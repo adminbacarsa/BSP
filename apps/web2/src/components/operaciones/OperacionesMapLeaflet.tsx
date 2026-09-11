@@ -1,31 +1,67 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { getMapBasemapConfig } from '@/lib/mapBasemap';
-import { buildOperacionesMarkerIcon } from '@/lib/operaciones/mapMarkerIcons';
+import { buildOperacionesMarkerIcon, escapeHtmlLabel } from '@/lib/operaciones/mapMarkerIcons';
+import { MAP_OBJECTIVE_LABEL_CSS } from '@/components/operaciones/mapLabelStyles';
 import { useOperacionesMapMarkers } from '@/hooks/useOperacionesMapMarkers';
 import { OperacionesMapPopup } from '@/components/operaciones/OperacionesMapPopup';
+import { OperacionesMapChrome } from '@/components/operaciones/OperacionesMapChrome';
 import type { OperacionesMapProps } from '@/components/operaciones/OperacionesMapGoogle';
 
-const createLeafletIcon = (preset: string) => {
+const createLeafletIcon = (preset: string, name: string) => {
   const gIcon = buildOperacionesMarkerIcon(preset as any);
-  return L.icon({
-    iconUrl: gIcon.url,
-    iconSize: [36, 36],
+  const label = escapeHtmlLabel(name);
+  return L.divIcon({
+    className: 'cosp-leaflet-obj-marker',
+    html: `<div style="display:flex;flex-direction:column;align-items:center">
+      <img src="${gIcon.url}" width="36" height="36" alt="" />
+      ${label ? `<span class="cosp-obj-label" style="margin-top:-2px;max-width:140px;overflow:hidden;text-overflow:ellipsis">${label}</span>` : ''}
+    </div>`,
+    iconSize: [36, 52],
     iconAnchor: [18, 36],
     popupAnchor: [0, -36],
   });
 };
 
-const MapUpdater = ({ markers }: { markers: { lat: number; lng: number }[] }) => {
+const MapUpdater = ({
+  markers,
+  fitRef,
+  markerIdsKey,
+}: {
+  markers: { lat: number; lng: number }[];
+  fitRef: React.MutableRefObject<(() => void) | null>;
+  markerIdsKey: string;
+}) => {
   const map = useMap();
-  useEffect(() => {
-    if (markers.length > 0) {
-      const group = new L.FeatureGroup(markers.map((m) => L.marker([m.lat, m.lng])));
-      map.fitBounds(group.getBounds().pad(0.2));
+  const initialFitDoneRef = useRef(false);
+  const markerIdsKeyRef = useRef('');
+
+  const fit = useCallback(() => {
+    if (markers.length === 0) return;
+    if (markers.length === 1) {
+      map.setView([markers[0].lat, markers[0].lng], 16);
+      return;
     }
+    const group = new L.FeatureGroup(markers.map((m) => L.marker([m.lat, m.lng])));
+    map.fitBounds(group.getBounds().pad(0.2));
   }, [markers, map]);
+
+  useEffect(() => {
+    fitRef.current = fit;
+  }, [fit, fitRef]);
+
+  useEffect(() => {
+    if (markers.length === 0) return;
+    const idsChanged = markerIdsKeyRef.current !== markerIdsKey;
+    if (!initialFitDoneRef.current || idsChanged) {
+      fit();
+      initialFitDoneRef.current = true;
+      markerIdsKeyRef.current = markerIdsKey;
+    }
+  }, [markers.length, markerIdsKey, fit]);
+
   return null;
 };
 
@@ -38,26 +74,54 @@ const OperacionesMapLeaflet = ({
   onOpenHandover,
   onOpenInterrupt,
   onOpenManualRetention,
+  tacticalHud,
 }: OperacionesMapProps) => {
   const markers = useOperacionesMapMarkers(allObjectives, filteredShifts);
   const basemap = getMapBasemapConfig();
   const mapCenter = Array.isArray(center) ? center : [center.lat, center.lng];
+  const fitRef = useRef<(() => void) | null>(null);
+  const iconCacheRef = useRef<Map<string, L.DivIcon>>(new Map());
+
+  const markerIdsKey = useMemo(
+    () => markers.map((m) => m.id).sort().join('|'),
+    [markers],
+  );
+
+  const getLeafletIcon = useCallback((marker: { id: string; iconPreset: string; name: string }) => {
+    const cacheKey = `${marker.id}:${marker.iconPreset}:${marker.name}`;
+    const cached = iconCacheRef.current.get(cacheKey);
+    if (cached) return cached;
+    const icon = createLeafletIcon(marker.iconPreset, marker.name);
+    iconCacheRef.current.set(cacheKey, icon);
+    return icon;
+  }, []);
 
   return (
-    <div className="relative h-full w-full">
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-xl bg-slate-900/90 text-slate-200 text-[10px] font-semibold shadow-lg border border-slate-700/50 pointer-events-none">
-        Modo OpenStreetMap — agregá <code className="text-indigo-300">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code> para Google Maps y rondines
+    <div className="relative h-full w-full operaciones-map-leaflet">
+      <style>{`
+        .operaciones-map-leaflet .leaflet-container {
+          background: #e8eef5;
+        }
+        ${MAP_OBJECTIVE_LABEL_CSS}
+      `}</style>
+      <div className={`absolute left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-xl bg-slate-900/90 text-slate-200 text-[10px] font-semibold shadow-lg border border-slate-700/50 max-w-lg text-center pointer-events-auto ${tacticalHud ? 'top-20' : 'top-3'}`}>
+        Modo OpenStreetMap — cargá la key en{' '}
+        <a href="/admin/configuracion" className="text-indigo-300 underline font-bold pointer-events-auto">
+          Configuración → Empresas → Google Maps
+        </a>{' '}
+        o en <code className="text-indigo-300">NEXT_PUBLIC_GOOGLE_MAPS_API_KEY</code>
       </div>
       <MapContainer center={mapCenter as [number, number]} zoom={13} style={{ height: '100%', width: '100%' }} className="z-0">
         <TileLayer url={basemap.url} attribution={basemap.attribution} />
-        <MapUpdater markers={markers} />
+        <MapUpdater markers={markers} fitRef={fitRef} markerIdsKey={markerIdsKey} />
 
         {markers.map((marker) => (
           <Marker
             key={marker.id}
             position={[marker.lat, marker.lng]}
-            icon={createLeafletIcon(marker.iconPreset)}
-            zIndexOffset={marker.layerOrder === 0 ? 0 : 500}
+            icon={getLeafletIcon(marker)}
+            title={`${marker.name} · ${marker.statusText}`}
+            zIndexOffset={marker.layerOrder === 0 ? 0 : marker.isEvent ? 600 : 500}
           >
             <Popup className="custom-popup">
               <OperacionesMapPopup
@@ -72,6 +136,12 @@ const OperacionesMapLeaflet = ({
           </Marker>
         ))}
       </MapContainer>
+      <OperacionesMapChrome
+        provider="osm"
+        markerCount={markers.length}
+        onFit={() => fitRef.current?.()}
+        legendClassName={tacticalHud ? 'top-20 left-3' : 'top-4 left-4'}
+      />
     </div>
   );
 };

@@ -18,6 +18,9 @@ export type Shift = {
   clientName?: string;
   positionName?: string;
   code?: string;
+  /** Origen operativo: PLANIFICADOR | OPERATIONS_COVERAGE | RETEN | EVENTO | … */
+  origin?: string;
+  resolvedBy?: string;
   eventoId?: string;
   eventoNombre?: string;
   servicioId?: string;
@@ -27,6 +30,7 @@ export type Shift = {
   isCompleted?: boolean;
   isAbsent?: boolean;
   isFranco?: boolean;
+  isFrancoTrabajado?: boolean;
   checkInTime?: FirestoreTimestampLike;
   checkInRequestedAt?: FirestoreTimestampLike;
   checkInRequestStatus?: string;

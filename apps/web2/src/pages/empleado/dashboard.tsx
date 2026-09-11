@@ -8,7 +8,7 @@ import { solicitudEventoService, type SolicitudEvento } from '@/services/solicit
 import CredencialDigital from '@/components/empleado/CredencialDigital';
 import { MobilePreviewQrPanel } from '@/components/empleado/MobilePreviewQrPanel';
 import { app, db, functions, storage, auth, onSnapshotFresh } from '@/lib/firebase';
-import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp } from 'firebase/firestore';
+import { collection, doc, serverTimestamp, addDoc, setDoc, deleteDoc, query, where, orderBy, limit, updateDoc, getDocs, getDoc, Timestamp, onSnapshot } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { httpsCallable } from 'firebase/functions';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -244,6 +244,62 @@ export default function EmployeeDashboard() {
   const allMonthRead = monthInbox.length > 0 && monthInbox.every((n) => n.read);
   const hasUnread = monthInbox.some((n) => !n.read);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [etaMinutes, setEtaMinutes] = useState(15);
+  const [respondingNotif, setRespondingNotif] = useState<string | null>(null);
+
+  const handleResponderLlegada = async (notif: any, respuesta: 'LLEGATARDE' | 'AUSENTE') => {
+    if (respondingNotif) return;
+    setRespondingNotif(notif.id);
+    const eId = empresaCtx?.id || empProfile?.empresaId || '';
+    try {
+      const shiftId = notif.data?.shiftId || notif.shiftId;
+      await updateDoc(doc(db, 'user_notifications', notif.id), {
+        read: true, readAt: serverTimestamp(),
+        respondido: true, respuesta, etaMinutes: respuesta === 'LLEGATARDE' ? etaMinutes : null,
+      });
+      if (respuesta === 'LLEGATARDE') {
+        if (shiftId) {
+          await updateDoc(doc(db, 'turnos', shiftId), {
+            expectedLateArrival: true, etaMinutes, lateArrivalAvisadoAt: serverTimestamp(),
+          });
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'LLEGADA_TARDE_AVISADA', status: 'pending',
+          title: 'Guardia avisa llegada tarde',
+          description: `${user?.displayName || 'Guardia'} avisa que llega en ${etaMinutes} min a ${notif.data?.objectiveName || notif.objectiveName || 'su puesto'}.`,
+          shiftId: shiftId || null, objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+          objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+          createdAt: serverTimestamp(), reportedBy: 'PORTAL_EMPLEADO',
+        }, eId));
+        addToast(`Avisado ✓ — llegás en ${etaMinutes} min.`, 'success');
+      } else {
+        if (shiftId) {
+          await updateDoc(doc(db, 'turnos', shiftId), {
+            isAbsent: true, absenceType: 'AA', autoAbsentAt: serverTimestamp(),
+          });
+          await addDoc(collection(db, 'ausencias'), stampEmpresaId({
+            shiftId, type: 'AA', absenceType: 'AA', status: 'Pendiente',
+            objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+            objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+            origin: 'PORTAL_EMPLEADO', createdAt: serverTimestamp(),
+          }, eId));
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'AUSENCIA_AUTO', status: 'pending',
+          title: 'Ausencia — avisó por portal',
+          description: `${user?.displayName || 'Guardia'} informó que no puede presentarse a ${notif.data?.objectiveName || 'su puesto'}.`,
+          shiftId: shiftId || null, objectiveId: notif.data?.objectiveId || notif.objectiveId || null,
+          objectiveName: notif.data?.objectiveName || notif.objectiveName || null,
+          createdAt: serverTimestamp(), reportedBy: 'PORTAL_EMPLEADO',
+        }, eId));
+        addToast('Registrado. El operador gestionará la cobertura.', 'info');
+      }
+    } catch {
+      addToast('Error al registrar la respuesta. Intentá de nuevo.', 'error');
+    } finally {
+      setRespondingNotif(null);
+    }
+  };
   const [showCompletedPanel, setShowCompletedPanel] = useState(false);
   const [completedView, setCompletedView] = useState<'HOY' | 'SEMANA' | 'MES'>('MES');
   const [showPresentHistory, setShowPresentHistory] = useState(false);
@@ -256,6 +312,8 @@ export default function EmployeeDashboard() {
   const [swapPeopleList, setSwapPeopleList] = useState<{ key: string; name: string }[]>([]);
   const [swapRequests, setSwapRequests] = useState<any[]>([]);
   const [swapBusy, setSwapBusy] = useState(false);
+  const [convocatoriasCobertura, setConvocatoriasCobertura] = useState<any[]>([]);
+  const [convBusy, setConvBusy] = useState(false);
   const [swapSearched, setSwapSearched] = useState(false);
   const [swapSearch, setSwapSearch] = useState('');
   const [swapPersonKey, setSwapPersonKey] = useState('');
@@ -641,9 +699,64 @@ export default function EmployeeDashboard() {
 
   useEffect(() => {
     if (!user) return;
-    loadSwapRequests();
-    const t = setInterval(() => loadSwapRequests(), 60000);
-    return () => clearInterval(t);
+    let unsub1: (() => void) | undefined;
+    let unsub2: (() => void) | undefined;
+    let active = true;
+    const byId = new Map<string, any>();
+    resolveEmpDocId().then((empDocId) => {
+      if (!active || !empDocId) return;
+      const flush = () => setSwapRequests(Array.from(byId.values()));
+      unsub1 = onSnapshot(
+        query(collection(db, 'swap_requests'), where('requesterId', '==', empDocId)),
+        (snap) => {
+          snap.docChanges().forEach((ch) =>
+            ch.type === 'removed' ? byId.delete(ch.doc.id) : byId.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() })
+          );
+          flush();
+        },
+        (err) => console.error('[swap requester]', err)
+      );
+      unsub2 = onSnapshot(
+        query(collection(db, 'swap_requests'), where('targetId', '==', empDocId)),
+        (snap) => {
+          snap.docChanges().forEach((ch) =>
+            ch.type === 'removed' ? byId.delete(ch.doc.id) : byId.set(ch.doc.id, { id: ch.doc.id, ...ch.doc.data() })
+          );
+          flush();
+        },
+        (err) => console.error('[swap target]', err)
+      );
+    });
+    return () => { active = false; unsub1?.(); unsub2?.(); };
+  }, [user?.uid]);
+
+  // ── Convocatorias de cobertura operativa ─────────────────────────────────
+  useEffect(() => {
+    if (!user?.uid) return;
+    let active = true;
+    const resolveId = async () => {
+      const byUid = await getDocs(query(collection(db, 'empleados'), where('uid', '==', user.uid)));
+      return byUid.empty ? user.uid : byUid.docs[0].id;
+    };
+    let unsub: (() => void) | undefined;
+    resolveId().then((empId) => {
+      if (!active || !empId) return;
+      unsub = onSnapshot(
+        query(
+          collection(db, 'convocatorias_cobertura'),
+          where('candidateEmployeeId', '==', empId),
+          where('status', 'in', ['PENDING', 'ESCALATED']),
+          orderBy('createdAt', 'desc'),
+          limit(10),
+        ),
+        (snap) => {
+          if (!active) return;
+          setConvocatoriasCobertura(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        },
+        (err) => console.error('[convocatorias_cobertura]', err),
+      );
+    });
+    return () => { active = false; unsub?.(); };
   }, [user?.uid]);
 
   useEffect(() => {
@@ -1501,26 +1614,8 @@ export default function EmployeeDashboard() {
     }
   };
 
-  const loadSwapRequests = async () => {
-    if (!user) return;
-    try {
-      const empDocId = await resolveEmpDocId();
-      if (!empDocId) return;
-      const snap = await getDocs(query(
-        collection(db, 'swap_requests'),
-        where('requesterId', '==', empDocId)
-      ));
-      const snap2 = await getDocs(query(
-        collection(db, 'swap_requests'),
-        where('targetId', '==', empDocId)
-      ));
-      const all = [...snap.docs, ...snap2.docs].map(d => ({ id: d.id, ...d.data() }));
-      const unique = Array.from(new Map(all.map(r => [r.id, r])).values());
-      setSwapRequests(unique);
-    } catch (e) {
-      console.error(e);
-    }
-  };
+  // eslint-disable-next-line @typescript-eslint/no-empty-function
+  const loadSwapRequests = async () => {}; // reemplazado por onSnapshot (ver useEffect abajo)
 
   const loadSwapCandidates = async () => {
     if (!user || !swapShiftId) return;
@@ -1642,6 +1737,21 @@ export default function EmployeeDashboard() {
       addToast('No se pudo confirmar', 'error');
     } finally {
       setSwapBusy(false);
+    }
+  };
+
+  const handleResponderConvocatoriaCobertura = async (convocatoriaId: string, response: 'ACCEPTED' | 'REJECTED') => {
+    if (!user) return;
+    setConvBusy(true);
+    try {
+      const callable = httpsCallable(functions, 'responderConvocatoriaCobertura');
+      await callable({ convocatoriaId, response });
+      addToast(response === 'ACCEPTED' ? '¡Confirmaste la cobertura!' : 'Rechazaste la convocatoria', response === 'ACCEPTED' ? 'success' : 'info');
+    } catch (e: any) {
+      console.error(e);
+      addToast(e?.message || 'Error al responder la convocatoria', 'error');
+    } finally {
+      setConvBusy(false);
     }
   };
 
@@ -2079,10 +2189,57 @@ export default function EmployeeDashboard() {
                   <div key={n.id} className="border border-slate-800 rounded-xl p-3 bg-slate-950/50">
                     <div className="text-xs font-bold">{n.title || n.titulo || 'Notificación'}</div>
                     <div className="text-[11px] text-slate-300 mt-1">{n.body || n.mensaje || n.message || ''}</div>
-                    <div className="flex items-center justify-between mt-2">
-                      <span className="text-[10px] text-rose-500 font-bold">No leída</span>
-                      <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
-                    </div>
+                    {n.type === 'SOLICITUD_ESTADO_LLEGADA' ? (
+                      <div className="mt-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[11px] text-slate-400">Llego en</span>
+                          <input
+                            type="number" min={1} max={120} value={etaMinutes}
+                            onChange={e => setEtaMinutes(Math.max(1, Math.min(120, Number(e.target.value))))}
+                            className="w-16 px-2 py-1 rounded-lg bg-slate-800 text-white text-xs text-center border border-slate-700"
+                          />
+                          <span className="text-[11px] text-slate-400">min</span>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleResponderLlegada(n, 'LLEGATARDE')}
+                            disabled={respondingNotif === n.id}
+                            className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+                          >
+                            Llego en {etaMinutes} min
+                          </button>
+                          <button
+                            onClick={() => handleResponderLlegada(n, 'AUSENTE')}
+                            disabled={respondingNotif === n.id}
+                            className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+                          >
+                            No puedo ir
+                          </button>
+                        </div>
+                      </div>
+                    ) : n.type === 'SOLICITUD_ESTADO_RELEVO' ? (
+                      <div className="mt-3 flex gap-2">
+                        <button
+                          onClick={() => handleResponderLlegada(n, 'LLEGATARDE')}
+                          disabled={respondingNotif === n.id}
+                          className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50"
+                        >
+                          Estoy en camino
+                        </button>
+                        <button
+                          onClick={() => handleResponderLlegada(n, 'AUSENTE')}
+                          disabled={respondingNotif === n.id}
+                          className="flex-1 px-3 py-2 rounded-lg text-[11px] font-black uppercase bg-rose-600 hover:bg-rose-700 text-white disabled:opacity-50"
+                        >
+                          No puedo relevar
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[10px] text-rose-500 font-bold">No leída</span>
+                        <button onClick={() => markNotificationRead(n.id)} className="px-3 py-1 rounded-lg text-[10px] font-black uppercase bg-slate-800 text-white">Marcar leída</button>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -2972,6 +3129,70 @@ export default function EmployeeDashboard() {
             </div>
           )}
 
+          {/* ===== CONVOCATORIAS DE COBERTURA OPERATIVA ===== */}
+          {convocatoriasCobertura.length > 0 && (
+            <div className="bg-slate-900 border border-rose-600/50 rounded-2xl p-4">
+              <p className="text-[10px] font-black uppercase text-rose-400 mb-3 flex items-center gap-2">
+                <Bell size={12}/> Convocatoria de cobertura
+              </p>
+              <div className="space-y-3">
+                {convocatoriasCobertura.map((conv: any) => {
+                  const startDate = toDate(conv.startTime);
+                  const timeoutDate = toDate(conv.timeoutAt);
+                  const now = new Date();
+                  const minutesLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - now.getTime()) / 60000)) : null;
+                  const urgencyColor = conv.urgency === 'URGENTE' ? 'text-rose-400' : conv.urgency === 'INTERMEDIO' ? 'text-amber-400' : 'text-sky-400';
+                  const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
+                  const typeLabel: Record<string, string> = {
+                    RET: 'Retención (RET)',
+                    VOLANTE: 'Cobertura volante',
+                    SIN_TURNO_CON_EXP: 'Cobertura disponible',
+                    EXTEND: 'Extensión de jornada',
+                    ADVANCE: 'Adelanto de turno',
+                    SIN_TURNO: 'Cobertura disponible',
+                    FT: 'Franco Trabajado (FT)',
+                    LLEGADA_TARDE: '¿Estás en camino?',
+                  };
+                  return (
+                    <div key={conv.id} className={`border rounded-xl p-3 ${isLlegadaTarde ? 'border-amber-600/50 bg-amber-950/20' : 'border-rose-800/40 bg-rose-950/20'}`}>
+                      <div className={`text-[10px] font-black uppercase mb-1 ${isLlegadaTarde ? 'text-amber-400' : urgencyColor}`}>
+                        {isLlegadaTarde ? '⏰ LLEGADA TARDE' : `${conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? '⚠ INTERMEDIO' : 'NORMAL'} — ${typeLabel[conv.type] || conv.type}`}
+                      </div>
+                      <div className="font-bold text-slate-200 text-sm">{conv.objectiveName || 'Puesto'}</div>
+                      {isLlegadaTarde && (
+                        <div className="text-[11px] text-amber-300 mt-1">Tu turno ya comenzó. ¿Estás en camino?</div>
+                      )}
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        {conv.clientName ? `${conv.clientName} · ` : ''}{conv.shiftCode || ''}{startDate ? ` · ${formatTime(conv.startTime)}` : ''}
+                      </div>
+                      {minutesLeft !== null && minutesLeft > 0 && (
+                        <div className="text-[10px] text-amber-400 mt-1 flex items-center gap-1">
+                          <Clock size={10}/> Tiempo para responder: {minutesLeft} min
+                        </div>
+                      )}
+                      <div className="flex gap-2 mt-3">
+                        <button
+                          onClick={() => handleResponderConvocatoriaCobertura(conv.id, 'ACCEPTED')}
+                          disabled={convBusy}
+                          className="flex-1 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
+                        >
+                          {isLlegadaTarde ? 'Sí, voy' : 'Acepto'}
+                        </button>
+                        <button
+                          onClick={() => handleResponderConvocatoriaCobertura(conv.id, 'REJECTED')}
+                          disabled={convBusy}
+                          className="flex-1 py-2 rounded-xl bg-slate-700 hover:bg-slate-600 text-slate-300 text-[11px] font-black uppercase disabled:opacity-50 transition-colors"
+                        >
+                          {isLlegadaTarde ? 'No voy' : 'No puedo'}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* ===== SWAP REQUESTS PENDIENTES ===== */}
           {portalFeatures.swapShifts && swapRequests.filter((r: any) => {
             const status = (r.status || '').toString().toUpperCase();
@@ -3234,7 +3455,7 @@ export default function EmployeeDashboard() {
                           <div className="font-bold text-slate-200">{r.requesterName || 'Empleado'} ⇄ {r.targetName || 'Empleado'}</div>
                           <div className="text-[11px] text-slate-400 mt-0.5">{formatDate(r.requesterShiftDate)} · {status}</div>
                           {isRequester && !['APPROVED','REJECTED','CANCELLED'].includes(statusUpper) && status !== 'PENDING_REQUESTER' && (<div className="flex gap-2 mt-2"><button onClick={() => handleCancelSwap(r.id)} disabled={swapBusy} className="px-3 py-1 rounded-lg bg-rose-600 text-white text-[10px] font-black uppercase disabled:opacity-50">Cancelar solicitud</button></div>)}
-                          {status === 'PENDING_APPROVAL' && <div className="text-[10px] text-amber-300 mt-2">Pendiente de autorización</div>}
+                          {status === 'PENDING_SUPERVISOR' && <div className="text-[10px] text-amber-300 mt-2">Pendiente de autorización del supervisor</div>}
                         </div>
                       );
                     })}

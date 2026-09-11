@@ -1,0 +1,8 @@
+{
+  "empresa": "Bacar",
+  "periodo": "Agosto 2026",
+  "titulo": "Liquidación de sueldos",
+  "n": 863,
+  "fuente": "c:\\Users\\Mauro\\Downloads\\liquidacion.xls",
+  "campoCosto": "int__costo_laboral (costo empleador)"
+}

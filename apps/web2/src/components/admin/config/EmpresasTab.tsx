@@ -1,14 +1,16 @@
 ﻿import React, { useState, useRef } from 'react';
-import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio } from 'lucide-react';
+import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin, Zap, Timer } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 import { db, functions, auth, storage } from '@/lib/firebase';
+import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import EmpresaAfipSection from '@/components/admin/config/EmpresaAfipSection';
+import { persistGoogleMapsApiKey } from '@/lib/googleMapsConfig';
 
 function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
   const code = err instanceof FirebaseError ? err.code : '';
@@ -175,6 +177,83 @@ export default function EmpresasTab() {
 
   const [guardandoCc, setGuardandoCc] = useState(false);
   const ccActivo = empresa?.centroControlEnabled !== false;
+
+  const [guardandoPiloto, setGuardandoPiloto] = useState(false);
+  const pilotoActivo = empresa?.pilotoAutoEnabled === true;
+
+  const handleTogglePiloto = async () => {
+    if (!empresa) return;
+    setGuardandoPiloto(true);
+    try {
+      await guardarEmpresa(empresa.id, { pilotoAutoEnabled: !pilotoActivo } as any);
+      toast.success(pilotoActivo ? 'Piloto Automático desactivado' : 'Piloto Automático activado — el asistente ejecuta acciones sin confirmación');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoPiloto(false);
+    }
+  };
+
+  const [guardandoModoDemo, setGuardandoModoDemo] = useState(false);
+  const modoDemoActivo = empresa?.modoDemoEnabled === true;
+
+  const handleToggleModoDemo = async () => {
+    if (!empresa) return;
+    setGuardandoModoDemo(true);
+    try {
+      const next = !modoDemoActivo;
+      if (next) {
+        const snap = await getDocs(query(
+          collection(db, 'sesiones_operador'),
+          where('empresaId', '==', empresa.id),
+          where('status', '==', 'ACTIVO'),
+        ));
+        await Promise.all(snap.docs.map(d => updateDoc(doc(db, 'sesiones_operador', d.id), {
+          status: 'CERRADO',
+          endTime: serverTimestamp(),
+        })));
+      }
+      await guardarEmpresa(empresa.id, { modoDemoEnabled: next } as any);
+      toast.success(next
+        ? 'Modo Demo ON — pipeline Auto + simulador (cron cada 5 min). Manual cerrado.'
+        : 'Modo Demo OFF — queda Auto con eventos reales');
+    } catch {
+      toast.error('Error al guardar');
+    } finally {
+      setGuardandoModoDemo(false);
+    }
+  };
+  const [autoPresenciaLoading, setAutoPresenciaLoading] = useState(false);
+  const [autoPresenciaResult, setAutoPresenciaResult] = useState<{
+    dryRun: boolean; turnosEvaluados: number; presenciaMarcada: number; turnosCerrados: number;
+    turnosEnRetencion?: number;
+    detalle?: { presenciaMarcada: string[]; turnosCerrados: string[]; turnosEnRetencion?: string[] }; mensaje: string;
+  } | null>(null);
+
+  const handleAutoPresencia = async (dryRun: boolean) => {
+    if (!empresa) return;
+    setAutoPresenciaLoading(true);
+    try {
+      const fn = httpsCallable<{ empresaId: string; dryRun: boolean }, typeof autoPresenciaResult>(
+        functions, 'autoPresenciaYCierre',
+      );
+      const { data } = await fn({ empresaId: empresa.id, dryRun });
+      setAutoPresenciaResult(data);
+      toast.success(dryRun ? 'Simulación completada' : 'Presencias y cierres aplicados');
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Error al ejecutar');
+    } finally {
+      setAutoPresenciaLoading(false);
+    }
+  };
+
+  const [mapsKeyDraft, setMapsKeyDraft] = useState('');
+  const [guardandoMaps, setGuardandoMaps] = useState(false);
+  const [showMapsKey, setShowMapsKey] = useState(false);
+
+  React.useEffect(() => {
+    setMapsKeyDraft(String((empresa as any)?.googleMapsApiKey || ''));
+  }, [empresa?.id, (empresa as any)?.googleMapsApiKey]);
 
   const handleToggleCentroControl = async () => {
     if (!empresa) return;
@@ -566,6 +645,210 @@ export default function EmpresasTab() {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${pilotoActivo ? 'bg-violet-500/15' : 'bg-slate-200'}`}>
+                <Zap size={18} className={pilotoActivo ? 'text-violet-600' : 'text-slate-400'} />
+              </div>
+              <div className="min-w-0">
+                <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Piloto Automático</h3>
+                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                  Cuando está activo, el asistente ejecuta las acciones confirmadas automáticamente sin mostrar tarjeta de confirmación.
+                  Recomendado solo para operadores experimentados.
+                </p>
+              </div>
+            </div>
+            {isSuperAdmin && (
+              <button
+                type="button"
+                onClick={handleTogglePiloto}
+                disabled={guardandoPiloto}
+                role="switch"
+                aria-checked={pilotoActivo}
+                aria-label="Activar o desactivar Piloto Automático"
+                className={`relative h-8 w-14 rounded-full shrink-0 transition-colors disabled:opacity-60 ${pilotoActivo ? 'bg-violet-600' : 'bg-slate-300'}`}
+              >
+                <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${pilotoActivo ? 'translate-x-6' : 'translate-x-0'}`} />
+                {guardandoPiloto && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {empresa && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${modoDemoActivo ? 'bg-emerald-500/15' : 'bg-slate-200'}`}>
+                <Timer size={18} className={modoDemoActivo ? 'text-emerald-600' : 'text-slate-400'} />
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Modo Demo</h3>
+                  {modoDemoActivo && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">Activo</span>}
+                  {modoDemoActivo && (
+                    <span className="text-[10px] font-mono bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full">
+                      cron 5 min
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                  Demo = generador de eventos (presente / ausente / tarde) + respuestas a convocatorias.
+                  Cierres y coberturas los hace el mismo pipeline que Auto. En producción: Demo OFF → Auto.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleToggleModoDemo}
+              disabled={guardandoModoDemo}
+              role="switch"
+              aria-checked={modoDemoActivo}
+              aria-label="Activar o desactivar Modo Demo"
+              className={`relative h-8 w-14 rounded-full shrink-0 transition-colors disabled:opacity-60 ${modoDemoActivo ? 'bg-emerald-500' : 'bg-slate-300'}`}
+            >
+              <span className={`absolute top-1 left-1 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${modoDemoActivo ? 'translate-x-6' : 'translate-x-0'}`} />
+              {guardandoModoDemo && <Loader2 size={12} className="absolute inset-0 m-auto animate-spin text-white" />}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {empresa && isSuperAdmin && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/15 flex items-center justify-center shrink-0">
+              <Timer size={18} className="text-amber-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Auto Presencia y Cierre</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                Marca presencia en turnos que ya iniciaron sin fichar, y cierra los que terminaron y siguen activos.
+                Usá <strong>Simular</strong> primero para ver qué afectaría sin modificar nada.
+              </p>
+            </div>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={() => { setAutoPresenciaResult(null); handleAutoPresencia(true); }}
+              disabled={autoPresenciaLoading}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 disabled:opacity-50 flex items-center gap-2 transition-colors"
+            >
+              {autoPresenciaLoading ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />}
+              Simular (dry run)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAutoPresenciaResult(null); handleAutoPresencia(false); }}
+              disabled={autoPresenciaLoading}
+              className="px-4 py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-600 text-white disabled:opacity-50 flex items-center gap-2 transition-colors"
+            >
+              {autoPresenciaLoading ? <Loader2 size={13} className="animate-spin" /> : <Timer size={13} />}
+              Ejecutar ahora
+            </button>
+          </div>
+          {autoPresenciaResult && (
+            <div className={`mt-4 rounded-xl p-4 text-xs space-y-2 ${autoPresenciaResult.dryRun ? 'bg-slate-50 border border-slate-200' : 'bg-emerald-50 border border-emerald-200'}`}>
+              <p className="font-bold text-slate-700">{autoPresenciaResult.mensaje}</p>
+              <p className="text-slate-500">Turnos evaluados: {autoPresenciaResult.turnosEvaluados} · Presencias: {autoPresenciaResult.presenciaMarcada} · Cierres: {autoPresenciaResult.turnosCerrados}</p>
+              {autoPresenciaResult.detalle?.presenciaMarcada?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-slate-600 mb-1">Presencias marcadas:</p>
+                  <ul className="list-disc list-inside text-slate-500 space-y-0.5">
+                    {autoPresenciaResult.detalle.presenciaMarcada.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+              {autoPresenciaResult.detalle?.turnosCerrados?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-slate-600 mb-1">Turnos cerrados:</p>
+                  <ul className="list-disc list-inside text-slate-500 space-y-0.5">
+                    {autoPresenciaResult.detalle.turnosCerrados.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+              {autoPresenciaResult.detalle?.turnosEnRetencion?.length > 0 && (
+                <div>
+                  <p className="font-semibold text-amber-700 mb-1">En retención (relevo pendiente):</p>
+                  <ul className="list-disc list-inside text-amber-600 space-y-0.5">
+                    {autoPresenciaResult.detalle.turnosEnRetencion.map((l, i) => <li key={i}>{l}</li>)}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {empresa && (
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          <div className="flex items-start gap-3 mb-4">
+            <div className="w-10 h-10 rounded-xl bg-indigo-500/15 flex items-center justify-center shrink-0">
+              <MapPin size={18} className="text-indigo-600" />
+            </div>
+            <div className="min-w-0">
+              <h3 className="text-sm font-black text-slate-800 uppercase tracking-wide">Google Maps</h3>
+              <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                Key de Maps JavaScript API para el mapa táctico de Operaciones. Sin key se usa OpenStreetMap.
+                En Google Cloud: habilitar <strong>Maps JavaScript API</strong> y restringir por HTTP referrer
+                (`localhost:3001/*`, `comtroldata.web.app/*`).
+              </p>
+              <p className={`text-[10px] font-black uppercase tracking-wider mt-2 ${mapsKeyDraft.trim() ? 'text-emerald-600' : 'text-amber-700'}`}>
+                {mapsKeyDraft.trim() ? 'Key configurada para esta empresa' : 'Sin key — mapa en modo OpenStreetMap'}
+              </p>
+            </div>
+          </div>
+          {isSuperAdmin && (
+            <div className="space-y-3">
+              <div className="relative">
+                <input
+                  type={showMapsKey ? 'text' : 'password'}
+                  value={mapsKeyDraft}
+                  onChange={e => setMapsKeyDraft(e.target.value)}
+                  autoComplete="off"
+                  className="w-full px-3 py-2 pr-10 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  placeholder="AIza…"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowMapsKey(v => !v)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-slate-400 hover:text-slate-600"
+                  aria-label={showMapsKey ? 'Ocultar key' : 'Mostrar key'}
+                >
+                  {showMapsKey ? <EyeOff size={14} /> : <Eye size={14} />}
+                </button>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  disabled={guardandoMaps}
+                  onClick={async () => {
+                    if (!empresa) return;
+                    setGuardandoMaps(true);
+                    try {
+                      await guardarEmpresa(empresa.id, { googleMapsApiKey: mapsKeyDraft.trim() } as any);
+                      persistGoogleMapsApiKey(mapsKeyDraft.trim());
+                      toast.success(mapsKeyDraft.trim() ? 'Key de Google Maps guardada' : 'Key de Google Maps quitada');
+                    } catch (err) {
+                      toast.error(empresaWriteErrorMessage(err, isSuperAdmin));
+                    } finally {
+                      setGuardandoMaps(false);
+                    }
+                  }}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 text-white rounded-xl text-xs font-black hover:bg-indigo-700 disabled:opacity-60 transition-colors"
+                >
+                  {guardandoMaps ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />} Guardar Maps
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

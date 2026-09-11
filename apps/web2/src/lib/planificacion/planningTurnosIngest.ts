@@ -64,7 +64,7 @@ export function ingestPlanningTurnosSnapshot(
     empresaId: string,
     migracionCompleta: boolean,
     getDateKey: (dateInput: any) => string,
-    opts?: { rfzOnly?: boolean },
+    opts?: { rfzOnly?: boolean; turaOnly?: boolean },
 ): PlanningTurnosIngestResult {
     const map: Record<string, any> = {};
     const cellTurnos: Record<string, any[]> = {};
@@ -78,6 +78,7 @@ export function ingestPlanningTurnosSnapshot(
     docs.forEach((d) => {
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        if (data.isDeleted === true) return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {
@@ -89,10 +90,18 @@ export function ingestPlanningTurnosSnapshot(
 
         if (rfzOnly) return;
 
-        if (code === 'TURA' && data.parentShiftId) {
-            turaM[data.parentShiftId] = { id: d.id, ...data };
+        if (code === 'TURA') {
+            const turaData = { id: d.id, ...data };
+            if (data.parentShiftId) {
+                turaM[data.parentShiftId] = turaData;
+            } else {
+                turaM[`__tura_${d.id}`] = turaData;
+            }
+            if (opts?.turaOnly) return;
             return;
         }
+
+        if (opts?.turaOnly) return;
 
         if (data.startTime?.seconds) {
             const dateKey = getDateKey(data.startTime);

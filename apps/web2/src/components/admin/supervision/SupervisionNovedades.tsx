@@ -220,11 +220,14 @@ export default function SupervisionNovedades({
   objectives,
   userUid,
   userName,
+  embedded = false,
 }: {
   objectiveIds: string[];
   objectives: SupervisorObjective[];
   userUid: string;
   userName: string;
+  /** Dentro del tab Campo unificado — menos padding inferior. */
+  embedded?: boolean;
 }) {
   const [entries, setEntries] = useState<LibroGuardiaEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -263,7 +266,7 @@ export default function SupervisionNovedades({
   }, [entries, filterClient, filterObj, soloIncidentes, objectives]);
 
   return (
-    <div className="space-y-4 pb-20">
+    <div className={`space-y-4 ${embedded ? 'pb-4' : 'pb-20'}`}>
       <div className="flex flex-col gap-3">
         <SupervisionClienteObjetivoPicker
           objectives={objectives}

@@ -2,14 +2,17 @@
 import Head from 'next/head';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
+import { useRouter } from 'next/router';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { toast } from 'sonner';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, waitForPendingWrites, getDocs } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
+import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -25,6 +28,17 @@ import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, Lo
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
+import {
+    novedadActorName,
+    novedadBodyText,
+    novedadHeadline,
+    novedadSubline,
+    isInformationalNovedad,
+    isHiddenFromOpsAlerts,
+    isOrphanShiftNoiseNovedad,
+    COBERTURA_RESUELTA_META,
+} from '@/lib/operaciones/novedadAlertDisplay';
+import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
 
@@ -46,13 +60,20 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 
 // --- MODALES (INTEGRADOS) ---
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelievedIds, onRelieved }: any) => {
-    if (!isOpen || !incomingShift) return null;
+    const { empresaId, empresa } = useEmpresa();
+    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const lockingRef = React.useRef(false);
+    if (!isOpen || !incomingShift) {
+        lockingRef.current = false;
+        return null;
+    }
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
+    const wasAbsent = incomingShift.isAbsent === true || incomingShift.absenceType === 'AA';
     const activeGuards = logic.processedData.filter((s:any) => {
         if (s.objectiveId !== incomingShift.objectiveId) return false;
-        if (s.positionName !== incomingShift.positionName) return false;
-        if (!(s.isPresent || s.status === 'COMPLETED') || s.isCompleted) return false;
+        if (String(s.positionName || '').trim().toLowerCase() !== String(incomingShift.positionName || '').trim().toLowerCase()) return false;
+        if (!s.isPresent || s.isCompleted) return false;
         if (s.id === incomingShift.id) return false;
         if (recentlyRelievedIds?.has?.(s.id)) return false;
         // Guardias retenidos: solo los cuyo turno terminó ≤45 min antes del turno entrante
@@ -63,30 +84,58 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         const minutesUntilEnd = (toDate(s.endDateObj).getTime() - now.getTime()) / 60000;
         return minutesUntilEnd <= 15;
     });
-    const handleConfirm = async (prevShiftId: string | null) => {
-        try {
-            const batch = writeBatch(db);
-            batch.update(doc(db, 'turnos', incomingShift.id), { isPresent: true, status: 'PRESENT', realStartTime: serverTimestamp(), isLate: status === 'LATE' });
-            if (prevShiftId) {
-                batch.update(doc(db, 'turnos', prevShiftId), { realEndTime: serverTimestamp(), isCompleted: true, status: 'COMPLETED' });
+    const handleConfirm = (mode: 'auto' | 'override' | 'skip', prevShiftId?: string | null) => {
+        if (lockingRef.current) return;
+        if (!incomingShift?.id) {
+            toast.error('Turno sin ID — no se puede registrar el ingreso.');
+            return;
+        }
+
+        const shiftEmp = String(incomingShift.empresaId || '').trim();
+        if (migracionCompleta && empresaId && shiftEmp && shiftEmp !== empresaId) {
+            toast.error(`Operación bloqueada: el turno pertenece a «${shiftEmp}», no a «${empresaId}».`);
+            return;
+        }
+        if (mode === 'override' && prevShiftId) {
+            const prev = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEmp = String(prev?.empresaId || '').trim();
+            if (migracionCompleta && empresaId && prevEmp && prevEmp !== empresaId) {
+                toast.error('Operación bloqueada: el turno saliente pertenece a otra empresa.');
+                return;
             }
-            await batch.commit();
+        }
 
-            // Cerrar inmediatamente — write ya en IndexedDB local
-            if (prevShiftId && onRelieved) onRelieved(prevShiftId);
-            else onClose();
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
+        lockingRef.current = true;
+        if (mode === 'override' && prevShiftId && onRelieved) onRelieved(prevShiftId);
+        else onClose();
 
-            // Background: sync check (no bloquea UI)
-            Promise.race([
-                waitForPendingWrites(db),
-                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
-            ]).catch(err => {
-                if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
-                }
-            }).catch(() => {});
-        } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
+        toast.success(
+            mode === 'skip'
+                ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
+                : mode === 'override'
+                    ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
+                    : (status === 'LATE' ? 'Ingreso tarde — relevo automático FIFO.' : 'Ingreso — relevo automático FIFO.'),
+        );
+
+        void registrarPresenciaOps({
+            shiftId: incomingShift.id,
+            source: 'OPERATIONS',
+            skipAutoRelevo: mode === 'skip',
+            overrideRelieveShiftId: mode === 'override' && prevShiftId ? prevShiftId : mode === 'skip' ? null : undefined,
+        }).then((res) => {
+            if (res.alreadyPresent) {
+                toast.message('El turno ya estaba marcado presente.');
+            } else if (mode === 'auto' && res.relieved) {
+                toast.success(`Relevó a ${res.relieved.employeeName} (FIFO).`);
+                onRelieved?.(res.relieved.shiftId);
+            } else if (mode === 'auto' && !res.relieved) {
+                toast.message('Presente OK — no había saliente para relevar.');
+            }
+        }).catch((e: any) => {
+            console.error('[HandoverModal map]', e);
+            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+            lockingRef.current = false;
+        });
     };
     return (
         <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -103,7 +152,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                             </p>
                         </div>
                     </div>
-                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
+                    <button type="button" onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
                 </div>
                 <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
                     <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
@@ -117,11 +166,18 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                     </span>
                 </div>
                 <div className="px-4 pb-5">
+                    <button
+                        type="button"
+                        onClick={() => handleConfirm('auto')}
+                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}
+                    >
+                        {status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO'}
+                    </button>
                     {activeGuards.length > 0 && (
                         <div className="space-y-2 mb-3">
-                            <p className="text-[10px] font-bold text-slate-400 uppercase">Seleccione a quién relevar:</p>
+                            <p className="text-[10px] font-bold text-slate-400 uppercase">Forzar relevo (opcional):</p>
                             {activeGuards.map((s:any) => (
-                                <button key={s.id} onClick={() => handleConfirm(s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
+                                <button key={s.id} type="button" onClick={() => handleConfirm('override', s.id)} className="w-full p-3 border rounded-xl hover:bg-slate-50 flex justify-between items-center group">
                                     <div className="text-left">
                                         <span className="block text-xs font-bold text-slate-700">{s.employeeName}</span>
                                         <span className="block text-[10px] text-slate-400">Salida: {formatTimeSimple(s.endDateObj)}</span>
@@ -131,14 +187,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                             ))}
                         </div>
                     )}
-                    {activeGuards.length === 0 && (
-                        <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-3">
-                            <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
-                        </div>
-                    )}
-                    <button onClick={() => handleConfirm(null)}
-                        className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                        {activeGuards.length > 0 ? 'INGRESAR SIN RELEVAR' : (status === 'LATE' ? 'CONFIRMAR LLEGADA TARDE' : 'CONFIRMAR INGRESO')}
+                    <button
+                        type="button"
+                        onClick={() => handleConfirm('skip')}
+                        className="w-full py-2.5 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors text-xs"
+                    >
+                        INGRESAR SIN RELEVAR
                     </button>
                 </div>
             </div>
@@ -723,6 +777,7 @@ const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if 
 // ── NOVEDAD DETAIL POPUP ─────────────────────────────────────────────────────
 const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',  bg: 'bg-rose-600',   text: 'text-white', border: 'border-rose-500' },
+    AUSENCIA_OPERATIVA:           { label: 'AUSENCIA',       bg: 'bg-rose-600',   text: 'text-white', border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',        bg: 'bg-red-600',    text: 'text-white', border: 'border-red-500' },
     AVISO_AUSENCIA_ANTICIPADA:    { label: 'ANTICIPADA',     bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-400' },
     VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',      bg: 'bg-orange-500', text: 'text-white', border: 'border-orange-400' },
@@ -736,18 +791,28 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     RRHH_NOVEDAD:                 { label: 'RRHH',           bg: 'bg-purple-600', text: 'text-white', border: 'border-purple-500' },
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
+    TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
+    LLEGADA_TARDE:                { label: 'LLEGADA TARDE',  bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-400' },
+    COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
 };
 const DEFAULT_META_MAP = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
-const AUTO_CLOSE_MAP = 3000;
+const AUTO_CLOSE_MAP = 10000;
 
 const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
-    const [remaining, setRemaining] = React.useState(AUTO_CLOSE_MAP);
+    const isInfo = isInformationalNovedad(novedad);
+    const autoMs = isInfo ? 0 : AUTO_CLOSE_MAP;
+    const [remaining, setRemaining] = React.useState(autoMs || AUTO_CLOSE_MAP);
     const intervalRef = React.useRef<any>(null);
     const meta = TYPE_META_MAP[novedad?.type] ?? DEFAULT_META_MAP;
+    const actor = novedadActorName(novedad);
+    const body = novedadBodyText(novedad) || novedadSubline(novedad);
 
     React.useEffect(() => {
-        if (!novedad) return;
-        setRemaining(AUTO_CLOSE_MAP);
+        if (!novedad || !autoMs) {
+            clearInterval(intervalRef.current);
+            return;
+        }
+        setRemaining(autoMs);
         const tick = 50;
         intervalRef.current = setInterval(() => {
             setRemaining(r => {
@@ -756,14 +821,15 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
             });
         }, tick);
         return () => clearInterval(intervalRef.current);
-    }, [novedad?.id]);
+    }, [novedad?.id, autoMs]);
 
     if (!novedad) return null;
 
     const ts = novedad.createdAt?.seconds ? new Date(novedad.createdAt.seconds * 1000) : null;
-    const pct = (remaining / AUTO_CLOSE_MAP) * 100;
+    const pct = autoMs ? (remaining / autoMs) * 100 : 100;
     const pause = () => clearInterval(intervalRef.current);
     const resume = () => {
+        if (!autoMs) return;
         clearInterval(intervalRef.current);
         const tick = 50;
         intervalRef.current = setInterval(() => {
@@ -785,17 +851,15 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                 onMouseEnter={pause}
                 onMouseLeave={resume}
             >
-                {/* Barra auto-cierre */}
                 <div className="h-1 w-full bg-white/10">
                     <div className={`h-full ${meta.bg} transition-none`}
-                         style={{ width: `${pct}%`, transition: 'width 50ms linear' }} />
+                         style={{ width: `${pct}%`, transition: autoMs ? 'width 50ms linear' : undefined }} />
                 </div>
-                {/* Header */}
-                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
+                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between gap-2`}>
                     <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
-                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                        {meta.label}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
                                 {ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })}
@@ -804,15 +868,14 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                         <button onClick={onClose} className="text-white/60 hover:text-white transition-colors"><X size={14}/></button>
                     </div>
                 </div>
-                {/* Cuerpo */}
                 <div className="px-5 py-4 space-y-3">
-                    {novedad.employeeName && (
+                    {actor && (
                         <div className="flex items-center gap-2">
                             <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-sm font-black text-white shrink-0">
-                                {novedad.employeeName[0]?.toUpperCase()}
+                                {actor[0]?.toUpperCase()}
                             </div>
-                            <div>
-                                <p className="text-white font-black text-sm leading-tight">{novedad.employeeName}</p>
+                            <div className="min-w-0">
+                                <p className="text-white font-black text-sm leading-tight truncate">{actor}</p>
                                 {novedad.positionName && <p className="text-white/50 text-[10px]">{novedad.positionName}</p>}
                             </div>
                         </div>
@@ -823,57 +886,31 @@ const NovedadDetailPopupMap = ({ novedad, onClose, onAtender }: { novedad: any; 
                             <span className="text-white/90 text-xs font-bold">{novedad.objectiveName}</span>
                         </div>
                     )}
-                    {novedad.clientName && novedad.clientName !== novedad.objectiveName && (
-                        <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-1.5">
-                            <span className="text-white/40 text-[10px] shrink-0">Cliente</span>
-                            <span className="text-white/70 text-xs">{novedad.clientName}</span>
-                        </div>
-                    )}
-                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
-                        <div className="space-y-1.5 text-xs text-white/80">
-                            {novedad.tipoSolicitud && (
-                                <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
-                            )}
-                            {(novedad.fecha || novedad.startTime) && (
-                                <p><span className="text-white/50">Cuándo:</span> {novedad.fecha || '—'} · {novedad.startTime || ''}{novedad.endTime ? `–${novedad.endTime}` : ''}</p>
-                            )}
-                            {novedad.cantidadPax != null && novedad.tipoSolicitud === 'RFZ' && (
-                                <p><span className="text-white/50">Personas:</span> {novedad.cantidadPax}</p>
-                            )}
-                            {novedad.horasVendidasEstimadas != null && (
-                                <p><span className="text-white/50">Hs. vendidas (pactadas):</span> {novedad.horasVendidasEstimadas}h</p>
-                            )}
-                            {novedad.parentEmpleadoName && (
-                                <p><span className="text-white/50">Guardia base:</span> {novedad.parentEmpleadoName}</p>
-                            )}
-                            {novedad.motivo && (
-                                <p className="text-white/60 italic">{novedad.motivo}</p>
-                            )}
-                        </div>
-                    )}
-                    {novedad.description && (
-                        <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
-                            {novedad.description}
+                    {novedad.type === 'COBERTURA_RESUELTA' && novedad.coverageType && (
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-300/90">
+                            Tipo: {String(novedad.coverageType)}
                         </p>
                     )}
-                    {novedad.minutesBeforeShift != null && novedad.minutesBeforeShift > 0 && (
-                        <div className="flex items-center gap-1.5 text-amber-400">
-                            <Clock size={12}/>
-                            <span className="text-xs font-bold">{novedad.minutesBeforeShift} min al inicio del turno</span>
-                        </div>
+                    {body ? (
+                        <p className="text-white/80 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
+                            {body}
+                        </p>
+                    ) : (
+                        <p className="text-white/40 text-xs italic">Sin detalle adicional en esta alerta.</p>
                     )}
                 </div>
-                {/* Footer */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s · hover pausa
+                        {autoMs
+                            ? `Cerrando en ${Math.ceil(remaining / 1000)}s · hover pausa`
+                            : 'Confirmá lectura para quitarla de Alertas'}
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white transition-all hover:scale-105 ${meta.bg}`}
                     >
                         <CheckCircle size={13}/>
-                        ATENDER
+                        {isInfo ? 'ENTENDIDO' : 'ATENDER'}
                     </button>
                 </div>
             </div>
@@ -985,6 +1022,7 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
 };
 
 export default function TacticalMapView() {
+    const router = useRouter();
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const logic = useOperacionesMonitor();
@@ -1026,13 +1064,27 @@ export default function TacticalMapView() {
             ch.close();
         };
     }, []);
-    const pendingNovedades = useMemo(() =>
-        empNovedades.filter(n =>
-            n.status !== 'ATENDIDA' && n.status !== 'atendida' &&
-            n.type !== 'VACANTE_A_PLANIFICACION' &&
-            !n.enGestion   // excluir las que otro operador está gestionando
-        ),
-    [empNovedades]);
+    const pendingNovedades = useMemo(() => {
+        const filtered = empNovedades.filter(n => {
+            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            if (isHiddenFromOpsAlerts(n)) return false;
+            if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false;
+            if (n.enGestion) return false;
+            if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
+                const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
+                if (target?.turaContiguous) return false;
+            }
+            return true;
+        });
+        const seen = new Set<string>();
+        return filtered.filter((n: any) => {
+            const key = n.shiftId ? `${n.type}__${n.shiftId}` : n.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+    }, [empNovedades, logic.processedData]);
     // Nombre del operador actual (para marcar enGestion)
     const operatorName = useMemo(() => getAuth().currentUser?.email?.split('@')[0] || 'Operador', []);
     useEffect(() => {
@@ -1054,7 +1106,7 @@ export default function TacticalMapView() {
         return () => unsub();
     }, [empresaId, empresa, migracionCompleta, refreshKey]);
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
-    const prevPendingCount = useRef(0);
+    const prevPendingCount = useRef(-1);
     useEffect(() => {
         if (pendingNovedades.length > prevPendingCount.current) setNotifPanelOpen(true);
         prevPendingCount.current = pendingNovedades.length;
@@ -1149,10 +1201,36 @@ export default function TacticalMapView() {
                     if (vacShift.isVirtual || !novedad.shiftId) {
                         const newRef = doc(collection(db, 'turnos'));
                         await setDoc(newRef, stampEmpresaId({ clientId: vacShift.clientId, clientName: vacShift.clientName, objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName, positionName: vacShift.positionName, employeeId: 'VACANTE', employeeName: 'VACANTE', startTime: Timestamp.fromDate(vacShift.shiftDateObj), endTime: Timestamp.fromDate(vacShift.endDateObj), status: 'UNCOVERED_REPORTED', isReported: true, origin: 'SLA_VIRTUAL', createdAt: serverTimestamp() }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
-                        setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
-                    } else { setCoverageData({ isOpen: true, shift: vacShift }); }
+                        openCoverageProtocol({ ...vacShift, id: newRef.id, isVirtual: false });
+                    } else { openCoverageProtocol(vacShift); }
                 } else { toast.info('Vacante no encontrada. Verificá en mapa.'); }
-            } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
+            } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
+                const target = resolveTuraExtensionOperacionesTarget(novedad, logic.processedData);
+                if (target) {
+                    logic.setViewTab('PLAN');
+                    setHandoverData({ isOpen: true, shift: target });
+                    toast.info(target.turaContiguous
+                        ? `Turno extendido: ${target.employeeName}${target.turaExtensionRange ? ` · ${target.turaExtensionRange}` : ''}`
+                        : `2º tramo TURA: ${target.employeeName}`);
+                } else {
+                    logic.setViewTab('PLAN');
+                    toast.info('Buscá al guardia en PLAN — el TURA está anexado a su turno.');
+                }
+            } else if (
+                novedad.type === 'REFUERZO_CLIENTE_PENDIENTE'
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'RFZ')
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.actionTarget === 'PLANIFICACION')
+            ) {
+                const fecha = String(novedad.fecha || '').slice(0, 10);
+                const [y, mo] = fecha.split('-').map(Number);
+                const qs = new URLSearchParams();
+                if (novedad.objectiveId) qs.set('objectiveId', String(novedad.objectiveId));
+                if (novedad.clientId) qs.set('clientId', String(novedad.clientId));
+                if (Number.isFinite(y) && y > 2000) qs.set('year', String(y));
+                if (Number.isFinite(mo) && mo >= 1 && mo <= 12) qs.set('month', String(mo));
+                void router.push(`/admin/planificacion/${qs.toString() ? `?${qs.toString()}` : ''}`);
+                toast.info('Planificación — fila VACANTE RFZ: asigná guardia y publicá.');
+            } else if (novedad.type === 'VACANTE_OPERATIVA') {
                 const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
                 const vacShift = turnoIds.length
                     ? logic.processedData.find((s: any) => turnoIds.includes(s.id))
@@ -1161,12 +1239,12 @@ export default function TacticalMapView() {
                         (s.origin === 'CLIENT_REQUEST' && s.objectiveId === novedad.objectiveId && s.isUnassigned)
                     );
                 if (vacShift) {
-                    setCoverageData({ isOpen: true, shift: vacShift });
+                    openCoverageProtocol(vacShift);
                     logic.setViewTab('VACANTES');
-                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'RFZ'}`);
+                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'TURA'}`);
                 } else {
                     logic.setViewTab('VACANTES');
-                    toast.info(novedad.description || 'Buscá la vacante RFZ/TURA en la pestaña VACANTES');
+                    toast.info(novedad.description || 'Buscá la vacante TURA en la pestaña VACANTES');
                 }
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
                 const targetShift = novedad.shiftId
@@ -1186,7 +1264,7 @@ export default function TacticalMapView() {
                 const targetShift = novedad.shiftId
                     ? logic.processedData.find((s: any) => s.id === novedad.shiftId)
                     : logic.processedData.find((s: any) => s.objectiveId === novedad.objectiveId && (s.positionName || '').toLowerCase() === (novedad.positionName || '').toLowerCase() && !s.isCompleted);
-                if (targetShift) { setCoverageData({ isOpen: true, shift: targetShift }); toast.info(`Cobertura abierta: ${novedad.employeeName || 'empleado'}`); }
+                if (targetShift) { openCoverageProtocol(targetShift); toast.info(`Protocolo de cobertura abierto: ${novedad.employeeName || 'empleado'}`); }
                 else { toast.info('Turno no encontrado en datos actuales.'); }
             } else { toast.success('Alerta atendida'); }
         } catch(e) { toast.error('Error al atender la alerta'); }
@@ -1195,7 +1273,8 @@ export default function TacticalMapView() {
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [coverageSessions, setCoverageSessions] = useState<CoverageSession[]>([]);
+    const [activeCoverageId, setActiveCoverageId] = useState<string | null>(null);
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [manualRetentionData, setManualRetentionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1209,10 +1288,22 @@ export default function TacticalMapView() {
         try {
             await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true }, empresaId, migracionCompleta);
             setAttendanceData({isOpen:false, shift:null});
-            setCoverageData({isOpen:true, shift: shift});
+            openCoverageProtocol(shift);
         } catch (e) { toast.error("Error al marcar ausencia"); }
     };
-    const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
+    const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); openCoverageProtocol(newVacancyShift); };
+
+    // ─── Coverage protocol multi-session ─────────────────────────────────────
+    const openCoverageProtocol = (shift: any) => {
+        const existing = coverageSessions.find(s => s.absentShift?.id === shift?.id);
+        if (existing) { setActiveCoverageId(existing.id); setCoverageSessions(prev => prev.map(s => s.id === existing.id ? { ...s, minimized: false } : s)); return; }
+        const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
+        setCoverageSessions(prev => [...prev, newSess]);
+        setActiveCoverageId(newSess.id);
+    };
+    const updateCoverageSession = (id: string, fn: (s: CoverageSession) => CoverageSession) => setCoverageSessions(prev => prev.map(s => s.id === id ? fn(s) : s));
+    const closeCoverageSession = (id: string) => { setCoverageSessions(prev => prev.filter(s => s.id !== id)); setActiveCoverageId(prev => prev === id ? (coverageSessions.find(s => s.id !== id)?.id ?? null) : prev); };
+    // ─────────────────────────────────────────────────────────────────────────
     const handleReportPlanning = async (shift: any) => { toast.info("Reportando..."); };
     const handleOpenWAMap = (shift: any) => {
         setWaData({ isOpen: true, ctx: { employeeName: shift.employeeName || '', phone: shift.phone || '', objectiveName: shift.objectiveName, horaInicio: shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '', horaFin: shift.endDateObj ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '' } });
@@ -1226,7 +1317,7 @@ export default function TacticalMapView() {
         await addDoc(collection(db, 'ausencias'), stampEmpresaId({ employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, type: 'NO_PRESENTACION', startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd), status: 'Pendiente', reason: `No presentación — ${shift.objectiveName} (${shift.positionName})`, hasCertificate: false, createdAt: serverTimestamp(), origin: 'OPERACIONES', shiftId: shift.id }, shiftEmpresaId));
         if (shift.employeeId) await addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: shift.employeeId, type: 'AUSENCIA_DECLARADA', title: 'Ausencia registrada', read: false, body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`, objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5', status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, shiftId: shift.id, objectiveName: shift.objectiveName || '', positionName: shift.positionName || '', description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-        setCoverageData({ isOpen: true, shift });
+        openCoverageProtocol(shift);
         toast.success(`Ausencia de ${shift.employeeName} registrada.`);
     };
     const handleLateArrival = async (shift: any, etaTime: string) => {
@@ -1234,23 +1325,37 @@ export default function TacticalMapView() {
         catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     };
 
-    // --- SYNC FILTROS (cliente y búsqueda; la solapa NO se hereda del panel: el mapa expandido abre siempre en MAPA GENERAL) ---
+    // --- SYNC FILTROS con CC (cliente, búsqueda y solapa activa) ---
     useEffect(() => {
-        logic.setViewTab('TODOS');
         const syncFilters = () => {
             const saved = localStorage.getItem('crono_ops_filters');
             if (saved) {
                 try {
-                    const { client, text } = JSON.parse(saved);
+                    const { client, text, tab } = JSON.parse(saved);
                     logic.setSelectedClientId(client ?? '');
                     logic.setFilterText(text ?? '');
-                } catch (e) { console.error(e); }
+                    const allowed = ['TODOS', 'PRIORIDAD', 'NO_LLEGO', 'PLAN', 'ACTIVOS', 'RETENIDOS', 'VACANTES', 'AUSENTES', 'FRANCOS'];
+                    if (tab && allowed.includes(tab)) logic.setViewTab(tab as typeof logic.viewTab);
+                    else logic.setViewTab('TODOS');
+                } catch (e) { console.error(e); logic.setViewTab('TODOS'); }
+            } else {
+                logic.setViewTab('TODOS');
             }
         };
         syncFilters();
-        window.addEventListener('storage', (e) => { if (e.key === 'crono_ops_filters') syncFilters(); });
-        return () => window.removeEventListener('storage', () => {});
+        const onStorage = (e: StorageEvent) => { if (e.key === 'crono_ops_filters') syncFilters(); };
+        window.addEventListener('storage', onStorage);
+        return () => window.removeEventListener('storage', onStorage);
     }, []);
+
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        localStorage.setItem('crono_ops_filters', JSON.stringify({
+            tab: logic.viewTab,
+            client: logic.selectedClientId,
+            text: logic.filterText,
+        }));
+    }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
     const tabs = [
         { id: 'PRIORIDAD', label: 'PRIO', count: logic.stats.prioridad, color: 'text-rose-600' },
@@ -1263,43 +1368,26 @@ export default function TacticalMapView() {
         { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 
-    const objectivesWithCoords = useMemo(() => (logic.objectives || []).filter((o: any) => o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng))), [logic.objectives]);
-    const objectivesForMap = useMemo(() => {
-        const base = logic.filteredObjectives || [];
-        const allObjs = logic.objectives || [];
-        const centerLat = -31.4201, centerLng = -64.1888;
-        const ensureCoords = (arr: any[]) => arr.map((o: any) => {
-            const hasCoords = o != null && Number.isFinite(Number(o.lat)) && Number.isFinite(Number(o.lng));
-            return hasCoords ? o : { ...o, lat: centerLat, lng: centerLng };
-        });
-        if (logic.viewTab === 'TODOS') {
-            const result = base.length ? base : allObjs;
-            return ensureCoords(result.length ? result : objectivesWithCoords);
-        }
-        const ids = new Set((logic.listData || []).map((s: any) => s.objectiveId).filter(Boolean));
-        const fromTab = base.filter((o: any) => ids.has(o.id));
-        const combined = fromTab.length ? fromTab : base;
-        return ensureCoords(combined.length ? combined : objectivesWithCoords);
-    }, [logic.filteredObjectives, logic.listData, logic.viewTab, logic.objectives, objectivesWithCoords]);
-
     return (
         <div className="h-screen w-screen overflow-hidden bg-slate-900 relative">
-            <Head><title>COSP TACTICAL V1.0 · 31b309b</title></Head>
+            <Head><title>COSP TACTICAL V1.0</title></Head>
             <style>{POPUP_STYLES}</style>
             
-            <div className="absolute top-4 left-4 right-4 z-[1000] flex gap-2 justify-between pointer-events-none">
-                <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-2 flex items-center gap-3 border border-slate-200 pointer-events-auto">
-                    <div className="flex items-center gap-2 px-3 border-r border-slate-200 pr-4"><Radio className="text-rose-600 animate-pulse" size={20} /><div><h1 className="font-black text-slate-800 text-sm leading-none">COSP TACTICAL</h1><span className="text-[10px] text-slate-500 font-bold">V1.0 · <span className="font-mono">31b309b</span></span></div></div>
-                    <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200"><Filter size={14} className="text-slate-400 ml-1"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-xs font-bold text-slate-700 outline-none w-40 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                    <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200 w-64"><Search size={14} className="text-slate-400 ml-1"/><input className="bg-transparent text-xs font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar guardia, objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
+            <div className="absolute top-0 left-0 right-0 z-[1000] px-3 py-2 pointer-events-none">
+                <div className="flex flex-wrap items-center gap-2 justify-between">
+                <div className="bg-white/95 backdrop-blur shadow-lg rounded-xl px-2 py-1.5 flex items-center gap-2 border border-slate-200 pointer-events-auto min-h-0">
+                    <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200"><Radio className="text-rose-600 animate-pulse shrink-0" size={16} /><div className="leading-none"><h1 className="font-black text-slate-800 text-[11px]">COSP</h1><span className="text-[8px] text-slate-500 font-bold">TACTICAL</span></div></div>
+                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200"><Filter size={12} className="text-slate-400"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-36 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200 w-52"><Search size={12} className="text-slate-400"/><input className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
                 </div>
                 <div className="flex items-center gap-2 pointer-events-auto">
                     {/* Mini chip cobertura */}
                     {(() => {
                         const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
                         const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                        const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                        const pct = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : null;
+                        const huecos = logic.stats.vacantes;
+                        const debieronIniciar = cubiertos + huecos;
+                        const pct = total === 0 ? null : (debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 100);
                         if (pct === null) return null;
                         const isCrisis = pct < 50;
                         const isWarn = pct >= 50 && pct < 80;
@@ -1335,14 +1423,15 @@ export default function TacticalMapView() {
                         <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
                     </div>
                 </div>
+                </div>
             </div>
 
             <OperacionesMap
-                key={`tactical-${logic.viewTab}-${(objectivesForMap || []).map((o:any)=>o.id).sort().join(',').slice(0,120)}`}
                 center={[-31.4201, -64.1888]}
-                allObjectives={objectivesForMap}
+                allObjectives={logic.mapTabObjectives}
                 filteredShifts={logic.listData}
-                onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                tacticalHud
+                onOpenCoverage={(s:any)=>openCoverageProtocol(s)}
                 onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} 
                 onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} 
                 onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} 
@@ -1350,6 +1439,13 @@ export default function TacticalMapView() {
                 onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true, shift:s})}
                 onReportPlanning={handleReportPlanning} 
             />
+            {!logic.isStable && (
+                <div className="absolute inset-0 z-[400] flex items-center justify-center bg-slate-900/40 pointer-events-none">
+                    <div className="rounded-2xl bg-slate-900/90 border border-slate-600 px-4 py-3 text-xs font-black text-slate-200 uppercase tracking-wide">
+                        Sincronizando operaciones…
+                    </div>
+                </div>
+            )}
 
             {showHelp && (
                 <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setShowHelp(false)}>
@@ -1384,12 +1480,19 @@ export default function TacticalMapView() {
                 </div>
             )}
             
-            {/* ── PANEL FLOTANTE DE ALERTAS — con fix ghost badge + triage urgente/PROT ── */}
-            <div className="absolute bottom-8 left-8 z-[1000]">
+            {/* ── PANEL FLOTANTE DE ALERTAS — abajo izquierda; leyenda del mapa está arriba izquierda ── */}
+            <div className="absolute bottom-14 left-4 z-[1000]">
             {(() => {
                 // Ghost badge fix: mismo filtro que stats.prioridad
                 const _now = new Date();
-                const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                const _hoy = logic.processedData.filter((s:any) => {
+                    if (isSameDay(s.shiftDateObj, _now)) return true;
+                    if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+                        const sm = s.shiftDateObj?.getTime?.() ?? 0;
+                        return sm > 0 && (_now.getTime() - sm) <= 48 * 60 * 60 * 1000;
+                    }
+                    return false;
+                });
                 const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                 // Guardias que no llegaron: T+5 → T+60
                 const lateShiftsPanel = _hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified) && !s.isFranco && !s.isAbsent);
@@ -1404,7 +1507,8 @@ export default function TacticalMapView() {
                 const otherNovedades = pendingNovedades.filter(n =>
                     !urgentNovedades.includes(n) && !protNovedades.includes(n)
                 );
-                const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + urgentNovedades.length + otherNovedades.length + protNovedades.length;
+                // Mismo criterio que Operaciones: novedades + turnos en prioridad
+                const totalAlerts = priorityShiftsPanel.length + lateShiftsPanel.length + pendingNovedades.length;
 
                 const NOV_TYPE_META: Record<string, { label: string; bg: string; border: string }> = {
                     AUSENCIA_CORTO_PLAZO:        { label: 'URGENTE', bg: 'bg-red-600 text-white animate-pulse', border: 'border-l-red-600' },
@@ -1422,26 +1526,25 @@ export default function TacticalMapView() {
                     RETENCION_DETECTADA:         { label: 'REC',     bg: 'bg-orange-100 text-orange-800',       border: 'border-l-orange-600' },
                     REFUERZO_CLIENTE_PENDIENTE:  { label: 'RFZ CLI', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
                     VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',     border: 'border-l-fuchsia-500' },
+                    TURA_EXTENSION:              { label: 'TURA', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
+                    COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder },
                 };
                 const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
 
                 const renderNovedad = (n: any) => {
                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
                     const meta = getNovMeta(n.type);
+                    const headline = novedadHeadline(n);
+                    const sub = novedadSubline(n);
                     return (
                         <div key={n.id}
                             onClick={() => setDetailNovedad(n)}
                             className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/80 transition-colors cursor-pointer`}>
                             <div className="flex-1 min-w-0">
                                 <p className="text-[11px] font-bold text-slate-800 leading-snug truncate">
-                                    {n.title
-                                        ? String(n.title)
-                                        : n.employeeName && n.objectiveName
-                                            ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                            : n.objectiveName || n.employeeName || n.type}
-                                    {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                    {headline}
                                 </p>
-                                <p className="text-[9px] text-slate-400 leading-tight truncate">{n.description || '-'}</p>
+                                <p className="text-[9px] text-slate-400 leading-tight truncate">{sub || '—'}</p>
                             </div>
                             <div className="flex items-center gap-1 shrink-0">
                                 <span className="text-[9px] text-slate-400 font-mono">
@@ -1454,7 +1557,7 @@ export default function TacticalMapView() {
                                     </button>
                                 )}
                                 <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                    className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Atender">
+                                    className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}>
                                     <CheckCircle size={10}/>
                                 </button>
                             </div>
@@ -1648,11 +1751,13 @@ export default function TacticalMapView() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageModal
-                isOpen={coverageData.isOpen}
-                onClose={() => setCoverageData({isOpen:false, shift:null})}
-                absenceShift={coverageData.shift}
+            <CoverageSessionManager
+                sessions={coverageSessions}
+                activeId={activeCoverageId}
                 logic={logic}
+                onActivate={setActiveCoverageId}
+                onClose={closeCoverageSession}
+                onUpdate={updateCoverageSession}
             />
             <WorkedDayOffModal
                 isOpen={workedFrancoData.isOpen}
@@ -1674,7 +1779,7 @@ export default function TacticalMapView() {
                 isOpen={rrhhVacancyData.isOpen}
                 onClose={() => setRrhhVacancyData({isOpen:false, shift:null})}
                 shift={rrhhVacancyData.shift}
-                onCoverageProtocol={(s:any) => setCoverageData({isOpen:true, shift:s})}
+                onCoverageProtocol={(s:any) => openCoverageProtocol(s)}
                 onSendToPlanning={(s:any) => { logic.handleAction('SEND_TO_PLANNING', s.id, null); setRrhhVacancyData({isOpen:false, shift:null}); }}
             />
             <WAComposeModal
@@ -1683,44 +1788,11 @@ export default function TacticalMapView() {
                 ctx={waData.ctx}
             />
             {detailNovedad && (
-                <div className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center p-4" onClick={() => setDetailNovedad(null)}>
-                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-5" onClick={e => e.stopPropagation()}>
-                        <div className="flex items-center justify-between mb-3">
-                            <span className="text-xs font-black uppercase tracking-widest text-slate-500">
-                                {detailNovedad.title ? String(detailNovedad.title).slice(0, 48) : (TYPE_META_MAP as any)[detailNovedad?.type]?.label || detailNovedad?.type}
-                            </span>
-                            <button onClick={() => setDetailNovedad(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
-                                <X size={16}/>
-                            </button>
-                        </div>
-                        {detailNovedad.employeeName && (
-                            <p className="font-bold text-slate-800 text-sm mb-1">{detailNovedad.employeeName}</p>
-                        )}
-                        {detailNovedad.objectiveName && (
-                            <p className="text-xs text-slate-500 mb-1">{detailNovedad.objectiveName}</p>
-                        )}
-                        {(detailNovedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || detailNovedad.type === 'VACANTE_OPERATIVA') && (
-                            <div className="text-xs text-slate-600 mb-3 space-y-1">
-                                {detailNovedad.fecha && <p><span className="text-slate-400">Fecha:</span> {detailNovedad.fecha}</p>}
-                                {(detailNovedad.startTime || detailNovedad.endTime) && (
-                                    <p><span className="text-slate-400">Horario:</span> {detailNovedad.startTime || ''}{detailNovedad.endTime ? `–${detailNovedad.endTime}` : ''}</p>
-                                )}
-                                {detailNovedad.horasVendidasEstimadas != null && (
-                                    <p><span className="text-slate-400">Hs. pactadas:</span> {detailNovedad.horasVendidasEstimadas}h</p>
-                                )}
-                            </div>
-                        )}
-                        {detailNovedad.description && (
-                            <p className="text-sm text-slate-600 mb-4 leading-relaxed">{detailNovedad.description}</p>
-                        )}
-                        <button
-                            onClick={() => { handleAtenderNovedad(detailNovedad); setDetailNovedad(null); }}
-                            className="w-full py-2.5 bg-slate-800 text-white text-sm font-bold rounded-xl hover:bg-slate-700 transition-colors"
-                        >
-                            ATENDER
-                        </button>
-                    </div>
-                </div>
+                <NovedadDetailPopupMap
+                    novedad={detailNovedad}
+                    onClose={() => setDetailNovedad(null)}
+                    onAtender={handleAtenderNovedad}
+                />
             )}
         </div>
     );

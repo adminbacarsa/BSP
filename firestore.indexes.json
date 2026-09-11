@@ -433,6 +433,14 @@
         { "fieldPath": "empleadoId",   "order": "ASCENDING" },
         { "fieldPath": "servicioFecha","order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "swap_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",    "order": "ASCENDING" },
+        { "fieldPath": "empresaId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

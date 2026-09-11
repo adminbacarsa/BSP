@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runAutoSchedule = exports.runAutoScheduleHandler = void 0;
+exports.runAutoScheduleCore = runAutoScheduleCore;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const autoScheduleEngine_1 = require("./autoScheduleEngine");
@@ -143,24 +144,19 @@ function buildStaffingNeeds(positions, positionGroups) {
     });
 }
 const RUNTIME = { timeoutSeconds: 120, memory: '512MB' };
-const runAutoScheduleHandler = async (data, context) => {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
-    }
+async function runAutoScheduleCore(data) {
     const { objectiveId, year, month, empresaId, options } = data;
     if (!objectiveId || !year || !month || !empresaId) {
-        throw new functions.https.HttpsError('invalid-argument', 'objectiveId, year, month y empresaId son requeridos.');
+        throw new Error('objectiveId, year, month y empresaId son requeridos.');
     }
-    if (month < 1 || month > 12) {
-        throw new functions.https.HttpsError('invalid-argument', 'month debe ser 1-12.');
-    }
+    if (month < 1 || month > 12)
+        throw new Error('month debe ser 1-12.');
     const [{ positions, slaVendidas, codeHoursHint }, employees,] = await Promise.all([
         loadPositionsFromSla(objectiveId),
         loadEmployees(empresaId, objectiveId),
     ]);
-    if (positions.length === 0) {
-        throw new functions.https.HttpsError('failed-precondition', 'El SLA no tiene puestos definidos.');
-    }
+    if (positions.length === 0)
+        throw new Error('El SLA no tiene puestos definidos.');
     const daysInMonth = buildDaysInMonth(year, month);
     const currentState = await loadPlanningState(objectiveId, year, month);
     let defaultPositionByEmp = currentState.defaultPositionByEmp;
@@ -208,6 +204,24 @@ const runAutoScheduleHandler = async (data, context) => {
             generatedAt: new Date().toISOString(),
         },
     };
+}
+const runAutoScheduleHandler = async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
+    }
+    try {
+        return await runAutoScheduleCore(data);
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error en autoSchedule');
+        if (msg.includes('requeridos') || msg.includes('1-12')) {
+            throw new functions.https.HttpsError('invalid-argument', msg);
+        }
+        if (msg.includes('puestos definidos')) {
+            throw new functions.https.HttpsError('failed-precondition', msg);
+        }
+        throw new functions.https.HttpsError('internal', msg);
+    }
 };
 exports.runAutoScheduleHandler = runAutoScheduleHandler;
 exports.runAutoSchedule = functions

@@ -16,7 +16,11 @@ import { useEmpresaBranding } from '../../src/hooks/useEmpresaBranding';
 import { useEventosPortal } from '../../src/hooks/useEventosPortal';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
-import { heroShift, pickTodayShiftAny } from '../../src/lib/shifts';
+import {
+  heroShift,
+  isShiftInProgress,
+  shiftStartsToday,
+} from '../../src/lib/shifts';
 import { resolveShiftPlacement } from '../../src/lib/shiftPlacement';
 import { appRoutes } from '../../src/lib/appRoutes';
 import { CommandButton } from '../../src/components/ui/CommandButton';
@@ -35,8 +39,10 @@ import { radius, spacing } from '../../src/theme/tokens';
 import { PortalErrorPanel } from '../../src/components/PortalErrorPanel';
 import { useNetworkStatus } from '../../src/hooks/useNetworkStatus';
 import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
+import { useClockNow } from '../../src/hooks/useClockNow';
 import { useTheme } from '../../src/theme/ThemeContext';
 import type { SolicitudEvento } from '@cosp/portal-types';
+import Constants from 'expo-constants';
 
 export default function HoyScreen() {
   return (
@@ -57,7 +63,6 @@ function HoyScreenContent() {
     employee,
     empDocId,
     portalFeatures,
-    signOut,
     refreshEmployee,
     employeeProfileLoading,
     employeeProfileReady,
@@ -70,6 +75,12 @@ function HoyScreenContent() {
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } =
     useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
+  const appVersion = Constants.expoConfig?.version ?? '—';
+  const headerTitle = useMemo(() => {
+    const emp = (empresaNombre || '').trim();
+    if (emp) return `COSP · ${emp} · v${appVersion}`;
+    return `COSP Guardia · v${appVersion}`;
+  }, [empresaNombre, appVersion]);
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
       return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();
@@ -104,25 +115,28 @@ function HoyScreenContent() {
 
   useEffect(() => {
     navigation.setOptions({
-      title: 'Hoy',
-      headerRight: () => (
-        <Text
-          style={[styles.headerAction, { color: palette.headerTint }]}
-          onPress={() => signOut().then(() => router.replace('/login'))}
-        >
-          Salir
-        </Text>
-      ),
+      title: headerTitle,
+      headerTitleStyle: { fontSize: 14, fontWeight: '700' },
+      headerTitleNumberOfLines: 1,
+      headerRight: undefined,
     });
-  }, [navigation, palette.headerTint, router, signOut]);
+  }, [navigation, headerTitle]);
 
-  const now = new Date();
-  const todayAny = pickTodayShiftAny(shifts, now);
+  const now = useClockNow(30_000);
   const mainShift = heroShift(shifts, now, { empDocId, authUid: user?.uid ?? null });
   const placement = resolveShiftPlacement(mainShift, objectivesMap);
   const objective = placement.objectiveLocation;
   const labRelaxedCheckIn = isEmulatorMode() && objective?.allowRemoteCheckIn === true;
   const timing = mainShift ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn }) : null;
+  const heroInProgress = !!mainShift && isShiftInProgress(mainShift, now);
+  const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
+  const isOpsHero =
+    !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  const heroSectionLabel = isOpsHero
+    ? 'Turno asignado'
+    : heroInProgress
+      ? 'Turno actual'
+      : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
@@ -162,9 +176,8 @@ function HoyScreenContent() {
     Alert.alert('Llegada tarde', result.message);
   }
 
-  const isHeroToday = !!todayAny;
   const heroSub =
-    todayAny?.isFranco || mainShift?.isFranco
+    mainShift?.isFranco
       ? 'Día de descanso programado'
       : mainShift
         ? formatHeroTimeRange(mainShift)
@@ -273,7 +286,8 @@ function HoyScreenContent() {
               subline={heroSub}
               shift={mainShift}
               placement={placement}
-              empresaNombre={empresaNombre || 'Grupo Bacar'}
+              empresaNombre={empresaNombre || 'Tu empresa'}
+              sectionLabel={heroSectionLabel}
               statusSlot={
                 <>
                   <CheckInStatusBanner view={checkInStatusView} />
@@ -368,5 +382,4 @@ const styles = StyleSheet.create({
   quickHalf: { flex: 1, gap: 8 },
   quickTitle: { fontSize: 16, fontWeight: '800' },
   quickSub: { fontSize: 12, marginBottom: 4, minHeight: 32 },
-  headerAction: { fontWeight: '800', marginRight: 12, fontSize: 14 },
 });

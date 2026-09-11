@@ -106,7 +106,16 @@ export type MonthCell = {
   hasFranco: boolean;
 };
 
+export function isOpsCoverageShift(s: Shift): boolean {
+  return String(s.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+}
+
 function shiftCodeLabel(s: Shift): string {
+  // Cobertura ops: siempre el código de banda (T/M/…), nunca como franco.
+  if (isOpsCoverageShift(s)) {
+    return String(s.code || 'T').toUpperCase().slice(0, 3);
+  }
+  if (s.isFrancoTrabajado || String(s.code || '').toUpperCase() === 'FT') return 'FT';
   if (s.isFranco) return 'F';
   if (s.eventoId || String(s.code || '').toUpperCase() === 'EV') return 'EV';
   return String(s.code || 'T').toUpperCase().slice(0, 3);
@@ -131,8 +140,8 @@ export function buildMonthCells(anchor: Date, byDay: Record<string, Shift[]>, to
       isToday: key === todayKey,
       codes,
       hasEv: dayShifts.some((s) => !!s.eventoId || String(s.code || '').toUpperCase() === 'EV'),
-      hasWork: dayShifts.some((s) => !s.isFranco),
-      hasFranco: dayShifts.some((s) => !!s.isFranco),
+      hasWork: dayShifts.some((s) => isOpsCoverageShift(s) || !s.isFranco),
+      hasFranco: dayShifts.some((s) => !!s.isFranco && !isOpsCoverageShift(s) && !s.isFrancoTrabajado),
     });
   }
 

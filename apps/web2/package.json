@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "eval:guard-capacity": "npx tsx scripts/eval-guard-capacity.ts",
+    "eval:service-capacity-viability": "npx tsx scripts/eval-service-capacity-viability.ts",
     "eval:custom-cover": "npx tsx scripts/eval-custom-cover-cycle.ts",
     "eval:multipax-24hs": "npx tsx scripts/eval-multipax-24hs.ts",
     "eval:obrador-mixed": "npx tsx scripts/eval-obrador-mixed.ts",

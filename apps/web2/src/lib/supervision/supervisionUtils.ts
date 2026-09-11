@@ -2,7 +2,25 @@ import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'NOVEDADES' | 'MAS';
+export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'CAMPO';
+
+/** Sub-secciones del tab Campo (libro, rondas, consignas). */
+export type SupervisionCampoSection = 'NOVEDADES' | 'VISITAS' | 'CONSIGNAS';
+
+/** Tabs legacy — migración desde localStorage. */
+export type SupervisionMainTabLegacy = SupervisionMainTab | 'NOVEDADES' | 'MAS';
+
+export function normalizeSupervisionMainTab(tab: string | null | undefined): SupervisionMainTab {
+  if (tab === 'NOVEDADES' || tab === 'MAS') return 'CAMPO';
+  if (tab === 'TABLERO' || tab === 'BANDEJA' || tab === 'CAMPO') return tab;
+  return 'TABLERO';
+}
+
+export function legacyMainTabToCampoSection(tab: string | null | undefined): SupervisionCampoSection | null {
+  if (tab === 'NOVEDADES') return 'NOVEDADES';
+  if (tab === 'MAS') return 'VISITAS';
+  return null;
+}
 
 export type UrgencyLevel = 'HOY' | 'MANANA' | 'NORMAL';
 
@@ -126,4 +144,30 @@ export function filterSolicitudesByObjectives<T extends { objectiveId: string }>
   if (!objectiveIds.length) return [];
   const scope = new Set(objectiveIds);
   return items.filter(s => scope.has(s.objectiveId));
+}
+
+const MAX_RFZ_RANGO_DIAS = 31;
+
+/** Lista inclusive YYYY-MM-DD desde `from` hasta `to` (mismo día si to vacío). */
+export function listYmdDatesInclusive(from: string, to?: string): string[] {
+  const start = String(from || '').trim().slice(0, 10);
+  if (!start) return [];
+  const endRaw = String(to || '').trim().slice(0, 10);
+  const end = endRaw && endRaw >= start ? endRaw : start;
+  const out: string[] = [];
+  const cur = new Date(`${start}T12:00:00`);
+  const last = new Date(`${end}T12:00:00`);
+  if (Number.isNaN(cur.getTime()) || Number.isNaN(last.getTime())) return [start];
+  while (cur <= last) {
+    out.push(cur.toLocaleDateString('en-CA'));
+    cur.setDate(cur.getDate() + 1);
+    if (out.length > MAX_RFZ_RANGO_DIAS) break;
+  }
+  return out;
+}
+
+export function formatYmdAr(ymd: string): string {
+  const [y, m, d] = String(ymd || '').slice(0, 10).split('-');
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y}`;
 }

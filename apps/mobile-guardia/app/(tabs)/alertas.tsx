@@ -17,18 +17,20 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { RequireAuth } from '../../src/hooks/useRequireAuth';
 import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
+import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { usePortalInbox, type PortalInboxItem } from '../../src/hooks/usePortalInbox';
 import {
   alertNeedsAck,
   notificationActionLabel,
   notificationDomainLabel,
   routeFromNotificationData,
+  COVERAGE_RESPONSE_TYPES,
 } from '../../src/lib/notificationNavigation';
-import { getPortalCallables } from '../../src/lib/portal';
+import { getPortalCallables, isEmulatorMode } from '../../src/lib/portal';
 import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
 
-const DOMAIN_FILTERS = ['Todas', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
+const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
 
 function hrefFromRoute(route: string): Href {
@@ -53,10 +55,12 @@ export default function AlertasScreen() {
 
 function AlertasScreenContent() {
   const router = useRouter();
-  const { user, previewEmpDocId, isPreviewMode } = usePortalAuth();
+  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin } = usePortalAuth();
   const { palette } = useTheme();
-  const { items, loading, unreadCount, markRead, acknowledge, dismiss, markAllUnreadRead, dismissAll } =
+  const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
+  const { items, loading, unreadCount, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
     usePortalInbox(user, previewEmpDocId);
+  const showTestPush = isEmulatorMode() || isPreviewMode || isSuperAdmin;
   const [testBusy, setTestBusy] = useState(false);
   const [markAllBusy, setMarkAllBusy] = useState(false);
   const [dismissAllBusy, setDismissAllBusy] = useState(false);
@@ -179,6 +183,38 @@ function AlertasScreenContent() {
     [acknowledge],
   );
 
+  const onRespond = useCallback(
+    (n: PortalInboxItem, response: 'ACCEPTED' | 'REJECTED') => {
+      const label = response === 'ACCEPTED' ? 'Aceptar' : 'Rechazar';
+      Alert.alert(
+        label,
+        response === 'ACCEPTED'
+          ? '¿Confirmás que aceptás la cobertura?'
+          : '¿Confirmás que rechazás la cobertura?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: label,
+            style: response === 'ACCEPTED' ? 'default' : 'destructive',
+            onPress: () => {
+              void (async () => {
+                setBusyId(n.id);
+                try {
+                  await respond(n.id, response);
+                } catch {
+                  Alert.alert('Error', 'No se pudo enviar la respuesta. Reintentá.');
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [respond],
+  );
+
   const onDismiss = useCallback(
     (n: PortalInboxItem) => {
       const needsAck = alertNeedsAck(n);
@@ -217,7 +253,15 @@ function AlertasScreenContent() {
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          {
+            paddingHorizontal: horizontalPadding,
+            ...(contentMaxWidth
+              ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' }
+              : {}),
+          },
+        ]}
         ListHeaderComponent={
           <View style={styles.headerBlock}>
             <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
@@ -282,13 +326,15 @@ function AlertasScreenContent() {
                   style={styles.headerBtnFlex}
                 />
               ) : null}
-              <CommandButton
-                label={testBusy ? 'Enviando…' : 'Probar push'}
-                variant="ghost"
-                onPress={sendTestPush}
-                disabled={headerBusy}
-                style={styles.headerBtnFlex}
-              />
+              {showTestPush ? (
+                <CommandButton
+                  label={testBusy ? 'Enviando…' : 'Probar push'}
+                  variant="ghost"
+                  onPress={sendTestPush}
+                  disabled={headerBusy}
+                  style={styles.headerBtnFlex}
+                />
+              ) : null}
             </View>
           </View>
         }
@@ -307,9 +353,10 @@ function AlertasScreenContent() {
         }
         renderItem={({ item: n }) => {
           const needsAck = alertNeedsAck(n);
+          const isCoverage = COVERAGE_RESPONSE_TYPES.has(String(n.type ?? '').toUpperCase());
           const busy = busyId === n.id;
           const route = routeFromNotificationData({ type: n.type });
-          const settled = !needsAck && (n.read || !!n.ackedAt);
+          const settled = !needsAck && !isCoverage && (n.read || !!n.ackedAt);
 
           if (settled) {
             return (
@@ -356,10 +403,12 @@ function AlertasScreenContent() {
               ]}
             >
               <View style={styles.inboxTop}>
-                <Text style={[styles.domain, { color: palette.primary }]}>
+                <Text style={[styles.domain, { color: isCoverage ? palette.error : palette.primary }]}>
                   {notificationDomainLabel(n.type)}
                 </Text>
-                {needsAck ? (
+                {isCoverage ? (
+                  <Text style={[styles.nueva, { color: palette.error }]}>Responder</Text>
+                ) : needsAck ? (
                   <Text style={[styles.nueva, { color: palette.warning }]}>Confirmar</Text>
                 ) : (
                   <Text style={[styles.nueva, { color: palette.error }]}>Nueva</Text>
@@ -374,7 +423,24 @@ function AlertasScreenContent() {
                 </Text>
               ) : null}
               <View style={styles.rowBtns}>
-                {needsAck ? (
+                {isCoverage ? (
+                  <>
+                    <CommandButton
+                      label={busy ? '…' : 'Aceptar'}
+                      variant="success"
+                      onPress={() => onRespond(n, 'ACCEPTED')}
+                      disabled={busy}
+                      style={styles.btnFlex}
+                    />
+                    <CommandButton
+                      label={busy ? '…' : 'Rechazar'}
+                      variant="danger"
+                      onPress={() => onRespond(n, 'REJECTED')}
+                      disabled={busy}
+                      style={styles.btnFlex}
+                    />
+                  </>
+                ) : needsAck ? (
                   <CommandButton
                     label={busy ? '…' : 'Me enteré'}
                     variant="success"
@@ -383,7 +449,7 @@ function AlertasScreenContent() {
                     style={styles.btnFlex}
                   />
                 ) : null}
-                {route ? (
+                {!isCoverage && route ? (
                   <CommandButton
                     label={notificationActionLabel(n.type)}
                     variant="secondary"
@@ -410,7 +476,7 @@ function AlertasScreenContent() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  list: { padding: spacing.container, paddingBottom: 32, gap: 10 },
+  list: { paddingVertical: spacing.container, paddingBottom: 32, gap: 10 },
   headerBlock: { gap: 8, marginBottom: 8 },
   intro: { fontSize: 14, lineHeight: 21 },
   filtersScroll: { flexGrow: 0, marginHorizontal: -2 },

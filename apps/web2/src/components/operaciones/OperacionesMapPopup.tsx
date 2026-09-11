@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
+import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -216,6 +217,7 @@ export function OperacionesMapPopup({
             const s = getShiftStatusStyle(shift, diffMin);
             const t1 = start.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
             const t2 = end ? end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
+            const dayTag = opsShiftDayLabel(start, now);
 
             let statusLabel = 'PLAN';
             let statusColor = '#94a3b8';
@@ -312,7 +314,7 @@ export function OperacionesMapPopup({
                 </span>
                 <span
                   style={{
-                    flex: '0 0 100px',
+                    flex: '0 0 120px',
                     fontSize: '10px',
                     fontFamily: 'monospace',
                     color: '#334155',
@@ -320,6 +322,15 @@ export function OperacionesMapPopup({
                     whiteSpace: 'nowrap',
                   }}
                 >
+                  {dayTag.key !== 'hoy' && (
+                    <span style={{
+                      color: dayTag.key === 'manana' ? '#0284c7' : '#d97706',
+                      fontWeight: 900,
+                      fontFamily: 'inherit',
+                      marginRight: 4,
+                      fontSize: 9,
+                    }}>{dayTag.label}</span>
+                  )}
                   {t1}
                   {t2 ? `–${t2}` : ''}
                 </span>

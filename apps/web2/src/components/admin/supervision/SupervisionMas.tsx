@@ -313,6 +313,9 @@ export default function SupervisionMas({
   userName,
   isSuperAdmin,
   canViewAllObjectives,
+  forcedSection,
+  hideSectionToggle = false,
+  hideKpi = false,
 }: {
   empresaId: string;
   objectiveIds: string[];
@@ -321,8 +324,13 @@ export default function SupervisionMas({
   userName: string;
   isSuperAdmin: boolean;
   canViewAllObjectives: boolean;
+  forcedSection?: MasSection;
+  hideSectionToggle?: boolean;
+  hideKpi?: boolean;
 }) {
-  const [section, setSection] = useState<MasSection>('VISITAS');
+  const [internalSection, setInternalSection] = useState<MasSection>('VISITAS');
+  const section = forcedSection ?? internalSection;
+  const setSection = forcedSection ? () => {} : setInternalSection;
   const [visitas, setVisitas] = useState<SupervisionVisita[]>([]);
   const [consignas, setConsignas] = useState<ObjetivoConsigna[]>([]);
   const [lecturas, setLecturas] = useState<ConsignaLectura[]>([]);
@@ -359,32 +367,36 @@ export default function SupervisionMas({
   const objetivosVisitadosMes = new Set(visitasDelMes.map(v => v.objectiveId)).size;
 
   return (
-    <div className="space-y-4 pb-20">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-indigo-600">Visitas este mes</p>
-          <p className="text-2xl font-black text-indigo-800">{visitasMes}</p>
+    <div className={`space-y-4 ${forcedSection ? 'pb-4' : 'pb-20'}`}>
+      {!hideKpi && (
+        <div className="grid grid-cols-2 gap-2">
+          <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-3 shadow-sm">
+            <p className="text-[10px] font-black uppercase text-indigo-600">Visitas este mes</p>
+            <p className="text-2xl font-black text-indigo-800">{visitasMes}</p>
+          </div>
+          <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3 shadow-sm">
+            <p className="text-[10px] font-black uppercase text-violet-600">Objetivos visitados</p>
+            <p className="text-2xl font-black text-violet-800">{objetivosVisitadosMes}/{objectives.length || '—'}</p>
+          </div>
         </div>
-        <div className="rounded-2xl border border-violet-100 bg-violet-50 p-3 shadow-sm">
-          <p className="text-[10px] font-black uppercase text-violet-600">Objetivos visitados</p>
-          <p className="text-2xl font-black text-violet-800">{objetivosVisitadosMes}/{objectives.length || '—'}</p>
-        </div>
-      </div>
+      )}
 
-      <div className="flex gap-2">
-        {(['VISITAS', 'CONSIGNAS'] as const).map(s => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => setSection(s)}
-            className={`flex-1 py-3 rounded-2xl text-xs font-black uppercase border transition-colors ${
-              section === s ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'
-            }`}
-          >
-            {s === 'VISITAS' ? 'Rondas / Visitas' : 'Consignas'}
-          </button>
-        ))}
-      </div>
+      {!hideSectionToggle && (
+        <div className="flex gap-2">
+          {(['VISITAS', 'CONSIGNAS'] as const).map(s => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => setSection(s)}
+              className={`flex-1 py-3 rounded-2xl text-xs font-black uppercase border transition-colors ${
+                section === s ? 'bg-slate-900 text-white border-slate-900' : 'bg-white border-slate-200 text-slate-500'
+              }`}
+            >
+              {s === 'VISITAS' ? 'Rondas / Visitas' : 'Consignas'}
+            </button>
+          ))}
+        </div>
+      )}
 
       {section === 'VISITAS' && (
         <>

@@ -64,5 +64,6 @@ export interface RunAutoScheduleOutput {
         generatedAt: string;
     };
 }
+export declare function runAutoScheduleCore(data: RunAutoScheduleInput): Promise<RunAutoScheduleOutput>;
 export declare const runAutoScheduleHandler: (data: RunAutoScheduleInput, context: functions.https.CallableContext) => Promise<RunAutoScheduleOutput>;
 export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnable<any>;

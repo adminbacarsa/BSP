@@ -19,6 +19,8 @@ type Props = {
   /** @deprecated usar placement */
   objective?: ShiftPlacement['objectiveLocation'];
   empresaNombre?: string;
+  /** En curso → "Turno actual"; futuro → "Próximo turno" */
+  sectionLabel?: string;
   footer?: ReactNode;
   statusSlot?: ReactNode;
 };
@@ -30,6 +32,7 @@ export function HeroShiftPanel({
   placement: placementProp,
   objective,
   empresaNombre,
+  sectionLabel = 'Próximo turno',
   footer,
   statusSlot,
 }: Props) {
@@ -49,7 +52,7 @@ export function HeroShiftPanel({
   const inner = (
     <>
       <View style={styles.topRow}>
-        <Text style={[styles.sectionLabel, { color: palette.heroSubtext }]}>Próximo turno</Text>
+        <Text style={[styles.sectionLabel, { color: palette.heroSubtext }]}>{sectionLabel}</Text>
         {empresaNombre ? (
           <View style={[styles.empresaPill, { borderColor: palette.chipBg }]}>
             <Text style={[styles.empresaText, { color: palette.heroSubtext }]} numberOfLines={1}>

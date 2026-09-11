@@ -104,14 +104,12 @@ export function envelopingRange(start: Date, end: Date): { start: Date; end: Dat
   };
 }
 
-/** Mes calendario de `now` y los 3 anteriores (4 meses). Ago 2026 → 01/05–31/08. */
+import { hotWindow } from '@/lib/dataRetention';
+
+/** Mes en curso + 2 cerrados (política hot / dataRetention). */
 export function analisisWorkingWindow(now: Date): { start: Date; end: Date } {
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  return {
-    start: new Date(y, m - 3, 1, 0, 0, 0, 0),
-    end: new Date(y, m + 1, 0, 23, 59, 59, 999),
-  };
+  const w = hotWindow(now);
+  return { start: w.start, end: w.end };
 }
 
 export function mergeIntervals(intervals: MsRange[]): MsRange[] {

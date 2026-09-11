@@ -382,4 +382,207 @@ export const ASSISTANT_FUNCTION_DECLARATIONS = [
   },
 ];
 
+// ── Tools de consulta operativa extendida ────────────────────────────────────
+
+ASSISTANT_FUNCTION_DECLARATIONS.push(
+  {
+    name: 'consultar_vacantes_dia',
+    description:
+      'Lista los turnos del día que están vacantes (isAbsent=true o sin empleado asignado) en un objetivo o en todos los objetivos de la empresa. Usá para «qué turnos quedan vacantes hoy», «hay vacantes en el Casino esta tarde», «cuántas vacantes tenemos». Devuelve objetivo, banda/código y si ya fue cubierto.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre o fragmento del objetivo para filtrar. Omití para ver todos.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'resumen_ausencias_pendientes',
+    description:
+      'Lista ausencias recientes de la empresa que aún no tienen cobertura asignada (vacantes sin resolver). Usá para «ausencias sin resolver», «quiénes faltaron y no se cubrió», «pendientes de cobertura hoy». Filtra por fecha o rango.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha_desde: { type: SchemaType.STRING, description: 'YYYY-MM-DD inicio. Default: hoy cliente.' },
+        fecha_hasta: { type: SchemaType.STRING, description: 'YYYY-MM-DD fin. Default: igual a fecha_desde (solo hoy).' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas (default 30).' },
+      },
+      required: [],
+    },
+  } as any,
+);
+
+// ── Tools de propuesta de acción (write con confirmación humana) ──────────────
+
+ASSISTANT_FUNCTION_DECLARATIONS.push(
+  {
+    name: 'proponer_extender_jornada',
+    description:
+      'Propone extender la jornada de un empleado de 8h a 12h (M→D12, T→D12, N→N12) en un objetivo y fecha. Usá cuando pidan «extendé a García», «pasá a García a 12 horas», «necesito extender el turno de X». Buscá primero al empleado con buscar_empleados_por_nombre si no tenés su id. Requiere permiso OPERATIONS.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado (de buscar_empleados_por_nombre).' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno a extender. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo/sede (opcional, para desambiguar si tiene varios turnos ese día).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_cubrir_ausencia',
+    description:
+      'Busca candidatos disponibles para cubrir un puesto vacante o una ausencia en un objetivo y día, siguiendo la prioridad CCT (sin turno → RET → ESC → FT). Usá cuando pidan «alguien para cubrir», «hay alguien disponible para el turno M en X», «cubrí la vacante». Si no especifican banda, usá la del turno ausente.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo donde hay vacante.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        banda: { type: SchemaType.STRING, description: 'M | T | N — turno a cubrir.' },
+        id_empleado_ausente: { type: SchemaType.STRING, description: 'Opcional: ID del empleado ausente para tomar su turno exacto.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_crear_turno_refuerzo',
+    description:
+      'Propone crear un turno de refuerzo (origen OPERATIONS_COVERAGE) para un empleado específico en un objetivo y fecha. Usá para «agregá un refuerzo», «mandá a García al objetivo X mañana», «necesito un refuerzo en Banco XYZ». Requiere nombre de empleado, objetivo, fecha y banda.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno a crear.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo donde irá el refuerzo.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        banda: { type: SchemaType.STRING, description: 'M | T | N | D12 | N12 — código CCT del turno.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_confirmar_presencia',
+    description:
+      'Propone marcar presente a un empleado en su turno del día indicado. Usá cuando digan «marcá presente a García», «confirmar presencia de X», «llegó García». Buscá al empleado con buscar_empleados_por_nombre si no tenés id. Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD del turno. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar si hay más de un turno ese día.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_registrar_ausencia',
+    description:
+      'Propone registrar que un empleado estuvo ausente en su turno: marca isAbsent=true y crea doc en ausencias. Usá para «García no vino», «registrá la ausencia de X», «faltó Romero hoy». Siempre buscá primero el turno del empleado. Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+        motivo: { type: SchemaType.STRING, description: 'Motivo opcional: AA (injustificada), E (enfermedad), A (autorizada). Default: AA.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_cerrar_turno',
+    description:
+      'Propone cerrar (checkout / completar) el turno de un empleado: isCompleted=true. Usá para «cerré el turno de García», «García ya se fue», «checkout de X». Requiere permiso OPERATIONS:update.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del empleado.' },
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido si no tenés el id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo para desambiguar.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'proponer_planificar_objetivo_mes',
+    description:
+      'Genera automáticamente el cronograma mensual de un objetivo aplicando CCT 422/05 (ciclo 6+2). Usá para «planificá Obrador para octubre», «generá la planificación de Casino en septiembre», «automatizá el crono de X». Los turnos se crean como borrador (draft:true) para revisión antes de publicar. Requiere permiso PLANNING:create.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo/sede a planificar (ej. «Obrador Malagueño», «Casino»).' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo (si ya lo tenés de buscar_objetivos_por_nombre).' },
+        mes: { type: SchemaType.NUMBER, description: 'Número de mes 1-12 (ej. octubre = 10). Default: mes en curso.' },
+        anio: { type: SchemaType.NUMBER, description: 'Año (ej. 2026). Default: año en curso.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'estado_modo_demo',
+    description: 'Consulta si el Modo Demo (operador automático) está activo o no para la empresa actual. Usá para «está activo el modo demo», «cómo está el modo demo», «modo demo on/off».',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
+    name: 'activar_modo_demo',
+    description: 'Enciende el flag persistente de Modo Demo para que el cron automático corra cada 5 minutos en producción. Usá SOLO para «encender el modo demo», «prender el automático», «habilitar modo demo», «modo demo on». NO usar para ejecutar un ciclo ahora mismo — para eso usá ejecutar_auto_presencia_cierre.',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
+    name: 'desactivar_modo_demo',
+    description: 'Apaga el flag persistente de Modo Demo. Usá para «apagar el modo demo», «deshabilitar modo demo», «modo demo off», «desactivar el automático».',
+    parameters: { type: SchemaType.OBJECT, properties: {}, required: [] },
+  } as any,
+  {
+    name: 'ejecutar_auto_presencia_cierre',
+    description:
+      'Ejecuta UN CICLO AHORA MISMO como operador: marca presencia a los guardias que ya iniciaron turno sin fichar, cierra los turnos que terminaron, y completa relevos en el mismo ciclo. Usá para «ejecutá el modo demo», «corré el ciclo», «procesá los turnos ahora», «dar presentes ahora», «cerrar turnos ahora», «hacé los relevos». Con simulacion=true muestra preview sin modificar. Con simulacion=false (default al pedir ejecutar) aplica los cambios reales.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        simulacion: {
+          type: SchemaType.BOOLEAN,
+          description: 'false = ejecuta cambios reales (modo demo activo). true = solo preview sin modificar. Default: false cuando el usuario dice "activá modo demo" o equivalente; true cuando dice "simulá" o "qué haría".',
+        },
+      },
+      required: [],
+    },
+  } as any,
+);
+
 export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
+
+const WRITE_TOOL_MODULE_REQUIREMENTS: Record<string, string> = {
+  proponer_extender_jornada: 'OPERATIONS',
+  proponer_cubrir_ausencia: 'OPERATIONS',
+  proponer_crear_turno_refuerzo: 'OPERATIONS',
+  proponer_confirmar_presencia: 'OPERATIONS',
+  proponer_registrar_ausencia: 'OPERATIONS',
+  proponer_cerrar_turno: 'OPERATIONS',
+  proponer_planificar_objetivo_mes: 'PLANNING',
+  ejecutar_auto_presencia_cierre: 'OPERATIONS',
+  activar_modo_demo: 'OPERATIONS',
+  desactivar_modo_demo: 'OPERATIONS',
+  estado_modo_demo: 'OPERATIONS',
+};
+
+export function getFilteredDeclarations(readableModuleKeys: string[]): typeof ASSISTANT_FUNCTION_DECLARATIONS {
+  const moduleSet = new Set(readableModuleKeys);
+  return ASSISTANT_FUNCTION_DECLARATIONS.filter((decl) => {
+    const req = WRITE_TOOL_MODULE_REQUIREMENTS[(decl as any).name];
+    if (!req) return true;
+    return moduleSet.has(req);
+  }) as typeof ASSISTANT_FUNCTION_DECLARATIONS;
+}

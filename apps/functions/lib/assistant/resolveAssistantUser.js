@@ -68,6 +68,11 @@ async function resolveAssistantUser(uid, opts) {
             summaryLabel: role ? `Usuario sistema (${role})` : 'Usuario sistema',
         };
     }
+    if ((0, role_util_1.isSuperAdminRole)(claimRole)) {
+        const authSuper = await tryResolveSuperAdminFromAuth(uid, claimRole);
+        if (authSuper)
+            return authSuper;
+    }
     const clientSnap = await db.collection('client_users').where('uid', '==', uid).limit(1).get();
     if (!clientSnap.empty) {
         const d = clientSnap.docs[0].data();

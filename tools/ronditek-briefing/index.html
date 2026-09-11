@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Ronditek — discovery y comparación con COSP</title>
+  <style>
+    @page { margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #000;
+      color: #e2e8f0;
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      width: 1920px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .slide {
+      width: 1920px;
+      height: auto;
+      background: #000;
+      padding: 56px 64px 40px;
+      overflow: visible;
+      display: flex;
+      flex-direction: column;
+      position: relative;
+    }
+    .slide + .slide { border-top: 1px solid #111827; }
+    .slide::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 6px;
+      background: #4f46e5;
+    }
+    .slide.part2::before { background: #10b981; }
+    .part {
+      float: right;
+      font-size: 12px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #64748b;
+    }
+    .kicker {
+      color: #818cf8;
+      font-size: 14px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+    .slide.part2 .kicker { color: #34d399; }
+    h1 { font-size: 54px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; }
+    h2 { font-size: 34px; font-weight: 700; letter-spacing: -0.02em; }
+    h3 { font-size: 17px; font-weight: 650; color: #c7d2fe; }
+    p { font-size: 17px; line-height: 1.45; color: #cbd5e1; }
+    .sub { color: #94a3b8; font-size: 17px; line-height: 1.45; max-width: 1480px; }
+    .row { display: flex; gap: 18px; }
+    .grow { flex: 1; min-width: 0; }
+    .stats { display: grid; gap: 16px; }
+    .s4 { grid-template-columns: repeat(4, 1fr); }
+    .s3 { grid-template-columns: repeat(3, 1fr); }
+    .s2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: #0a0e16;
+      border: 1px solid #1e293b;
+      border-radius: 22px;
+      padding: 20px 22px;
+    }
+    .stat .v { font-size: 30px; font-weight: 700; color: #f8fafc; letter-spacing: -0.03em; }
+    .stat .v.ok { color: #34d399; }
+    .stat .l { margin-top: 6px; font-size: 13px; color: #94a3b8; line-height: 1.35; }
+    .warn {
+      background: #1a1408;
+      border: 1px solid #854d0e;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #fde68a;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .okbox {
+      background: #06150f;
+      border: 1px solid #065f46;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #a7f3d0;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .info {
+      background: #0a1220;
+      border: 1px solid #1e3a5f;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #bfdbfe;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      padding: 7px 12px 9px;
+      border-bottom: 1px solid #1e293b;
+    }
+    td {
+      padding: 8px 12px;
+      font-size: 15px;
+      line-height: 1.32;
+      border-bottom: 1px solid #111827;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: #070a10; }
+    td.cosp { color: #a7f3d0; }
+    .ok { color: #34d399; }
+    .warn-t { color: #fbbf24; }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .pill.ok { background: #052e1f; color: #6ee7b7; }
+    .pill.warn { background: #2a1d04; color: #fcd34d; }
+    .pill.bad { background: #2a0b0b; color: #fca5a5; }
+    .pill.info { background: #0b1c33; color: #93c5fd; }
+    .foot {
+      margin-top: auto;
+      padding-top: 14px;
+      color: #475569;
+      font-size: 12px;
+    }
+    .mt { margin-top: 18px; }
+    .mt8 { margin-top: 8px; }
+    .modules { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .mod h3 { margin-bottom: 8px; }
+    .timeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+    .tl {
+      background: #0a0e16;
+      border: 1px solid #1e293b;
+      border-radius: 18px;
+      padding: 16px 16px 14px;
+      border-top: 3px solid #6366f1;
+    }
+    .tl .n { color: #818cf8; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; font-weight: 700; }
+    .tl p { font-size: 15px; margin-top: 8px; }
+    .bars { display: flex; align-items: flex-end; gap: 40px; height: 300px; }
+    .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 8px; }
+    .bar-wrap { display: flex; align-items: flex-end; gap: 8px; height: 240px; width: 100%; justify-content: center; }
+    .bar { width: 48px; border-radius: 10px 10px 0 0; }
+    .bar.a { background: #34d399; }
+    .bar.b { background: #60a5fa; }
+    .bar.c { background: #818cf8; }
+    .bar-lab { font-size: 14px; color: #94a3b8; }
+    .legend { display: flex; gap: 22px; color: #94a3b8; font-size: 13px; }
+    .dot { width: 10px; height: 10px; border-radius: 99px; display: inline-block; margin-right: 6px; }
+  </style>
+</head>
+<body>
+
+  <!-- ========== PARTE 1: LA CHARLA ========== -->
+  <section class="slide">
+    <div class="part">Parte 1 · La charla</div>
+    <div class="kicker">Briefing interno · Grupo Bacar · 18/08/2026</div>
+    <h1 class="mt">Discovery call<br>con Ronditek</h1>
+    <p class="sub mt8">Videollamada de presentación comercial (~35 min). Quedó registrado qué mostraron, cómo opera la plataforma y para qué mercado está hecha. Se especializan en rondas, acuda y alarmas.</p>
+    <div class="stats s4 mt">
+      <div class="card stat"><div class="v">~35 min</div><div class="l">Duración del Meet. Lo grabado fueron 17 min (Ronditek.mp4)</div></div>
+      <div class="card stat"><div class="v">Daniel Santamaria</div><div class="l">Quien recorrió la consola y respondió la demo</div></div>
+      <div class="card stat"><div class="v">localhost:5173</div><div class="l">Stack Vite. Demo local, no un tenant de producción</div></div>
+      <div class="card stat"><div class="v">Chile</div><div class="l">OS10, RUT, +56. Mencionaron soporte en Colombia</div></div>
+    </div>
+    <div class="info mt">
+      Fuente: capturas cada 20 s del MP4 (Meet + pantalla compartida). Lo que sigue describe lo que se vio y se dijo en esa llamada.
+    </div>
+    <div class="foot">Documento de pantalla 16:9 · fondo negro · sin márgenes de impresión</div>
+  </section>
+
+  <section class="slide">
+    <div class="part">Parte 1 · La charla</div>
+    <div class="kicker">Cómo fue la reunión</div>
+    <h2>Qué se vio en el video</h2>
+    <p class="sub mt8">Santamaria compartió la consola web. El guardia no estuvo en cámara: se infiere por PIN, rostro, kiosko y app de ronda. El relato comercial fue de ERP, pero el producto se especializa en rondas —el tipo de operación de acuda y alarmas—, no en el núcleo de haberes de una empresa de vigilancia fija.</p>
+    <div class="timeline mt">
+      <div class="tl"><div class="n">01 · Consola</div><p>Dashboard y panel ejecutivo. Entrada por menú lateral. Aspecto de producto terminado, data de clientes chilenos.</p></div>
+      <div class="tl"><div class="n">02 · Campo</div><p>Incidencias, mapa en vivo, rondas con puntos QR, tareas por checkpoint, foto, accesos y visitas de supervisión.</p></div>
+      <div class="tl"><div class="n">03 · Personal</div><p>Aptitud para asignar, documentos, calificaciones, dotación, asistencia GPS, PIN y reconocimiento facial.</p></div>
+      <div class="tl"><div class="n">04 · Turnos</div><p>Grilla AM/PM y rol autogenerado (4×4, 5×2, 24/7). Ausencias, cobertura, retén y ofertas de retén.</p></div>
+      <div class="tl"><div class="n">05 · Backoffice</div><p>Clientes, sedes, puestos, consignas, portal. Nómina programado vs real, costos, inventario, kioskos, reglas.</p></div>
+    </div>
+    <div class="card mt">
+      <h3>Dato de la demo, no de un cliente argentino</h3>
+      <p class="mt8">Los ejemplos en pantalla fueron Clínica Alemana, Costanera Center, Falabella y Cencosud. RUT con dígito verificador (24.379.157-K), teléfonos +56, calificación OS10. Eso no es un “también sirve en Argentina”: es el preset con el que el producto se vende hoy.</p>
+    </div>
+    <div class="foot">Meet 18/08/2026 · pantalla compartida de la consola Ronditek</div>
+  </section>
+
+  <section class="slide">
+    <div class="part">Parte 1 · La charla</div>
+    <div class="kicker">La plataforma que mostraron</div>
+    <h2>Qué es Ronditek, según la demo</h2>
+    <p class="sub mt8">Consola web + app/kiosko para el vigilador. Se especializa en rondas: checkpoints QR, evidencia de recorrido, acuda y alarmas. Prometen cubrir de la ronda al costo. En la práctica es un ERP de campo chileno con WFM y una vista de nómina, no un motor de haberes argentino.</p>
+    <div class="modules mt">
+      <div class="card mod">
+        <h3>Operación · especialidad</h3>
+        <p>Rondas QR con tareas por checkpoint y foto. Acuda y alarmas: el valor está en demostrar que se recorrió el puesto. Incidencias, mapa en vivo, accesos, visitas de supervisión y formularios.</p>
+      </div>
+      <div class="card mod">
+        <h3>Personal e identidad</h3>
+        <p>Aptitud para asignar (docs, calificaciones, dotación, acceso móvil). Asistencia GPS. Alertas de vencimiento. PIN y reconocimiento facial. Kioskos.</p>
+      </div>
+      <div class="card mod">
+        <h3>Programación</h3>
+        <p>Grilla de turnos y rol de servicio autogenerado: patrones 4×4, 5×2, día+noche 24/7. Ausencias, “quién falta”, cobertura y retén.</p>
+      </div>
+      <div class="card mod">
+        <h3>Clientes y consignas</h3>
+        <p>Sedes, puestos, consignas con confirmación individual y scoring. Portal del cliente para sedes, incidencias y reportes.</p>
+      </div>
+      <div class="card mod">
+        <h3>Finanzas e inventario</h3>
+        <p>Costos, centros de costo, facturación. Nómina: programado vs real, ordinario, domingo, tardanza, HE 50%. Dotación (uniforme, radio).</p>
+      </div>
+      <div class="card mod">
+        <h3>Reglas y configuración</h3>
+        <p>Tipos de turno, ausencias, elegibilidad, nómina, kioskos, permisos. El vendedor habla de “reglas configurables”. En la demo las reglas son chilenas.</p>
+      </div>
+    </div>
+    <div class="foot">Arquitectura adaptable ≠ producto ya localizado.</div>
+  </section>
+
+  <section class="slide">
+    <div class="part">Parte 1 · La charla</div>
+    <div class="kicker">Señales de origen</div>
+    <h2>Hecho para Chile, con puerta a Colombia</h2>
+    <p class="sub mt8">En la charla (~35 min; 17 grabados) no hubo un solo código CCT, ni ciclo 26→25, ni AFIP, ni API de liquidación. Sí hubo, en cambio, el paquete normativo chileno y el relato de rondas / acuda / alarmas.</p>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>Lo que apareció en pantalla</h3>
+        <p class="mt8">Calificación OS10 (norma chilena de guardias). RUT con DV. Teléfonos +56. Ausencias «feriado legal» y «permiso personal». Concepto «tardanza» en nómina. Liquidación mes calendario 1–31. Extra 50% y domingo trabajado. Sin API: se descarga un archivo y el traspaso es manual.</p>
+      </div>
+      <div class="card">
+        <h3>Lo que dijeron del mercado</h3>
+        <p class="mt8">Producto nacido en Chile. Mencionaron soporte comercial en Colombia. No mostraron un tenant argentino, ni un convenio colectivo, ni un ciclo de haberes distinto al mes 1–31. La localización, si existiera, no estuvo en esta demo.</p>
+      </div>
+    </div>
+    <div class="warn mt">
+      Lectura de la charla: Ronditek se especializa en rondas, acuda y alarmas. Vende evidencia de campo (QR, foto, mapa, kiosko, rostro) y un WFM genérico. La nómina que mostraron es una vista para bajar archivo, no un motor de liquidación.
+    </div>
+    <div class="foot">Sigue el análisis Ronditek vs COSP.</div>
+  </section>
+
+  <!-- ========== PARTE 2: VS ========== -->
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Análisis comparativo</div>
+    <h1 class="mt">Ronditek vs COSP</h1>
+    <p class="sub mt8">Misma fecha. Ahora sí: la plataforma de la charla contra el inventario real de COSP (admin, portales, supervisión, API). Criterio: qué sostiene el negocio de Bacar, no quién tiene más íconos en el menú.</p>
+    <div class="stats s4 mt">
+      <div class="card stat"><div class="v">Rondas / acuda</div><div class="l">Especialidad de Ronditek: rondas, acuda y alarmas. No es el núcleo de Bacar.</div></div>
+      <div class="card stat"><div class="v ok">Convenio + ops</div><div class="l">Donde COSP ya es nativo. Acá se juega liquidación y servicio.</div></div>
+      <div class="card stat"><div class="v">Tercero</div><div class="l">Ronditek: continuidad, precio y data fuera de casa.</div></div>
+      <div class="card stat"><div class="v ok">Propia</div><div class="l">COSP: código, dato y roadmap bajo control de Bacar.</div></div>
+    </div>
+    <div class="okbox mt">
+      No son el mismo producto y no conviene tratarlos como reemplazo. Ronditek se especializa en rondas, acuda y alarmas (ERP de campo chileno). COSP es el sistema operativo de Bacar: CCT 422/05, malla, SLA, RRHH, prefactura y liquidación de vigilancia fija. Supervisión, libro de guardia, consignas, visitas y portal cliente ya están en desarrollo. El hueco real es el rondín con checkpoints QR y el kiosko/PIN/rostro. Eso se construye adentro. No se cede el núcleo por un módulo de acuda.
+    </div>
+    <div class="foot">Inventario COSP: modules.ts, /admin/supervision, /cliente, portal empleado, payrollApi, análisis, KPIs, cotizador.</div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Plataforma propia</div>
+    <h2>Alcance COSP — lo que ya existe</h2>
+    <p class="sub mt8">«En desarrollo» = UI y modelo en el repo, no un casillero vacío. «En control» = en uso operativo, aún sin el ciclo de liquidación cerrado.</p>
+    <div class="mt" style="flex:1;">
+      <table>
+        <thead><tr><th>Módulo</th><th>Estado</th><th>Qué cubre hoy</th></tr></thead>
+        <tbody>
+          <tr><td>Dashboard / KPIs ejecutivos</td><td class="ok">En control</td><td>Resumen, servicios, clientes, personal, liquidación</td></tr>
+          <tr><td>Operaciones</td><td class="ok">En producción</td><td>Presencia, ausencia, vacante, cobertura, origen plan vs ops</td></tr>
+          <tr><td>Planificación + motor V2 + IA</td><td class="ok">En producción</td><td>Malla CCT, publicación, automatizar, ajuste Gemini</td></tr>
+          <tr><td>CRM + prefactura + AFIP</td><td class="ok">En control</td><td>Ficha, servicio, horas diurnas/nocturnas, padrón CUIT</td></tr>
+          <tr><td>Servicios / SLA</td><td class="ok">En producción</td><td>Puestos, bandas, horas vendidas, vigencia</td></tr>
+          <tr><td>Eventos</td><td class="warn-t">En desarrollo</td><td>Cupo, servicios de evento, código EV en malla</td></tr>
+          <tr><td>RRHH / novedades</td><td class="ok">En control</td><td>Legajos, V/L/E/A/AA/PG/SUS/MAVIC</td></tr>
+          <tr><td>Reportes + API liquidación</td><td class="ok">En producción</td><td>Ciclo 26→25; inserto LOL con presupuesto pedido</td></tr>
+          <tr><td>Análisis</td><td class="ok">En control</td><td>Operativo, humano, financiero; SLA vs plan vs real</td></tr>
+          <tr><td>Supervisión</td><td class="warn-t">En desarrollo</td><td>Bandeja, tablero, novedades, visitas, consignas</td></tr>
+          <tr><td>Libro de guardia</td><td class="warn-t">En desarrollo</td><td>Novedad, ronda, incidente; foto y gravedad</td></tr>
+          <tr><td>Portal cliente</td><td class="warn-t">En desarrollo</td><td>Vista del contratante: cobertura y libro</td></tr>
+          <tr><td>Portal empleado</td><td class="ok">En producción</td><td>Turnos, fichada GPS, ausencias, permutas, credencial</td></tr>
+          <tr><td>App nativa guardia</td><td class="warn-t">En desarrollo</td><td>Expo/React Native; paridad con el portal web</td></tr>
+          <tr><td>Asistente virtual</td><td class="ok">En producción</td><td>Globo + Gemini; herramientas de solo lectura</td></tr>
+          <tr><td>Cotizador</td><td class="ok">En producción</td><td>Costo laboral, uniforme, supervisión, estructura</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Comparación · 1 de 3</div>
+    <h2>Núcleo: quién manda el negocio</h2>
+    <p class="sub mt8">Titularidad, mercado y motor de planificación. Acá COSP no compite: ya es el estándar de Bacar.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th style="width:22%">Capacidad</th><th>Ronditek (lo de la charla)</th><th>COSP</th></tr></thead>
+        <tbody>
+          <tr><td>Centro de gravedad</td><td>Rondas, acuda y alarmas. Campo, WFM y evidencia (QR, foto, kiosko)</td><td class="cosp">Operaciones, RRHH y API de liquidación de vigilancia fija. Es el centro de Bacar.</td></tr>
+          <tr><td>Titularidad</td><td>Tercero. Sin garantía de continuidad, roadmap ni residencia del dato</td><td class="cosp">Plataforma propia. Código, datos y evolución bajo control de Bacar</td></tr>
+          <tr><td>Mercado de origen</td><td>Chile (OS10, RUT, +56, feriado legal). Soporte comercial en Colombia</td><td class="cosp">Argentina. CCT 422/05 SUVICO nativo</td></tr>
+          <tr><td>Planificación</td><td>Turnos AM/PM + rol 4×4 / 5×2 / 24×7. Elegibilidad genérica</td><td class="cosp">Malla CCT: M/T/N/D12/N12 + RET/F/FT + motor V2 + ajuste IA</td></tr>
+          <tr><td>Ciclo de horas</td><td>Mes calendario 1–31</td><td class="cosp">Ciclo CCT 26→25. El que usa liquidación y prefactura</td></tr>
+          <tr><td>Topes laborales</td><td>Tope semanal genérico + elegibilidad</td><td class="cosp">Descanso 10 h, bolsa 192, techo 200, 48/56 sem, Art. 12</td></tr>
+          <tr><td>Ausencias</td><td>Permiso personal, feriado legal</td><td class="cosp">PG y el catálogo completo de novedades RRHH</td></tr>
+          <tr><td>Cobertura de huecos</td><td>Cubrir ahora + retén + ofertas de retén</td><td class="cosp">Cascada de costo: sin turno → RET → ESC → ext. 12 h → FT</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="foot">Si el vendedor promete «reglas configurables», el filtro es un puesto 4+2 de Córdoba con ciclo 26–25, no el dashboard.</div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Comparación · 2 de 3</div>
+    <h2>Campo y evidencia: el hueco se construye</h2>
+    <p class="sub mt8">Ronditek llega más cerrado en QR y kiosko. COSP ya tiene el dominio (supervisión, libro, consignas, portal) en desarrollo. No se terceriza el resto del stack por un checkpoint.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th style="width:22%">Capacidad</th><th>Ronditek (lo de la charla)</th><th>COSP</th></tr></thead>
+        <tbody>
+          <tr><td>Rondas QR / checkpoints</td><td>QR, mapa, tareas por checkpoint, foto. Producto maduro</td><td class="cosp">Tipo «Ronda» en libro de guardia (en desarrollo). El QR es roadmap propio, no un cambio de plataforma</td></tr>
+          <tr><td>Libro de guardia</td><td>Bitácora de incidencias en la app</td><td class="cosp">En desarrollo: novedad / ronda / incidente, foto, gravedad. Mismo dominio, sin tercero</td></tr>
+          <tr><td>Presencia / geocerca</td><td>Marcas GPS, kiosko, PIN, rostro</td><td class="cosp">Check-in/out del portal en producción, con geocerca de objetivo</td></tr>
+          <tr><td>Supervisión</td><td>Visitas + checklist + geocerca</td><td class="cosp">En desarrollo: bandeja, tablero, novedades, visitas y consignas</td></tr>
+          <tr><td>Visitas de supervisión</td><td>Checklist + geocerca + evidencia</td><td class="cosp">En desarrollo: checklist (puesto, uniforme, libro, consignas), geo y foto</td></tr>
+          <tr><td>Consignas de puesto</td><td>Confirmación individual + scoring</td><td class="cosp">En desarrollo: alta, lectura y archivo en Supervisión</td></tr>
+          <tr><td>Portal cliente</td><td>Sedes, incidencias y reportes</td><td class="cosp">En desarrollo: /cliente alineado a turnos, cobertura y libro</td></tr>
+          <tr><td>Identidad / kiosko</td><td>PIN y rostros de guardias</td><td class="cosp">Credencial digital en el portal. La biometría no decide el sistema de haberes</td></tr>
+          <tr><td>App nativa guardia</td><td>Implícita (PIN, rostro, rondas, consignas)</td><td class="cosp">Portal empleado en producción. App nativa en desarrollo sobre el mismo modelo</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Comparación · 3 de 3</div>
+    <h2>Servicio, haberes y análisis</h2>
+    <p class="sub mt8">Donde Bacar cobra, liquida y se defiende ante el cliente, COSP ya tiene el modelo. Ronditek mostró archivo y traspaso manual.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th style="width:22%">Capacidad</th><th>Ronditek (lo de la charla)</th><th>COSP</th></tr></thead>
+        <tbody>
+          <tr><td>Nómina</td><td>Ordinario, domingo, tardanza, HE 50%. Sin API: archivo y traspaso manual</td><td class="cosp">Horas plan/real, recargos CCT, API de liquidación. Inserto LOL con presupuesto pedido</td></tr>
+          <tr><td>CRM / contrato</td><td>Clientes, sedes, puestos, portal</td><td class="cosp">Clientes + objetivos + SLA + Prefactura + consulta AFIP por CUIT</td></tr>
+          <tr><td>Servicios / SLA</td><td>Puestos y coberturas. No hay diseño de servicio</td><td class="cosp">Módulo Servicios: puestos, bandas, horas vendidas, esquema 8/12</td></tr>
+          <tr><td>Eventos</td><td>No formó parte de la demo</td><td class="cosp">En desarrollo: cupo, servicios de evento, código EV en malla</td></tr>
+          <tr><td>Asistente virtual</td><td>No formó parte de la demo</td><td class="cosp">En producción. Solo lectura sobre turnos, horas, plantel y SLA</td></tr>
+          <tr><td>Análisis</td><td>Dashboard + panel ejecutivo</td><td class="cosp">Dashboard + KPIs + análisis operativo, financiero y humano</td></tr>
+          <tr><td>Inventario / dotación</td><td>Sí (uniforme, radio, etc.)</td><td class="cosp">No es un módulo. No justifica ceder operaciones ni haberes</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="okbox mt">
+      Síntesis de las tres tablas: Ronditek gana un casillero de evidencia QR. COSP gana titularidad, convenio, ciclo, cobertura, SLA, prefactura, AFIP, API de liquidación y análisis. El casillero de campo ya está abierto en COSP; falta el checkpoint QR, no el módulo.
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Normativa</div>
+    <h2>Adaptabilidad a Argentina / SUVICO</h2>
+    <p class="sub mt8">Tres capas distintas. Una plataforma puede ser excelente en campo y inviable en haberes. Para Bacar pesan la 2 y la 3.</p>
+    <div class="mt" style="display:grid; gap:12px;">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3>Ley / registro provincial (habilitación, vigilador, bitácora)</h3>
+          <div><span class="pill warn">Ronditek media–alta</span> <span class="pill warn">COSP media–alta</span></div>
+        </div>
+        <p class="mt8">Ronditek: docs y calificaciones configurables; el preset es OS10, no ReNaSEP ni registro provincial. COSP: legajo y docs en RRHH. Libro, visitas y consignas ya están en Supervisión (en desarrollo). El QR de checkpoints se suma; no se parte de cero.</p>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3>CCT 422/05 SUVICO (códigos, 6+2, RET, ciclo 26–25)</h3>
+          <div><span class="pill bad">Ronditek baja de fábrica</span> <span class="pill ok">COSP alta</span></div>
+        </div>
+        <p class="mt8">Ronditek tiene motor de reglas, pero la demo liquida mes 1–31, usa feriado legal, tardanza y HE 50%, y no muestra códigos CCT. COSP ya es el modelo de datos: M/T/N/D12/N12, F/FT/RET, 192/200, descanso 10 h, MAVIC, Art. 12.</p>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3>LCT + recargos (nocturno 21–06, sáb/dom/feriado 100%)</h3>
+          <div><span class="pill warn">Ronditek media</span> <span class="pill ok">COSP alta</span></div>
+        </div>
+        <p class="mt8">En Ronditek las reglas de nómina se configuran; los conceptos de la demo son chilenos, no la matriz SUVICO. COSP ya lo tiene en suvicoPolicy: nocturno, suplementarias 50% sobre 192, feriado 100%.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Normativa · cierre</div>
+    <h2>Cliente, haberes y veredicto de adaptación</h2>
+    <div class="mt" style="display:grid; gap:12px;">
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3>Prueba de servicio frente al cliente</h3>
+          <div><span class="pill ok">Ronditek alta (demo)</span> <span class="pill warn">COSP media · en desarrollo</span></div>
+        </div>
+        <p class="mt8">Ronditek llega más cerrado en QR, mapa, consignas, visitas y portal. COSP ya tiene portal, libro, visitas y consignas en código y UI. El hueco es el rondín con checkpoints QR, no la ausencia del módulo. Cerrar ese hueco adentro deja a COSP también alto en prueba de servicio, sin ceder el resto.</p>
+      </div>
+      <div class="card">
+        <div class="row" style="justify-content:space-between; align-items:center;">
+          <h3>Liquidación / AFIP / ciclo de haberes</h3>
+          <div><span class="pill bad">Ronditek baja</span> <span class="pill ok">COSP alta</span></div>
+        </div>
+        <p class="mt8">Ronditek no tiene API: archivo y traspaso manual. No se vio AFIP, SAC ni ciclo 26–25. COSP: hoursMode plan/real, API de liquidación, ciclo CCT, consulta AFIP por CUIT.</p>
+      </div>
+    </div>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>Ronditek → Argentina / SUVICO</h3>
+        <p class="mt8"><span class="pill warn">De fábrica: baja–media</span> <span class="pill info">Con proyecto: media–alta</span></p>
+        <p class="mt8">Localizar ciclo 26–25, códigos RET/FT/D12 y 192/200 es un proyecto de producto, no un switch de país. El menú se parece; las fórmulas no.</p>
+      </div>
+      <div class="card">
+        <h3>COSP → Argentina / SUVICO</h3>
+        <p class="mt8"><span class="pill ok">De fábrica: alta</span> <span class="pill warn">Hueco: QR / kiosko</span></p>
+        <p class="mt8">Jornada 8/12, descanso 10 h, techo 200, bolsa 192, cobertura por costo, MAVIC, ciclo, SLA vs plan vs real, AFIP, prefactura. El campo inspector ya está en el backlog propio.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Economía · plantel 510</div>
+    <h2>Ahorro de no pagar la licencia</h2>
+    <p class="sub mt8">De la charla sale el precio de lista: USD 3 por guardia por mes. 510 × 3 × 12 = USD 18.360 de ahorro cada año, iguales los próximos 5. Sueldos COSP = USD 30.000 una vez (2 SR × 6 meses + implementador × 3 meses), gente que ya está y no se dedica solo a esto.</p>
+    <div class="stats s3 mt">
+      <div class="card stat"><div class="v ok">18.360</div><div class="l">Ahorro anual · 510 × USD 3 × 12</div></div>
+      <div class="card stat"><div class="v ok">91.800</div><div class="l">Ahorro a 5 años (18.360 × 5)</div></div>
+      <div class="card stat"><div class="v ok">206%</div><div class="l">ROI a 5 años · neto USD 61.800</div></div>
+    </div>
+    <div class="row mt" style="flex:1; gap:28px;">
+      <div class="grow">
+        <table>
+          <thead><tr><th>Año</th><th>Ahorro del año</th><th>Acumulado</th><th>Sueldos COSP</th><th>Neto</th><th>ROI</th></tr></thead>
+          <tbody>
+            <tr><td>1</td><td>18.360</td><td>18.360</td><td>30.000</td><td>−11.640</td><td>−39%</td></tr>
+            <tr><td>3 (recupero)</td><td>18.360</td><td>55.080</td><td>30.000</td><td>25.080</td><td>84%</td></tr>
+            <tr><td>5 (horizonte)</td><td>18.360</td><td>91.800</td><td>30.000</td><td>61.800</td><td>206%</td></tr>
+          </tbody>
+        </table>
+        <div class="legend mt">
+          <span><i class="dot" style="background:#34d399"></i>Ahorro acumulado</span>
+          <span><i class="dot" style="background:#60a5fa"></i>Sueldos COSP (una vez)</span>
+          <span><i class="dot" style="background:#818cf8"></i>Ahorro neto</span>
+        </div>
+      </div>
+      <div class="grow">
+        <div class="bars">
+          <div class="col">
+            <div class="bar-wrap">
+              <div class="bar a" style="height:48px"></div>
+              <div class="bar b" style="height:78px"></div>
+              <div class="bar c" style="height:30px"></div>
+            </div>
+            <div class="bar-lab">Año 1</div>
+          </div>
+          <div class="col">
+            <div class="bar-wrap">
+              <div class="bar a" style="height:144px"></div>
+              <div class="bar b" style="height:78px"></div>
+              <div class="bar c" style="height:66px"></div>
+            </div>
+            <div class="bar-lab">Año 3</div>
+          </div>
+          <div class="col">
+            <div class="bar-wrap">
+              <div class="bar a" style="height:240px"></div>
+              <div class="bar b" style="height:78px"></div>
+              <div class="bar c" style="height:162px"></div>
+            </div>
+            <div class="bar-lab">Año 5</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Economía · crecimiento</div>
+    <h2>Si Bacar crece, Ronditek se encarece</h2>
+    <p class="sub mt8">La base de decisión es 18.360 fijos. Si el plantel crece, cada año se evitan más USD 3. COSP no cobra por cabeza.</p>
+    <div class="s2 stats mt" style="flex:1;">
+      <div class="card">
+        <table>
+          <thead><tr><th>Crecimiento anual</th><th>Guardias año 5</th><th>Ahorro 5 años</th><th>Neto</th><th>ROI</th></tr></thead>
+          <tbody>
+            <tr><td class="ok">0% (base)</td><td>510</td><td>91.800</td><td>61.800</td><td>206%</td></tr>
+            <tr><td>5%</td><td>620</td><td>101.448</td><td>71.448</td><td>238%</td></tr>
+            <tr><td>10%</td><td>747</td><td>112.104</td><td>82.104</td><td>274%</td></tr>
+            <tr><td>15%</td><td>892</td><td>123.804</td><td>93.804</td><td>313%</td></tr>
+          </tbody>
+        </table>
+        <p class="mt8" style="font-size:14px;color:#94a3b8;">Localización (USD 10.000) y ajustes del proveedor (USD 6.000/año) no entran en los 18.360. A 5 años serían USD 40.000 extra. Si los cobran, el ahorro de COSP es mayor.</p>
+      </div>
+      <div class="card">
+        <h3>ROI a 5 años según crecimiento de plantel</h3>
+        <div class="bars" style="height:260px;margin-top:20px;">
+          <div class="col"><div class="bar-wrap"><div class="bar a" style="height:158px"></div></div><div class="bar-lab">0% · 206%</div></div>
+          <div class="col"><div class="bar-wrap"><div class="bar a" style="height:182px"></div></div><div class="bar-lab">5% · 238%</div></div>
+          <div class="col"><div class="bar-wrap"><div class="bar a" style="height:210px"></div></div><div class="bar-lab">10% · 274%</div></div>
+          <div class="col"><div class="bar-wrap"><div class="bar a" style="height:240px"></div></div><div class="bar-lab">15% · 313%</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide part2">
+    <div class="part">Parte 2 · El versus</div>
+    <div class="kicker">Decisión</div>
+    <h2>Lectura para Bacar</h2>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>Qué se saca de la charla</h3>
+        <p class="mt8">Ronditek es un producto serio de rondas, acuda y alarmas: QR, kiosko, biometría, visitas, consignas, portal. Está hecho para Chile. La nómina que mostraron no es API. Colombia es soporte comercial, no localización argentina.</p>
+        <p class="mt8">De esa demo se mira el rondín QR y el kiosko. No se importa el motor de haberes. No se abandona supervisión, libro de guardia ni portal cliente: eso ya está en el backlog de COSP.</p>
+      </div>
+      <div class="card">
+        <h3>Qué se decide sobre COSP</h3>
+        <p class="mt8">No reemplazar COSP. Dato, convenio y roadmap quedan en casa. Si el tercero cierra, cambia precio o deja el país, no hay continuidad.</p>
+        <p class="mt8">El año 1 el impacto de sueldos (30.000) pesa más que un año de licencia (18.360). El recupero se ve al año 3 (84%) y se consolida a 5 años (206%, neto 61.800). Si el equipo no está 100% en este gap, el ROI real es mayor.</p>
+      </div>
+    </div>
+    <div class="okbox mt">
+      Filtro si vuelven a la mesa: ciclo 26–25, códigos CCT y un puesto 4+2 de Córdoba, sin desarrollo a medida. Si eso no sale, Ronditek es un módulo de campo. COSP sigue siendo el sistema.
+    </div>
+    <div class="foot">Evaluación de producto, no dictamen legal. Regenerar: node tools/ronditek-briefing/export-pdf.mjs</div>
+  </section>
+
+</body>
+</html>

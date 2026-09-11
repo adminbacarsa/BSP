@@ -25,7 +25,6 @@ import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQu
 import { db, getDocsOnce, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
-import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
@@ -162,7 +161,7 @@ import {
 import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
-import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery, buildPlanningMonthTuraQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 import {
     adjacentPlanningMonths,
@@ -170,7 +169,13 @@ import {
     planningMonthCacheKey,
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
+import { planningMonthAccess, classifyYearMonth } from '@/lib/dataRetention';
 import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
+import {
+    buildPlanningEventosCellsByDay,
+    formatPlanningEventosTooltip,
+} from '@/lib/planificacion/planningEventosExtras';
+import { formatShiftClockRange, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -181,7 +186,10 @@ import {
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
-import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
+import { mergeEncargadoIntoAssignments, isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { positionIncludeInSlaTotals } from '@/lib/servicios/auxiliaryPositionPolicy';
+import { calculatePositionMonthHours } from '@/lib/servicios/slaHoursCalculator';
 import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
 import {
     countPositionClosedUnitsFromShifts,
@@ -288,6 +296,7 @@ import {
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import {
     shiftCoverageExtensionExtraHours,
     calcPlanningBillableShiftHours,
@@ -553,8 +562,25 @@ function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefi
     return true;
 }
 
+/**
+ * Cobertura SIN_TURNO (y similares) creada en Operaciones: se muestra en la grilla
+ * del objetivo con el código real (T/M/…), pero NO suma a Hs. Plan.
+ */
+function isOpsCoverageShiftForObjective(data: any, objectiveId: string | undefined | null): boolean {
+    if (!data || !objectiveId) return false;
+    if (String(data.objectiveId || '') !== String(objectiveId)) return false;
+    const o = String(data?.origin || '').toUpperCase();
+    if (o !== 'OPERATIONS_COVERAGE') return false;
+    if (data.isFranco === true && data.isFrancoTrabajado !== true) return false;
+    return true;
+}
+
 const OTHER_OBJECTIVE_CELL_STYLE =
     'bg-slate-700 text-slate-200 border-slate-600 ring-2 ring-slate-500 ring-offset-2 dark:ring-offset-slate-900 font-bold opacity-90';
+
+/** Estilo visual: turno asignado por Operaciones (cobertura), distinto del planificado. */
+const OPS_COVERAGE_CELL_RING =
+    'ring-2 ring-orange-400 ring-offset-1 dark:ring-offset-slate-900';
 
 function shiftPlanningCodeUpper(shift: any): string {
     return String(shift?.code || shift?.type || '').toUpperCase();
@@ -623,8 +649,9 @@ function resolveCellShiftAtObjective(
         if (obj != null && obj !== '' && String(obj) !== String(selectedObjective)) return null;
         return activeShift;
     }
-    if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return null;
-    return activeShift;
+    if (turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return activeShift;
+    if (isOpsCoverageShiftForObjective(activeShift, selectedObjective)) return activeShift;
+    return null;
 }
 
 /** Turno(s) visibles en celda según objetivo activo o grupo unificado. */
@@ -660,8 +687,10 @@ function resolveCellShiftDisplay(
             }
             return { s: rawS ?? null, p: rawP };
         }
-        if (objId && selectedGrupo.objectiveIds.includes(objId) && !isOperationalOriginShift(active)) {
-            return { s: rawS, p: null };
+        if (objId && selectedGrupo.objectiveIds.includes(objId)) {
+            if (!isOperationalOriginShift(active) || isOpsCoverageShiftForObjective(active, objId)) {
+                return { s: rawS, p: null };
+            }
         }
         return { s: null, p: null };
     }
@@ -1000,6 +1029,24 @@ export default function PlanificacionPage() {
     // 1. ESTADOS (NIVEL 0)
     // ============================================================================
     const [currentDate, setCurrentDate] = useState(new Date());
+    const goToPlanningMonth = useCallback((year: number, monthIndex0: number) => {
+        const month = monthIndex0 + 1;
+        const access = planningMonthAccess(year, month);
+        if (!access.allowed) {
+            toast.error(access.message);
+            return false;
+        }
+        if (access.tier === 'warm' && access.message) {
+            toast.message(access.message);
+        }
+        setCurrentDate(new Date(year, monthIndex0, 1));
+        return true;
+    }, []);
+    const planningMonthTier = useMemo(() => {
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth() + 1;
+        return classifyYearMonth(y, m);
+    }, [currentDate]);
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
@@ -1117,10 +1164,10 @@ export default function PlanificacionPage() {
         const y = Number(router.query.year);
         const m = Number(router.query.month);
         if (Number.isFinite(y) && y > 2000 && Number.isFinite(m) && m >= 1 && m <= 12) {
-            setCurrentDate(new Date(y, m - 1, 1));
+            goToPlanningMonth(y, m - 1);
         }
         void router.replace('/admin/planificacion/', undefined, { shallow: true });
-    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month]);
+    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, goToPlanningMonth]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');
@@ -2402,6 +2449,42 @@ export default function PlanificacionPage() {
         });
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
 
+    const planningAuxiliarySummary = useMemo(() => {
+        if (!Array.isArray(activePlanningSlaRow?.positions) || activePlanningSlaRow.positions.length === 0) return null;
+        const positions = Array.isArray(activePlanningSlaRow.positions) ? activePlanningSlaRow.positions : [];
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth();
+        const start = toYyyyMmDd(activePlanningSlaRow.startDate) || '';
+        const end = toYyyyMmDd(activePlanningSlaRow.endDate) || '';
+        const ex = activePlanningSlaRow.excludedDates as string[] | undefined;
+        let encContract = 0;
+        let encInSla = 0;
+        const hasEnc = positions.some((p: any) => isEncargadoPosition(p));
+        const hasEvt = positions.some((p: any) => isEventosPosition(p));
+        for (const pos of positions) {
+            if (!isEncargadoPosition(pos)) continue;
+            const h = calculatePositionMonthHours(pos, start, end, ex, y, m);
+            encContract += h;
+            if (positionIncludeInSlaTotals(pos)) encInSla += h;
+        }
+        const encPlanned = Math.round((planningMonthHoursBreakdown.byCodeGross['ENC'] || 0) * 10) / 10;
+        const evtFromGrid = Math.round(((planningMonthHoursBreakdown.byCodeGross['EVT'] || 0) + (planningMonthHoursBreakdown.byCodeGross['EV'] || 0)) * 10) / 10;
+        const monthPrefixEvt = `${y}-${String(m + 1).padStart(2, '0')}`;
+        const turaEventosHrs = Object.values(turaMap)
+            .filter((t: any) => t.objectiveId === selectedObjective && String(t.fecha || '').startsWith(monthPrefixEvt))
+            .filter((t: any) => isEventosPosition({ name: t.positionName, coverageType: 'eventos' }))
+            .reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
+        const evtPlanned = Math.round((evtFromGrid + turaEventosHrs) * 10) / 10;
+        return {
+            hasEnc,
+            hasEvt,
+            encContract: Math.round(encContract * 10) / 10,
+            encInSla: Math.round(encInSla * 10) / 10,
+            encPlanned,
+            evtPlanned,
+        };
+    }, [activePlanningSlaRow, currentDate, planningMonthHoursBreakdown, turaMap, selectedObjective]);
+
     /** Facturable por sede (grupo unificado): suma turnos con objectiveId de cada objetivo — debe cerrar con grupoTotalVendidas. */
     const grupoObjectiveBillableHours = useMemo(() => {
         if (!selectedGrupo || !grupoUnifiedMode) return null;
@@ -3270,6 +3353,21 @@ export default function PlanificacionPage() {
 
     /** Slots cerrados y fechas pasadas bloqueadas solo con cronograma publicado (salvo modo corrección). */
     const enforcePlanningClosureRules = isCronogramaPublicado && !correctionMode;
+
+    /** Multiselección / barra masiva: borrador siempre; publicado solo en modo corrección. */
+    const allowPlanningMultiSelect = !isCronogramaPublicado || correctionMode;
+
+    useEffect(() => {
+        if (allowPlanningMultiSelect) return;
+        setSelection((prev) => {
+            if (!prev.start || !prev.end) return prev;
+            if (prev.start.r === prev.end.r && prev.start.c === prev.end.c) return prev;
+            return { start: null, end: null };
+        });
+        setIsDragging(false);
+        setColumnSelectMode(false);
+        setColumnSelectSource(null);
+    }, [allowPlanningMultiSelect]);
 
     const isPlanningDateLocked = useCallback(
         (dateStr: string) => (enforcePlanningClosureRules ? isDateLocked(dateStr) : false),
@@ -4212,7 +4310,7 @@ export default function PlanificacionPage() {
         }
         setSelectedClient(clientId);
         setSelectedObjective(objectiveId);
-        setCurrentDate(new Date(year, month - 1, 1));
+        goToPlanningMonth(year, month - 1);
         setSearchTerm('');
         setShowGuardiaSearch(false);
         setBandFilter(null);
@@ -4222,7 +4320,7 @@ export default function PlanificacionPage() {
         setComparingSnapshot(null);
         setOpenDrop(null);
         setAutoGeneratedReady(false);
-    }, []);
+    }, [goToPlanningMonth]);
     useEffect(() => { if (!openDrop) return; const h = () => setOpenDrop(null); document.addEventListener('click', h); return () => document.removeEventListener('click', h); }, [openDrop]);
 
     // ============================================================================
@@ -4829,7 +4927,7 @@ export default function PlanificacionPage() {
             setShiftsMap(ingested.shiftsMap);
             setCellTurnosMap(ingested.cellTurnosMap);
             setAllShiftIds(ingested.allShiftIds);
-            setTuraMap(ingested.turaMap);
+            setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
             setSecondBlockMap(ingested.secondBlockMap);
             setRfzVacantes(ingested.rfzVacantes);
             setRfzTodos(ingested.rfzTodos);
@@ -4843,6 +4941,7 @@ export default function PlanificacionPage() {
             setShiftsMapLoaded(false);
             setRfzVacantes([]);
             setRfzTodos([]);
+            setTuraMap({});
         }
 
         const mergeRfzLists = (prev: any[], extra: any[]) => {
@@ -4892,6 +4991,7 @@ export default function PlanificacionPage() {
         });
 
         let unsubRfz = () => {};
+        let unsubTura = () => {};
         try {
             const rfzQ = buildPlanningMonthRfzQuery({
                 empresaId,
@@ -4916,9 +5016,33 @@ export default function PlanificacionPage() {
             /* índice RFZ opcional en emulador */
         }
 
+        try {
+            const turaQ = buildPlanningMonthTuraQuery({
+                empresaId,
+                scopeEmpresa,
+                year: viewYear,
+                month: viewMonth,
+            });
+            unsubTura = onSnapshot(turaQ, (snap) => {
+                const ingested = ingestPlanningTurnosSnapshot(
+                    snap.docs,
+                    empresaId,
+                    migracionCompleta,
+                    getDateKey,
+                    { turaOnly: true },
+                );
+                setTuraMap((prev) => ({ ...prev, ...ingested.turaMap }));
+            }, () => {
+                /* índice TURA+fecha opcional en emulador */
+            });
+        } catch {
+            /* índice TURA opcional */
+        }
+
         return () => {
             unsubS();
             unsubRfz();
+            unsubTura();
             if (prefetchTimer) window.clearTimeout(prefetchTimer);
         };
     }, [empresaId, migracionCompleta, scopeEmpresa, currentDate.getFullYear(), currentDate.getMonth()]);
@@ -5821,6 +5945,102 @@ export default function PlanificacionPage() {
                 }
             };
 
+            const eventoSolicitudCache = new Map<string, Array<{ id: string; tipo?: string; status?: string }>>();
+
+            const readEventoSolicitudes = async (
+                eventoId: string,
+                servicioId: string,
+                empleadoId: string,
+            ) => {
+                const cacheKey = `${eventoId}__${servicioId}__${empleadoId}`;
+                if (eventoSolicitudCache.has(cacheKey)) return eventoSolicitudCache.get(cacheKey)!;
+                const snap = await getDocs(query(
+                    collection(db, 'solicitudes_evento'),
+                    where('empresaId', '==', empresaId),
+                    where('eventoId', '==', eventoId),
+                    where('servicioId', '==', servicioId),
+                    where('empleadoId', '==', empleadoId),
+                ));
+                const rows = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) }));
+                eventoSolicitudCache.set(cacheKey, rows);
+                return rows;
+            };
+
+            const rollbackEventoSolicitud = async (
+                eventoId: string,
+                servicioId: string,
+                empleadoId: string,
+            ) => {
+                if (!eventoId || !servicioId || !empleadoId) return;
+                const rows = await readEventoSolicitudes(eventoId, servicioId, empleadoId);
+                if (rows.length === 0) return;
+                for (const row of rows) {
+                    if (row.tipo === 'admin_asigna') {
+                        batch.delete(doc(db, 'solicitudes_evento', row.id));
+                    } else {
+                        batch.update(doc(db, 'solicitudes_evento', row.id), {
+                            status: 'convocado',
+                            respondidoAt: serverTimestamp(),
+                            respondidoPor: auth.currentUser?.uid || '',
+                        });
+                    }
+                    bumpBatchOp();
+                    await flushBatchWhenFull();
+                }
+                eventoSolicitudCache.delete(`${eventoId}__${servicioId}__${empleadoId}`);
+            };
+
+            const approveEventoSolicitud = async (
+                change: any,
+                empId: string,
+                empName: string,
+                dateStr: string,
+            ) => {
+                const eventoId = String(change?.eventoId || '');
+                const servicioId = String(change?.servicioId || '');
+                if (!eventoId || !servicioId) return;
+                const rows = await readEventoSolicitudes(eventoId, servicioId, empId);
+                if (rows.length > 0) {
+                    const first = rows[0];
+                    batch.update(doc(db, 'solicitudes_evento', first.id), {
+                        status: 'aprobada',
+                        tipo: first.tipo || 'admin_asigna',
+                        eventoNombre: change.eventoNombre || null,
+                        servicioNombre: change.servicioNombre || null,
+                        servicioFecha: dateStr,
+                        respondidoAt: serverTimestamp(),
+                        respondidoPor: auth.currentUser?.uid || '',
+                    });
+                    bumpBatchOp();
+                    await flushBatchWhenFull();
+                    return;
+                }
+                const newRef = doc(collection(db, 'solicitudes_evento'));
+                batch.set(newRef, stampEmpresaId({
+                    empresaId,
+                    eventoId,
+                    eventoNombre: change.eventoNombre || '',
+                    servicioId,
+                    servicioNombre: change.servicioNombre || '',
+                    servicioFecha: dateStr,
+                    empleadoId: empId,
+                    empleadoNombre: empName,
+                    status: 'aprobada',
+                    tipo: 'admin_asigna',
+                    convocadoPor: auth.currentUser?.uid || '',
+                    respondidoPor: auth.currentUser?.uid || '',
+                    respondidoAt: serverTimestamp(),
+                    creadoAt: serverTimestamp(),
+                }, empresaId));
+                bumpBatchOp();
+                await flushBatchWhenFull();
+                eventoSolicitudCache.set(`${eventoId}__${servicioId}__${empId}`, [{
+                    id: newRef.id,
+                    tipo: 'admin_asigna',
+                    status: 'aprobada',
+                }]);
+            };
+
             const registerPlanificacionCorreccion = async (
                 empId: string,
                 empName: string,
@@ -5876,6 +6096,12 @@ export default function PlanificacionPage() {
                     const empId = parts[0];
                     const dateStr = parts[1]; // YYYY-MM-DD
                     const existing = jobShiftsMap[key];
+                    const existingCodeUpper = String(existing?.code || existing?.type || '').toUpperCase();
+                    const nextCodeUpper = String(change?.code || change?.type || '').toUpperCase();
+                    const existingEventoId = String(existing?.eventoId || '');
+                    const existingServicioId = String(existing?.servicioId || '');
+                    const nextEventoId = String(change?.eventoId || '');
+                    const nextServicioId = String(change?.servicioId || '');
                     const empObj = employeesById[empId];
                     const empName = empObj ? empObj.name : 'Desconocido';
                     let actionType = 'ASIGNACION_MASIVA';
@@ -5898,7 +6124,48 @@ export default function PlanificacionPage() {
                     if (change.isDeleted) {
                         actionType = 'ELIMINACION_MASIVA';
                         actionDetail = `Borró turno de ${empName} el ${dateStr}`;
+                        if (existingCodeUpper === 'EV' && existingEventoId && existingServicioId) {
+                            await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
+                        }
                         deleteAllExisting();
+
+                        // Crear vacante en Firestore cuando una corrección quita un guardia de un turno publicado
+                        if (correctionMode) {
+                            const nonCoverageCodes = new Set(['F','FF','FP','FT','V','L','E','A','AA','PG','EV','RET']);
+                            const todayStr = new Date().toISOString().slice(0, 10);
+                            const isFutureOrToday = dateStr >= todayStr;
+                            if (!nonCoverageCodes.has(existingCodeUpper) && isFutureOrToday && existing?.startTime && existing?.endTime) {
+                                const nowH = new Date().getHours();
+                                const isTomorrow = dateStr > todayStr;
+                                const actionTarget = (!isTomorrow || nowH >= 19) ? 'OPERACIONES' : 'PLANIFICACION';
+                                const vacancyDoc: Record<string, unknown> = {
+                                    employeeId: 'VACANTE',
+                                    employeeName: 'VACANTE',
+                                    clientId: existing.clientId || selectedClient,
+                                    objectiveId: existing.objectiveId || resolveObjectiveForEmp(empId),
+                                    objectiveName: existing.objectiveName || '',
+                                    positionName: existing.positionName || 'General',
+                                    code: existingCodeUpper,
+                                    type: existing.type || existingCodeUpper,
+                                    startTime: existing.startTime,
+                                    endTime: existing.endTime,
+                                    scheduleDate: dateStr,
+                                    origin: 'VACANTE_CORRECCION',
+                                    vacancyOrigin: 'VACANTE_CORRECCION',
+                                    causedByEmployeeId: empId,
+                                    causedByEmployeeName: empName,
+                                    actionTarget,
+                                    isUnassigned: true,
+                                    draft: false,
+                                    createdAt: serverTimestamp(),
+                                    actorName: realActorName,
+                                };
+                                batch.set(doc(collection(db, 'turnos')), stampEmpresaId(vacancyDoc, empresaId));
+                                bumpBatchOp();
+                                await flushBatchWhenFull();
+                            }
+                        }
+
                         await registerPlanificacionCorreccion(
                             empId,
                             empName,
@@ -5908,6 +6175,18 @@ export default function PlanificacionPage() {
                             '(eliminado)',
                         );
                     } else {
+                        if (
+                            existingCodeUpper === 'EV'
+                            && existingEventoId
+                            && existingServicioId
+                            && (
+                                nextCodeUpper !== 'EV'
+                                || existingEventoId !== nextEventoId
+                                || existingServicioId !== nextServicioId
+                            )
+                        ) {
+                            await rollbackEventoSolicitud(existingEventoId, existingServicioId, empId);
+                        }
                         deleteAllExisting();
                         await flushBatchWhenFull();
 
@@ -5952,6 +6231,7 @@ export default function PlanificacionPage() {
 
                         const turnoPayload: Record<string, unknown> = {
                             employeeId: empId,
+                            employeeName: empName,
                             clientId: selectedClient,
                             objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
                             code: change.isFrancoCompensatorio ? 'FF' : change.code,
@@ -6046,6 +6326,9 @@ export default function PlanificacionPage() {
                         batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
                         bumpBatchOp();
                         await flushBatchWhenFull();
+                        if (nextCodeUpper === 'EV' && nextEventoId && nextServicioId) {
+                            await approveEventoSolicitud(change, empId, empName, dateStr);
+                        }
 
                         if (correctionMode) {
                             const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
@@ -6674,6 +6957,10 @@ export default function PlanificacionPage() {
     
     // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
     const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
@@ -6990,6 +7277,10 @@ export default function PlanificacionPage() {
 
     /** Completa la selección forzando un puesto SLA (elige banda por emp / primer turno del puesto). */
     const applyBulkPositionFill = (posName: string) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
 
@@ -7424,6 +7715,10 @@ export default function PlanificacionPage() {
         intent: 'SURPLUS' | 'TRAINING',
         opts?: { onlyEmpId?: string; positionName?: string },
     ) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
@@ -7716,6 +8011,7 @@ export default function PlanificacionPage() {
 
     /** Copia la selección actual al portapapeles. Devuelve bounds o null. */
     const copySelectionToClipboard = useCallback((asCut: boolean) => {
+        if (!allowPlanningMultiSelect) return null;
         if (!selection.start) return null;
         const minR = Math.min(selection.start.r, selection.end?.r ?? selection.start.r);
         const maxR = Math.max(selection.start.r, selection.end?.r ?? selection.start.r);
@@ -7737,9 +8033,13 @@ export default function PlanificacionPage() {
         setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
         setClipboardIsCut(asCut);
         return { minR, maxR, minC, maxC, cells };
-    }, [selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para pegar en masa.');
+            return;
+        }
         if (!clipboard) return;
         const prev = pendingChangesRef.current;
         const newChanges = { ...prev };
@@ -7773,9 +8073,13 @@ export default function PlanificacionPage() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         const bounds = copySelectionToClipboard(true);
         if (!bounds) return;
@@ -7799,7 +8103,7 @@ export default function PlanificacionPage() {
         }
         commitPendingChanges(newChanges);
         toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
@@ -7811,6 +8115,11 @@ export default function PlanificacionPage() {
             if (mod && key === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 undoLastPending();
+                return;
+            }
+            if (!allowPlanningMultiSelect && mod && (key === 'c' || key === 'x' || key === 'v')) {
+                e.preventDefault();
+                toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
                 return;
             }
             if (mod && key === 'c' && selection.start) {
@@ -7838,7 +8147,7 @@ export default function PlanificacionPage() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
+    }, [allowPlanningMultiSelect, selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
 
     const handleMouseUp = () => {
         setIsDragging(false);
@@ -7865,6 +8174,14 @@ export default function PlanificacionPage() {
                 if (
                     effectiveShift &&
                     selectedObjective &&
+                    isOpsCoverageShiftForObjective(effectiveShift, selectedObjective)
+                ) {
+                    toast.message('Turno asignado (Operaciones) · Cobertura — solo lectura en este cronograma.');
+                    return;
+                }
+                if (
+                    effectiveShift &&
+                    selectedObjective &&
                     !(selectedGrupo && grupoUnifiedMode) &&
                     isCrossObjectivePlanningReadOnly(effectiveShift, selectedObjective)
                 ) {
@@ -7887,12 +8204,19 @@ export default function PlanificacionPage() {
         } 
     };
     const handleMouseDown = (r: number, c: number) => { if (!selectedObjective || comparingSnapshot || isServiceLocked) return; setIsDragging(true); setSelection({ start: {r, c}, end: {r, c} }); };
-    const handleMouseEnter = (r: number, c: number) => { if (!isDragging) return; setSelection(prev => ({ ...prev, end: {r, c} })); };
+    const handleMouseEnter = (r: number, c: number) => {
+        if (!isDragging || !allowPlanningMultiSelect) return;
+        setSelection(prev => ({ ...prev, end: {r, c} }));
+    };
     const isCellSelected = (r: number, c: number) => selection.start && r >= Math.min(selection.start.r, selection.end!.r) && r <= Math.max(selection.start.r, selection.end!.r) && c >= Math.min(selection.start.c, selection.end!.c) && c <= Math.max(selection.start.c, selection.end!.c);
 
     // ── COLUMN SELECT (long press on day header) ──────────────────────────────
     const handleDayHeaderMouseDown = (dayIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         // Segundo clic en la misma fuente: cancela
         if (columnSelectMode && columnSelectSource === dayIndex) {
             setColumnSelectMode(false); setColumnSelectSource(null); setIsDragging(false);
@@ -7905,7 +8229,7 @@ export default function PlanificacionPage() {
         setSelection({ start: { r: 0, c: dayIndex }, end: { r: displayedEmployees.length - 1, c: dayIndex } });
     };
     const handleDayHeaderMouseEnter = (dayIndex: number) => {
-        if (!columnSelectMode || !isDragging) return;
+        if (!allowPlanningMultiSelect || !columnSelectMode || !isDragging) return;
         setSelection(prev => prev.start ? ({ start: prev.start, end: { r: displayedEmployees.length - 1, c: dayIndex } }) : prev);
     };
     const handleDayHeaderMouseUpOrLeave = () => { clearTimeout(longPressTimer.current); };
@@ -7913,6 +8237,10 @@ export default function PlanificacionPage() {
     // Seleccionar fila completa (click en nombre de empleado)
     const handleRowHeaderClick = (rowIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked || columnSelectMode) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         setSelection({ start: { r: rowIndex, c: 0 }, end: { r: rowIndex, c: daysInMonth.length - 1 } });
     };
 
@@ -9558,6 +9886,12 @@ export default function PlanificacionPage() {
         return filtered;
     }, [positionStructure, daysInMonth]);
 
+    const planningEventosCellsByDay = useMemo(() => {
+        if (!selectedObjective) return {};
+        const monthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        return buildPlanningEventosCellsByDay(turaMap, shiftsMap, selectedObjective, monthPrefix);
+    }, [turaMap, shiftsMap, selectedObjective, currentDate]);
+
     const hasSlaExcludedDatesInMonth = Object.keys(excludedPositionsByDate).length > 0;
 
     const planningCompareDiff = useMemo(() => {
@@ -9942,7 +10276,7 @@ export default function PlanificacionPage() {
                                         });
                                         let statusIndicator = null;
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (_planPublished && (s.status === 'ABSENT' || s.isAbsent)) statusIndicator = 'bg-rose-500'; }
+                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
@@ -9976,6 +10310,18 @@ export default function PlanificacionPage() {
                                         }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
                                         const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+                                        const isOpsCoverageCell = !!(
+                                            selectedObjective
+                                            && activeShift
+                                            && isOpsCoverageShiftForObjective(activeShift, selectedObjective)
+                                        );
+                                        if (isOpsCoverageCell) {
+                                            const opsCode = String(activeShift.code || 'T').toUpperCase();
+                                            content = opsCode;
+                                            style = `${getDefaultStyle(opsCode)} ${OPS_COVERAGE_CELL_RING}`;
+                                            isFT = false;
+                                            isFF = false;
+                                        }
                                         // TURA: turno agregado por cliente → fondo rojo en celda padre
                                         if (activeShift?.id && turaMap[activeShift.id]) { style = 'bg-red-500 text-white border-red-600 font-black'; }
                                         const hasRfzOverlay = !!(rfzOnCell && (s || (p && !p.isDeleted)) && !absence);
@@ -10055,9 +10401,9 @@ export default function PlanificacionPage() {
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _opsHint = isOpsCoverageCell ? `\n🟠 Turno asignado (Operaciones) · Cobertura` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_opsHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _opsHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isOpsCoverageCell ? 'Turno asignado (Operaciones) · Cobertura — solo lectura' : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{isOpsCoverageCell && content && (<div className="absolute -bottom-0.5 right-0 text-[6px] font-black bg-orange-500 text-white px-0.5 rounded" title="Turno asignado (Operaciones) · Cobertura">COB</div>)}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -10107,6 +10453,61 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
+                {/* ── Fila Eventos: TURAs imputadas a extras (prefactura) — no cubre SLA ── */}
+                {!isSnapshotView && Object.keys(planningEventosCellsByDay).length > 0 && (
+                    <tr className="hover:bg-violet-50/40 dark:hover:bg-violet-950/20">
+                        <td
+                            className="sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800"
+                            style={{ width: nameColWidth, minWidth: nameColWidth }}
+                        >
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-[9px] font-black uppercase tracking-wide leading-tight text-violet-800 dark:text-violet-200">
+                                    Eventos
+                                </span>
+                                <span className="text-[8px] font-bold truncate text-violet-600 dark:text-violet-400" title="TURAs imputadas a Eventos — facturan en prefactura, no suman cobertura SLA">
+                                    Extras TURA · prefactura
+                                </span>
+                            </div>
+                        </td>
+                        {daysInMonth.map((day) => {
+                            const dayStr = getDateKey(day);
+                            const cell = planningEventosCellsByDay[dayStr];
+                            const isCellWeekend = [0, 6].includes(day.getDay());
+                            const tooltip = cell ? formatPlanningEventosTooltip(cell) : '';
+                            const hrsLabel = cell
+                                ? (Number.isInteger(cell.totalHours) ? String(cell.totalHours) : cell.totalHours.toFixed(1))
+                                : '';
+                            return (
+                                <td
+                                    key={`eventos_${dayStr}`}
+                                    className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}
+                                    onMouseEnter={(e) => {
+                                        if (!cell) { setShiftTooltip(null); return; }
+                                        setShiftTooltip({
+                                            label: tooltip,
+                                            pos: 'Eventos',
+                                            range: cell.entries.map((en) => `${en.guardName} ${en.range}`).join(' · '),
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            restHours: null,
+                                        });
+                                    }}
+                                    onMouseLeave={() => setShiftTooltip(null)}
+                                >
+                                    {cell && (
+                                        <div
+                                            className="w-full h-6 rounded flex flex-col items-center justify-center text-[8px] font-black border bg-violet-600 text-white border-violet-700 leading-none"
+                                            title={tooltip}
+                                        >
+                                            <span>EVT</span>
+                                            <span className="text-[7px] font-bold opacity-90">{hrsLabel}h</span>
+                                        </div>
+                                    )}
+                                </td>
+                            );
+                        })}
+                    </tr>
+                )}
                 {/* ── Filas de refuerzo RFZ VACANTE — solo sin guardia asignado (asignados van en fila del empleado) ── */}
                 {!isSnapshotView && rfzTodos.filter(rfz => {
                     if (rfz.objectiveId !== selectedObjective) return false;
@@ -10553,9 +10954,9 @@ export default function PlanificacionPage() {
                             </span>
                             <div className="h-4 w-px bg-amber-200 shrink-0"/>
                             <div className="flex items-center bg-white rounded-lg p-0.5 border border-amber-200 shrink-0">
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-0.5 hover:bg-amber-50 rounded"><ChevronLeft size={14}/></button>
+                                <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-0.5 hover:bg-amber-50 rounded"><ChevronLeft size={14}/></button>
                                 <span className="px-2 font-black text-[10px] w-20 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'short', year:'2-digit'})}</span>
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-0.5 hover:bg-amber-50 rounded"><ChevronRight size={14}/></button>
+                                <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-0.5 hover:bg-amber-50 rounded"><ChevronRight size={14}/></button>
                             </div>
                             <div className="h-4 w-px bg-amber-200 shrink-0"/>
                             <Split size={13} className="text-amber-600 shrink-0"/>
@@ -11012,7 +11413,7 @@ export default function PlanificacionPage() {
                                 )}
 
                                 {/* < MES > — siempre visible */}
-                                <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className="px-3 font-black text-xs w-24 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
+                                <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className={`px-3 font-black text-xs w-24 text-center capitalize ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
 
                                 <button
                                     onClick={applyPrevMonthTemplate}
@@ -11518,7 +11919,7 @@ export default function PlanificacionPage() {
                 </div>
 
                 {/* BARRA FLOTANTE */}
-                {!comparingSnapshot && !isServiceLocked && (
+                {!comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
@@ -12092,8 +12493,20 @@ export default function PlanificacionPage() {
                         )}
                         {effectiveSlaVendidas > 0 && statsHoursView === 'total' && (
                             <div className={`${metricBox} min-w-[2.5rem] ${slaMismatch ? 'border-teal-200/90' : ''}`}>
-                                <p className={metricLabel}>Vendidas</p>
+                                <p className={metricLabel}>SLA vend.</p>
                                 <p className={`${metricValue} text-teal-800 dark:text-teal-300`}>{effectiveSlaVendidas}</p>
+                            </div>
+                        )}
+                        {planningAuxiliarySummary?.hasEnc && (
+                            <div className={`${metricBox} min-w-[2.75rem]`} title={`Encargado: ${planningAuxiliarySummary.encPlanned}h planificadas · techo ${planningAuxiliarySummary.encContract}h${planningAuxiliarySummary.encInSla > 0 ? ` (${planningAuxiliarySummary.encInSla}h en SLA vendido)` : ' (fuera de SLA vendido)'}`}>
+                                <p className={`${metricLabel} text-amber-700`}>ENC</p>
+                                <p className={`${metricValue} text-amber-800`}>{planningAuxiliarySummary.encPlanned}<span className="text-[8px] text-slate-500">/{planningAuxiliarySummary.encContract}</span></p>
+                            </div>
+                        )}
+                        {(planningAuxiliarySummary?.hasEvt || (planningAuxiliarySummary?.evtPlanned ?? 0) > 0) && (
+                            <div className={`${metricBox} min-w-[2.5rem]`} title="Eventos / extras TURA — prefactura, fuera de SLA cobertura">
+                                <p className={`${metricLabel} text-violet-700`}>EVT</p>
+                                <p className={`${metricValue} text-violet-800`}>{planningAuxiliarySummary?.evtPlanned ?? 0}</p>
                             </div>
                         )}
                         {hoursMode === 'mes' && selectedObjective && (
@@ -12280,6 +12693,7 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'bg-violet-100 text-violet-700',
                                                 CONVOCATORIA_EVENTO: 'bg-yellow-100 text-yellow-800',
                                                 EVENTO_CONFIRMADO: 'bg-emerald-100 text-emerald-800',
+                                                EVENTO_DESAFECTADO: 'bg-rose-100 text-rose-800',
                                             };
                                             const typeLabel: Record<string, string> = {
                                                 TURNO_NUEVO: 'Nuevo turno',
@@ -12289,8 +12703,9 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'Cronograma',
                                                 CONVOCATORIA_EVENTO: 'Convocatoria',
                                                 EVENTO_CONFIRMADO: 'Evento OK',
+                                                EVENTO_DESAFECTADO: 'Desafectado',
                                             };
-                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO'].includes(n.type)) && !n.ackedAt;
+                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO','EVENTO_DESAFECTADO'].includes(n.type)) && !n.ackedAt;
                                             return (
                                                 <div key={n.id} className={`p-3 border rounded-2xl shadow-sm transition-colors ${
                                                     pendingAck ? 'bg-amber-50 border-amber-200' : n.ackedAt ? 'bg-emerald-50/40 border-emerald-100' : n.read ? 'bg-white' : 'bg-indigo-50 border-indigo-200'
@@ -13243,6 +13658,22 @@ export default function PlanificacionPage() {
                                                             const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr, true);
                                                             if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
+                                                            const countAssignedForService = (servicioId: string) => {
+                                                                return displayedEmployees.reduce((acc: number, emp: any) => {
+                                                                    const shift = resolveCellShiftAtObjective(
+                                                                        emp.id,
+                                                                        selectedCell.dateStr,
+                                                                        selectedObjective,
+                                                                        pendingChanges,
+                                                                        shiftsMap,
+                                                                    );
+                                                                    if (!shift || shift.isDeleted) return acc;
+                                                                    const code = String(shift.code || shift.type || '').toUpperCase();
+                                                                    if (code !== 'EV') return acc;
+                                                                    if (String(shift.servicioId || '') !== String(servicioId)) return acc;
+                                                                    return acc + 1;
+                                                                }, 0);
+                                                            };
                                                             const assignServicio = async ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
                                                                 if (isServiceLocked) return;
                                                                 const guardHours = servicio.tipoTurno === '3x8' ? 8
@@ -13250,48 +13681,55 @@ export default function PlanificacionPage() {
                                                                     : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
                                                                 const emp = (displayedEmployees as any[]).find((e: any) => e.id === selectedCell.empId);
                                                                 const empNombre = emp?.name || selectedCell.empId;
-                                                                try {
-                                                                    const uid = getAuth().currentUser?.uid || '';
-                                                                    const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
-                                                                        empresaId,
-                                                                        eventoId: evento.id,
-                                                                        eventoNombre: evento.nombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        status: 'aprobada',
-                                                                        tipo: 'admin_asigna',
-                                                                        convocadoPor: uid,
-                                                                        respondidoPor: uid,
-                                                                        respondidoAt: serverTimestamp(),
-                                                                        creadoAt: serverTimestamp(),
-                                                                    });
-                                                                    await assignGuardToEvent({
-                                                                        empresaId,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        empleadoObjectiveId: emp?.preferredObjectiveId || emp?.objectiveId,
-                                                                        empleadoObjectiveName: emp?.preferredObjectiveName || emp?.objectiveName,
-                                                                        eventoId: evento.id!,
-                                                                        eventoNombre: evento.nombre,
-                                                                        clienteId: evento.clienteId,
-                                                                        clienteNombre: evento.clienteNombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        horaInicio: servicio.horaInicio,
-                                                                        horaFin: servicio.horaFin,
-                                                                        horas: guardHours,
-                                                                        solicitudId: solicitudRef.id,
-                                                                        respondidoPor: uid,
-                                                                    });
-                                                                } catch (e) {
-                                                                    console.error('Error asignando guardia a evento:', e);
+                                                                const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                                                const current = pendingChanges[key]?.isDeleted
+                                                                    ? null
+                                                                    : (pendingChanges[key] || selectedCell.currentShift);
+                                                                const currentCode = String(current?.code || current?.type || '').toUpperCase();
+                                                                const alreadySameService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id)
+                                                                    && String(current?.eventoId || '') === String(evento.id || '');
+                                                                if (alreadySameService) {
+                                                                    toast.info('Ese guardia ya está asignado a este servicio en borrador');
+                                                                    setEventoPickerKey(null);
+                                                                    return;
                                                                 }
+                                                                const assigned = countAssignedForService(servicio.id);
+                                                                const replacingThisService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id);
+                                                                const effectiveAssigned = replacingThisService ? Math.max(0, assigned - 1) : assigned;
+                                                                if (servicio.cupo > 0 && effectiveAssigned >= servicio.cupo) {
+                                                                    toast.error(`Cupo completo para ${servicio.nombre} (${effectiveAssigned}/${servicio.cupo})`);
+                                                                    return;
+                                                                }
+                                                                const coveredPosition = activePosition || current?.positionName || 'General';
+                                                                applyToPending({
+                                                                    code: 'EV',
+                                                                    name: 'Evento',
+                                                                    hours: guardHours,
+                                                                    startTime: servicio.horaInicio || '08:00',
+                                                                    endTime: servicio.horaFin || '16:00',
+                                                                    positionName: coveredPosition,
+                                                                    eventoId: evento.id,
+                                                                    eventoNombre: evento.nombre,
+                                                                    servicioId: servicio.id,
+                                                                    servicioNombre: servicio.nombre,
+                                                                    comments: `Evento: ${evento.nombre} · ${servicio.nombre}`,
+                                                                    isFrancoTrabajado: false,
+                                                                    isFrancoCompensatorio: false,
+                                                                    isExtended: false,
+                                                                    isEarlyStart: false,
+                                                                });
                                                                 setEventoPickerKey(null);
                                                             };
+                                                            const buttonLabel = (() => {
+                                                                if (srvsDia.length !== 1) return `${srvsDia.length} servicios`;
+                                                                const one = srvsDia[0];
+                                                                const assigned = countAssignedForService(one.servicio.id);
+                                                                const left = one.servicio.cupo > 0 ? Math.max(0, one.servicio.cupo - assigned) : null;
+                                                                const base = `${one.evento.nombre} · ${one.servicio.nombre}`;
+                                                                return left == null ? base : `${base} (${assigned}/${one.servicio.cupo})`;
+                                                            })();
                                                             return (
                                                                 <div className="col-span-3">
                                                                     <button
@@ -13309,12 +13747,14 @@ export default function PlanificacionPage() {
                                                                     >
                                                                         <span>EV</span>
                                                                         <span className="text-[9px] font-bold truncate max-w-[120px]">
-                                                                            {srvsDia.length === 1 ? srvsDia[0].servicio.nombre : `${srvsDia.length} servicios`}
+                                                                            {buttonLabel}
                                                                         </span>
                                                                     </button>
                                                                     {isPickerOpen && srvsDia.length > 1 && (
                                                                         <div className="mt-1 flex flex-col gap-1 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-2 max-h-48 overflow-y-auto">
                                                                             {srvsDia.map(({ evento, servicio }) => {
+                                                                                const assigned = countAssignedForService(servicio.id);
+                                                                                const cupoLleno = servicio.cupo > 0 && assigned >= servicio.cupo;
                                                                                 const horarioBadge = servicio.tipoTurno === '3x8'
                                                                                     ? '3×8h'
                                                                                     : servicio.tipoTurno === '2x12'
@@ -13323,8 +13763,11 @@ export default function PlanificacionPage() {
                                                                                 return (
                                                                                     <button
                                                                                         key={servicio.id}
+                                                                                        disabled={cupoLleno}
                                                                                         onClick={() => { void assignServicio({ evento, servicio }); }}
-                                                                                        className="text-left px-2 py-2 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 border-b border-yellow-100 last:border-0"
+                                                                                        className={`text-left px-2 py-2 rounded text-xs font-bold border-b border-yellow-100 last:border-0 ${
+                                                                                            cupoLleno ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-yellow-900 hover:bg-yellow-200'
+                                                                                        }`}
                                                                                     >
                                                                                         <div className="flex items-center justify-between gap-2">
                                                                                             <span className="font-black truncate">{servicio.nombre}</span>
@@ -13332,7 +13775,8 @@ export default function PlanificacionPage() {
                                                                                         </div>
                                                                                         <div className="flex items-center gap-1.5 mt-0.5 font-normal text-[10px] opacity-70">
                                                                                             <span className="px-1 py-0.5 bg-yellow-300 rounded text-[9px] font-bold">{horarioBadge}</span>
-                                                                                            {servicio.cupo > 0 && <span>{servicio.cupo} pax</span>}
+                                                                                            {servicio.cupo > 0 && <span>{assigned}/{servicio.cupo} pax</span>}
+                                                                                            {cupoLleno && <span className="text-rose-500 font-bold">Cupo completo</span>}
                                                                                         </div>
                                                                                     </button>
                                                                                 );
@@ -14907,6 +15351,29 @@ export default function PlanificacionPage() {
                                     const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
                                     return (
                                         <>
+                                            {planningAuxiliarySummary && (planningAuxiliarySummary.hasEnc || planningAuxiliarySummary.hasEvt) && (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                    {planningAuxiliarySummary.hasEnc && (
+                                                        <div className="rounded-xl border border-amber-200 p-3 bg-amber-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-amber-700">Encargado (ENC)</p>
+                                                            <p className="text-lg font-black text-amber-900">{planningAuxiliarySummary.encPlanned}h <span className="text-sm font-bold text-slate-500">plan</span></p>
+                                                            <p className="text-[10px] text-slate-600">Techo mes: {planningAuxiliarySummary.encContract}h · {planningAuxiliarySummary.encInSla > 0 ? `${planningAuxiliarySummary.encInSla}h en SLA vendido` : 'fuera de SLA vendido'}</p>
+                                                        </div>
+                                                    )}
+                                                    {(planningAuxiliarySummary.hasEvt || planningAuxiliarySummary.evtPlanned > 0) && (
+                                                        <div className="rounded-xl border border-violet-200 p-3 bg-violet-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-violet-700">Eventos (EVT)</p>
+                                                            <p className="text-lg font-black text-violet-900">{planningAuxiliarySummary.evtPlanned}h</p>
+                                                            <p className="text-[10px] text-slate-600">Prefactura / extras — no cierra SLA cobertura</p>
+                                                        </div>
+                                                    )}
+                                                    <div className="rounded-xl border border-slate-200 p-3 bg-slate-50/80">
+                                                        <p className="text-[9px] font-black uppercase text-slate-500">SLA cobertura</p>
+                                                        <p className="text-lg font-black text-teal-800">{vend || '—'}h vend.</p>
+                                                        <p className="text-[10px] text-slate-600">Base plan {b.baseSla}h · facturable {b.gross}h</p>
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                                 <div className="rounded-xl border border-slate-200 p-3 bg-white dark:bg-slate-800">
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Col. legajo (CRM)</p>
@@ -15381,7 +15848,7 @@ export default function PlanificacionPage() {
                         onClose={() => setShowCronogramasOverview(false)}
                         year={currentDate.getFullYear()}
                         month={currentDate.getMonth() + 1}
-                        onMonthChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))}
+                        onMonthChange={(y, m) => { if (goToPlanningMonth(y, m - 1)) setAutoGeneratedReady(false); }}
                         empresaId={empresaId || ''}
                         migracionCompleta={migracionCompleta}
                         scopeEmpresa={scopeEmpresa}
@@ -17171,6 +17638,22 @@ export default function PlanificacionPage() {
                                                         employeeName: emp.name,
                                                         ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
                                                     });
+                                                    const solId = String(rfzAsignando.solicitudRefuerzoId || '').trim();
+                                                    if (solId) {
+                                                        try {
+                                                            const solSnap = await getDoc(doc(db, 'solicitudes_refuerzo', solId));
+                                                            if (solSnap.exists()) {
+                                                                const solData = solSnap.data();
+                                                                const prevIds = Array.isArray(solData.empleadoIds) ? solData.empleadoIds : [];
+                                                                const prevNames = Array.isArray(solData.empleadoNames) ? solData.empleadoNames : [];
+                                                                await solicitudRefuerzoService.update(solId, {
+                                                                    estado: 'ASIGNADA',
+                                                                    empleadoIds: prevIds.includes(emp.id) ? prevIds : [...prevIds, emp.id],
+                                                                    empleadoNames: prevIds.includes(emp.id) ? prevNames : [...prevNames, emp.name],
+                                                                });
+                                                            }
+                                                        } catch { /* turno asignado; sync solicitud best-effort */ }
+                                                    }
                                                     activateRfzCorrectionFlow();
                                                     setRfzAsignando(null);
                                                     const lookupKey = planificacionPublishLookupKey(

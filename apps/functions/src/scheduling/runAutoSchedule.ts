@@ -365,25 +365,15 @@ function buildStaffingNeeds(
 
 const RUNTIME = { timeoutSeconds: 120, memory: '512MB' as const };
 
-export const runAutoScheduleHandler = async (
-    data: RunAutoScheduleInput,
-    context: functions.https.CallableContext,
-): Promise<RunAutoScheduleOutput> => {
-    // ── 1. Autenticación ──────────────────────────────
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
-    }
-
+/** Lógica de generación sin validación de auth — usable desde otros contexts (ej. agente). */
+export async function runAutoScheduleCore(data: RunAutoScheduleInput): Promise<RunAutoScheduleOutput> {
     const { objectiveId, year, month, empresaId, options } = data;
 
     if (!objectiveId || !year || !month || !empresaId) {
-        throw new functions.https.HttpsError('invalid-argument', 'objectiveId, year, month y empresaId son requeridos.');
+        throw new Error('objectiveId, year, month y empresaId son requeridos.');
     }
-    if (month < 1 || month > 12) {
-        throw new functions.https.HttpsError('invalid-argument', 'month debe ser 1-12.');
-    }
+    if (month < 1 || month > 12) throw new Error('month debe ser 1-12.');
 
-    // ── 2. Carga de datos desde Firestore ─────────────
     const [
         { positions, slaVendidas, codeHoursHint },
         employees,
@@ -392,16 +382,11 @@ export const runAutoScheduleHandler = async (
         loadEmployees(empresaId, objectiveId),
     ]);
 
-    if (positions.length === 0) {
-        throw new functions.https.HttpsError('failed-precondition', 'El SLA no tiene puestos definidos.');
-    }
+    if (positions.length === 0) throw new Error('El SLA no tiene puestos definidos.');
 
     const daysInMonth = buildDaysInMonth(year, month);
-
-    // Estado del mes actual (asignaciones manuales de puesto)
     const currentState = await loadPlanningState(objectiveId, year, month);
 
-    // Si no hay asignaciones en el mes actual, intentar heredar del mes anterior
     let defaultPositionByEmp = currentState.defaultPositionByEmp;
     let defaultShiftByEmp = currentState.defaultShiftByEmp;
 
@@ -414,11 +399,9 @@ export const runAutoScheduleHandler = async (
         defaultShiftByEmp = prevState.defaultShiftByEmp;
     }
 
-    // Ausencias del mes
     const absencesRaw = await loadAbsences(objectiveId, empresaId, year, month);
     const absences: Record<string, Set<string>> = absencesRaw;
 
-    // ── 3. Construcción del contexto del motor ────────
     const ctx: EngineContext = {
         positions,
         employees,
@@ -428,7 +411,6 @@ export const runAutoScheduleHandler = async (
         absences,
         defaultPositionByEmp,
         defaultShiftByEmp,
-        // Trailing del mes anterior para continuidad de racha 6+2
         prevMonthTrailingWorkDays: prevState.trailingWorkDays,
         prevMonthTrailingRestDays: prevState.trailingRestDays,
         prevMonthLastShiftByEmp: prevState.lastShiftByEmp,
@@ -437,13 +419,8 @@ export const runAutoScheduleHandler = async (
         codeHoursHint,
     };
 
-    // ── 4. Generación del cronograma ──────────────────
     const result = generateSchedule(ctx);
-
-    // ── 5. Verificación de cobertura ──────────────────
     const coverage = verifyCoverage(ctx, result.assignments);
-
-    // ── 6. Necesidades de dotación (para UI de viabilidad) ──
     const staffingNeeds = buildStaffingNeeds(positions, result.stats.positionGroups);
 
     return {
@@ -461,6 +438,27 @@ export const runAutoScheduleHandler = async (
             generatedAt: new Date().toISOString(),
         },
     };
+}
+
+export const runAutoScheduleHandler = async (
+    data: RunAutoScheduleInput,
+    context: functions.https.CallableContext,
+): Promise<RunAutoScheduleOutput> => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Se requiere autenticación.');
+    }
+    try {
+        return await runAutoScheduleCore(data);
+    } catch (e: any) {
+        const msg = String(e?.message ?? e ?? 'Error en autoSchedule');
+        if (msg.includes('requeridos') || msg.includes('1-12')) {
+            throw new functions.https.HttpsError('invalid-argument', msg);
+        }
+        if (msg.includes('puestos definidos')) {
+            throw new functions.https.HttpsError('failed-precondition', msg);
+        }
+        throw new functions.https.HttpsError('internal', msg);
+    }
 };
 
 export const runAutoSchedule = functions

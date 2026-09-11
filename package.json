@@ -55,6 +55,7 @@
     "test:migrate-fixes": "node scripts/test-empresa-migrate-fixes.mjs",
     "eval:planning-agent": "node scripts/eval-planning-agent.mjs",
     "eval:guard-capacity": "npx tsx apps/web2/scripts/eval-guard-capacity.ts",
+    "eval:service-capacity-viability": "npx tsx apps/web2/scripts/eval-service-capacity-viability.ts",
     "eval:custom-cover": "npx tsx apps/web2/scripts/eval-custom-cover-cycle.ts",
     "eval:sla-active-days": "npx tsx apps/web2/scripts/eval-sla-active-days.ts",
     "eval:franco-streak": "npx tsx apps/web2/scripts/eval-franco-streak-guard.ts",

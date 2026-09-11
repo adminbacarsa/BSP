@@ -1,0 +1,40 @@
+Modulo,Submodulo,PM_min,PM_base,PM_max,Complejidad,Estado COSP actual,Notas auditoria
+01 Plataforma,Arquitectura Firebase + Auth + multitenancy base,3,4,6,Alta,Parcial,empresaId rules indexes emuladores
+01 Plataforma,Design system + layout admin (Centro de Comando),2,3,4,Media,Hecho,Tailwind componentes propios
+01 Plataforma,Roles permisos modulos (9 modulos + acciones),2,3,4,Alta,Hecho,isSuperAdmin bypass
+01 Plataforma,Config empresas usuarios AFIP credenciales,2,3,5,Alta,Hecho,SuperAdmin kill switch
+02 CRM,Clientes objetivos servicios embebidos,2,3,4,Media-Alta,Hecho,Soft delete clientes
+02 CRM,Integracion AFIP WSAA padron CUIT,2,3,4,Alta,Hecho,Por empresa + fallback global
+03 Servicios SLA,Contratos puestos bandas horas calculator,4,6,8,Muy alta,Hecho,excludedDates rotaciones reglas
+03 Servicios SLA,Metricas KPI catalogo objetivos,1,2,3,Media,Hecho,Audit script julio 2026
+04 Planificacion,Grilla mes publicacion estados,6,8,10,Muy alta,Hecho,planificacion_estados
+04 Planificacion,Cobertura SLA FT extensiones tratamientos,4,6,8,Muy alta,Hecho,CCT 422/05 codigos turno
+04 Planificacion,Historial snapshots diff compare,2,3,4,Alta,Hecho,Version reciente mes completo
+04 Planificacion,Auto-lab calendario exclusiones,3,4,6,Muy alta,Hecho,Casos catalogo resolucion
+04 Planificacion,Motor autoSchedule V2/V4 verificacion,6,8,12,Muy alta,Hecho,Pipeline automatizar
+04 Planificacion,Optimizacion Gemini + agente planificacion,4,6,8,Muy alta,Hecho,callables secrets eval scripts
+04 Planificacion,VPLAN experimental (fases 0-10),3,5,8,Muy alta,Parcial,Solo emulador sin deploy prod
+05 Operaciones,Monitor tiempo real useOperacionesMonitor,6,9,12,Muy alta,Hecho,Logica critica no tocar
+05 Operaciones,Crons ausencias vacantes autoCompletar centroControl,3,4,6,Alta,Hecho,Kill switch por empresa
+05 Operaciones,Cobertura ausentes RET ESC FT extension,4,5,7,Muy alta,Hecho,Prioridad cobertura CCT
+06 RRHH,Legajos empleados plantilla,2,3,4,Media-Alta,Hecho,status ACTIVE INACTIVE
+06 RRHH,Tipos novedad catalogo novedades ausencias,3,4,6,Alta,Hecho,AUTO_T30 MAVIC seed
+07 Analisis,Snapshot store ventana 4 meses,4,6,8,Muy alta,Hecho,useAnalisisSnapshot
+07 Analisis,Informe demanda cobertura capacidad bandas,4,6,9,Muy alta,Hecho,hours_balances overlay
+07 Analisis,Financiera humana herramientas viabilidad,4,6,8,Muy alta,Hecho,192h ref 200h techo liq
+07 Analisis,Export Excel eval queries smoke,2,3,4,Media-Alta,Hecho,npm run eval:analisis-queries
+08 Reportes,Reportes turnos planificacion liquidacion,3,4,6,Alta,Hecho,payroll-api hooks
+08 Reportes,hours_balances extracto mensual CRM,2,3,4,Alta,Hecho,Sincron con analisis dashboard
+09 Portal empleado,Web dashboard turnos presencia licencias,3,4,5,Media-Alta,Hecho,Paralelo a mobile
+10 Mobile guardia,App Expo F0-F7 portal nativo push,8,12,16,Muy alta,En curso,docs MOBILE-GUARDIA-IMPLEMENTACION
+10 Mobile guardia,Activacion deep links assetlinks EAS,2,3,4,Alta,Parcial,google-services eas.json
+11 IA plataforma,Asistente Gemini tools read-only Firestore,4,5,7,Alta,Hecho,135 training pairs
+11 IA plataforma,Guides por modulo UX globo arrastrable,1,2,3,Media,Hecho,chatPlatformAssistant
+12 Backend,Functions NestJS triggers callables crons,4,6,8,Alta,Hecho,Node 22 firebase v7
+12 Backend,Firestore rules indexes security,3,4,6,Muy alta,Hecho,Revision continua requerida
+12 Backend,Eventos portal callables notificaciones,3,4,6,Alta,Parcial,Mobile + functions WIP
+13 Infra,Deploy worktree emuladores seed lab N8N,2,3,4,Media,Hecho,npm run deploy emulators
+13 Infra,Scripts eval auditoria herramientas internas,2,3,4,Media,Hecho,40+ eval scripts
+14 QA hardening,Testing integracion UAT dominio seguridad,4,6,8,Alta,Parcial,Smoke scripts no E2E full
+15 Documentacion,CLAUDE protocolo capacitacion operadores,2,3,4,Media,Hecho,Onboarding manual hoy
+,TOTALES,,113,150,172,,,Suma PM antes de factor IA

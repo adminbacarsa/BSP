@@ -19,7 +19,7 @@ export function listEventosPositions(positions: Array<{ id?: string; name?: stri
 }
 
 export function buildEventosPositionDraft(partial?: Partial<ServicePosition>): ServicePosition {
-  return {
+  const base: ServicePosition = {
     id: '',
     name: 'Eventos',
     code: EVENTOS_SHIFT_CODE,
@@ -28,8 +28,13 @@ export function buildEventosPositionDraft(partial?: Partial<ServicePosition>): S
     activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
     allowedShiftTypes: [],
     preferenciaGenero: 'INDISTINTO',
+    includeInSlaTotals: false,
+  };
+  return {
+    ...base,
     ...partial,
     coverageType: EVENTOS_COVERAGE_TYPE,
-    allowedShiftTypes: [],
+    includeInSlaTotals: false,
+    allowedShiftTypes: partial?.allowedShiftTypes ?? [],
   };
 }

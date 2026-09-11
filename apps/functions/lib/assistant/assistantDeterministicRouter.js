@@ -280,6 +280,8 @@ function matchObjectivePresentAtSiteIntent(t) {
         return true;
     if (t.length > 90)
         return false;
+    if (/\b(asignar|asigna|cubrir|cubra|refuerzo|extende|extender|necesito|quiero|crea|crear|mand[aá])\b/i.test(t))
+        return false;
     if (/\b(casisa|obrador|malagueno|malagueño|misericordia|san\s+roque|cruz\s+del\s+eje|loteria|lotería)\b/.test(t)) {
         if (/\b(todos los|toda la empresa|cuantos clientes|sla|horas vendidas)\b/.test(t))
             return false;
@@ -967,7 +969,13 @@ function extractFrancoRetTipoFromQuery(t, recent) {
     return 'ambos';
 }
 function extractObjectiveSiteFromQuery(t) {
-    let m = t.match(/\bturnos?\s+(?:del?\s+|de\s+(?:el\s+)?)?(?:h\.?\s*|hospital\s*)?([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
+    let m = t.match(/\b(?:al|en\s+el|en|del)\s+objetivo\s+([a-záéíóúñ0-9.\s]{3,50}?)(?:\s+hoy|\s+para|\s+mañana|\s*\?|$)/i);
+    if (m?.[1]?.trim())
+        return m[1].trim();
+    m = t.match(/\bobjetivo\s+([a-záéíóúñ0-9.\s]{3,50}?)(?:\s+hoy|\s+para|\s+mañana|\s*\?|$)/i);
+    if (m?.[1]?.trim())
+        return m[1].trim();
+    m = t.match(/\bturnos?\s+(?:del?\s+|de\s+(?:el\s+)?)?(?:h\.?\s*|hospital\s*)?([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
     if (m?.[1]?.trim())
         return m[1].trim();
     m = t.match(/\b(?:en|del|de)\s+(?:el\s+)?(?:hospital|h\.?)\s*([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i);
@@ -1956,7 +1964,7 @@ async function tryDeterministicPresentesEnObjetivoReply(t, toolCtx, recent) {
     const fecha = extractDayYmdFromQuery(t, toolCtx.referenceDateYsMmDd, recent);
     const siteHint = extractObjectiveSiteFromQuery(t) ||
         extractObjectiveHintFromRecentMessages(recent) ||
-        t.trim();
+        (t.trim().split(/\s+/).length <= 4 ? t.trim() : null);
     if (!siteHint || siteHint.length < 3)
         return null;
     const found = await (0, assistantDataTools_1.ejecutarBuscarObjetivosPorNombre)(toolCtx, { texto: siteHint, limite: 6 });

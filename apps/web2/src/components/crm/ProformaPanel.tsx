@@ -12,6 +12,7 @@ import {
 import type { ProformaExportBundle, ProformaLayoutMode } from '@/lib/crm/proformaTypes';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { formatHoursColonTotal, shortDayHeader } from '@/lib/crm/proformaGrid';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import type { ProformaDetailMode } from '@/lib/crm/proformaMode';
 
 export type ProformaPanelProps = {
@@ -606,22 +607,34 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                             </tr>
                           </thead>
                           <tbody>
-                            {grid.positions.map((p) => (
-                              <tr key={p.positionName} className="border-b hover:bg-slate-50/80">
-                                <td className="sticky left-0 z-10 bg-white border-r px-2 py-1.5 font-bold text-slate-800">{p.positionName}</td>
+                            {grid.positions.map((p) => {
+                              const isEvtRow = isEventosPosition({ name: p.positionName, coverageType: 'eventos' });
+                              return (
+                              <tr key={p.positionName} className={`border-b hover:bg-slate-50/80 ${isEvtRow ? 'bg-violet-50/60' : ''}`}>
+                                <td className={`sticky left-0 z-10 border-r px-2 py-1.5 font-bold ${isEvtRow ? 'bg-violet-50 text-violet-900' : 'bg-white text-slate-800'}`}>
+                                  {p.positionName}
+                                  {isEvtRow && (
+                                    <span className="block text-[8px] font-bold uppercase text-violet-500 tracking-wide">Extras TURA</span>
+                                  )}
+                                </td>
                                 {grid.dateColumns.map((d) => {
-                                  const h = p.days[d]?.hours || 0;
+                                  const cell = p.days[d];
+                                  const h = cell?.hours || 0;
                                   return (
-                                    <td key={d} className="px-0.5 py-1 text-center border-r font-mono whitespace-nowrap text-slate-700">
-                                      {h > 0 ? Math.round(h * 10) / 10 : ''}
+                                    <td
+                                      key={d}
+                                      className={`px-0.5 py-1 text-center border-r font-mono whitespace-nowrap ${isEvtRow ? 'text-violet-800' : 'text-slate-700'}`}
+                                      title={isEvtRow && h > 0 ? `TURA imputada a Eventos: ${cell?.display || h}h` : undefined}
+                                    >
+                                      {h > 0 ? (cell?.display || Math.round(h * 10) / 10) : ''}
                                     </td>
                                   );
                                 })}
-                                <td className="px-2 py-1.5 text-center font-mono font-black text-slate-800 whitespace-nowrap">
+                                <td className={`px-2 py-1.5 text-center font-mono font-black whitespace-nowrap ${isEvtRow ? 'text-violet-800' : 'text-slate-800'}`}>
                                   {Math.round(p.totalHours * 10) / 10}
                                 </td>
                               </tr>
-                            ))}
+                            );})}
                             <tr className="bg-slate-100 font-black">
                               <td className="sticky left-0 z-10 bg-slate-100 border-r px-2 py-1.5 text-slate-600">Totales</td>
                               {grid.dateColumns.map((d) => {

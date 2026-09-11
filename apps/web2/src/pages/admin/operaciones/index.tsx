@@ -1,4 +1,5 @@
-﻿import React, { useState, useMemo, useEffect, useRef } from 'react';
+﻿import React, { useState, useMemo, useEffect, useRef, useLayoutEffect, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
@@ -8,11 +9,11 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, ChevronLeft, XCircle,
-    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer
+    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
+    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
@@ -21,12 +22,31 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites, onSnapshot } from 'firebase/firestore';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { app, db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
+import {
+    novedadActorName,
+    novedadBodyText,
+    novedadHeadline,
+    novedadSubline,
+    isInformationalNovedad,
+    isHiddenFromOpsAlerts,
+    isOrphanShiftNoiseNovedad,
+    COBERTURA_RESUELTA_META,
+} from '@/lib/operaciones/novedadAlertDisplay';
+import {
+    resolveOpsMode,
+    getOpsCapabilities,
+    readManualAssistPreference,
+    writeManualAssistPreference,
+} from '@/lib/operaciones/opsMode';
+import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -36,6 +56,10 @@ const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) r
 const formatTimeSimple = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Cordoba' }).toUpperCase(); } catch (e) { return '--/--'; } };
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
+const displayShiftTimeRange = (shift: any) => {
+    if (shift?.turaContiguous && shift?.turaExtensionRange) return shift.turaExtensionRange;
+    return formatTimeRange(shift.shiftDateObj, shift.endDateObj);
+};
 const fmt24h = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const isSameDay = (d1: any, d2: any) => { if (!d1 || !d2) return false; return toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA'); };
 const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => { if (!lat1 || !lon1 || !lat2 || !lon2) return Infinity; const R = 6371; const dLat = (lat2 - lat1) * (Math.PI / 180); const dLon = (lon2 - lon1) * (Math.PI / 180); const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2); const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)); return R * c; };
@@ -54,7 +78,7 @@ const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
 const getGuardAvatarLabel = (shift: any, name: string): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref) return ref;
-    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return '!';
+    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return '!';
     return (name[0] || '?').toUpperCase();
 };
 
@@ -62,7 +86,7 @@ const getGuardAvatarClass = (shift: any): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref === 'RFZ') return 'bg-red-100 text-red-700';
     if (ref === 'TURA') return 'bg-violet-100 text-violet-700';
-    if (shift?.isUnassigned && !shift?.isReportedToPlanning) return 'bg-rose-100 text-rose-600';
+    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return 'bg-rose-100 text-rose-600';
     return 'bg-slate-200 text-slate-600';
 };
 
@@ -77,6 +101,7 @@ const SectionList = ({ title, color, expanded, onToggle, items, onAction, onWhat
 const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, recentlyRelievedIds, onRelieved }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
+    const [saving, setSaving] = React.useState(false);
     if (!isOpen || !incomingShift) return null;
     const now = new Date();
     const start = toDate(incomingShift.shiftDateObj);
@@ -109,7 +134,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
 
     // Candidatos a relevar:
     // 1. Guardias en retención (siempre — llevan tiempo extra esperando)
-    // 2. Guardias a â‰¤15 min de terminar su turno (están por salir)
+    // 2. Guardias a ≤15 min de terminar su turno (están por salir)
     // Filtro de duración: solo guardias con turno compatible (±90 min) al del entrante
     // Ordenados por FIFO: quien lleva más minutos trabajados se va primero
     const incomingDurMin = (() => {
@@ -144,7 +169,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const positionCapacity = Math.max(1, Number(pos?.quantity) || 1);
     const mustRelevar = activeGuards.length >= positionCapacity;
 
-    // â"€â"€ INTERCAMBIO DE TURNOS â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // ── INTERCAMBIO DE TURNOS ──────────────────────────────────────────────
     // Cuando Guard A llega tarde (>60 min) y su turno fue cubierto por Guard B,
     // Guard A puede tomar el próximo turno de Guard B como compensación.
     const handleIntercambio = async () => {
@@ -196,14 +221,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: incomingShift.employeeId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ"„ Intercambio de turno',
+                title: 'Intercambio de turno',
                 body: `Cubrís el turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)} - ${formatTimeSimple(guardBNextShift.endDateObj)}).`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: coveringEmpId,
                 type: 'INTERCAMBIO',
-                title: 'ðŸ"„ Intercambio de turno',
+                title: 'Intercambio de turno',
                 body: `${incomingShift.employeeName} tomó tu turno de ${guardBNextShift.objectiveName}. Tu turno de la mañana queda registrado.`,
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
@@ -222,154 +247,61 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         } catch (e: any) { toast.error('Error en intercambio: ' + (e?.message || String(e))); }
     };
 
-    const handleConfirm = async (prevShiftId: string | null) => {
-        // Un guardia tardío SIEMPRE puede dar presente — el relevo es secundario.
-        // Si el puesto está lleno y no seleccionó relevo, dar presente igual con aviso.
-        if (mustRelevar && !prevShiftId && status !== 'LATE') {
-            toast.error(`Puesto completo (${positionCapacity} pax). Seleccioná a quién relevar.`);
+    const handleConfirm = (mode: 'auto' | 'override' | 'skip', prevShiftId?: string | null) => {
+        if (saving) return;
+        if (mustRelevar && mode === 'skip' && status !== 'LATE') {
+            toast.error(`Puesto completo (${positionCapacity} pax). Usá auto-relevo o elegí a quién relevar.`);
             return;
         }
-        if (mustRelevar && !prevShiftId && status === 'LATE') {
+        if (mustRelevar && mode === 'skip' && status === 'LATE') {
             toast.warning(`${incomingShift.employeeName} ingresó. Hay guardias en retención — relevalos manualmente.`);
         }
-        try {
-            await assertDocBelongsToEmpresa('turnos', incomingShift.id, empresaId, migracionCompleta);
-            if (prevShiftId) await assertDocBelongsToEmpresa('turnos', prevShiftId, empresaId, migracionCompleta);
+        if (!incomingShift?.id) {
+            toast.error('Turno sin ID — no se puede registrar el ingreso.');
+            return;
+        }
 
-            // â"€â"€ Leer ausencia AA ANTES de abrir el batch (no se puede hacer getDocs dentro de un batch) â"€â"€
-            const wasAutoAbsent = incomingShift.absenceType === 'AA' && wasAbsent;
-            let aaDoc: any = null;
-            let aaHorario = '';
-            if (wasAutoAbsent) {
-                const absSnap = await getDocs(query(
-                    collection(db, 'ausencias'),
-                    where('shiftId', '==', incomingShift.id),
-                    limit(5)
-                ));
-                aaDoc = absSnap.docs.find(d => d.data().absenceType === 'AA') ?? null;
-                if (aaDoc) {
-                    const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-                    const st = incomingShift.shiftDateObj instanceof Date ? incomingShift.shiftDateObj : null;
-                    const et = incomingShift.endDateObj instanceof Date ? incomingShift.endDateObj : null;
-                    aaHorario = st ? (et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st)) : '';
-                }
+        const shiftEmp = String(incomingShift.empresaId || '').trim();
+        if (migracionCompleta && empresaId && shiftEmp && shiftEmp !== empresaId) {
+            toast.error(`Operación bloqueada: el turno pertenece a «${shiftEmp}», no a «${empresaId}».`);
+            return;
+        }
+        if (mode === 'override' && prevShiftId) {
+            const prev = logic.processedData.find((s: any) => s.id === prevShiftId);
+            const prevEmp = String(prev?.empresaId || '').trim();
+            if (migracionCompleta && empresaId && prevEmp && prevEmp !== empresaId) {
+                toast.error(`Operación bloqueada: el turno saliente pertenece a otra empresa.`);
+                return;
             }
+        }
 
-            // â"€â"€ Construir y commitear el batch (sin lecturas async intercaladas) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            const batch = writeBatch(db);
-            // Regla de liquidación: realStartTime = hora planificada (no la real de llegada)
-            // El guardia siempre cobra desde su hora planificada, llegue antes o después.
-            // Excepción: adelanto por cobertura (isEarlyStart) → usa adjustedStartTime del operador.
-            const incomingScheduledStart = incomingShift.shiftDateObj instanceof Date
-                ? incomingShift.shiftDateObj
-                : toDate(incomingShift.shiftDateObj);
-            const isEarlyStartShift = !!incomingShift.isEarlyStart;
-            // Adelanto: usa adjustedStartTime (= inicio de la vacante a cubrir, no la hora de llegada)
-            // Así el guardia cobra desde las 7 AM aunque haya llegado a las 8 AM
-            const incomingRealStart = isEarlyStartShift
-                ? (incomingShift.adjustedStartTime
-                    ? (incomingShift.adjustedStartTime.toDate
-                        ? Timestamp.fromDate(incomingShift.adjustedStartTime.toDate())
-                        : Timestamp.fromDate(new Date(incomingShift.adjustedStartTime)))
-                    : serverTimestamp())
-                : Timestamp.fromDate(incomingScheduledStart); // normal: hora planificada
-            batch.update(doc(db, 'turnos', incomingShift.id), {
-                isPresent:           true,
-                status:              'PRESENT',
-                realStartTime:       incomingRealStart,
-                lateArrivalAt:       status === 'LATE' || wasAutoAbsent ? serverTimestamp() : null,
-                isLate:              status === 'LATE' || wasAutoAbsent,
-                // Limpiar flags de ausencia — el guardia llegó tarde pero llegó
-                isAbsent:            false,
-                absenceType:         null,
-                absenceDetectedAt:   null,
-                absenceReversedAt:   serverTimestamp(),
-                absenceReversedBy:   'OPERACIONES',
-            });
-            // Si fue marcado AA, marcar la ausencia como "Llegada Tarde" (ya leímos aaDoc arriba)
-            if (wasAutoAbsent && aaDoc) {
-                batch.update(aaDoc.ref, {
-                    type: 'Llegada Tarde',
-                    absenceType: 'LT',
-                    status: 'Confirmada',
-                    reason: `Llegada tarde al turno${aaHorario ? ' ' + aaHorario : ''} - ${incomingShift.objectiveName || ''} (${incomingShift.positionName || ''})`,
-                    arrivedAt: serverTimestamp(),
-                });
+        setSaving(true);
+        if (mode === 'override' && prevShiftId) onRelieved?.(prevShiftId);
+        else onClose();
+        toast.success(
+            mode === 'skip'
+                ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
+                : mode === 'override'
+                    ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
+                    : (status === 'LATE' ? 'Ingreso tarde — relevo automático FIFO.' : 'Ingreso — relevo automático FIFO.'),
+        );
+
+        void registrarPresenciaOps({
+            shiftId: incomingShift.id,
+            source: 'OPERATIONS',
+            skipAutoRelevo: mode === 'skip',
+            overrideRelieveShiftId: mode === 'override' && prevShiftId ? prevShiftId : mode === 'skip' ? null : undefined,
+        }).then((res) => {
+            if (res.alreadyPresent) toast.message('El turno ya estaba marcado presente.');
+            else if (mode === 'auto' && res.relieved) {
+                toast.success(`Relevó a ${res.relieved.employeeName} (FIFO).`);
+                onRelieved?.(res.relieved.shiftId);
+            } else if (mode === 'auto' && !res.relieved) {
+                toast.message('Presente OK — no había saliente para relevar.');
             }
-            if (prevShiftId) {
-                // Horas completas: si el relevo es anticipado, el saliente cobra hasta su hora programada de fin
-                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                const prevEnd = prevShift ? toDate(prevShift.endDateObj) : null;
-                const nowDate = new Date();
-                const isEarlyRelevo = prevEnd && prevEnd > nowDate;
-                const outgoingRealEnd = isEarlyRelevo
-                    ? Timestamp.fromDate(prevEnd!)   // hora programada → horas completas
-                    : serverTimestamp();              // ya pasó el horario → hora real
-                batch.update(doc(db, 'turnos', prevShiftId), {
-                    realEndTime: outgoingRealEnd,
-                    isCompleted: true,
-                    status: 'COMPLETED',
-                    isPresent: false,
-                    relievedEarly: isEarlyRelevo,    // flag para trazabilidad
-                });
-            }
-            await batch.commit();
-
-            // Cerrar el modal inmediatamente — el write ya está en IndexedDB local.
-            if (prevShiftId) onRelieved?.(prevShiftId);
-            toast.success(status === 'LATE' ? 'Ingreso Tarde registrado.' : 'Ingreso Correcto.');
-            onClose();
-
-            // Background: verificar sync con servidor (no bloquea UI)
-            Promise.race([
-                waitForPendingWrites(db),
-                new Promise<void>((_, reject) => setTimeout(() => reject(new Error('sync_timeout')), 8000)),
-            ]).catch(err => {
-                if ((err as Error).message === 'sync_timeout') {
-                    toast.warning('⚠️ Conexión lenta — verificá que el presente quedó guardado.');
-                }
-            }).catch(() => {});
-
-
-            // â"€â"€ Audit log: presente / llegada tarde / relevo â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-            {
-                const _tenantId = String(incomingShift.empresaId || empresaId || '').trim();
-                const _actor    = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                const _prev     = prevShiftId ? logic.processedData.find((s: any) => s.id === prevShiftId) : null;
-                const _detail   = _prev
-                    ? `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}. Relevó a ${_prev.employeeName}.`
-                    : `${incomingShift.employeeName} ingresó${status === 'LATE' ? ' tarde' : ''} en ${incomingShift.objectiveName || ''}.`;
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action:        status === 'LATE' ? 'LLEGADA_TARDE' : 'PRESENTE',
-                    module:        'OPERACIONES',
-                    actorName:     _actor,
-                    timestamp:     serverTimestamp(),
-                    employeeId:    incomingShift.employeeId,
-                    employeeName:  incomingShift.employeeName,
-                    objectiveId:   incomingShift.objectiveId,
-                    objectiveName: incomingShift.objectiveName,
-                    shiftId:       incomingShift.id,
-                    details:       _detail,
-                }, _tenantId)).catch(() => {});
-            }
-
-            // Notificar al guardia saliente si fue relevado
-            if (prevShiftId) {
-                const prevShift = logic.processedData.find((s: any) => s.id === prevShiftId);
-                if (prevShift?.employeeId) {
-                    const shiftEmpresaId = String(incomingShift.empresaId || empresaId || '').trim();
-                    await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-                        userId:   prevShift.employeeId,
-                        type:     'RELEVO',
-                        title:    'âœ… Turno finalizado — relevado',
-                        body:     `Fuiste relevado por ${incomingShift.employeeName} en ${incomingShift.objectiveName}. Tu turno finalizó.`,
-                        read:     false,
-                        createdAt: serverTimestamp(),
-                    }, shiftEmpresaId)).catch(() => {});
-                }
-            }
-
-        } catch (e: any) { toast.error('Error al procesar relevo: ' + (e?.message || e?.code || String(e))); }
+        }).catch((e: any) => {
+            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+        }).finally(() => setSaving(false));
     };
 
     return (
@@ -436,20 +368,24 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                         </div>
                     ) : (
                     <>
+                        <button type="button" onClick={() => handleConfirm('auto')}
+                            className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                            {status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO'}
+                        </button>
                         {mustRelevar && (
                             <div className="mb-3 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl">
-                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). Selección a quién relevar.</p>
+                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). Auto-relevo FIFO o forzá quién sale.</p>
                             </div>
                         )}
                         {activeGuards.length > 0 ? (
                             <div className="space-y-2 mb-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Selección a quién relevar:</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Forzar relevo (opcional):</p>
                                 {activeGuards.map((s: any) => {
                                     const minutesWorked = s.totalMinutesWorked ?? 0;
                                     const hoursWorked = (minutesWorked / 60).toFixed(1);
                                     const isOver12h = minutesWorked >= 12 * 60;
                                     return (
-                                        <button key={s.id} onClick={() => handleConfirm(s.id)}
+                                        <button key={s.id} type="button" onClick={() => handleConfirm('override', s.id)}
                                             className={`w-full p-3 border rounded-xl flex justify-between items-center group ${s.isRetention ? 'border-orange-300 bg-orange-50/40 hover:bg-orange-50' : isOver12h ? 'border-red-200 bg-red-50/30 hover:bg-red-50/50' : 'border-slate-200 hover:bg-slate-50'}`}>
                                             <div className="flex items-center gap-2.5 text-left">
                                                 <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
@@ -470,18 +406,17 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                                 })}
                             </div>
                         ) : (
-                            <div className="p-3 bg-slate-50 border border-slate-100 rounded-xl text-center mb-3">
-                                <p className="text-xs text-slate-400 italic">No hay guardia saliente registrado.</p>
+                            <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center mb-3 space-y-1">
+                                <p className="text-xs font-bold text-slate-600">No hay guardia saliente en el puesto</p>
+                                <p className="text-[11px] text-slate-500 leading-snug">
+                                    El auto-relevo no encontrará saliente; el entrante queda solo en el puesto.
+                                </p>
                             </div>
                         )}
-                        {!mustRelevar && (
-                            <button onClick={() => handleConfirm(null)}
-                                className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
-                                {activeGuards.length > 0
-                                    ? 'INGRESAR SIN RELEVAR'
-                                    : (status === 'LATE' ? 'CONFIRMAR LLEGADA TARDE' : 'CONFIRMAR INGRESO')}
-                            </button>
-                        )}
+                        <button type="button" onClick={() => handleConfirm('skip')}
+                            className="w-full py-2.5 font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors text-xs">
+                            INGRESAR SIN RELEVAR
+                        </button>
                     </>
                     )}
                 </div>
@@ -528,13 +463,30 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                 objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
                 positionName: shift.positionName,
                 employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)',
+                vacancyBand: (shift.positionName || 'PUESTO').toUpperCase(),
                 startTime: serverTimestamp(),
+                scheduleDate: new Date().toISOString().slice(0, 10),
                 status: 'UNCOVERED_REPORTED', isUnassigned: true, isPresent: false, isReported: true,
-                origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp(),
+                origin: 'INTERRUPTION', originRef: shift.id,
+                causedByEmployeeId: shift.employeeId, causedByEmployeeName: shift.employeeName,
+                createdAt: serverTimestamp(),
             }, shiftEmpresaId);
             if (endTs) vacancyPayload.endTime = endTs;
             const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
             onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
+            // Ausencia por retiro anticipado → RRHH
+            const _shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj || Date.now());
+            const _dateStr = `${_shiftDate.getFullYear()}-${String(_shiftDate.getMonth()+1).padStart(2,'0')}-${String(_shiftDate.getDate()).padStart(2,'0')}`;
+            addDoc(collection(db, 'ausencias'), stampEmpresaId({
+                employeeId: shift.employeeId, employeeName: shift.employeeName || '',
+                startDate: _dateStr, endDate: _dateStr,
+                type: 'Retiro Anticipado', absenceType: 'AA',
+                origin: 'INTERRUPTION', shiftId: shift.id,
+                objectiveId: shift.objectiveId || null, objectiveName: shift.objectiveName || null,
+                positionName: shift.positionName || null,
+                reason: `Retiro anticipado — ${shift.objectiveName || ''} (${shift.positionName || ''})`,
+                status: 'Confirmada', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, shiftEmpresaId)).catch(() => {});
             // Bitácora
             {
                 const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
@@ -639,6 +591,11 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                             {formatDateShort(item.shiftDateObj)} · {formatTimeSimple(item.shiftDateObj)}–{formatTimeSimple(item.endDateObj)}
                         </span>
                     )}
+                    {item.horasYaTrabajadas !== undefined && (
+                        <span className={`text-[10px] font-bold ${item.horasYaTrabajadas >= 10 ? 'text-rose-600' : item.horasYaTrabajadas >= 8 ? 'text-amber-600' : 'text-slate-500'}`}>
+                            {item.horasYaTrabajadas.toFixed(1)}h trabajadas · puede {Math.max(0, 12 - item.horasYaTrabajadas).toFixed(1)}h más
+                        </span>
+                    )}
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -658,6 +615,73 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [showNoCoverage, setShowNoCoverage] = useState(false);
     const [noCoverageNotes, setNoCoverageNotes] = useState('');
     const [noCoverageLoading, setNoCoverageLoading] = useState(false);
+    const [swapConfirm, setSwapConfirm] = useState<any>(null);
+    const [swapLoading, setSwapLoading] = useState(false);
+    const [pendingConvocatorias, setPendingConvocatorias] = useState<any[]>([]);
+    const [convocatoriaLoading, setConvocatoriaLoading] = useState<string | null>(null);
+    const [currentStep, setCurrentStep] = useState(0);
+    const [stepActionSent, setStepActionSent] = useState(false);
+
+    // Reset de paso al cambiar de turno ausente
+    useEffect(() => { setCurrentStep(0); setStepActionSent(false); }, [absenceShift?.id]);
+
+    // Suscripción en tiempo real a convocatorias pendientes para esta vacante
+    useEffect(() => {
+        if (!isOpen || !absenceShift?.id) { setPendingConvocatorias([]); return; }
+        // PENDING: esperando dentro del timeout · ESCALATED: timeout vencido pero aún activa
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('shiftId', '==', absenceShift.id),
+            where('status', 'in', ['PENDING', 'ESCALATED']),
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            setPendingConvocatorias(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        }, (err) => console.error('[convocatoria modal]', err));
+        return () => unsub();
+    }, [isOpen, absenceShift?.id]);
+
+    const handleConvocarConvocatoria = async (candidateEmployeeId: string, type: string, extraData?: Record<string, string>) => {
+        if (!absenceShift?.id || !empresaId) return;
+        setConvocatoriaLoading(type + '_' + candidateEmployeeId);
+        try {
+            // Materializar turno virtual antes de convocar: la callable busca en Firestore por ID real
+            let shiftId = absenceShift.id;
+            const isVirtualId = absenceShift.isVirtual || String(shiftId).startsWith('V124_') || String(shiftId).startsWith('SLA_GAP');
+            if (isVirtualId) {
+                const newRef = doc(collection(db, 'turnos'));
+                await setDoc(newRef, stampEmpresaId({
+                    clientId: absenceShift.clientId || null,
+                    clientName: absenceShift.clientName || null,
+                    objectiveId: absenceShift.objectiveId || null,
+                    objectiveName: absenceShift.objectiveName || null,
+                    positionName: absenceShift.positionName || null,
+                    employeeId: 'VACANTE', employeeName: 'VACANTE',
+                    startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+                    endTime: Timestamp.fromDate(toDate(absenceShift.endDateObj)),
+                    status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
+                    origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
+                }, String(absenceShift.empresaId || empresaId || '').trim()));
+                shiftId = newRef.id;
+            }
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'crearConvocatoriaCobertura');
+            await fn({ shiftId, candidateEmployeeId, type, empresaId, ...extraData });
+            toast.success('Convocatoria enviada — esperando respuesta del guardia');
+        } catch (e: any) {
+            toast.error('Error al convocar: ' + (e?.message || String(e)));
+        } finally {
+            setConvocatoriaLoading(null);
+        }
+    };
+
+    const handleCancelarConvocatoria = async (convId: string) => {
+        try {
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'cancelarConvocatoriaCobertura');
+            await fn({ convocatoriaId: convId });
+            toast.info('Convocatoria cancelada');
+        } catch (e: any) {
+            toast.error('Error: ' + (e?.message || String(e)));
+        }
+    };
 
     if (!isOpen || !absenceShift) return null;
     if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
@@ -680,10 +704,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         if (s.objectiveId !== absenceShift.objectiveId) return false;
         if (s.positionName !== absenceShift.positionName) return false;
         if (s.id === absenceShift.id) return false;
-        // Verificar que el turno ya empezó (no mostrar turnos futuros)
         const shiftStartMs = s.shiftDateObj ? toDate(s.shiftDateObj).getTime() : 0;
         return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
-    });
+    }).map((s: any) => ({
+        ...s,
+        horasYaTrabajadas: Math.max(0, (now.getTime() - toDate(s.shiftDateObj).getTime()) / 3600000),
+    }));
 
     // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición — HOY únicamente
     const adelanto = logic.processedData.filter((s: any) =>
@@ -720,7 +746,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por experiencia, luego cercanía
     const busyIds = new Set(
-        logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
+        logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now)).map((s: any) => s.employeeId)
     );
     const retenes = (logic.employees || [])
         .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // â† excluir restringidos
@@ -762,11 +788,57 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         })
         .slice(0, 12);
 
+    // RET pasivos: mismo objetivo, turno con code='RET' hoy, en standby
+    const retPasivos = logic.processedData
+        .filter((s: any) => {
+            if (s.isCompleted || s.isPresent) return false;
+            if ((s.code || '').toUpperCase() !== 'RET') return false;
+            if (s.objectiveId !== absenceShift.objectiveId) return false;
+            if (!isSameDay(s.shiftDateObj, now)) return false;
+            return true;
+        })
+        .map((s: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
+        });
+
+    // ESC: mismo objetivo, turno con code='ESC' hoy, redirigible al puesto
+    const escuelas = logic.processedData
+        .filter((s: any) => {
+            if (s.isCompleted) return false;
+            if ((s.code || '').toUpperCase() !== 'ESC') return false;
+            if (s.objectiveId !== absenceShift.objectiveId) return false;
+            if (!isSameDay(s.shiftDateObj, now)) return false;
+            return true;
+        })
+        .map((s: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+            return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
+        });
+
     const openLocalWA = (item: any) => {
         const nombre = item.employeeName || item.fullName || '';
         const ph = item.phone || item.celular || '';
         setLocalWa({ isOpen: true, ctx: { employeeName: nombre, phone: ph, objectiveName: absenceShift.objectiveName, horaInicio: hiStart, horaFin: hiEnd } });
     };
+
+    // 5. PERMUTA: turnos futuros (próximos 7 días) mismo objetivo — solo cuando hay guardia ausente real
+    const hasRealAbsentEmployee = absenceShift.employeeId && absenceShift.employeeId !== 'VACANTE';
+    const permutaCandidates = hasRealAbsentEmployee
+        ? logic.processedData
+            .filter((s: any) => {
+                if (!s.employeeId || s.employeeId === 'VACANTE') return false;
+                if (s.id === absenceShift.id) return false;
+                if (s.objectiveId !== absenceShift.objectiveId) return false;
+                if (s.isCompleted || s.isAbsent || s.isFranco || s.isUnassigned) return false;
+                if (s.positionName !== absenceShift.positionName) return false;
+                const shiftDate = toDate(s.shiftDateObj);
+                const cutoff = new Date(); cutoff.setDate(cutoff.getDate() + 7);
+                return shiftDate > now && shiftDate <= cutoff;
+            })
+            .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
+            .slice(0, 8)
+        : [];
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
 
@@ -914,6 +986,172 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         finally { setLoading(null); }
     };
 
+    const handleActivateRet = async (s: any) => {
+        setLoading('retpas_' + s.id);
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'turnos', s.id), {
+                isRetentionActivated: true,
+                activatedForAbsenceId: absenceShift.id,
+                activatedAt: serverTimestamp(),
+                activatedBy: 'OPERACIONES',
+            });
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                userId: s.employeeId, type: 'RET_ACTIVADO', title: 'Retén activado',
+                read: false,
+                body: `Procedé al puesto ${absenceShift.positionName} en ${absenceShift.objectiveName} — retención activada.`,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, createdAt: serverTimestamp(),
+            }, tenantId(s)));
+            markCoverageResolved(batch, 'RET_PASIVO', s);
+            await batch.commit();
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                type: 'RET_ACTIVADO', title: 'Retén pasivo activado', status: 'pending',
+                employeeId: s.employeeId, employeeName: s.employeeName || s.fullName,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, description: `${s.employeeName || s.fullName} activado (RET) en ${absenceShift.objectiveName}`,
+                createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, tenantId(s)));
+            toast.success(`${s.employeeName || s.fullName} activado como retén`);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setLoading(null); }
+    };
+
+    const handleActivateEsc = async (s: any) => {
+        setLoading('esc_' + s.id);
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, 'turnos', s.id), {
+                isEscRedirected: true,
+                redirectedForAbsenceId: absenceShift.id,
+                redirectedAt: serverTimestamp(),
+                redirectedBy: 'OPERACIONES',
+            });
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                userId: s.employeeId, type: 'ESC_REDIRIGIDO', title: 'Escuela redirigida',
+                read: false,
+                body: `Tu turno de escuela fue redirigido al puesto ${absenceShift.positionName} en ${absenceShift.objectiveName}.`,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, createdAt: serverTimestamp(),
+            }, tenantId(s)));
+            markCoverageResolved(batch, 'ESCUELA', s);
+            await batch.commit();
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                type: 'ESC_REDIRIGIDO', title: 'Escuela redirigida al puesto', status: 'pending',
+                employeeId: s.employeeId, employeeName: s.employeeName || s.fullName,
+                objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+                shiftId: s.id, description: `${s.employeeName || s.fullName} redirigido desde ESC en ${absenceShift.objectiveName}`,
+                createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, tenantId(s)));
+            toast.success(`${s.employeeName || s.fullName} redirigido desde escuela`);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setLoading(null); }
+    };
+
+    const handlePermuta = async () => {
+        if (!swapConfirm) return;
+        setSwapLoading(true);
+        try {
+            const absDateStr = (absenceShift.scheduleDate as string | undefined) || toDate(absenceShift.shiftDateObj).toISOString().slice(0, 10);
+            const tgtDateStr = (swapConfirm.scheduleDate as string | undefined) || toDate(swapConfirm.shiftDateObj).toISOString().slice(0, 10);
+            const actorName = getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+            const batch = writeBatch(db);
+            const swapRef = doc(collection(db, 'swap_requests'));
+            batch.set(swapRef, stampEmpresaId({
+                status: 'PENDING_SUPERVISOR',
+                objectiveId: absenceShift.objectiveId || '',
+                objectiveName: absenceShift.objectiveName || '',
+                requesterId: absenceShift.employeeId,
+                requesterUid: null,
+                requesterName: absenceShift.employeeName || '',
+                targetId: swapConfirm.employeeId,
+                targetUid: null,
+                targetName: swapConfirm.employeeName || '',
+                requesterShiftId: absenceShift.id,
+                targetShiftId: swapConfirm.id,
+                requesterShiftDate: absDateStr,
+                targetShiftDate: tgtDateStr,
+                requesterClientName: absenceShift.clientName || '',
+                requesterObjectiveName: absenceShift.objectiveName || '',
+                requesterPositionName: absenceShift.positionName || '',
+                targetClientName: swapConfirm.clientName || absenceShift.clientName || '',
+                targetObjectiveName: swapConfirm.objectiveName || absenceShift.objectiveName || '',
+                targetPositionName: swapConfirm.positionName || absenceShift.positionName || '',
+                initiatedByOperaciones: true,
+                initiatedByActorName: actorName,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+            }, tenantId(absenceShift)));
+            batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({
+                employeeId: swapConfirm.employeeId,
+                type: 'SWAP_REQUEST',
+                title: 'Permuta propuesta por Operaciones',
+                body: `Operaciones propone que cubrás el turno de ${absenceShift.employeeName || 'un guardia'} (${hiStart}–${hiEnd}). Tu turno del ${tgtDateStr} se intercambiaría. Pendiente de supervisión.`,
+                read: false,
+                createdAt: serverTimestamp(),
+            }, tenantId(absenceShift)));
+            await batch.commit();
+            toast.success(`Permuta propuesta a ${swapConfirm.employeeName} — pendiente de aprobación del supervisor`);
+            setSwapConfirm(null);
+            onClose();
+        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        finally { setSwapLoading(false); }
+    };
+
+    // Pasos activos: solo los que tienen candidatos (se muestran de a uno)
+    const stepDefs = [
+        retencion.length > 0 ? {
+            key: 'ret', colorClass: 'text-orange-700', badgeClass: 'bg-orange-500',
+            title: 'Retención · Guardia presente en el objetivo',
+            warning: adelanto.length === 0 ? 'Sin turno siguiente planificado — la retención no garantiza cobertura continua' : null,
+            node: <div className="space-y-1.5">{retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>{handleRetener(s);setStepActionSent(true);}} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        adelanto.length > 0 ? {
+            key: 'adel', colorClass: 'text-indigo-700', badgeClass: 'bg-indigo-500',
+            title: 'Adelanto · Próximo turno planificado', warning: null,
+            node: <div className="space-y-1.5">{adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'ADVANCE',{advanceShiftId:s.id});setStepActionSent(true);}} label={convocatoriaLoading===`ADVANCE_${s.employeeId}`?'Enviando...':'CONVOCAR'} color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        retPasivos.length > 0 ? {
+            key: 'retpas', colorClass: 'text-amber-700', badgeClass: 'bg-amber-500',
+            title: 'Retención Pasiva · Guardia en standby (RET)', warning: null,
+            node: <div className="space-y-1.5">{retPasivos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'retpas_'+s.id} onAction={()=>{handleActivateRet(s);setStepActionSent(true);}} label="ACTIVAR" color="bg-amber-500 hover:bg-amber-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        escuelas.length > 0 ? {
+            key: 'esc', colorClass: 'text-teal-700', badgeClass: 'bg-teal-500',
+            title: 'Escuela · Redirigir turno ESC al puesto', warning: null,
+            node: <div className="space-y-1.5">{escuelas.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'esc_'+s.id} onAction={()=>{handleActivateEsc(s);setStepActionSent(true);}} label="REDIRIGIR" color="bg-teal-600 hover:bg-teal-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        retenes.length > 0 ? {
+            key: 'sinturno', colorClass: 'text-slate-700', badgeClass: 'bg-slate-600',
+            title: 'Sin Turno · Disponibles hoy', warning: null,
+            node: <div className="space-y-1.5">{retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>{handleConvocarConvocatoria(e.id,'SIN_TURNO_CON_EXP');setStepActionSent(true);}} label={convocatoriaLoading===`SIN_TURNO_CON_EXP_${e.id}`?'Enviando...':'CONVOCAR'} color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        francos.length > 0 ? {
+            key: 'ft', colorClass: 'text-blue-700', badgeClass: 'bg-blue-500',
+            title: 'Francos · Día libre (FT)', warning: null,
+            node: <div className="space-y-1.5">{francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'FT');setStepActionSent(true);}} label={convocatoriaLoading===`FT_${s.employeeId}`?'Enviando...':'CONVOCAR FT'} color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+        } : null,
+        (hasRealAbsentEmployee && permutaCandidates.length > 0) ? {
+            key: 'permuta', colorClass: 'text-violet-700', badgeClass: 'bg-violet-500',
+            title: 'Permuta · Intercambio de turno', warning: null,
+            node: <div className="space-y-1.5">{permutaCandidates.map((s: any) => (
+                <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
+                    <div className="flex-1 min-w-0">
+                        <p className="font-bold text-slate-800 text-sm truncate">{s.employeeName}</p>
+                        <p className="text-[11px] text-violet-600 font-mono">{formatDateShort(s.shiftDateObj)} · {formatTimeSimple(s.shiftDateObj)}–{formatTimeSimple(s.endDateObj)}</p>
+                    </div>
+                    <button onClick={() => setSwapConfirm(s)} className="shrink-0 px-3 py-1.5 bg-violet-600 hover:bg-violet-700 text-white text-[11px] font-bold rounded-lg transition-colors">PROPONER</button>
+                </div>
+            ))}</div>,
+        } : null,
+    ].filter(Boolean) as { key: string; colorClass: string; badgeClass: string; title: string; warning: string | null; node: React.ReactNode }[];
+    const safeStep = Math.min(currentStep, Math.max(0, stepDefs.length - 1));
+    const activeStep = stepDefs[safeStep] || null;
+    const isLastStep = safeStep >= stepDefs.length - 1;
+    const goNext = () => { setCurrentStep(s => Math.min(s + 1, stepDefs.length - 1)); setStepActionSent(false); };
+
     return (
         <>
             <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
@@ -942,22 +1180,84 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                         </span>
                     </div>
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
-                        <CoverageSection num="1" title="Retención · Guardia presente en el objetivo" colorClass="text-orange-700" badgeClass="bg-orange-500"
-                            empty="No hay guardias presentes en este objetivo."
-                            items={retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>handleRetener(s)} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="2" title="Adelanto · Próximo turno planificado" colorClass="text-indigo-700" badgeClass="bg-indigo-500"
-                            empty="No hay turno próximo planificado."
-                            items={adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>handleAdelantar(s)} label="ADELANTAR" color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="3" title="Retenes · Sin turno hoy" colorClass="text-slate-700" badgeClass="bg-slate-600"
-                            empty="No hay retenes disponibles."
-                            items={retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>handleReten(e)} label="CONVOCAR" color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}
-                        />
-                        <CoverageSection num="4" title="Francos · Día libre" colorClass="text-blue-700" badgeClass="bg-blue-500"
-                            empty="No hay francos disponibles hoy."
-                            items={francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>handleFranco(s)} label="CONVOCAR FT" color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}
-                        />
+                        {/* ── Convocatorias en curso ── */}
+                        {pendingConvocatorias.length > 0 && (
+                            <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 space-y-2">
+                                <p className="text-[10px] font-black uppercase text-amber-700 flex items-center gap-1.5">
+                                    <AlarmClock size={11}/> Convocatorias en curso
+                                </p>
+                                {pendingConvocatorias.map((c: any) => {
+                                    const typeLabel: Record<string, string> = { RET: 'RET', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Sin turno', EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Sin turno', FT: 'FT' };
+                                    const timeoutDate = c.timeoutAt?.seconds ? new Date(c.timeoutAt.seconds * 1000) : null;
+                                    const minsLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - Date.now()) / 60000)) : null;
+                                    return (
+                                        <div key={c.id} className="flex items-center justify-between gap-2 bg-white border border-amber-200 rounded-lg px-3 py-2">
+                                            <div>
+                                                <span className="text-xs font-bold text-slate-800">{c.candidateEmployeeName}</span>
+                                                <span className="text-[10px] text-slate-500 ml-1.5">({typeLabel[c.type] || c.type})</span>
+                                                {c.status === 'ESCALATED' ? (
+                                                    <span className="text-[10px] text-orange-500 ml-1.5">· esperando aún</span>
+                                                ) : minsLeft !== null && minsLeft > 0 ? (
+                                                    <span className="text-[10px] text-amber-600 ml-1.5">· {minsLeft}m restantes</span>
+                                                ) : null}
+                                            </div>
+                                            <button
+                                                onClick={() => handleCancelarConvocatoria(c.id)}
+                                                className="text-[10px] text-rose-600 hover:text-rose-800 font-bold uppercase px-2 py-1 rounded border border-rose-200 hover:bg-rose-50 transition-colors"
+                                            >
+                                                Cancelar
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
+
+                        {/* ── Protocolo paso a paso ── */}
+                        {stepDefs.length === 0 ? (
+                            <div className="text-center py-8 text-slate-400 text-xs">
+                                No hay opciones de cobertura disponibles en este momento.
+                            </div>
+                        ) : (
+                            <div className="space-y-3">
+                                {/* Barra de progreso por pasos */}
+                                <div className="flex items-center gap-1">
+                                    {stepDefs.map((step, i) => (
+                                        <button key={step.key} onClick={() => { setCurrentStep(i); setStepActionSent(false); }}
+                                            className={`flex-1 h-1.5 rounded-full transition-all ${i === safeStep ? step.badgeClass : i < safeStep ? 'bg-slate-300' : 'bg-slate-100'}`}
+                                            title={step.title}
+                                        />
+                                    ))}
+                                </div>
+                                <div className="flex items-center justify-between">
+                                    <span className={`text-[10px] font-black uppercase tracking-wider ${activeStep?.colorClass}`}>
+                                        Paso {safeStep + 1} de {stepDefs.length} · {activeStep?.title}
+                                    </span>
+                                </div>
+                                {activeStep?.warning && (
+                                    <div className="flex items-start gap-1.5 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-2 text-[11px] text-amber-700">
+                                        <AlertTriangle size={12} className="shrink-0 mt-0.5"/>
+                                        <span>{activeStep.warning}</span>
+                                    </div>
+                                )}
+                                {activeStep?.node}
+                                <div className="flex items-center gap-2 pt-1">
+                                    {safeStep > 0 && (
+                                        <button onClick={() => { setCurrentStep(s => s - 1); setStepActionSent(false); }}
+                                            className="text-[11px] text-slate-500 hover:text-slate-700 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white">
+                                            ← Anterior
+                                        </button>
+                                    )}
+                                    <div className="flex-1"/>
+                                    {!isLastStep && (
+                                        <button onClick={goNext}
+                                            className={`px-3 py-1.5 text-[11px] font-bold rounded-lg border transition-colors ${stepActionSent ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'}`}>
+                                            {stepActionSent ? '✓ Enviado · Siguiente →' : 'Siguiente paso →'}
+                                        </button>
+                                    )}
+                                </div>
+                            </div>
+                        )}
                         {/* Sin Cobertura — última medida */}
                         <div className="border-t border-slate-200 pt-4">
                             {!showNoCoverage ? (
@@ -1016,6 +1316,31 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 </div>
             </div>
             <WAComposeModal isOpen={localWa.isOpen} onClose={() => setLocalWa(d => ({...d, isOpen: false}))} ctx={localWa.ctx}/>
+            {/* Confirmación de permuta */}
+            {swapConfirm && (
+                <div className="fixed inset-0 z-[9100] bg-slate-900/60 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
+                        <p className="font-black text-slate-800 text-sm mb-3 flex items-center gap-2"><ArrowLeftRight size={15} className="text-violet-600"/> Confirmar permuta</p>
+                        <p className="text-xs text-slate-600 mb-1">
+                            <span className="font-bold text-violet-700">{swapConfirm.employeeName}</span> cubrirá el turno de{' '}
+                            <span className="font-bold">{absenceShift.employeeName}</span> — hoy {hiStart}–{hiEnd}.
+                        </p>
+                        <p className="text-xs text-slate-600 mb-4">
+                            Su turno del <span className="font-bold">{formatDateShort(swapConfirm.shiftDateObj)}</span> ({formatTimeSimple(swapConfirm.shiftDateObj)}–{formatTimeSimple(swapConfirm.endDateObj)}) pasará a{' '}
+                            <span className="font-bold">{absenceShift.employeeName}</span> cuando regrese.
+                        </p>
+                        <p className="text-[10px] text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 mb-4">
+                            ⏳ La permuta queda pendiente de aprobación del supervisor en Planificación.
+                        </p>
+                        <div className="flex gap-2">
+                            <button onClick={handlePermuta} disabled={swapLoading} className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl text-xs font-bold hover:bg-violet-700 disabled:opacity-60 transition-colors">
+                                {swapLoading ? 'Guardando...' : 'CONFIRMAR PERMUTA'}
+                            </button>
+                            <button onClick={() => setSwapConfirm(null)} disabled={swapLoading} className="px-4 py-2.5 bg-white border border-slate-200 text-slate-500 rounded-xl text-xs font-bold hover:bg-slate-50 transition-colors">Cancelar</button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </>
     );
 };
@@ -1311,6 +1636,7 @@ const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => {
 // â"€â"€ Popup de detalle de novedad â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
+    AUSENCIA_OPERATIVA:           { label: 'AUSENCIA',        bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
     AUSENCIA_CORTO_PLAZO:         { label: 'URGENTE',         bg: 'bg-red-600',    text: 'text-white',     border: 'border-red-500' },
     AVISO_AUSENCIA_ANTICIPADA:    { label: 'ANTICIPADA',      bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
     VACANTE_PROTOCOLO_COBERTURA:  { label: 'PROTOCOLO',       bg: 'bg-orange-500', text: 'text-white',     border: 'border-orange-400' },
@@ -1324,19 +1650,32 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     RRHH_NOVEDAD:                 { label: 'RRHH',            bg: 'bg-purple-600', text: 'text-white',     border: 'border-purple-500' },
     REFUERZO_CLIENTE_PENDIENTE:   { label: 'REFUERZO CLIENTE', bg: 'bg-violet-600', text: 'text-white',   border: 'border-violet-500' },
     VACANTE_OPERATIVA:            { label: 'VACANTE RFZ/TURA', bg: 'bg-fuchsia-600', text: 'text-white', border: 'border-fuchsia-500' },
+    TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
+    LLEGADA_TARDE:                { label: 'LLEGADA TARDE',   bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
+    COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
+    TURNO_COMPLETADO_AUTO:        { label: 'TURNO FIN',       bg: 'bg-slate-600',  text: 'text-white',     border: 'border-slate-500' },
+    INGRESO_AUTOREGISTRO:         { label: 'INGRESO',         bg: 'bg-teal-600',   text: 'text-white',     border: 'border-teal-500' },
 };
 const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 
-const AUTO_CLOSE_MS = 3000;
+/** Auto-cierre solo en informativas cortas; al abrir VER no apurar al operador. */
+const AUTO_CLOSE_MS = 10000;
 
 const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
-    const [remaining, setRemaining] = React.useState(AUTO_CLOSE_MS);
+    const isInfo = isInformationalNovedad(novedad);
+    const autoMs = isInfo ? 0 : AUTO_CLOSE_MS;
+    const [remaining, setRemaining] = React.useState(autoMs || AUTO_CLOSE_MS);
     const intervalRef = React.useRef<any>(null);
     const meta = TYPE_META[novedad?.type] ?? DEFAULT_META;
+    const actor = novedadActorName(novedad);
+    const body = novedadBodyText(novedad) || novedadSubline(novedad);
 
     React.useEffect(() => {
-        if (!novedad) return;
-        setRemaining(AUTO_CLOSE_MS);
+        if (!novedad || !autoMs) {
+            clearInterval(intervalRef.current);
+            return;
+        }
+        setRemaining(autoMs);
         const tick = 50;
         intervalRef.current = setInterval(() => {
             setRemaining(r => {
@@ -1345,15 +1684,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
             });
         }, tick);
         return () => clearInterval(intervalRef.current);
-    }, [novedad?.id]);
+    }, [novedad?.id, autoMs]);
 
     if (!novedad) return null;
 
     const ts = novedad.createdAt?.seconds ? new Date(novedad.createdAt.seconds * 1000) : null;
-    const pct = (remaining / AUTO_CLOSE_MS) * 100;
+    const pct = autoMs ? (remaining / autoMs) * 100 : 100;
 
     const pause = () => clearInterval(intervalRef.current);
     const resume = () => {
+        if (!autoMs) return;
         clearInterval(intervalRef.current);
         const tick = 50;
         intervalRef.current = setInterval(() => {
@@ -1379,16 +1719,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                 <div className="h-1 w-full bg-white/10">
                     <div
                         className={`h-full ${meta.bg} transition-none`}
-                        style={{ width: `${pct}%`, transition: 'width 50ms linear' }}
+                        style={{ width: `${pct}%`, transition: autoMs ? 'width 50ms linear' : undefined }}
                     />
                 </div>
 
                 {/* Header */}
-                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between`}>
+                <div className={`${meta.bg} px-4 py-3 flex items-center justify-between gap-2`}>
                     <span className={`text-xs font-black uppercase tracking-widest ${meta.text}`}>
-                        {novedad.title ? String(novedad.title).slice(0, 48) : meta.label}
+                        {meta.label}
                     </span>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                         {ts && (
                             <span className="text-[10px] font-mono text-white/70">
                                 {ts.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })}
@@ -1400,20 +1740,18 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
 
                 {/* Cuerpo */}
                 <div className="px-5 py-4 space-y-3">
-                    {/* Empleado */}
-                    {novedad.employeeName && (
+                    {actor && (
                         <div className="flex items-center gap-2">
                             <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center text-sm font-black text-white shrink-0">
-                                {novedad.employeeName[0]?.toUpperCase()}
+                                {actor[0]?.toUpperCase()}
                             </div>
-                            <div>
-                                <p className="text-white font-black text-sm leading-tight">{novedad.employeeName}</p>
+                            <div className="min-w-0">
+                                <p className="text-white font-black text-sm leading-tight truncate">{actor}</p>
                                 {novedad.positionName && <p className="text-white/50 text-[10px]">{novedad.positionName}</p>}
                             </div>
                         </div>
                     )}
 
-                    {/* Objetivo */}
                     {novedad.objectiveName && (
                         <div className="flex items-center gap-2 bg-white/5 rounded-lg px-3 py-2">
                             <MapPin size={13} className="text-white/40 shrink-0"/>
@@ -1421,8 +1759,13 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         </div>
                     )}
 
-                    {/* Refuerzo / vacante cliente */}
-                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') && (
+                    {novedad.type === 'COBERTURA_RESUELTA' && novedad.coverageType && (
+                        <p className="text-[10px] font-black uppercase tracking-wide text-emerald-300/90">
+                            Tipo: {String(novedad.coverageType)}
+                        </p>
+                    )}
+
+                    {(novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA' || novedad.type === 'TURA_EXTENSION') && (
                         <div className="space-y-1.5 text-xs text-white/80">
                             {novedad.tipoSolicitud && (
                                 <p><span className="text-white/50">Tipo:</span> <span className="font-bold text-white">{novedad.tipoSolicitud}</span></p>
@@ -1445,14 +1788,14 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                         </div>
                     )}
 
-                    {/* Descripción completa */}
-                    {novedad.description && (
-                        <p className="text-white/70 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
-                            {novedad.description}
+                    {body ? (
+                        <p className="text-white/80 text-xs leading-relaxed border-l-2 border-white/20 pl-3">
+                            {body}
                         </p>
+                    ) : (
+                        <p className="text-white/40 text-xs italic">Sin detalle adicional en esta alerta.</p>
                     )}
 
-                    {/* Tiempo al turno */}
                     {novedad.minutesBeforeShift != null && novedad.minutesBeforeShift > 0 && (
                         <div className="flex items-center gap-1.5 text-amber-400">
                             <Clock size={12}/>
@@ -1464,14 +1807,16 @@ const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onC
                 {/* Footer: acción + auto-cierre */}
                 <div className="px-4 pb-4 flex items-center justify-between gap-3">
                     <span className="text-white/30 text-[10px]">
-                        Cerrando en {Math.ceil(remaining / 1000)}s · hover para pausar
+                        {autoMs
+                            ? `Cerrando en ${Math.ceil(remaining / 1000)}s · hover para pausar`
+                            : 'Confirmá lectura para quitarla de Alertas'}
                     </span>
                     <button
                         onClick={() => { onAtender(novedad); onClose(); }}
                         className={`flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-black text-white transition-all hover:scale-105 ${meta.bg}`}
                     >
                         <CheckCircle size={13}/>
-                        ATENDER
+                        {isInfo ? 'ENTENDIDO' : 'ATENDER'}
                     </button>
                 </div>
             </div>
@@ -1583,10 +1928,42 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
+/** Solo turnos realmente de evento (EV). No alcanza con eventoId suelto en un M/T/N. */
+const isEventShift = (shift: any): boolean => {
+    const code = String(shift?.code || '').trim().toUpperCase();
+    const origin = String(shift?.origin || '').trim().toUpperCase();
+    return code === 'EV' || origin === 'EVENTO';
+};
+
+const getEventGroupKey = (shift: any): string => {
+    const eventoId = String(shift?.eventoId || '').trim();
+    const servicioId = String(shift?.servicioId || '').trim();
+    if (eventoId || servicioId) return `EV_${eventoId || 'sin_evento'}_${servicioId || 'sin_servicio'}`;
+    const eventoNombre = String(shift?.eventoNombre || '').trim();
+    const servicioNombre = String(shift?.servicioNombre || '').trim();
+    return `EVNAME_${eventoNombre || 'evento'}_${servicioNombre || 'servicio'}`;
+};
+
+const getEventGroupLabel = (shift: any): string => {
+    const evento = String(shift?.eventoNombre || '').trim() || 'Evento sin nombre';
+    const servicio = String(shift?.servicioNombre || '').trim();
+    if (servicio) return `Evento: ${evento} · ${servicio}`;
+    return `Evento: ${evento}`;
+};
+
+/** En EV mostrar el servicio del evento, no el puesto SLA que quedó pegado al convertir. */
+const shiftPostLabel = (shift: any): string => {
+    if (isEventShift(shift)) {
+        return String(shift?.servicioNombre || shift?.eventoNombre || shift?.positionName || 'Evento').trim();
+    }
+    return String(shift?.positionName || '—').trim();
+};
+
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
-    if (shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
+    if (shift.isUnassigned && shift.isReportedToPlanning)   { accentColor = 'bg-slate-500';   rowBg = 'bg-slate-50'; }
+    else if (shift.isDescubierto || shift.isSinCobertura) { accentColor = 'bg-slate-400'; rowBg = 'bg-slate-50'; }
     else if (shift.isResolvedByOps)   { accentColor = 'bg-indigo-500';  rowBg = 'bg-indigo-50/40'; }
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
@@ -1609,24 +1986,41 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
-    const canCover = !!(shift.isOperationalVacancy ?? (shift.isUnassigned && !shift.isReportedToPlanning));
+    const canCover = isActionableOpsVacancy(shift);
     // Devolver a planificación: solo vacantes NO originadas por ausencia, dentro de las 12h previas al inicio
     const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
     const canReturn = canCover && shift.vacancyOrigin !== 'ABSENCE' && hoursUntilStart <= 12;
 
-    let name = shift.isUnassigned ? (shift.employeeName || 'VACANTE') : (shift.employeeName || 'Desconocido');
-    if (shift.isReportedToPlanning) name = name.replace('VACANTE: ', '');
+    let name = shift.isUnassigned
+        ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
+        : (shift.employeeName || 'Desconocido');
+    if (shift.isUnassigned && shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
+    if (shift.isDescubierto || shift.isSinCobertura) {
+        name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
+    }
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
 
     // Badge de estado
     let badge = null;
-    if (shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
-    else if (refuerzoLabel && shift.isUnassigned) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-fuchsia-600 text-white shrink-0">VACANTE {refuerzoLabel}</span>;
+    if (shift.isUnassigned && shift.isReportedToPlanning)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white flex items-center gap-0.5 shrink-0"><CornerUpLeft size={8}/> DEVUELTO</span>;
+    else if (shift.isDescubierto || shift.isSinCobertura) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0">DESCUBIERTO</span>;
+    else if (shift.isTuraCutSegment) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-700 text-white shrink-0">TURA 2º tramo</span>;
+    else if (refuerzoLabel && shift.isUnassigned) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 bg-fuchsia-600`}>{`VACANTE ${refuerzoLabel}`}</span>;
     else if (refuerzoLabel) badge = <span className={`text-[9px] font-black px-1.5 py-0.5 rounded text-white shrink-0 ${refuerzoLabel === 'TURA' ? 'bg-violet-600' : 'bg-red-600'}`}>{refuerzoLabel}</span>;
+    else if (shift.turaContiguous) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0" title={shift.turaExtensionRange ? `Bloque ${shift.turaExtensionRange}` : 'TURA seguido'}>TURA seguido</span>;
     else if (shift.isUnassigned && shift.isPartialPlannedCoverage) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">PARCIAL PLAN</span>;
-    else if (shift.isUnassigned)     badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
+    else if (shift.isUnassigned) {
+        const vOrigin = String(shift.origin || shift.vacancyOrigin || '');
+        if (vOrigin === 'VACANTE_CORRECCION')   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-700 text-white shrink-0">CORRECCIÓN PLAN</span>;
+        else if (vOrigin === 'VACANTE_POR_EVENTO') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-purple-600 text-white shrink-0">POR EVENTO</span>;
+        else if (vOrigin === 'VACANTE_POR_AUSENCIA' || vOrigin === 'ABSENCE') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">POR AUSENCIA</span>;
+        else if (vOrigin === 'RRHH_NOVEDAD')    badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-600 text-white shrink-0">NOVEDAD RRHH</span>;
+        else if (vOrigin === 'NO_PLANNING' || vOrigin === 'SIN_PLANIFICAR') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white shrink-0">SIN PLANIFICAR</span>;
+        else if (vOrigin === 'INTERRUPTION') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-700 text-white shrink-0">RETIRO ANTICIP.</span>;
+        else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
+    }
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
@@ -1644,6 +2038,16 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
+    const dayTag = opsShiftDayLabel(shift.shiftDateObj, now);
+    const dayTagEl = dayTag.key === 'hoy'
+        ? null
+        : <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${dayTag.key === 'manana' ? 'bg-sky-600 text-white' : 'bg-slate-500 text-white'}`}>{dayTag.label}</span>;
+    const dayInlineClass = dayTag.key === 'hoy'
+        ? 'text-slate-400'
+        : dayTag.key === 'manana'
+            ? 'text-sky-600'
+            : 'text-amber-500';
+
     if (isCompact) return (
         <div className={`relative flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-200/80 mb-1 shadow-sm hover:shadow-md transition-all ${rowBg}`}>
             <div className={`absolute left-0 top-0 bottom-0 w-1 rounded-l-lg ${accentColor}`}/>
@@ -1652,20 +2056,21 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
             </div>
             <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-1.5 leading-tight">
-                    <span className={`text-[11px] font-black truncate ${shift.isUnassigned && !shift.isReportedToPlanning ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                    <span className={`text-[11px] font-black truncate ${isActionableOpsVacancy(shift) ? 'text-rose-600' : 'text-slate-800'}`}>{name}</span>
+                    {dayTagEl}
                     {badge}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
-                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shift.positionName}</span></span>
-                    <span className={`shrink-0 font-bold ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
-                    <span className="shrink-0 font-mono">{formatTimeRange(shift.shiftDateObj, shift.endDateObj)}</span>
+                    <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
+                    <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
+                    <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
                 {canCover && viewTab === 'VACANTES' && (<button onClick={() => onOpenCoverage(shift)} className="p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 transition-colors" title="Cubrir"><Siren size={12}/></button>)}
                 {canReturn && viewTab === 'VACANTES' && (<button onClick={handleReport} className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors" title="Devolver a planificación"><CornerUpLeft size={12}/></button>)}
-                {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
+                {shift.isUnassigned && shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
                     <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
@@ -1704,17 +2109,20 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">{badge}</div>
+                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}</div>
                 </div>
                 {/* Fila 2: objetivo · posición */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">
                     <MapPin size={10} className="text-indigo-400 shrink-0"/>
                     <span className="truncate font-medium">{shift.objectiveName}</span>
                     <span className="text-slate-300">·</span>
-                    <span className="text-indigo-600 font-bold truncate">{shift.positionName}</span>
+                    <span className="text-indigo-600 font-bold truncate">{shiftPostLabel(shift)}</span>
+                    {shift.turaContiguous && shift.turaImputationPos && (
+                        <span className="text-violet-600 font-bold shrink-0">+TURA {shift.turaImputationPos}</span>
+                    )}
                     <span className="ml-auto font-mono text-slate-600 shrink-0 flex items-center gap-1">
-                        <span className={`font-bold not-font-mono text-[9px] ${isSameDay(shift.shiftDateObj, now) ? 'text-slate-400' : 'text-amber-500'}`}>{isSameDay(shift.shiftDateObj, now) ? 'HOY' : formatDateShort(shift.shiftDateObj)}</span>
-                        {formatTimeRange(shift.shiftDateObj, shift.endDateObj)}
+                        <span className={`font-bold not-font-mono text-[9px] ${dayInlineClass}`}>{dayTag.label}</span>
+                        {displayShiftTimeRange(shift)}
                     </span>
                 </div>
                 {/* Franja retención */}
@@ -1743,7 +2151,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     {canReturn && viewTab === 'VACANTES' && (
                         <button onClick={handleReport} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-700 text-white rounded-lg text-[10px] font-bold hover:bg-slate-800 transition-colors"><CornerUpLeft size={11}/>DEVOLVER</button>
                     )}
-                    {shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
+                    {shift.isUnassigned && shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[10px] font-bold text-slate-500 uppercase flex items-center gap-1 px-2 py-1.5"><CornerUpLeft size={10}/>Devuelto</span>)}
                     {viewTab === 'PLAN' && (<>
                         {!shift.hasRRHHNovedad && <button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}><PlayCircle size={11}/>DAR PRESENTE</button>}
                         {shift.hasRRHHNovedad
@@ -1785,35 +2193,297 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
 };
 
-const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isAutoMode, isPublished }: any) => {
-    const [expanded, setExpanded] = useState(true);
-    return (
-        <div className={`bg-white rounded-xl border shadow-sm overflow-hidden mb-3 ${isPublished === false ? 'border-amber-300' : 'border-slate-300'}`}>
-            <div className={`px-3 py-2 border-b flex justify-between items-center cursor-pointer ${isPublished === false ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`} onClick={() => setExpanded(!expanded)}>
-                <div className="flex items-center gap-2 min-w-0">
-                    <div className="bg-slate-700 text-white w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0">{group.items.length}</div>
-                    <div className="min-w-0">
-                        <h4 className="font-black text-xs text-slate-800 uppercase truncate leading-tight">{group.name}</h4>
-                        {group.client && <span className="text-[9px] text-slate-400 font-medium truncate block leading-tight">{group.client}</span>}
+const splitShiftsByEvent = (items: any[]) => {
+    const regular: any[] = [];
+    const groups = new Map<string, { id: string; label: string; items: any[] }>();
+    (items || []).forEach((shift: any) => {
+        if (!isEventShift(shift)) {
+            regular.push(shift);
+            return;
+        }
+        const groupKey = getEventGroupKey(shift);
+        if (!groups.has(groupKey)) {
+            groups.set(groupKey, {
+                id: groupKey,
+                label: getEventGroupLabel(shift),
+                items: [],
+            });
+        }
+        groups.get(groupKey)!.items.push(shift);
+    });
+    const eventGroups = Array.from(groups.values()).sort((a, b) => a.label.localeCompare(b.label));
+    return { regular, eventGroups };
+};
+
+type ObjectivesSortMode = 'critico' | 'cliente' | 'nombre';
+
+const objectiveCardLabel = (o: { name?: string; label?: string }) =>
+    String(o.name || o.label || '').trim();
+
+const sortObjectiveCards = (a: any, b: any, mode: ObjectivesSortMode) => {
+    if (mode === 'critico') {
+        const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
+        const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+    }
+    if (mode === 'cliente') {
+        const byClient = String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' });
+        if (byClient !== 0) return byClient;
+        return objectiveCardLabel(a).localeCompare(objectiveCardLabel(b), 'es', { sensitivity: 'base' });
+    }
+    const byName = objectiveCardLabel(a).localeCompare(objectiveCardLabel(b), 'es', { sensitivity: 'base' });
+    if (byName !== 0) return byName;
+    return String(a.client || '').localeCompare(String(b.client || ''), 'es', { sensitivity: 'base' });
+};
+
+const findScrollParent = (el: HTMLElement | null): HTMLElement | null => {
+    let node = el?.parentElement ?? null;
+    while (node) {
+        const { overflowY } = window.getComputedStyle(node);
+        if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') return node;
+        node = node.parentElement;
+    }
+    return null;
+};
+
+/** Panel expandido pegado al objetivo: abajo abre ↓, objetivos inferiores abren ↑. */
+function ObjectiveExpandOverlay({
+    open,
+    anchorRef,
+    onClose,
+    title,
+    subtitle,
+    children,
+}: {
+    open: boolean;
+    anchorRef: RefObject<HTMLElement | null>;
+    onClose: () => void;
+    title?: string;
+    subtitle?: string;
+    children: ReactNode;
+}) {
+    const [style, setStyle] = useState<React.CSSProperties>({ visibility: 'hidden' });
+
+    useLayoutEffect(() => {
+        if (!open) return;
+
+        const update = () => {
+            const el = anchorRef.current;
+            if (!el) return;
+            const r = el.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const pad = 8;
+            const gap = 4;
+            const maxPanel = 280;
+            const width = Math.min(Math.max(r.width, 280), vw - pad * 2);
+            const left = Math.max(pad, Math.min(r.left, vw - width - pad));
+
+            const spaceBelow = vh - r.bottom - pad;
+            const spaceAbove = r.top - pad;
+            const cardMid = (r.top + r.bottom) / 2;
+            const openUp = cardMid > vh * 0.55 || (spaceBelow < spaceAbove && spaceBelow < maxPanel * 0.85);
+
+            if (openUp) {
+                const maxHeight = Math.min(maxPanel, Math.max(96, spaceAbove));
+                setStyle({
+                    position: 'fixed',
+                    bottom: vh - r.top + gap,
+                    top: 'auto',
+                    left,
+                    width,
+                    maxHeight,
+                    zIndex: 8000,
+                    visibility: 'visible',
+                });
+            } else {
+                const maxHeight = Math.min(maxPanel, Math.max(96, spaceBelow));
+                setStyle({
+                    position: 'fixed',
+                    top: r.bottom + gap,
+                    bottom: 'auto',
+                    left,
+                    width,
+                    maxHeight,
+                    zIndex: 8000,
+                    visibility: 'visible',
+                });
+            }
+        };
+
+        update();
+        const raf = requestAnimationFrame(update);
+        const scrollParent = findScrollParent(anchorRef.current);
+
+        window.addEventListener('scroll', update, true);
+        window.addEventListener('resize', update);
+        scrollParent?.addEventListener('scroll', update, { passive: true });
+
+        return () => {
+            cancelAnimationFrame(raf);
+            window.removeEventListener('scroll', update, true);
+            window.removeEventListener('resize', update);
+            scrollParent?.removeEventListener('scroll', update);
+        };
+    }, [open, anchorRef]);
+
+    if (!open || typeof document === 'undefined') return null;
+
+    return createPortal(
+        <>
+            <div className="fixed inset-0 z-[7990] bg-slate-900/25" onClick={onClose} aria-hidden />
+            <div
+                style={style}
+                className="flex flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl"
+            >
+                {(title || subtitle) && (
+                    <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-2 border-b border-indigo-700 bg-indigo-600 px-3 py-2 text-white">
+                        <div className="min-w-0">
+                            {title && <div className="truncate text-xs font-black uppercase leading-tight">{title}</div>}
+                            {subtitle && <div className="truncate text-[9px] font-medium text-indigo-200">{subtitle}</div>}
+                        </div>
+                        <button
+                            type="button"
+                            onClick={onClose}
+                            className="shrink-0 rounded-lg p-1.5 transition-colors hover:bg-indigo-500"
+                            title="Cerrar"
+                        >
+                            <X size={14} />
+                        </button>
                     </div>
-                    {isPublished === false && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 shrink-0">BORRADOR</span>}
-                </div>
-                {expanded ? <ChevronDown size={16} className="text-slate-400 shrink-0"/> : <ChevronRight size={16} className="text-slate-400 shrink-0"/>}
+                )}
+                <div className="min-h-0 flex-1 overflow-y-auto custom-scrollbar">{children}</div>
             </div>
-            {expanded && (
-                <div className="p-2 bg-slate-50 space-y-2">
-                    {group.items.map((s: any) => (
-                        <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} isAutoMode={isAutoMode}
-                            onOpenCheckout={(s: any) => modals.setCheckoutData({ isOpen: true, shift: s })}
-                            onOpenAttendance={(s: any) => modals.setAttendanceData({ isOpen: true, shift: s })}
-                            onOpenHandover={(s: any) => modals.setHandoverData({ isOpen: true, shift: s })}
-                            onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
-                            onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
-                            onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
-                            onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}
-                            onOpenManualRetention={(s: any) => modals.setManualRetentionData({ isOpen: true, shift: s })}/>
+        </>,
+        document.body,
+    );
+}
+
+/** Tarjeta de objetivo/evento en grilla: expande en overlay si mult columna. */
+function OpsObjectiveGridCard({
+    useOverlay,
+    isExpanded,
+    onToggleExpand,
+    borderColor,
+    bgColor,
+    header,
+    expandedBody,
+    overlayTitle,
+    overlaySubtitle,
+}: {
+    useOverlay: boolean;
+    isExpanded: boolean;
+    onToggleExpand: (next: boolean) => void;
+    borderColor: string;
+    bgColor: string;
+    header: ReactNode;
+    expandedBody: ReactNode;
+    overlayTitle?: string;
+    overlaySubtitle?: string;
+}) {
+    const cardRef = useRef<HTMLDivElement>(null);
+
+    return (
+        <div className={`min-w-0 ${isExpanded && useOverlay ? 'relative z-40' : ''}`}>
+            <div
+                ref={cardRef}
+                className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-shadow ${isExpanded ? 'ring-2 ring-indigo-300 shadow-lg' : 'shadow-sm'}`}
+            >
+                {header}
+                {isExpanded && !useOverlay && (
+                    <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
+                        {expandedBody}
+                    </div>
+                )}
+            </div>
+            {useOverlay && (
+                <ObjectiveExpandOverlay
+                    open={isExpanded}
+                    anchorRef={cardRef}
+                    onClose={() => onToggleExpand(false)}
+                    title={overlayTitle}
+                    subtitle={overlaySubtitle}
+                >
+                    <div className="px-2 py-2 space-y-1.5">{expandedBody}</div>
+                </ObjectiveExpandOverlay>
+            )}
+        </div>
+    );
+}
+
+const ObjectiveGroup = ({ group, modals, isCompact, onReport, viewTab, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, isAutoMode, isPublished, layoutGrid }: any) => {
+    const [expanded, setExpanded] = useState(!layoutGrid);
+    const cardRef = useRef<HTMLDivElement>(null);
+    const split = useMemo(() => splitShiftsByEvent(group.items || []), [group.items]);
+    const expandedBody = (
+        <div className="p-2 bg-slate-50 space-y-2">
+            {split.eventGroups.length > 0 && (
+                <div className="space-y-2">
+                    {split.eventGroups.map((ev) => (
+                        <div key={ev.id} className="rounded-xl border border-amber-200 bg-amber-50/60">
+                            <div className="px-2.5 py-1.5 border-b border-amber-200 flex items-center justify-between gap-2">
+                                <span className="text-[10px] font-black uppercase tracking-wide text-amber-800 truncate">{ev.label}</span>
+                                <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-200 text-amber-900 shrink-0">{ev.items.length} guardia(s)</span>
+                            </div>
+                            <div className="p-1.5 space-y-1.5 bg-white/80">
+                                {ev.items.map((s: any) => (
+                                    <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} isAutoMode={isAutoMode}
+                                        onOpenCheckout={(s: any) => modals.setCheckoutData({ isOpen: true, shift: s })}
+                                        onOpenAttendance={(s: any) => modals.setAttendanceData({ isOpen: true, shift: s })}
+                                        onOpenHandover={(s: any) => modals.setHandoverData({ isOpen: true, shift: s })}
+                                        onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
+                                        onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
+                                        onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
+                                        onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}
+                                        onOpenManualRetention={(s: any) => modals.setManualRetentionData({ isOpen: true, shift: s })}/>
+                                ))}
+                            </div>
+                        </div>
                     ))}
                 </div>
+            )}
+            {split.regular.map((s: any) => (
+                <GuardCard key={s.id} shift={s} viewTab={viewTab} isCompact={isCompact} isAutoMode={isAutoMode}
+                    onOpenCheckout={(s: any) => modals.setCheckoutData({ isOpen: true, shift: s })}
+                    onOpenAttendance={(s: any) => modals.setAttendanceData({ isOpen: true, shift: s })}
+                    onOpenHandover={(s: any) => modals.setHandoverData({ isOpen: true, shift: s })}
+                    onOpenInterrupt={(s: any) => modals.setInterruptData({ isOpen: true, shift: s })}
+                    onOpenCoverage={(s: any) => modals.setCoverageData({ isOpen: true, shift: s })}
+                    onReportPlanning={onReport} onOpenWorkedFranco={onOpenWorkedFranco}
+                    onNovedadAbsence={onNovedadAbsence} onOpenWA={onOpenWA} onOpenAbsenceDecision={onOpenAbsenceDecision} onOpenRRHH={onOpenRRHH}
+                    onOpenManualRetention={(s: any) => modals.setManualRetentionData({ isOpen: true, shift: s })}/>
+            ))}
+        </div>
+    );
+    return (
+        <div className={`min-w-0 ${expanded && layoutGrid ? 'relative z-40' : ''}`}>
+            <div
+                ref={cardRef}
+                className={`bg-white rounded-xl border shadow-sm overflow-hidden min-w-0 ${layoutGrid ? 'mb-0' : 'mb-3'} ${isPublished === false ? 'border-amber-300' : 'border-slate-300'} ${expanded && layoutGrid ? 'ring-2 ring-indigo-300 shadow-lg' : ''}`}
+            >
+                <div className={`px-3 py-2 border-b flex justify-between items-center cursor-pointer ${isPublished === false ? 'bg-amber-50 border-amber-200 hover:bg-amber-100' : 'bg-slate-100 border-slate-200 hover:bg-slate-200'}`} onClick={() => setExpanded(!expanded)}>
+                    <div className="flex items-center gap-2 min-w-0">
+                        <div className="bg-slate-700 text-white w-5 h-5 rounded flex items-center justify-center text-[10px] font-black shrink-0">{group.items.length}</div>
+                        <div className="min-w-0">
+                            <h4 className="font-black text-xs text-slate-800 uppercase truncate leading-tight">{group.name}</h4>
+                            {group.client && <span className="text-[9px] text-slate-400 font-medium truncate block leading-tight">{group.client}</span>}
+                        </div>
+                        {isPublished === false && <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-200 text-amber-800 shrink-0">BORRADOR</span>}
+                    </div>
+                    {expanded ? <ChevronDown size={16} className="text-slate-400 shrink-0"/> : <ChevronRight size={16} className="text-slate-400 shrink-0"/>}
+                </div>
+                {expanded && !layoutGrid && expandedBody}
+            </div>
+            {layoutGrid && (
+                <ObjectiveExpandOverlay
+                    open={expanded}
+                    anchorRef={cardRef}
+                    onClose={() => setExpanded(false)}
+                    title={group.name}
+                    subtitle={group.client}
+                >
+                    {expandedBody}
+                </ObjectiveExpandOverlay>
             )}
         </div>
     );
@@ -1846,30 +2516,48 @@ export default function OperacionesPage() {
     const logic = useOperacionesMonitor(assignedClientId);
     const session = useOperatorSession();
     const elapsed = useElapsedTime(session.mySession?.startTime || null);
-    useAutoMonitor({
-        isActive: centroControlEnabled,
-        isAutoMode: session.isAutoMode,
-        empresaId,
-        activeOperatorId: session.mySession?.operatorId || null,
-        processedData: logic.processedData,
-    });
 
     // Rol CC: operadores cuya única misión es el CC — se les auto-inicia guardia al abrir
     // Supervisores y superadmin pueden entrar sin iniciar guardia
     const isCCOperator = !isSuperAdmin && (userRole === 'OPERADOR' || userRole === 'OPERADOR_CC');
 
-    // Auto-inicio de guardia para rol OPERADOR cuando data está lista
+    const modoDemoActivo = empresa?.modoDemoEnabled === true;
+    const manualGuardiaOn = !session.loading && !!session.mySession;
+    /** Demo | Auto | Manual — excluyentes. Manual puede ir con asistido. */
+    const [manualAssist, setManualAssist] = useState(true);
+    useEffect(() => { setManualAssist(readManualAssistPreference()); }, []);
+    const opsMode = resolveOpsMode({
+        modoDemoEnabled: modoDemoActivo,
+        hasManualSession: manualGuardiaOn,
+        sessionLoading: session.loading,
+    });
+    const opsCaps = getOpsCapabilities(opsMode, manualAssist);
+    const ccDemoOn = opsCaps.isDemo;
+    const ccAutoOn = opsCaps.isAuto;
+    const ccManualOn = opsCaps.isManual;
+
+    useAutoMonitor({
+        isActive: centroControlEnabled,
+        pipelineRoutine: opsCaps.pipelineRoutine,
+        fullAuto: opsCaps.fullAuto,
+        empresaId,
+        activeOperatorId: session.mySession?.operatorId || null,
+        processedData: logic.processedData,
+    });
+
+    // Auto-inicio de guardia para rol OPERADOR cuando data está lista (no en modo Demo)
     const autoStartedRef = useRef(false);
     useEffect(() => {
         if (!centroControlEnabled) return;
         if (!isCCOperator) return;
+        if (modoDemoActivo) return;
         if (!logic.isReady) return;
         if (session.loading) return;
         if (session.isMySession) return;
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
         session.startSession().catch(e => console.warn('[CC auto-start]', e));
-    }, [centroControlEnabled, isCCOperator, logic.isReady, session.loading, session.isMySession]);
+    }, [centroControlEnabled, isCCOperator, modoDemoActivo, logic.isReady, session.loading, session.isMySession]);
 
     // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
     const prevAutoModeRef = useRef<boolean | null>(null);
@@ -1897,6 +2585,7 @@ export default function OperacionesPage() {
     }, [session.isAutoMode, session.loading]);
 
     const [detailNovedad, setDetailNovedad] = useState<any>(null);
+    const [cascadeConvs, setCascadeConvs] = useState<any[]>([]);
     const [showDebugPanel, setShowDebugPanel] = useState(false);
     const [isExternalMap, setIsExternalMap] = useState(false);
     const [mapCollapsed, setMapCollapsed] = useState(false);
@@ -1908,6 +2597,61 @@ export default function OperacionesPage() {
         }
     }, []);
     const [confirmEndSession, setConfirmEndSession] = useState(false);
+    const [toggleModoDemoLoading, setToggleModoDemoLoading] = useState(false);
+    const [guardiaActionLoading, setGuardiaActionLoading] = useState(false);
+
+    const handleToggleModoDemo = async () => {
+        if (!isSuperAdmin || isCCOperator || !empresaId) return;
+        setToggleModoDemoLoading(true);
+        try {
+            const next = !modoDemoActivo;
+            if (next && session.isMySession) {
+                await session.endSession();
+            }
+            await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: next });
+            toast.success(
+                next
+                    ? 'Demo ON — pipeline Auto + simulador de eventos (empresa lab)'
+                    : 'Demo OFF — volvés a Auto (realidad, sin simulador)',
+            );
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo cambiar el modo demo');
+        } finally {
+            setToggleModoDemoLoading(false);
+        }
+    };
+
+    const handleStartManualGuardia = async () => {
+        if (isCCOperator || !empresaId) return;
+        setGuardiaActionLoading(true);
+        try {
+            if (modoDemoActivo) {
+                await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: false });
+            }
+            await session.startSession();
+            toast.success('Demo OFF · Auto OFF · Manual ON');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo iniciar guardia manual');
+        } finally {
+            setGuardiaActionLoading(false);
+        }
+    };
+
+    const handleEndManualGuardia = async () => {
+        setGuardiaActionLoading(true);
+        try {
+            await session.endSession();
+            setConfirmEndSession(false);
+            toast.success('Demo OFF · Auto ON · Manual OFF');
+        } catch (e) {
+            console.error(e);
+            toast.error('No se pudo cerrar la guardia manual');
+        } finally {
+            setGuardiaActionLoading(false);
+        }
+    };
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -1923,7 +2667,8 @@ export default function OperacionesPage() {
     const [isGrouped, setIsGrouped] = useState(true);
     const [viewMode, setViewMode] = usePersistedState<'objetivos' | 'lista'>('cosp:ops:viewMode', 'objetivos');
     const [expandedObjectiveId, setExpandedObjectiveId] = usePersistedState<string | null>('cosp:ops:expandedObj', null);
-    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'>('reciente');
+    const [objectivesSortMode, setObjectivesSortMode] = usePersistedState<ObjectivesSortMode>('cosp:ops:objSort', 'cliente');
+    const [bitacoraTab, setBitacoraTab] = useState<'reciente'|'operaciones'|'alertas'|'cascada'>('reciente');
     const [bitacoraOpen, setBitacoraOpen] = useState(false);
     const [bitacoraExpanded, setBitacoraExpanded] = useState<string | null>(null);
     const [bitacoraFiltroObj, setBitacoraFiltroObj] = useState<string>('');
@@ -1979,9 +2724,12 @@ export default function OperacionesPage() {
     const [cierreObs, setCierreObs] = useState('');
     const [cierreLoading, setCierreLoading] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
+    const [activeConvsByObjective, setActiveConvsByObjective] = useState<Record<string, number>>({});
+    const [activeConvsList, setActiveConvsList] = useState<any[]>([]);
+    const [convsPanelOpen, setConvsPanelOpen] = useState(true);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
-    const [absencesPanelOpen, setAbsencesPanelOpen] = useState(true);
+    const [absencesPanelOpen, setAbsencesPanelOpen] = useState(false);
     // Refresh key: reconecta listeners al volver de background o recuperar red
     const [listenerRefreshKey, setListenerRefreshKey] = useState(0);
     useEffect(() => {
@@ -1999,14 +2747,40 @@ export default function OperacionesPage() {
         empNovedades.filter(n => n.status === 'ATENDIDA' || n.status === 'atendida').slice(0, 8),
     [empNovedades]);
 
+    // Suscripción en tiempo real a convocatorias de cascada (últimas 4h)
+    useEffect(() => {
+        if (!empresaId || isExternalMap) return;
+        const since = Timestamp.fromMillis(Date.now() - 4 * 60 * 60 * 1000);
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('empresaId', '==', empresaId),
+            where('createdAt', '>=', since),
+            orderBy('createdAt', 'desc'),
+            limit(100),
+        );
+        const unsub = onSnapshot(q, snap => {
+            setCascadeConvs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+        }, () => {});
+        return () => unsub();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [empresaId, isExternalMap]);
+
     const COVERAGE_GRACE_MINUTES = 60; // tiempo de gracia para gestionar cobertura
 
     const pendingNovedades = useMemo(() => {
         const now = Date.now();
-        return empNovedades.filter(n => {
+        const filtered = empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
+            if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
+            if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
+
+            // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
+            if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
+                const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
+                if (target?.turaContiguous) return false;
+            }
 
             // Protocolo de cobertura: no mostrar si el turno ya terminó o venció el tiempo de gracia
             if (n.type === 'VACANTE_PROTOCOLO_COBERTURA') {
@@ -2038,6 +2812,15 @@ export default function OperacionesPage() {
 
             return true;
         });
+
+        // Una sola alerta por (type, shiftId) — evita duplicados por DEMO en varias pestañas
+        const seen = new Set<string>();
+        return filtered.filter((n: any) => {
+            const key = n.shiftId ? `${n.type}__${n.shiftId}` : n.id;
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
     }, [empNovedades, logic.processedData]);
 
     useEffect(() => {
@@ -2060,6 +2843,25 @@ export default function OperacionesPage() {
         );
         return () => unsub();
     }, [empresaId, empresa, listenerRefreshKey]);
+
+    // Convocatorias activas por objetivo — para badge lateral
+    useEffect(() => {
+        if (!empresaId) { setActiveConvsByObjective({}); return; }
+        const q = query(
+            collection(db, 'convocatorias_cobertura'),
+            where('empresaId', '==', empresaId),
+            where('status', 'in', ['PENDING', 'ESCALATED']),
+        );
+        const unsub = onSnapshot(q, (snap) => {
+            const byObj: Record<string, number> = {};
+            snap.docs.forEach(d => {
+                const objId = d.data().objectiveId;
+                if (objId) byObj[objId] = (byObj[objId] || 0) + 1;
+            });
+            setActiveConvsByObjective(byObj);
+        });
+        return () => unsub();
+    }, [empresaId]);
 
     useEffect(() => {
         const todayStr = new Date().toLocaleDateString('en-CA');
@@ -2105,6 +2907,8 @@ export default function OperacionesPage() {
         const now = Date.now();
         const newlyAbsent = logic.processedData.filter((s: any) => {
             if (!s.isAbsent || s.absenceType !== 'AA') return false;
+            // RET es stand-by pasivo: no dispara cobertura si no fue convocado
+            if (s.isRetention || s.origin === 'RETEN' || s.isReten) return false;
             if (!isSameDay(s.shiftDateObj, new Date())) return false;
             if (autoAbsentTriggeredRef.current.has(s.id)) return false;
             // No auto-abrir si ya pasó el tiempo de gracia — el operador puede abrir manualmente
@@ -2119,8 +2923,12 @@ export default function OperacionesPage() {
         // Persistir en localStorage para no re-abrir tras recarga
         try { localStorage.setItem(ABSENT_ACK_KEY, JSON.stringify([...autoAbsentTriggeredRef.current])); } catch {}
         logic.setViewTab('AUSENTES');
-        setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
-    }, [logic.processedData]);
+        if (opsCaps.fullAuto) {
+            toast.info(`AUTO/DEMO: ausencia — ${newlyAbsent[0].employeeName} · ${newlyAbsent[0].objectiveName}. Cobertura por protocolo / cascada.`);
+        } else {
+            setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
+        }
+    }, [logic.processedData, opsCaps.fullAuto]);
 
     const openHandoverFromNovedad = (novedad: any) => {
         const targetShift = novedad.shiftId
@@ -2268,7 +3076,35 @@ export default function OperacionesPage() {
                     toast.info('Usá el botón CUBRIR en la vacante correspondiente');
                 }
 
-            } else if (novedad.type === 'REFUERZO_CLIENTE_PENDIENTE' || novedad.type === 'VACANTE_OPERATIVA') {
+            } else if (novedad.type === 'TURA_EXTENSION' || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'TURA' && novedad.parentEmpleadoId)) {
+                const target = resolveTuraExtensionOperacionesTarget(novedad, logic.processedData);
+                if (target) {
+                    logic.setViewTab('PLAN');
+                    setHandoverData({ isOpen: true, shift: target });
+                    toast.info(target.turaContiguous
+                        ? `Turno extendido: ${target.employeeName} · ${displayShiftTimeRange(target)}`
+                        : `2º tramo TURA: ${target.employeeName} · ${displayShiftTimeRange(target)}`);
+                } else {
+                    logic.setViewTab('PLAN');
+                    toast.info('Buscá al guardia en PLAN — el TURA está anexado a su turno.');
+                }
+
+            } else if (
+                novedad.type === 'REFUERZO_CLIENTE_PENDIENTE'
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.tipoSolicitud === 'RFZ')
+                || (novedad.type === 'VACANTE_OPERATIVA' && novedad.actionTarget === 'PLANIFICACION')
+            ) {
+                const fecha = String(novedad.fecha || '').slice(0, 10);
+                const [y, mo] = fecha.split('-').map(Number);
+                const qs = new URLSearchParams();
+                if (novedad.objectiveId) qs.set('objectiveId', String(novedad.objectiveId));
+                if (novedad.clientId) qs.set('clientId', String(novedad.clientId));
+                if (Number.isFinite(y) && y > 2000) qs.set('year', String(y));
+                if (Number.isFinite(mo) && mo >= 1 && mo <= 12) qs.set('month', String(mo));
+                void router.push(`/admin/planificacion/${qs.toString() ? `?${qs.toString()}` : ''}`);
+                toast.info('Planificación — fila VACANTE RFZ: asigná guardia y publicá el cronograma.');
+
+            } else if (novedad.type === 'VACANTE_OPERATIVA') {
                 const turnoIds: string[] = Array.isArray(novedad.turnoIds) ? novedad.turnoIds : [];
                 const vacShift = turnoIds.length
                     ? logic.processedData.find((s: any) => turnoIds.includes(s.id))
@@ -2279,10 +3115,10 @@ export default function OperacionesPage() {
                 if (vacShift) {
                     setCoverageData({ isOpen: true, shift: vacShift });
                     logic.setViewTab('VACANTES');
-                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'RFZ'}`);
+                    toast.info(`Asigná guardia: ${novedad.title || novedad.tipoSolicitud || 'TURA'}`);
                 } else {
                     logic.setViewTab('VACANTES');
-                    toast.info(novedad.description || 'Buscá la vacante RFZ/TURA en la pestaña VACANTES');
+                    toast.info(novedad.description || 'Buscá la vacante TURA en la pestaña VACANTES');
                 }
 
             } else if (novedad.type === 'ADELANTO_TURNO' || novedad.type === 'CONVOCATORIA_RETEN' || novedad.type === 'RETENCION' || novedad.type === 'FRANCO_TRABAJADO') {
@@ -2316,11 +3152,19 @@ export default function OperacionesPage() {
 
     const prevPendingCount = useRef(0);
     useEffect(() => {
+        if (isExternalMap) return;
         if (pendingNovedades.length > prevPendingCount.current) {
             setNotifPanelOpen(true);
         }
         prevPendingCount.current = pendingNovedades.length;
-    }, [pendingNovedades.length]);
+    }, [pendingNovedades.length, isExternalMap]);
+
+    /** Mapa undocked: cerrar panel de alertas en CC (el host pasa al map-view). */
+    useEffect(() => {
+        if (!isExternalMap) return;
+        setNotifPanelOpen(false);
+        setBitacoraTab((t) => (t === 'alertas' ? 'reciente' : t));
+    }, [isExternalMap]);
 
     // ── Alertas sonoras: disparar cuando llegan novedades nuevas
     useEffect(() => {
@@ -2374,6 +3218,36 @@ export default function OperacionesPage() {
             }
         });
     }, [empNovedades]);
+
+    // Auto-atender TURNO_COMPLETADO_AUTO + REC+12/retención huérfanas (turno ya no presente)
+    const autoFinAttendedRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        const stale = empNovedades.filter((n: any) => {
+            if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
+            if (autoFinAttendedRef.current.has(n.id)) return false;
+            if (n.type === 'TURNO_COMPLETADO_AUTO') return true;
+            if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return true;
+            return false;
+        });
+        if (!stale.length) return;
+        stale.forEach(async (n: any) => {
+            autoFinAttendedRef.current.add(n.id);
+            try {
+                await updateDoc(doc(db, 'novedades', n.id), {
+                    status: 'ATENDIDA',
+                    atendidaAt: serverTimestamp(),
+                    atendidaPor: 'Sistema',
+                    autoAttended: true,
+                    resolution: n.type === 'TURNO_COMPLETADO_AUTO'
+                        ? 'AUTO_FIN_NO_ACTION'
+                        : 'SHIFT_NO_LONGER_PRESENT',
+                });
+            } catch (e) {
+                autoFinAttendedRef.current.delete(n.id);
+                console.warn('[auto-fin] Error atendiendo novedad ruido', e);
+            }
+        });
+    }, [empNovedades, logic.processedData]);
 
     const ACTION_LABELS: Record<string, string> = {
         CHECKIN: 'Ingreso', CHECK_IN: 'Ingreso', GUARDIA_INICIADA: 'Guardia iniciada',
@@ -2574,13 +3448,14 @@ export default function OperacionesPage() {
         const objMap = new Map<string,any>();
         todayShifts.forEach((s:any) => {
             if (!s.objectiveId) return;
+            if (s.isVirtual) return; // excluir slots SLA_VIRTUAL sintéticos del informe
             if (!objMap.has(s.objectiveId)) objMap.set(s.objectiveId,{name:s.objectiveName||s.objectiveId,plan:0,activo:0,compl:0,ausente:0,vacante:0,ret:0,planHrs:0,realHrs:0,tardanzas:0});
             const o = objMap.get(s.objectiveId);
             o.plan++;
             if (s.isPresent && !s.isCompleted) o.activo++;
             if (s.isCompleted) o.compl++;
             if (s.isAbsent || s.isPotentialAbsence) o.ausente++;
-            if (s.isUnassigned) o.vacante++;
+            if (s.isUnassigned && !s.isReportedToPlanning) o.vacante++;
             if (s.isRetention) o.ret++;
             try { const ph=(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000; if(ph>0&&ph<=24)o.planHrs+=ph; } catch {}
             if (s.isCompleted) {
@@ -3259,13 +4134,14 @@ export default function OperacionesPage() {
             isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted)
         );
         hoy.forEach((s:any) => {
+            if (isEventShift(s)) return;
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';
             if (!map[key]) map[key] = { name: s.objectiveName || '—', client: s.clientName || '', total: 0, active: 0, absent: 0, vacant: 0, objectiveId: key };
             map[key].total++;
             if (s.isPresent || s.isRetention) map[key].active++;
             if (s.isAbsent || s.isPotentialAbsence) map[key].absent++;
-            if (s.isUnassigned) map[key].vacant++;
+            if (isActionableOpsVacancy(s)) map[key].vacant++;
         });
         return Object.values(map)
             .filter(o => o.total > 0)
@@ -3282,16 +4158,15 @@ export default function OperacionesPage() {
         });
     }, [logic.listData, isGrouped]);
 
+    const matchesViewTabForShift = (s: any) => shiftMatchesOpsViewTab(s, logic.viewTab);
+
     // â"€â"€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â"€â"€
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
-        const hoy = logic.processedData.filter((s: any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
+        const hoy = logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
         hoy.forEach((s: any) => {
+            if (isEventShift(s)) return;
             if (s.isFranco) return;
             const key = s.objectiveId || 'unknown';
             if (!map.has(key)) {
@@ -3312,7 +4187,7 @@ export default function OperacionesPage() {
             if (s.isRetention)                               obj.retention++;
             else if (s.isPresent && !s.isCompleted)          obj.active++;
             else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (s.isUnassigned)                       { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; } // incluye devueltas
+            else if (isActionableOpsVacancy(s))            { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
             else if (s.isFuture || s.isImminent)             obj.plan++;
         });
         // Aplicar filtro de cliente si está activo
@@ -3329,6 +4204,104 @@ export default function OperacionesPage() {
             .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
+    const eventsWithAlerts = useMemo(() => {
+        const now = new Date();
+        const map = new Map<string, any>();
+        const hoy = logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
+        hoy.forEach((s: any) => {
+            if (!isEventShift(s)) return;
+            if (s.isFranco) return;
+            const key = getEventGroupKey(s);
+            if (!map.has(key)) {
+                map.set(key, {
+                    eventKey: key,
+                    label: getEventGroupLabel(s),
+                    objectiveName: s.objectiveName || '—',
+                    client: s.clientName || '',
+                    clientId: s.clientId || '',
+                    active: 0, absent: 0, vacant: 0, retention: 0, plan: 0, total: 0,
+                    criticalShift: null as any,
+                    shifts: [] as any[],
+                });
+            }
+            const ev = map.get(key)!;
+            ev.total++;
+            ev.shifts.push(s);
+            if (s.isRetention)                              ev.retention++;
+            else if (s.isPresent && !s.isCompleted)        ev.active++;
+            else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (isActionableOpsVacancy(s))           { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (s.isFuture || s.isImminent)           ev.plan++;
+        });
+        const clientFilter = logic.selectedClientId;
+        return Array.from(map.values())
+            .filter(ev => !clientFilter || ev.clientId === clientFilter)
+            .sort((a, b) => {
+                const scoreA = a.absent * 3 + a.vacant * 2 + a.retention;
+                const scoreB = b.absent * 3 + b.vacant * 2 + b.retention;
+                return scoreB - scoreA;
+            })
+            .filter(ev => (ev.active + ev.absent + ev.vacant + ev.retention + ev.plan) > 0);
+    }, [logic.processedData, logic.selectedClientId]);
+
+    /** Sidebar objetivos/eventos: respeta tab (ACT/VAC/…) y búsqueda por nombre/cliente/guardia. */
+    const objectiveMatchesTab = (o: { active: number; absent: number; vacant: number; retention: number; plan: number; shifts?: any[] }) => {
+        switch (logic.viewTab) {
+            case 'ACTIVOS':   return o.active > 0;
+            case 'RETENIDOS': return o.retention > 0;
+            case 'AUSENTES':  return o.absent > 0;
+            case 'VACANTES':  return o.vacant > 0;
+            case 'PLAN':      return o.plan > 0;
+            case 'FRANCOS':   return (o.shifts || []).some((s: any) => s.isFranco);
+            case 'PRIORIDAD':
+            case 'NO_LLEGO':
+            case 'TODOS':
+                return (o.shifts || []).some((s: any) => matchesViewTabForShift(s));
+            default:
+                return true;
+        }
+    };
+    const foldQ = (v: unknown) => String(v ?? '').trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const objectiveMatchesSearch = (o: { name?: string; client?: string; objectiveName?: string; label?: string; shifts?: any[] }) => {
+        const q = foldQ(logic.filterText);
+        if (!q) return true;
+        if (foldQ(o.name).includes(q) || foldQ(o.objectiveName).includes(q) || foldQ(o.client).includes(q) || foldQ(o.label).includes(q)) {
+            return true;
+        }
+        return (o.shifts || []).some((s: any) =>
+            foldQ(s.employeeName).includes(q) ||
+            foldQ(s.positionName).includes(q) ||
+            foldQ(s.objectiveName).includes(q)
+        );
+    };
+    const filteredObjectivesWithAlerts = useMemo(() => {
+        const today = new Date();
+        const y = today.getFullYear();
+        const m = today.getMonth() + 1;
+        return objectivesWithAlerts
+            .filter((o) => {
+                if (!objectiveMatchesTab(o) || !objectiveMatchesSearch(o)) return false;
+                const pubKey = `${o.objectiveId}_${y}_${m}`;
+                if (logic.publishStatusMap[pubKey]) return true;
+                // Mostrar aunque no haya planificación publicada si tiene turnos de origen operativo
+                return (o.shifts || []).some((s: any) =>
+                    s.origin === 'RETEN' ||
+                    s.origin === 'SLA_VIRTUAL' ||
+                    s.isReten === true ||
+                    s.resolvedBy === 'OPERACIONES' ||
+                    s.isVirtual === true
+                );
+            })
+            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
+    }, [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode, logic.publishStatusMap]);
+    const filteredEventsWithAlerts = useMemo(
+        () => eventsWithAlerts
+            .filter((ev) => objectiveMatchesTab(ev) && objectiveMatchesSearch(ev))
+            .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode)),
+        [eventsWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode],
+    );
+
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
     const tabs = [
         { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600' },
@@ -3338,6 +4311,74 @@ export default function OperacionesPage() {
         { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700' },
         { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
     ];
+
+    const mapVisible = !isExternalMap && !mapCollapsed;
+    /** Panel operaciones a ancho completo (mapa en otra pantalla o colapsado). */
+    const wideOpsPanel = isExternalMap || mapCollapsed;
+    /** Alertas flotantes / campana: solo en CC cuando el mapa táctico no está undocked. */
+    const alertsOnCc = !isExternalMap;
+    const objectivesLayoutClass = wideOpsPanel
+        ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2 auto-rows-min items-start content-start'
+        : 'space-y-1.5';
+
+    const dayStatusKpi = useMemo(() => {
+        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        const cubiertos = logic.stats.activos + logic.stats.retenidos;
+        // Cobertura operativa = puestos con gente / (puestos con gente + vacantes abiertas).
+        // Un ausente ya cubierto no baja el %: el reemplazo está en ACT y no hay VAC.
+        const huecos = logic.stats.vacantes;
+        const debieronIniciar = cubiertos + huecos;
+        const isEmpty = total === 0;
+        const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : (isEmpty ? 0 : 100);
+        const isCrisis = !isEmpty && cobertura < 50;
+        const isWarning = !isEmpty && cobertura >= 50 && cobertura < 80;
+        const isOk = !isEmpty && cobertura >= 80;
+        return {
+            cobertura,
+            cubiertos,
+            total,
+            isEmpty,
+            isCrisis,
+            isWarning,
+            isOk,
+            barColor: isEmpty ? 'bg-slate-300' : isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500',
+            pctColor: isEmpty ? 'text-slate-500' : isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600',
+            bannerBg: isEmpty
+                ? 'bg-white/95 backdrop-blur-sm border-slate-300'
+                : isCrisis
+                    ? 'bg-rose-50/95 backdrop-blur-sm border-rose-300'
+                    : isWarning
+                        ? 'bg-amber-50/95 backdrop-blur-sm border-amber-300'
+                        : 'bg-white/95 backdrop-blur-sm border-slate-200',
+        };
+    }, [logic.stats]);
+
+    const priorityShiftsForAlerts = useMemo(() => {
+        const now = new Date();
+        const hoy = logic.processedData.filter((s: any) =>
+            isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted),
+        );
+        return hoy.filter((s: any) =>
+            (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco,
+        );
+    }, [logic.processedData]);
+
+    const totalAlertsCount = pendingNovedades.length + priorityShiftsForAlerts.length;
+
+    /** Al cerrar mapa undocked, restaurar panel de alertas en CC si hay pendientes. */
+    useEffect(() => {
+        if (isExternalMap) return;
+        if (totalAlertsCount > 0) setNotifPanelOpen(true);
+    }, [isExternalMap, totalAlertsCount]);
+
+    const coverageHasIssues = useMemo(
+        () => coverageByObjective.some((obj) => {
+            const denom = obj.active + obj.vacant;
+            const pct = denom > 0 ? Math.round((obj.active / denom) * 100) : 100;
+            return pct < 50 || obj.vacant > 0;
+        }),
+        [coverageByObjective],
+    );
 
     if (!(logic.isStable ?? logic.isReady)) return (
         <DashboardLayout>
@@ -3362,6 +4403,7 @@ export default function OperacionesPage() {
     );
 
     return (
+        <>
         <DashboardLayout>
             <Head><title>COSP V1.0 | Centro de Operaciones</title></Head>
             <style>{POPUP_STYLES}</style>
@@ -3373,124 +4415,15 @@ export default function OperacionesPage() {
                 </div>
             )}
             
-            {/* â"€â"€ Banda Estado del Día â"€â"€ */}
-            {(logic.stats.activos + logic.stats.plan + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes) > 0 && (() => {
-                const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                // Solo sobre turnos que debieron iniciar (excluye los planificados para más tarde)
-                const debieronIniciar = logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                const cobertura = debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : total > 0 ? 0 : 100;
-                const isCrisis  = cobertura < 50;
-                const isWarning = cobertura >= 50 && cobertura < 80;
-                const isOk      = cobertura >= 80;
-                const barColor  = isOk ? 'bg-emerald-500' : isWarning ? 'bg-amber-500' : 'bg-rose-500';
-                const pctColor  = isOk ? 'text-emerald-600' : isWarning ? 'text-amber-600' : 'text-rose-600';
-                const bannerBg  = isCrisis ? 'bg-rose-50 border-rose-300' : isWarning ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200';
-                return (
-                    <div className={`mx-2 mb-2 border rounded-xl shadow-sm ${bannerBg}`}>
-                        {/* Fila principal */}
-                        <div className="px-3 py-2 flex flex-wrap items-center gap-2 sm:gap-4">
-                            <div className="flex items-center gap-2">
-                                {isCrisis && <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping inline-block shrink-0"/>}
-                                <span className={`text-[10px] font-black uppercase tracking-wider shrink-0 ${isCrisis ? 'text-rose-600' : isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
-                                    {isCrisis ? 'âš  COBERTURA CRÍTICA' : isWarning ? '▲ ATENCIÓN' : 'Estado del día'}
-                                </span>
-                            </div>
-                            <div className="flex items-center gap-2 flex-1 min-w-[120px]">
-                                <div className="shrink-0">
-                                    <span className={`text-2xl font-black tabular-nums leading-none block ${pctColor}`}>{cobertura}%</span>
-                                    {logic.stats.plan > 0 && (
-                                        <span className="text-[8px] font-bold text-slate-400 leading-none whitespace-nowrap">
-                                            +{logic.stats.plan} en espera
-                                        </span>
-                                    )}
-                                </div>
-                                <div className="flex-1 h-3 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
-                                    <div className={`h-full rounded-full transition-all duration-500 ${barColor} ${isCrisis ? 'animate-pulse' : ''}`} style={{ width: `${cobertura}%` }}/>
-                                </div>
-                            </div>
-                            <div className="flex items-center gap-3 sm:gap-4 shrink-0">
-                                {[
-                                    { label: 'Activos',  val: cubiertos,              cls: isOk ? 'text-emerald-600' : 'text-slate-500', bg: 'bg-emerald-50' },
-                                    { label: 'Vacantes', val: logic.stats.vacantes,   cls: logic.stats.vacantes > 0 ? 'text-rose-600 font-black' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                    { label: 'Ausentes', val: logic.stats.ausentes,   cls: logic.stats.ausentes > 0 ? 'text-rose-700 font-black' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
-                                    { label: 'Plan',     val: total,                  cls: 'text-slate-600', bg: 'bg-slate-50' },
-                                ].map(m => (
-                                    <div key={m.label} className={`text-center px-2 py-1 rounded-lg ${m.bg}`}>
-                                        <div className={`text-base leading-none ${m.cls}`}>{m.val}</div>
-                                        <div className="text-[8px] text-slate-400 uppercase mt-0.5 font-bold">{m.label}</div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        {/* Barra de alertas rápidas cuando hay crisis */}
-                        {isCrisis && (logic.stats.vacantes > 0 || logic.stats.ausentes > 0) && (
-                            <div className="px-3 pb-2 flex gap-2 flex-wrap">
-                                {logic.stats.ausentes > 0 && (
-                                    <button onClick={() => logic.setViewTab('AUSENTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-600 text-white text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-700 active:scale-95 transition-colors">
-                                        <AlertTriangle size={13}/> {logic.stats.ausentes} AUSENTES — Gestionar
-                                    </button>
-                                )}
-                                {logic.stats.vacantes > 0 && (
-                                    <button onClick={() => logic.setViewTab('VACANTES' as any)}
-                                        className="flex items-center gap-1.5 px-3 py-2 lg:py-1 bg-rose-100 text-rose-700 border border-rose-300 text-xs lg:text-[10px] font-black rounded-lg hover:bg-rose-200 active:scale-95 transition-colors">
-                                        <UserX size={13}/> {logic.stats.vacantes} VACANTES — Ver
-                                    </button>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                );
-            })()}
-
-            {/* â"€â"€ GRID COBERTURA POR OBJETIVO (colapsable) â"€â"€ */}
-            {coverageByObjective.length > 0 && (
-                <div className="mx-2 mb-2">
-                    <button onClick={() => setShowCoverageGrid(v => !v)}
-                        className="w-full flex items-center gap-2 px-3 py-1.5 bg-white border border-slate-200 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-left">
-                        <Layers size={13} className="text-indigo-500 shrink-0"/>
-                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-wider flex-1">Cobertura por objetivo</span>
-                        <span className="text-[9px] text-slate-400">{coverageByObjective.length} objetivos</span>
-                        <ChevronDown size={12} className={`text-slate-400 transition-transform ${showCoverageGrid ? 'rotate-180' : ''}`}/>
-                    </button>
-                    {showCoverageGrid && (
-                        <div className="mt-1 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto">
-                            {coverageByObjective.map(obj => {
-                                const pct = obj.total > 0 ? Math.round((obj.active / obj.total) * 100) : 0;
-                                const hasIssue = obj.absent > 0 || obj.vacant > 0;
-                                const isCrit = pct < 50;
-                                return (
-                                    <div key={obj.objectiveId} className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-left ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
-                                        <div className="flex-1 min-w-0">
-                                            <p className="text-[10px] font-black truncate" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#1e293b' }}>{obj.name}</p>
-                                            <p className="text-[9px] truncate" style={{ color: 'var(--txt3)' }}>{obj.client}</p>
-                                        </div>
-                                        <div className="text-right shrink-0">
-                                            <p className="text-[11px] font-black" style={{ color: isCrit ? '#dc2626' : hasIssue ? '#d97706' : '#10b981' }}>{pct}%</p>
-                                            <p className="text-[9px]" style={{ color: 'var(--txt3)' }}>{obj.active}/{obj.total}</p>
-                                        </div>
-                                        {hasIssue && (
-                                            <div className="text-[9px] shrink-0 text-right leading-tight">
-                                                {obj.absent > 0 && <div className="text-rose-600 font-bold">{obj.absent}aus</div>}
-                                                {obj.vacant > 0 && <div className="text-amber-600 font-bold">{obj.vacant}vac</div>}
-                                            </div>
-                                        )}
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
-            )}
-
-            <div className={`flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative ${mapCollapsed || isExternalMap ? 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]' : 'h-[calc(100vh-164px)] lg:h-[calc(100vh-100px)]'}`}>
+            <div className="flex flex-col lg:flex-row gap-2 lg:gap-4 p-2 animate-in fade-in relative min-h-0 h-[calc(100vh-120px)] lg:h-[calc(100vh-88px)] lg:items-stretch">
                 {!isExternalMap && !mapCollapsed && (
-                    <div className="flex-1 max-h-[38%] lg:max-h-none lg:flex-[3] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner">
+                    <div className="flex-1 min-h-[240px] max-h-[42vh] lg:max-h-none lg:min-h-0 lg:flex-[3] relative rounded-xl border border-slate-200 overflow-hidden shadow-inner bg-slate-100">
+                        <div className="absolute inset-0 z-0">
                         <OperacionesMap
                             center={[-31.4201, -64.1888]}
-                            allObjectives={logic.filteredObjectives}
+                            allObjectives={logic.mapTabObjectives}
                             filteredShifts={logic.listData}
+                            tacticalHud
                             onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }}
                             onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
                             onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
@@ -3498,7 +4431,33 @@ export default function OperacionesPage() {
                             onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
                             onReportPlanning={handleReportPlanning}
                         />
-                        <div className="absolute top-4 right-4 z-[1000] flex gap-2">
+                        </div>
+                        <div className={`absolute top-2 left-2 right-14 z-[2000] border rounded-xl shadow-lg px-3 py-1.5 flex items-center gap-2 sm:gap-3 pointer-events-none ${dayStatusKpi.bannerBg}`}>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                {dayStatusKpi.isCrisis && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
+                                <span className={`text-[9px] font-black uppercase tracking-wider ${dayStatusKpi.isEmpty ? 'text-slate-500' : dayStatusKpi.isCrisis ? 'text-rose-600' : dayStatusKpi.isWarning ? 'text-amber-600' : 'text-slate-400'}`}>
+                                    {dayStatusKpi.isEmpty ? 'Sin turnos' : dayStatusKpi.isCrisis ? 'Crítica' : dayStatusKpi.isWarning ? 'Atención' : 'Estado'}
+                                </span>
+                            </div>
+                            <span className={`text-xl font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.isEmpty ? '—' : `${dayStatusKpi.cobertura}%`}</span>
+                            <div className="flex-1 h-2 bg-white/70 border border-slate-200 rounded-full overflow-hidden min-w-[48px]">
+                                <div className={`h-full rounded-full transition-all duration-500 ${dayStatusKpi.barColor}`} style={{ width: dayStatusKpi.isEmpty ? '0%' : `${dayStatusKpi.cobertura}%` }}/>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                {[
+                                    { label: 'Plan', val: logic.stats.plan, cls: 'text-indigo-600', bg: 'bg-indigo-50' },
+                                    { label: 'Act', val: dayStatusKpi.cubiertos, cls: 'text-emerald-600', bg: 'bg-emerald-50' },
+                                    { label: 'Vac', val: logic.stats.vacantes, cls: logic.stats.vacantes > 0 ? 'text-rose-600' : 'text-slate-400', bg: logic.stats.vacantes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                    { label: 'Aus', val: logic.stats.ausentes, cls: logic.stats.ausentes > 0 ? 'text-rose-700' : 'text-slate-400', bg: logic.stats.ausentes > 0 ? 'bg-rose-50' : 'bg-slate-50' },
+                                ].map((m) => (
+                                    <div key={m.label} className={`text-center px-1 py-0.5 rounded ${m.bg}`}>
+                                        <div className={`text-[10px] font-black leading-none ${m.cls}`}>{m.val}</div>
+                                        <div className="text-[6px] text-slate-400 uppercase font-bold">{m.label}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="absolute top-4 right-4 z-[2002] flex gap-2 pointer-events-auto">
                             <button onClick={() => setMapCollapsed(true)} className="bg-white p-2 rounded-lg shadow hover:bg-slate-100" title="Colapsar mapa"><ChevronLeft size={18} className="text-slate-600"/></button>
                             <button onClick={handleUndockMap} className="hidden lg:flex bg-white p-2 rounded-lg shadow hover:bg-slate-100"><MonitorUp size={18} className="text-indigo-600"/></button>
                         </div>
@@ -3523,7 +4482,7 @@ export default function OperacionesPage() {
                     </>
                 )}
 
-                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col shadow-sm ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
+                <div className={`bg-white rounded-xl border border-slate-200 flex flex-col min-h-0 shadow-sm relative ${isExternalMap || mapCollapsed ? 'w-full' : 'flex-1 lg:flex-[2]'}`}>
                     <div className="px-3 pt-2 pb-2 border-b">
                         {/* Fila 1: título + controles */}
                         <div className="flex justify-between items-center mb-1.5">
@@ -3541,73 +4500,153 @@ export default function OperacionesPage() {
                                     </button>
                                 </div>
                                 {viewMode === 'lista' && <button onClick={() => setIsGrouped(!isGrouped)} className={`px-2 py-1 font-bold text-[9px] rounded-lg border flex items-center gap-1 transition-all ${isGrouped ? 'bg-indigo-600 text-white border-indigo-700' : 'bg-white text-slate-600 hover:bg-slate-50'}`}><Layers size={10}/>{isGrouped ? 'AGRUP.' : 'FLAT'}</button>}
+                                {viewMode === 'objetivos' && (
+                                    <select
+                                        value={objectivesSortMode}
+                                        onChange={(e) => setObjectivesSortMode(e.target.value as ObjectivesSortMode)}
+                                        className="px-1.5 py-1 text-[9px] font-black rounded-lg border border-slate-200 bg-slate-50 text-slate-600 outline-none cursor-pointer max-w-[88px]"
+                                        title="Orden de tarjetas"
+                                    >
+                                        <option value="cliente">Cliente</option>
+                                        <option value="nombre">A → Z</option>
+                                        <option value="critico">Crítico</option>
+                                    </select>
+                                )}
+                                {isExternalMap && (
+                                    <span className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border border-indigo-200 hidden sm:inline">
+                                        Vista mult columna
+                                    </span>
+                                )}
                                 {isExternalMap && <button onClick={handleRestoreMap} className="px-2 py-1 bg-indigo-50 text-indigo-700 font-bold text-[9px] rounded-lg border">Restaurar</button>}
                                 {isSuperAdmin && <button onClick={() => setShowDebugPanel(true)} title="Panel de diagnóstico" className="px-2 py-1 bg-amber-50 text-amber-700 font-bold text-[9px] rounded-lg border border-amber-200 hover:bg-amber-100 transition-colors">🔍 Debug</button>}
                                 <button onClick={() => logic.setIsCompact(!logic.isCompact)} aria-label={logic.isCompact ? 'Expandir panel' : 'Compactar panel'} className="p-1 bg-slate-100 rounded-lg text-slate-600">{logic.isCompact ? <Maximize2 size={12} aria-hidden="true"/> : <Minimize2 size={12} aria-hidden="true"/>}</button>
                             </div>
                         </div>
 
-                        {/* Barra de sesión compacta */}
-                        {session.isAutoMode ? (
-                            <div className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping"/>
-                                        <span className="text-[10px] font-black text-amber-700 uppercase">
-                                            {isCCOperator ? 'Iniciando guardiaâ€¦' : 'Modo Automático'}
-                                        </span>
-                                    </div>
-                                    {/* Operadores CC: no muestran el botón — se auto-inicia */}
-                                    {!isCCOperator && (
-                                        <button onClick={session.startSession} className="px-2 py-1 bg-indigo-600 text-white text-[9px] font-black rounded-lg hover:bg-indigo-700">INICIAR GUARDIA</button>
-                                    )}
+                        {!mapVisible && (
+                            <div className={`mb-1.5 shrink-0 border rounded-lg px-2 py-1 flex items-center gap-2 ${dayStatusKpi.bannerBg}`}>
+                                <span className={`text-lg font-black tabular-nums leading-none shrink-0 ${dayStatusKpi.pctColor}`}>{dayStatusKpi.isEmpty ? '—' : `${dayStatusKpi.cobertura}%`}</span>
+                                <div className="flex-1 h-1.5 bg-white/70 border border-slate-200 rounded-full overflow-hidden">
+                                    <div className={`h-full rounded-full ${dayStatusKpi.barColor}`} style={{ width: dayStatusKpi.isEmpty ? '0%' : `${dayStatusKpi.cobertura}%` }}/>
                                 </div>
-                                {session.activeSessions.length > 0 && (
-                                    <p className="text-[9px] text-amber-800 leading-tight">
-                                        <span className="font-black">En guardia:</span>{' '}
-                                        {session.activeSessions.map(s => s.operatorName).join(' · ')}
-                                    </p>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-2 py-1 mb-1.5 space-y-1">
-                                <div className="flex items-center justify-between">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                        <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"/>
-                                        <span className="text-[10px] font-black text-slate-700 uppercase truncate max-w-[110px]">{session.mySession?.operatorName}</span>
-                                        {elapsed && <span className="text-[9px] font-mono text-slate-500 bg-white px-1 py-0.5 rounded border">{elapsed}</span>}
-                                        <span className="text-[9px] text-emerald-700 font-bold bg-emerald-100 px-1 rounded">TU GUARDIA</span>
-                                    </div>
-                                    {confirmEndSession ? (
-                                        <div className="flex items-center gap-1 shrink-0">
-                                            <span className="text-[8px] text-rose-600 font-black">Â¿Confirmar?</span>
-                                            <button
-                                                onClick={async () => {
-                                                    try {
-                                                        await session.endSession();
-                                                        toast.success('Sesión finalizada');
-                                                        setConfirmEndSession(false);
-                                                    } catch (e) {
-                                                        console.error(e);
-                                                        toast.error('No se pudo finalizar la sesión');
-                                                    }
-                                                }}
-                                                className="px-1.5 py-1 bg-rose-600 text-white text-[8px] font-black rounded-lg hover:bg-rose-700"
-                                            >Sí</button>
-                                            <button onClick={() => setConfirmEndSession(false)} className="px-1.5 py-1 bg-slate-200 text-slate-700 text-[8px] font-black rounded-lg hover:bg-slate-300">No</button>
-                                        </div>
-                                    ) : (
-                                        <button onClick={() => setConfirmEndSession(true)} className="px-2 py-1 bg-slate-700 text-white text-[9px] font-black rounded-lg hover:bg-slate-900 shrink-0">Finalizar Sesión</button>
-                                    )}
-                                </div>
-                                {session.otherSessions.length > 0 && (
-                                    <p className="text-[9px] text-emerald-800 leading-tight">
-                                        <span className="font-black">También en guardia:</span>{' '}
-                                        {session.otherSessions.map(s => s.operatorName).join(' · ')}
-                                    </p>
-                                )}
+                                <span className="text-[8px] font-bold text-slate-500 shrink-0">{dayStatusKpi.cubiertos} act · {logic.stats.vacantes} vac · {logic.stats.plan} plan</span>
                             </div>
                         )}
+
+                        <div className="flex flex-wrap items-center gap-1 mb-1.5 shrink-0">
+                            {isSuperAdmin ? (
+                                <button
+                                    type="button"
+                                    disabled={isCCOperator || toggleModoDemoLoading || ccManualOn}
+                                    onClick={handleToggleModoDemo}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border disabled:opacity-50 transition-colors ${
+                                        ccDemoOn
+                                            ? 'bg-violet-600 border-violet-700 text-white shadow-sm'
+                                            : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                    title={ccManualOn
+                                        ? 'Cerrá la guardia manual antes de activar Demo'
+                                        : 'Demo = Auto + simulador (presente/ausente/tarde). Escribe datos reales en la empresa lab.'}
+                                >
+                                    <Zap size={10} />
+                                    {toggleModoDemoLoading ? 'Demo…' : `Demo ${opsCaps.labels.demo}`}
+                                </button>
+                            ) : ccDemoOn ? (
+                                <span
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-violet-100 border-violet-300 text-violet-800"
+                                    title="Demo activo: pipeline Auto + eventos simulados en esta empresa"
+                                >
+                                    <Zap size={10} className="text-violet-600" />
+                                    Demo ON · lab
+                                </span>
+                            ) : null}
+                            <span
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${
+                                    ccAutoOn
+                                        ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm'
+                                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                                }`}
+                                title="Auto = mismo pipeline que Demo, sin simulador. Eventos reales (prod)."
+                            >
+                                <Radio size={10} />
+                                Auto {opsCaps.labels.auto}
+                            </span>
+                            <span
+                                className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border ${
+                                    ccManualOn
+                                        ? 'bg-emerald-600 border-emerald-700 text-white shadow-sm'
+                                        : 'bg-slate-50 border-slate-200 text-slate-400'
+                                }`}
+                                title="Operador en guardia. Con Asistido: cierres/retención rutinarios; coberturas las decide el operador."
+                            >
+                                <Shield size={10} />
+                                Manual {opsCaps.labels.manual}{ccManualOn && elapsed ? ` · ${elapsed}` : ''}
+                            </span>
+                            {ccManualOn && (
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        const next = !manualAssist;
+                                        setManualAssist(next);
+                                        writeManualAssistPreference(next);
+                                        toast.success(next
+                                            ? 'Manual asistido ON — cierres y retención automáticos'
+                                            : 'Manual asistido OFF — solo el operador escribe');
+                                    }}
+                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${
+                                        manualAssist
+                                            ? 'bg-teal-600 border-teal-700 text-white'
+                                            : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
+                                    }`}
+                                    title="Asistido: el sistema cierra turnos y marca retención; coberturas quedan al operador"
+                                >
+                                    Asistido {manualAssist ? 'ON' : 'OFF'}
+                                </button>
+                            )}
+                            {ccAutoOn && !isCCOperator && (
+                                <button
+                                    type="button"
+                                    onClick={handleStartManualGuardia}
+                                    disabled={guardiaActionLoading}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"
+                                >
+                                    <PlayCircle size={10} />
+                                    {guardiaActionLoading ? '…' : 'Activar manual'}
+                                </button>
+                            )}
+                            {ccManualOn && confirmEndSession ? (
+                                <div className="flex items-center gap-0.5">
+                                    <button
+                                        type="button"
+                                        onClick={handleEndManualGuardia}
+                                        disabled={guardiaActionLoading}
+                                        className="px-2 py-1 rounded-lg text-[8px] font-black bg-rose-600 text-white disabled:opacity-50"
+                                    >
+                                        Sí, cerrar manual
+                                    </button>
+                                    <button type="button" onClick={() => setConfirmEndSession(false)} className="px-2 py-1 rounded-lg text-[8px] font-black bg-slate-200 text-slate-700">No</button>
+                                </div>
+                            ) : ccManualOn ? (
+                                <button
+                                    type="button"
+                                    onClick={() => setConfirmEndSession(true)}
+                                    disabled={guardiaActionLoading}
+                                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                                >
+                                    Cerrar manual
+                                </button>
+                            ) : null}
+                            {isCCOperator && ccAutoOn && (
+                                <span className="text-[8px] font-bold text-amber-700 px-1">Iniciando guardia…</span>
+                            )}
+                            {alertsOnCc ? (
+                                <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
+                            ) : (
+                                <span className="ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border border-indigo-200 bg-indigo-50 text-indigo-700" title="Las alertas se gestionan en la ventana del mapa táctico">
+                                    <MonitorUp size={10}/> Alertas en mapa
+                                </span>
+                            )}
+                        </div>
 
                         {/* Búsqueda + cliente en una fila */}
                         <div className="flex gap-1.5 mb-1.5">
@@ -3628,7 +4667,7 @@ export default function OperacionesPage() {
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                        className={`relative flex-1 px-1 py-2 lg:py-1.5 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
+                                        className={`relative flex-1 px-1 py-1 lg:py-1 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
                                                 ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
                                                 : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'bg-slate-50 text-slate-400 hover:bg-slate-100')
@@ -3702,19 +4741,190 @@ export default function OperacionesPage() {
                         </div>
                     )}
 
-                    <div className="flex-1 overflow-y-auto bg-slate-50">
+                    {/* ── Panel convocatorias activas ── */}
+                    {activeConvsList.length > 0 && (
+                        <div className="px-3 py-1.5 border-b border-purple-100 bg-purple-50/60 shrink-0">
+                            <button
+                                onClick={() => setConvsPanelOpen(v => !v)}
+                                className="flex items-center gap-1.5 w-full text-left"
+                            >
+                                <Radio size={10} className="text-purple-600 shrink-0 animate-pulse"/>
+                                <span className="text-[9px] font-black text-purple-700 uppercase flex-1">Convocatorias activas</span>
+                                <span className="text-[9px] font-black bg-purple-600 text-white px-1.5 py-0.5 rounded-full">{activeConvsList.length}</span>
+                                {convsPanelOpen ? <ChevronUp size={10} className="text-purple-500 ml-1"/> : <ChevronDown size={10} className="text-purple-500 ml-1"/>}
+                            </button>
+                            {convsPanelOpen && (
+                                <div className="mt-1.5 space-y-1">
+                                    {activeConvsList.map((conv: any) => {
+                                        const urgColors: Record<string, string> = {
+                                            URGENTE: 'bg-rose-100 text-rose-700',
+                                            INTERMEDIO: 'bg-amber-100 text-amber-800',
+                                            NORMAL: 'bg-sky-100 text-sky-700',
+                                        };
+                                        const typeLabel: Record<string, string> = {
+                                            RET: 'RET', VOLANTE: 'VOL', SIN_TURNO_CON_EXP: 'EXP',
+                                            EXTEND: 'EXT', ADVANCE: 'ADV', SIN_TURNO: 'ST', FT: 'FT',
+                                        };
+                                        const urgColor = urgColors[conv.urgency] || 'bg-slate-100 text-slate-600';
+                                        const nowMs = Date.now();
+                                        const timeoutMs = conv.timeoutAt?.seconds ? conv.timeoutAt.seconds * 1000 : 0;
+                                        const minsLeft = timeoutMs ? Math.max(0, Math.round((timeoutMs - nowMs) / 60000)) : null;
+                                        return (
+                                            <div key={conv.id} className="flex items-center gap-2 bg-white border border-purple-100 rounded-lg px-2 py-1">
+                                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded shrink-0 ${urgColor}`}>{typeLabel[conv.type] || conv.type}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <div className="text-[10px] font-bold text-slate-700 truncate">{conv.candidateEmployeeName || '—'}</div>
+                                                    <div className="text-[9px] text-slate-400 truncate">{conv.objectiveName || ''}{conv.shiftCode ? ` · ${conv.shiftCode}` : ''}</div>
+                                                </div>
+                                                {minsLeft !== null && (
+                                                    <span className={`text-[9px] font-mono shrink-0 ${minsLeft <= 1 ? 'text-rose-600 font-black' : 'text-slate-500'}`}>
+                                                        {minsLeft}m
+                                                    </span>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-                        {viewMode === 'objetivos' && (
-                        <div className="p-2 space-y-1.5">
-                            {objectivesWithAlerts.length === 0 ? (
-                                <div className="text-center py-10 text-slate-400 text-xs">Sin datos de objetivos</div>
-                            ) : objectivesWithAlerts.map(obj => {
-                                const pct = (obj.active + obj.retention) > 0 && obj.total > 0
-                                    ? Math.round(((obj.active + obj.retention) / Math.max(obj.total - obj.plan, 1)) * 100)
-                                    : obj.total > 0 ? 0 : 100;
-                                const isCrit = obj.absent > 0 || obj.vacant > 0;
-                                const isWarn = obj.retention > 0;
+                        {viewMode === 'objetivos' && logic.viewTab === 'FRANCOS' && (
+                        <div className={`p-2 ${objectivesLayoutClass}`}>
+                            {logic.listData.length === 0 ? (
+                                <div className="text-center py-10 text-slate-400 text-xs col-span-full">
+                                    {logic.filterText.trim() ? 'Sin francos que coincidan con la búsqueda' : 'Sin guardias de franco hoy'}
+                                </div>
+                            ) : (
+                                logic.listData.map((s: any) => (
+                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto}
+                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                        onReportPlanning={handleReportPlanning}
+                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                        onNovedadAbsence={handleNovedadAbsence}
+                                        onOpenWA={handleOpenWA}
+                                        onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                        onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                        onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                        onRevertAbsence={handleRevertAbsence}
+                                    />
+                                ))
+                            )}
+                        </div>
+                        )}
+                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && (
+                        <div className={`p-2 ${objectivesLayoutClass}`}>
+                            {(filteredEventsWithAlerts.length === 0 && filteredObjectivesWithAlerts.length === 0) ? (
+                                <div className="text-center py-10 text-slate-400 text-xs">
+                                    {logic.filterText.trim()
+                                        ? 'Sin objetivos que coincidan con la búsqueda'
+                                        : 'Sin objetivos en este filtro'}
+                                </div>
+                            ) : (
+                                <>
+                                    {filteredEventsWithAlerts.map((ev) => {
+                                        const onPost = ev.active + ev.retention;
+                                        const denom = onPost + ev.vacant;
+                                        const pct = denom > 0 ? Math.round((onPost / denom) * 100) : 100;
+                                        const isCrit = ev.vacant > 0;
+                                        const isWarn = ev.retention > 0 || (ev.absent > 0 && ev.vacant === 0);
+                                        const expandKey = `EVENT__${ev.eventKey}`;
+                                        const isExpanded = expandedObjectiveId === expandKey;
+                                        const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-amber-300';
+                                        const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-amber-50/40';
+                                        const evShifts = (ev.shifts || []).filter((s: any) => matchesViewTabForShift(s));
+                                        return (
+                                            <OpsObjectiveGridCard
+                                                key={expandKey}
+                                                useOverlay={wideOpsPanel}
+                                                isExpanded={isExpanded}
+                                                onToggleExpand={(next) => setExpandedObjectiveId(next ? expandKey : null)}
+                                                borderColor={borderColor}
+                                                bgColor={bgColor}
+                                                overlayTitle={ev.label}
+                                                overlaySubtitle={ev.client}
+                                                expandedBody={
+                                                    evShifts.length === 0 ? (
+                                                        <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                                    ) : evShifts.map((s: any) => (
+                                                        <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                            isAutoMode={opsCaps.fullAuto}
+                                                            onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                            onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                            onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                            onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                            onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                            onReportPlanning={handleReportPlanning}
+                                                            onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                            onNovedadAbsence={handleNovedadAbsence}
+                                                            onOpenWA={handleOpenWA}
+                                                            onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                                            onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                                            onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                                            onRevertAbsence={handleRevertAbsence}
+                                                        />
+                                                    ))
+                                                }
+                                                header={(
+                                                    <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
+                                                    <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-amber-500'}`}/>
+                                                    <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedObjectiveId(isExpanded ? null : expandKey)}>
+                                                        <div className="flex items-center gap-2">
+                                                            <span className="text-xs font-black text-slate-800 truncate">{ev.label}</span>
+                                                            <span className="text-[9px] text-slate-400 shrink-0">{ev.client}</span>
+                                                        </div>
+                                                        <div className="flex items-center gap-3 mt-0.5">
+                                                            <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden max-w-[80px]">
+                                                                <div className="h-full rounded-full transition-all duration-500"
+                                                                    style={{
+                                                                        width: `${Math.min(100, pct)}%`,
+                                                                        backgroundColor: isCrit ? '#ef4444' : isWarn ? '#f59e0b' : '#d97706'
+                                                                    }}/>
+                                                            </div>
+                                                            <span className="text-[9px] font-black shrink-0" style={{color: isCrit ? '#dc2626' : isWarn ? '#d97706' : '#b45309'}}>
+                                                                {pct}%
+                                                            </span>
+                                                            <div className="flex items-center gap-1">
+                                                                {ev.active > 0 && <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100 px-1.5 rounded">{ev.active} act</span>}
+                                                                {ev.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{ev.retention} ret</span>}
+                                                                {ev.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{ev.absent} aus</span>}
+                                                                {ev.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{ev.vacant} vac</span>}
+                                                                {ev.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{ev.plan} plan</span>}
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        {(ev.vacant > 0) && ev.criticalShift && (
+                                                            <button onClick={() => setCoverageData({isOpen:true, shift:ev.criticalShift})}
+                                                                className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
+                                                                title="Protocolo cobertura">
+                                                                <Siren size={14}/>
+                                                            </button>
+                                                        )}
+                                                        <button onClick={() => setExpandedObjectiveId(isExpanded ? null : expandKey)}
+                                                            className="p-2 lg:p-1.5 bg-slate-100 text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">
+                                                            {isExpanded ? <ChevronUp size={13}/> : <ChevronDown size={13}/>}
+                                                        </button>
+                                                    </div>
+                                                    </div>
+                                                )}
+                                            />
+                                        );
+                                    })}
+                                    {filteredObjectivesWithAlerts.map(obj => {
+                                // % = gente en puesto / (gente + vacantes abiertas). Ausente cubierto no baja.
+                                const onPost = obj.active + obj.retention;
+                                const denom = onPost + obj.vacant;
+                                const pct = denom > 0 ? Math.round((onPost / denom) * 100) : 100;
+                                const isCrit = obj.vacant > 0;
+                                const isWarn = obj.retention > 0 || (obj.absent > 0 && obj.vacant === 0);
                                 const isExpanded = expandedObjectiveId === obj.objectiveId;
                                 const borderColor = isCrit ? 'border-rose-300' : isWarn ? 'border-orange-300' : 'border-slate-200';
                                 const bgColor = isCrit ? 'bg-rose-50' : isWarn ? 'bg-orange-50/40' : 'bg-white';
@@ -3723,25 +4933,44 @@ export default function OperacionesPage() {
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
                                     if (s.objectiveId !== obj.objectiveId) return false;
-                                    // Mismo filtro "hoy" que stats — excluye completados y virtuales vencidos de OTRO día
-                                    if (s.isCompleted && !s.isRetention) return false;
-                                    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now2) && s.endDateObj.getTime() < now2.getTime()) return false;
-                                    const hoy2 = isSameDay(s.shiftDateObj, now2) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-                                    if (!hoy2) return false;
-                                    switch(logic.viewTab) {
-                                        case 'ACTIVOS':    return s.isPresent && !s.isCompleted && !s.isRetention;
-                                        case 'RETENIDOS':  return s.isRetention;
-                                        case 'AUSENTES':   return s.isAbsent || s.isPotentialAbsence;
-                                        case 'VACANTES':   return s.isUnassigned; // incluye devueltas
-                                        case 'PLAN':       return s.isFuture && !s.isFranco && !s.isUnassigned;
-                                        case 'FRANCOS':    return s.isFranco;
-                                        default:           return !s.isFranco;
-                                    }
+                                    if (isEventShift(s)) return false;
+                                    if (!isOpsShiftHoy(s, now2)) return false;
+                                    return matchesViewTabForShift(s);
                                 });
 
                                 return (
-                                    <div key={obj.objectiveId} className={`rounded-xl border ${borderColor} ${bgColor} overflow-hidden transition-all`}>
-                                        {/* Header del objetivo */}
+                                    <OpsObjectiveGridCard
+                                        key={obj.objectiveId}
+                                        useOverlay={wideOpsPanel}
+                                        isExpanded={isExpanded}
+                                        onToggleExpand={(next) => setExpandedObjectiveId(next ? obj.objectiveId : null)}
+                                        borderColor={borderColor}
+                                        bgColor={bgColor}
+                                        overlayTitle={obj.name}
+                                        overlaySubtitle={obj.client}
+                                        expandedBody={
+                                            objShifts.length === 0 ? (
+                                                <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
+                                            ) : objShifts.map((s: any) => (
+                                                <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
+                                                    isAutoMode={opsCaps.fullAuto}
+                                                    onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
+                                                    onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
+                                                    onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
+                                                    onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
+                                                    onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
+                                                    onReportPlanning={handleReportPlanning}
+                                                    onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
+                                                    onNovedadAbsence={handleNovedadAbsence}
+                                                    onOpenWA={handleOpenWA}
+                                                    onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
+                                                    onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
+                                                    onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
+                                                    onRevertAbsence={handleRevertAbsence}
+                                                />
+                                            ))
+                                        }
+                                        header={(
                                         <div className="px-3 py-3 lg:py-2.5 flex items-center gap-2">
                                             {/* Indicador color */}
                                             <div className={`w-2.5 h-2.5 lg:w-2 lg:h-2 rounded-full shrink-0 ${isCrit ? 'bg-rose-500 animate-pulse' : isWarn ? 'bg-orange-500' : 'bg-emerald-500'}`}/>
@@ -3770,6 +4999,7 @@ export default function OperacionesPage() {
                                                         {obj.retention > 0 && <span className="text-[9px] font-bold text-orange-700 bg-orange-100 px-1.5 rounded animate-pulse">{obj.retention} ret</span>}
                                                         {obj.absent > 0 && <span className="text-[9px] font-bold text-rose-700 bg-rose-100 px-1.5 rounded">{obj.absent} aus</span>}
                                                         {obj.vacant > 0 && <span className="text-[9px] font-bold text-amber-700 bg-amber-100 px-1.5 rounded">{obj.vacant} vac</span>}
+                                                        {(activeConvsByObjective[obj.objectiveId] || 0) > 0 && <span className="text-[9px] font-bold text-purple-700 bg-purple-100 px-1.5 rounded animate-pulse">{activeConvsByObjective[obj.objectiveId]} conv</span>}
                                                         {obj.plan > 0 && <span className="text-[9px] text-slate-500 px-1">{obj.plan} plan</span>}
                                                     </div>
                                                 </div>
@@ -3777,7 +5007,7 @@ export default function OperacionesPage() {
 
                                             {/* Acciones rápidas */}
                                             <div className="flex items-center gap-1 shrink-0">
-                                                {(obj.absent > 0 || obj.vacant > 0) && obj.criticalShift && (
+                                                {(obj.vacant > 0) && obj.criticalShift && (
                                                     <button onClick={() => setCoverageData({isOpen:true, shift:obj.criticalShift})}
                                                         className="p-2 lg:p-1.5 bg-rose-600 text-white rounded-lg hover:bg-rose-700 active:scale-95 transition-colors"
                                                         title="Protocolo cobertura">
@@ -3790,44 +5020,21 @@ export default function OperacionesPage() {
                                                 </button>
                                             </div>
                                         </div>
-
-                                        {/* Guardias expandidos */}
-                                        {isExpanded && (
-                                            <div className="border-t border-slate-200 bg-white px-2 py-2 space-y-1.5">
-                                                {objShifts.length === 0 ? (
-                                                    <p className="text-[10px] text-slate-400 text-center py-2">Sin guardias en esta categoría</p>
-                                                ) : objShifts.map((s: any) => (
-                                                    <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={true}
-                                                        isAutoMode={session.isAutoMode}
-                                                        onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})}
-                                                        onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})}
-                                                        onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})}
-                                                        onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})}
-                                                        onOpenCoverage={(s:any)=>setCoverageData({isOpen:true, shift:s})}
-                                                        onReportPlanning={handleReportPlanning}
-                                                        onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})}
-                                                        onNovedadAbsence={handleNovedadAbsence}
-                                                        onOpenWA={handleOpenWA}
-                                                        onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})}
-                                                        onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})}
-                                                        onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})}
-                                                        onRevertAbsence={handleRevertAbsence}
-                                                    />
-                                                ))}
-                                            </div>
                                         )}
-                                    </div>
+                                    />
                                 );
                             })}
+                                </>
+                            )}
                         </div>
                         )}
 
                         {/* â•â• MODO LISTA (existente) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
                         {viewMode === 'lista' && (
-                        <div className="p-3 space-y-2">
+                        <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
-                            isGrouped ? (groupedList.map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished}/>; })) :
-                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={session.isAutoMode} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
+                            isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
+                            (logic.listData.map((s:any) => <GuardCard key={s.id} shift={s} viewTab={logic.viewTab} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onOpenCheckout={(s:any)=>setCheckoutData({isOpen:true, shift:s})} onOpenAttendance={(s:any)=>setAttendanceData({isOpen:true, shift:s})} onOpenHandover={(s:any)=>setHandoverData({isOpen:true, shift:s})} onOpenInterrupt={(s:any)=>setInterruptData({isOpen:true, shift:s})} onOpenCoverage={(s:any)=> { setCoverageData({isOpen:true, shift:s}); }} onReportPlanning={handleReportPlanning} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} onOpenManualRetention={(s:any)=>setManualRetentionData({isOpen:true,shift:s})} onRevertAbsence={handleRevertAbsence}/>))
                         }
                         </div>
                         )}
@@ -3844,7 +5051,7 @@ export default function OperacionesPage() {
                         {!bitacoraOpen && logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length > 0 && (
                           <span className="text-[9px] text-slate-400 mr-1">{logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length} eventos</span>
                         )}
-                        {!bitacoraOpen && pendingNovedades.length > 0 && (
+                        {!bitacoraOpen && alertsOnCc && pendingNovedades.length > 0 && (
                           <span className="text-[9px] font-black bg-rose-500 text-white px-1.5 rounded-full animate-pulse mr-1">{pendingNovedades.length}</span>
                         )}
                         {bitacoraOpen ? <ChevronDown size={12} className="text-slate-400"/> : <ChevronRight size={12} className="text-slate-400"/>}
@@ -3855,16 +5062,18 @@ export default function OperacionesPage() {
                           {([
                             { id:'reciente' as const,    label:'Actividad',   count: logic.recentLogs.filter((l:any)=>l.formattedActor!=='VACANTE').length },
                             { id:'operaciones' as const, label:'Operaciones', count: logic.recentLogs.filter((l:any)=>{ const a=(l.action||'').toUpperCase(); return OPS_ACTIONS.has(a); }).length },
-                            { id:'alertas' as const,     label:'Novedades',   count: pendingNovedades.length, urgent: pendingNovedades.length > 0 },
+                            ...(alertsOnCc ? [{ id:'alertas' as const, label:'Novedades', count: pendingNovedades.length, urgent: pendingNovedades.length > 0 }] : []),
+                            ...(alertsOnCc ? [{ id:'cascada' as const, label:'Cascada', count: cascadeConvs.filter(c=>c.status==='PENDING'||c.status==='ESCALATED').length, urgent: cascadeConvs.some(c=>c.status==='PENDING'||c.status==='ESCALATED') }] : []),
                           ]).map(t => (
                             <button key={t.id} onClick={() => setBitacoraTab(t.id)}
                               className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black uppercase transition-colors
                                 ${bitacoraTab===t.id
-                                  ? ((t as any).urgent ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white')
-                                  : ((t as any).urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
+                                  ? ((t as any).urgent ? 'bg-violet-600 text-white' : 'bg-slate-800 text-white')
+                                  : ((t as any).urgent && t.id==='cascada' ? 'bg-violet-50 text-violet-700 border border-violet-200' : (t as any).urgent ? 'bg-rose-50 text-rose-700 border border-rose-200' : 'text-slate-400 hover:bg-slate-100')}`}>
                               {t.id === 'alertas' && <Siren size={10}/>}
+                              {t.id === 'cascada' && <GitBranch size={10}/>}
                               {t.label}
-                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : (t as any).urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
+                              <span className={`text-[9px] font-black px-1 rounded-full ${bitacoraTab===t.id ? 'bg-white/20' : (t as any).urgent && t.id==='cascada' ? 'bg-violet-500 text-white animate-pulse' : (t as any).urgent ? 'bg-rose-500 text-white animate-pulse' : 'bg-slate-200 text-slate-500'}`}>{t.count}</span>
                             </button>
                           ))}
                           <div className="ml-auto flex items-center gap-1">
@@ -4002,6 +5211,7 @@ export default function OperacionesPage() {
                               LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse', border: 'border-l-amber-400' },
                               TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',           border: 'border-l-slate-300' },
                               INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',             border: 'border-l-teal-500' },
+                              COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder },
                             };
                             const getMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
                             const groups: { type: string; items: any[] }[] = [];
@@ -4027,22 +5237,21 @@ export default function OperacionesPage() {
                                   </div>
                                   {items.map((n: any) => {
                                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                    const headline = novedadHeadline(n);
+                                    const sub = novedadSubline(n);
                                     return (
                                       <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                         <div className="flex-1 min-w-0">
                                           <p className="text-xs lg:text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                            {n.employeeName && n.objectiveName
-                                              ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                              : n.objectiveName || n.employeeName || n.type}
-                                            {n.positionName && <span className="text-slate-400 font-normal text-[9px]"> · {n.positionName}</span>}
+                                            {headline}
                                           </p>
-                                          <p className="text-[9px] text-slate-400 truncate leading-tight">{n.description || '-'}</p>
+                                          <p className="text-[9px] text-slate-400 truncate leading-tight">{sub || '—'}</p>
                                         </div>
                                         <span className="text-[9px] text-slate-400 font-mono shrink-0">
                                           {ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}
                                         </span>
                                         <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }}
-                                          className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title="Atender">
+                                          className="p-1.5 bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors shrink-0" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}>
                                           <CheckCircle size={11}/>
                                         </button>
                                       </div>
@@ -4068,34 +5277,184 @@ export default function OperacionesPage() {
                           )}
                         </div>
                         )}
+
+                        {/* ── Tab Cascada ── */}
+                        {bitacoraTab === 'cascada' && (() => {
+                          const TYPE_LABEL: Record<string, string> = {
+                            RET: 'Retención', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Disp. c/exp',
+                            EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Disponible', FT: 'Franco Trab.',
+                            LLEGADA_TARDE: 'Llegada Tarde',
+                          };
+                          const STATUS_META: Record<string, { icon: string; cls: string; label: string }> = {
+                            PENDING:   { icon: '⏳', cls: 'text-amber-700 bg-amber-50 border-amber-200', label: 'Esperando' },
+                            ESCALATED: { icon: '↗', cls: 'text-blue-700 bg-blue-50 border-blue-200', label: 'Escalado' },
+                            ACCEPTED:  { icon: '✓', cls: 'text-emerald-700 bg-emerald-50 border-emerald-200', label: 'Aceptó' },
+                            REJECTED:  { icon: '✗', cls: 'text-rose-700 bg-rose-50 border-rose-200', label: 'Rechazó' },
+                            TIMEOUT:   { icon: '⏰', cls: 'text-slate-500 bg-slate-50 border-slate-200', label: 'Sin resp.' },
+                            CANCELLED: { icon: '✕', cls: 'text-slate-400 bg-slate-50 border-slate-100', label: 'Cancelado' },
+                          };
+                          // Agrupar por shiftId
+                          const byShift = new Map<string, any[]>();
+                          for (const c of cascadeConvs) {
+                            if (!byShift.has(c.shiftId)) byShift.set(c.shiftId, []);
+                            byShift.get(c.shiftId)!.push(c);
+                          }
+                          const groups = Array.from(byShift.entries());
+                          if (groups.length === 0) {
+                            return (
+                              <div className="flex-1 overflow-y-auto p-6 text-center">
+                                <GitBranch size={24} className="mx-auto mb-2 text-violet-300"/>
+                                <p className="text-xs font-bold text-slate-400">Sin convocatorias en las últimas 4h</p>
+                                <p className="text-[9px] text-slate-300 mt-1">Las convocatorias aparecen aquí cuando la cascada se activa.</p>
+                              </div>
+                            );
+                          }
+                          return (
+                            <div className="flex-1 overflow-y-auto">
+                              {groups.map(([shiftId, convs]) => {
+                                const first = convs[0];
+                                const hasActive = convs.some(c => c.status === 'PENDING' || c.status === 'ESCALATED');
+                                const isResolved = convs.some(c => c.status === 'ACCEPTED');
+                                return (
+                                  <div key={shiftId} className={`border-b border-slate-100 ${hasActive ? 'bg-violet-50/40' : ''}`}>
+                                    {/* Header del turno */}
+                                    <div className={`px-3 py-1.5 flex items-center gap-2 ${hasActive ? 'bg-violet-100/50' : 'bg-slate-50'}`}>
+                                      <GitBranch size={10} className={hasActive ? 'text-violet-600' : 'text-slate-400'}/>
+                                      <div className="flex-1 min-w-0">
+                                        <p className="text-[9px] font-black text-slate-700 truncate">{first.objectiveName || 'Objetivo'}</p>
+                                        <p className="text-[8px] text-slate-400 truncate">
+                                          {first.shiftCode} · {first.startTime?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'}) ?? '--'}
+                                          {isResolved && <span className="ml-1 text-emerald-600 font-bold">· ✓ CUBIERTO</span>}
+                                        </p>
+                                      </div>
+                                      <span className={`text-[8px] font-black px-1 rounded ${hasActive ? 'bg-violet-200 text-violet-700' : isResolved ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-500'}`}>
+                                        {convs.length} paso{convs.length !== 1 ? 's' : ''}
+                                      </span>
+                                    </div>
+                                    {/* Lista de convocatorias */}
+                                    {convs.map(c => {
+                                      const sm = STATUS_META[c.status] || STATUS_META.TIMEOUT;
+                                      const ts = c.createdAt?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'});
+                                      const respondedTs = c.respondedAt?.toDate?.()?.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Buenos_Aires'});
+                                      return (
+                                        <div key={c.id} className={`px-3 py-1.5 flex items-center gap-2 border-l-2 ml-3 ${c.status==='PENDING'||c.status==='ESCALATED' ? 'border-violet-400' : c.status==='ACCEPTED' ? 'border-emerald-400' : 'border-slate-200'}`}>
+                                          <span className="text-[10px] shrink-0">{sm.icon}</span>
+                                          <div className="flex-1 min-w-0">
+                                            <p className="text-[9px] font-bold text-slate-800 truncate">{c.candidateEmployeeName}</p>
+                                            <p className="text-[8px] text-slate-400 truncate">{TYPE_LABEL[c.type] || c.type}</p>
+                                          </div>
+                                          <div className="text-right shrink-0">
+                                            <span className={`text-[8px] font-black px-1 py-0.5 rounded border ${sm.cls}`}>{sm.label}</span>
+                                            <p className="text-[8px] text-slate-300 font-mono mt-0.5">{respondedTs ?? ts ?? '--'}</p>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
                       </>)}
                     </div>
+
+                    {coverageByObjective.length > 0 && (
+                        <div className={`border-t border-slate-200 bg-white shrink-0 flex flex-col ${showCoverageGrid ? 'max-h-[35vh]' : ''}`}>
+                            <button type="button" onClick={() => setShowCoverageGrid(v => !v)} className="px-3 py-1.5 flex items-center gap-2 hover:bg-slate-50 text-left shrink-0">
+                                <Layers size={12} className="text-indigo-500 shrink-0"/>
+                                <span className="text-[9px] font-black text-slate-600 uppercase flex-1">Cobertura por objetivo</span>
+                                {coverageHasIssues && !showCoverageGrid && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"/>}
+                                <span className="text-[9px] text-slate-400">{coverageByObjective.length}</span>
+                                <ChevronDown size={12} className={`text-slate-400 transition-transform ${showCoverageGrid ? 'rotate-180' : ''}`}/>
+                            </button>
+                            {showCoverageGrid && (
+                                <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-2 space-y-1">
+                                    {coverageByObjective.map(obj => {
+                                        const denom = obj.active + obj.vacant;
+                                        const pct = denom > 0 ? Math.round((obj.active / denom) * 100) : 100;
+                                        const hasIssue = obj.vacant > 0;
+                                        const isCrit = pct < 50;
+                                        return (
+                                            <div key={obj.objectiveId} className={`flex items-center gap-2 px-2 py-1.5 rounded-lg border ${isCrit ? 'bg-rose-50 border-rose-200' : hasIssue ? 'bg-amber-50 border-amber-200' : 'bg-white border-slate-200'}`}>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="text-[10px] font-black truncate text-slate-800">{obj.name}</p>
+                                                    <p className="text-[9px] truncate text-slate-400">{obj.client}</p>
+                                                </div>
+                                                <div className="text-right shrink-0">
+                                                    <p className={`text-[11px] font-black ${isCrit ? 'text-rose-600' : hasIssue ? 'text-amber-600' : 'text-emerald-600'}`}>{pct}%</p>
+                                                    <p className="text-[9px] text-slate-400">{obj.active}/{obj.total}</p>
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {mapVisible && alertsOnCc && notifPanelOpen && (
+                        <div className="absolute inset-x-0 bottom-0 z-[90] max-h-[min(70vh,520px)] flex flex-col bg-white rounded-t-2xl shadow-2xl border border-slate-200 mx-0 lg:mx-1 lg:mb-1 lg:rounded-xl overflow-hidden">
+                            <div className="bg-slate-900 px-3 py-2 flex items-center gap-2 shrink-0">
+                                <Siren size={14} className="text-rose-400"/>
+                                <span className="text-xs font-black uppercase text-white flex-1">Alertas</span>
+                                {totalAlertsCount > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlertsCount}</span>}
+                                <button type="button" onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg"><X size={14} className="text-slate-400"/></button>
+                            </div>
+                            <div className="flex-1 min-h-0 overflow-y-auto">
+                                {priorityShiftsForAlerts.length === 0 && pendingNovedades.length === 0 ? (
+                                    <p className="p-4 text-center text-xs text-slate-400">Sin alertas pendientes</p>
+                                ) : (
+                                    <>
+                                        {priorityShiftsForAlerts.slice(0, 8).map((s: any) => (
+                                            <div key={s.id} className="px-3 py-2 border-b border-slate-100 text-[10px]">
+                                                <p className="font-bold text-slate-800 truncate">{s.employeeName || '—'} · {s.objectiveName}</p>
+                                                <p className="text-slate-400 truncate">{s.positionName}</p>
+                                            </div>
+                                        ))}
+                                        {pendingNovedades.slice(0, 12).map((n: any) => {
+                                            const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN', COBERTURA_RESUELTA:'CUBIERTO' };
+                                            const label = tl[n.type] || (n.type || '').replace(/_/g,' ').slice(0,8).toUpperCase();
+                                            const headline = novedadHeadline(n);
+                                            const sub = novedadSubline(n);
+                                            return (
+                                            <div key={n.id} className="px-3 py-2 border-b border-slate-50 text-[10px] flex items-center gap-2">
+                                                <span className={`text-[8px] font-black px-1 py-0.5 rounded shrink-0 ${n.type === 'COBERTURA_RESUELTA' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-white'}`}>{label}</span>
+                                                <div className="flex-1 min-w-0">
+                                                    <p className="font-bold text-slate-700 truncate">{headline}</p>
+                                                    {sub ? <p className="text-slate-400 truncate">{sub}</p> : null}
+                                                </div>
+                                                <button type="button" onClick={() => setDetailNovedad(n)} className="text-[9px] font-black text-indigo-600 shrink-0">VER</button>
+                                            </div>
+                                            );
+                                        })}
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
                 </div>
 
-                {/* â"€â"€ PANEL FLOTANTE DE ALERTAS — solo visible cuando el mapa NO está en ventana externa â"€â"€ */}
-                {!isExternalMap && (
+                {/* Panel alertas flotante — solo mapa colapsado o undocked */}
                 <React.Fragment>
                 {/* Backdrop mobile cuando panel abierto */}
-                {notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
-                <div className={notifPanelOpen
-                    ? 'fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8'
-                    : 'absolute bottom-8 left-8 z-[1000]'}>
+                {alertsOnCc && notifPanelOpen && <div className="fixed inset-0 bg-black/40 z-[999] lg:hidden" onClick={() => setNotifPanelOpen(false)}/>}
+                {alertsOnCc && mapCollapsed && notifPanelOpen && (
+                <div className="fixed bottom-0 left-0 right-0 z-[1000] lg:absolute lg:inset-auto lg:bottom-8 lg:left-8">
                 {(() => {
                     // Calcular priority shifts con el MISMO filtro que stats.prioridad (hoy + activos)
                     const _now = new Date();
-                    const _hoy = logic.processedData.filter((s:any) => isSameDay(s.shiftDateObj, _now) || ((s.isPresent || s.isRetention) && !s.isCompleted));
+                    const _hoy = logic.processedData.filter((s:any) => {
+                        if (isSameDay(s.shiftDateObj, _now)) return true;
+                        if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+                            const sm = s.shiftDateObj?.getTime?.() ?? 0;
+                            return sm > 0 && (_now.getTime() - sm) <= 48 * 60 * 60 * 1000;
+                        }
+                        return false;
+                    });
                     const priorityShiftsPanel = _hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn) && !s.isFranco);
                     const totalAlerts = pendingNovedades.length + priorityShiftsPanel.length;
-                    return !notifPanelOpen ? (
-                    <button onClick={() => setNotifPanelOpen(true)}
-                        className={`flex items-center gap-2 px-4 py-2.5 rounded-xl shadow-lg font-black uppercase text-sm transition-all hover:scale-105 ${totalAlerts > 0 ? 'bg-rose-600 text-white' : 'bg-slate-800 text-white'}`}>
-                        <Siren size={15} className={totalAlerts > 0 ? 'animate-pulse' : ''}/>
-                        Alertas
-                        <span className={`text-xs font-black px-2 py-0.5 rounded-full ${totalAlerts > 0 ? 'bg-white text-rose-600' : 'bg-white/20 text-white'}`}>
-                            {totalAlerts}
-                        </span>
-                    </button>
-                ) : (
+                    return (
                     <div className="w-full lg:w-[480px] flex flex-col bg-white rounded-t-2xl lg:rounded-xl shadow-2xl border border-slate-200 animate-in slide-in-from-bottom-4 max-h-[92vh] lg:max-h-[70vh]">
                         <div className="bg-slate-900 rounded-t-2xl">
                             {/* Drag handle — solo mobile */}
@@ -4214,6 +5573,9 @@ export default function OperacionesPage() {
                                     LLEGADA_TARDE:               { label: 'TARDE',   bg: 'bg-amber-400 text-white animate-pulse',    border: 'border-l-amber-400',  actionBg: 'bg-amber-500 hover:bg-amber-600' },
                                     TURNO_COMPLETADO_AUTO:       { label: 'FIN',     bg: 'bg-slate-100 text-slate-600',              border: 'border-l-slate-400',  actionBg: 'bg-slate-600 hover:bg-slate-700' },
                                     INGRESO_AUTOREGISTRO:        { label: 'INGRESO', bg: 'bg-teal-100 text-teal-700',                border: 'border-l-teal-500',   actionBg: 'bg-teal-600 hover:bg-teal-700' },
+                                    VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',         border: 'border-l-fuchsia-500', actionBg: 'bg-fuchsia-700 hover:bg-fuchsia-800' },
+                                    TURA_EXTENSION:              { label: 'TURA',    bg: 'bg-violet-100 text-violet-800',           border: 'border-l-violet-500', actionBg: 'bg-violet-700 hover:bg-violet-800' },
+                                    COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder, actionBg: COBERTURA_RESUELTA_META.actionBg },
                                 };
                                 const getMeta = (t: string) => NOV_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300', actionBg: 'bg-slate-700 hover:bg-slate-800' };
                                 // Agrupar por tipo
@@ -4242,18 +5604,18 @@ export default function OperacionesPage() {
                                             </div>
                                             {items.map((n: any) => {
                                                 const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
+                                                const headline = novedadHeadline(n);
+                                                const sub = novedadSubline(n);
                                                 return (
                                                     <div key={n.id} className={`flex items-center gap-2 px-3 py-1.5 border-l-4 ${meta.border} bg-white border-b border-slate-50 hover:bg-slate-50/50 transition-colors`}>
                                                         <div className="flex-1 min-w-0">
                                                             <p className="text-[10px] font-bold text-slate-800 truncate leading-tight">
-                                                                {n.employeeName && n.objectiveName
-                                                                    ? <>{n.employeeName} <span className="text-slate-400 font-normal">·</span> {n.objectiveName}</>
-                                                                    : n.objectiveName || n.employeeName || n.type}
+                                                                {headline}
                                                             </p>
-                                                            <p className="text-[9px] text-slate-400 truncate leading-tight">{n.positionName || n.description || ''}</p>
+                                                            {sub ? <p className="text-[9px] text-slate-400 truncate leading-tight">{sub}</p> : null}
                                                         </div>
                                                         <span className="text-[9px] font-mono text-slate-500 w-10 text-right shrink-0">{ts ? ts.toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',timeZone:'America/Argentina/Cordoba'}) : '--'}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }} className="p-1 bg-slate-700 text-white rounded hover:bg-slate-800 transition-colors shrink-0" title="Atender"><CheckCircle size={10}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); handleAtenderNovedad(n); }} className="p-1 bg-slate-700 text-white rounded hover:bg-slate-800 transition-colors shrink-0" title={isInformationalNovedad(n) ? 'Entendido' : 'Atender'}><CheckCircle size={10}/></button>
                                                         <button onClick={() => { setNotifPanelOpen(false); setDetailNovedad(n); }}
                                                             className={`text-[9px] font-black text-white px-2 py-1 rounded-lg w-16 text-center shrink-0 transition-colors ${meta.actionBg}`}>VER</button>
                                                     </div>
@@ -4268,8 +5630,8 @@ export default function OperacionesPage() {
                     );
                 })()}
                 </div>
-                </React.Fragment>
                 )}
+                </React.Fragment>
 
             </div>
 
@@ -4421,5 +5783,13 @@ export default function OperacionesPage() {
                 );
             })()}
         </DashboardLayout>
+        {detailNovedad && (
+            <NovedadDetailPopup
+                novedad={detailNovedad}
+                onClose={() => setDetailNovedad(null)}
+                onAtender={handleAtenderNovedad}
+            />
+        )}
+        </>
     );
 }
