@@ -641,6 +641,26 @@ const CoverageRow = ({
 };
 
 const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) => {
+    if (!isOpen || !absenceShift) return null;
+    if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
+        setTimeout(() => {
+            toast.info('Vacante devuelta a planificación — no se puede cubrir desde operaciones.');
+            onClose();
+        }, 0);
+        return null;
+    }
+    return (
+        <CoverageModalContent
+            isOpen={isOpen}
+            onClose={onClose}
+            absenceShift={absenceShift}
+            logic={logic}
+            opsCaps={opsCaps}
+        />
+    );
+};
+
+const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const tenantId = (s?: any) => String(s?.empresaId || absenceShift?.empresaId || empresaId || '').trim();
@@ -677,11 +697,11 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
         setDemoStepKey(null);
         demoCandidateIndexRef.current = 0;
         setDemoPaused(false);
-    }, [absenceShift?.id, isOpen]);
+    }, [absenceShift?.id]);
 
     // Suscripción en tiempo real a convocatorias pendientes para esta vacante
     useEffect(() => {
-        if (!isOpen || !absenceShift?.id) { setPendingConvocatorias([]); return; }
+        if (!absenceShift?.id) { setPendingConvocatorias([]); return; }
         // PENDING: esperando dentro del timeout · ESCALATED: timeout vencido pero aún activa
         const q = query(
             collection(db, 'convocatorias_cobertura'),
@@ -692,7 +712,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
             setPendingConvocatorias(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
         }, (err) => console.error('[convocatoria modal]', err));
         return () => unsub();
-    }, [isOpen, absenceShift?.id]);
+    }, [absenceShift?.id]);
 
     const handleConvocarConvocatoria = async (candidateEmployeeId: string, type: string, extraData?: Record<string, string>) => {
         if (!absenceShift?.id || !empresaId) return;
@@ -736,13 +756,6 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
             toast.error('Error: ' + (e?.message || String(e)));
         }
     };
-
-    if (!isOpen || !absenceShift) return null;
-    if (absenceShift.isReportedToPlanning && absenceShift.isUnassigned) {
-        toast.info('Vacante devuelta a planificación — no se puede cubrir desde operaciones.');
-        onClose();
-        return null;
-    }
 
     const now = new Date();
     const absenceEnd = toDate(absenceShift.endDateObj);
@@ -6057,7 +6070,9 @@ export default function OperacionesPage() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic} opsCaps={opsCaps}/>
+            {coverageData.isOpen && coverageData.shift && (
+                <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic} opsCaps={opsCaps}/>
+            )}
             <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
             <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({isOpen:true,shift:s})} onSendToPlanning={handleReportPlanning}/>
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
