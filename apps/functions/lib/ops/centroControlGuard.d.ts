@@ -2,4 +2,5 @@ export declare function isCentroControlEnabled(data: FirebaseFirestore.DocumentD
 export declare function loadCentroControlState(db: FirebaseFirestore.Firestore): Promise<{
     anyEnabled: boolean;
     isEnabled: (empresaId: string | null | undefined) => boolean;
+    isDemo: (empresaId: string | null | undefined) => boolean;
 }>;
