@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Phone, ChevronRight, CheckCircle, Clock, AlertTriangle, Users, SkipForward } from 'lucide-react';
+import { X, Phone, ChevronRight, ChevronLeft, CheckCircle, Clock, AlertTriangle, Users, SkipForward } from 'lucide-react';
 import { collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -396,6 +396,19 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     if (unsubRef.current) { unsubRef.current(); unsubRef.current = null; }
     upd({ status: 'SELECTING', pending: null, awaitingPhone: false });
+  };
+
+  const goToStep = (targetStep: number) => {
+    if (targetStep < 0 || targetStep >= STEPS.length) return;
+    if (session.status === 'CONFIRMED') return;
+    rejectCandidate();
+    upd({ currentStep: targetStep, status: 'SELECTING', pending: null, pendingExt: null, pendingAdv: null, awaitingPhone: false });
+  };
+
+  const prevStep = () => {
+    if (session.currentStep > 0) {
+      goToStep(session.currentStep - 1);
+    }
   };
 
   const skipStep = () => {
@@ -822,16 +835,22 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
               const active = i === session.currentStep && !isConfirmed && !isFailed;
               return (
                 <React.Fragment key={st.key}>
-                  <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[10px] font-black transition-colors whitespace-nowrap ${
-                    done ? 'bg-emerald-100 text-emerald-700'
-                    : active ? 'bg-rose-600 text-white'
-                    : 'bg-white text-slate-400 border border-slate-200'
-                  }`}>
+                  <button
+                    type="button"
+                    onClick={() => goToStep(i)}
+                    disabled={isConfirmed}
+                    title={`Ir al paso ${i + 1}: ${st.label}`}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all whitespace-nowrap cursor-pointer hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-100 ${
+                      done ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                      : active ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
+                      : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
                     <span>{done ? '✓' : st.icon}</span>
                     <span>{st.label}</span>
                     {active && session.status === 'PENDING' && <span className="font-mono ml-1">{fmtCountdown(session.pending?.sec ?? 0)}</span>}
                     {active && session.status === 'PENDING_DUAL' && <Clock size={10} className="ml-1" />}
-                  </div>
+                  </button>
                   {i < STEPS.length - 1 && <ChevronRight size={10} className="text-slate-300 flex-shrink-0" />}
                 </React.Fragment>
               );
@@ -869,11 +888,18 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
                     <h3 className="text-base font-black text-slate-800">{step.label}</h3>
                     {step.mandatory && <span className="text-[10px] text-orange-600 font-bold">Asignación obligatoria</span>}
                   </div>
-                  {session.status === 'SELECTING' && session.currentStep < STEPS.length - 1 && !step.isDual && (
-                    <button onClick={skipStep} className="flex items-center gap-1 text-[10px] text-slate-400 hover:text-slate-600 font-semibold transition-colors">
-                      <SkipForward size={12} /> Siguiente paso
-                    </button>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {session.status === 'SELECTING' && session.currentStep > 0 && (
+                      <button onClick={prevStep} className="flex items-center gap-0.5 text-[11px] text-slate-500 hover:text-slate-800 font-bold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                        <ChevronLeft size={13} /> Anterior
+                      </button>
+                    )}
+                    {session.status === 'SELECTING' && session.currentStep < STEPS.length - 1 && !step.isDual && (
+                      <button onClick={skipStep} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                        <SkipForward size={12} /> Saltear
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Pending o selección */}
@@ -884,11 +910,18 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
                       <div className="flex flex-col items-center gap-3 py-8 text-center">
                         <Users size={32} className="text-slate-300" />
                         <div className="text-sm text-slate-400">Sin candidatos para este paso</div>
-                        {session.currentStep < STEPS.length - 1 && (
-                          <button onClick={skipStep} className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-2">
-                            <SkipForward size={14} /> Siguiente paso
-                          </button>
-                        )}
+                        <div className="flex items-center gap-2 justify-center mt-2">
+                          {session.currentStep > 0 && (
+                            <button onClick={prevStep} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm flex items-center gap-1 transition-colors">
+                              <ChevronLeft size={14} /> Anterior
+                            </button>
+                          )}
+                          {session.currentStep < STEPS.length - 1 && (
+                            <button onClick={skipStep} className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-2 transition-colors">
+                              <SkipForward size={14} /> Siguiente paso
+                            </button>
+                          )}
+                        </div>
                       </div>
                     )
                     : (
@@ -906,11 +939,18 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         {!isConfirmed && !isFailed && (
           <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 shrink-0 flex items-center justify-between">
             <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600 font-semibold transition-colors">Cerrar</button>
-            {session.currentStep < STEPS.length - 1 && session.status === 'SELECTING' && (
-              <button onClick={skipStep} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-bold transition-colors">
-                Saltear paso <SkipForward size={12} />
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {session.currentStep > 0 && session.status === 'SELECTING' && (
+                <button onClick={prevStep} className="flex items-center gap-0.5 text-xs text-slate-600 hover:text-slate-800 font-bold transition-colors">
+                  <ChevronLeft size={13} /> Paso anterior
+                </button>
+              )}
+              {session.currentStep < STEPS.length - 1 && session.status === 'SELECTING' && (
+                <button onClick={skipStep} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-bold transition-colors">
+                  Saltear paso <SkipForward size={12} />
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

@@ -8,7 +8,7 @@
  */
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
-  X, ChevronRight, Phone, SkipForward, CheckCircle,
+  X, ChevronRight, ChevronLeft, Phone, SkipForward, CheckCircle,
   AlertTriangle, Users, Clock, Minimize2, Search,
 } from 'lucide-react';
 import {
@@ -536,6 +536,20 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   confirmCandidateRef.current = confirmCandidate;
 
   const rejectCandidate = () => onUpd({ status: 'SELECTING', pending: null, awaitingPhone: false });
+
+  const goToStep = (targetStep: number) => {
+    if (targetStep < 0 || targetStep >= STEPS.length) return;
+    if (s.status === 'CONFIRMED') return;
+    rejectCandidate();
+    onUpd({ currentStep: targetStep, status: 'SELECTING', pending: null, pendingExt: null, pendingAdv: null, awaitingPhone: false });
+  };
+
+  const prevStep = () => {
+    if (s.currentStep > 0) {
+      goToStep(s.currentStep - 1);
+    }
+  };
+
   const skipStep = () => {
     rejectCandidate();
     const next = s.currentStep + 1;
@@ -861,10 +875,22 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             const sec = active && s.status === 'PENDING' ? s.pending?.sec : null;
             return (
               <React.Fragment key={st.key}>
-                <div className={`flex items-center gap-1 px-2 py-1 rounded-full text-[9px] font-black whitespace-nowrap transition-all ${done ? 'bg-emerald-100 text-emerald-700' : active ? 'bg-rose-600 text-white shadow-sm' : 'bg-white text-slate-400 border border-slate-200'}`}>
+                <button
+                  type="button"
+                  onClick={() => goToStep(i)}
+                  disabled={s.status === 'CONFIRMED'}
+                  title={`Ir al paso ${i + 1}: ${st.label}`}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[9px] font-black whitespace-nowrap transition-all cursor-pointer hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-100 ${
+                    done
+                      ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                      : active
+                        ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
+                        : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                  }`}
+                >
                   {done ? '✓' : st.icon} {st.label}
                   {sec != null && <span className="font-mono ml-0.5 text-[8px]">{fmtCd(sec)}</span>}
-                </div>
+                </button>
                 {i < STEPS.length - 1 && <ChevronRight size={8} className="text-slate-300 flex-shrink-0" />}
               </React.Fragment>
             );
@@ -904,11 +930,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   </div>
                 )}
               </div>
-              {s.status === 'SELECTING' && s.currentStep < STEPS.length - 1 && (
-                <button onClick={skipStep} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold shrink-0 ml-2 mt-1">
-                  <SkipForward size={12} /> Saltear
-                </button>
-              )}
+              <div className="flex items-center gap-1 shrink-0 ml-2 mt-1">
+                {s.status === 'SELECTING' && s.currentStep > 0 && (
+                  <button onClick={prevStep} className="flex items-center gap-0.5 text-[11px] text-slate-500 hover:text-slate-800 font-bold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                    <ChevronLeft size={13} /> Anterior
+                  </button>
+                )}
+                {s.status === 'SELECTING' && s.currentStep < STEPS.length - 1 && (
+                  <button onClick={skipStep} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                    <SkipForward size={12} /> Saltear
+                  </button>
+                )}
+              </div>
             </div>
 
             {s.status === 'PENDING'
@@ -921,11 +954,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                       <Users size={36} className="text-slate-200" />
                       <div className="text-sm font-bold text-slate-400">Sin candidatos disponibles</div>
                       <p className="text-xs text-slate-400 max-w-[200px]">No hay empleados que cumplan los criterios de este paso.</p>
-                      {s.currentStep < STEPS.length - 1 && (
-                        <button onClick={skipStep} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition-colors">
-                          <SkipForward size={13} /> Siguiente paso
-                        </button>
-                      )}
+                      <div className="flex items-center gap-2 justify-center mt-2">
+                        {s.currentStep > 0 && (
+                          <button onClick={prevStep} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm flex items-center gap-1 transition-colors">
+                            <ChevronLeft size={14} /> Anterior
+                          </button>
+                        )}
+                        {s.currentStep < STEPS.length - 1 && (
+                          <button onClick={skipStep} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition-colors">
+                            <SkipForward size={13} /> Siguiente paso
+                          </button>
+                        )}
+                      </div>
                     </div>
                   )
                   : (
