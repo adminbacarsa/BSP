@@ -267,6 +267,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
   // ── Candidatos ─────────────────────────────────────────────────────────────
 
+  const targetDate = toDate(absenceShift.shiftDateObj);
+
   // Empleados ocupados en otras sesiones activas (evita proponer el mismo candidato en paralelo)
   const crossSessionBusy = new Set<string>(
     allSessions
@@ -280,10 +282,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       ].filter(Boolean) as string[])
   );
 
+  // Empleados que ya tienen turno o descanso asignado en la fecha del turno ausente
+  const hasShiftOnTargetDate = new Set<string>(
+    (logic.processedData || [])
+      .filter((sh: any) => isSameDay(sh.shiftDateObj, targetDate))
+      .map((sh: any) => sh.employeeId)
+  );
+
   const busyIds = new Set<string>([
-    ...(logic.processedData || [])
-      .filter((sh: any) => isSameDay(sh.shiftDateObj, now) && !sh.isFranco && sh.code !== 'RET' && sh.code !== 'ESC' && sh.code !== 'REF')
-      .map((sh: any) => sh.employeeId),
+    ...hasShiftOnTargetDate,
     ...crossSessionBusy,
   ]);
 
@@ -307,30 +314,61 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           }))
           .sort((a: any, b: any) => (b.hasAffinity ? 1 : 0) - (a.hasAffinity ? 1 : 0));
       case 'RET_PASIVO':
-        return (logic.processedData || []).filter((sh: any) => sh.code === 'RET' && !sh.isAbsent && sh.employeeId !== absenceShift.employeeId && !crossSessionBusy.has(sh.employeeId));
+        return (logic.processedData || []).filter((sh: any) =>
+          sh.code === 'RET' &&
+          isSameDay(sh.shiftDateObj, targetDate) &&
+          !sh.isAbsent &&
+          sh.employeeId !== absenceShift.employeeId &&
+          !crossSessionBusy.has(sh.employeeId)
+        );
       case 'ESC':
-        return (logic.processedData || []).filter((sh: any) => (sh.code === 'ESC' || sh.code === 'REF') && !sh.isAbsent && sh.employeeId !== absenceShift.employeeId && !crossSessionBusy.has(sh.employeeId));
+        return (logic.processedData || []).filter((sh: any) =>
+          (sh.code === 'ESC' || sh.code === 'REF') &&
+          isSameDay(sh.shiftDateObj, targetDate) &&
+          !sh.isAbsent &&
+          sh.employeeId !== absenceShift.employeeId &&
+          !crossSessionBusy.has(sh.employeeId)
+        );
       case 'RETENCION':
         return [];
       case 'FT':
         return (logic.processedData || [])
-          .filter((sh: any) => sh.isFranco && isSameDay(sh.shiftDateObj, now) && !sh.isFrancoTrabajado && !crossSessionBusy.has(sh.employeeId))
-          .map((sh: any) => { const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId); return { ...sh, fullName: sh.employeeName, phone: sh.phone || emp?.phone || emp?.celular || '' }; });
+          .filter((sh: any) =>
+            sh.isFranco &&
+            isSameDay(sh.shiftDateObj, targetDate) &&
+            !sh.isFrancoTrabajado &&
+            !sh.isAbsent &&
+            sh.employeeId !== absenceShift.employeeId &&
+            !crossSessionBusy.has(sh.employeeId)
+          )
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+            };
+          });
     }
   };
 
   const candidatesExt = (logic.processedData || []).filter((sh: any) =>
-    sh.isPresent && !sh.isCompleted && sh.objectiveId === absenceShift.objectiveId && sh.positionName === absenceShift.positionName && sh.id !== absenceShift.id);
+    sh.isPresent && !sh.isCompleted &&
+    isSameDay(sh.shiftDateObj, targetDate) &&
+    sh.objectiveId === absenceShift.objectiveId &&
+    sh.positionName === absenceShift.positionName &&
+    sh.id !== absenceShift.id
+  );
   // ADV: turno que aún no empezó en el mismo objetivo/puesto, dentro de las próximas 12h.
   // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
-  const advWindowEnd = new Date(now.getTime() + 12 * 3600 * 1000);
+  const advWindowEnd = new Date(targetDate.getTime() + 12 * 3600 * 1000);
   const candidatesAdv = (logic.processedData || [])
     .filter((sh: any) => {
       const shStart = toDate(sh.shiftDateObj);
       return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
         && sh.objectiveId === absenceShift.objectiveId
         && sh.positionName === absenceShift.positionName
-        && shStart > now && shStart <= advWindowEnd;
+        && shStart > targetDate && shStart <= advWindowEnd;
     })
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
     .slice(0, 1);

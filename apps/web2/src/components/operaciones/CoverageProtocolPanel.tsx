@@ -123,25 +123,33 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
 
   // ─── Candidatos por paso ─────────────────────────────────────────────────
 
-  const busyIds = new Set<string>(
+  const targetDate = toDate(absenceShift.shiftDateObj);
+
+  // Empleados que ya tienen turno o descanso asignado en la fecha del turno ausente
+  const hasShiftOnTargetDate = new Set<string>(
     (logic.processedData || [])
-      .filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco && s.code !== 'RET' && s.code !== 'ESC' && s.code !== 'REF')
+      .filter((s: any) => isSameDay(s.shiftDateObj, targetDate))
       .map((s: any) => s.employeeId)
   );
+
+  const busyIds = new Set<string>([
+    ...hasShiftOnTargetDate,
+  ]);
 
   const candidatesBySin: any[] = (logic.employees || [])
     .filter((e: any) => !busyIds.has(e.id) && e.id !== absenceShift.employeeId)
     .map((e: any) => ({ ...e, fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '', phone: e.phone || e.celular || '' }));
 
   const candidatesRet: any[] = (logic.processedData || [])
-    .filter((s: any) => (s.code === 'RET') && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
+    .filter((s: any) => s.code === 'RET' && isSameDay(s.shiftDateObj, targetDate) && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
 
   const candidatesEsc: any[] = (logic.processedData || [])
-    .filter((s: any) => (s.code === 'ESC' || s.code === 'REF') && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
+    .filter((s: any) => (s.code === 'ESC' || s.code === 'REF') && isSameDay(s.shiftDateObj, targetDate) && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
 
   const candidatesExt: any[] = (logic.processedData || [])
     .filter((s: any) =>
       s.isPresent && !s.isCompleted &&
+      isSameDay(s.shiftDateObj, targetDate) &&
       s.objectiveId === absenceShift.objectiveId &&
       s.positionName === absenceShift.positionName &&
       s.id !== absenceShift.id
@@ -152,14 +160,14 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
       !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
       s.objectiveId === absenceShift.objectiveId &&
       s.positionName === absenceShift.positionName &&
-      toDate(s.shiftDateObj) > now &&
-      isSameDay(s.shiftDateObj, now)
+      toDate(s.shiftDateObj) > targetDate &&
+      isSameDay(s.shiftDateObj, targetDate)
     )
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
     .slice(0, 1);
 
   const candidatesFt: any[] = (logic.processedData || [])
-    .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado)
+    .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, targetDate) && !s.isFrancoTrabajado && !s.isAbsent && s.employeeId !== absenceShift.employeeId)
     .map((s: any) => {
       const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
       return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
