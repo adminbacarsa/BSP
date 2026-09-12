@@ -859,6 +859,18 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificación
                 operacionallyCovered:  true,            // slot operativo cubierto
             });
+
+            // Si se cubrió una vacante real provocada por una ausencia (causedByShiftId), propagar al turno ausente original
+            if (absenceShift.causedByShiftId) {
+                batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+                    operacionallyCovered:  true,
+                    resolvedBy:            'OPERACIONES',
+                    coverageType,
+                    coveredAt:             serverTimestamp(),
+                    coveredByEmployeeId:   covEmpId,
+                    coveredByEmployeeName: covEmpName,
+                });
+            }
         }
     };
 
@@ -2001,11 +2013,15 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const canReturn = canCover && shift.vacancyOrigin !== 'ABSENCE' && hoursUntilStart <= 12;
 
     let name = shift.isUnassigned
-        ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
+        ? (shift.causedByEmployeeName
+            ? `VACANTE · ${shift.causedByEmployeeName}`
+            : (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE')))
         : (shift.employeeName || 'Desconocido');
     if (shift.isUnassigned && shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
     if (shift.isDescubierto || shift.isSinCobertura) {
-        name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
+        name = shift.causedByEmployeeName
+            ? `DESCUBIERTO · ${shift.causedByEmployeeName}`
+            : (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
     }
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);

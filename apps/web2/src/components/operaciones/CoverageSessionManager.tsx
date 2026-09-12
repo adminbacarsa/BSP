@@ -401,10 +401,23 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const shiftId = cand.id;
       // coveredBy* en el turno ausente alimenta "CUBIERTO POR" en planificación y reportes
       const markCovered = (ct: string) => {
-        if (isReal) batch.update(doc(db, 'turnos', absenceShift.id), {
-          status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType: ct, coveredAt: serverTimestamp(),
-          coveredByEmployeeId: empId, coveredByEmployeeName: empName,
-        });
+        if (isReal) {
+          batch.update(doc(db, 'turnos', absenceShift.id), {
+            status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType: ct, coveredAt: serverTimestamp(),
+            coveredByEmployeeId: empId, coveredByEmployeeName: empName,
+          });
+        }
+        // Si esta vacante fue generada por una ausencia (causedByShiftId), propagar también al turno ausente original
+        if (absenceShift.causedByShiftId) {
+          batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+            operacionallyCovered: true,
+            resolvedBy: 'OPERACIONES',
+            coverageType: ct,
+            coveredAt: serverTimestamp(),
+            coveredByEmployeeId: empId,
+            coveredByEmployeeName: empName,
+          });
+        }
       };
 
       if (step.key === 'SIN_TURNO') {
@@ -498,6 +511,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           const advLabel = `${advName} adel ${fmtTime(advSh?.shiftDateObj)}–${hiEnd}`;
           const covLabel = `${extLabel} + ${advLabel}`;
           if (absenceShift.id) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
+          if (absenceShift.causedByShiftId) {
+            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
           await batch.commit();
           toast.success('Cobertura completa');
           onUpd({ status: 'CONFIRMED', confirmedExt: newConfirmedExt, pendingExt: null });
@@ -523,6 +545,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           const advLabel = `${advName} adel ${fmtTime(sh?.shiftDateObj)}–${hiEnd}`;
           const covLabel = `${extLabel} + ${advLabel}`;
           if (absenceShift.id) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
+          if (absenceShift.causedByShiftId) {
+            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
           await batch.commit();
           toast.success('Cobertura completa');
           onUpd({ status: 'CONFIRMED', confirmedAdv: newConfirmedAdv, pendingAdv: null });

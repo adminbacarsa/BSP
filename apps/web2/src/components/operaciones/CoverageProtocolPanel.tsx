@@ -262,8 +262,29 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
     try {
       const batch = writeBatch(db);
       const isRealVacant = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual;
+      const covEmpId = emp.id || emp.employeeId || empId || null;
+      const covEmpName = emp.fullName || emp.name || emp.employeeName || '';
       const markCovered = (coverageType: string) => {
-        if (isRealVacant) batch.update(doc(db, 'turnos', absenceShift.id), { status: 'COVERED', resolvedBy: 'OPERACIONES', coverageType, coveredAt: serverTimestamp() });
+        if (isRealVacant) {
+          batch.update(doc(db, 'turnos', absenceShift.id), {
+            status: 'COVERED',
+            resolvedBy: 'OPERACIONES',
+            coverageType,
+            coveredAt: serverTimestamp(),
+            coveredByEmployeeId: covEmpId,
+            coveredByEmployeeName: covEmpName,
+          });
+        }
+        if (absenceShift.causedByShiftId) {
+          batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+            operacionallyCovered: true,
+            resolvedBy: 'OPERACIONES',
+            coverageType,
+            coveredAt: serverTimestamp(),
+            coveredByEmployeeId: covEmpId,
+            coveredByEmployeeName: covEmpName,
+          });
+        }
       };
 
       if (step.key === 'SIN_TURNO') {
@@ -375,8 +396,36 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia (EXT)', status: 'pending', employeeId: slot.empId, employeeName: extShift?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: extShift?.id || null, description: `${extShift?.employeeName} retenido hasta ${hiEnd} — cobertura 1ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: 'RETENCION_EXT' }, tid));
         const nextAdv = session.confirmedAdv;
-        if (nextAdv) { toast.success('Cobertura completa — ambos confirmados'); upd({ status: 'CONFIRMED', confirmedExt: slot.empId, pendingExt: null }); setTimeout(onClose, 1500); }
-        else upd({ confirmedExt: slot.empId, pendingExt: null });
+        if (nextAdv) {
+          const advSh = candidatesAdv.find((s: any) => s.employeeId === nextAdv);
+          const extName = (extShift?.employeeName || '').split(' ')[0];
+          const advName = (advSh?.employeeName || '').split(' ')[0];
+          const covLabel = `${extName} ext + ${advName} adel`;
+          if (isRealVacant) {
+            batch.update(doc(db, 'turnos', absenceShift.id), {
+              status: 'COVERED',
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          if (absenceShift.causedByShiftId) {
+            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          await batch.commit();
+          toast.success('Cobertura completa — ambos confirmados');
+          upd({ status: 'CONFIRMED', confirmedExt: slot.empId, pendingExt: null });
+          setTimeout(onClose, 1500);
+        } else {
+          upd({ confirmedExt: slot.empId, pendingExt: null });
+        }
       } else {
         const advShift = candidatesAdv.find((s: any) => s.employeeId === slot.empId);
         const vacancyStart = Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
@@ -388,8 +437,36 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno (ADV)', status: 'pending', employeeId: slot.empId, employeeName: advShift?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: advShift?.id || null, description: `${advShift?.employeeName} adelantado — cobertura 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: 'RETENCION_ADV' }, tid));
         const nextExt = session.confirmedExt;
-        if (nextExt) { toast.success('Cobertura completa — ambos confirmados'); upd({ status: 'CONFIRMED', confirmedAdv: slot.empId, pendingAdv: null }); setTimeout(onClose, 1500); }
-        else upd({ confirmedAdv: slot.empId, pendingAdv: null });
+        if (nextExt) {
+          const extSh = candidatesExt.find((s: any) => s.employeeId === nextExt);
+          const extName = (extSh?.employeeName || '').split(' ')[0];
+          const advName = (advShift?.employeeName || '').split(' ')[0];
+          const covLabel = `${extName} ext + ${advName} adel`;
+          if (isRealVacant) {
+            batch.update(doc(db, 'turnos', absenceShift.id), {
+              status: 'COVERED',
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          if (absenceShift.causedByShiftId) {
+            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          await batch.commit();
+          toast.success('Cobertura completa — ambos confirmados');
+          upd({ status: 'CONFIRMED', confirmedAdv: slot.empId, pendingAdv: null });
+          setTimeout(onClose, 1500);
+        } else {
+          upd({ confirmedAdv: slot.empId, pendingAdv: null });
+        }
       }
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }

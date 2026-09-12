@@ -595,6 +595,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const isUnassigned = !isValidEmployee;
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
+            // Vacantes reales generadas operativamente (por ausencia detectada, corrección de plan, eventos, interrupción, etc.)
+            const isRealOperativeVacancy = isUnassigned && (
+                shift.origin === 'VACANTE_POR_AUSENCIA' ||
+                shift.origin === 'VACANTE_CORRECCION' ||
+                shift.origin === 'VACANTE_POR_EVENTO' ||
+                shift.origin === 'INTERRUPTION' ||
+                shift.origin === 'VACANTE_OPERATIVA' ||
+                shift.vacancyOrigin === 'ABSENCE' ||
+                !!shift.causedByShiftId ||
+                !!shift.causedByEmployeeId
+            );
+
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
             const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
             const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
@@ -604,13 +616,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     ? `TURA · ${shift.parentEmpleadoName}`
                     : 'VACANTE: TURA';
             }
+            if (isRealOperativeVacancy && shift.causedByEmployeeName) {
+                finalEmpName = `VACANTE · ${shift.causedByEmployeeName}`;
+            }
             // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
             // Display VAC / mapa rojo: solo isActionableOpsVacancy (no DEVUELTO ni >55%/fin).
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
 
             const isSinCobertura = !!shift.isSinCobertura;
-            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ y TURA (2º tramo cortado)
-            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante) return null;
+            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ, TURA (2º tramo cortado) y vacantes operativas reales
+            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante && !isRealOperativeVacancy) return null;
 
             const turaExt = parentTuraExt.get(shift.id);
             const effectiveEndDateObj = (turaExt?.endDateObj instanceof Date ? turaExt.endDateObj : shift.endDateObj) as Date | undefined;
@@ -737,7 +752,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     turaImputationPos: turaExt.tura.positionName,
                     turaExtensionRange: combinedContiguousRangeLabel(shift, turaExt.tura),
                 } : {}),
-                vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
+                vacancyOrigin: isRfzVacante ? 'ABSENCE' : (isRealOperativeVacancy ? (shift.vacancyOrigin || 'ABSENCE') : shift.vacancyOrigin),
+                isRealOperativeVacancy,
                 operacionallyCovered: plannedOperativelyCovered || !!shift.operacionallyCovered,
             };
         }).filter(Boolean);
@@ -1023,6 +1039,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 return;
             }
             // Cobertura (plan + presentes) suficiente → planning ya asignó
+            // EXCEPCIÓN: si la vacante fue provocada por una ausencia puntual (VACANTE_POR_AUSENCIA / causedByShiftId),
+            // el guardia ausente dejó un hueco específico que DEBE ser gestionado en Operaciones. No suprimirlo
+            // automáticamente por el recuento genérico si no ha sido cubierto (status === 'UNCOVERED').
+            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') return;
+
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
