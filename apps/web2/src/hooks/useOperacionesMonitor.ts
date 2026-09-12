@@ -1038,8 +1038,24 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 suppressedDevuelto.add(s.id);
                 return;
             }
-            // Vacante real por ausencia no cubierta: DEBE permanecer visible en el registro del día
-            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') return;
+            // Vacante real por ausencia: si no está cubierta y el puesto aún no tiene guardia suficiente, permanece viva.
+            // Si el puesto ya tiene guardias suficientes (cubierta o empleado corregido a presente), se suprime.
+            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') {
+                const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
+                if (cap > 0) {
+                    const coveringCount = dedupedRealShifts.filter(cover =>
+                        !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                        !cover.isFranco &&
+                        cover.objectiveId === s.objectiveId &&
+                        shiftCoversVacancySlot(cover, s.shiftDateObj, s.endDateObj, s.positionName)
+                    ).length;
+                    if (coveringCount >= cap) {
+                        suppressedDevuelto.add(s.id);
+                        return;
+                    }
+                }
+                return;
+            }
 
             // Slot ya terminado sin doc SIN_COBERTURA: no mostrar como cola viva
             if (!s.isSinCobertura && s.endDateObj.getTime() < now.getTime()) {
