@@ -389,7 +389,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                 coveredByEmployeeName: covEmpName,
             });
         }
-        if (absenceShift.causedByShiftId) {
+        if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
             batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
                 operacionallyCovered: true,
                 resolvedBy: 'OPERACIONES',
