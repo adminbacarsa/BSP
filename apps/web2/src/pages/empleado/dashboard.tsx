@@ -878,7 +878,10 @@ export default function EmployeeDashboard() {
     return sortedShifts.find((s) => {
       const start = toDate(s.startTime);
       const end = toDate(s.endTime);
-      if (!start || start < startOfDay || start > endOfDay) return false;
+      if (!start) return false;
+      const isTodayStart = start >= startOfDay && start <= endOfDay;
+      const isShiftOngoing = start <= now && !!end && end > now;
+      if (!isTodayStart && !isShiftOngoing) return false;
       // Si el turno ya terminó, no mostrarlo en el hero (pasar al siguiente)
       if (end && end < now) return false;
       return true;
@@ -933,13 +936,29 @@ export default function EmployeeDashboard() {
   const blueIsConfirmedPresent = !!blueShift && (blueShift.isPresent || blueShiftStatus === 'PRESENT' || blueShiftStatus === 'InProgress');
   const blueHasPendingRequest = !!blueShift?.checkInRequestedAt && !blueIsConfirmedPresent;
   const blueStart = blueShift ? toDate(blueShift.startTime) : null;
+  const blueEnd = blueShift ? toDate(blueShift.endTime) : null;
+  const blueShiftNotEnded = !blueEnd || blueEnd.getTime() > now.getTime();
+  const isCoverageShift = !!(
+    blueShift && (
+      blueShift.origin === 'OPERATIONS_COVERAGE' ||
+      blueShift.origin === 'RETEN' ||
+      blueShift.origin === 'SLA_VIRTUAL' ||
+      blueShift.resolvedBy === 'OPERACIONES' ||
+      blueShift.coverageType ||
+      blueShift.absenceShiftId ||
+      (blueShift as any).isCoverage ||
+      (blueShift as any).isRetention ||
+      (blueShift as any).isEarlyStart
+    )
+  );
   const blueDiffMinutes = blueStart ? Math.round((blueStart.getTime() - now.getTime()) / 60000) : null;
-  const blueCountdownMinutes = blueDiffMinutes !== null && blueDiffMinutes <= 30 && blueDiffMinutes > 15 ? blueDiffMinutes : null;
-  const blueTimeOk = blueDiffMinutes !== null && blueDiffMinutes <= 15 && blueDiffMinutes >= -5;
-  const blueCanRequest = !!blueShift && !blueShift.isFranco && blueTimeOk && !blueHasPendingRequest && !blueIsConfirmedPresent;
-  const blueLateWindow = blueDiffMinutes !== null && blueDiffMinutes < -5 && blueDiffMinutes >= -120;
+  const maxEarly = isCoverageShift ? 30 : 15;
+  const blueCountdownMinutes = blueDiffMinutes !== null && blueDiffMinutes > maxEarly && blueDiffMinutes <= 60
+    ? (blueDiffMinutes - maxEarly)
+    : null;
+  const blueCanRequest = !!blueShift && !blueShift.isFranco && blueShiftNotEnded && (blueDiffMinutes === null || blueDiffMinutes <= maxEarly) && !blueHasPendingRequest && !blueIsConfirmedPresent;
   const blueIsLateNotified = !!(blueShift && (lateArrivalSent[blueShift?.id || ''] || blueShift.lateArrivalAt));
-  const blueLateCanRequest = !!blueShift && !blueShift.isFranco && blueLateWindow && !blueHasPendingRequest && !blueIsConfirmedPresent;
+  const blueLateCanNotify = !!blueShift && !blueShift.isFranco && !isCoverageShift && blueDiffMinutes !== null && blueDiffMinutes < -5 && blueShiftNotEnded && !blueHasPendingRequest && !blueIsConfirmedPresent;
 
   const nextFranco = useMemo(() => {
     const todayKey = dateKey(new Date());
@@ -1244,6 +1263,7 @@ export default function EmployeeDashboard() {
 
   const getObjectiveForShift = (shift: Shift) => {
     if (shift.objectiveId && objectivesMap[shift.objectiveId]) return objectivesMap[shift.objectiveId];
+    if (shift.objectiveName && objectivesMap[shift.objectiveName]) return objectivesMap[shift.objectiveName];
     return null;
   };
 
@@ -1350,27 +1370,36 @@ export default function EmployeeDashboard() {
     }
 
     const now = new Date();
+    const isCov = shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'RETEN' || !!shift.coverageType || shift.resolvedBy === 'OPERACIONES';
+    const maxEarlyMinutes = isCov ? 30 : 15;
     const diffMinutes = (start.getTime() - now.getTime()) / 60000;
-    if (diffMinutes > 15) {
-      addToast('Muy temprano para fichar (15 min antes)', 'error');
+    if (diffMinutes > maxEarlyMinutes) {
+      addToast(`Muy temprano para fichar (${maxEarlyMinutes} min antes)`, 'error');
+      return;
+    }
+
+    if (end && now.getTime() > end.getTime()) {
+      addToast('El turno ya finalizó', 'error');
       return;
     }
 
     const objective = getObjectiveForShift(shift);
     const remoteAllowed = objective?.allowRemoteCheckIn === true;
 
-    // Si el objetivo no tiene coordenadas Y no permite remoto, bloquear
+    // Si el objetivo no tiene coordenadas Y no permite remoto, bloquear (salvo en modo preview de testeo)
     if (!objective || (!objective.lat && !objective.lng && !remoteAllowed)) {
-      addToast('Objetivo sin ubicación configurada', 'error');
-      return;
+      if (!isPreviewMode) {
+        addToast('Objetivo sin ubicación configurada', 'error');
+        return;
+      }
     }
 
     let coords: { latitude: number; longitude: number } | null = null;
     setCheckingShiftId(shift.id);
     try {
       // Si el objetivo permite check-in remoto, omitir verificación de distancia
-      if (!remoteAllowed) {
-        if (!objective.lat || !objective.lng) {
+      if (!remoteAllowed && !isPreviewMode) {
+        if (!objective?.lat || !objective?.lng) {
           addToast('Objetivo sin coordenadas GPS', 'error');
           return;
         }
@@ -1379,6 +1408,21 @@ export default function EmployeeDashboard() {
         if (distanceKm > 0.08) {
           addToast(`Estás a más de 80 mts del objetivo (${Math.round(distanceKm * 1000)}m)`, 'error');
           return;
+        }
+      } else if (isPreviewMode) {
+        // En preview mode (SuperAdmin testeando), intentar GPS y fallback a coordenadas del objetivo
+        try {
+          coords = await getCoords();
+          if (objective?.lat && objective?.lng && coords) {
+            const dist = haversineKm(coords.latitude, coords.longitude, objective.lat, objective.lng);
+            if (dist > 0.08) {
+              coords = { latitude: objective.lat, longitude: objective.lng };
+            }
+          }
+        } catch (_) {
+          if (objective?.lat && objective?.lng) {
+            coords = { latitude: objective.lat, longitude: objective.lng };
+          }
         }
       } else {
         // Igual intentamos obtener coords pero sin bloquear si falla
@@ -2588,30 +2632,28 @@ export default function EmployeeDashboard() {
                 <button
                   onClick={() => handleCheckIn(blueShift)}
                   disabled={checkingShiftId === blueShift.id}
-                  className="mt-4 w-full py-3.5 bg-white text-indigo-700 rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-2 shadow-lg hover:bg-indigo-50 disabled:opacity-60 transition-all active:scale-95"
+                  className={`mt-4 w-full py-3.5 rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-2 shadow-lg transition-all active:scale-95 disabled:opacity-60 ${
+                    blueIsLateNotified
+                      ? 'bg-emerald-500 text-white hover:bg-emerald-400'
+                      : 'bg-white text-indigo-700 hover:bg-indigo-50'
+                  }`}
                 >
                   <Navigation size={18}/>
-                  {checkingShiftId === blueShift.id ? 'Validando ubicación...' : 'Dar Presente'}
+                  {checkingShiftId === blueShift.id
+                    ? 'Validando ubicación...'
+                    : blueIsLateNotified
+                    ? 'Ya Llegué'
+                    : 'Dar Presente'}
                 </button>
               )}
-              {portalFeatures.checkIn && blueLateCanRequest && !blueIsLateNotified && blueShift && (
+              {portalFeatures.checkIn && !isCoverageShift && blueLateCanNotify && !blueIsLateNotified && blueShift && (
                 <button
                   onClick={() => handleLlegadaTarde(blueShift)}
                   disabled={checkingShiftId === blueShift.id}
-                  className="mt-4 w-full py-3.5 bg-amber-500 text-white rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-2 shadow-lg hover:bg-amber-400 disabled:opacity-60 transition-all active:scale-95"
+                  className="mt-2 w-full py-2.5 bg-amber-500/20 border border-amber-400/40 text-amber-200 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 hover:bg-amber-500/30 disabled:opacity-60 transition-all active:scale-95"
                 >
-                  <AlertTriangle size={18}/>
-                  {checkingShiftId === blueShift.id ? 'Enviando...' : 'Llegué Tarde'}
-                </button>
-              )}
-              {portalFeatures.checkIn && blueIsLateNotified && !blueIsConfirmedPresent && !blueHasPendingRequest && blueShift && !blueShift.isFranco && (
-                <button
-                  onClick={() => handleCheckIn(blueShift)}
-                  disabled={checkingShiftId === blueShift.id}
-                  className="mt-4 w-full py-3.5 bg-emerald-500 text-white rounded-2xl font-black uppercase text-sm flex items-center justify-center gap-2 shadow-lg hover:bg-emerald-400 disabled:opacity-60 transition-all active:scale-95"
-                >
-                  <Navigation size={18}/>
-                  {checkingShiftId === blueShift.id ? 'Validando ubicación...' : 'Ya Llegué'}
+                  <AlertTriangle size={14}/>
+                  {checkingShiftId === blueShift.id ? 'Enviando...' : 'Avisar Llegada Tarde (en camino)'}
                 </button>
               )}
             </div>
