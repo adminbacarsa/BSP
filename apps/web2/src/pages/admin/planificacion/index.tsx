@@ -534,15 +534,36 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
 
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
 function isOperationalOriginShift(data: any): boolean {
+    if (!data) return false;
     const o = String(data?.origin || '').toUpperCase();
     if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-    if (data?.resolvedBy === 'OPERACIONES') return true;
+    if (data?.isReten === true || data?.isRelief === true) return true;
+    if (data?.resolvedBy === 'OPERACIONES' && (data?.coversAbsenceEmployeeName || data?.absenceShiftId || data?.coverageType || o === 'RETEN' || o === 'OPERATIONS_COVERAGE')) return true;
     return false;
 }
 
-/** Cobertura SIN_TURNO: se muestra en grilla (visual) pero no suma CCT. */
+/** Comprueba si el turno coincide con el objetivo (directo o por cobertura/franco/redirección). */
+function shiftMatchesObjective(data: any, objectiveId: string | undefined | null): boolean {
+    if (!data || !objectiveId) return false;
+    const target = String(objectiveId);
+    if (data.objectiveId && String(data.objectiveId) === target) return true;
+    if (data.francoObjectiveId && String(data.francoObjectiveId) === target) return true;
+    if (data.coverageRedirectedTo && String(data.coverageRedirectedTo) === target) return true;
+    return false;
+}
+
+/** Cobertura operativa: se muestra en grilla (visual) pero no suma CCT. */
 function isOpsCoverageShift(data: any): boolean {
-    return String(data?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+    if (!data) return false;
+    const o = String(data?.origin || '').toUpperCase();
+    if (o === 'OPERATIONS_COVERAGE' || o === 'RETEN') return true;
+    if (data?.isReten === true || data?.isRelief === true) return true;
+    if (data?.resolvedBy === 'OPERACIONES') return true;
+    if (data?.coverageType) return true;
+    if (data?.isFrancoTrabajado && data?.francoObjectiveId) return true;
+    if (data?.coverageRedirectedTo) return true;
+    if (data?.coversAbsenceEmployeeName || data?.absenceShiftId) return true;
+    return false;
 }
 
 /**
@@ -585,6 +606,7 @@ function isShiftAtOtherObjective(
     if (p?.isDeleted) return false;
     const active = p && !p.isDeleted ? p : s;
     if (!active) return false;
+    if (shiftMatchesObjective(active, selectedObjective)) return false;
     const obj = active.objectiveId;
     if (obj == null || obj === '') return false;
     return String(obj) !== String(selectedObjective);
@@ -597,6 +619,7 @@ function isCrossObjectivePlanningReadOnly(
 ): boolean {
     if (!shift || !selectedObjective) return false;
     if (isOperationalOriginShift(shift)) return true;
+    if (shiftMatchesObjective(shift, selectedObjective)) return false;
     const obj = shift.objectiveId;
     if (obj == null || obj === '') return false;
     if (String(obj) === String(selectedObjective)) return false;
@@ -613,6 +636,7 @@ function pickCrossObjectiveSavedShift(
 ): any | null {
     if (!rawS || !selectedObjective) return null;
     if (isOperationalOriginShift(rawS)) return null;
+    if (shiftMatchesObjective(rawS, selectedObjective)) return null;
     const obj = rawS.objectiveId;
     if (obj == null || obj === '') return null;
     if (String(obj) === String(selectedObjective)) return null;
@@ -628,13 +652,12 @@ function pickOpsCoverageFromCellTurnos(
     if (!cellTurnos?.length) return null;
     for (const t of cellTurnos) {
         if (!isOpsCoverageShift(t)) continue;
-        const obj = String(t.objectiveId || '');
-        if (!obj) continue;
         if (grupoObjectiveIds?.length) {
-            if (grupoObjectiveIds.includes(obj)) return t;
+            const tObj = String(t.objectiveId || t.francoObjectiveId || t.coverageRedirectedTo || '');
+            if (grupoObjectiveIds.includes(tObj)) return t;
             continue;
         }
-        if (selectedObjective && obj === String(selectedObjective)) return t;
+        if (shiftMatchesObjective(t, selectedObjective)) return t;
     }
     return null;
 }
@@ -655,14 +678,13 @@ function resolveCellShiftAtObjective(
     const activeShift = pending && !pending.isDeleted ? pending : existing;
     if (!activeShift) return null;
     if (pending && !pending.isDeleted) {
-        const obj = activeShift.objectiveId;
-        if (obj != null && obj !== '' && String(obj) !== String(selectedObjective)) return null;
+        if (!shiftMatchesObjective(activeShift, selectedObjective)) return null;
         return activeShift;
     }
-    // OPERATIONS_COVERAGE: visible en grilla, no cuenta para CCT
+    // Cobertura operativa: visible en grilla, no cuenta para CCT
     if (
         isOpsCoverageShift(activeShift)
-        && String(activeShift.objectiveId || '') === String(selectedObjective)
+        && shiftMatchesObjective(activeShift, selectedObjective)
     ) {
         return activeShift;
     }
@@ -716,6 +738,7 @@ function resolveCellShiftDisplay(
         return { s: null, p: null };
     }
 
+    // 1. Turno directo en el objetivo (planificado o cobertura presente en shiftsMap o pending)
     const resolved = resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
     if (resolved) {
         if (rawP && !rawP.isDeleted) {
@@ -724,6 +747,11 @@ function resolveCellShiftDisplay(
         return { s: resolved, p: null };
     }
 
+    // 2. Si no resolvió arriba pero existe un turno de cobertura operativa para ESTE objetivo en cellTurnosMap (ej. guardia EXT o múltiple turno)
+    const opsCov = pickOpsCoverageFromCellTurnos(cellTurnosMap?.[key], selectedObjective, null);
+    if (opsCov) return { s: opsCov, p: null };
+
+    // 3. Turno guardado de otro objetivo (se muestra en gris/slate)
     const crossSaved = pickCrossObjectiveSavedShift(rawS, selectedObjective);
     if (crossSaved) {
         return { s: crossSaved, p: null };
@@ -738,9 +766,6 @@ function resolveCellShiftDisplay(
             return { s: rawP, p: null };
         }
     }
-
-    const opsCov = pickOpsCoverageFromCellTurnos(cellTurnosMap?.[key], selectedObjective, null);
-    if (opsCov) return { s: opsCov, p: null };
 
     return { s: null, p: null };
 }
@@ -10289,7 +10314,7 @@ export default function PlanificacionPage() {
                                         let absence = absencesMap[key];
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
-                                        const coveredByCell = p?.coveredBy || s?.coveredBy;
+                                        const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
                                         let hasConflict = shouldShowLeaveConflictSiren({
                                             shiftCode: effectiveCode,
                                             absence,
@@ -10417,6 +10442,7 @@ export default function PlanificacionPage() {
                                                 : '';
                                         const _opsCovName = activeShift?.coversAbsenceEmployeeName
                                             || activeShift?.absenceEmployeeName
+                                            || activeShift?.coveredEmployeeName
                                             || '';
                                         const _opsCovHint = isOpsCovCell
                                             ? `\n🟠 Cobertura ops${_opsCovName ? ` — cubre: ${_opsCovName}` : ''}`
