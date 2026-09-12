@@ -2560,14 +2560,16 @@ export const autoCompletarTurnos = functions
       const windowStart = admin.firestore.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
       const windowEnd   = admin.firestore.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
 
-      const relieveSnap = await db.collection('turnos')
+      let relieveQ: FirebaseFirestore.Query = db.collection('turnos')
         .where('objectiveId',  '==', shift.objectiveId)
-        .where('positionName', '==', shift.positionName)
         .where('startTime', '>=', windowStart)
-        .where('startTime', '<=', windowEnd)
-        .get();
+        .where('startTime', '<=', windowEnd);
+      if (shift.positionName) {
+        relieveQ = relieveQ.where('positionName', '==', shift.positionName);
+      }
+      const relieveSnap = await relieveQ.get();
 
-      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente estÃ¡ etiquetado
+      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente está etiquetado
       const relieveDocs = relieveSnap.docs.filter(d =>
         d.id !== docSnap.id && sameTenantShift(shift, d.data()),
       );
@@ -2577,8 +2579,6 @@ export const autoCompletarTurnos = functions
         return s === 'PRESENT' || s === 'COMPLETED';
       });
       // Solo contar como relevo pendiente un turno con empleado REAL asignado.
-      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos —
-      // si se cuentan, el turno saliente nunca se cierra y queda como retenido indefinidamente.
       const relievePending = relieveDocs.find(d => {
         const data = d.data();
         if (!data.employeeId || data.employeeId === 'VACANTE') return false;
@@ -2587,14 +2587,19 @@ export const autoCompletarTurnos = functions
         return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
       });
 
-      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
+      // Relevo ausente o vacante activa:
       const relieveAbsent = relieveDocs.find(d => {
         const data = d.data();
         return data.isAbsent === true || data.status === 'ABSENT';
       });
+      const relieveVacant = relieveDocs.find(d => {
+        const data = d.data();
+        return (data.isUnassigned === true || data.employeeId === 'VACANTE' || data.origin === 'VACANTE_POR_AUSENCIA')
+          && data.status !== 'COVERED' && data.status !== 'COMPLETED';
+      });
 
       if (relievePresent) {
-        // CASO A: El relevo ya estÃ¡ presente — safety net, cerrar el turno saliente
+        // CASO A: El relevo ya está presente — safety net, cerrar el turno saliente
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
@@ -2616,7 +2621,7 @@ export const autoCompletarTurnos = functions
         completed++;
 
       } else if (relievePending) {
-        // CASO B: Relevo programado pero no llegÃ³ → retener al guardia + push + novedad
+        // CASO B: Relevo programado pero no llegó → retener al guardia + push + novedad
         // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
@@ -2666,13 +2671,14 @@ export const autoCompletarTurnos = functions
           alertedNoRelief++;
         }
 
-      } else if (relieveAbsent) {
-        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
+      } else if (relieveAbsent || relieveVacant) {
+        // CASO B2: El relevo está ausente o hay vacante activa en el puesto
         // → Retención forzada + push + novedad
+        const absentOrVacLabel = relieveAbsent?.data()?.employeeName || relieveVacant?.data()?.causedByEmployeeName || 'puesto vacante';
         if (!shift.isRetention || !shift.autoRetentionAt) {
           completeBatch.update(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
+            retentionReason: `RELEVO_AUSENTE: relevo no se presentó (${absentOrVacLabel})`,
             autoRetentionAt: now,
           });
         }
@@ -2683,7 +2689,7 @@ export const autoCompletarTurnos = functions
             tokens: retTokensB2,
             notification: {
               title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+              body: `El relevo no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },

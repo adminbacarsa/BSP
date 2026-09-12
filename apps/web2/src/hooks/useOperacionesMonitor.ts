@@ -44,14 +44,18 @@ export function isRestFrancoShift(shift: any): boolean {
  */
 export const OPS_PLAN_LOOKAHEAD_MS = 16 * 60 * 60 * 1000;
 
-export function isOpsShiftHoy(s: any, now: Date): boolean {
+export function isOpsShiftHoy(s: any, now: Date = new Date()): boolean {
+    if (!s) return false;
+    const effectiveNow = now instanceof Date ? now : new Date();
     if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
-    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-    if (isSameDay(s.shiftDateObj, now)) return true;
+    const sStart = s.shiftDateObj instanceof Date ? s.shiftDateObj : (s.shiftDateObj ? new Date(s.shiftDateObj) : null);
+    const sEnd = s.endDateObj instanceof Date ? s.endDateObj : (s.endDateObj ? new Date(s.endDateObj) : null);
+    if (s.isVirtual && sEnd && (!sStart || !isSameDay(sStart, effectiveNow)) && sEnd.getTime() < effectiveNow.getTime()) return false;
+    if (sStart && isSameDay(sStart, effectiveNow)) return true;
 
-    const nowMs = now.getTime();
-    const startMs = (s.shiftDateObj as Date)?.getTime?.() ?? 0;
-    let endMs = (s.endDateObj as Date)?.getTime?.() ?? 0;
+    const nowMs = effectiveNow.getTime();
+    const startMs = sStart?.getTime() ?? 0;
+    let endMs = sEnd?.getTime() ?? 0;
     if (startMs > 0 && endMs > 0 && endMs <= startMs) endMs += 86400000;
 
     // Presentes/retenidos de días anteriores (zombies acotados a 48h)
@@ -1510,20 +1514,23 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 (isCFRetention && (s.retentionMinutes ?? 0) >= 60 && (s.retentionMinutes ?? 0) < 720);
 
             if (shouldAutoClose && !alertedVacancyIds.current.has(autoShiftEndKey)) {
-                // Hay relevo planificado que todavía no llegó? (solo aplica en los primeros 60 min)
-                const hasScheduledRelevo = !isCFRetention && minutesOvertime < 60 && processedData.some((other: any) => {
-                    const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
-                    return (
-                        other.id !== s.id &&
-                        other.objectiveId === s.objectiveId &&
-                        normPosName(other.positionName) === normPosName(s.positionName) &&
-                        !other.isPresent && !other.isCompleted && !other.isUnassigned &&
-                        !other.isAbsent && !other.isPotentialAbsence &&
-                        otherStart >= endMs - 15 * 60000 &&
-                        otherStart <= endMs + 90 * 60000
-                    );
-                });
-                if (!hasScheduledRelevo) {
+                // ¿Tiene continuidad o relevo planificado en este puesto?
+                // Si existe un turno sucesor (esté pendiente, vacante, tarde o ausente) o si el puesto es 24h/continuo,
+                // hay continuidad: el guardia saliente NO debe cerrarse automáticamente, debe permanecer retenido.
+                const hasContinuity = !s.isCustomPost && (
+                    processedData.some((other: any) => {
+                        const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
+                        return (
+                            other.id !== s.id &&
+                            other.objectiveId === s.objectiveId &&
+                            normPosName(other.positionName) === normPosName(s.positionName) &&
+                            !other.isCompleted &&
+                            otherStart >= endMs - 30 * 60000 &&
+                            otherStart <= endMs + 120 * 60000
+                        );
+                    })
+                );
+                if (!hasContinuity) {
                     alertedVacancyIds.current.add(autoShiftEndKey);
                     autoCloseShiftTx(s.id, {
                         status: 'COMPLETED', isCompleted: true, isPresent: false,

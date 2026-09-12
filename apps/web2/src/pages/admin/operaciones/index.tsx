@@ -3301,8 +3301,9 @@ export default function OperacionesPage() {
     const demoVacTriggeredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         if (!opsCaps.isDemo || coverageData.isOpen) return;
+        const now = new Date();
         const openVac = logic.processedData.find((s: any) => 
-            isOpsShiftHoy(s) &&
+            isOpsShiftHoy(s, now) &&
             s.isUnassigned &&
             !s.isReportedToPlanning &&
             s.status !== 'COVERED' &&
