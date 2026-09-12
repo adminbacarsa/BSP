@@ -460,7 +460,31 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
-            batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
+            const titularNameForCover = absenceShift.causedByEmployeeName
+                || (absenceShift.employeeName && !absenceShift.employeeName.startsWith('VACANTE') ? absenceShift.employeeName : '')
+                || '';
+            const titularIdForCover = absenceShift.causedByEmployeeId
+                || (absenceShift.employeeId && absenceShift.employeeId !== 'VACANTE' ? absenceShift.employeeId : null);
+            batch.set(newRef, stampEmpresaId({
+                employeeId: emp.id,
+                employeeName: empName,
+                clientId: absenceShift.clientId,
+                clientName: absenceShift.clientName,
+                objectiveId: absenceShift.objectiveId,
+                objectiveName: absenceShift.objectiveName,
+                positionName: absenceShift.positionName,
+                code: absenceShift.code || 'T',
+                startTime: Timestamp.fromDate(slotStart),
+                endTime: Timestamp.fromDate(endTime),
+                status: 'PENDING',
+                origin: 'RETEN',
+                isReten: true,
+                absenceShiftId: isRealVacantShift ? absenceShift.id : (absenceShift.causedByShiftId || null),
+                coversAbsenceEmployeeName: titularNameForCover,
+                coversEmployeeId: titularIdForCover,
+                comments: titularNameForCover ? `Cubriendo a ${titularNameForCover} (${absenceShift.code || 'T'})` : '',
+                createdAt: serverTimestamp(),
+            }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), { userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() });
             markOriginalCovered(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();

@@ -322,23 +322,70 @@ function resolveTitularCoverageName(
     pendingChanges: Record<string, any>,
     empNameById: (id: string) => string | undefined,
     coveredByFromCell?: string | null,
+    cellTurnosMap?: Record<string, any[]>,
+    objectiveIdHint?: string | null,
+    positionHint?: string | null,
+    codeHint?: string | null,
 ): string | null {
     if (coveredByFromCell) {
         return String(coveredByFromCell).replace(/\s*\([^)]*\)\s*$/, '').trim() || null;
+    }
+    const titularLastName = titularName.split(',')[0]?.trim().toLowerCase() || titularName.toLowerCase();
+    const candidates: any[] = [];
+    if (cellTurnosMap) {
+        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+            if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${titularEmpId}_`)) continue;
+            if (Array.isArray(arr)) {
+                for (const item of arr) {
+                    if (item && !item.isDeleted && !candidates.some(c => c.id === item.id)) {
+                        candidates.push(item);
+                    }
+                }
+            }
+        }
     }
     const allSources = { ...shiftsMap, ...pendingChanges };
     for (const [k, raw] of Object.entries(allSources)) {
         if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${titularEmpId}_`)) continue;
         const s = raw as any;
-        if (s?.isDeleted) continue;
-        if (String(s.comments || '').includes(`Cubriendo a ${titularName}`)) {
-            const covEmpId = k.replace(`_${dateStr}`, '');
-            const name = empNameById(covEmpId);
+        if (s && !s.isDeleted && !candidates.some(c => c.id === s.id)) {
+            candidates.push(s);
+        }
+    }
+
+    for (const s of candidates) {
+        const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
+        const coversEmpId = String(s.coversEmployeeId || '');
+        const comments = String(s.comments || '').toLowerCase();
+
+        const matchesName = coversName && (coversName.includes(titularLastName) || titularName.toLowerCase().includes(coversName));
+        const matchesId = coversEmpId && coversEmpId === titularEmpId;
+        const matchesComments = comments.includes(`cubriendo a ${titularName.toLowerCase()}`)
+            || comments.includes(`cubre a ${titularName.toLowerCase()}`)
+            || (titularLastName.length > 2 && comments.includes(`cubre ${titularLastName}`))
+            || (titularLastName.length > 2 && comments.includes(`cubre: ${titularLastName}`));
+
+        if (matchesName || matchesId || matchesComments) {
+            const name = s.employeeName || empNameById(s.employeeId);
             const covCode = String(s.code || '').toUpperCase();
             if (name && covCode && !LEAVE_CELL_CODES.has(covCode)) return `${name} turno ${covCode}`;
             return name || null;
         }
     }
+
+    if (objectiveIdHint) {
+        const matchingOps = candidates.filter(c => isOpsCoverageShift(c) && shiftMatchesObjective(c, objectiveIdHint));
+        const matched = (codeHint && matchingOps.find(c => String(c.code || '').toUpperCase() === codeHint.toUpperCase()))
+            || (positionHint && positionHint !== 'General' && matchingOps.find(c => String(c.positionName || '').toLowerCase() === positionHint.toLowerCase()))
+            || (matchingOps.length === 1 ? matchingOps[0] : null);
+        if (matched) {
+            const name = matched.employeeName || empNameById(matched.employeeId);
+            const covCode = String(matched.code || codeHint || '').toUpperCase();
+            if (name && covCode && !LEAVE_CELL_CODES.has(covCode)) return `${name} turno ${covCode}`;
+            return name || null;
+        }
+    }
+
     return null;
 }
 
@@ -535,10 +582,12 @@ const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): numb
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
 function isOperationalOriginShift(data: any): boolean {
     if (!data) return false;
+    // Turno titular que fue cubierto o marcado ausente: es planificado original, NO generado por operaciones
+    if (data?.operacionallyCovered === true || data?.coveredBy || data?.coveredByEmployeeName || data?.isAbsent === true) return false;
     const o = String(data?.origin || '').toUpperCase();
     if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
     if (data?.isReten === true || data?.isRelief === true) return true;
-    if (data?.resolvedBy === 'OPERACIONES' && (data?.coversAbsenceEmployeeName || data?.absenceShiftId || data?.coverageType || o === 'RETEN' || o === 'OPERATIONS_COVERAGE')) return true;
+    if (data?.resolvedBy === 'OPERACIONES' && (data?.coversAbsenceEmployeeName || data?.absenceShiftId || o === 'RETEN' || o === 'OPERATIONS_COVERAGE')) return true;
     return false;
 }
 
@@ -555,14 +604,15 @@ function shiftMatchesObjective(data: any, objectiveId: string | undefined | null
 /** Cobertura operativa: se muestra en grilla (visual) pero no suma CCT. */
 function isOpsCoverageShift(data: any): boolean {
     if (!data) return false;
+    // El titular ausente o cubierto NO es un turno de cobertura operativa
+    if (data?.operacionallyCovered === true || data?.isAbsent === true) return false;
     const o = String(data?.origin || '').toUpperCase();
     if (o === 'OPERATIONS_COVERAGE' || o === 'RETEN') return true;
     if (data?.isReten === true || data?.isRelief === true) return true;
-    if (data?.resolvedBy === 'OPERACIONES') return true;
-    if (data?.coverageType) return true;
     if (data?.isFrancoTrabajado && data?.francoObjectiveId) return true;
     if (data?.coverageRedirectedTo) return true;
-    if (data?.coversAbsenceEmployeeName || data?.absenceShiftId) return true;
+    if (data?.coversAbsenceEmployeeName || data?.absenceShiftId || data?.coversEmployeeId) return true;
+    if (data?.resolvedBy === 'OPERACIONES' && (o === 'OPERATIONS_COVERAGE' || o === 'RETEN' || data?.coversAbsenceEmployeeName || data?.absenceShiftId)) return true;
     return false;
 }
 
@@ -8224,7 +8274,7 @@ export default function PlanificacionPage() {
                 // Si la celda tiene borrado pendiente, tratar como vacía para permitir reasignar sin guardar
                 const effectiveShift = pendingChanges[key]?.isDeleted
                     ? null
-                    : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+                    : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null) || shiftsMap[key] || (cellTurnosMap?.[key] && cellTurnosMap[key][0]) || null);
                 const effObjId = effectiveShift?.objectiveId;
                 if (
                     effectiveShift &&
@@ -10454,7 +10504,7 @@ export default function PlanificacionPage() {
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
                                                     : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{isOpsCovCell && (<div className="absolute -bottom-0.5 left-0 right-0 text-[5.5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight" title={_opsCovName ? `Cubre: ${_opsCovName}` : 'Cobertura operativa'}>{_opsCovName ? `Cubre: ${_opsCovName.split(/\s+/)[0]}` : 'COV'}</div>)}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
@@ -12861,28 +12911,167 @@ export default function PlanificacionPage() {
                                 const resolveCoverageForAbsence = () => {
                                     const empName = employees.find(e => e.id === selectedCell.empId)?.name || '';
                                     const dateStr = selectedCell.dateStr;
+                                    const titularLastName = empName.split(',')[0]?.trim().toLowerCase() || empName.toLowerCase();
+
+                                    // 1. Recolectar todos los turnos del día que no sean del titular
+                                    const candidates: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                            if (Array.isArray(arr)) {
+                                                for (const item of arr) {
+                                                    if (item && !item.isDeleted && !candidates.some(c => c.id === item.id)) {
+                                                        candidates.push(item);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     const allSources = { ...shiftsMap, ...pendingChanges };
                                     for (const [k, raw] of Object.entries(allSources)) {
                                         if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
                                         const s = raw as any;
-                                        if (s?.isDeleted) continue;
-                                        if (s?.comments?.includes(`Cubriendo a ${empName}`)) {
-                                            const covEmpId = k.replace(`_${dateStr}`, '');
-                                            const covEmp = employees.find((e: any) => e.id === covEmpId);
+                                        if (s && !s.isDeleted && !candidates.some(c => c.id === s.id)) {
+                                            candidates.push(s);
+                                        }
+                                    }
+
+                                    // 2. Buscar turno de cobertura específico para este titular/ausencia
+                                    for (const s of candidates) {
+                                        const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
+                                        const coversEmpId = String(s.coversEmployeeId || '');
+                                        const absShiftId = String(s.absenceShiftId || '');
+                                        const causedShiftId = String(s.causedByShiftId || s.coverageSourceId || '');
+                                        const comments = String(s.comments || '').toLowerCase();
+
+                                        const matchesName = coversName && (coversName.includes(titularLastName) || empName.toLowerCase().includes(coversName));
+                                        const matchesId = coversEmpId && coversEmpId === selectedCell.empId;
+                                        const matchesShift = (absShiftId && (absShiftId === shift?.id || absShiftId === absence?.shiftId || absShiftId === absence?.id))
+                                            || (causedShiftId && (causedShiftId === shift?.id || causedShiftId === absence?.shiftId));
+                                        const matchesComments = comments.includes(`cubriendo a ${empName.toLowerCase()}`)
+                                            || comments.includes(`cubre a ${empName.toLowerCase()}`)
+                                            || (titularLastName.length > 2 && comments.includes(`cubre ${titularLastName}`))
+                                            || (titularLastName.length > 2 && comments.includes(`cubre: ${titularLastName}`));
+
+                                        if (matchesName || matchesId || matchesShift || matchesComments) {
+                                            const covEmp = employees.find((e: any) => e.id === s.employeeId);
+                                            const covName = covEmp?.name || s.employeeName || '—';
                                             const covCode = String(s.code || '').toUpperCase();
                                             return {
-                                                employeeName: covEmp?.name || '—',
+                                                employeeName: covName,
                                                 code: covCode,
                                                 shift: s,
                                                 objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
                                             };
                                         }
                                     }
-                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy;
+
+                                    // 3. Revisar si hay un nombre explícito en shift o absence o pending
+                                    const coveredByRaw = shift?.coveredBy
+                                        || shift?.coveredByEmployeeName
+                                        || pending?.coveredBy
+                                        || pending?.coveredByEmployeeName
+                                        || absence?.coveredBy
+                                        || absence?.coveredByEmployeeName;
+
                                     if (coveredByRaw) {
                                         const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
+                                        const matchedCandidate = candidates.find(c => {
+                                            const cName = String(c.employeeName || employees.find(e => e.id === c.employeeId)?.name || '').toLowerCase();
+                                            return cName.includes(nameOnly.toLowerCase()) || nameOnly.toLowerCase().includes(cName);
+                                        });
+                                        if (matchedCandidate) {
+                                            return {
+                                                employeeName: matchedCandidate.employeeName || nameOnly,
+                                                code: String(matchedCandidate.code || '').toUpperCase(),
+                                                shift: matchedCandidate,
+                                                objectiveName: matchedCandidate.objectiveName || (matchedCandidate.objectiveId ? getObjectiveName(matchedCandidate.objectiveId) : serviceName),
+                                            };
+                                        }
                                         return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
                                     }
+
+                                    // 4. Si la ausencia está en este objetivo y existe una cobertura operativa en el mismo puesto/objetivo/banda
+                                    const targetObj = String(shift?.objectiveId || absence?.objectiveId || selectedObjective || '');
+                                    const reasonStr = String(absence?.reason || '');
+                                    const reasonPosMatch = reasonStr.match(/\(([^)]+)\)/);
+                                    const extractedPos = reasonPosMatch ? reasonPosMatch[1].trim() : '';
+                                    const targetPos = String(shift?.positionName || absence?.positionName || extractedPos || coveredPosition || '');
+
+                                    let targetCode = String(shift?.code || absence?.shiftCode || '').toUpperCase();
+                                    if (!targetCode && reasonStr) {
+                                        if (reasonStr.includes('04:00') || reasonStr.includes('16:00') || reasonStr.includes('Turno T') || reasonStr.includes('turno T')) targetCode = 'T';
+                                        else if (reasonStr.includes('06:00') || reasonStr.includes('08:00') || reasonStr.includes('Turno M') || reasonStr.includes('turno M')) targetCode = 'M';
+                                        else if (reasonStr.includes('22:00') || reasonStr.includes('12:00') || reasonStr.includes('Turno N') || reasonStr.includes('turno N')) targetCode = 'N';
+                                        else if (reasonStr.includes('D12')) targetCode = 'D12';
+                                        else if (reasonStr.includes('N12')) targetCode = 'N12';
+                                    }
+
+                                    if (targetObj) {
+                                        const matchingOpsCovers = candidates.filter(c =>
+                                            isOpsCoverageShift(c) &&
+                                            shiftMatchesObjective(c, targetObj)
+                                        );
+
+                                        // Prioridad 1: Coincide puesto y código/banda
+                                        const exactMatch = matchingOpsCovers.find(c => {
+                                            const codeMatch = !targetCode || String(c.code || '').toUpperCase() === targetCode;
+                                            const posMatch = !targetPos || targetPos === 'General' || String(c.positionName || '').toLowerCase() === targetPos.toLowerCase();
+                                            return codeMatch && posMatch;
+                                        });
+                                        if (exactMatch) {
+                                            const covEmp = employees.find((e: any) => e.id === exactMatch.employeeId);
+                                            return {
+                                                employeeName: covEmp?.name || exactMatch.employeeName || '—',
+                                                code: String(exactMatch.code || targetCode || '').toUpperCase(),
+                                                shift: exactMatch,
+                                                objectiveName: exactMatch.objectiveName || (exactMatch.objectiveId ? getObjectiveName(exactMatch.objectiveId) : serviceName),
+                                            };
+                                        }
+
+                                        // Prioridad 2: Coincide puesto
+                                        if (targetPos && targetPos !== 'General') {
+                                            const posMatches = matchingOpsCovers.filter(c => String(c.positionName || '').toLowerCase() === targetPos.toLowerCase());
+                                            if (posMatches.length === 1) {
+                                                const single = posMatches[0];
+                                                const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                                return {
+                                                    employeeName: covEmp?.name || single.employeeName || '—',
+                                                    code: String(single.code || targetCode || '').toUpperCase(),
+                                                    shift: single,
+                                                    objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                                };
+                                            }
+                                        }
+
+                                        // Prioridad 3: Coincide código/banda
+                                        if (targetCode) {
+                                            const codeMatches = matchingOpsCovers.filter(c => String(c.code || '').toUpperCase() === targetCode);
+                                            if (codeMatches.length === 1) {
+                                                const single = codeMatches[0];
+                                                const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                                return {
+                                                    employeeName: covEmp?.name || single.employeeName || '—',
+                                                    code: String(single.code || targetCode || '').toUpperCase(),
+                                                    shift: single,
+                                                    objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                                };
+                                            }
+                                        }
+
+                                        // Prioridad 4: Cobertura operativa única en el objetivo ese día
+                                        if (matchingOpsCovers.length === 1) {
+                                            const single = matchingOpsCovers[0];
+                                            const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                            return {
+                                                employeeName: covEmp?.name || single.employeeName || '—',
+                                                code: String(single.code || targetCode || '').toUpperCase(),
+                                                shift: single,
+                                                objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                            };
+                                        }
+                                    }
+
                                     return null;
                                 };
                                 const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
@@ -12943,6 +13132,34 @@ export default function PlanificacionPage() {
                                             hours: h,
                                             service: serviceName,
                                             position: shift.positionName || coveredPosition,
+                                        };
+                                    }
+                                    // Fallback: buscar desde los datos de la ausencia (shiftCode o parsing de motivo)
+                                    const absShiftCode = String(absence?.shiftCode || '').toUpperCase();
+                                    let inferredCode = isWorkCode(absShiftCode) ? absShiftCode : '';
+                                    let scheduleText = '';
+                                    if (!inferredCode && absence?.reason) {
+                                        const r = String(absence.reason);
+                                        const matchSchedule = r.match(/(\d{1,2}:\d{2}\s*(?:[ap]\.?\s*m\.?)?)\s*-\s*(\d{1,2}:\d{2}\s*(?:[ap]\.?\s*m\.?)?)/i);
+                                        if (matchSchedule) {
+                                            scheduleText = `${matchSchedule[1]} - ${matchSchedule[2]}`;
+                                        }
+                                        if (r.includes('04:00') || r.includes('16:00') || r.includes('Turno T') || r.includes('turno T')) inferredCode = 'T';
+                                        else if (r.includes('06:00') || r.includes('08:00') || r.includes('Turno M') || r.includes('turno M')) inferredCode = 'M';
+                                        else if (r.includes('22:00') || r.includes('12:00') || r.includes('Turno N') || r.includes('turno N')) inferredCode = 'N';
+                                        else if (r.includes('D12')) inferredCode = 'D12';
+                                        else if (r.includes('N12')) inferredCode = 'N12';
+                                    }
+                                    if (inferredCode) {
+                                        const posName = absence?.positionName || coveredPosition;
+                                        const h = SHIFT_HOURS_LOOKUP[inferredCode] || 8;
+                                        return {
+                                            code: inferredCode,
+                                            label: LEGEND_DESCRIPTIONS[inferredCode] || `Turno ${inferredCode}`,
+                                            schedule: scheduleText || VACANCY_BAND_SCHEDULE[inferredCode] || formatShiftScheduleLabel({ code: inferredCode, positionName: posName }, inferredCode),
+                                            hours: h,
+                                            service: absence?.objectiveName || serviceName,
+                                            position: posName,
                                         };
                                     }
                                     return null;

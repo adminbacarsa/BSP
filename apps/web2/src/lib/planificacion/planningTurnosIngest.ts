@@ -112,8 +112,10 @@ export function ingestPlanningTurnosSnapshot(
 
         if (opts?.turaOnly) return;
 
-        if (data.startTime?.seconds) {
-            const dateKey = getDateKey(data.startTime);
+        const rawStart = data.startTime || data.scheduleDate || data.planningDate || data.fecha;
+        const hasStart = rawStart && (rawStart.seconds || typeof rawStart === 'string' || rawStart instanceof Date);
+        if (hasStart && data.employeeId) {
+            const dateKey = getDateKey(rawStart);
             const key = `${data.employeeId}_${dateKey}`;
             if (!allIds[key]) allIds[key] = [];
             allIds[key].push(d.id);
