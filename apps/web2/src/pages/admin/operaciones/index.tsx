@@ -4166,7 +4166,7 @@ export default function OperacionesPage() {
             map[key].total++;
             if (s.isPresent || s.isRetention) map[key].active++;
             if (s.isAbsent || s.isPotentialAbsence) map[key].absent++;
-            if (isActionableOpsVacancy(s)) map[key].vacant++;
+            if (s.isUnassigned && !s.isReportedToPlanning && s.status !== 'COVERED') map[key].vacant++;
         });
         return Object.values(map)
             .filter(o => o.total > 0)
@@ -4212,7 +4212,10 @@ export default function OperacionesPage() {
             if (s.isRetention)                               obj.retention++;
             else if (s.isPresent && !s.isCompleted)          obj.active++;
             else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
-            else if (isActionableOpsVacancy(s))            { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
+            else if (s.isUnassigned && !s.isReportedToPlanning && s.status !== 'COVERED') {
+                obj.vacant++;
+                if (!obj.criticalShift && isActionableOpsVacancy(s, now)) obj.criticalShift = s;
+            }
             else if (s.isFuture || s.isImminent)             obj.plan++;
         });
         // Aplicar filtro de cliente si está activo
@@ -4255,7 +4258,10 @@ export default function OperacionesPage() {
             if (s.isRetention)                              ev.retention++;
             else if (s.isPresent && !s.isCompleted)        ev.active++;
             else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
-            else if (isActionableOpsVacancy(s))           { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }
+            else if (s.isUnassigned && !s.isReportedToPlanning && s.status !== 'COVERED') {
+                ev.vacant++;
+                if (!ev.criticalShift && isActionableOpsVacancy(s, now)) ev.criticalShift = s;
+            }
             else if (s.isFuture || s.isImminent)           ev.plan++;
         });
         const clientFilter = logic.selectedClientId;

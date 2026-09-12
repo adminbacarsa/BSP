@@ -118,21 +118,23 @@ export function isVacancyDescubierto(s: any, now: Date = new Date()): boolean {
 }
 
 /**
- * Vacante viva para Ops (tab VAC / sirena / mapa rojo):
- * sin devolver a planificación y aún dentro de la ventana accionable (<55%).
+ * Vacante viva para Ops (tab VAC / sirena / mapa rojo / botón CUBRIR):
+ * sin devolver a planificación, no cubierta y cuyo horario de turno no haya finalizado aún.
  */
 export function isActionableOpsVacancy(s: any, now: Date = new Date()): boolean {
     if (!s?.isUnassigned) return false;
     if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
-    if (isVacancyDescubierto(s, now)) return false;
+    if (s.status === 'COVERED') return false;
+    const end = s?.endDateObj instanceof Date ? s.endDateObj : getSafeDate(s?.endDateObj);
+    if (end && end.getTime() < now.getTime()) return false;
     return true;
 }
 
 export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
     switch (viewTab) {
         case 'TODOS':
-            // Devueltas y descubiertas no son “cola viva”: salen de TODOS/VAC.
-            if (s.isUnassigned && (s.isReportedToPlanning || isVacancyDescubierto(s))) return false;
+            // En TODOS solo se excluyen las devueltas a planificación y francos
+            if (s.isUnassigned && (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true)) return false;
             return !s.isFranco;
         case 'PRIORIDAD':
             return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco;
@@ -145,7 +147,11 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'RETENIDOS':
             return s.isRetention;
         case 'VACANTES':
-            return isActionableOpsVacancy(s);
+            // En VACANTES se muestran todas las vacantes no cubiertas ni devueltas
+            if (!s?.isUnassigned) return false;
+            if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
+            if (s.status === 'COVERED') return false;
+            return true;
         case 'AUSENTES':
             // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
             if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
@@ -1032,17 +1038,14 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 suppressedDevuelto.add(s.id);
                 return;
             }
+            // Vacante real por ausencia no cubierta: DEBE permanecer visible en el registro del día
+            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') return;
+
             // Slot ya terminado sin doc SIN_COBERTURA: no mostrar como cola viva
-            // (el flag isDescubierto + tab VAC ya los excluye; esto limpia TODOS también)
             if (!s.isSinCobertura && s.endDateObj.getTime() < now.getTime()) {
                 suppressedDevuelto.add(s.id);
                 return;
             }
-            // Cobertura (plan + presentes) suficiente → planning ya asignó
-            // EXCEPCIÓN: si la vacante fue provocada por una ausencia puntual (VACANTE_POR_AUSENCIA / causedByShiftId),
-            // el guardia ausente dejó un hueco específico que DEBE ser gestionado en Operaciones. No suprimirlo
-            // automáticamente por el recuento genérico si no ha sido cubierto (status === 'UNCOVERED').
-            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') return;
 
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
