@@ -136,26 +136,51 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
     ...hasShiftOnTargetDate,
   ]);
 
+  const dedupeByEmployee = (list: any[]) => {
+    const seen = new Set<string>();
+    return list.filter((cand: any) => {
+      const id = cand.employeeId || cand.id;
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+
   const candidatesBySin: any[] = (logic.employees || [])
     .filter((e: any) => !busyIds.has(e.id) && e.id !== absenceShift.employeeId)
     .map((e: any) => ({ ...e, fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '', phone: e.phone || e.celular || '' }));
 
   const candidatesRet: any[] = (logic.processedData || [])
-    .filter((s: any) => s.code === 'RET' && isSameDay(s.shiftDateObj, targetDate) && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
+    .filter((s: any) =>
+      s.code === 'RET' &&
+      isSameDay(s.shiftDateObj, targetDate) &&
+      !s.isAbsent &&
+      !s.isCompleted &&
+      s.status !== 'COMPLETED' &&
+      s.employeeId !== absenceShift.employeeId
+    );
 
   const candidatesEsc: any[] = (logic.processedData || [])
-    .filter((s: any) => (s.code === 'ESC' || s.code === 'REF') && isSameDay(s.shiftDateObj, targetDate) && !s.isAbsent && s.employeeId !== absenceShift.employeeId);
+    .filter((s: any) =>
+      (s.code === 'ESC' || s.code === 'REF') &&
+      isSameDay(s.shiftDateObj, targetDate) &&
+      !s.isAbsent &&
+      !s.isCompleted &&
+      s.status !== 'COMPLETED' &&
+      s.employeeId !== absenceShift.employeeId
+    );
 
-  const candidatesExt: any[] = (logic.processedData || [])
+  const candidatesExt: any[] = dedupeByEmployee((logic.processedData || [])
     .filter((s: any) =>
       s.isPresent && !s.isCompleted &&
       isSameDay(s.shiftDateObj, targetDate) &&
       s.objectiveId === absenceShift.objectiveId &&
       s.positionName === absenceShift.positionName &&
       s.id !== absenceShift.id
-    );
+    )
+  );
 
-  const candidatesAdv: any[] = (logic.processedData || [])
+  const candidatesAdv: any[] = dedupeByEmployee((logic.processedData || [])
     .filter((s: any) =>
       !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
       s.objectiveId === absenceShift.objectiveId &&
@@ -164,7 +189,8 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
       isSameDay(s.shiftDateObj, targetDate)
     )
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
-    .slice(0, 1);
+    .slice(0, 1)
+  );
 
   const candidatesFt: any[] = (logic.processedData || [])
     .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, targetDate) && !s.isFrancoTrabajado && !s.isAbsent && s.employeeId !== absenceShift.employeeId)
@@ -175,11 +201,11 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
 
   const candidatesForStep = (): any[] => {
     switch (step.key) {
-      case 'SIN_TURNO':  return candidatesBySin;
-      case 'RET_PASIVO': return candidatesRet;
-      case 'ESC':        return candidatesEsc;
+      case 'SIN_TURNO':  return dedupeByEmployee(candidatesBySin);
+      case 'RET_PASIVO': return dedupeByEmployee(candidatesRet);
+      case 'ESC':        return dedupeByEmployee(candidatesEsc);
       case 'RETENCION':  return [];  // dual: handled separately
-      case 'FT':         return candidatesFt;
+      case 'FT':         return dedupeByEmployee(candidatesFt);
     }
   };
 

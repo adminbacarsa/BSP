@@ -301,6 +301,16 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       .map((sh: any) => sh.employeeId)
   );
 
+  const dedupeByEmployee = (list: any[]) => {
+    const seen = new Set<string>();
+    return list.filter((cand: any) => {
+      const id = cand.employeeId || cand.id;
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+
   const byKey = (key: StepKey): any[] => {
     switch (key) {
       case 'SIN_TURNO':
@@ -318,6 +328,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           sh.code === 'RET' &&
           isSameDay(sh.shiftDateObj, targetDate) &&
           !sh.isAbsent &&
+          !sh.isCompleted &&
+          sh.status !== 'COMPLETED' &&
           sh.employeeId !== absenceShift.employeeId &&
           !crossSessionBusy.has(sh.employeeId)
         );
@@ -326,6 +338,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           (sh.code === 'ESC' || sh.code === 'REF') &&
           isSameDay(sh.shiftDateObj, targetDate) &&
           !sh.isAbsent &&
+          !sh.isCompleted &&
+          sh.status !== 'COMPLETED' &&
           sh.employeeId !== absenceShift.employeeId &&
           !crossSessionBusy.has(sh.employeeId)
         );
@@ -352,17 +366,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     }
   };
 
-  const candidatesExt = (logic.processedData || []).filter((sh: any) =>
+  const candidatesExt = dedupeByEmployee((logic.processedData || []).filter((sh: any) =>
     sh.isPresent && !sh.isCompleted &&
     isSameDay(sh.shiftDateObj, targetDate) &&
     sh.objectiveId === absenceShift.objectiveId &&
     sh.positionName === absenceShift.positionName &&
     sh.id !== absenceShift.id
-  );
-  // ADV: turno que aún no empezó en el mismo objetivo/puesto, dentro de las próximas 12h.
+  ));
+  // ADV: turno que aún no empezó en el mismo objective/puesto, dentro de las próximas 12h.
   // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
   const advWindowEnd = new Date(targetDate.getTime() + 12 * 3600 * 1000);
-  const candidatesAdv = (logic.processedData || [])
+  const candidatesAdv = dedupeByEmployee((logic.processedData || [])
     .filter((sh: any) => {
       const shStart = toDate(sh.shiftDateObj);
       return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
@@ -371,9 +385,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         && shStart > targetDate && shStart <= advWindowEnd;
     })
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
-    .slice(0, 1);
+    .slice(0, 1)
+  );
 
-  const allCandidates = byKey(step.key);
+  const allCandidates = dedupeByEmployee(byKey(step.key));
   const candidates = search.trim()
     ? allCandidates.filter((c: any) => {
         const name = (c.fullName || c.employeeName || c.name || '').toLowerCase();
