@@ -10,7 +10,8 @@ import {
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
     MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
-    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
+    FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch,
+    Bot, Sparkles, Pause, Play
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
@@ -561,7 +562,10 @@ const CoverageSection = ({ num, title, colorClass, badgeClass, items, empty }: a
     </section>
 );
 
-const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any) => {
+const CoverageRow = ({ 
+    item, lKey, onAction, label, color, loading, onWA,
+    isDemoCandidate, demoState, demoCountdown, onSimulateAccept, onSimulateReject
+}: any) => {
     const name = item.employeeName || item.fullName || '';
     const ph = item.phone || item.celular || '';
     const busy = loading === lKey;
@@ -575,11 +579,21 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                 ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">Mismo cliente</span>
                 : null;
     return (
-        <div className={`flex items-center justify-between p-2 bg-white border rounded-lg gap-2 shadow-sm ${expLv >= 2 ? 'border-emerald-200' : 'border-slate-100'}`}>
+        <div className={`flex items-center justify-between p-2 bg-white border rounded-lg gap-2 shadow-sm transition-all ${
+            isDemoCandidate 
+                ? 'border-emerald-400 ring-2 ring-emerald-300/60 bg-emerald-50/40 shadow-md' 
+                : expLv >= 2 ? 'border-emerald-200' : 'border-slate-100'
+        }`}>
             <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                     <span className="text-xs font-bold text-slate-800 truncate">{name}</span>
                     {expBadge}
+                    {isDemoCandidate && (
+                        <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white animate-pulse flex items-center gap-1">
+                            <Bot size={10}/>
+                            {demoState === 'DISPATCHING' ? 'Enviando...' : demoState === 'WAITING' ? `Esperando (${demoCountdown}s)` : demoState === 'ACCEPTED' ? '✓ ¡Aceptado!' : 'Simulando'}
+                        </span>
+                    )}
                 </div>
                 <div className="flex items-center gap-2 flex-wrap">
                     {Number.isFinite(item.distance) && item.distance > 0.05
@@ -598,7 +612,27 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
                     )}
                 </div>
             </div>
-            <div className="flex gap-1 shrink-0">
+            <div className="flex gap-1 shrink-0 items-center">
+                {isDemoCandidate && demoState === 'WAITING' && (
+                    <div className="flex gap-1 mr-1">
+                        <button
+                            type="button"
+                            onClick={onSimulateAccept}
+                            className="px-2 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg shadow-sm transition-colors"
+                            title="Simular aceptación"
+                        >
+                            ✓ Acepta
+                        </button>
+                        <button
+                            type="button"
+                            onClick={onSimulateReject}
+                            className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold rounded-lg transition-colors"
+                            title="Simular rechazo y avanzar"
+                        >
+                            ✗ Rechaza
+                        </button>
+                    </div>
+                )}
                 <button onClick={() => onWA(item)} className={`p-1.5 border rounded-lg transition-colors ${ph ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-default'}`} title="WhatsApp"><MessageCircle size={13}/></button>
                 <button onClick={onAction} disabled={busy} className={`px-2.5 py-1 text-white text-[10px] font-bold rounded-lg transition-colors ${color} disabled:opacity-50`}>{busy ? '...' : label}</button>
             </div>
@@ -606,7 +640,7 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
     );
 };
 
-const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
+const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const tenantId = (s?: any) => String(s?.empresaId || absenceShift?.empresaId || empresaId || '').trim();
@@ -622,8 +656,28 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const [currentStep, setCurrentStep] = useState(0);
     const [stepActionSent, setStepActionSent] = useState(false);
 
+    // Modos
+    const isDemoMode = opsCaps?.isDemo === true;
+    const isAutoMode = opsCaps?.isAuto === true;
+
+    // Estado simulación MODO DEMO
+    const [demoState, setDemoState] = useState<'IDLE' | 'DISPATCHING' | 'WAITING' | 'ACCEPTED' | 'REJECTED' | 'RESOLVING'>('IDLE');
+    const [demoPaused, setDemoPaused] = useState(false);
+    const [demoCandidate, setDemoCandidate] = useState<any>(null);
+    const [demoStepKey, setDemoStepKey] = useState<string | null>(null);
+    const [demoCountdown, setDemoCountdown] = useState<number>(3);
+    const demoCandidateIndexRef = useRef<number>(0);
+
     // Reset de paso al cambiar de turno ausente
-    useEffect(() => { setCurrentStep(0); setStepActionSent(false); }, [absenceShift?.id]);
+    useEffect(() => { 
+        setCurrentStep(0); 
+        setStepActionSent(false);
+        setDemoState('IDLE');
+        setDemoCandidate(null);
+        setDemoStepKey(null);
+        demoCandidateIndexRef.current = 0;
+        setDemoPaused(false);
+    }, [absenceShift?.id, isOpen]);
 
     // Suscripción en tiempo real a convocatorias pendientes para esta vacante
     useEffect(() => {
@@ -1121,42 +1175,200 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
         finally { setSwapLoading(false); }
     };
 
+    // Manejador de aceptación simulada
+    const handleSimulateAccept = async (cand: any, sKey?: string) => {
+        const stepKeyToUse = sKey || demoStepKey || activeStep?.key;
+        setDemoState('ACCEPTED');
+        const cName = cand?.fullName || cand?.employeeName || 'Guardia';
+        toast.success(`✓ MODO DEMO: ${cName} aceptó la convocatoria`);
+        setTimeout(async () => {
+            setDemoState('RESOLVING');
+            try {
+                if (stepKeyToUse === 'ret') await handleRetener(cand);
+                else if (stepKeyToUse === 'adel') await handleAdelantar(cand);
+                else if (stepKeyToUse === 'retpas') await handleActivateRet(cand);
+                else if (stepKeyToUse === 'esc') await handleActivateEsc(cand);
+                else if (stepKeyToUse === 'sinturno') await handleReten(cand);
+                else if (stepKeyToUse === 'ft') await handleFranco(cand);
+                else if (activeStep?.resolveCandidate) await activeStep.resolveCandidate(cand);
+            } catch (err: any) {
+                console.error('[demoSimulateAccept]', err);
+            }
+        }, 900);
+    };
+
+    // Manejador de rechazo simulado
+    const handleSimulateReject = (cand: any) => {
+        setDemoState('REJECTED');
+        const cName = cand?.fullName || cand?.employeeName || 'Guardia';
+        toast.warning(`✗ MODO DEMO: ${cName} rechazó. Escalando al siguiente candidato / paso CCT...`);
+        setTimeout(() => {
+            const cands = activeStep?.candidates || [];
+            const nextIdx = demoCandidateIndexRef.current + 1;
+            if (nextIdx < cands.length) {
+                demoCandidateIndexRef.current = nextIdx;
+                setDemoCandidate(cands[nextIdx]);
+                setDemoState('DISPATCHING');
+            } else {
+                demoCandidateIndexRef.current = 0;
+                setDemoCandidate(null);
+                if (!isLastStep) {
+                    goNext();
+                    setDemoState('IDLE');
+                } else {
+                    toast.info('MODO DEMO: Se agotaron todas las opciones de la cascada CCT');
+                    setDemoState('IDLE');
+                }
+            }
+        }, 1100);
+    };
+
     // Pasos activos: solo los que tienen candidatos (se muestran de a uno)
     const stepDefs = [
         retencion.length > 0 ? {
             key: 'ret', colorClass: 'text-orange-700', badgeClass: 'bg-orange-500',
             title: 'Retención · Guardia presente en el objetivo',
             warning: adelanto.length === 0 ? 'Sin turno siguiente planificado — la retención no garantiza cobertura continua' : null,
-            node: <div className="space-y-1.5">{retencion.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'ret_'+s.id} onAction={()=>{handleRetener(s);setStepActionSent(true);}} label="RETENER" color="bg-orange-500 hover:bg-orange-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: retencion,
+            resolveCandidate: (s: any) => handleRetener(s),
+            node: <div className="space-y-1.5">{retencion.map((s: any) => (
+                <CoverageRow 
+                    key={s.id} 
+                    item={s} 
+                    lKey={'ret_'+s.id} 
+                    onAction={()=>{handleRetener(s);setStepActionSent(true);}} 
+                    label="RETENER" 
+                    color="bg-orange-500 hover:bg-orange-600" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === s.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(s, 'ret')}
+                    onSimulateReject={() => handleSimulateReject(s)}
+                />
+            ))}</div>,
         } : null,
         adelanto.length > 0 ? {
             key: 'adel', colorClass: 'text-indigo-700', badgeClass: 'bg-indigo-500',
             title: 'Adelanto · Próximo turno planificado', warning: null,
-            node: <div className="space-y-1.5">{adelanto.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'adel_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'ADVANCE',{advanceShiftId:s.id});setStepActionSent(true);}} label={convocatoriaLoading===`ADVANCE_${s.employeeId}`?'Enviando...':'CONVOCAR'} color="bg-indigo-600 hover:bg-indigo-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: adelanto,
+            resolveCandidate: (s: any) => handleAdelantar(s),
+            node: <div className="space-y-1.5">{adelanto.map((s: any) => (
+                <CoverageRow 
+                    key={s.id} 
+                    item={s} 
+                    lKey={'adel_'+s.id} 
+                    onAction={()=>{handleConvocarConvocatoria(s.employeeId,'ADVANCE',{advanceShiftId:s.id});setStepActionSent(true);}} 
+                    label={convocatoriaLoading===`ADVANCE_${s.employeeId}`?'Enviando...':'CONVOCAR'} 
+                    color="bg-indigo-600 hover:bg-indigo-700" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === s.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(s, 'adel')}
+                    onSimulateReject={() => handleSimulateReject(s)}
+                />
+            ))}</div>,
         } : null,
         retPasivos.length > 0 ? {
             key: 'retpas', colorClass: 'text-amber-700', badgeClass: 'bg-amber-500',
             title: 'Retención Pasiva · Guardia en standby (RET)', warning: null,
-            node: <div className="space-y-1.5">{retPasivos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'retpas_'+s.id} onAction={()=>{handleActivateRet(s);setStepActionSent(true);}} label="ACTIVAR" color="bg-amber-500 hover:bg-amber-600" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: retPasivos,
+            resolveCandidate: (s: any) => handleActivateRet(s),
+            node: <div className="space-y-1.5">{retPasivos.map((s: any) => (
+                <CoverageRow 
+                    key={s.id} 
+                    item={s} 
+                    lKey={'retpas_'+s.id} 
+                    onAction={()=>{handleActivateRet(s);setStepActionSent(true);}} 
+                    label="ACTIVAR" 
+                    color="bg-amber-500 hover:bg-amber-600" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === s.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(s, 'retpas')}
+                    onSimulateReject={() => handleSimulateReject(s)}
+                />
+            ))}</div>,
         } : null,
         escuelas.length > 0 ? {
             key: 'esc', colorClass: 'text-teal-700', badgeClass: 'bg-teal-500',
             title: 'Escuela · Redirigir turno ESC al puesto', warning: null,
-            node: <div className="space-y-1.5">{escuelas.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'esc_'+s.id} onAction={()=>{handleActivateEsc(s);setStepActionSent(true);}} label="REDIRIGIR" color="bg-teal-600 hover:bg-teal-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: escuelas,
+            resolveCandidate: (s: any) => handleActivateEsc(s),
+            node: <div className="space-y-1.5">{escuelas.map((s: any) => (
+                <CoverageRow 
+                    key={s.id} 
+                    item={s} 
+                    lKey={'esc_'+s.id} 
+                    onAction={()=>{handleActivateEsc(s);setStepActionSent(true);}} 
+                    label="REDIRIGIR" 
+                    color="bg-teal-600 hover:bg-teal-700" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === s.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(s, 'esc')}
+                    onSimulateReject={() => handleSimulateReject(s)}
+                />
+            ))}</div>,
         } : null,
         retenes.length > 0 ? {
             key: 'sinturno', colorClass: 'text-slate-700', badgeClass: 'bg-slate-600',
             title: 'Sin Turno · Disponibles hoy', warning: null,
-            node: <div className="space-y-1.5">{retenes.map((e: any) => <CoverageRow key={e.id} item={e} lKey={'reten_'+e.id} onAction={()=>{handleConvocarConvocatoria(e.id,'SIN_TURNO_CON_EXP');setStepActionSent(true);}} label={convocatoriaLoading===`SIN_TURNO_CON_EXP_${e.id}`?'Enviando...':'CONVOCAR'} color="bg-slate-700 hover:bg-slate-800" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: retenes,
+            resolveCandidate: (e: any) => handleReten(e),
+            node: <div className="space-y-1.5">{retenes.map((e: any) => (
+                <CoverageRow 
+                    key={e.id} 
+                    item={e} 
+                    lKey={'reten_'+e.id} 
+                    onAction={()=>{handleConvocarConvocatoria(e.id,'SIN_TURNO_CON_EXP');setStepActionSent(true);}} 
+                    label={convocatoriaLoading===`SIN_TURNO_CON_EXP_${e.id}`?'Enviando...':'CONVOCAR'} 
+                    color="bg-slate-700 hover:bg-slate-800" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === e.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(e, 'sinturno')}
+                    onSimulateReject={() => handleSimulateReject(e)}
+                />
+            ))}</div>,
         } : null,
         francos.length > 0 ? {
             key: 'ft', colorClass: 'text-blue-700', badgeClass: 'bg-blue-500',
             title: 'Francos · Día libre (FT)', warning: null,
-            node: <div className="space-y-1.5">{francos.map((s: any) => <CoverageRow key={s.id} item={s} lKey={'franco_'+s.id} onAction={()=>{handleConvocarConvocatoria(s.employeeId,'FT');setStepActionSent(true);}} label={convocatoriaLoading===`FT_${s.employeeId}`?'Enviando...':'CONVOCAR FT'} color="bg-blue-600 hover:bg-blue-700" loading={loading} onWA={openLocalWA}/>)}</div>,
+            candidates: francos,
+            resolveCandidate: (s: any) => handleFranco(s),
+            node: <div className="space-y-1.5">{francos.map((s: any) => (
+                <CoverageRow 
+                    key={s.id} 
+                    item={s} 
+                    lKey={'franco_'+s.id} 
+                    onAction={()=>{handleConvocarConvocatoria(s.employeeId,'FT');setStepActionSent(true);}} 
+                    label={convocatoriaLoading===`FT_${s.employeeId}`?'Enviando...':'CONVOCAR FT'} 
+                    color="bg-blue-600 hover:bg-blue-700" 
+                    loading={loading} 
+                    onWA={openLocalWA}
+                    isDemoCandidate={isDemoMode && demoCandidate?.id === s.id}
+                    demoState={demoState}
+                    demoCountdown={demoCountdown}
+                    onSimulateAccept={() => handleSimulateAccept(s, 'ft')}
+                    onSimulateReject={() => handleSimulateReject(s)}
+                />
+            ))}</div>,
         } : null,
         (hasRealAbsentEmployee && permutaCandidates.length > 0) ? {
             key: 'permuta', colorClass: 'text-violet-700', badgeClass: 'bg-violet-500',
             title: 'Permuta · Intercambio de turno', warning: null,
+            candidates: permutaCandidates,
+            resolveCandidate: (s: any) => setSwapConfirm(s),
             node: <div className="space-y-1.5">{permutaCandidates.map((s: any) => (
                 <div key={s.id} className="flex items-center justify-between gap-2 py-2 px-3 bg-violet-50 border border-violet-100 rounded-xl">
                     <div className="flex-1 min-w-0">
@@ -1167,11 +1379,57 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 </div>
             ))}</div>,
         } : null,
-    ].filter(Boolean) as { key: string; colorClass: string; badgeClass: string; title: string; warning: string | null; node: React.ReactNode }[];
+    ].filter(Boolean) as { key: string; colorClass: string; badgeClass: string; title: string; warning: string | null; candidates: any[]; resolveCandidate: (c: any) => any; node: React.ReactNode }[];
+
     const safeStep = Math.min(currentStep, Math.max(0, stepDefs.length - 1));
     const activeStep = stepDefs[safeStep] || null;
     const isLastStep = safeStep >= stepDefs.length - 1;
     const goNext = () => { setCurrentStep(s => Math.min(s + 1, stepDefs.length - 1)); setStepActionSent(false); };
+
+    // Orquestador automático del MODO DEMO
+    useEffect(() => {
+        if (!isOpen || !isDemoMode || demoPaused || !activeStep) return;
+
+        let timer: any = null;
+
+        if (demoState === 'IDLE') {
+            const cands = activeStep.candidates || [];
+            if (cands.length === 0) {
+                if (!isLastStep) {
+                    timer = setTimeout(() => goNext(), 1200);
+                }
+                return () => clearTimeout(timer);
+            }
+            const cand = cands[demoCandidateIndexRef.current] || cands[0];
+            setDemoCandidate(cand);
+            setDemoStepKey(activeStep.key);
+            timer = setTimeout(() => {
+                setDemoState('DISPATCHING');
+                const cName = cand.fullName || cand.employeeName || 'Guardia';
+                toast.info(`📲 MODO DEMO: Enviando notificación de cobertura a ${cName}...`);
+            }, 1200);
+            return () => clearTimeout(timer);
+        }
+
+        if (demoState === 'DISPATCHING') {
+            timer = setTimeout(() => {
+                setDemoState('WAITING');
+                setDemoCountdown(3);
+            }, 1500);
+            return () => clearTimeout(timer);
+        }
+
+        if (demoState === 'WAITING') {
+            if (demoCountdown > 0) {
+                timer = setTimeout(() => {
+                    setDemoCountdown(c => c - 1);
+                }, 1000);
+                return () => clearTimeout(timer);
+            } else {
+                handleSimulateAccept(demoCandidate, demoStepKey || activeStep.key);
+            }
+        }
+    }, [isOpen, isDemoMode, demoPaused, demoState, demoCountdown, safeStep, activeStep]);
 
     return (
         <>
@@ -1200,6 +1458,77 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                             {hiStart}–{hiEnd}
                         </span>
                     </div>
+
+                    {/* Banner MODO DEMO */}
+                    {isDemoMode && (
+                        <div className="bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-indigo-500/10 border-b border-emerald-500/20 px-4 py-2.5 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2">
+                                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                                    <Bot size={15} className="animate-pulse"/>
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-xs font-black text-slate-800">MODO DEMO</span>
+                                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                            {demoPaused ? 'PAUSADO' : demoState === 'WAITING' ? `ESPERANDO RESPUESTA (${demoCountdown}s)` : demoState === 'DISPATCHING' ? 'ENVIANDO MENSAJE...' : demoState === 'ACCEPTED' ? 'ACEPTADO · CONFIRMANDO' : 'SIMULANDO PROTOCOLO CCT'}
+                                        </span>
+                                    </div>
+                                    <p className="text-[10px] text-slate-500">
+                                        {demoPaused 
+                                            ? 'Simulación pausada. Podés operar manualmente o reanudar.'
+                                            : demoCandidate 
+                                                ? `Simulando cobertura con ${demoCandidate.fullName || demoCandidate.employeeName}...` 
+                                                : 'Buscando el mejor reemplazo según prioridad CCT...'}
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                    type="button"
+                                    onClick={() => setDemoPaused(p => !p)}
+                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition-colors flex items-center gap-1 shadow-sm ${demoPaused ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}`}
+                                >
+                                    {demoPaused ? <><Play size={10}/> Reanudar</> : <><Pause size={10}/> Pausar</>}
+                                </button>
+                                {demoCandidate && !demoPaused && demoState === 'WAITING' && (
+                                    <>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSimulateAccept(demoCandidate)}
+                                            className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] font-bold rounded-lg shadow-sm transition-colors"
+                                            title="Simular aceptación inmediata"
+                                        >
+                                            ✓ Acepta
+                                        </button>
+                                        <button
+                                            type="button"
+                                            onClick={() => handleSimulateReject(demoCandidate)}
+                                            className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-[10px] font-bold rounded-lg transition-colors"
+                                            title="Simular rechazo y avanzar"
+                                        >
+                                            ✗ Rechaza
+                                        </button>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Banner MODO AUTO */}
+                    {isAutoMode && (
+                        <div className="bg-indigo-50 border-b border-indigo-200 px-4 py-2.5 flex items-center justify-between shrink-0">
+                            <div className="flex items-center gap-2">
+                                <Zap size={14} className="text-indigo-600 shrink-0"/>
+                                <div>
+                                    <span className="text-xs font-black text-indigo-950">MODO AUTO ACTIVO</span>
+                                    <p className="text-[10px] text-indigo-700">Protocolo de cobertura desatendido por cascada CCT. Esperando respuesta de guardias.</p>
+                                </div>
+                            </div>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                                {pendingConvocatorias.length > 0 ? `${pendingConvocatorias.length} en curso` : 'Sin esperas activas'}
+                            </span>
+                        </div>
+                    )}
                     <div className="p-4 overflow-y-auto custom-scrollbar space-y-5 flex-1">
                         {/* ── Convocatorias en curso ── */}
                         {pendingConvocatorias.length > 0 && (
@@ -2948,12 +3277,34 @@ export default function OperacionesPage() {
         // Persistir en localStorage para no re-abrir tras recarga
         try { localStorage.setItem(ABSENT_ACK_KEY, JSON.stringify([...autoAbsentTriggeredRef.current])); } catch {}
         logic.setViewTab('AUSENTES');
-        if (opsCaps.fullAuto) {
-            toast.info(`AUTO/DEMO: ausencia — ${newlyAbsent[0].employeeName} · ${newlyAbsent[0].objectiveName}. Cobertura por protocolo / cascada.`);
+        if (opsCaps.isDemo) {
+            toast.info(`🤖 MODO DEMO: Ausencia de ${newlyAbsent[0].employeeName} en ${newlyAbsent[0].objectiveName}. Iniciando protocolo de cobertura.`);
+            setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
+        } else if (opsCaps.isAuto) {
+            toast.info(`⚡ MODO AUTO: Ausencia de ${newlyAbsent[0].employeeName} en ${newlyAbsent[0].objectiveName}. Convocando cobertura automática por cascada.`);
         } else {
             setCoverageData({ isOpen: true, shift: newlyAbsent[0] });
         }
-    }, [logic.processedData, opsCaps.fullAuto]);
+    }, [logic.processedData, opsCaps.isDemo, opsCaps.isAuto]);
+
+    // En MODO DEMO: auto-abrir modal de cobertura para vacantes descubiertas activas de hoy si no hay modal abierto
+    const demoVacTriggeredRef = useRef<Set<string>>(new Set());
+    useEffect(() => {
+        if (!opsCaps.isDemo || coverageData.isOpen) return;
+        const openVac = logic.processedData.find((s: any) => 
+            isOpsShiftHoy(s) &&
+            s.isUnassigned &&
+            !s.isReportedToPlanning &&
+            s.status !== 'COVERED' &&
+            s.status !== 'SIN_COBERTURA' &&
+            (s.origin === 'VACANTE_POR_AUSENCIA' || !!s.causedByShiftId || s.isAbsent)
+        );
+        if (openVac && !demoVacTriggeredRef.current.has(openVac.id)) {
+            demoVacTriggeredRef.current.add(openVac.id);
+            setCoverageData({ isOpen: true, shift: openVac });
+            toast.info(`🤖 MODO DEMO: Vacante activa detectada en ${openVac.objectiveName}. Iniciando protocolo de cobertura.`);
+        }
+    }, [opsCaps.isDemo, coverageData.isOpen, logic.processedData]);
 
     const openHandoverFromNovedad = (novedad: any) => {
         const targetShift = novedad.shiftId
@@ -5695,7 +6046,7 @@ export default function OperacionesPage() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic}/>
+            <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic} opsCaps={opsCaps}/>
             <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
             <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({isOpen:true,shift:s})} onSendToPlanning={handleReportPlanning}/>
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
