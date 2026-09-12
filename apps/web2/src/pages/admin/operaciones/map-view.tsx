@@ -352,22 +352,28 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
     const busyIds = new Set(
         logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco).map((s: any) => s.employeeId)
     );
-    const retenes = (logic.employees || [])
+    const sortedRetenes = (logic.employees || [])
         .filter((e: any) => !busyIds.has(e.id))
         .map((e: any) => {
             const dist = calculateDistance(objLat, objLng, e.lat, e.lng);
             return { ...e, fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '', phone: e.phone || e.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null };
         })
-        .sort((a: any, b: any) => a.distance - b.distance).slice(0, 8);
+        .sort((a: any, b: any) => (Number.isFinite(a.distance) ? a.distance : Infinity) - (Number.isFinite(b.distance) ? b.distance : Infinity));
+    const retenes15 = sortedRetenes.filter((e: any) => Number.isFinite(e.distance) && e.distance <= 15);
+    const retenes30 = sortedRetenes.filter((e: any) => Number.isFinite(e.distance) && e.distance <= 30);
+    const retenes = (retenes15.length > 0 ? retenes15 : retenes30.length > 0 ? retenes30 : sortedRetenes).slice(0, 8);
 
-    const francos = logic.processedData
+    const sortedFrancos = logic.processedData
         .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado)
         .map((s: any) => {
             const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
             const dist = calculateDistance(objLat, objLng, emp?.lat, emp?.lng);
             return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null };
         })
-        .sort((a: any, b: any) => a.distance - b.distance).slice(0, 8);
+        .sort((a: any, b: any) => (Number.isFinite(a.distance) ? a.distance : Infinity) - (Number.isFinite(b.distance) ? b.distance : Infinity));
+    const francos15 = sortedFrancos.filter((s: any) => Number.isFinite(s.distance) && s.distance <= 15);
+    const francos30 = sortedFrancos.filter((s: any) => Number.isFinite(s.distance) && s.distance <= 30);
+    const francos = (francos15.length > 0 ? francos15 : francos30.length > 0 ? francos30 : sortedFrancos).slice(0, 8);
 
     const openLocalWA = (item: any) => {
         const nombre = item.employeeName || item.fullName || '';

@@ -798,12 +798,12 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
         return false;
     };
 
-    // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por experiencia, luego cercanía
+    // 3. RETENES: empleados sin turno hoy — sin restricciones, ordenados por cercanía y experiencia
     const busyIds = new Set(
         logic.processedData.filter((s: any) => isSameDay(s.shiftDateObj, now)).map((s: any) => s.employeeId)
     );
-    const retenes = (logic.employees || [])
-        .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // â† excluir restringidos
+    const sortedRetenes = (logic.employees || [])
+        .filter((e: any) => !busyIds.has(e.id) && !isRestricted(e)) // ← excluir restringidos
         .map((e: any) => {
             const dist  = calculateDistance(objLat, objLng, e.lat, e.lng);
             const expLv = experienceLevel(e);
@@ -817,17 +817,22 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
             };
         })
         .sort((a: any, b: any) => {
-            if (b.experienceLv !== a.experienceLv) return b.experienceLv - a.experienceLv; // exp desc
-            return (a.distance ?? Infinity) - (b.distance ?? Infinity);                    // dist asc
-        })
-        .slice(0, 12);
+            const distA = Number.isFinite(a.distance) ? a.distance : Infinity;
+            const distB = Number.isFinite(b.distance) ? b.distance : Infinity;
+            if (distA !== distB) return distA - distB; // Menor distancia primero
+            return (b.experienceLv ?? 0) - (a.experienceLv ?? 0); // Desempate por experiencia
+        });
+
+    const retenes15 = sortedRetenes.filter((e: any) => Number.isFinite(e.distance) && e.distance <= 15);
+    const retenes30 = sortedRetenes.filter((e: any) => Number.isFinite(e.distance) && e.distance <= 30);
+    const retenes = (retenes15.length > 0 ? retenes15 : retenes30.length > 0 ? retenes30 : sortedRetenes).slice(0, 12);
 
     // 4. FRANCOS: turnos franco hoy, no trabajados — sin restricciones, mismo orden
-    const francos = logic.processedData
+    const sortedFrancos = logic.processedData
         .filter((s: any) => {
             if (!s.isFranco || !isSameDay(s.shiftDateObj, now) || s.isFrancoTrabajado) return false;
             const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
-            if (emp && isRestricted(emp)) return false; // â† excluir restringidos
+            if (emp && isRestricted(emp)) return false; // ← excluir restringidos
             return true;
         })
         .map((s: any) => {
@@ -837,10 +842,15 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, opsCaps }: any) =
             return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '', distance: dist, eta: Number.isFinite(dist) ? estimateEta(dist) : null, experienceLv: expLv };
         })
         .sort((a: any, b: any) => {
-            if (b.experienceLv !== a.experienceLv) return b.experienceLv - a.experienceLv;
-            return (a.distance ?? Infinity) - (b.distance ?? Infinity);
-        })
-        .slice(0, 12);
+            const distA = Number.isFinite(a.distance) ? a.distance : Infinity;
+            const distB = Number.isFinite(b.distance) ? b.distance : Infinity;
+            if (distA !== distB) return distA - distB; // Menor distancia primero
+            return (b.experienceLv ?? 0) - (a.experienceLv ?? 0); // Desempate por experiencia
+        });
+
+    const francos15 = sortedFrancos.filter((s: any) => Number.isFinite(s.distance) && s.distance <= 15);
+    const francos30 = sortedFrancos.filter((s: any) => Number.isFinite(s.distance) && s.distance <= 30);
+    const francos = (francos15.length > 0 ? francos15 : francos30.length > 0 ? francos30 : sortedFrancos).slice(0, 12);
 
     // RET pasivos: mismo objetivo, turno con code='RET' hoy, en standby
     const retPasivos = logic.processedData

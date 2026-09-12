@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
   X, ChevronRight, ChevronLeft, Phone, SkipForward, CheckCircle,
-  AlertTriangle, Users, Clock, Minimize2, Search,
+  AlertTriangle, Users, Clock, Minimize2, Search, MapPin,
 } from 'lucide-react';
 import {
   collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot,
@@ -83,6 +83,30 @@ const fmtTime = (d: any) => { try { return toDate(d).toLocaleTimeString('es-AR',
 const isSameDay = (d1: any, d2: any) => toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA');
 const simPhone = (id: string) => { const n = parseInt(id.replace(/\D/g, '')) || 1; return `+54 9 351 ${String(n * 1317 % 10000).padStart(4, '0')}-${String(n * 7531 % 10000).padStart(4, '0')}`; };
 const initials = (name: string) => (name || '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
+
+const calculateDistance = (lat1: number | null | undefined, lon1: number | null | undefined, lat2: number | null | undefined, lon2: number | null | undefined): number => {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Infinity;
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (isNaN(nLat1) || isNaN(nLon1) || isNaN(nLat2) || isNaN(nLon2)) return Infinity;
+  const R = 6371; // Radio medio de la Tierra en km
+  const dLat = (nLat2 - nLat1) * (Math.PI / 180);
+  const dLon = (nLon2 - nLon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(nLat1 * (Math.PI / 180)) * Math.cos(nLat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const formatDistanceKm = (dist: number): string => {
+  if (!Number.isFinite(dist)) return 'Sin GPS';
+  if (dist < 1) return `${Math.round(dist * 1000)}m`;
+  return `${dist.toFixed(1)} km`;
+};
 
 export function createSession(absentShift: any, empresaId: string): CoverageSession {
   return {
@@ -301,6 +325,71 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       .map((sh: any) => sh.employeeId)
   );
 
+  // ── Coordenadas del objetivo ausente ─────────────────────────────────────────
+  const objCoords = React.useMemo(() => {
+    let lat = absenceShift.lat;
+    let lng = absenceShift.lng;
+    if ((lat == null || lng == null) && logic.clients) {
+      for (const cl of (logic.clients || [])) {
+        const obj = (cl.objetivos || []).find((o: any) => o.id === absenceShift.objectiveId);
+        if (obj && (obj.lat != null || obj.location?.lat != null)) {
+          lat = obj.lat ?? obj.location?.lat;
+          lng = obj.lng ?? obj.location?.lng;
+          break;
+        }
+      }
+    }
+    return {
+      lat: Number(lat) || -31.4201,
+      lng: Number(lng) || -64.1888,
+    };
+  }, [absenceShift, logic.clients]);
+
+  const getDistanceToObjective = (emp: any, cand?: any): number => {
+    const lat = emp?.lat ?? cand?.lat ?? emp?.location?.lat;
+    const lng = emp?.lng ?? cand?.lng ?? emp?.location?.lng;
+    if (lat == null || lng == null) return Infinity;
+    return calculateDistance(objCoords.lat, objCoords.lng, Number(lat), Number(lng));
+  };
+
+  const getCandidateExperience = (emp: any, cand?: any) => {
+    const objId = absenceShift.objectiveId;
+    if (!objId) return { hasExp: false, label: 'Sin exp.', level: 0 };
+    const e = emp || cand || {};
+    const empId = e.id || cand?.employeeId || cand?.id;
+
+    // 1. Titular / preferido
+    if (e.preferredObjectiveId === objId) {
+      return { hasExp: true, label: 'Titular objetivo', level: 3 };
+    }
+
+    // 2. Historial en experienciaObjetivos
+    const expMap = e.experienciaObjetivos || {};
+    const entry = expMap[objId];
+    if (entry) {
+      const turnosTotal =
+        (entry.turnosRegulares ?? 0) +
+        (entry.turnosRefuerzo ?? 0) +
+        (entry.turnosConvocado ?? 0) +
+        (entry.turnosEscuela ?? 0) +
+        (entry.count ?? 0);
+      if (turnosTotal > 0 || (entry.nivel && entry.nivel !== 'NINGUNO')) {
+        return {
+          hasExp: true,
+          label: turnosTotal > 0 ? `${turnosTotal}T exp.` : 'Con experiencia',
+          level: 2,
+        };
+      }
+    }
+
+    // 3. Turnos registrados en este objetivo en processedData
+    if (empId && (logic.processedData || []).some((sh: any) => sh.employeeId === empId && sh.objectiveId === objId)) {
+      return { hasExp: true, label: 'Turnos previos', level: 1 };
+    }
+
+    return { hasExp: false, label: 'Sin exp.', level: 0 };
+  };
+
   const dedupeByEmployee = (list: any[]) => {
     const seen = new Set<string>();
     return list.filter((cand: any) => {
@@ -316,33 +405,66 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       case 'SIN_TURNO':
         return (logic.employees || [])
           .filter((e: any) => !busyIds.has(e.id) && e.id !== absenceShift.employeeId)
-          .map((e: any) => ({
-            ...e,
-            fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '',
-            phone: e.phone || e.celular || '',
-            hasAffinity: objectiveAffinity.has(e.id),
-          }))
-          .sort((a: any, b: any) => (b.hasAffinity ? 1 : 0) - (a.hasAffinity ? 1 : 0));
+          .map((e: any) => {
+            const dist = getDistanceToObjective(e);
+            const exp = getCandidateExperience(e);
+            return {
+              ...e,
+              fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '',
+              phone: e.phone || e.celular || '',
+              distance: dist,
+              experience: exp,
+              hasAffinity: exp.hasExp,
+            };
+          });
       case 'RET_PASIVO':
-        return (logic.processedData || []).filter((sh: any) =>
-          sh.code === 'RET' &&
-          isSameDay(sh.shiftDateObj, targetDate) &&
-          !sh.isAbsent &&
-          !sh.isCompleted &&
-          sh.status !== 'COMPLETED' &&
-          sh.employeeId !== absenceShift.employeeId &&
-          !crossSessionBusy.has(sh.employeeId)
-        );
+        return (logic.processedData || [])
+          .filter((sh: any) =>
+            sh.code === 'RET' &&
+            isSameDay(sh.shiftDateObj, targetDate) &&
+            !sh.isAbsent &&
+            !sh.isCompleted &&
+            sh.status !== 'COMPLETED' &&
+            sh.employeeId !== absenceShift.employeeId &&
+            !crossSessionBusy.has(sh.employeeId)
+          )
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            const dist = getDistanceToObjective(emp, sh);
+            const exp = getCandidateExperience(emp, sh);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+              distance: dist,
+              experience: exp,
+              hasAffinity: exp.hasExp,
+            };
+          });
       case 'ESC':
-        return (logic.processedData || []).filter((sh: any) =>
-          (sh.code === 'ESC' || sh.code === 'REF') &&
-          isSameDay(sh.shiftDateObj, targetDate) &&
-          !sh.isAbsent &&
-          !sh.isCompleted &&
-          sh.status !== 'COMPLETED' &&
-          sh.employeeId !== absenceShift.employeeId &&
-          !crossSessionBusy.has(sh.employeeId)
-        );
+        return (logic.processedData || [])
+          .filter((sh: any) =>
+            (sh.code === 'ESC' || sh.code === 'REF') &&
+            isSameDay(sh.shiftDateObj, targetDate) &&
+            !sh.isAbsent &&
+            !sh.isCompleted &&
+            sh.status !== 'COMPLETED' &&
+            sh.employeeId !== absenceShift.employeeId &&
+            !crossSessionBusy.has(sh.employeeId)
+          )
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            const dist = getDistanceToObjective(emp, sh);
+            const exp = getCandidateExperience(emp, sh);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+              distance: dist,
+              experience: exp,
+              hasAffinity: exp.hasExp,
+            };
+          });
       case 'RETENCION':
         return [];
       case 'FT':
@@ -357,10 +479,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           )
           .map((sh: any) => {
             const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            const dist = getDistanceToObjective(emp, sh);
+            const exp = getCandidateExperience(emp, sh);
             return {
               ...sh,
               fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
               phone: sh.phone || emp?.phone || emp?.celular || '',
+              distance: dist,
+              experience: exp,
+              hasAffinity: exp.hasExp,
             };
           });
     }
@@ -388,7 +515,45 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     .slice(0, 1)
   );
 
-  const allCandidates = dedupeByEmployee(byKey(step.key));
+  const rawCandidates = dedupeByEmployee(byKey(step.key));
+
+  // Ordenamiento por distancia al objetivo (menor a mayor); desempate por experiencia y luego alfabético
+  const sortedCandidates = [...rawCandidates].sort((a: any, b: any) => {
+    const distA = Number.isFinite(a.distance) ? a.distance : Infinity;
+    const distB = Number.isFinite(b.distance) ? b.distance : Infinity;
+    if (distA !== distB) {
+      return distA - distB;
+    }
+    const expA = a.experience?.level ?? (a.hasAffinity ? 1 : 0);
+    const expB = b.experience?.level ?? (b.hasAffinity ? 1 : 0);
+    if (expB !== expA) {
+      return expB - expA;
+    }
+    return (a.fullName || '').localeCompare(b.fullName || '');
+  });
+
+  // Filtro de radio progresivo:
+  // "no mostrar aquellos que estan a mas de 15km, si no hubiera en ese radio si mostrar hasta 30 km"
+  const within15 = sortedCandidates.filter((c: any) => Number.isFinite(c.distance) && c.distance <= 15);
+  const within30 = sortedCandidates.filter((c: any) => Number.isFinite(c.distance) && c.distance <= 30);
+
+  let activeRadiusKm: 15 | 30 | null = 15;
+  let radiusFilteredCandidates: any[] = [];
+
+  if (within15.length > 0) {
+    activeRadiusKm = 15;
+    radiusFilteredCandidates = within15;
+  } else if (within30.length > 0) {
+    activeRadiusKm = 30;
+    radiusFilteredCandidates = within30;
+  } else {
+    // Si no hay candidatos con GPS en <= 30 km (o ninguno tiene coordenadas cargadas),
+    // mostramos los disponibles para no bloquear la cobertura operativa
+    activeRadiusKm = null;
+    radiusFilteredCandidates = sortedCandidates;
+  }
+
+  const allCandidates = radiusFilteredCandidates;
   const candidates = search.trim()
     ? allCandidates.filter((c: any) => {
         const name = (c.fullName || c.employeeName || c.name || '').toLowerCase();
@@ -970,8 +1135,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   )
                   : (
                     <div className="flex flex-col gap-2">
-                      {/* Búsqueda — solo cuando hay más de 5 candidatos */}
-                      {step.key === 'SIN_TURNO' && allCandidates.length > 5 && (
+                      {/* Búsqueda — cuando hay más de 5 candidatos */}
+                      {allCandidates.length > 5 && (
                         <div className="relative">
                           <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                           <input
@@ -983,15 +1148,32 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                           />
                         </div>
                       )}
-                      {/* Contador y aviso de afinidad */}
-                      {step.key === 'SIN_TURNO' && (
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                          <span className="font-bold">{candidates.length}{search ? ` de ${allCandidates.length}` : ''} candidato{candidates.length !== 1 ? 's' : ''} sin turno hoy</span>
-                          {allCandidates.some((c: any) => c.hasAffinity) && (
-                            <span className="text-indigo-500 font-bold">· 🎯 mismo objetivo primero</span>
-                          )}
-                        </div>
-                      )}
+
+                      {/* Banner de radio de distancia y estado de búsqueda */}
+                      <div className="rounded-xl border p-2 text-[10px] font-semibold">
+                        {activeRadiusKm === 15 ? (
+                          <div className="flex items-center justify-between text-indigo-700 bg-indigo-50/70 -m-2 p-2 rounded-xl">
+                            <span className="flex items-center gap-1">
+                              <MapPin size={11} className="text-indigo-600" /> Radio: <strong>≤ 15 km</strong> del objetivo
+                            </span>
+                            <span className="font-bold text-indigo-900">{candidates.length}{search ? ` de ${allCandidates.length}` : ''} disponibles</span>
+                          </div>
+                        ) : activeRadiusKm === 30 ? (
+                          <div className="flex items-center justify-between text-amber-800 bg-amber-50 -m-2 p-2 rounded-xl">
+                            <span className="flex items-center gap-1">
+                              <MapPin size={11} className="text-amber-600" /> Sin candidatos a 15 km · Ampliado a <strong>≤ 30 km</strong>
+                            </span>
+                            <span className="font-bold text-amber-900">{candidates.length}{search ? ` de ${allCandidates.length}` : ''} disponibles</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-between text-slate-600 bg-slate-100 -m-2 p-2 rounded-xl">
+                            <span className="flex items-center gap-1">
+                              <MapPin size={11} className="text-slate-400" /> Sin candidatos dentro de 30 km · Mostrando disponibles
+                            </span>
+                            <span className="font-bold text-slate-800">{candidates.length}{search ? ` de ${allCandidates.length}` : ''} disponibles</span>
+                          </div>
+                        )}
+                      </div>
 
                       {/* Lista */}
                       {candidates.length === 0 && search && (
@@ -1002,17 +1184,45 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                         const name = c.fullName || c.employeeName || c.name || '—';
                         const phone = c.phone || c.celular || simPhone(empId);
                         const isNotifying = loading === 'notif_' + empId;
+                        const hasExp = !!c.experience?.hasExp;
+                        const expLabel = c.experience?.label || (c.hasAffinity ? 'Con experiencia' : 'Sin exp.');
                         return (
                           <div key={c.id || empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
                             <div className="relative shrink-0">
-                              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black text-slate-600">{initials(name)}</div>
-                              {c.hasAffinity && (
-                                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-white flex items-center justify-center text-[8px]">🎯</div>
+                              <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black ${
+                                hasExp ? 'bg-emerald-100 text-emerald-800 ring-2 ring-emerald-300' : 'bg-slate-100 text-slate-600'
+                              }`}>{initials(name)}</div>
+                              {hasExp && (
+                                <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center text-[9px] text-white" title={expLabel}>🎯</div>
                               )}
                             </div>
                             <div className="flex-1 min-w-0">
-                              <div className="text-sm font-bold text-slate-800 truncate leading-tight">{name}</div>
-                              <div className="text-sm font-black font-mono text-slate-600 mt-0.5">📱 {phone}</div>
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-bold text-slate-800 truncate leading-tight">{name}</span>
+                                {hasExp ? (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                                    ✓ {expLabel}
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 shrink-0">
+                                    Sin exp.
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2 flex-wrap mt-1">
+                                <span className="text-xs font-bold font-mono text-slate-600">📱 {phone}</span>
+                                {Number.isFinite(c.distance) ? (
+                                  <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0">
+                                    <MapPin size={10} className="text-indigo-500" />
+                                    {formatDistanceKm(c.distance)}
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] font-medium text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0" title="Empleado sin coordenadas GPS registradas">
+                                    <MapPin size={10} className="text-slate-300" />
+                                    Sin GPS
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             <button
                               onClick={() => sendNotification(c)}
