@@ -684,15 +684,45 @@ const absenceStatusBadgeClass = (status: string) =>
     ABSENCE_STATUS_STYLES[status] || 'bg-slate-100 text-slate-600 border-slate-200';
 
 const formatShiftScheduleLabel = (shift: any, bandCode: string): string => {
+    const bandFallback = SHIFT_RANGES[String(bandCode || '').toUpperCase()] || '—';
+    const isSameClock = (a: string, b: string) => {
+        const norm = (t: string) => {
+            const raw = String(t || '').trim().toLowerCase()
+                .replace(/\s+/g, ' ')
+                .replace(/\./g, '');
+            // 12:00 a m / 00:00 / 0:00 → medianoche placeholder
+            if (/^(0?0:00|12:00\s*a\s*m)$/.test(raw)) return '00:00';
+            const m = raw.match(/^(\d{1,2}):(\d{2})/);
+            if (!m) return raw;
+            return `${String(Number(m[1])).padStart(2, '0')}:${m[2]}`;
+        };
+        return norm(a) === norm(b);
+    };
+
     if (typeof shift?.startTime === 'string' && typeof shift?.endTime === 'string') {
-        return `${shift.startTime} - ${shift.endTime}`;
+        const s = shift.startTime.trim();
+        const e = shift.endTime.trim();
+        if (s && e && !isSameClock(s, e)) return `${s} - ${e}`;
+        return bandFallback;
     }
     if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
         const s = formatTime(shift.startTime);
         const e = formatTime(shift.endTime);
-        if (s !== '--:--' && e !== '--:--' && s !== e) return `${s} - ${e}`;
+        if (s !== '--:--' && e !== '--:--' && !isSameClock(s, e)) return `${s} - ${e}`;
     }
-    return SHIFT_RANGES[bandCode] || '—';
+    return bandFallback;
+};
+
+/** Partes start/end para UI; si start≈end usa banda CCT (nunca fingir 24h). */
+const resolveShiftDisplayClockParts = (shift: any, bandCode: string): { start: string; end: string; usedBandFallback: boolean } => {
+    const label = formatShiftScheduleLabel(shift, bandCode);
+    const parts = String(label).split(/\s*[-–—]\s*/);
+    if (parts.length >= 2 && parts[0] && parts[1] && parts[0] !== '—') {
+        const band = SHIFT_RANGES[String(bandCode || '').toUpperCase()];
+        const usedBandFallback = !!band && label === band;
+        return { start: parts[0].trim(), end: parts[1].trim(), usedBandFallback };
+    }
+    return { start: '--:--', end: '--:--', usedBandFallback: true };
 };
 
 const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
@@ -10661,8 +10691,12 @@ export default function PlanificacionPage() {
                                         const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
                                         const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
                                         const _cellShift = (p && !p.isDeleted) ? p : s;
-                                        const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
-                                            ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
+                                        const _cellCodeForRange = String(cellCode || '').toUpperCase();
+                                        const _cellActualRange = (_cellShift && _cellCodeForRange)
+                                            ? (() => {
+                                                const label = formatShiftScheduleLabel(_cellShift, _cellCodeForRange);
+                                                return label && label !== '—' ? label : null;
+                                            })()
                                             : null;
                                         const _b2 = resolveCellSecondBlock(
                                             key,
@@ -10713,7 +10747,12 @@ export default function PlanificacionPage() {
                                         const _opsAbsentHint = _opsAbsent
                                             ? `\n🔴 Ausente operativo${_opsAbsentCovered ? ` · Cubierto por: ${_opsAbsentCovered}` : ' · Sin cobertura nominal'}`
                                             : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint + _opsAbsentHint;
+                                        const _segCoverHint = (isEarly || isExtended || isCoverageSplitCell) && _opsCovName
+                                            ? `\n🔗 Cubre a: ${_opsCovName}`
+                                            : ((isEarly || covRole === 'EARLY_START')
+                                                ? '\n⚠ Adelanto ≠ +24h; horario de banda si timestamps 00:00'
+                                                : '');
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint + _opsAbsentHint + _segCoverHint;
                                         const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                                             ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                                             : null;
@@ -10737,12 +10776,12 @@ export default function PlanificacionPage() {
                                                         >
                                                             {_gridCoveredLabel ? `→${_gridCoveredLabel}` : 'SIN COV'}
                                                         </div>
-                                                    ) : (_opsCovName || isOpsCovCell) ? (
+                                                    ) : (_opsCovName || isOpsCovCell || isCoverageSplitCell || isEarly || isExtended) ? (
                                                         <div
                                                             className="absolute -bottom-0.5 left-0 right-0 text-[5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight"
-                                                            title={_opsCovName ? `Cubre a: ${_opsCovName}` : 'Cobertura operativa'}
+                                                            title={_opsCovName ? `Cubre a: ${_opsCovName}` : (isEarly ? 'Adelanto (cobertura) — no es +24h' : isExtended ? 'Extensión (cobertura)' : 'Cobertura operativa')}
                                                         >
-                                                            {_covererLabel ? `cubre ${_covererLabel}` : 'COV'}
+                                                            {_covererLabel ? `cubre ${_covererLabel}` : (isEarly ? 'ADEL+' : isExtended ? 'EXT+' : 'COV')}
                                                         </div>
                                                     ) : null}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
@@ -13443,9 +13482,52 @@ export default function PlanificacionPage() {
                                 const coversAbsenceName = String(
                                     shift?.coversAbsenceEmployeeName || shift?.absenceEmployeeName || shift?.coveredEmployeeName || '',
                                 ).trim();
-                                const isCovererCell = !!coversAbsenceName;
+
+                                const resolveWhoThisShiftCovers = (): string | null => {
+                                    if (coversAbsenceName) return coversAbsenceName;
+                                    const dateStr = selectedCell.dateStr;
+                                    const covererLast = employeeName.split(',')[0]?.trim().toLowerCase() || '';
+                                    const sources: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                            if (Array.isArray(arr)) sources.push(...arr);
+                                        }
+                                    }
+                                    for (const [k, raw] of Object.entries({ ...shiftsMap, ...pendingChanges })) {
+                                        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                        sources.push(raw as any);
+                                    }
+                                    for (const t of sources) {
+                                        if (!t || t.isDeleted) continue;
+                                        if (t.employeeId === 'VACANTE' || t.isUnassigned) continue;
+                                        const byId = String(t.coveredByEmployeeId || t.coveredBy || '');
+                                        const byName = String(t.coveredByEmployeeName || t.coveredBy || '').toLowerCase();
+                                        if (byId && byId === selectedCell.empId) {
+                                            return t.employeeName || employees.find((e: any) => e.id === t.employeeId)?.name || null;
+                                        }
+                                        if (covererLast.length > 2 && byName.includes(covererLast)) {
+                                            return t.employeeName || employees.find((e: any) => e.id === t.employeeId)?.name || null;
+                                        }
+                                    }
+                                    const note = String(shift?.coverageNote || shift?.comments || '');
+                                    const m = note.match(/cubre(?:ndo)?\s+a[:\s]+([^|.\n]+)/i);
+                                    if (m) return m[1].trim();
+                                    return null;
+                                };
+
+                                const inferredCoversName = resolveWhoThisShiftCovers();
+                                const isCoverageSegmentCell = !!(
+                                    shift?.isEarlyStart
+                                    || shift?.isExtended
+                                    || shift?.isRetention
+                                    || shift?.coverageSegmentRole
+                                    || shift?.coveragePackageId
+                                    || isOpsCoverageShift(shift)
+                                );
                                 const showRrhhPanel = !!(absence || isRRHHCode);
-                                const showTraceNarrative = !!(showRrhhPanel || isOpsAbsent || isCovererCell);
+                                const isCovererCell = !!(inferredCoversName || (isCoverageSegmentCell && !isOpsAbsent && !showRrhhPanel));
+                                const showTraceNarrative = !!(showRrhhPanel || isOpsAbsent || isCovererCell || isCoverageSegmentCell);
                                 const isReadOnly = isConsolidated || isSwapPersisted;
 
                                 const findLinkedVacancyOpen = (): boolean => {
@@ -13484,19 +13566,20 @@ export default function PlanificacionPage() {
                                 const vacancyStillOpen = (absence || isOpsAbsent) ? findLinkedVacancyOpen() : false;
 
                                 const coverHowLabel = (() => {
-                                    const covShift = coverageInfo?.shift;
-                                    if (!covShift) return shift?.coverageType ? String(shift.coverageType) : null;
-                                    if (covShift.isFrancoTrabajado || String(covShift.code || '').toUpperCase() === 'FT') return 'Franco trabajado (FT)';
-                                    if (covShift.isExtended || covShift.coverageRole === 'EXTENSION') return 'Extensión de jornada';
-                                    if (covShift.isEarlyStart || covShift.coverageRole === 'EARLY_START') return 'Adelanto';
-                                    const o = String(covShift.origin || '').toUpperCase();
-                                    if (o === 'RETEN' || covShift.isRetention) return 'Retención (RET)';
+                                    const covShift = coverageInfo?.shift || (isCoverageSegmentCell ? shift : null);
+                                    if (!covShift && !isCoverageSegmentCell) return shift?.coverageType ? String(shift.coverageType) : null;
+                                    const src = covShift || shift;
+                                    if (src.isFrancoTrabajado || String(src.code || '').toUpperCase() === 'FT') return 'Franco trabajado (FT)';
+                                    if (src.isExtended || src.coverageRole === 'EXTENSION' || src.coverageSegmentRole === 'EXTENSION') return 'Extensión de jornada';
+                                    if (src.isEarlyStart || src.coverageRole === 'EARLY_START' || src.coverageSegmentRole === 'EARLY_START') return 'Adelanto (cobertura)';
+                                    const o = String(src.origin || '').toUpperCase();
+                                    if (o === 'RETEN' || src.isRetention) return 'Retención (RET)';
                                     if (o === 'OPERATIONS_COVERAGE') return 'Cobertura Ops';
-                                    if (covShift.resolvedBy === 'OPERACIONES') return 'Resuelto en Ops';
-                                    return o ? o.replace(/_/g, ' ') : null;
+                                    if (src.resolvedBy === 'OPERACIONES') return 'Resuelto en Ops';
+                                    return o ? o.replace(/_/g, ' ') : (shift?.coverageType ? String(shift.coverageType) : null);
                                 })();
 
-                                const traceRole: 'titular' | 'coverer' | 'normal' = isCovererCell && !isOpsAbsent && !showRrhhPanel
+                                const traceRole: 'titular' | 'coverer' | 'normal' = (isCovererCell || isCoverageSegmentCell) && !isOpsAbsent && !showRrhhPanel
                                     ? 'coverer'
                                     : (showRrhhPanel || isOpsAbsent ? 'titular' : 'normal');
 
@@ -13520,9 +13603,9 @@ export default function PlanificacionPage() {
                                         coveredByHow: coverHowLabel,
                                         vacancyOpen: vacancyStillOpen,
                                         covererName: employeeName,
-                                        coversAbsenceName: coversAbsenceName || null,
+                                        coversAbsenceName: inferredCoversName || coversAbsenceName || null,
                                         covererCode: code || null,
-                                        covererOrigin: shift?.origin || shift?.coverageType || null,
+                                        covererOrigin: coverHowLabel || shift?.origin || shift?.coverageType || null,
                                     })
                                     : [];
 
@@ -13546,14 +13629,17 @@ export default function PlanificacionPage() {
                                     </div>
                                 ) : null;
 
-                                const plannedStart =
-                                    (typeof shift?.startTime === 'string') ? shift.startTime
-                                    : (shift?.startTime ? formatTime(shift.startTime) : '--:--');
-                                const plannedEnd =
-                                    (typeof shift?.endTime === 'string') ? shift.endTime
-                                    : (shift?.endTime ? formatTime(shift.endTime) : '--:--');
-                                const realStart = shift?.realStartTime ? formatTime(shift.realStartTime) : (shift?.checkInTime ? formatTime(shift.checkInTime) : '--:--');
-                                const realEnd = shift?.realEndTime ? formatTime(shift.realEndTime) : (shift?.checkOutTime ? formatTime(shift.checkOutTime) : '--:--');
+                                const displayClock = resolveShiftDisplayClockParts(shift, code);
+                                const plannedStart = displayClock.start;
+                                const plannedEnd = displayClock.end;
+                                const rawRealStart = shift?.realStartTime ? formatTime(shift.realStartTime) : (shift?.checkInTime ? formatTime(shift.checkInTime) : '--:--');
+                                const rawRealEnd = shift?.realEndTime ? formatTime(shift.realEndTime) : (shift?.checkOutTime ? formatTime(shift.checkOutTime) : '--:--');
+                                const isPlaceholderClock = (t: string) => {
+                                    const raw = String(t || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/\./g, '');
+                                    return /^(0?0:00|12:00\s*a\s*m|--:--)$/.test(raw);
+                                };
+                                const realStart = (displayClock.usedBandFallback && isPlaceholderClock(rawRealStart)) ? '--:--' : rawRealStart;
+                                const realEnd = (displayClock.usedBandFallback && isPlaceholderClock(rawRealEnd)) ? '--:--' : rawRealEnd;
                                 const rawStatus = (shift?.status || '').toString().toUpperCase();
                                 const STATUS_LABELS: Record<string, string> = { PRESENT: 'Presente', COMPLETED: 'Completado', ABSENT: 'Ausente', LATE: 'Tarde', INTERRUPTED: 'Interrumpido', PENDING: 'Pendiente' };
                                 const status = STATUS_LABELS[rawStatus] || rawStatus || '-';
@@ -13751,7 +13837,7 @@ export default function PlanificacionPage() {
                                                 <div className="p-3 rounded-xl border bg-slate-50">
                                                     <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Planificado (Planificador)</div>
                                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                                        <div className="font-bold text-slate-600">Cubrió</div>
+                                                        <div className="font-bold text-slate-600">Turno</div>
                                                         <div className="text-slate-800 font-bold">
                                                             <span className="font-mono">{code || '-'}</span>
                                                             <span className="mx-2 text-slate-300">|</span>
@@ -13760,7 +13846,14 @@ export default function PlanificacionPage() {
                                                         <div className="font-bold text-slate-600">Servicio</div>
                                                         <div className="text-slate-800">{serviceName || '-'}</div>
                                                         <div className="font-bold text-slate-600">Horario</div>
-                                                        <div className="font-mono text-slate-800">{plannedStart} - {plannedEnd}</div>
+                                                        <div className="font-mono text-slate-800">
+                                                            {plannedStart} - {plannedEnd}
+                                                            {displayClock.usedBandFallback && (
+                                                                <span className="block text-[9px] font-bold text-amber-700 mt-0.5 normal-case">
+                                                                    Banda CCT (timestamps 00:00=00:00 inválidos — no es 24h)
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <div className="font-bold text-slate-600">Horas</div>
                                                         <div className="font-mono text-slate-800">{hours ? `${hours}h` : '-'}</div>
                                                     </div>
