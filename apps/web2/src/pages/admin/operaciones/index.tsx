@@ -66,11 +66,14 @@ const displayShiftTimeRange = (shift: any) => {
     try {
         const s = toDate(shift.shiftDateObj);
         const e = toDate(shift.endDateObj);
-        // Placeholder 00:00→00:00 (o mismo instante): mostrar banda CCT del código, no 24h fantasma
-        if (Math.abs(e.getTime() - s.getTime()) < 60_000) {
-            const code = String(shift.code || shift.type || '').toUpperCase();
+        const code = String(shift.code || shift.type || '').toUpperCase();
+        const diff = Math.abs(e.getTime() - s.getTime());
+        // Placeholder mismo instante O wrap fantasma ~24h con misma hora de reloj
+        const sameClock = s.getHours() === e.getHours() && s.getMinutes() === e.getMinutes();
+        if (diff < 60_000 || (sameClock && Math.abs(diff - 86_400_000) < 120_000)) {
             if (OPS_BAND_RANGES[code]) return OPS_BAND_RANGES[code];
         }
+        if (shift.opsBandSanitized && OPS_BAND_RANGES[code]) return OPS_BAND_RANGES[code];
     } catch { /* fall through */ }
     return formatTimeRange(shift.shiftDateObj, shift.endDateObj);
 };

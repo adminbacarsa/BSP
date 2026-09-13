@@ -30,6 +30,56 @@ const getDuration = (start: Date, end: Date) => {
     if (diff < 0) diff += 24;
     return diff;
 };
+
+/** Solo overnight real (23:00→07:00). start===end NO suma 24h. */
+const overnightEndMs = (startMs: number, endMs: number): number => {
+    if (startMs > 0 && endMs > 0 && endMs < startMs) return endMs + 86400000;
+    return endMs;
+};
+
+const OPS_BAND_CLOCK: Record<string, { startH: number; startM: number; endH: number; endM: number }> = {
+    M: { startH: 7, startM: 0, endH: 15, endM: 0 },
+    T: { startH: 15, startM: 0, endH: 23, endM: 0 },
+    N: { startH: 23, startM: 0, endH: 7, endM: 0 },
+    D12: { startH: 7, startM: 0, endH: 19, endM: 0 },
+    N12: { startH: 19, startM: 0, endH: 7, endM: 0 },
+};
+
+/** 00:00→00:00 o wrap fantasma ~24h con misma hora de reloj. */
+export function isPlaceholderOpsWindow(start: Date | null | undefined, end: Date | null | undefined): boolean {
+    if (!start || !end) return false;
+    const diff = Math.abs(end.getTime() - start.getTime());
+    if (diff < 60_000) return true;
+    if (Math.abs(diff - 86_400_000) < 120_000) {
+        return start.getHours() === end.getHours() && start.getMinutes() === end.getMinutes();
+    }
+    return false;
+}
+
+function applyCctBandWindow(base: Date, code: string): { start: Date; end: Date } | null {
+    const band = OPS_BAND_CLOCK[String(code || '').toUpperCase()];
+    if (!band) return null;
+    const start = new Date(base);
+    start.setHours(band.startH, band.startM, 0, 0);
+    const end = new Date(base);
+    end.setHours(band.endH, band.endM, 0, 0);
+    if (end.getTime() <= start.getTime()) end.setDate(end.getDate() + 1);
+    return { start, end };
+}
+
+/** Corrige start/end basura antes de lógica Ops (activo, retención, HOY, display). */
+export function sanitizeOpsShiftDates<T extends { shiftDateObj?: Date | null; endDateObj?: Date | null; code?: unknown; type?: unknown; opsBandSanitized?: boolean }>(shift: T): T {
+    const start = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : null;
+    const end = shift.endDateObj instanceof Date ? shift.endDateObj : null;
+    if (!isPlaceholderOpsWindow(start, end)) return shift;
+    const code = String(shift.code || shift.type || '').toUpperCase();
+    const base = start || end;
+    if (!base) return shift;
+    const band = applyCctBandWindow(base, code);
+    if (!band) return shift;
+    return { ...shift, shiftDateObj: band.start, endDateObj: band.end, opsBandSanitized: true };
+}
+
 const createDateFromTime = (timeStr: string, baseDate: Date) => { if (!timeStr) return null; const [hours, minutes] = timeStr.split(':').map(Number); const d = new Date(baseDate); d.setHours(hours, minutes, 0, 0); return d; };
 const getDayCode = (date: Date) => ['D', 'L', 'M', 'X', 'J', 'V', 'S'][date.getDay()];
 
@@ -64,7 +114,7 @@ export function isOpsShiftHoy(s: any, now: Date = new Date()): boolean {
     const nowMs = effectiveNow.getTime();
     const startMs = sStart?.getTime() ?? 0;
     let endMs = sEnd?.getTime() ?? 0;
-    if (startMs > 0 && endMs > 0 && endMs <= startMs) endMs += 86400000;
+    endMs = overnightEndMs(startMs, endMs);
 
     // Presentes/retenidos de días anteriores (zombies acotados a 48h)
     if ((s.isPresent || s.isRetention) && !s.isCompleted) {
@@ -72,7 +122,8 @@ export function isOpsShiftHoy(s: any, now: Date = new Date()): boolean {
     }
 
     // Turno en curso por horario (p.ej. N que empezó ayer y termina hoy) — continuidad
-    if (startMs > 0 && endMs > nowMs && startMs <= nowMs) return true;
+    // Placeholder 00:00=00:00: no inventar ventana 24h
+    if (startMs > 0 && endMs > startMs && endMs > nowMs && startMs <= nowMs) return true;
 
     // Próximos turnos (madrugada / primer turno de mañana) aunque el start sea “mañana”
     if (startMs > nowMs && startMs - nowMs <= OPS_PLAN_LOOKAHEAD_MS) return true;
@@ -113,7 +164,8 @@ export function getVacancyElapsedRatio(s: any, now: Date = new Date()): number |
     if (!start || !end) return null;
     let startMs = start.getTime();
     let endMs = end.getTime();
-    if (endMs <= startMs) endMs += 86400000;
+    if (Math.abs(endMs - startMs) < 60_000) return null;
+    endMs = overnightEndMs(startMs, endMs);
     const dur = endMs - startMs;
     if (dur <= 0) return null;
     return (now.getTime() - startMs) / dur;
@@ -204,11 +256,13 @@ const findTimeGaps = (shifts: any[], baseDate: Date) => {
 // HELPER: SLOT COVERAGE (EL VERDADERO MOTOR V124)
 const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
     let tStart = slotStart.getTime(); let tEnd = slotEnd.getTime();
-    if (tEnd <= tStart) tEnd += 86400000;
+    tEnd = overnightEndMs(tStart, tEnd);
+    if (tEnd <= tStart) return false;
     const duration = tEnd - tStart; let covered = 0;
     shifts.forEach(s => {
         let sStart = s.shiftDateObj.getTime(); let sEnd = s.endDateObj.getTime();
-        if (sEnd <= sStart) sEnd += 86400000;
+        if (Math.abs(sEnd - sStart) < 60_000) return;
+        sEnd = overnightEndMs(sStart, sEnd);
         
         // Alineación inteligente: Si el turno cubre el rango, suma.
         // No forzamos dias, solo superposición de timestamps.
@@ -226,12 +280,12 @@ const overlapHoursWithSlot = (s: any, slotStart: Date, slotEnd: Date): number =>
     if (!s?.shiftDateObj || !s?.endDateObj || !slotStart || !slotEnd) return 0;
     let tStart = slotStart.getTime();
     let tEnd = slotEnd.getTime();
-    if (tEnd <= tStart) tEnd += 86400000;
+    tEnd = overnightEndMs(tStart, tEnd);
     let sStart = s.shiftDateObj.getTime();
     let sEnd = s.endDateObj.getTime();
     // Placeholder mismo instante: no inventar 24h de cobertura fantasma
     if (Math.abs(sEnd - sStart) < 60_000) return 0;
-    if (sEnd <= sStart) sEnd += 86400000;
+    sEnd = overnightEndMs(sStart, sEnd);
     const overlapStart = Math.max(tStart, sStart);
     const overlapEnd = Math.min(tEnd, sEnd);
     if (overlapEnd <= overlapStart) return 0;
@@ -524,7 +578,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const map = new Map<string, any>();
         rawShifts.forEach(s => map.set(s.id, s));
         rawRefuerzos.forEach(s => { if (!map.has(s.id)) map.set(s.id, s); });
-        return Array.from(map.values()).filter((s) => s.isDeleted !== true);
+        return Array.from(map.values())
+            .filter((s) => s.isDeleted !== true)
+            .map((s) => sanitizeOpsShiftDates(s));
     }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
@@ -731,15 +787,26 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
             }
-            // totalMinutesWorked: para ordenar por FIFO quién lleva más tiempo en el puesto
-            const checkInMs = shift.realStartTime?.seconds
+            // totalMinutesWorked / ACTIVO: no contar desde 00:00 placeholder
+            const rawCheckInMs = shift.realStartTime?.seconds
                 ? shift.realStartTime.seconds * 1000
                 : shift.checkInTime?.seconds
                     ? shift.checkInTime.seconds * 1000
-                    : (shift.shiftDateObj?.getTime?.() ?? 0);
+                    : shift.presentAt?.seconds
+                        ? shift.presentAt.seconds * 1000
+                        : 0;
+            const checkInLooksPlaceholder = (() => {
+                if (!rawCheckInMs) return true;
+                if (!shift.opsBandSanitized) return false;
+                const d = new Date(rawCheckInMs);
+                return d.getHours() === 0 && d.getMinutes() === 0;
+            })();
+            const checkInMs = (!checkInLooksPlaceholder && rawCheckInMs > 0)
+                ? rawCheckInMs
+                : (shift.opsBandSanitized ? 0 : (shift.shiftDateObj?.getTime?.() ?? 0));
             const totalMinutesWorked = checkInMs > 0 ? Math.floor((currentTime.getTime() - checkInMs) / 60000) : 0;
             const activeStartTime: Date | null = isPresent
-                ? (shift.realStartTime?.seconds ? new Date(shift.realStartTime.seconds * 1000) : shift.shiftDateObj)
+                ? (checkInMs > 0 ? new Date(checkInMs) : null)
                 : null;
             
             // ── Novedad RRHH: turno marcado por replicarAusenciaEnPlanificador ─────
