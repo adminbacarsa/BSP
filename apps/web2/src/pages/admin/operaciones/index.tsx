@@ -56,9 +56,22 @@ import { DebugPanel } from '@/components/operaciones/DebugPanel';
 const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) return d; if (d.seconds) return new Date(d.seconds * 1000); return new Date(d); };
 const formatTimeSimple = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
 const formatDateShort = (dateObj: any) => { try { return toDate(dateObj).toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: '2-digit', timeZone: 'America/Argentina/Cordoba' }).toUpperCase(); } catch (e) { return '--/--'; } };
+const OPS_BAND_RANGES: Record<string, string> = {
+    M: '07:00 - 15:00', T: '15:00 - 23:00', N: '23:00 - 07:00',
+    D12: '07:00 - 19:00', N12: '19:00 - 07:00',
+};
 const formatTimeRange = (start: any, end: any) => { try { return `${toDate(start).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})} - ${toDate(end).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit', timeZone: 'America/Argentina/Cordoba'})}`; } catch { return '--:--'; } };
 const displayShiftTimeRange = (shift: any) => {
     if (shift?.turaContiguous && shift?.turaExtensionRange) return shift.turaExtensionRange;
+    try {
+        const s = toDate(shift.shiftDateObj);
+        const e = toDate(shift.endDateObj);
+        // Placeholder 00:00→00:00 (o mismo instante): mostrar banda CCT del código, no 24h fantasma
+        if (Math.abs(e.getTime() - s.getTime()) < 60_000) {
+            const code = String(shift.code || shift.type || '').toUpperCase();
+            if (OPS_BAND_RANGES[code]) return OPS_BAND_RANGES[code];
+        }
+    } catch { /* fall through */ }
     return formatTimeRange(shift.shiftDateObj, shift.endDateObj);
 };
 const fmt24h = (dateObj: any) => { try { return toDate(dateObj).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'America/Argentina/Cordoba' }); } catch(e) { return '-'; } };
@@ -2441,6 +2454,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
+                    {(shift.coveredByEmployeeName || shift.coveredBy) && (
+                        <span className="shrink-0 text-emerald-600 font-bold">· cubre {shift.coveredByEmployeeName || shift.coveredBy}</span>
+                    )}
+                    {shift.coversAbsenceEmployeeName && (
+                        <span className="shrink-0 text-indigo-600 font-bold">· cubrió a {shift.coversAbsenceEmployeeName}</span>
+                    )}
                 </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -2517,6 +2536,17 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {!shift.manualRetentionType && shift.isRetention && <>
                             Recargo automático{shift.retentionMinutes > 0 && <span className="ml-1">· +{shift.retentionMinutes} min</span>}
                         </>}
+                    </div>
+                )}
+                {/* Cobertura: quién lo cubre / a quién cubrió */}
+                {(shift.isAbsent || shift.isPotentialAbsence || shift.isUnassigned) && (shift.coveredByEmployeeName || shift.coveredBy) && (
+                    <div className="flex items-center gap-1.5 text-[9px] font-bold text-emerald-800 bg-emerald-50 border border-emerald-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
+                        Cubierto por: {shift.coveredByEmployeeName || shift.coveredBy}
+                    </div>
+                )}
+                {shift.coversAbsenceEmployeeName && (
+                    <div className="flex items-center gap-1.5 text-[9px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
+                        Cubrió a: {shift.coversAbsenceEmployeeName}
                     </div>
                 )}
                 {/* Fila 3: botones con texto */}

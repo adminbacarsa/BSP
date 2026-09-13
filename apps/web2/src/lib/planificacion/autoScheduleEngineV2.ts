@@ -4465,7 +4465,25 @@ function applyServiceRulesPostProcess(
                             const idx = result.indexOf(empA);
                             if (idx >= 0) result[idx] = { ...result[idx], positionName: action.positionName, code: action.shiftCode };
                         } else {
-                            result.push({ empId: action.employeeId, dateStr, positionName: action.positionName, code: action.shiftCode, name: action.shiftCode, hours: 8, startTime: '00:00' });
+                            const ac = String(action.shiftCode || '').toUpperCase();
+                            const bandByCode: Record<string, { hours: number; startTime: string; endTime: string }> = {
+                                M: { hours: 8, startTime: '07:00', endTime: '15:00' },
+                                T: { hours: 8, startTime: '15:00', endTime: '23:00' },
+                                N: { hours: 8, startTime: '23:00', endTime: '07:00' },
+                                D12: { hours: 12, startTime: '07:00', endTime: '19:00' },
+                                N12: { hours: 12, startTime: '19:00', endTime: '07:00' },
+                            };
+                            const band = bandByCode[ac] || { hours: 8, startTime: '07:00', endTime: '15:00' };
+                            result.push({
+                                empId: action.employeeId,
+                                dateStr,
+                                positionName: action.positionName,
+                                code: action.shiftCode,
+                                name: action.shiftCode,
+                                hours: band.hours,
+                                startTime: band.startTime,
+                                endTime: band.endTime,
+                            });
                         }
                     }
                 }

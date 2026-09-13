@@ -558,8 +558,13 @@ const resolveBandHours = (
         const e = parseH(en);
         if (s !== null && e !== null) {
             let dur = e - s;
-            if (dur <= 0) dur += 24;
-            if (dur > 0 && dur <= 24) return dur;
+            // 00:00→00:00 no es 24h; overnight real solo si end < start.
+            if (Math.abs(dur) < 1 / 60) {
+                /* cae al lookup CCT */
+            } else {
+                if (dur < 0) dur += 24;
+                if (dur > 0 && dur <= 24) return dur;
+            }
         }
     }
     return SHIFT_HOURS_LOOKUP[upper] ?? 8;
@@ -1092,10 +1097,19 @@ function computeServiceRuleChanges(
                     const eSaved = shiftsMap[`${action.employeeId}_${dateStr}`];
                     const eCheck = (e && !e.isDeleted && !e._isAutoRotation) ? e : (eSaved && !eSaved.isDeleted ? eSaved : null);
                     if (eCheck && String(eCheck.code || eCheck.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
+                    const assignCode = String(action.shiftCode || '').toUpperCase();
+                    const bandClock: Record<string, { start: string; end: string; hours: number }> = {
+                        M: { start: '07:00', end: '15:00', hours: 8 },
+                        T: { start: '15:00', end: '23:00', hours: 8 },
+                        N: { start: '23:00', end: '07:00', hours: 8 },
+                        D12: { start: '07:00', end: '19:00', hours: 12 },
+                        N12: { start: '19:00', end: '07:00', hours: 12 },
+                    };
+                    const band = bandClock[assignCode] || { start: '07:00', end: '15:00', hours: 8 };
                     additions[`${action.employeeId}_${dateStr}`] = {
                         ...(eCheck || e || {}),
                         code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
-                        hours: 8, startTime: '00:00', endTime: '00:00',
+                        hours: band.hours, startTime: band.start, endTime: band.end,
                         positionName: action.positionName, isTemp: true, isFranco: false,
                         objectiveId: (eCheck || e)?.objectiveId ?? objectiveId,
                         _isAutoRotation: undefined,
@@ -6315,7 +6329,15 @@ export default function PlanificacionPage() {
                         else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(change.endTime)) {
                             const [eh, em] = change.endTime.split(':').map(Number);
                             end.setHours(eh, em, 0);
-                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
+                            if (end.getTime() === start.getTime()) {
+                                // Placeholder 00:00→00:00: usar horas de banda, no wrap +24h
+                                const hrs = Number(change.hours) > 0
+                                    ? Number(change.hours)
+                                    : (SHIFT_HOURS_LOOKUP[String(change.code || '').toUpperCase()] || 8);
+                                end.setTime(start.getTime() + hrs * 3600000);
+                            } else if (end < start) {
+                                end.setTime(end.getTime() + 24 * 3600000);
+                            }
                         } else {
                             const slaSh = slaShiftByPosCode.get(`${safePositionName}__${String(change.code || '').toUpperCase()}`);
                             const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
@@ -6323,7 +6345,12 @@ export default function PlanificacionPage() {
                             if (slaEnd && /^\d{1,2}:\d{2}(:\d{2})?$/.test(slaEnd)) {
                                 const [eh, em] = slaEnd.split(':').map(Number);
                                 end.setHours(eh, em, 0);
-                                if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
+                                if (end.getTime() === start.getTime()) {
+                                    const hrs = slaHours || Number(change.hours) || SHIFT_HOURS_LOOKUP[String(change.code || '').toUpperCase()] || 8;
+                                    end.setTime(start.getTime() + hrs * 3600000);
+                                } else if (end < start) {
+                                    end.setTime(end.getTime() + 24 * 3600000);
+                                }
                             } else if (slaHours) {
                                 end.setTime(start.getTime() + slaHours * 3600000);
                             } else {
@@ -13181,7 +13208,7 @@ export default function PlanificacionPage() {
                                     : (ABSENCE_STATUS_ES[absenceRawStatus?.toUpperCase?.()] || absenceRawStatus || '');
                                 const coveringEmployee = coverageInfo
                                     ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
-                                    : (shift?.coveredBy || pending?.coveredBy || null);
+                                    : (shift?.coveredBy || shift?.coveredByEmployeeName || pending?.coveredBy || pending?.coveredByEmployeeName || null);
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
                                 const showRrhhPanel = !!(absence || isRRHHCode);
@@ -13199,10 +13226,22 @@ export default function PlanificacionPage() {
                                 const STATUS_LABELS: Record<string, string> = { PRESENT: 'Presente', COMPLETED: 'Completado', ABSENT: 'Ausente', LATE: 'Tarde', INTERRUPTED: 'Interrumpido', PENDING: 'Pendiente' };
                                 const status = STATUS_LABELS[rawStatus] || rawStatus || '-';
                                 const storedHours = Number(shift?.hours);
-                                const calcHoursFromTs = (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string')
-                                    ? Math.max(0, (formatTime(shift.endTime) !== '--:--' ? (shift.endTime.toDate ? shift.endTime.toDate().getTime() : new Date(shift.endTime.seconds * 1000).getTime()) - (shift.startTime.toDate ? shift.startTime.toDate().getTime() : new Date(shift.startTime.seconds * 1000).getTime()) : 0)) / 3600000
-                                    : 0;
-                                const hours = storedHours || calcHoursFromTs || (code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0);
+                                let calcHoursFromTs = 0;
+                                if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
+                                    const startMs = shift.startTime.toDate ? shift.startTime.toDate().getTime() : new Date(shift.startTime.seconds * 1000).getTime();
+                                    const endMs = shift.endTime.toDate ? shift.endTime.toDate().getTime() : new Date(shift.endTime.seconds * 1000).getTime();
+                                    let durH = (endMs - startMs) / 3600000;
+                                    if (Math.abs(durH) < 1 / 60) durH = 0;
+                                    else if (durH < 0) durH += 24;
+                                    calcHoursFromTs = Math.max(0, durH);
+                                }
+                                // Si timestamps dan 24h pero el código es banda CCT corta, preferir lookup (caso 00:00→00:00 wrap).
+                                const bandLookup = code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0;
+                                const hours = (storedHours > 0 && storedHours <= 16)
+                                    ? storedHours
+                                    : (calcHoursFromTs >= 0.5 && calcHoursFromTs <= 16)
+                                        ? calcHoursFromTs
+                                        : (bandLookup || storedHours || calcHoursFromTs || 0);
                                 const showRealTimes = isConsolidated;
 
                                 if (isReadOnly || showRrhhPanel) {

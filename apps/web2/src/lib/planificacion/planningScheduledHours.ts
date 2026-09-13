@@ -22,7 +22,9 @@ export function hoursBetweenClockTimes(from: string, to: string): number | null 
   const t = parseHHmmToHours(to);
   if (f == null || t == null) return null;
   let dur = t - f;
-  if (dur <= 0) dur += 24;
+  // Solo overnight real (23:00→07:00). start===end (00:00→00:00) NO es 24h — es placeholder corrupto.
+  if (dur < 0) dur += 24;
+  if (dur === 0) return null;
   return Math.max(0, Math.min(dur, 24));
 }
 
@@ -151,7 +153,9 @@ function durationHoursFromShiftTimestamps(shift: any): number {
   const endAt = instantFromShiftClock(shift.endTime);
   if (startAt && endAt) {
     let dur = (endAt.getTime() - startAt.getTime()) / 3600000;
-    if (dur <= 0) dur += 24;
+    // Igualdad exacta (00:00→00:00) = placeholder; no sumar 24h fantasma.
+    if (Math.abs(dur) < 1 / 60) return 0;
+    if (dur < 0) dur += 24;
     if (dur > 0 && dur <= 24) return Math.round(dur * 100) / 100;
   }
   if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
@@ -166,7 +170,9 @@ function durationHoursFromShiftTimestamps(shift: any): number {
     const e = parseH(shift.endTime);
     if (s !== null && e !== null) {
       let dur = e - s;
-      if (dur <= 0) dur += 24;
+      if (Math.abs(dur) < 1 / 60) return 0;
+      if (dur < 0) dur += 24;
+      if (dur <= 0) return 0;
       return Math.max(0, Math.min(dur, 24));
     }
   }
@@ -201,11 +207,19 @@ export function calcPlanningBillableShiftHours(
   const storedForBase = Number(shift.hours);
   const tsDur = durationHoursFromShiftTimestamps(shift);
   const isClienteRefuerzo = code === 'RFZ' || code === 'TURA';
+  // Timestamps 00:00→(+24h) por wrap de placeholder: no confiar si el código es banda CCT ≤12h.
+  const tsLooksCorruptWrap =
+    !isClienteRefuerzo
+    && tsDur >= 23.5
+    && typeof cctBand === 'number'
+    && cctBand > 0
+    && cctBand <= 12;
+  const usableTs = tsLooksCorruptWrap ? 0 : tsDur;
   const intrinsic =
     isClienteRefuerzo && tsDur >= 0.25
       ? tsDur
-      : storedForBase >= 0.5 ? Math.min(storedForBase, 24)
-        : tsDur >= 0.5 ? tsDur
+      : storedForBase >= 0.5 && storedForBase <= 16 ? Math.min(storedForBase, 24)
+        : usableTs >= 0.5 ? usableTs
           : 0;
 
   let codeBase = 0;

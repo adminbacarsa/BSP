@@ -7,6 +7,7 @@ import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
+import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -21,7 +22,14 @@ const registerPublishedState = (
 
 const getSafeDate = (val: any) => { if (!val) return null; try { if (val.toDate) return val.toDate(); if (val.seconds) return new Date(val.seconds * 1000); return new Date(val); } catch (e) { return null; } };
 const isSameDay = (d1: Date, d2: Date) => d1 && d2 && d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
-const getDuration = (start: Date, end: Date) => { if (!start || !end) return 0; let diff = (end.getTime() - start.getTime()) / 3600000; if (diff < 0) diff += 24; return diff; };
+const getDuration = (start: Date, end: Date) => {
+    if (!start || !end) return 0;
+    let diff = (end.getTime() - start.getTime()) / 3600000;
+    // Mismo instante (00:00→00:00) no es 24h
+    if (Math.abs(diff) < 1 / 60) return 0;
+    if (diff < 0) diff += 24;
+    return diff;
+};
 const createDateFromTime = (timeStr: string, baseDate: Date) => { if (!timeStr) return null; const [hours, minutes] = timeStr.split(':').map(Number); const d = new Date(baseDate); d.setHours(hours, minutes, 0, 0); return d; };
 const getDayCode = (date: Date) => ['D', 'L', 'M', 'X', 'J', 'V', 'S'][date.getDay()];
 
@@ -151,11 +159,8 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'RETENIDOS':
             return s.isRetention;
         case 'VACANTES':
-            // En VACANTES se muestran todas las vacantes no cubiertas ni devueltas
-            if (!s?.isUnassigned) return false;
-            if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
-            if (s.status === 'COVERED') return false;
-            return true;
+            // Solo vacantes vivas (no DEVUELTO, no COVERED, horario no finalizado)
+            return isActionableOpsVacancy(s);
         case 'AUSENTES':
             // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
             if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
@@ -216,6 +221,46 @@ const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
     return (covered / duration) > 0.90;
 };
 
+/** Horas de solapamiento entre un turno y un slot SLA (puede cruzar medianoche). */
+const overlapHoursWithSlot = (s: any, slotStart: Date, slotEnd: Date): number => {
+    if (!s?.shiftDateObj || !s?.endDateObj || !slotStart || !slotEnd) return 0;
+    let tStart = slotStart.getTime();
+    let tEnd = slotEnd.getTime();
+    if (tEnd <= tStart) tEnd += 86400000;
+    let sStart = s.shiftDateObj.getTime();
+    let sEnd = s.endDateObj.getTime();
+    // Placeholder mismo instante: no inventar 24h de cobertura fantasma
+    if (Math.abs(sEnd - sStart) < 60_000) return 0;
+    if (sEnd <= sStart) sEnd += 86400000;
+    const overlapStart = Math.max(tStart, sStart);
+    const overlapEnd = Math.min(tEnd, sEnd);
+    if (overlapEnd <= overlapStart) return 0;
+    return (overlapEnd - overlapStart) / 3600000;
+};
+
+/**
+ * Un guardia cuenta para el slot si aporta cobertura real:
+ * - ≥3h de solape, o
+ * - ≥50% de su propio turno dentro del slot, o
+ * - ≥50% del slot (regla clásica relajada desde 90% — evita que 08–16 no “cubra” un D12 08–20).
+ */
+const shiftContributesToVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string) => {
+    if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
+    if (s.isAbsent || s.isPotentialAbsence || s.isFranco || s.isUnassigned) return false;
+    const seg = getSegmentCoverageWindow(s, slotStart);
+    const proxy = seg ? { shiftDateObj: seg.start, endDateObj: seg.end } : s;
+    const overlapH = overlapHoursWithSlot(proxy, slotStart, slotEnd);
+    if (overlapH < 0.25) return false;
+    if (overlapH >= 3) return true;
+    let slotDur = (slotEnd.getTime() - slotStart.getTime()) / 3600000;
+    if (slotDur <= 0) slotDur += 24;
+    let shiftDur = getDuration(proxy.shiftDateObj, proxy.endDateObj);
+    if (shiftDur <= 0) shiftDur = overlapH;
+    if (shiftDur > 0 && overlapH / shiftDur >= 0.5) return true;
+    if (slotDur > 0 && overlapH / slotDur >= 0.5) return true;
+    return false;
+};
+
 /** Ventana efectiva para cobertura split planificada (ext/adel con tramo horario). */
 const getSegmentCoverageWindow = (s: any, baseDate: Date): { start: Date; end: Date } | null => {
     const from = s.segmentFromTime;
@@ -240,11 +285,7 @@ const shiftMatchesVacancyPosition = (s: any, vacancyPos: string) => {
 
 /** Cobertura de slot considerando ext/adel planificados en otro puesto/tramo. */
 const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string) => {
-    if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
-    if (s.isAbsent || s.isPotentialAbsence || s.isFranco || s.isUnassigned) return false;
-    const seg = getSegmentCoverageWindow(s, slotStart);
-    const proxy = seg ? { shiftDateObj: seg.start, endDateObj: seg.end } : s;
-    return checkSlotCoverage(slotStart, slotEnd, [proxy]);
+    return shiftContributesToVacancySlot(s, slotStart, slotEnd, vacancyPos);
 };
 
 const assessPlannedPackageStatus = (rows: any[]): 'COVERED' | 'PARTIAL' | 'NONE' => {
@@ -506,7 +547,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
         // Filtrar SLAs por empresa usando clientId como fallback para docs legacy sin empresaId
         const clientIds = new Set(objectives.map((o: any) => o.clientId).filter(Boolean));
-        const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
+        const empresaSlas = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
+        // Un SLA vigente por objetivo (evita vacantes duplicadas si hay varios contratos activos)
+        const dayStart = new Date(now); dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(now); dayEnd.setHours(23, 59, 59, 999);
+        const filteredSLA = pickVigenteSlasForPeriod(empresaSlas as any, dayStart, dayEnd) as typeof servicesSLA;
         const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
 
         const suppressedTuraIds = new Set<string>();
@@ -823,18 +868,46 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 // Solo los que cuentan como cobertura real (excluye ausentes)
                 const posShifts = allPosShifts.filter((s: any) => s.countsForCoverage);
 
-                // Detectar ciclo 12h usando TODOS los turnos (no solo activos)
-                // Si todos están ausentes, posShifts=[] y no detectaríamos el ciclo 12h
-                const has12hShifts = allPosShifts.some((s: any) => s.duration > 10);
+                // Detectar esquema real del día por CÓDIGO y por duración real (08–16 = 8h).
+                // Un T/M/N con timestamps 00:00→+24h NO debe activar ciclo DIURNO/NOCTURNO 12H.
+                const plannedCodes = allPosShifts
+                    .map((s: any) => String(s.code || s.type || '').toUpperCase())
+                    .filter(Boolean);
+                const hasPlanned12Code = plannedCodes.some((c) => c === 'D12' || c === 'N12');
+                const hasPlanned8Code = plannedCodes.some((c) => c === 'M' || c === 'T' || c === 'N');
+                // Patrón operativo corto (ej. 08:00–16:00) aunque el código no sea M/T/N
+                const shortBandShifts = allPosShifts.filter((s: any) => {
+                    const d = Number(s.duration) || 0;
+                    return d >= 6 && d <= 10;
+                });
+                const hasShortBandPattern = shortBandShifts.length >= Math.max(1, Math.ceil(allPosShifts.length * 0.4));
+                const hasReal12hDuration = allPosShifts.some((s: any) => {
+                    const code = String(s.code || s.type || '').toUpperCase();
+                    if (code === 'M' || code === 'T' || code === 'N') return false;
+                    const d = Number(s.duration) || 0;
+                    if (d >= 6 && d <= 10) return false;
+                    const storedH = Number(s.hours);
+                    if (storedH > 10 && storedH <= 16) return true;
+                    return d > 10 && d <= 16;
+                });
                 let relevantDefinitions = allowedShifts;
-                // Si hay turnos definidos, los usamos
-                // Si no, fallback a gap
-                
-                if (has12hShifts && allowedShifts.length > 0) {
-                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) > 10);
+                let skipSlaVirtuals = false;
+                if (hasPlanned12Code && !hasPlanned8Code && !hasShortBandPattern) {
+                    relevantDefinitions = allowedShifts.filter((d: any) => (d.hours || 8) > 10);
+                } else if ((hasPlanned8Code || hasShortBandPattern) && !hasPlanned12Code) {
+                    // Cronograma 8h (M/T/N o 08–16): no inventar DIURNO/NOCTURNO 12H del SLA
+                    const shortSlots = allowedShifts.filter((d: any) => (d.hours || 8) <= 10);
+                    if (shortSlots.length > 0) {
+                        relevantDefinitions = shortSlots;
+                    } else {
+                        // SLA solo declara 12h pero el día opera en bandas cortas → no generar virtuales
+                        relevantDefinitions = [];
+                        skipSlaVirtuals = true;
+                    }
+                } else if (hasReal12hDuration && allowedShifts.length > 0) {
+                    relevantDefinitions = allowedShifts.filter((d: any) => (d.hours || 8) > 10);
                 } else if (allowedShifts.length > 0) {
-                    // Si no hay 12hs activas: incluir slots de hasta 11h (cubre 8h, 9h, 10h)
-                    relevantDefinitions = allowedShifts.filter((d:any) => (d.hours || 8) < 12);
+                    relevantDefinitions = allowedShifts.filter((d: any) => (d.hours || 8) < 12);
                 }
 
                 // 🛑 UNIFICACIÓN V124:
@@ -859,10 +932,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         if (start && end) {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
 
-                            // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
+                            // Contar guardias que aportan cobertura real al slot (solape significativo)
                             const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
                             // Capacidad requerida según SLA (quantity del puesto)
                             const requiredCount = pos.quantity || 1;
+                            // Si hay suficientes presentes/planificados aportando al slot → 0 vacantes
                             const missing = Math.max(0, requiredCount - coveredCount);
 
                             // Generar una tarjeta de vacante por cada puesto faltante
@@ -888,7 +962,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 // ⚠️  Discriminamos según tipo de turno:
                 //   - 24h (3×8h o 2×12h): findTimeGaps sobre la jornada completa
                 //   - Custom (franjas parciales, ej. Rondín 08-18): verificar turno por turno
-                else {
+                // skipSlaVirtuals: plan 8h vs SLA solo 12h → no inventar huecos fantasma
+                else if (!skipSlaVirtuals) {
                     // Turnos de franco del puesto: también necesitan reemplazo.
                     // objShifts excluye franco, los buscamos directamente en realShifts.
                     const posFrancoShifts = realShifts.filter((s: any) => {
@@ -1118,7 +1193,30 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             isDescubierto: isVacancyDescubierto(v, now),
         }));
 
-        return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
+        // Deduplicar virtuales por slot (objetivo+puesto+inicio+fin+banda) por si quedó más de un SLA
+        const seenVirtualSlots = new Set<string>();
+        const dedupedVirtualVacancies = filteredVirtualVacancies.filter((v) => {
+            const startMs = v.shiftDateObj?.getTime?.() ?? 0;
+            const endMs = v.endDateObj?.getTime?.() ?? 0;
+            const key = `${v.objectiveId}|${normalizePosMatch(v.positionName)}|${startMs}|${endMs}|${v.vacancyBand || ''}`;
+            if (seenVirtualSlots.has(key)) return false;
+            seenVirtualSlots.add(key);
+            return true;
+        });
+
+        // Deduplicar vacantes reales idénticas (mismo puesto+ventana+origen) — cascada/reintentos
+        const seenRealVacSlots = new Set<string>();
+        const dedupedVisibleReals = visibleRealShifts.filter((s) => {
+            if (!s.isUnassigned || !s.isRealOperativeVacancy) return true;
+            const startMs = s.shiftDateObj?.getTime?.() ?? 0;
+            const endMs = s.endDateObj?.getTime?.() ?? 0;
+            const key = `${s.objectiveId}|${normalizePosMatch(s.positionName)}|${startMs}|${endMs}|${s.origin || ''}|${s.causedByShiftId || s.causedByEmployeeId || ''}`;
+            if (seenRealVacSlots.has(key)) return false;
+            seenRealVacSlots.add(key);
+            return true;
+        });
+
+        return [...dedupedVisibleReals, ...dedupedVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
     const filteredObjectives = useMemo(() => {
