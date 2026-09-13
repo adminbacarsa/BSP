@@ -16,6 +16,7 @@ import {
   newCoverageEventId,
   resolveTitularFromAbsenceOrVacancy,
 } from './coverageLedger';
+import { assertCoverageOpsCallable } from './coverage-auth.util';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -704,9 +705,6 @@ async function resolverCobertura(
 export const crearConvocatoriaCobertura = functions
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    }
     const db = admin.firestore();
 
     const {
@@ -735,6 +733,8 @@ export const crearConvocatoriaCobertura = functions
       throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     }
     const shift = shiftSnap.data()!;
+
+    await assertCoverageOpsCallable(context, empresaId, shift);
 
     // Cargar candidato
     const empSnap = await db.collection('empleados').doc(candidateEmployeeId).get();
@@ -900,9 +900,6 @@ export const responderConvocatoriaCobertura = functions
 export const cancelarConvocatoriaCobertura = functions
   .runWith({ timeoutSeconds: 30, memory: '128MB' })
   .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-      throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    }
     const db = admin.firestore();
 
     const { convocatoriaId } = data as { convocatoriaId: string };
@@ -912,7 +909,10 @@ export const cancelarConvocatoriaCobertura = functions
     const snap = await ref.get();
     if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Convocatoria no encontrada.');
 
-    if (snap.data()?.status !== 'PENDING') {
+    const convData = snap.data()!;
+    await assertCoverageOpsCallable(context, String(convData.empresaId || ''), convData);
+
+    if (convData.status !== 'PENDING') {
       throw new functions.https.HttpsError('failed-precondition', 'Solo se pueden cancelar convocatorias PENDING.');
     }
 
@@ -934,7 +934,6 @@ export const cancelarConvocatoriaCobertura = functions
 export const getCandidatosCobertura = functions
   .runWith({ timeoutSeconds: 60, memory: '256MB' })
   .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     const db = admin.firestore();
 
     const { shiftId, empresaId, type } = data as {
@@ -943,9 +942,15 @@ export const getCandidatosCobertura = functions
       type?: CandidateType;
     };
 
+    if (!shiftId || !empresaId) {
+      throw new functions.https.HttpsError('invalid-argument', 'shiftId y empresaId son requeridos.');
+    }
+
     const shiftSnap = await db.collection('turnos').doc(shiftId).get();
     if (!shiftSnap.exists) throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     const shift = shiftSnap.data()!;
+
+    await assertCoverageOpsCallable(context, empresaId, shift);
 
     const ctx = {
       objectiveId: String(shift.objectiveId || ''),

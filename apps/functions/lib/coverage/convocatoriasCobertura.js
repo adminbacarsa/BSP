@@ -9,6 +9,8 @@ const functions = require("firebase-functions/v1");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
+const coverageLedger_1 = require("./coverageLedger");
+const coverage_auth_util_1 = require("./coverage-auth.util");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -375,6 +377,22 @@ async function resolverCobertura(db, conv) {
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
         : conv.createdBy === 'AUTO' ? 'AUTO'
             : 'OPERACIONES';
+    const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
+    const titular = (0, coverageLedger_1.resolveTitularFromAbsenceOrVacancy)(vacantData);
+    const coverageEventId = (0, coverageLedger_1.newCoverageEventId)();
+    const ledgerBase = {
+        covererEmployeeId: conv.candidateEmployeeId,
+        covererEmployeeName: conv.candidateEmployeeName,
+        titularEmployeeId: titular.titularEmployeeId,
+        titularEmployeeName: titular.titularEmployeeName,
+        titularShiftId: titular.titularShiftId,
+        titularIsAbsence: true,
+        resolvedBy,
+        coverageEventId,
+        vacancyExtra: { coverageConvocatoriaId: conv.id, coverageResolvedAt: firestore_1.FieldValue.serverTimestamp() },
+        covererExtra: { coverageConvocatoriaId: conv.id, assignedByConvocatoria: conv.id },
+    };
     if (conv.type === 'EXTEND' && conv.extendShiftId) {
         const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
         const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
@@ -385,12 +403,12 @@ async function resolverCobertura(db, conv) {
             extendedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
         });
-        batch.update(db.collection('turnos').doc(conv.shiftId), {
-            coveredByEmployeeId: conv.candidateEmployeeId,
-            coveredByEmployeeName: conv.candidateEmployeeName,
+        (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+            ...ledgerBase,
+            vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+            covererShiftId: conv.extendShiftId,
             coverageType: 'EXTEND',
-            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
-            coverageConvocatoriaId: conv.id,
+            markVacancyCovered: true,
         });
     }
     else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
@@ -398,16 +416,17 @@ async function resolverCobertura(db, conv) {
         batch.update(nextRef, {
             startTime: conv.startTime,
             isAdvanced: true,
+            isEarlyStart: true,
             advancedBy: 'CONVOCATORIA',
             advancedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
         });
-        batch.update(db.collection('turnos').doc(conv.shiftId), {
-            coveredByEmployeeId: conv.candidateEmployeeId,
-            coveredByEmployeeName: conv.candidateEmployeeName,
+        (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+            ...ledgerBase,
+            vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+            covererShiftId: conv.advanceShiftId,
             coverageType: 'ADVANCE',
-            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
-            coverageConvocatoriaId: conv.id,
+            markVacancyCovered: true,
         });
     }
     else if (conv.type === 'RET') {
@@ -416,9 +435,26 @@ async function resolverCobertura(db, conv) {
             employeeId: conv.candidateEmployeeId,
             employeeName: conv.candidateEmployeeName,
             origin: 'OPERATIONS_COVERAGE',
-            resolvedBy,
+            isUnassigned: false,
             isRetentionActivated: true,
             retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+            ...(0, coverageLedger_1.covererLedgerFields)({
+                ...ledgerBase,
+                coverageEventId,
+                vacancyShiftId: null,
+                coverageType: 'RET',
+                causedByShiftIdPreserve: titular.titularShiftId,
+                covererExtra: {
+                    ...ledgerBase.covererExtra,
+                    isRetentionActivated: true,
+                },
+            }),
+        });
+        (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+            ...ledgerBase,
+            vacancyShiftId: null,
+            covererShiftId: null,
+            coverageType: 'RET',
         });
     }
     else if (conv.type === 'FT') {
@@ -434,8 +470,14 @@ async function resolverCobertura(db, conv) {
                 realEndTime: conv.endTime || null,
                 resolvedBy,
                 coveredShiftId: conv.shiftId,
-                assignedByConvocatoria: conv.id,
                 assignedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+                ...ledgerBase,
+                vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+                covererShiftId: conv.ftShiftId,
+                coverageType: 'FT',
+                markVacancyCovered: true,
             });
         }
     }
@@ -446,9 +488,21 @@ async function resolverCobertura(db, conv) {
             employeeName: conv.candidateEmployeeName,
             code: String(conv.shiftCode || 'M'),
             origin: 'OPERATIONS_COVERAGE',
-            resolvedBy,
-            assignedByConvocatoria: conv.id,
+            isUnassigned: false,
             assignedAt: firestore_1.FieldValue.serverTimestamp(),
+            ...(0, coverageLedger_1.covererLedgerFields)({
+                ...ledgerBase,
+                coverageEventId,
+                vacancyShiftId: null,
+                coverageType: conv.type,
+                causedByShiftIdPreserve: titular.titularShiftId,
+            }),
+        });
+        (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+            ...ledgerBase,
+            vacancyShiftId: null,
+            covererShiftId: null,
+            coverageType: conv.type,
         });
     }
     const [pendingSnap, escalatedSnap] = await Promise.all([
@@ -473,6 +527,7 @@ async function resolverCobertura(db, conv) {
         objectiveName: conv.objectiveName || '',
         clientId: conv.clientId || null,
         empresaId: conv.empresaId,
+        coverageEventId,
         title: 'Cobertura resuelta',
         message: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
         description: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
@@ -481,6 +536,7 @@ async function resolverCobertura(db, conv) {
         candidateEmployeeName: conv.candidateEmployeeName,
         employeeId: conv.candidateEmployeeId,
         employeeName: conv.candidateEmployeeName,
+        coversAbsenceEmployeeName: titular.titularEmployeeName || null,
         status: 'unread',
         resolved: false,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -490,9 +546,6 @@ async function resolverCobertura(db, conv) {
 exports.crearConvocatoriaCobertura = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    }
     const db = admin.firestore();
     const { shiftId, candidateEmployeeId, type, empresaId, advanceShiftId, extendShiftId, } = data;
     if (!shiftId || !candidateEmployeeId || !type || !empresaId) {
@@ -503,6 +556,7 @@ exports.crearConvocatoriaCobertura = functions
         throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     }
     const shift = shiftSnap.data();
+    await (0, coverage_auth_util_1.assertCoverageOpsCallable)(context, empresaId, shift);
     const empSnap = await db.collection('empleados').doc(candidateEmployeeId).get();
     if (!empSnap.exists) {
         throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
@@ -630,9 +684,6 @@ exports.responderConvocatoriaCobertura = functions
 exports.cancelarConvocatoriaCobertura = functions
     .runWith({ timeoutSeconds: 30, memory: '128MB' })
     .https.onCall(async (data, context) => {
-    if (!context.auth?.uid) {
-        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    }
     const db = admin.firestore();
     const { convocatoriaId } = data;
     if (!convocatoriaId)
@@ -641,7 +692,9 @@ exports.cancelarConvocatoriaCobertura = functions
     const snap = await ref.get();
     if (!snap.exists)
         throw new functions.https.HttpsError('not-found', 'Convocatoria no encontrada.');
-    if (snap.data()?.status !== 'PENDING') {
+    const convData = snap.data();
+    await (0, coverage_auth_util_1.assertCoverageOpsCallable)(context, String(convData.empresaId || ''), convData);
+    if (convData.status !== 'PENDING') {
         throw new functions.https.HttpsError('failed-precondition', 'Solo se pueden cancelar convocatorias PENDING.');
     }
     await ref.update({
@@ -654,14 +707,16 @@ exports.cancelarConvocatoriaCobertura = functions
 exports.getCandidatosCobertura = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
     .https.onCall(async (data, context) => {
-    if (!context.auth?.uid)
-        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     const db = admin.firestore();
     const { shiftId, empresaId, type } = data;
+    if (!shiftId || !empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'shiftId y empresaId son requeridos.');
+    }
     const shiftSnap = await db.collection('turnos').doc(shiftId).get();
     if (!shiftSnap.exists)
         throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     const shift = shiftSnap.data();
+    await (0, coverage_auth_util_1.assertCoverageOpsCallable)(context, empresaId, shift);
     const ctx = {
         objectiveId: String(shift.objectiveId || ''),
         clientId: String(shift.clientId || ''),
