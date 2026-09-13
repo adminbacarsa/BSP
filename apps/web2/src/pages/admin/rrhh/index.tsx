@@ -1450,28 +1450,26 @@ export default function EmployeesPage() {
         );
       }
       return (
-        <div className="flex flex-col items-center gap-1">
-          <span className="px-2 py-0.5 rounded text-[9px] font-black uppercase bg-blue-100 text-blue-700">
+        <div className="flex items-center gap-1 flex-wrap justify-center">
+          <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-blue-100 text-blue-700 border border-blue-200 shrink-0">
             Confirmada
           </span>
-          <div className="flex gap-1">
-            <button
-              type="button"
-              onClick={() => handleQuickClassify(a.id!, 'Justificada')}
-              title="Marcar como Justificada"
-              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-emerald-50 text-emerald-600 border border-emerald-200 hover:bg-emerald-100 transition-colors"
-            >
-              ✓ Just.
-            </button>
-            <button
-              type="button"
-              onClick={() => handleQuickClassify(a.id!, 'Injustificada')}
-              title="Marcar como Injustificada"
-              className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-rose-50 text-rose-600 border border-rose-200 hover:bg-rose-100 transition-colors"
-            >
-              ✗ Injust.
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => handleQuickClassify(a.id!, 'Justificada')}
+            title="Marcar como Justificada"
+            className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100 transition-colors shrink-0"
+          >
+            ✓ Just.
+          </button>
+          <button
+            type="button"
+            onClick={() => handleQuickClassify(a.id!, 'Injustificada')}
+            title="Marcar como Injustificada"
+            className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 transition-colors shrink-0"
+          >
+            ✗ Injust.
+          </button>
         </div>
       );
     }

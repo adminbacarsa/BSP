@@ -341,10 +341,10 @@ export default function AusenciasTab({
       )}
 
       <div className="flex-1 min-h-0 overflow-auto custom-scrollbar border border-slate-100 dark:border-slate-700 rounded-xl">
-        <table className="w-full text-left">
-          <thead className="bg-slate-50 dark:bg-slate-900 sticky top-0 z-10">
-            <tr>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">
+        <table className="w-full text-left border-collapse">
+          <thead className="bg-slate-50 dark:bg-slate-900/80 sticky top-0 z-10">
+            <tr className="border-b-2 border-slate-200 dark:border-slate-700">
+              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400">
                 <div className="flex items-center gap-2">
                   {canAdjust && (
                     <SelectionBox
@@ -359,47 +359,36 @@ export default function AusenciasTab({
                   <span>Empleado</span>
                 </div>
               </th>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">Tipo / Motivo</th>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400">Periodo</th>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400 text-center">Estado</th>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400 text-center">Cert.</th>
-              <th className="px-3 py-2 text-[10px] font-black uppercase text-slate-400 text-center">Cobertura</th>
-              <th className="px-2 py-2 text-right w-20" />
+              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Tipo / Motivo</th>
+              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 whitespace-nowrap">Periodo</th>
+              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Estado</th>
+              <th className="px-4 py-3 text-[10px] font-black uppercase tracking-wider text-slate-400 text-center whitespace-nowrap">Cobertura</th>
+              <th className="px-3 py-3 w-20" />
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+          <tbody>
             {filteredAbsences.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-8 text-center text-sm text-slate-400 font-bold">
+                <td colSpan={6} className="px-4 py-12 text-center text-sm text-slate-400 font-bold">
                   No hay novedades con los filtros actuales
                 </td>
               </tr>
-            ) : filteredAbsences.map(a => {
+            ) : filteredAbsences.map((a, idx) => {
               const isLT = a.type === 'Llegada Tarde';
               const isAA = (a.type === 'No Presentacion' || a.type === 'No Presentación' || (a as any).absenceType === 'AA') && !isLT;
               const hasCert = !!(a as any).certificateDriveLink || !!(a as any).certificateUrl || a.hasCertificate;
-              // checkInTime (Timestamp CF), checkInTimeStr (string CF), arrivedAt (Timestamp cliente)
               const checkInStr = fmtCheckIn((a as any).checkInTimeStr, (a as any).checkInTime, (a as any).arrivedAt);
-              const rowBg = selectedAbsenceIds.has(a.id!)
-                ? 'bg-rose-50 dark:bg-rose-900/10'
-                : isLT
-                  ? 'bg-orange-50/40 dark:bg-orange-900/10'
-                  : isAA && a.status === 'Confirmada'
-                    ? 'bg-blue-50/40 dark:bg-blue-900/10'
-                    : a.status === 'Injustificada'
-                      ? 'bg-rose-50/30 dark:bg-rose-900/10'
-                      : a.status === 'Justificada'
-                        ? 'bg-emerald-50/30'
-                        : '';
+              const isSelected = selectedAbsenceIds.has(a.id!);
               return (
                 <AbsenceRow
                   key={a.id}
                   a={a}
+                  idx={idx}
                   isLT={isLT}
                   isAA={isAA}
                   hasCert={hasCert}
                   checkInStr={checkInStr}
-                  rowBg={rowBg}
+                  isSelected={isSelected}
                   canAdjust={canAdjust}
                   selectedAbsenceIds={selectedAbsenceIds}
                   setSelectedAbsenceIds={setSelectedAbsenceIds}
@@ -419,105 +408,183 @@ export default function AusenciasTab({
   );
 }
 
+// ─── helpers de formato de fecha ───────────────────────────────────────────
+function fmtDate(raw: string | undefined | null): string {
+  if (!raw) return '—';
+  // raw puede ser "YYYY-MM-DD"
+  const [y, m, d] = (raw as string).split('-');
+  if (!y || !m || !d) return raw ?? '—';
+  const months = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'];
+  return `${parseInt(d, 10)} ${months[parseInt(m, 10) - 1] ?? m}`;
+}
+
+function fmtPeriodo(startDate: string | undefined | null, endDate: string | undefined | null): string {
+  const s = fmtDate(startDate);
+  const e = fmtDate(endDate);
+  if (!endDate || startDate === endDate) return s;
+  return `${s} — ${e}`;
+}
+
+// ─── chip de tipo ──────────────────────────────────────────────────────────
+function TypeChip({ isLT, isAA, type, checkInStr }: { isLT: boolean; isAA: boolean; type: string; checkInStr: string | null }) {
+  if (isLT) {
+    return (
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-orange-100 text-orange-700 border border-orange-200">
+          <Clock size={9} /> Llegada tarde
+        </span>
+        {checkInStr && (
+          <span className="text-[10px] font-bold text-orange-500 font-mono">{checkInStr}</span>
+        )}
+      </div>
+    );
+  }
+  if (isAA) {
+    return (
+      <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-100 text-blue-700 border border-blue-200">
+        No presentación
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-slate-100 text-slate-600 border border-slate-200">
+      {type || '—'}
+    </span>
+  );
+}
+
 // ─── Fila individual con hooks propios (countdown) ─────────────────────────
 function AbsenceRow({
-  a, isLT, isAA, hasCert, checkInStr, rowBg,
+  a, idx, isLT, isAA, hasCert, checkInStr, isSelected,
   canAdjust, selectedAbsenceIds, setSelectedAbsenceIds,
   getAbsenceEmployeeName, getArgentinaDate, renderAbsenceStatusCell,
   coberturaBadgeClass, handleOpenAbsenceModal, handleDeleteAbsence,
 }: {
-  a: any; isLT: boolean; isAA: boolean; hasCert: boolean; checkInStr: string | null; rowBg: string;
+  a: any; idx: number; isLT: boolean; isAA: boolean; hasCert: boolean; checkInStr: string | null; isSelected: boolean;
   canAdjust: boolean; selectedAbsenceIds: Set<string>; setSelectedAbsenceIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   getAbsenceEmployeeName: (a: any) => string; getArgentinaDate: (d: any) => string;
   renderAbsenceStatusCell: (a: any) => React.ReactNode; coberturaBadgeClass: (e?: string) => string;
   handleOpenAbsenceModal: (a: any) => void; handleDeleteAbsence: (id: string) => void;
 }) {
   const countdown = useCountdownTo2359(isAA && a.status === 'Confirmada' && !hasCert ? a.startDate : undefined);
+  const hasCountdown = !!countdown;
+
+  const rowClass = [
+    'border-b border-slate-100 dark:border-slate-700/60 transition-colors',
+    isSelected
+      ? 'bg-indigo-50 dark:bg-indigo-900/15'
+      : idx % 2 === 0
+        ? 'bg-white dark:bg-slate-800'
+        : 'bg-slate-50/60 dark:bg-slate-800/50',
+    'hover:bg-indigo-50/50 dark:hover:bg-slate-700/40',
+  ].join(' ');
+
+  // Borde izquierdo de urgencia
+  const urgencyBorder = hasCountdown
+    ? 'border-l-[3px] border-l-amber-400'
+    : a.status === 'Injustificada'
+      ? 'border-l-[3px] border-l-rose-400'
+      : a.status === 'Justificada'
+        ? 'border-l-[3px] border-l-emerald-400'
+        : 'border-l-[3px] border-l-transparent';
+
   return (
-    <tr className={`hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors ${rowBg}`}>
-      <td className="px-3 py-2 font-bold text-xs text-slate-900 dark:text-white uppercase">
-        <div className="flex items-center gap-2">
+    <tr className={`${rowClass} ${urgencyBorder}`}>
+      {/* ── Empleado ── */}
+      <td className="px-4 py-3">
+        <div className="flex items-start gap-2">
           {canAdjust && (
-            <SelectionBox
-              checked={selectedAbsenceIds.has(a.id!)}
-              label={`Seleccionar novedad de ${getAbsenceEmployeeName(a)}`}
-              onChange={checked => {
-                setSelectedAbsenceIds(prev => {
-                  const next = new Set(prev);
-                  checked ? next.add(a.id!) : next.delete(a.id!);
-                  return next;
-                });
-              }}
-            />
-          )}
-          <span>{getAbsenceEmployeeName(a)}</span>
-        </div>
-      </td>
-      <td className="px-3 py-2">
-        <div className="flex flex-col gap-0.5">
-          {isLT ? (
-            <div className="flex items-center gap-1">
-              <span className="text-[11px] font-black uppercase text-orange-600 leading-tight">Llegada Tarde</span>
-              {checkInStr && (
-                <span className="flex items-center gap-0.5 text-[10px] font-bold text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded-full border border-orange-200">
-                  <Clock size={9}/>{checkInStr}
-                </span>
-              )}
+            <div className="pt-0.5 shrink-0">
+              <SelectionBox
+                checked={isSelected}
+                label={`Seleccionar novedad de ${getAbsenceEmployeeName(a)}`}
+                onChange={checked => {
+                  setSelectedAbsenceIds(prev => {
+                    const next = new Set(prev);
+                    checked ? next.add(a.id!) : next.delete(a.id!);
+                    return next;
+                  });
+                }}
+              />
             </div>
-          ) : (
-            <span className="text-[11px] font-bold uppercase leading-tight">{a.type}</span>
           )}
-          <span className="text-[10px] text-slate-500 line-clamp-1">{a.reason || '-'}</span>
+          <div className="flex flex-col gap-0.5 min-w-0">
+            <span className="text-[12px] font-black uppercase text-slate-900 dark:text-white leading-tight truncate">
+              {getAbsenceEmployeeName(a)}
+            </span>
+            {hasCountdown && (
+              <span className="inline-flex items-center gap-1 text-[9px] font-black text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full w-fit">
+                <AlertTriangle size={8} /> Vence en {countdown}
+              </span>
+            )}
+          </div>
         </div>
       </td>
-      <td className="px-3 py-2 text-[11px] font-mono text-slate-500 whitespace-nowrap">
-        {getArgentinaDate(a.startDate)} — {getArgentinaDate(a.endDate)}
-      </td>
-      <td className="px-3 py-2 text-center">
-        <div className="flex flex-col items-center gap-1">
+
+      {/* ── Tipo / Motivo ── */}
+      <td className="px-4 py-3">
+        <div className="flex flex-col gap-1">
+          <TypeChip isLT={isLT} isAA={isAA} type={a.type} checkInStr={checkInStr} />
+          {a.reason && (
+            <span className="text-[10px] text-slate-400 dark:text-slate-500 leading-snug line-clamp-2 max-w-[180px]">
+              {a.reason}
+            </span>
+          )}
           {hasCert && (
-            <span className="flex items-center gap-0.5 text-[9px] font-black uppercase text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full">
-              <FileCheck size={9}/> Cert. presentado
+            <span className="inline-flex items-center gap-1 text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded-full w-fit">
+              <FileCheck size={8} /> Certificado
             </span>
           )}
-          {isAA && a.status === 'Confirmada' && !hasCert && countdown && (
-            <span className="flex items-center gap-0.5 text-[9px] font-black text-amber-600 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-full">
-              <AlertTriangle size={9}/> Vence en {countdown}
-            </span>
-          )}
-          {renderAbsenceStatusCell(a)}
         </div>
       </td>
-      <td className="px-3 py-2 text-center">
-        {hasCert
-          ? <span className="text-emerald-500 flex justify-center"><FileCheck size={14} /></span>
-          : <span className="text-slate-300">-</span>}
-      </td>
-      <td className="px-3 py-2 text-center">
-        <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>
-          {a.coberturaEstado || 'PENDIENTE'}
+
+      {/* ── Periodo ── */}
+      <td className="px-4 py-3 whitespace-nowrap">
+        <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300 font-mono tabular-nums">
+          {fmtPeriodo(a.startDate, a.endDate)}
         </span>
-        {(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && (
-          <p className="text-[8px] text-slate-400 mt-0.5 font-bold leading-tight">Planificación</p>
-        )}
       </td>
-      <td className="px-2 py-2 text-right">
-        <div className="flex justify-end gap-1">
+
+      {/* ── Estado ── */}
+      <td className="px-4 py-3">
+        {renderAbsenceStatusCell(a)}
+      </td>
+
+      {/* ── Cobertura ── */}
+      <td className="px-4 py-3 text-center">
+        <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>
+          {a.coberturaEstado || 'Pendiente'}
+        </span>
+      </td>
+
+      {/* ── Acciones ── */}
+      <td className="px-3 py-3">
+        <div className="flex items-center justify-end gap-0.5">
           {(a.status === 'Pendiente' || a.status === 'En verificación') && (
             <button
               title="Rechazar"
               onClick={() => handleOpenAbsenceModal({ ...a, status: 'Rechazada' })}
-              className="text-slate-400 hover:text-red-600 text-[9px] font-black uppercase px-1.5 py-0.5 rounded hover:bg-red-50"
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
             >
-              ✕
+              <Trash2 size={13} />
             </button>
           )}
-          <button onClick={() => handleOpenAbsenceModal(a)} className="text-slate-400 hover:text-indigo-500 p-0.5">
-            <Edit2 size={14} />
+          <button
+            title="Editar"
+            onClick={() => handleOpenAbsenceModal(a)}
+            className="p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 transition-colors"
+          >
+            <Edit2 size={13} />
           </button>
-          <button onClick={() => handleDeleteAbsence(a.id!)} className="text-slate-400 hover:text-rose-500 p-0.5">
-            <Trash2 size={14} />
-          </button>
+          {a.status !== 'Pendiente' && a.status !== 'En verificación' && (
+            <button
+              title="Eliminar"
+              onClick={() => handleDeleteAbsence(a.id!)}
+              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-900/20 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       </td>
     </tr>
