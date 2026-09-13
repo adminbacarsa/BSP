@@ -4,11 +4,36 @@
  *   - Operaciones lo vea en la pestaña VACANTES con badge "POR AUSENCIA"
  *   - onVacanteCorrectionCreated dispare FCM a los admins de la empresa
  *
+ * NO crea vacante ops cuando RRHH marca licencia/vacaciones planificadas
+ * (hasNovedad / absenceId): eso ya se refleja en la malla de Planificación.
+ * Sí crea para ausencias operativas (T+30, Ops manual, estrategia VACANTE).
+ *
  * Deduplicación: marca vacancyCreatedForAbsence=true en el turno original
  * para que reinicios del trigger no generen duplicados.
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+
+const OPS_ABSENCE_TYPES = new Set(['AA', 'MANUAL_OPS', 'AUTO_T30']);
+
+function isOperationalAbsence(after: Record<string, any>): boolean {
+  if (after.absenceDetectedBy === 'SYSTEM_SCHEDULER') return true;
+  if (after.absenceConfirmedBy === 'OPERACIONES') return true;
+  if (after.isReportedToPlanning === true) return true; // ajuste Crono → hueco explícito
+  const absType = String(after.absenceType || '').toUpperCase();
+  if (OPS_ABSENCE_TYPES.has(absType)) return true;
+  if (after.status === 'ABSENT' && after.absenceDetectedAt) return true;
+  return false;
+}
+
+function isRrhhPlannedAbsence(after: Record<string, any>): boolean {
+  if (String(after.type || '').toUpperCase() === 'NOVEDAD') return true;
+  if (after.absenceId) return true;
+  if (after.hasNovedad === true) return true;
+  const absType = String(after.absenceType || '').toLowerCase();
+  if (/vacacion|licencia|enfermedad|gremial|art\b|permiso/.test(absType)) return true;
+  return false;
+}
 
 export const onGuardAbsenceDetected = functions
   .runWith({ timeoutSeconds: 30, memory: '256MB' })
@@ -25,8 +50,17 @@ export const onGuardAbsenceDetected = functions
     if (after.vacancyCreatedForAbsence === true) return;
     // Turnos operativos auto-generados no crean segunda vacante
     const skipOrigins = new Set(['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL',
-                                 'VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA']);
+                                 'VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA',
+                                 'INTERRUPTION']);
     if (skipOrigins.has(String(after.origin || ''))) return;
+
+    // Licencia/vacaciones RRHH en malla → no abrir hueco en Ops
+    if (isRrhhPlannedAbsence(after) && !isOperationalAbsence(after)) {
+      console.log(
+        `[onGuardAbsenceDetected] skip RRHH planificado turno ${context.params.turnoId} (absenceId=${after.absenceId || '-'})`,
+      );
+      return;
+    }
 
     const empresaId = typeof after.empresaId === 'string' ? after.empresaId : null;
     if (!empresaId) return;
