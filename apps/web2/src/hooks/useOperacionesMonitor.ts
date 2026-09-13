@@ -1,6 +1,5 @@
 
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { useOperacionesMonitorContext } from '@/context/operacionesMonitorContext';
+import { useState, useEffect, useMemo, useRef, createContext, useContext } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
@@ -432,6 +431,12 @@ export type OperacionesMonitorShared = {
     objectives: any[];
     now: Date;
 };
+
+export const OperacionesMonitorReactContext = createContext<OperacionesMonitorShared | null>(null);
+
+export function useOperacionesMonitorContext(): OperacionesMonitorShared | null {
+    return useContext(OperacionesMonitorReactContext);
+}
 
 /** Suscripciones Firestore + procesamiento + automatismos (una instancia por provider). */
 export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolean } = {}): OperacionesMonitorShared {
