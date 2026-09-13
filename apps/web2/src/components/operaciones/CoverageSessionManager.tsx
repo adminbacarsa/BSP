@@ -17,6 +17,7 @@ import {
 import { db } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import { toast } from 'sonner';
+import { markOpsSinCobertura } from '@/lib/operaciones/markOpsSinCobertura';
 import {
   applyCoverageLedgerToBatch,
   covererLedgerFields,
@@ -1100,7 +1101,23 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             <AlertTriangle size={48} className="text-amber-500" />
             <div className="font-black text-amber-700 text-base">Protocolo CCT agotado</div>
             <p className="text-xs text-slate-500 max-w-[240px]">No se encontró reemplazo disponible en ninguno de los pasos del protocolo.</p>
-            <button onClick={() => addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'SIN_COBERTURA', title: 'Sin cobertura', status: 'pending', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '', positionName: absenceShift.positionName || '', description: 'Protocolo CCT agotado', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid)).then(() => { toast.info('Registrado sin cobertura'); onClose(); })} className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-sm transition-colors">
+            <button
+              onClick={async () => {
+                try {
+                  await markOpsSinCobertura({
+                    absenceShift,
+                    empresaId: tid,
+                    notes: 'Protocolo CCT agotado',
+                    stamp: stampEmpresaId,
+                  });
+                  toast.info('Puesto cerrado sin cobertura');
+                  onClose();
+                } catch (e: any) {
+                  toast.error(e?.message || 'Error al cerrar sin cobertura');
+                }
+              }}
+              className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-sm transition-colors"
+            >
               Registrar sin cobertura
             </button>
           </div>
@@ -1264,6 +1281,32 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           </div>
         )}
       </div>
+
+      {s.status !== 'CONFIRMED' && (
+        <div className="shrink-0 border-t border-slate-200 p-3 bg-slate-50">
+          <button
+            type="button"
+            onClick={async () => {
+              if (!confirm('¿Cerrar este hueco como SIN COBERTURA?\nDejará de aparecer en VACANTES.')) return;
+              try {
+                await markOpsSinCobertura({
+                  absenceShift,
+                  empresaId: tid,
+                  notes: 'Operador cerró sin cobertura desde protocolo',
+                  stamp: stampEmpresaId,
+                });
+                toast.info('Puesto cerrado sin cobertura');
+                onClose();
+              } catch (e: any) {
+                toast.error(e?.message || 'Error al cerrar sin cobertura');
+              }
+            }}
+            className="w-full py-2.5 bg-white text-slate-600 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-100 transition-colors"
+          >
+            Sin cobertura — cerrar hueco
+          </button>
+        </div>
+      )}
     </div>
   );
 }

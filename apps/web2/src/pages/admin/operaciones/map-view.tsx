@@ -14,6 +14,7 @@ import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import { revertOpsAbsence, createOpsAbsenceDoc } from '@/lib/operaciones/revertOpsAbsence';
+import { markOpsSinCobertura } from '@/lib/operaciones/markOpsSinCobertura';
 import {
     applyCoverageLedgerToBatch,
     covererLedgerFields,
@@ -593,32 +594,13 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                                         <button onClick={async () => {
                                             setNoCoverageLoading(true);
                                             try {
-                                                await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                                                    type: 'SIN_COBERTURA', title: 'Puesto sin cobertura', status: 'pending',
-                                                    objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '',
-                                                    positionName: absenceShift.positionName || '',
-                                                    employeeId: absenceShift.employeeId || null, employeeName: absenceShift.employeeName || null,
-                                                    clientId: absenceShift.clientId || null, shiftId: absenceShift.id || null,
-                                                    description: noCoverageNotes || `Protocolo agotado — ${absenceShift.positionName} en ${absenceShift.objectiveName} queda sin cobertura.`,
-                                                    createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
-                                                }, tenantId(absenceShift)));
-                                                // Crear doc sintético en turnos para que el hook no regenere la vacante
-                                                if (absenceShift.objectiveId && absenceShift.positionName) {
-                                                    const startTs = absenceShift.shiftDateObj instanceof Date ? absenceShift.shiftDateObj : new Date(absenceShift.shiftDateObj);
-                                                    const endTs   = absenceShift.endDateObj   instanceof Date ? absenceShift.endDateObj   : new Date(absenceShift.endDateObj);
-                                                    try {
-                                                        await addDoc(collection(db, 'turnos'), stampEmpresaId({
-                                                            origin: 'SIN_COBERTURA', status: 'SIN_COBERTURA',
-                                                            employeeId: 'VACANTE', employeeName: 'SIN COBERTURA',
-                                                            isReported: true, resolvedBy: 'OPERACIONES',
-                                                            objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '',
-                                                            positionName: absenceShift.positionName, clientId: absenceShift.clientId || null,
-                                                            startTime: Timestamp.fromDate(startTs), endTime: Timestamp.fromDate(endTs),
-                                                            createdAt: serverTimestamp(),
-                                                        }, tenantId(absenceShift)));
-                                                    } catch(e) { /* non-critical */ }
-                                                }
-                                                toast.info(`Puesto ${absenceShift.positionName} registrado sin cobertura.`);
+                                                await markOpsSinCobertura({
+                                                    absenceShift,
+                                                    empresaId: String(absenceShift.empresaId || empresaId || ''),
+                                                    notes: noCoverageNotes,
+                                                    stamp: stampEmpresaId,
+                                                });
+                                                toast.info(`Puesto ${absenceShift.positionName || ''} cerrado sin cobertura.`);
                                                 onClose();
                                             } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
                                             finally { setNoCoverageLoading(false); }

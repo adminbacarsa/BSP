@@ -187,8 +187,9 @@ export function isVacancyDescubierto(s: any, now: Date = new Date()): boolean {
  */
 export function isActionableOpsVacancy(s: any, now: Date = new Date()): boolean {
     if (!s?.isUnassigned) return false;
+    if (s.isSinCobertura || s.status === 'SIN_COBERTURA') return false;
     if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
-    if (s.status === 'COVERED') return false;
+    if (s.status === 'COVERED' || s.status === 'CANCELLED') return false;
     const end = s?.endDateObj instanceof Date ? s.endDateObj : getSafeDate(s?.endDateObj);
     if (end && end.getTime() < now.getTime()) return false;
     return true;
@@ -1184,9 +1185,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 suppressedDevuelto.add(s.id);
                 return;
             }
-            // Vacante real por ausencia: si no está cubierta y el puesto aún no tiene guardia suficiente, permanece viva.
-            // Si el puesto ya tiene guardias suficientes (cubierta o empleado corregido a presente), se suprime.
-            if (s.isRealOperativeVacancy && s.status === 'UNCOVERED') {
+            // Vacante real por ausencia: viva solo si el slot no terminó y no hay cobertura suficiente.
+            if (s.isRealOperativeVacancy && (s.status === 'UNCOVERED' || !s.status)) {
+                if (s.isSinCobertura || String(s.status || '') === 'SIN_COBERTURA') {
+                    suppressedDevuelto.add(s.id);
+                    return;
+                }
+                if (s.endDateObj.getTime() < now.getTime()) {
+                    suppressedDevuelto.add(s.id);
+                    return;
+                }
                 const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
                 if (cap > 0) {
                     const coveringCount = dedupedRealShifts.filter(cover =>

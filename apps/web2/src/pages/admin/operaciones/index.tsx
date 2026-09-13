@@ -53,6 +53,8 @@ import {
 } from '@/lib/operaciones/opsMode';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { revertOpsAbsence, createOpsAbsenceDoc } from '@/lib/operaciones/revertOpsAbsence';
+import { markOpsSinCobertura } from '@/lib/operaciones/markOpsSinCobertura';
+import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 
@@ -1698,35 +1700,13 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                                         <button onClick={async () => {
                                             setNoCoverageLoading(true);
                                             try {
-                                                await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                                                    type: 'SIN_COBERTURA', title: 'Puesto sin cobertura',
-                                                    status: 'pending',
-                                                    objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '',
-                                                    positionName: absenceShift.positionName || '',
-                                                    employeeId: absenceShift.employeeId || null,
-                                                    employeeName: absenceShift.employeeName || null,
-                                                    clientId: absenceShift.clientId || null,
-                                                    shiftId: absenceShift.id || null,
-                                                    description: noCoverageNotes || `Protocolo agotado — ${absenceShift.positionName} en ${absenceShift.objectiveName} queda sin cobertura.`,
-                                                    createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
-                                                }, tenantId(absenceShift)));
-                                                // Crear doc sintético en turnos para que el hook no regenere la vacante
-                                                if (absenceShift.objectiveId && absenceShift.positionName) {
-                                                    const startTs = absenceShift.shiftDateObj instanceof Date ? absenceShift.shiftDateObj : new Date(absenceShift.shiftDateObj);
-                                                    const endTs   = absenceShift.endDateObj   instanceof Date ? absenceShift.endDateObj   : new Date(absenceShift.endDateObj);
-                                                    try {
-                                                        await addDoc(collection(db, 'turnos'), stampEmpresaId({
-                                                            origin: 'SIN_COBERTURA', status: 'SIN_COBERTURA',
-                                                            employeeId: 'VACANTE', employeeName: 'SIN COBERTURA',
-                                                            isReported: true, resolvedBy: 'OPERACIONES',
-                                                            objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '',
-                                                            positionName: absenceShift.positionName, clientId: absenceShift.clientId || null,
-                                                            startTime: Timestamp.fromDate(startTs), endTime: Timestamp.fromDate(endTs),
-                                                            createdAt: serverTimestamp(),
-                                                        }, tenantId(absenceShift)));
-                                                    } catch(e) { /* non-critical */ }
-                                                }
-                                                toast.info(`Puesto ${absenceShift.positionName} registrado sin cobertura.`);
+                                                await markOpsSinCobertura({
+                                                    absenceShift,
+                                                    empresaId: tenantId(absenceShift) || String(empresaId || ''),
+                                                    notes: noCoverageNotes,
+                                                    stamp: stampEmpresaId,
+                                                });
+                                                toast.info(`Puesto ${absenceShift.positionName || ''} cerrado sin cobertura.`);
                                                 onClose();
                                             } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
                                             finally { setNoCoverageLoading(false); }
@@ -3105,7 +3085,56 @@ export default function OperacionesPage() {
     // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    const [coverageData, setCoverageData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [coverageData, setCoverageDataRaw] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [coverageSessions, setCoverageSessions] = useState<CoverageSession[]>([]);
+    const [activeCoverageId, setActiveCoverageId] = useState<string | null>(null);
+
+    const openCoverageProtocol = (shift: any) => {
+        if (!shift) return;
+        if (shift.isUnassigned && !isActionableOpsVacancy(shift)) {
+            const endLabel = shift.endDateObj instanceof Date
+                ? shift.endDateObj.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' })
+                : '';
+            toast.info(
+                endLabel
+                    ? `Este hueco ya terminó (${endLabel}). Podés cerrarlo como sin cobertura; no se cubre en vivo.`
+                    : 'Este hueco ya no es accionable (vencido o cerrado).',
+            );
+        }
+        const existing = coverageSessions.find(s => s.absentShift?.id === shift?.id);
+        if (existing) {
+            setActiveCoverageId(existing.id);
+            setCoverageSessions(prev => prev.map(s => s.id === existing.id ? { ...s, minimized: false } : s));
+            return;
+        }
+        const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
+        setCoverageSessions(prev => [...prev, newSess]);
+        setActiveCoverageId(newSess.id);
+    };
+    const updateCoverageSession = (id: string, fn: (s: CoverageSession) => CoverageSession) =>
+        setCoverageSessions(prev => prev.map(s => s.id === id ? fn(s) : s));
+    const closeCoverageSession = (id: string) => {
+        setCoverageSessions(prev => {
+            const next = prev.filter(s => s.id !== id);
+            setActiveCoverageId(cur => (cur === id ? (next[0]?.id ?? null) : cur));
+            return next;
+        });
+    };
+    /** Compat: código legacy que aún usa setCoverageData({isOpen, shift}) */
+    const setCoverageData = (v: { isOpen: boolean; shift: any }) => {
+        if (v.isOpen && v.shift) openCoverageProtocol(v.shift);
+        else if (!v.isOpen) {
+            setCoverageSessions(prev => {
+                if (activeCoverageId) {
+                    const next = prev.filter(s => s.id !== activeCoverageId);
+                    setActiveCoverageId(next[0]?.id ?? null);
+                    return next;
+                }
+                return prev;
+            });
+        }
+        setCoverageDataRaw(v);
+    };
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [rrhhVacancyData, setRrhhVacancyData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -3380,25 +3409,22 @@ export default function OperacionesPage() {
         }
     }, [logic.processedData, opsCaps.isDemo, opsCaps.isAuto]);
 
-    // En MODO DEMO: auto-abrir modal de cobertura para vacantes descubiertas activas de hoy si no hay modal abierto
+    // En MODO DEMO: auto-abrir protocolo (minimizable) para vacantes vivas de hoy
     const demoVacTriggeredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
-        if (!opsCaps.isDemo || coverageData.isOpen) return;
+        if (!opsCaps.isDemo || coverageSessions.length > 0) return;
         const now = new Date();
-        const openVac = logic.processedData.find((s: any) => 
-            isOpsShiftHoy(s, now) &&
-            s.isUnassigned &&
-            !s.isReportedToPlanning &&
-            s.status !== 'COVERED' &&
-            s.status !== 'SIN_COBERTURA' &&
-            (s.origin === 'VACANTE_POR_AUSENCIA' || !!s.causedByShiftId || s.isAbsent)
+        const openVac = logic.processedData.find((s: any) =>
+            isOpsShiftHoy(s, now)
+            && isActionableOpsVacancy(s, now)
+            && (s.origin === 'VACANTE_POR_AUSENCIA' || !!s.causedByShiftId || s.isAbsent)
         );
         if (openVac && !demoVacTriggeredRef.current.has(openVac.id)) {
             demoVacTriggeredRef.current.add(openVac.id);
-            setCoverageData({ isOpen: true, shift: openVac });
-            toast.info(`🤖 MODO DEMO: Vacante activa detectada en ${openVac.objectiveName}. Iniciando protocolo de cobertura.`);
+            openCoverageProtocol(openVac);
+            toast.info(`🤖 MODO DEMO: Vacante activa en ${openVac.objectiveName}. Protocolo de cobertura (podés minimizar).`);
         }
-    }, [opsCaps.isDemo, coverageData.isOpen, logic.processedData]);
+    }, [opsCaps.isDemo, coverageSessions.length, logic.processedData]);
 
     const openHandoverFromNovedad = (novedad: any) => {
         const targetShift = novedad.shiftId
@@ -6148,11 +6174,16 @@ export default function OperacionesPage() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            {coverageData.isOpen && coverageData.shift && (
-                <CoverageModal isOpen={coverageData.isOpen} onClose={() => setCoverageData({isOpen:false,shift:null})} absenceShift={coverageData.shift} logic={logic} opsCaps={opsCaps}/>
-            )}
+            <CoverageSessionManager
+                sessions={coverageSessions}
+                activeId={activeCoverageId}
+                logic={logic}
+                onActivate={setActiveCoverageId}
+                onClose={closeCoverageSession}
+                onUpdate={updateCoverageSession}
+            />
             <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
-            <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({isOpen:true,shift:s})} onSendToPlanning={handleReportPlanning}/>
+            <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => openCoverageProtocol(s)} onSendToPlanning={handleReportPlanning}/>
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
             <ManualRetentionModal isOpen={manualRetentionData.isOpen} onClose={() => setManualRetentionData({isOpen:false,shift:null})} shift={manualRetentionData.shift}/>
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData({isOpen:false,ctx:{employeeName:'',phone:''}})} ctx={waData.ctx}/>
