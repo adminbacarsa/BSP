@@ -233,6 +233,39 @@ service cloud.firestore {
       );
     }
 
+    // Portal guardia: solo turnos propios (employeeId / employeeUid del JWT).
+    function employeeOwnsShift(data) {
+      return isEmployeeClaim() && (
+        data.get('employeeUid', '') == request.auth.uid ||
+        empleadoDocOwnedByAuth(data.get('employeeId', ''))
+      ) && (
+        docEmpresaId(data) == '' || employeeTenantMatches(data)
+      );
+    }
+
+    // Portal guardia: solo legajo propio (doc id, uid o email del token).
+    function employeeCanReadEmpleadoDoc(employeeId) {
+      return isEmployeeClaim() && (
+        employeeId == request.auth.uid ||
+        resource.data.get('uid', '') == request.auth.uid ||
+        (request.auth.token.email != null &&
+          resource.data.get('email', '') == request.auth.token.email)
+      ) && (
+        docEmpresaId(resource.data) == '' || employeeTenantMatches(resource.data)
+      );
+    }
+
+    // Portal guardia: solo ausencias propias.
+    function employeeOwnsAusencia(data) {
+      return isEmployeeClaim() && (
+        data.get('employeeUid', '') == request.auth.uid ||
+        data.get('employeeId', '') == request.auth.uid ||
+        empleadoDocOwnedByAuth(data.get('employeeId', ''))
+      ) && (
+        docEmpresaId(data) == '' || employeeTenantMatches(data)
+      );
+    }
+
     function eventoActivoReadable(data) {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
@@ -247,8 +280,8 @@ service cloud.firestore {
 
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
-        || clientUserMatchesTurno(resource.data);
+        || clientUserMatchesTurno(resource.data)
+        || employeeOwnsShift(resource.data);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -256,15 +289,15 @@ service cloud.firestore {
 
     match /empleados/{employeeId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
-        || clientUserMatchesEmpleado(resource.data);
+        || clientUserMatchesEmpleado(resource.data)
+        || employeeCanReadEmpleadoDoc(employeeId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();
     }
 
     match /ausencias/{absenceId} {
-      allow read: if tenantAdminRead() || request.auth != null;
+      allow read: if tenantAdminRead() || employeeOwnsAusencia(resource.data);
       allow create: if tenantAdminCreate() || request.auth != null;
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();
