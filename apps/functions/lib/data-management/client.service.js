@@ -57,7 +57,10 @@ let ClientService = class ClientService {
         await ref.update(updateData);
     }
     async deleteClient(id) {
-        await this.getDb().collection(COLL_CLIENTS).doc(id).delete();
+        await this.getDb().collection(COLL_CLIENTS).doc(id).update({
+            status: 'INACTIVO',
+            deactivatedAt: admin.firestore.Timestamp.now(),
+        });
     }
     async createObjective(data) {
         await this.getClient(data.clientId);

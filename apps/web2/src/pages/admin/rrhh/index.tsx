@@ -1138,10 +1138,10 @@ export default function EmployeesPage() {
   
   const handleDelete = async (id: string) => {
     const emp = employees.find(e => e.id === id);
-    if (!confirm(`¿Eliminar legajo ${emp?.fileNumber || id}?`)) return;
+    if (!confirm(`¿Dar de baja el legajo ${emp?.fileNumber || id}? (soft delete — no se borra el historial)`)) return;
     try {
       await deleteEmployeeForEmpresa(id, empresaId, migracionCompleta);
-      await registrarAuditoria('DELETE_EMPLOYEE', `Eliminó legajo: ${emp?.fileNumber} - ${emp?.lastName}`);
+      await registrarAuditoria('DELETE_EMPLOYEE', `Baja legajo (soft): ${emp?.fileNumber} - ${emp?.lastName}`);
       loadData();
       setSelectedEmp(null);
     } catch (e) {

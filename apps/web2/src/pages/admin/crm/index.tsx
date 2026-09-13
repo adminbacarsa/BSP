@@ -574,16 +574,8 @@ export default function CRMPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, selectedClient?.id, empresaId, migracionCompleta, isSuperAdmin, allEmpresas]);
 
-  const clientDeleteToast = (
-    name: string,
-    r: { deletedTurnos: number; deletedSla: number; foreignTurnosLeft: number; foreignSlaLeft: number },
-  ) => {
-    let msg = `"${name}" eliminado (${r.deletedTurnos} turnos, ${r.deletedSla} SLA)`;
-    if (r.foreignTurnosLeft > 0 || r.foreignSlaLeft > 0) {
-      msg += `. Quedaron ${r.foreignTurnosLeft} turno(s) y ${r.foreignSlaLeft} SLA de otra empresa (ID compartido; Bacarsa no se tocó).`;
-    }
-    return msg;
-  };
+  const clientDeleteToast = (name: string) =>
+    `"${name}" desactivado. Turnos y SLA se conservan; podés filtrar clientes inactivos en el listado.`;
 
   const fetchClients = async () => {
     const gen = ++clientsFetchGenRef.current;
@@ -2477,11 +2469,11 @@ export default function CRMPage() {
                     <button
                       onClick={async () => {
                         const empresaLabel = empresa?.name || empresaId;
-                        if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
+                        if (!confirm(`¿Desactivar a "${c.name}"?\nEmpresa: ${empresaLabel}\nNo se borran turnos ni SLA; el cliente queda INACTIVO.`)) return;
                         try {
                           await assertClientWritable(c.id, c.name, 'eliminar');
-                          const result = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
-                          toast.success(clientDeleteToast(c.name, result));
+                          await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
+                          toast.success(clientDeleteToast(c.name));
                           fetchClients();
                           close();
                         } catch (e: unknown) {
@@ -2564,15 +2556,15 @@ export default function CRMPage() {
                   <button
                     onClick={async () => {
                       const empresaLabel = empresa?.name || empresaId;
-                      if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
+                      if (!confirm(`¿Desactivar a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nNo se borran turnos ni SLA; el cliente queda INACTIVO.`)) return;
                       try {
                         await assertClientWritable(selectedClient.id, selectedClient.name, 'eliminar');
-                        const result = await deleteClientForEmpresa(
+                        await deleteClientForEmpresa(
                           selectedClient.id,
                           empresaId,
                           migracionCompleta,
                         );
-                        toast.success(clientDeleteToast(selectedClient.name, result));
+                        toast.success(clientDeleteToast(selectedClient.name));
                         setSelectedClient(null);
                         setView('list');
                         fetchClients();

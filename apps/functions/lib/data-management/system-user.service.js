@@ -59,8 +59,17 @@ let SystemUserService = class SystemUserService {
         await db.collection(COLL_SYSTEM_USERS).doc(uid).update(safeData);
     }
     async deleteSystemUser(uid) {
-        await this.getAuth().deleteUser(uid);
-        await this.getDb().collection(COLL_SYSTEM_USERS).doc(uid).delete();
+        try {
+            await this.getAuth().updateUser(uid, { disabled: true });
+        }
+        catch (e) {
+            if (e.code !== 'auth/user-not-found')
+                throw e;
+        }
+        await this.getDb().collection(COLL_SYSTEM_USERS).doc(uid).update({
+            status: 'Inactive',
+            deactivatedAt: admin.firestore.Timestamp.now(),
+        });
     }
 };
 exports.SystemUserService = SystemUserService;

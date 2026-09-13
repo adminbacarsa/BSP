@@ -290,7 +290,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
       case 'GET_CLIENT': return { success: true, data: await clientService.getClient(payload.id) };
       case 'GET_ALL_CLIENTS': return { success: true, data: await clientService.findAllClients() };
       case 'UPDATE_CLIENT': await clientService.updateClient(payload.id, payload.data); return { success: true, message: 'Cliente actualizado' };
-      case 'DELETE_CLIENT': await clientService.deleteClient(payload.id); return { success: true, message: 'Cliente eliminado' };
+      case 'DELETE_CLIENT': await clientService.deleteClient(payload.id); return { success: true, message: 'Cliente desactivado' };
 
       case 'CREATE_OBJECTIVE': return { success: true, data: await clientService.createObjective(payload) };
       case 'UPDATE_OBJECTIVE': await clientService.updateObjective(payload.id, payload.data); return { success: true, message: 'Objetivo actualizado correctamente' };
@@ -344,7 +344,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         
       case 'DELETE_EMPLOYEE':
         await employeeService.deleteEmployee(payload.uid);
-        return { success: true, message: 'Empleado eliminado.' };
+        return { success: true, message: 'Empleado desactivado.' };
 
       // ðŸ›' NUEVO: IMPORTACIÓN MASIVA
       case 'IMPORT_EMPLOYEES':
@@ -390,7 +390,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
         return { success: true, message: 'Administrador actualizado.' };
       case 'DELETE_USER':
         await sysUserService.deleteSystemUser(payload.uid);
-        return { success: true, message: 'Administrador eliminado.' };
+        return { success: true, message: 'Administrador desactivado.' };
       default:
         throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }

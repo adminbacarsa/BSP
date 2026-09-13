@@ -440,7 +440,17 @@ export async function deleteEmployeeForEmpresa(
   empresaId: string,
   migracionCompleta: boolean,
 ): Promise<void> {
-  await deleteDocForEmpresa('empleados', employeeId, empresaId, migracionCompleta);
+  await updateDocForEmpresa(
+    'empleados',
+    employeeId,
+    {
+      status: 'INACTIVE',
+      isAvailable: false,
+      inactiveAt: new Date().toISOString(),
+    },
+    empresaId,
+    migracionCompleta,
+  );
 }
 
 export async function deleteSlaForEmpresa(
@@ -780,6 +790,7 @@ export async function deleteClientForEmpresa(
   empresaId: string,
   migracionCompleta: boolean,
 ): Promise<{
+  softDeleted: boolean;
   deletedTurnos: number;
   deletedSla: number;
   foreignTurnosLeft: number;
@@ -799,33 +810,23 @@ export async function deleteClientForEmpresa(
     );
   }
 
-  const [turnosSnap, slaSnap] = await Promise.all([
-    getDocs(query(collection(db, 'turnos'), where('clientId', '==', clientId))),
-    getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', clientId))),
-  ]);
-
-  const turnosOwned = turnosSnap.docs.filter((d) =>
-    isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const slaOwned = slaSnap.docs.filter((d) =>
-    isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const turnosForeign = turnosSnap.docs.filter((d) =>
-    !isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const slaForeign = slaSnap.docs.filter((d) =>
-    !isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
+  await updateDocForEmpresa(
+    resolved.collection,
+    clientId,
+    {
+      status: 'INACTIVO',
+      deactivatedAt: new Date().toISOString(),
+    },
+    empresaId,
+    migracionCompleta,
   );
 
-  const deletedTurnos = await deleteDocsInBatches(turnosOwned.map((d) => ({ ref: d.ref })));
-  const deletedSla = await deleteDocsInBatches(slaOwned.map((d) => ({ ref: d.ref })));
-
-  await deleteDoc(doc(db, resolved.collection, clientId));
   return {
-    deletedTurnos,
-    deletedSla,
-    foreignTurnosLeft: turnosForeign.length,
-    foreignSlaLeft: slaForeign.length,
+    softDeleted: true,
+    deletedTurnos: 0,
+    deletedSla: 0,
+    foreignTurnosLeft: 0,
+    foreignSlaLeft: 0,
   };
 }
 

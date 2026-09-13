@@ -85,8 +85,15 @@ export class SystemUserService {
    * Eliminar administrador.
    */
   async deleteSystemUser(uid: string): Promise<void> {
-    await this.getAuth().deleteUser(uid);
-    await this.getDb().collection(COLL_SYSTEM_USERS).doc(uid).delete();
+    try {
+      await this.getAuth().updateUser(uid, { disabled: true });
+    } catch (e: any) {
+      if (e.code !== 'auth/user-not-found') throw e;
+    }
+    await this.getDb().collection(COLL_SYSTEM_USERS).doc(uid).update({
+      status: 'Inactive',
+      deactivatedAt: admin.firestore.Timestamp.now(),
+    });
   }
 }
 

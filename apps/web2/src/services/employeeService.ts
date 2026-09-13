@@ -85,6 +85,7 @@ export const employeeService = {
   update: (id: string, data: Partial<Employee>) => updateDoc(doc(db, 'empleados', id), data),
   delete: (id: string) => updateDoc(doc(db, 'empleados', id), {
     status: 'INACTIVE',
+    isAvailable: false,
     inactiveAt: new Date().toISOString(),
   }),
 };

@@ -197,7 +197,7 @@ exports.manageHierarchy = functions.https.onCall(async (data, context) => {
                 return { success: true, message: 'Cliente actualizado' };
             case 'DELETE_CLIENT':
                 await clientService.deleteClient(payload.id);
-                return { success: true, message: 'Cliente eliminado' };
+                return { success: true, message: 'Cliente desactivado' };
             case 'CREATE_OBJECTIVE': return { success: true, data: await clientService.createObjective(payload) };
             case 'UPDATE_OBJECTIVE':
                 await clientService.updateObjective(payload.id, payload.data);
@@ -251,7 +251,7 @@ exports.manageEmployees = functions.https.onCall(async (data, context) => {
                 return { success: true, message: 'Datos actualizados.' };
             case 'DELETE_EMPLOYEE':
                 await employeeService.deleteEmployee(payload.uid);
-                return { success: true, message: 'Empleado eliminado.' };
+                return { success: true, message: 'Empleado desactivado.' };
             case 'IMPORT_EMPLOYEES':
                 if (!payload.rows || !Array.isArray(payload.rows)) {
                     throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
@@ -289,7 +289,7 @@ exports.manageSystemUsers = functions.https.onCall(async (data, context) => {
                 return { success: true, message: 'Administrador actualizado.' };
             case 'DELETE_USER':
                 await sysUserService.deleteSystemUser(payload.uid);
-                return { success: true, message: 'Administrador eliminado.' };
+                return { success: true, message: 'Administrador desactivado.' };
             default:
                 throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
         }

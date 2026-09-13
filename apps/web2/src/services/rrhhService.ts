@@ -1,6 +1,6 @@
 
 import { db } from '@/lib/firebase';
-import { collection, addDoc, getDocs, doc, updateDoc, deleteDoc, writeBatch } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, updateDoc, writeBatch } from 'firebase/firestore';
 
 export const rrhhService = {
   // --- EMPLEADOS ---
@@ -43,7 +43,11 @@ export const rrhhService = {
   }),
 
   updateEmployee: (id: string, data: any) => updateDoc(doc(db, 'empleados', id), data),
-  deleteEmployee: (id: string) => deleteDoc(doc(db, 'empleados', id)),
+  deleteEmployee: (id: string) => updateDoc(doc(db, 'empleados', id), {
+    status: 'INACTIVE',
+    isAvailable: false,
+    inactiveAt: new Date().toISOString(),
+  }),
 
   importEmployeesBatch: async (employeesData: any[]) => {
     const batch = writeBatch(db);
