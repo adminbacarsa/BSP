@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.backfillCoverageLedger = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -1895,6 +1895,8 @@ var onEmployeeNotificationCreated_1 = require("./notifications/onEmployeeNotific
 Object.defineProperty(exports, "onEmployeeNotificationCreated", { enumerable: true, get: function () { return onEmployeeNotificationCreated_1.onEmployeeNotificationCreated; } });
 var onVacanteCorrectionCreated_1 = require("./notifications/onVacanteCorrectionCreated");
 Object.defineProperty(exports, "onVacanteCorrectionCreated", { enumerable: true, get: function () { return onVacanteCorrectionCreated_1.onVacanteCorrectionCreated; } });
+var backfillCoverageLedger_1 = require("./coverage/backfillCoverageLedger");
+Object.defineProperty(exports, "backfillCoverageLedger", { enumerable: true, get: function () { return backfillCoverageLedger_1.backfillCoverageLedger; } });
 var onGuardAbsenceDetected_1 = require("./notifications/onGuardAbsenceDetected");
 Object.defineProperty(exports, "onGuardAbsenceDetected", { enumerable: true, get: function () { return onGuardAbsenceDetected_1.onGuardAbsenceDetected; } });
 var onSolicitudEventoCreated_1 = require("./notifications/onSolicitudEventoCreated");
@@ -3604,7 +3606,11 @@ exports.cleanupSlaDevueltas = functions
     .runWith({ timeoutSeconds: 120, memory: '256MB' })
     .https.onRequest(async (req, res) => {
     const secret = req.query.secret;
-    const expectedSecret = process.env.CLEANUP_SECRET || 'crono-cleanup-2024';
+    const expectedSecret = String(process.env.CLEANUP_SECRET ?? '').trim();
+    if (!expectedSecret) {
+        res.status(503).json({ error: 'CLEANUP_SECRET no configurado en el servidor.' });
+        return;
+    }
     if (secret !== expectedSecret) {
         res.status(403).json({ error: 'Forbidden' });
         return;
@@ -3746,7 +3752,14 @@ exports.setEmployeePortalPassword = functions.https.onCall(async (data, context)
     });
     return { success: true, email, alreadyExisted, uid };
 });
-exports.geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
+exports.geocodeAddressProxy = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isPanelUser) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo usuarios del panel pueden geocodificar direcciones.');
+    }
     const { address } = data;
     if (!address?.trim())
         throw new functions.https.HttpsError('invalid-argument', 'address requerido.');

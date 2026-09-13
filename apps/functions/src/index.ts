@@ -4282,7 +4282,11 @@ export const cleanupSlaDevueltas = functions
   .runWith({ timeoutSeconds: 120, memory: '256MB' })
   .https.onRequest(async (req, res) => {
     const secret = req.query.secret as string | undefined;
-    const expectedSecret = process.env.CLEANUP_SECRET || 'crono-cleanup-2024';
+    const expectedSecret = String(process.env.CLEANUP_SECRET ?? '').trim();
+    if (!expectedSecret) {
+      res.status(503).json({ error: 'CLEANUP_SECRET no configurado en el servidor.' });
+      return;
+    }
     if (secret !== expectedSecret) {
       res.status(403).json({ error: 'Forbidden' });
       return;
@@ -4438,7 +4442,18 @@ export const setEmployeePortalPassword = functions.https.onCall(async (data, con
   return { success: true, email, alreadyExisted, uid };
 });
 
-export const geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
+export const geocodeAddressProxy = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Solo usuarios del panel pueden geocodificar direcciones.',
+    );
+  }
+
   const { address } = data as { address: string };
   if (!address?.trim()) throw new functions.https.HttpsError('invalid-argument', 'address requerido.');
 
