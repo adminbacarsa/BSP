@@ -220,7 +220,7 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
     };
     const handleProtocol = async () => {
         await updateDocForEmpresa('turnos', shift.id, { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }, empresaId, migracionCompleta);
-        const newRef = await addDoc(collection(db, 'turnos'), stampEmpresaId({ clientId: shift.clientId, clientName: shift.clientName, objectiveId: shift.objectiveId, objectiveName: shift.objectiveName, positionName: shift.positionName, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false, origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
+        const newRef = await addDoc(collection(db, 'turnos'), stampEmpresaId({ clientId: shift.clientId, clientName: shift.clientName, objectiveId: shift.objectiveId, objectiveName: shift.objectiveName, positionName: shift.positionName, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false, origin: 'INTERRUPTION', causedByShiftId: shift.id, originRef: shift.id, causedByEmployeeId: shift.employeeId || null, causedByEmployeeName: shift.employeeName || null, createdAt: serverTimestamp() }, shiftEmpresaId));
         onVacancyCreated({ ...shift, id: newRef.id, isUnassigned: true });
     };
     return (

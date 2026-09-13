@@ -490,7 +490,9 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                 startTime: serverTimestamp(),
                 scheduleDate: new Date().toISOString().slice(0, 10),
                 status: 'UNCOVERED_REPORTED', isUnassigned: true, isPresent: false, isReported: true,
-                origin: 'INTERRUPTION', originRef: shift.id,
+                origin: 'INTERRUPTION',
+                causedByShiftId: shift.id,
+                originRef: shift.id,
                 causedByEmployeeId: shift.employeeId, causedByEmployeeName: shift.employeeName,
                 createdAt: serverTimestamp(),
             }, shiftEmpresaId);

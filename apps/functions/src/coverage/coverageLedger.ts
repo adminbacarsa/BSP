@@ -45,15 +45,18 @@ export function resolveTitularFromAbsenceOrVacancy(absenceShift: any & { id?: st
   titularEmployeeName: string;
   vacancyShiftId: string | null;
 } {
-  const caused =
-    absenceShift?.causedByShiftId && !isVirtualShiftId(absenceShift.causedByShiftId)
-      ? String(absenceShift.causedByShiftId)
-      : null;
+  const causedRaw =
+    absenceShift?.causedByShiftId
+    || absenceShift?.originRef // legacy INTERRUPTION
+    || null;
+  const caused = causedRaw && !isVirtualShiftId(causedRaw) ? String(causedRaw) : null;
+  const originUp = String(absenceShift?.origin || '').toUpperCase();
   const isVac =
     absenceShift?.isUnassigned === true
     || absenceShift?.employeeId === 'VACANTE'
     || String(absenceShift?.employeeName || '').toUpperCase().startsWith('VACANTE')
-    || String(absenceShift?.origin || '').toUpperCase().startsWith('VACANTE_');
+    || originUp.startsWith('VACANTE_')
+    || originUp === 'INTERRUPTION';
 
   const vacancyShiftId =
     isVac && absenceShift?.id && !isVirtualShiftId(absenceShift.id) && !absenceShift?.isVirtual
