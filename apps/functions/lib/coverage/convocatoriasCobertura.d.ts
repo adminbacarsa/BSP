@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { Timestamp } from 'firebase-admin/firestore';
-import { CandidateType } from './eligibilityFilter';
+import { CandidateType, CascadeStepType } from './eligibilityFilter';
 export type ConvocatoriaType = CandidateType | 'LLEGADA_TARDE';
 export interface ConvocatoriaCoberturaDoc {
     empresaId: string;
@@ -15,6 +15,7 @@ export interface ConvocatoriaCoberturaDoc {
     endTime?: Timestamp;
     aptitudesRequeridas?: string[];
     type: ConvocatoriaType;
+    cascadeStepKey?: CascadeStepType;
     urgency: 'URGENTE' | 'INTERMEDIO' | 'NORMAL';
     cascadeStep: number;
     candidateEmployeeId: string;
@@ -23,6 +24,7 @@ export interface ConvocatoriaCoberturaDoc {
     extendShiftId?: string;
     advanceShiftId?: string;
     ftShiftId?: string;
+    sourceShiftId?: string;
     status: 'PENDING' | 'ESCALATED' | 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'CANCELLED';
     timeoutAt: Timestamp;
     createdAt: Timestamp;

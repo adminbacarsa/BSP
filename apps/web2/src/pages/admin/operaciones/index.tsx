@@ -1615,7 +1615,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                                     <AlarmClock size={11}/> Convocatorias en curso
                                 </p>
                                 {pendingConvocatorias.map((c: any) => {
-                                    const typeLabel: Record<string, string> = { RET: 'RET', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Sin turno', EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Sin turno', FT: 'FT' };
+                                    const typeLabel: Record<string, string> = { RET: 'RET', ESC: 'ESC/REF', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Sin turno', EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Sin turno', FT: 'FT' };
                                     const timeoutDate = c.timeoutAt?.seconds ? new Date(c.timeoutAt.seconds * 1000) : null;
                                     const minsLeft = timeoutDate ? Math.max(0, Math.round((timeoutDate.getTime() - Date.now()) / 60000)) : null;
                                     return (
@@ -5272,7 +5272,7 @@ export default function OperacionesPage() {
                                             NORMAL: 'bg-sky-100 text-sky-700',
                                         };
                                         const typeLabel: Record<string, string> = {
-                                            RET: 'RET', VOLANTE: 'VOL', SIN_TURNO_CON_EXP: 'EXP',
+                                            RET: 'RET', ESC: 'ESC', VOLANTE: 'VOL', SIN_TURNO_CON_EXP: 'EXP',
                                             EXTEND: 'EXT', ADVANCE: 'ADV', SIN_TURNO: 'ST', FT: 'FT',
                                         };
                                         const urgColor = urgColors[conv.urgency] || 'bg-slate-100 text-slate-600';
@@ -5791,7 +5791,7 @@ export default function OperacionesPage() {
                         {/* ── Tab Cascada ── */}
                         {bitacoraTab === 'cascada' && (() => {
                           const TYPE_LABEL: Record<string, string> = {
-                            RET: 'Retención', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Disp. c/exp',
+                            RET: 'Retención', ESC: 'ESC/REF', VOLANTE: 'Volante', SIN_TURNO_CON_EXP: 'Disp. c/exp',
                             EXTEND: 'Extensión', ADVANCE: 'Adelanto', SIN_TURNO: 'Disponible', FT: 'Franco Trab.',
                             LLEGADA_TARDE: 'Llegada Tarde',
                           };

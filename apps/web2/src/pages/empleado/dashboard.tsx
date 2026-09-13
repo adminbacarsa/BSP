@@ -3192,6 +3192,8 @@ export default function EmployeeDashboard() {
                     EXTEND: 'Extensión de jornada',
                     ADVANCE: 'Adelanto de turno',
                     SIN_TURNO: 'Cobertura disponible',
+                    ESC: 'Escuela / Refuerzo',
+                    RET: 'Retención (RET)',
                     FT: 'Franco Trabajado (FT)',
                     LLEGADA_TARDE: '¿Estás en camino?',
                   };

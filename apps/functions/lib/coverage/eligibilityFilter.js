@@ -1,12 +1,50 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CASCADE_ORDER = void 0;
+exports.BROADCAST_LIMIT = exports.CASCADE_ORDER = void 0;
+exports.toCascadeStep = toCascadeStep;
+exports.cascadeStepIndex = cascadeStepIndex;
+exports.nextCascadeStep = nextCascadeStep;
 exports.checkEligibility = checkEligibility;
 exports.deriveCandidateType = deriveCandidateType;
-exports.nextCascadeStep = nextCascadeStep;
 exports.getUrgency = getUrgency;
 exports.findEmployeeUid = findEmployeeUid;
 const firestore_1 = require("firebase-admin/firestore");
+exports.CASCADE_ORDER = [
+    'SIN_TURNO',
+    'RET',
+    'ESC',
+    'EXT_DUAL',
+    'FT',
+];
+exports.BROADCAST_LIMIT = 5;
+function toCascadeStep(type) {
+    if (type === 'VOLANTE' || type === 'SIN_TURNO_CON_EXP' || type === 'SIN_TURNO')
+        return 'SIN_TURNO';
+    if (type === 'RET')
+        return 'RET';
+    if (type === 'ESC')
+        return 'ESC';
+    if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL')
+        return 'EXT_DUAL';
+    if (type === 'FT')
+        return 'FT';
+    return null;
+}
+function cascadeStepIndex(type) {
+    const step = toCascadeStep(type);
+    if (!step)
+        return -1;
+    return exports.CASCADE_ORDER.indexOf(step);
+}
+function nextCascadeStep(current) {
+    const step = toCascadeStep(String(current));
+    if (!step)
+        return null;
+    const idx = exports.CASCADE_ORDER.indexOf(step);
+    if (idx === -1 || idx >= exports.CASCADE_ORDER.length - 1)
+        return null;
+    return exports.CASCADE_ORDER[idx + 1];
+}
 function checkEligibility(employee, ctx, candidateType, distanceKm) {
     const today = new Date().toISOString().slice(0, 10);
     const restricObjs = employee.restriccionesObjetivo || [];
@@ -19,7 +57,7 @@ function checkEligibility(employee, ctx, candidateType, distanceKm) {
             return { eligible: false, reason: 'RESTRICCION_CLIENTE' };
         }
     }
-    if ((candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT') &&
+    if ((candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT' || candidateType === 'ESC') &&
         distanceKm !== undefined) {
         if (distanceKm > 15) {
             return { eligible: false, reason: 'DISTANCIA_EXCEDE_15KM' };
@@ -53,6 +91,8 @@ function deriveCandidateType(employee, objectiveId, todayShifts) {
         const code = String(shift.code || '').toUpperCase();
         if (code === 'RET')
             return 'RET';
+        if (code === 'ESC' || code === 'REF')
+            return 'ESC';
         if (['F', 'FF', 'FP', 'FT'].includes(code))
             return 'FT';
         return null;
@@ -65,21 +105,6 @@ function deriveCandidateType(employee, objectiveId, todayShifts) {
     if (isTitular || hasExp)
         return 'SIN_TURNO_CON_EXP';
     return 'SIN_TURNO';
-}
-exports.CASCADE_ORDER = [
-    'RET',
-    'ADVANCE',
-    'VOLANTE',
-    'SIN_TURNO_CON_EXP',
-    'EXTEND',
-    'SIN_TURNO',
-    'FT',
-];
-function nextCascadeStep(current) {
-    const idx = exports.CASCADE_ORDER.indexOf(current);
-    if (idx === -1 || idx >= exports.CASCADE_ORDER.length - 1)
-        return null;
-    return exports.CASCADE_ORDER[idx + 1];
 }
 function getUrgency(startTime) {
     const startMs = startTime instanceof firestore_1.Timestamp

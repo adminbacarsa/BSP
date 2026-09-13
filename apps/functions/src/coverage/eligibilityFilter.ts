@@ -1,14 +1,37 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 
+/**
+ * Tipos de convocatoria individuales (doc convocatorias_cobertura.type).
+ * EXTEND/ADVANCE son mitades del paso dual EXT_DUAL.
+ * VOLANTE / SIN_TURNO_CON_EXP son subtipos del paso SIN_TURNO (misma cola).
+ */
 export type CandidateType =
-  | 'RET'                // RET pasivo en objetivo (obligación)
-  | 'VOLANTE'            // Comodín explícito sin turno hoy
-  | 'SIN_TURNO_CON_EXP' // Sin turno, con experiencia en objetivo
-  | 'EXTEND'             // Extender jornada actual (8h → D12/N12)
-  | 'ADVANCE'            // Adelantar próximo turno de rotación
-  | 'SIN_TURNO'          // Sin turno, sin experiencia (pool frío)
-  | 'FT';                // Franco trabajado (broadcast múltiple, último recurso)
+  | 'SIN_TURNO'
+  | 'VOLANTE'
+  | 'SIN_TURNO_CON_EXP'
+  | 'RET'
+  | 'ESC' // ESC / REF redirigibles
+  | 'EXTEND'
+  | 'ADVANCE'
+  | 'FT';
+
+/**
+ * Escalera CCT = protocolo manual (CoverageSessionManager.STEPS).
+ * Auto y manual comparten este orden; auto notifica en paralelo y gana el 1º que acepta.
+ */
+export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'EXT_DUAL' | 'FT';
+
+export const CASCADE_ORDER: CascadeStepType[] = [
+  'SIN_TURNO',
+  'RET',
+  'ESC',
+  'EXT_DUAL',
+  'FT',
+];
+
+/** Máx. candidatos notificados en paralelo por paso (o por mitad EXT/ADV). */
+export const BROADCAST_LIMIT = 5;
 
 export interface EligibilityContext {
   objectiveId: string;
@@ -27,6 +50,29 @@ interface AptitudEntry {
   vigencia?: string; // YYYY-MM-DD
 }
 
+export function toCascadeStep(type: string): CascadeStepType | null {
+  if (type === 'VOLANTE' || type === 'SIN_TURNO_CON_EXP' || type === 'SIN_TURNO') return 'SIN_TURNO';
+  if (type === 'RET') return 'RET';
+  if (type === 'ESC') return 'ESC';
+  if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL') return 'EXT_DUAL';
+  if (type === 'FT') return 'FT';
+  return null;
+}
+
+export function cascadeStepIndex(type: string): number {
+  const step = toCascadeStep(type);
+  if (!step) return -1;
+  return CASCADE_ORDER.indexOf(step);
+}
+
+export function nextCascadeStep(current: CascadeStepType | CandidateType | string): CascadeStepType | null {
+  const step = toCascadeStep(String(current));
+  if (!step) return null;
+  const idx = CASCADE_ORDER.indexOf(step);
+  if (idx === -1 || idx >= CASCADE_ORDER.length - 1) return null;
+  return CASCADE_ORDER[idx + 1];
+}
+
 export function checkEligibility(
   employee: Record<string, any>,
   ctx: EligibilityContext,
@@ -35,13 +81,11 @@ export function checkEligibility(
 ): EligibilityResult {
   const today = new Date().toISOString().slice(0, 10);
 
-  // 1. Restricciones de objetivo
   const restricObjs: { objectiveId?: string }[] = employee.restriccionesObjetivo || [];
   if (restricObjs.some((r) => r.objectiveId === ctx.objectiveId)) {
     return { eligible: false, reason: 'RESTRICCION_OBJETIVO' };
   }
 
-  // 2. Restricciones de cliente
   if (ctx.clientId) {
     const restricClients: { clientId?: string }[] = employee.restriccionesCliente || [];
     if (restricClients.some((r) => r.clientId === ctx.clientId)) {
@@ -49,9 +93,8 @@ export function checkEligibility(
     }
   }
 
-  // 3. Filtro de distancia (RET, VOLANTE y FT: máx 15 km)
   if (
-    (candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT') &&
+    (candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT' || candidateType === 'ESC') &&
     distanceKm !== undefined
   ) {
     if (distanceKm > 15) {
@@ -59,7 +102,6 @@ export function checkEligibility(
     }
   }
 
-  // 4. Conocimiento del objetivo — obligatorio para RET
   if (candidateType === 'RET') {
     const isTitular = employee.preferredObjectiveId === ctx.objectiveId;
     const hasExp = !!(employee.experienciaObjetivos || {})[ctx.objectiveId];
@@ -69,7 +111,6 @@ export function checkEligibility(
     }
   }
 
-  // 5. Aptitudes vigentes
   const required: string[] = ctx.aptitudesRequeridas || [];
   if (required.length > 0) {
     const empApts: AptitudEntry[] = employee.aptitudes || [];
@@ -95,32 +136,16 @@ export function deriveCandidateType(
   if (shift) {
     const code = String(shift.code || '').toUpperCase();
     if (code === 'RET') return 'RET';
+    if (code === 'ESC' || code === 'REF') return 'ESC';
     if (['F', 'FF', 'FP', 'FT'].includes(code)) return 'FT';
-    return null; // ya tiene turno activo, no disponible
+    return null;
   }
-  // Sin turno hoy
   const isVolante = (employee.volante || []).includes(objectiveId);
   if (isVolante) return 'VOLANTE';
   const isTitular = employee.preferredObjectiveId === objectiveId;
   const hasExp = !!(employee.experienciaObjetivos || {})[objectiveId];
   if (isTitular || hasExp) return 'SIN_TURNO_CON_EXP';
   return 'SIN_TURNO';
-}
-
-export const CASCADE_ORDER: CandidateType[] = [
-  'RET',
-  'ADVANCE',
-  'VOLANTE',
-  'SIN_TURNO_CON_EXP',
-  'EXTEND',
-  'SIN_TURNO',
-  'FT',
-];
-
-export function nextCascadeStep(current: CandidateType): CandidateType | null {
-  const idx = CASCADE_ORDER.indexOf(current);
-  if (idx === -1 || idx >= CASCADE_ORDER.length - 1) return null;
-  return CASCADE_ORDER[idx + 1];
 }
 
 export function getUrgency(
@@ -144,6 +169,5 @@ export async function findEmployeeUid(
   const data = empData || (await db.collection('empleados').doc(employeeId).get()).data();
   if (!data) return null;
   if (data.uid) return String(data.uid);
-  // Buscar por legajo como uid directo en Auth
   return null;
 }
