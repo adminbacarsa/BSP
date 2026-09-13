@@ -771,79 +771,137 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     if (!slot) return;
     setLoading('confirm_' + role);
     try {
-      const batch = writeBatch(db);
-      const isRealVacant = absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
+      const isRealVacant = !!(
+        absenceShift.id
+        && !absenceShift.isVirtual
+        && !String(absenceShift.id).startsWith('V124_')
+        && !String(absenceShift.id).startsWith('SLA_GAP')
+      );
+      const isRealShiftDoc = (sh: any, empId: string) =>
+        !!(sh && sh.id && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP') && sh.id !== empId);
+
       if (role === 'ext') {
         const sh = candidatesExt.find((x: any) => x.employeeId === slot.empId);
-        const isRealExt = sh && sh.id && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP') && sh.id !== slot.empId;
-        // endTime real = fin de la ausencia: la app móvil y el cronograma leen endTime
-        if (isRealExt) batch.update(doc(db, 'turnos', sh.id), {
-          isRetention: true,
-          isExtended: true,
-          retentionEndTime: Timestamp.fromDate(absenceEnd),
-          endTime: Timestamp.fromDate(absenceEnd),
-        });
-        await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención EXT', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: isRealExt ? sh.id : null, description: `${sh?.employeeName} retenido — 1ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+        const isRealExt = isRealShiftDoc(sh, slot.empId);
+        if (isRealExt) {
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'turnos', sh.id), {
+            isRetention: true,
+            isExtended: true,
+            retentionEndTime: Timestamp.fromDate(absenceEnd),
+            endTime: Timestamp.fromDate(absenceEnd),
+          });
+          await batch.commit();
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'RETENCION', title: 'Retención EXT', status: 'pending',
+          employeeId: slot.empId, employeeName: sh?.employeeName || '',
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          shiftId: isRealExt ? sh.id : null,
+          description: `${sh?.employeeName} retenido — 1ª mitad`,
+          createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+        }, tid));
         const newConfirmedExt = slot.empId;
         if (s.confirmedAdv) {
-          // Ambos confirmados: escribir coveredBy en el turno ausente con formato "EXT HH:MM-HH:MM + ADV HH:MM-HH:MM"
           const advSh = candidatesAdv.find((x: any) => x.employeeId === s.confirmedAdv);
           const extName = (sh?.employeeName || '').split(' ')[0];
           const advName = (advSh?.employeeName || '').split(' ')[0];
-          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
-          const advLabel = `${advName} adel ${fmtTime(advSh?.shiftDateObj)}–${hiEnd}`;
-          const covLabel = `${extLabel} + ${advLabel}`;
-          if (isRealVacant) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
-          if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
-            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
-              operacionallyCovered: true,
-              resolvedBy: 'OPERACIONES',
+          const covLabel = `${extName} ext ${hiStart}–${hiEnd} + ${advName} adel ${fmtTime(advSh?.shiftDateObj)}–${hiEnd}`;
+          const batch2 = writeBatch(db);
+          const coverageEventId = newCoverageEventId();
+          const titular = resolveTitularFromAbsenceOrVacancy(absenceShift);
+          applyCoverageLedgerToBatch(batch2, {
+            vacancyShiftId: isRealVacant ? absenceShift.id : null,
+            titularShiftId: titular.titularShiftId,
+            covererShiftId: isRealExt ? sh.id : null,
+            covererEmployeeId: slot.empId,
+            covererEmployeeName: sh?.employeeName || covLabel,
+            titularEmployeeId: titular.titularEmployeeId,
+            titularEmployeeName: titular.titularEmployeeName || absenceShift.causedByEmployeeName,
+            coverageType: 'RETENCION',
+            titularIsAbsence: true,
+            resolvedBy: 'OPERACIONES',
+            coverageEventId,
+          });
+          if (isRealVacant) {
+            batch2.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel });
+          }
+          if (isRealShiftDoc(advSh, s.confirmedAdv!)) {
+            batch2.update(doc(db, 'turnos', advSh.id), {
+              coverageEventId,
+              coversAbsenceEmployeeName: titular.titularEmployeeName || absenceShift.causedByEmployeeName || null,
               coverageType: 'RETENCION',
-              coveredAt: serverTimestamp(),
-              coveredByEmployeeName: covLabel,
+              resolvedBy: 'OPERACIONES',
             });
           }
-          await batch.commit();
+          await batch2.commit();
           toast.success('Cobertura completa');
           onUpd({ status: 'CONFIRMED', confirmedExt: newConfirmedExt, pendingExt: null });
           setTimeout(onClose, 2000);
-        } else onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
+        } else {
+          onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
+        }
       } else {
         const sh = candidatesAdv.find((x: any) => x.employeeId === slot.empId);
-        const isRealAdv = sh && sh.id && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP') && sh.id !== slot.empId;
-        // Hora real de adelanto = inicio del turno ausente (no la hora de confirmación del operador)
+        const isRealAdv = isRealShiftDoc(sh, slot.empId);
         const vacancyStart = Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
-        if (isRealAdv) batch.update(doc(db, 'turnos', sh.id), {
-          adjustedStartTime: vacancyStart,
-          startTime: vacancyStart,
-          isEarlyStart: true,
-        });
-        await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto ADV', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: isRealAdv ? sh.id : null, description: `${sh?.employeeName} adelantado — 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+        if (isRealAdv) {
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'turnos', sh.id), {
+            adjustedStartTime: vacancyStart,
+            startTime: vacancyStart,
+            isEarlyStart: true,
+          });
+          await batch.commit();
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'ADELANTO_TURNO', title: 'Adelanto ADV', status: 'pending',
+          employeeId: slot.empId, employeeName: sh?.employeeName || '',
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          shiftId: isRealAdv ? sh.id : null,
+          description: `${sh?.employeeName} adelantado — 2ª mitad`,
+          createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+        }, tid));
         const newConfirmedAdv = slot.empId;
         if (s.confirmedExt) {
           const extSh = candidatesExt.find((x: any) => x.employeeId === s.confirmedExt);
           const extName = (extSh?.employeeName || '').split(' ')[0];
           const advName = (sh?.employeeName || '').split(' ')[0];
-          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
-          const advLabel = `${advName} adel ${fmtTime(sh?.shiftDateObj)}–${hiEnd}`;
-          const covLabel = `${extLabel} + ${advLabel}`;
-          if (isRealVacant) batch.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel, resolvedBy: 'OPERACIONES', coverageType: 'RETENCION', coveredAt: serverTimestamp() });
-          if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
-            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
-              operacionallyCovered: true,
-              resolvedBy: 'OPERACIONES',
+          const covLabel = `${extName} ext ${hiStart}–${hiEnd} + ${advName} adel ${fmtTime(sh?.shiftDateObj)}–${hiEnd}`;
+          const batch2 = writeBatch(db);
+          const coverageEventId = newCoverageEventId();
+          const titular = resolveTitularFromAbsenceOrVacancy(absenceShift);
+          applyCoverageLedgerToBatch(batch2, {
+            vacancyShiftId: isRealVacant ? absenceShift.id : null,
+            titularShiftId: titular.titularShiftId,
+            covererShiftId: isRealAdv ? sh.id : null,
+            covererEmployeeId: slot.empId,
+            covererEmployeeName: sh?.employeeName || covLabel,
+            titularEmployeeId: titular.titularEmployeeId,
+            titularEmployeeName: titular.titularEmployeeName || absenceShift.causedByEmployeeName,
+            coverageType: 'RETENCION',
+            titularIsAbsence: true,
+            resolvedBy: 'OPERACIONES',
+            coverageEventId,
+          });
+          if (isRealVacant) {
+            batch2.update(doc(db, 'turnos', absenceShift.id), { coveredByEmployeeName: covLabel });
+          }
+          if (isRealShiftDoc(extSh, s.confirmedExt!)) {
+            batch2.update(doc(db, 'turnos', extSh.id), {
+              coverageEventId,
+              coversAbsenceEmployeeName: titular.titularEmployeeName || absenceShift.causedByEmployeeName || null,
               coverageType: 'RETENCION',
-              coveredAt: serverTimestamp(),
-              coveredByEmployeeName: covLabel,
+              resolvedBy: 'OPERACIONES',
             });
           }
-          await batch.commit();
+          await batch2.commit();
           toast.success('Cobertura completa');
           onUpd({ status: 'CONFIRMED', confirmedAdv: newConfirmedAdv, pendingAdv: null });
           setTimeout(onClose, 2000);
-        } else onUpd({ confirmedAdv: newConfirmedAdv, pendingAdv: null });
+        } else {
+          onUpd({ confirmedAdv: newConfirmedAdv, pendingAdv: null });
+        }
       }
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }
