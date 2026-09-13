@@ -1,5 +1,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
+import { useOperacionesMonitorContext } from '@/context/operacionesMonitorContext';
 import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
@@ -393,6 +394,14 @@ const getPositionCapacity = (servicesSLA: any[], objectiveId: string, positionNa
     return Math.max(1, Number(pos?.quantity) || 1);
 };
 
+const EMPTY_PROCESSED_DATA: any[] = [];
+
+const foldSearch = (value: unknown) => String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
 const countPresentOnSlot = (
     shifts: any[],
     objectiveId: string,
@@ -406,7 +415,26 @@ const countPresentOnSlot = (
     checkSlotCoverage(slotStart, slotEnd, [s]),
 ).length;
 
-export const useOperacionesMonitor = (forcedClientId?: string | null) => {
+export type OperacionesMonitorViewTab =
+    | 'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS';
+
+export type OperacionesMonitorShared = {
+    processedData: any[];
+    publishStatusMap: Record<string, boolean>;
+    recentLogs: any[];
+    isReady: boolean;
+    isStable: boolean;
+    handleAction: (action: string, shiftId: string, payload?: any) => Promise<void>;
+    uniqueClients: { id: string; name: string }[];
+    employees: any[];
+    servicesSLA: any[];
+    rawShifts: any[];
+    objectives: any[];
+    now: Date;
+};
+
+/** Suscripciones Firestore + procesamiento + automatismos (una instancia por provider). */
+export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolean } = {}): OperacionesMonitorShared {
     const [now, setNow] = useState(new Date());
     const [rawShifts, setRawShifts] = useState<any[]>([]);
     // RFZ/TURA se guardan con startTime/endTime como string ISO (no Timestamp), por lo que el
@@ -417,10 +445,6 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const [objectives, setObjectives] = useState<any[]>([]);
     const [servicesSLA, setServicesSLA] = useState<any[]>([]);
     const [recentLogs, setRecentLogs] = useState<any[]>([]);
-    const [viewTab, setViewTab] = useState<'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS'>('PRIORIDAD');
-    const [selectedClientId, setSelectedClientId] = useState<string>(forcedClientId || '');
-    const [filterText, setFilterText] = useState('');
-    const [isCompact, setIsCompact] = useState(false);
     const [operatorInfo, setOperatorInfo] = useState<{ name: string; startTime: Date | null }>({ name: 'Operador', startTime: null });
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
     // isReady: true cuando los 3 listeners críticos (turnos, empleados, objetivos) recibieron su primer snapshot
@@ -443,6 +467,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     // y el onError del listener de turnos ya llama setRefreshKey ante fallos de red.
     const [refreshKey, setRefreshKey] = useState(0);
     useEffect(() => {
+        if (!enabled) return;
         const bump = () => setRefreshKey(k => k + 1);
         const onVisible = () => { if (document.visibilityState === 'visible') bump(); };
         document.addEventListener('visibilitychange', onVisible);
@@ -451,13 +476,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             document.removeEventListener('visibilitychange', onVisible);
             window.removeEventListener('online', bump);
         };
-    }, []);
+    }, [enabled]);
 
-    useEffect(() => { setNow(new Date()); const t = setInterval(() => setNow(new Date()), 30000); return () => clearInterval(t); }, []);
+    useEffect(() => {
+        if (!enabled) return;
+        setNow(new Date());
+        const t = setInterval(() => setNow(new Date()), 30000);
+        return () => clearInterval(t);
+    }, [enabled]);
 
     // SUSCRIPCIONES
     useEffect(() => {
-        if (!empresaId || empresa === null) return; // esperar a que cargue el doc de empresa (migracionCompleta puede cambiar)
+        if (!enabled || !empresaId || empresa === null) return; // esperar a que cargue el doc de empresa (migracionCompleta puede cambiar)
         const auth = getAuth();
         if (auth.currentUser) setOperatorInfo({ name: auth.currentUser.email?.split('@')[0] || 'Op', startTime: new Date() });
         const unsubs: Function[] = [];
@@ -528,10 +558,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 }), 200));
         }));
         return () => { unsubs.forEach(u => u()); };
-    }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
+    }, [enabled, empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
 
     useEffect(() => {
-        if (!empresaId || empresa === null) return; // esperar a que cargue el doc de empresa
+        if (!enabled || !empresaId || empresa === null) return; // esperar a que cargue el doc de empresa
         const start = new Date(); start.setDate(start.getDate() - 1); start.setHours(12,0,0,0); // ayer al mediodía — cubre turnos nocturnos que arrancan a las 22-23hs
         const end = new Date(); end.setDate(end.getDate() + 1); end.setHours(23,59,59,999);   // mañana al final — cubre planificación del día siguiente
         const turnosBase = query(
@@ -572,7 +602,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return () => { unsub(); unsubRfz(); };
-    }, [empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
+    }, [enabled, empresaId, empresa, migracionCompleta, scopeEmpresa, refreshKey]);
 
     // Unifica turnos regulares (Timestamp) + refuerzos RFZ/TURA (string ISO). Dedup por id.
     const mergedRawShifts = useMemo(() => {
@@ -585,13 +615,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
-    const foldSearch = (value: unknown) => String(value ?? '')
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '');
 
     const processedData = useMemo(() => {
+        if (!enabled) return EMPTY_PROCESSED_DATA;
         const currentTime = new Date(now.getTime());
         const yearMonth = `${now.getFullYear()}_${now.getMonth() + 1}`;
         const empMap = new Map(); employees.forEach(e => empMap.set(e.id, e.fullName));
@@ -1292,89 +1318,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return [...dedupedVisibleReals, ...dedupedVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
+    }, [enabled, mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
-    const filteredObjectives = useMemo(() => {
-        let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
-        const q = foldSearch(filterText);
-        if (!q) return list;
-        const idsFromShifts = new Set(
-            processedData
-                .filter((s: any) =>
-                    foldSearch(s.objectiveName).includes(q) ||
-                    foldSearch(s.positionName).includes(q) ||
-                    foldSearch(s.employeeName).includes(q)
-                )
-                .flatMap((s: any) => [String(s.objectiveId || ''), String(s.objectiveName || '')])
-        );
-        return list.filter((o: any) => {
-            const id = String(o.id || o.objectiveId || '');
-            return foldSearch(o.name).includes(q) ||
-                foldSearch(o.nombre).includes(q) ||
-                foldSearch(o.objectiveName).includes(q) ||
-                foldSearch(o.address).includes(q) ||
-                foldSearch(o.direccion).includes(q) ||
-                idsFromShifts.has(id) ||
-                idsFromShifts.has(String(o.name || ''));
-        });
-    }, [objectives, selectedClientId, filterText, processedData]);
-
-    // ... Resto del hook igual ...
-    const listData = useMemo(() => {
-        const vy = now.getFullYear();
-        const vm = now.getMonth() + 1;
-        const isVisible = (s: any) => {
-            if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
-        };
-        let list = processedData.filter(isVisible);
-        if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
-        if (filterText) {
-            const q = foldSearch(filterText);
-            list = list.filter((s: any) =>
-                foldSearch(s.employeeName).includes(q) ||
-                foldSearch(s.clientName).includes(q) ||
-                foldSearch(s.objectiveName).includes(q) ||
-                foldSearch(s.positionName).includes(q)
-            );
-        }
-        const hoy = list.filter((s: any) => isOpsShiftHoy(s, now));
-        return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
-    }, [processedData, viewTab, filterText, selectedClientId, now, publishStatusMap]);
-
-    /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
-    const mapTabObjectives = useMemo(() => {
-        const ids = new Set(
-            listData.map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
-        );
-        return filteredObjectives.filter((o: any) =>
-            ids.has(String(o.id ?? o.objectiveId ?? '').trim()),
-        );
-    }, [listData, filteredObjectives]);
-
-    const stats = useMemo(() => {
-        const sy = now.getFullYear();
-        const sm = now.getMonth() + 1;
-        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
-            if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
-        });
-        return {
-            prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
-            no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,
-            plan: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PLAN')).length,
-            activos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'ACTIVOS')).length,
-            retenidos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'RETENIDOS')).length,
-            vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
-            devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
-            ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
-            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
-            rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
-            rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
-            total: hoy.length,
-        };
-    }, [processedData, now, publishStatusMap]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
+        if (!enabled) return;
         try {
             if (action === 'CHECKOUT') {
                 const shift = processedData.find((s: any) => s.id === shiftId);
@@ -1425,6 +1372,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const alertedVacancyIds = useRef<Set<string>>(new Set());
     const autoAbsentedIds = useRef<Set<string>>(new Set());
     useEffect(() => {
+        if (!enabled) return;
         const virtualVacs = processedData.filter((s: any) => s.isVirtual && isSameDay(s.shiftDateObj, now));
         if (!virtualVacs.length) return;
         const nowMs = now.getTime();
@@ -1764,32 +1712,32 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 })
                 .catch(e => console.warn('[retentionLarga:check]', e));
         }
-    }, [processedData, empresaId]);
+    }, [enabled, processedData, empresaId, now, servicesSLA]);
 
     // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
     // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.
     useEffect(() => {
-        if (!isReady) return;
+        if (!enabled || !isReady) return;
         if (stableTimerRef.current) clearTimeout(stableTimerRef.current);
         stableTimerRef.current = setTimeout(() => setIsStable(true), 700);
         return () => { if (stableTimerRef.current) clearTimeout(stableTimerRef.current); };
-    }, [processedData, isReady]);
+    }, [enabled, processedData, isReady]);
 
     // Fallback: fuerza isStable(true) si despues de 3 seg el monitor no se inicio.
     useEffect(() => {
+        if (!enabled) return;
         const t = setTimeout(() => setIsStable(true), 3000);
         return () => clearTimeout(t);
-    }, []);
+    }, [enabled]);
 
     return {
-        processedData, publishStatusMap,
-        recentLogs, isReady, isStable,
-        filterText, setFilterText, isCompact, setIsCompact,
+        processedData,
+        publishStatusMap,
+        recentLogs,
+        isReady,
+        isStable,
         handleAction,
-        viewTab, setViewTab,
-        stats, listData, mapTabObjectives,
-        uniqueClients, selectedClientId, setSelectedClientId,
-        filteredObjectives,
+        uniqueClients,
         employees,
         servicesSLA,
         rawShifts: mergedRawShifts,
@@ -1797,4 +1745,123 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         now,
     };
 }
-            
+
+function useOperacionesMonitorDerived(
+    shared: OperacionesMonitorShared,
+    forcedClientId?: string | null,
+) {
+    const [viewTab, setViewTab] = useState<OperacionesMonitorViewTab>('PRIORIDAD');
+    const [selectedClientId, setSelectedClientId] = useState<string>(forcedClientId || '');
+    const [filterText, setFilterText] = useState('');
+    const [isCompact, setIsCompact] = useState(false);
+
+    const {
+        processedData,
+        publishStatusMap,
+        objectives,
+        now,
+    } = shared;
+
+    const filteredObjectives = useMemo(() => {
+        let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
+        const q = foldSearch(filterText);
+        if (!q) return list;
+        const idsFromShifts = new Set(
+            processedData
+                .filter((s: any) =>
+                    foldSearch(s.objectiveName).includes(q) ||
+                    foldSearch(s.positionName).includes(q) ||
+                    foldSearch(s.employeeName).includes(q)
+                )
+                .flatMap((s: any) => [String(s.objectiveId || ''), String(s.objectiveName || '')])
+        );
+        return list.filter((o: any) => {
+            const id = String(o.id || o.objectiveId || '');
+            return foldSearch(o.name).includes(q) ||
+                foldSearch(o.nombre).includes(q) ||
+                foldSearch(o.objectiveName).includes(q) ||
+                foldSearch(o.address).includes(q) ||
+                foldSearch(o.direccion).includes(q) ||
+                idsFromShifts.has(id) ||
+                idsFromShifts.has(String(o.name || ''));
+        });
+    }, [objectives, selectedClientId, filterText, processedData]);
+
+    const listData = useMemo(() => {
+        const vy = now.getFullYear();
+        const vm = now.getMonth() + 1;
+        const isVisible = (s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        };
+        let list = processedData.filter(isVisible);
+        if (selectedClientId) list = list.filter((s: any) => s.clientId === selectedClientId);
+        if (filterText) {
+            const q = foldSearch(filterText);
+            list = list.filter((s: any) =>
+                foldSearch(s.employeeName).includes(q) ||
+                foldSearch(s.clientName).includes(q) ||
+                foldSearch(s.objectiveName).includes(q) ||
+                foldSearch(s.positionName).includes(q)
+            );
+        }
+        const hoy = list.filter((s: any) => isOpsShiftHoy(s, now));
+        return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
+    }, [processedData, viewTab, filterText, selectedClientId, now, publishStatusMap]);
+
+    const mapTabObjectives = useMemo(() => {
+        const ids = new Set(
+            listData.map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
+        );
+        return filteredObjectives.filter((o: any) =>
+            ids.has(String(o.id ?? o.objectiveId ?? '').trim()),
+        );
+    }, [listData, filteredObjectives]);
+
+    const stats = useMemo(() => {
+        const sy = now.getFullYear();
+        const sm = now.getMonth() + 1;
+        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        });
+        return {
+            prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
+            no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,
+            plan: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PLAN')).length,
+            activos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'ACTIVOS')).length,
+            retenidos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'RETENIDOS')).length,
+            vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
+            devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
+            ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
+            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
+            rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
+            rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
+            total: hoy.length,
+        };
+    }, [processedData, now, publishStatusMap]);
+
+    return {
+        ...shared,
+        filterText,
+        setFilterText,
+        isCompact,
+        setIsCompact,
+        viewTab,
+        setViewTab,
+        stats,
+        listData,
+        mapTabObjectives,
+        selectedClientId,
+        setSelectedClientId,
+        filteredObjectives,
+    };
+}
+
+/** Monitor operativo: usa el provider compartido en /admin/operaciones o instancia local fuera de él. */
+export const useOperacionesMonitor = (forcedClientId?: string | null) => {
+    const fromProvider = useOperacionesMonitorContext();
+    const ownedCore = useOperacionesMonitorCore({ enabled: fromProvider === null });
+    const shared = fromProvider ?? ownedCore;
+    return useOperacionesMonitorDerived(shared, forcedClientId);
+};
