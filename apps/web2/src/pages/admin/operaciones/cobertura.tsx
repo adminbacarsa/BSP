@@ -22,8 +22,6 @@ import {
   where,
 } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { format, parseISO } from 'date-fns';
-import { es } from 'date-fns/locale';
 import {
   ArrowLeft,
   ChevronDown,
@@ -294,7 +292,14 @@ export default function CoberturaAuditPage() {
 
   const dateLabel = (() => {
     try {
-      return format(parseISO(dateStr), "EEEE d 'de' MMMM yyyy", { locale: es });
+      const [y, m, d] = dateStr.split('-').map(Number);
+      if (!y || !m || !d) return dateStr;
+      return new Date(y, m - 1, d).toLocaleDateString('es-AR', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      });
     } catch {
       return dateStr;
     }
