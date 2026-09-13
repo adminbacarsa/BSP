@@ -10,6 +10,12 @@ import {
   getUrgency,
   findEmployeeUid,
 } from './eligibilityFilter';
+import {
+  applyCoverageLedgerToBatch,
+  covererLedgerFields,
+  newCoverageEventId,
+  resolveTitularFromAbsenceOrVacancy,
+} from './coverageLedger';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -511,10 +517,27 @@ async function resolverCobertura(
 ): Promise<void> {
   const batch = db.batch();
 
-  // Trazabilidad: quién/qué resolvió la cobertura
   const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
                    : conv.createdBy === 'AUTO' ? 'AUTO'
                    : 'OPERACIONES';
+
+  // Cargar vacante/slot para anclar titular (causedByShiftId)
+  const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
+  const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
+  const titular = resolveTitularFromAbsenceOrVacancy(vacantData);
+  const coverageEventId = newCoverageEventId();
+  const ledgerBase = {
+    covererEmployeeId: conv.candidateEmployeeId,
+    covererEmployeeName: conv.candidateEmployeeName,
+    titularEmployeeId: titular.titularEmployeeId,
+    titularEmployeeName: titular.titularEmployeeName,
+    titularShiftId: titular.titularShiftId,
+    titularIsAbsence: true,
+    resolvedBy,
+    coverageEventId,
+    vacancyExtra: { coverageConvocatoriaId: conv.id, coverageResolvedAt: FieldValue.serverTimestamp() },
+    covererExtra: { coverageConvocatoriaId: conv.id, assignedByConvocatoria: conv.id },
+  };
 
   if (conv.type === 'EXTEND' && conv.extendShiftId) {
     const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
@@ -526,38 +549,57 @@ async function resolverCobertura(
       extendedAt: FieldValue.serverTimestamp(),
       resolvedBy,
     });
-    batch.update(db.collection('turnos').doc(conv.shiftId), {
-      coveredByEmployeeId: conv.candidateEmployeeId,
-      coveredByEmployeeName: conv.candidateEmployeeName,
+    applyCoverageLedgerToBatch(batch, db, {
+      ...ledgerBase,
+      vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+      covererShiftId: conv.extendShiftId,
       coverageType: 'EXTEND',
-      coverageResolvedAt: FieldValue.serverTimestamp(),
-      coverageConvocatoriaId: conv.id,
+      markVacancyCovered: true,
     });
   } else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
     const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
     batch.update(nextRef, {
       startTime: conv.startTime,
       isAdvanced: true,
+      isEarlyStart: true,
       advancedBy: 'CONVOCATORIA',
       advancedAt: FieldValue.serverTimestamp(),
       resolvedBy,
     });
-    batch.update(db.collection('turnos').doc(conv.shiftId), {
-      coveredByEmployeeId: conv.candidateEmployeeId,
-      coveredByEmployeeName: conv.candidateEmployeeName,
+    applyCoverageLedgerToBatch(batch, db, {
+      ...ledgerBase,
+      vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+      covererShiftId: conv.advanceShiftId,
       coverageType: 'ADVANCE',
-      coverageResolvedAt: FieldValue.serverTimestamp(),
-      coverageConvocatoriaId: conv.id,
+      markVacancyCovered: true,
     });
   } else if (conv.type === 'RET') {
+    // Reescribe vacante → turno cubridor; no marcar COVERED sobre el mismo doc
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
     batch.update(vacantRef, {
       employeeId: conv.candidateEmployeeId,
       employeeName: conv.candidateEmployeeName,
       origin: 'OPERATIONS_COVERAGE',
-      resolvedBy,
+      isUnassigned: false,
       isRetentionActivated: true,
       retentionActivatedAt: FieldValue.serverTimestamp(),
+      ...covererLedgerFields({
+        ...ledgerBase,
+        coverageEventId,
+        vacancyShiftId: null,
+        coverageType: 'RET',
+        causedByShiftIdPreserve: titular.titularShiftId,
+        covererExtra: {
+          ...ledgerBase.covererExtra,
+          isRetentionActivated: true,
+        },
+      }),
+    });
+    applyCoverageLedgerToBatch(batch, db, {
+      ...ledgerBase,
+      vacancyShiftId: null,
+      covererShiftId: null,
+      coverageType: 'RET',
     });
   } else if (conv.type === 'FT') {
     if (conv.ftShiftId) {
@@ -572,21 +614,39 @@ async function resolverCobertura(
         realEndTime: conv.endTime || null,
         resolvedBy,
         coveredShiftId: conv.shiftId,
-        assignedByConvocatoria: conv.id,
         assignedAt: FieldValue.serverTimestamp(),
+      });
+      applyCoverageLedgerToBatch(batch, db, {
+        ...ledgerBase,
+        vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+        covererShiftId: conv.ftShiftId,
+        coverageType: 'FT',
+        markVacancyCovered: true,
       });
     }
   } else {
-    // VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP
+    // VOLANTE, SIN_TURNO, SIN_TURNO_CON_EXP — reescribe vacante como cubridor
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
     batch.update(vacantRef, {
       employeeId: conv.candidateEmployeeId,
       employeeName: conv.candidateEmployeeName,
       code: String(conv.shiftCode || 'M'),
       origin: 'OPERATIONS_COVERAGE',
-      resolvedBy,
-      assignedByConvocatoria: conv.id,
+      isUnassigned: false,
       assignedAt: FieldValue.serverTimestamp(),
+      ...covererLedgerFields({
+        ...ledgerBase,
+        coverageEventId,
+        vacancyShiftId: null,
+        coverageType: conv.type,
+        causedByShiftIdPreserve: titular.titularShiftId,
+      }),
+    });
+    applyCoverageLedgerToBatch(batch, db, {
+      ...ledgerBase,
+      vacancyShiftId: null,
+      covererShiftId: null,
+      coverageType: conv.type,
     });
   }
 
@@ -617,6 +677,7 @@ async function resolverCobertura(
     objectiveName: conv.objectiveName || '',
     clientId: conv.clientId || null,
     empresaId: conv.empresaId,
+    coverageEventId,
     title: 'Cobertura resuelta',
     message: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
     description: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
@@ -625,6 +686,7 @@ async function resolverCobertura(
     candidateEmployeeName: conv.candidateEmployeeName,
     employeeId: conv.candidateEmployeeId,
     employeeName: conv.candidateEmployeeName,
+    coversAbsenceEmployeeName: titular.titularEmployeeName || null,
     status: 'unread',
     resolved: false,
     createdAt: FieldValue.serverTimestamp(),
