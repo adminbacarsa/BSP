@@ -47,9 +47,10 @@ service cloud.firestore {
       );
     }
 
-    function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.role == 'admin' ||
+    // Panel admin: rol explícito en JWT, doc system_users o type system.
+    // NO usar "cualquier no-empleado" — portal cliente/objetivo quedaría como admin.
+    function panelRoleFromToken() {
+      return request.auth.token.role == 'admin' ||
         request.auth.token.role == 'Admin' ||
         request.auth.token.role == 'ADMIN' ||
         request.auth.token.role == 'SuperAdmin' ||
@@ -65,11 +66,18 @@ service cloud.firestore {
         request.auth.token.role == 'Operator' ||
         request.auth.token.role == 'OPERATOR' ||
         request.auth.token.role == 'HR_Manager' ||
-        request.auth.token.role == 'HR_MANAGER' ||
-        isSystemUser() ||
-        isSystemUserDoc() ||
-        !isEmployeeClaim()
-      );
+        request.auth.token.role == 'HR_MANAGER';
+    }
+
+    function isAdmin() {
+      return request.auth != null &&
+        !isClientUser() &&
+        (
+          isSuperAdmin() ||
+          panelRoleFromToken() ||
+          isSystemUser() ||
+          isSystemUserDoc()
+        );
     }
 
     function isClientUser() {
