@@ -15,6 +15,7 @@ const migrate_job_runner_1 = require("./backup/migrate-job.runner");
 const empresa_migrate_service_1 = require("./backup/empresa-migrate.service");
 const backup_auth_util_1 = require("./backup/backup-auth.util");
 const panel_tenant_auth_util_1 = require("./auth/panel-tenant-auth.util");
+const cronLimits_1 = require("./ops/cronLimits");
 const main_1 = require("./main");
 const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
@@ -2052,8 +2053,10 @@ exports.sendTestNotification = functions.https.onCall(async (data, context) => {
 });
 exports.autoCompletarTurnos = functions
     .region('us-central1')
+    .runWith(cronLimits_1.CRON_V1_RUNTIME)
     .pubsub.schedule('every 5 minutes')
     .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await (0, centroControlGuard_1.loadCentroControlState)(db);
     if (!cc.anyEnabled) {
@@ -2067,14 +2070,49 @@ exports.autoCompletarTurnos = functions
     const snap = await db.collection('turnos')
         .where('status', '==', 'PRESENT')
         .where('endTime', '<=', cutoff)
+        .limit(cronLimits_1.CRON_QUERY_MAX_DOCS)
         .get();
     if (snap.empty)
         return null;
-    const completeBatch = db.batch();
-    const auditBatch = db.batch();
+    let completeBatch = db.batch();
+    let auditBatch = db.batch();
+    let completeOps = 0;
+    let auditOps = 0;
     let completed = 0;
     let alertedNoRelief = 0;
+    let processed = 0;
+    const flushCompleteBatch = async () => {
+        if (completeOps === 0)
+            return;
+        await completeBatch.commit();
+        completeBatch = db.batch();
+        completeOps = 0;
+    };
+    const flushAuditBatch = async () => {
+        if (auditOps === 0)
+            return;
+        await auditBatch.commit();
+        auditBatch = db.batch();
+        auditOps = 0;
+    };
+    const queueCompleteUpdate = async (ref, data) => {
+        completeBatch.update(ref, data);
+        completeOps++;
+        if (completeOps >= cronLimits_1.CRON_BATCH_WRITE_LIMIT)
+            await flushCompleteBatch();
+    };
+    const queueAuditSet = async (ref, data) => {
+        auditBatch.set(ref, data);
+        auditOps++;
+        if (auditOps >= cronLimits_1.CRON_BATCH_WRITE_LIMIT)
+            await flushAuditBatch();
+    };
     for (const docSnap of snap.docs) {
+        if ((0, cronLimits_1.cronShouldStop)(startedAt)) {
+            console.warn(`[autoCompletarTurnos] Wall-clock alcanzado tras ${processed} turnos`);
+            break;
+        }
+        processed++;
         const shift = docSnap.data();
         if (!cc.isEnabled(shift.empresaId))
             continue;
@@ -2095,7 +2133,7 @@ exports.autoCompletarTurnos = functions
                 if (minutesInRetention < 120)
                     continue;
             }
-            completeBatch.update(docSnap.ref, {
+            await queueCompleteUpdate(docSnap.ref, {
                 status: 'COMPLETED',
                 isCompleted: true,
                 isPresent: false,
@@ -2143,7 +2181,7 @@ exports.autoCompletarTurnos = functions
                 && data.status !== 'COVERED' && data.status !== 'COMPLETED';
         });
         if (relievePresent) {
-            completeBatch.update(docSnap.ref, {
+            await queueCompleteUpdate(docSnap.ref, {
                 status: 'COMPLETED',
                 isCompleted: true,
                 realEndTime: now,
@@ -2152,7 +2190,7 @@ exports.autoCompletarTurnos = functions
                 autoCloseReason: 'RELEVO_PRESENTE',
             });
             const logRef = db.collection('audit_logs').doc();
-            auditBatch.set(logRef, {
+            await queueAuditSet(logRef, {
                 action: 'AUTO_COMPLETE_SHIFT',
                 actorName: 'Sistema (Scheduler)',
                 actorUid: 'SYSTEM',
@@ -2165,7 +2203,7 @@ exports.autoCompletarTurnos = functions
         }
         else if (relievePending) {
             if (!shift.isRetention || !shift.autoRetentionAt) {
-                completeBatch.update(docSnap.ref, {
+                await queueCompleteUpdate(docSnap.ref, {
                     isRetention: true,
                     retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
                     autoRetentionAt: now,
@@ -2191,7 +2229,7 @@ exports.autoCompletarTurnos = functions
                 .limit(1).get();
             if (existingB.empty) {
                 const novRef = db.collection('novedades').doc();
-                auditBatch.set(novRef, {
+                await queueAuditSet(novRef, {
                     type: 'RETENCION_SIN_RELEVO',
                     status: 'PENDIENTE',
                     shiftId: docSnap.id,
@@ -2213,7 +2251,7 @@ exports.autoCompletarTurnos = functions
         else if (relieveAbsent || relieveVacant) {
             const absentOrVacLabel = relieveAbsent?.data()?.employeeName || relieveVacant?.data()?.causedByEmployeeName || 'puesto vacante';
             if (!shift.isRetention || !shift.autoRetentionAt) {
-                completeBatch.update(docSnap.ref, {
+                await queueCompleteUpdate(docSnap.ref, {
                     isRetention: true,
                     retentionReason: `RELEVO_AUSENTE: relevo no se presentó (${absentOrVacLabel})`,
                     autoRetentionAt: now,
@@ -2239,7 +2277,7 @@ exports.autoCompletarTurnos = functions
                 .limit(1).get();
             if (existing.empty) {
                 const novRef = db.collection('novedades').doc();
-                auditBatch.set(novRef, {
+                await queueAuditSet(novRef, {
                     type: 'RETENCION_SIN_RELEVO',
                     status: 'PENDIENTE',
                     shiftId: docSnap.id,
@@ -2277,7 +2315,7 @@ exports.autoCompletarTurnos = functions
             }
             if (requiresContinuousCoverage) {
                 if (!shift.isRetention || !shift.autoRetentionAt) {
-                    completeBatch.update(docSnap.ref, {
+                    await queueCompleteUpdate(docSnap.ref, {
                         isRetention: true,
                         retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
                         autoRetentionAt: now,
@@ -2303,7 +2341,7 @@ exports.autoCompletarTurnos = functions
                     .limit(1).get();
                 if (existingC.empty) {
                     const novRef = db.collection('novedades').doc();
-                    auditBatch.set(novRef, {
+                    await queueAuditSet(novRef, {
                         type: 'RETENCION_SIN_RELEVO',
                         status: 'PENDIENTE',
                         shiftId: docSnap.id,
@@ -2321,7 +2359,7 @@ exports.autoCompletarTurnos = functions
                 }
             }
             else {
-                completeBatch.update(docSnap.ref, {
+                await queueCompleteUpdate(docSnap.ref, {
                     status: 'COMPLETED',
                     isCompleted: true,
                     realEndTime: now,
@@ -2330,7 +2368,7 @@ exports.autoCompletarTurnos = functions
                     autoCloseReason: 'SIN_RELEVO_CUSTOM',
                 });
                 const logRef = db.collection('audit_logs').doc();
-                auditBatch.set(logRef, {
+                await queueAuditSet(logRef, {
                     action: 'AUTO_COMPLETE_SHIFT',
                     actorName: 'Sistema (Scheduler)',
                     actorUid: 'SYSTEM',
@@ -2343,9 +2381,9 @@ exports.autoCompletarTurnos = functions
             }
         }
     }
-    await completeBatch.commit();
-    await auditBatch.commit();
-    console.log(`[autoCompletarTurnos] Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
+    await flushCompleteBatch();
+    await flushAuditBatch();
+    console.log(`[autoCompletarTurnos] Procesados: ${processed}/${snap.size} | Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
     return null;
 });
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
@@ -2374,8 +2412,10 @@ async function getEmployeeTokens(db, employeeId) {
 }
 exports.detectarAusencias = functions
     .region('us-central1')
+    .runWith(cronLimits_1.CRON_V1_RUNTIME)
     .pubsub.schedule('every 5 minutes')
     .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await (0, centroControlGuard_1.loadCentroControlState)(db);
     if (!cc.anyEnabled) {
@@ -2389,8 +2429,15 @@ exports.detectarAusencias = functions
     const earlySnap = await db.collection('turnos')
         .where('startTime', '>=', earlyFrom)
         .where('startTime', '<=', earlyTo)
+        .limit(cronLimits_1.CRON_QUERY_MAX_DOCS)
         .get();
+    let earlyProcessed = 0;
     for (const earlyDoc of earlySnap.docs) {
+        if ((0, cronLimits_1.cronShouldStop)(startedAt)) {
+            console.warn(`[detectarAusencias] Wall-clock en bloque temprano tras ${earlyProcessed} turnos`);
+            break;
+        }
+        earlyProcessed++;
         const s = earlyDoc.data();
         if (!cc.isEnabled(s.empresaId))
             continue;
@@ -2473,12 +2520,19 @@ exports.detectarAusencias = functions
     const snap = await db.collection('turnos')
         .where('startTime', '>=', windowFrom)
         .where('startTime', '<=', windowTo)
+        .limit(cronLimits_1.CRON_QUERY_MAX_DOCS)
         .get();
     if (snap.empty)
         return null;
     let alerts = 0;
     let absents = 0;
+    let block2Processed = 0;
     for (const docSnap of snap.docs) {
+        if ((0, cronLimits_1.cronShouldStop)(startedAt)) {
+            console.warn(`[detectarAusencias] Wall-clock en bloque AA tras ${block2Processed} turnos`);
+            break;
+        }
+        block2Processed++;
         const shift = docSnap.data();
         if (!cc.isEnabled(shift.empresaId))
             continue;
@@ -2725,13 +2779,15 @@ exports.detectarAusencias = functions
             absents++;
         }
     }
-    console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
+    console.log(`[detectarAusencias] Bloque1: ${earlyProcessed}/${earlySnap.size} | Bloque2: ${block2Processed}/${snap.size} | Alertas: ${alerts} | Ausentes: ${absents}`);
     return null;
 });
 exports.gestionarVacantes = functions
     .region('us-central1')
+    .runWith(cronLimits_1.CRON_V1_RUNTIME)
     .pubsub.schedule('every 5 minutes')
     .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await (0, centroControlGuard_1.loadCentroControlState)(db);
     if (!cc.anyEnabled) {
@@ -2745,6 +2801,7 @@ exports.gestionarVacantes = functions
     const snap = await db.collection('turnos')
         .where('startTime', '>=', windowStart)
         .where('startTime', '<=', windowEnd)
+        .limit(cronLimits_1.CRON_QUERY_MAX_DOCS)
         .get();
     if (snap.empty)
         return null;
@@ -2780,7 +2837,13 @@ exports.gestionarVacantes = functions
     }
     let sentToPlanning = 0;
     let sentToProtocol = 0;
+    let vacantesProcessed = 0;
     for (const docSnap of snap.docs) {
+        if ((0, cronLimits_1.cronShouldStop)(startedAt)) {
+            console.warn(`[gestionarVacantes] Wall-clock alcanzado tras ${vacantesProcessed} vacantes`);
+            break;
+        }
+        vacantesProcessed++;
         const shift = docSnap.data();
         if (!cc.isEnabled(shift.empresaId))
             continue;
@@ -2944,7 +3007,7 @@ exports.gestionarVacantes = functions
             sentToPlanning++;
         }
     }
-    console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
+    console.log(`[gestionarVacantes] Procesados: ${vacantesProcessed}/${snap.size} | A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
     const GRACE_MINUTES = 60;
     const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
     const staleProtos = await db.collection('novedades')
@@ -3507,31 +3570,41 @@ exports.scheduledAutoInjustificada = functions
     const snap = await db.collection('ausencias')
         .where('startDate', '==', todayStr)
         .where('status', '==', 'Confirmada')
+        .limit(cronLimits_1.CRON_QUERY_MAX_DOCS)
         .get();
     if (snap.empty) {
         console.log('[autoInjustificada] Sin ausencias pendientes.');
         return null;
     }
-    const batch = db.batch();
+    let batch = db.batch();
+    let batchOps = 0;
     let count = 0;
-    snap.docs.forEach((doc) => {
+    for (const doc of snap.docs) {
         const data = doc.data();
         const absType = String(data.absenceType || data.type || '').toUpperCase();
         const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
         if (!isAA)
-            return;
+            continue;
         if (data.certificateUrl)
-            return;
+            continue;
         batch.update(doc.ref, {
             status: 'Injustificada',
             autoInjustificadaAt: now,
             reason: `${data.reason || 'No presentación'} — Auto-injustificada por sistema (sin certificado al 23:45)`,
         });
         count++;
-    });
-    if (count > 0) {
+        batchOps++;
+        if (batchOps >= cronLimits_1.CRON_BATCH_WRITE_LIMIT) {
+            await batch.commit();
+            batch = db.batch();
+            batchOps = 0;
+        }
+    }
+    if (batchOps > 0) {
         await batch.commit();
-        console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada.`);
+    }
+    if (count > 0) {
+        console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada (escaneadas ${snap.size}).`);
     }
     return null;
 });

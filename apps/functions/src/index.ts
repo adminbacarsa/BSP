@@ -23,6 +23,12 @@ import {
   isAdminBackupRole,
 } from './backup/backup-auth.util';
 import { assertPanelTenantCallable } from './auth/panel-tenant-auth.util';
+import {
+  CRON_V1_RUNTIME,
+  CRON_QUERY_MAX_DOCS,
+  CRON_BATCH_WRITE_LIMIT,
+  cronShouldStop,
+} from './ops/cronLimits';
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
 import { INestApplicationContext } from '@nestjs/common';
@@ -2491,8 +2497,10 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
 //   C) Turno sin relevo programado → cerrar directamente al vencimiento
 export const autoCompletarTurnos = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -2510,16 +2518,54 @@ export const autoCompletarTurnos = functions
     const snap = await db.collection('turnos')
       .where('status', '==', 'PRESENT')
       .where('endTime', '<=', cutoff)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
 
-    const completeBatch  = db.batch();
-    const auditBatch     = db.batch();
+    let completeBatch  = db.batch();
+    let auditBatch     = db.batch();
+    let completeOps = 0;
+    let auditOps = 0;
     let completed = 0;
     let alertedNoRelief = 0;
+    let processed = 0;
+
+    const flushCompleteBatch = async () => {
+      if (completeOps === 0) return;
+      await completeBatch.commit();
+      completeBatch = db.batch();
+      completeOps = 0;
+    };
+    const flushAuditBatch = async () => {
+      if (auditOps === 0) return;
+      await auditBatch.commit();
+      auditBatch = db.batch();
+      auditOps = 0;
+    };
+    const queueCompleteUpdate = async (
+      ref: FirebaseFirestore.DocumentReference,
+      data: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+    ) => {
+      completeBatch.update(ref, data);
+      completeOps++;
+      if (completeOps >= CRON_BATCH_WRITE_LIMIT) await flushCompleteBatch();
+    };
+    const queueAuditSet = async (
+      ref: FirebaseFirestore.DocumentReference,
+      data: FirebaseFirestore.WithFieldValue<FirebaseFirestore.DocumentData>,
+    ) => {
+      auditBatch.set(ref, data);
+      auditOps++;
+      if (auditOps >= CRON_BATCH_WRITE_LIMIT) await flushAuditBatch();
+    };
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[autoCompletarTurnos] Wall-clock alcanzado tras ${processed} turnos`);
+        break;
+      }
+      processed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
@@ -2542,7 +2588,7 @@ export const autoCompletarTurnos = functions
           if (minutesInRetention < 120) continue; // <2h → esperar más
         }
         // >2h de retención automática o >6h de retención manual → auto-cerrar
-        completeBatch.update(docSnap.ref, {
+        await queueCompleteUpdate(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
           isPresent: false,
@@ -2602,7 +2648,7 @@ export const autoCompletarTurnos = functions
 
       if (relievePresent) {
         // CASO A: El relevo ya está presente — safety net, cerrar el turno saliente
-        completeBatch.update(docSnap.ref, {
+        await queueCompleteUpdate(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
           realEndTime: now,
@@ -2611,7 +2657,7 @@ export const autoCompletarTurnos = functions
           autoCloseReason: 'RELEVO_PRESENTE',
         });
         const logRef = db.collection('audit_logs').doc();
-        auditBatch.set(logRef, {
+        await queueAuditSet(logRef, {
           action: 'AUTO_COMPLETE_SHIFT',
           actorName: 'Sistema (Scheduler)',
           actorUid: 'SYSTEM',
@@ -2626,7 +2672,7 @@ export const autoCompletarTurnos = functions
         // CASO B: Relevo programado pero no llegó → retener al guardia + push + novedad
         // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
         if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
+          await queueCompleteUpdate(docSnap.ref, {
             isRetention: true,
             retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
             autoRetentionAt: now,
@@ -2654,7 +2700,7 @@ export const autoCompletarTurnos = functions
           .limit(1).get();
         if (existingB.empty) {
           const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
+          await queueAuditSet(novRef, {
             type: 'RETENCION_SIN_RELEVO',
             status: 'PENDIENTE',
             shiftId: docSnap.id,
@@ -2678,7 +2724,7 @@ export const autoCompletarTurnos = functions
         // → Retención forzada + push + novedad
         const absentOrVacLabel = relieveAbsent?.data()?.employeeName || relieveVacant?.data()?.causedByEmployeeName || 'puesto vacante';
         if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
+          await queueCompleteUpdate(docSnap.ref, {
             isRetention: true,
             retentionReason: `RELEVO_AUSENTE: relevo no se presentó (${absentOrVacLabel})`,
             autoRetentionAt: now,
@@ -2705,7 +2751,7 @@ export const autoCompletarTurnos = functions
           .limit(1).get();
         if (existing.empty) {
           const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
+          await queueAuditSet(novRef, {
             type: 'RETENCION_SIN_RELEVO',
             status: 'PENDIENTE',
             shiftId: docSnap.id,
@@ -2749,7 +2795,7 @@ export const autoCompletarTurnos = functions
         if (requiresContinuousCoverage) {
           // CASO C2: Puesto 24HS sin relevo → retener al guardia + push
           if (!shift.isRetention || !shift.autoRetentionAt) {
-            completeBatch.update(docSnap.ref, {
+            await queueCompleteUpdate(docSnap.ref, {
               isRetention: true,
               retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
               autoRetentionAt: now,
@@ -2775,7 +2821,7 @@ export const autoCompletarTurnos = functions
             .limit(1).get();
           if (existingC.empty) {
             const novRef = db.collection('novedades').doc();
-            auditBatch.set(novRef, {
+            await queueAuditSet(novRef, {
               type: 'RETENCION_SIN_RELEVO',
               status: 'PENDIENTE',
               shiftId: docSnap.id,
@@ -2793,7 +2839,7 @@ export const autoCompletarTurnos = functions
           }
         } else {
           // CASO C: Puesto CUSTOM/parcial sin continuidad → cerrar turno automáticamente
-          completeBatch.update(docSnap.ref, {
+          await queueCompleteUpdate(docSnap.ref, {
             status: 'COMPLETED',
             isCompleted: true,
             realEndTime: now,
@@ -2802,7 +2848,7 @@ export const autoCompletarTurnos = functions
             autoCloseReason: 'SIN_RELEVO_CUSTOM',
           });
           const logRef = db.collection('audit_logs').doc();
-          auditBatch.set(logRef, {
+          await queueAuditSet(logRef, {
             action: 'AUTO_COMPLETE_SHIFT',
             actorName: 'Sistema (Scheduler)',
             actorUid: 'SYSTEM',
@@ -2816,9 +2862,9 @@ export const autoCompletarTurnos = functions
       }
     }
 
-    await completeBatch.commit();
-    await auditBatch.commit();
-    console.log(`[autoCompletarTurnos] Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
+    await flushCompleteBatch();
+    await flushAuditBatch();
+    console.log(`[autoCompletarTurnos] Procesados: ${processed}/${snap.size} | Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
     return null;
   });
 
@@ -2857,8 +2903,10 @@ async function getEmployeeTokens(db: admin.firestore.Firestore, employeeId: stri
 
 export const detectarAusencias = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -2877,9 +2925,16 @@ export const detectarAusencias = functions
     const earlySnap = await db.collection('turnos')
       .where('startTime', '>=', earlyFrom)
       .where('startTime', '<=', earlyTo)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
+    let earlyProcessed = 0;
     for (const earlyDoc of earlySnap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[detectarAusencias] Wall-clock en bloque temprano tras ${earlyProcessed} turnos`);
+        break;
+      }
+      earlyProcessed++;
       const s = earlyDoc.data();
       if (!cc.isEnabled(s.empresaId)) continue;
       if (cc.isDemo(s.empresaId)) continue; // Demo genera sus propios eventos
@@ -2965,14 +3020,21 @@ export const detectarAusencias = functions
     const snap = await db.collection('turnos')
       .where('startTime', '>=', windowFrom)
       .where('startTime', '<=', windowTo)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
 
     let alerts = 0;
     let absents = 0;
+    let block2Processed = 0;
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[detectarAusencias] Wall-clock en bloque AA tras ${block2Processed} turnos`);
+        break;
+      }
+      block2Processed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
@@ -3240,15 +3302,17 @@ export const detectarAusencias = functions
       }
     }
 
-    console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
+    console.log(`[detectarAusencias] Bloque1: ${earlyProcessed}/${earlySnap.size} | Bloque2: ${block2Processed}/${snap.size} | Alertas: ${alerts} | Ausentes: ${absents}`);
     return null;
   });
 
 // =========================================================
 export const gestionarVacantes = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -3266,6 +3330,7 @@ export const gestionarVacantes = functions
     const snap = await db.collection('turnos')
       .where('startTime', '>=', windowStart)
       .where('startTime', '<=', windowEnd)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
@@ -3302,8 +3367,14 @@ export const gestionarVacantes = functions
 
     let sentToPlanning = 0;
     let sentToProtocol = 0;
+    let vacantesProcessed = 0;
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[gestionarVacantes] Wall-clock alcanzado tras ${vacantesProcessed} vacantes`);
+        break;
+      }
+      vacantesProcessed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
@@ -3485,7 +3556,7 @@ export const gestionarVacantes = functions
       }
     }
 
-    console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
+    console.log(`[gestionarVacantes] Procesados: ${vacantesProcessed}/${snap.size} | A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
 
     // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
     // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
@@ -4165,6 +4236,7 @@ export const scheduledAutoInjustificada = functions
     const snap = await db.collection('ausencias')
       .where('startDate', '==', todayStr)
       .where('status', '==', 'Confirmada')
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) {
@@ -4172,27 +4244,35 @@ export const scheduledAutoInjustificada = functions
       return null;
     }
 
-    const batch = db.batch();
+    let batch = db.batch();
+    let batchOps = 0;
     let count = 0;
 
-    snap.docs.forEach((doc) => {
+    for (const doc of snap.docs) {
       const data = doc.data();
-      // Solo AA sin certificado
       const absType = String(data.absenceType || data.type || '').toUpperCase();
       const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
-      if (!isAA) return;
-      if (data.certificateUrl) return; // tiene certificado → no tocar
+      if (!isAA) continue;
+      if (data.certificateUrl) continue;
       batch.update(doc.ref, {
         status: 'Injustificada',
         autoInjustificadaAt: now,
         reason: `${data.reason || 'No presentación'} — Auto-injustificada por sistema (sin certificado al 23:45)`,
       });
       count++;
-    });
+      batchOps++;
+      if (batchOps >= CRON_BATCH_WRITE_LIMIT) {
+        await batch.commit();
+        batch = db.batch();
+        batchOps = 0;
+      }
+    }
 
-    if (count > 0) {
+    if (batchOps > 0) {
       await batch.commit();
-      console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada.`);
+    }
+    if (count > 0) {
+      console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada (escaneadas ${snap.size}).`);
     }
     return null;
   });
