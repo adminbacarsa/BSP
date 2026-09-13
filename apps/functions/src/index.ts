@@ -22,6 +22,7 @@ import {
   isSuperAdminBackupRole,
   isAdminBackupRole,
 } from './backup/backup-auth.util';
+import { assertPanelTenantCallable } from './auth/panel-tenant-auth.util';
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
 import { INestApplicationContext } from '@nestjs/common';
@@ -758,7 +759,6 @@ export const chatPlatformAssistant =
 // =========================================================
 // AGENTE: ejecutar acción propuesta (con confirmación humana)
 // =========================================================
-const AGENT_WRITE_ALLOWED_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador'];
 const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo', 'confirmar_presencia', 'registrar_ausencia', 'cerrar_turno', 'planificar_objetivo_mes'] as const;
 type AgentWriteAction = (typeof AGENT_WRITE_ACTIONS)[number];
 
@@ -766,20 +766,21 @@ async function executeAgentActionHandler(
   data: { action: string; payload: AgentActionPayload; empresaId: string },
   context: functions.https.CallableContext,
 ): Promise<{ ok: boolean; message: string }> {
-  if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
-  const role = String(context.auth.token.role ?? '');
-  const isSuperAdmin = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
-  if (!isSuperAdmin && !AGENT_WRITE_ALLOWED_ROLES.includes(role)) {
-    throw new functions.https.HttpsError('permission-denied', 'No tenés permiso para ejecutar acciones del agente.');
-  }
-
   const { action, payload, empresaId } = data;
   if (!AGENT_WRITE_ACTIONS.includes(action as AgentWriteAction)) {
     throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
   }
   if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
 
-  console.info('[executeAgentAction]', { uid: context.auth.uid, role, action, empresaId });
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar acciones del agente.',
+  );
+
+  const role = String(context.auth!.token.role ?? '');
+  console.info('[executeAgentAction]', { uid: context.auth!.uid, role, action, empresaId });
 
   try {
     if (action === 'extender_jornada') return await ejecutarExtenderJornada(empresaId, payload);

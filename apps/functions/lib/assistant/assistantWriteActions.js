@@ -9,6 +9,7 @@ exports.ejecutarCerrarTurno = ejecutarCerrarTurno;
 exports.ejecutarPlanificarObjetivoMes = ejecutarPlanificarObjetivoMes;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
+const panel_tenant_auth_util_1 = require("../auth/panel-tenant-auth.util");
 function startOfDayAr(dateYmd) {
     const [y, m, d] = dateYmd.split('-').map(Number);
     return new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
@@ -27,10 +28,7 @@ async function ejecutarExtenderJornada(empresaId, payload) {
         throw new Error('Payload incompleto: falta shiftId o nuevoCodigo.');
     const db = admin.firestore();
     const ref = db.collection('turnos').doc(shiftId);
-    const snap = await ref.get();
-    if (!snap.exists)
-        throw new Error(`Turno ${shiftId} no encontrado.`);
-    const data = snap.data();
+    const data = await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('turnos', shiftId, empresaId);
     const startTime = data.startTime;
     const startDate = startTime.toDate();
     const newEndTime = firestore_1.Timestamp.fromDate(addHours(startDate, codigoToHoras(nuevoCodigo)));
@@ -47,6 +45,7 @@ async function ejecutarCubrirAusencia(empresaId, payload) {
     const { empleadoId, objetivoId, clientId, banda, fecha, empleadoNombre, objetivoNombre } = payload;
     if (!empleadoId || !objetivoId || !banda || !fecha)
         throw new Error('Payload incompleto para cubrir_ausencia.');
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('empleados', empleadoId, empresaId);
     const [y, m, d] = fecha.split('-').map(Number);
     const startAr = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
     const bandaOffsets = {
@@ -81,6 +80,7 @@ async function ejecutarCrearTurnoRefuerzo(empresaId, payload) {
     const { empleadoId, objetivoId, clientId, banda, fecha, empleadoNombre, objetivoNombre } = payload;
     if (!empleadoId || !objetivoId || !banda || !fecha)
         throw new Error('Payload incompleto para crear_turno_refuerzo.');
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('empleados', empleadoId, empresaId);
     const [y, m, d] = fecha.split('-').map(Number);
     const startAr = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
     const bandaOffsets = {
@@ -115,6 +115,7 @@ async function ejecutarConfirmarPresencia(empresaId, payload) {
     const { shiftId, empleadoNombre, objetivoNombre, fecha } = payload;
     if (!shiftId)
         throw new Error('Payload incompleto: falta shiftId.');
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('turnos', shiftId, empresaId);
     const db = admin.firestore();
     const { registrarPresencia } = await Promise.resolve().then(() => require('../fichajes/registrarPresencia'));
     const result = await registrarPresencia(db, {
@@ -140,6 +141,8 @@ async function ejecutarRegistrarAusencia(empresaId, payload) {
     const { shiftId, empleadoId, objetivoId, fecha, empleadoNombre, objetivoNombre, motivo } = payload;
     if (!shiftId || !empleadoId || !fecha)
         throw new Error('Payload incompleto para registrar_ausencia.');
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('turnos', shiftId, empresaId);
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('empleados', empleadoId, empresaId);
     const db = admin.firestore();
     await db.collection('turnos').doc(shiftId).update({
         isAbsent: true,
@@ -166,6 +169,10 @@ async function ejecutarCerrarTurno(empresaId, payload) {
     const { shiftId, empleadoId, empleadoNombre, objetivoId, objetivoNombre, fecha } = payload;
     if (!shiftId)
         throw new Error('Payload incompleto: falta shiftId.');
+    await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('turnos', shiftId, empresaId);
+    if (empleadoId) {
+        await (0, panel_tenant_auth_util_1.loadDocAndAssertEmpresa)('empleados', empleadoId, empresaId);
+    }
     const db = admin.firestore();
     const now = firestore_1.Timestamp.now();
     await db.collection('turnos').doc(shiftId).update({

@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { loadDocAndAssertEmpresa } from '../auth/panel-tenant-auth.util';
 
 export type AgentActionPayload = Record<string, unknown>;
 
@@ -26,10 +27,7 @@ export async function ejecutarExtenderJornada(
 
   const db = admin.firestore();
   const ref = db.collection('turnos').doc(shiftId);
-  const snap = await ref.get();
-  if (!snap.exists) throw new Error(`Turno ${shiftId} no encontrado.`);
-
-  const data = snap.data()!;
+  const data = await loadDocAndAssertEmpresa('turnos', shiftId, empresaId);
   const startTime: Timestamp = data.startTime;
   const startDate = startTime.toDate();
   const newEndTime = Timestamp.fromDate(addHours(startDate, codigoToHoras(nuevoCodigo)));
@@ -59,6 +57,8 @@ export async function ejecutarCubrirAusencia(
     objetivoNombre?: string;
   };
   if (!empleadoId || !objetivoId || !banda || !fecha) throw new Error('Payload incompleto para cubrir_ausencia.');
+
+  await loadDocAndAssertEmpresa('empleados', empleadoId, empresaId);
 
   const [y, m, d] = fecha.split('-').map(Number);
   const startAr = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
@@ -109,6 +109,8 @@ export async function ejecutarCrearTurnoRefuerzo(
   };
   if (!empleadoId || !objetivoId || !banda || !fecha) throw new Error('Payload incompleto para crear_turno_refuerzo.');
 
+  await loadDocAndAssertEmpresa('empleados', empleadoId, empresaId);
+
   const [y, m, d] = fecha.split('-').map(Number);
   const startAr = new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
   const bandaOffsets: Record<string, [number, number]> = {
@@ -153,6 +155,7 @@ export async function ejecutarConfirmarPresencia(
     fecha?: string;
   };
   if (!shiftId) throw new Error('Payload incompleto: falta shiftId.');
+  await loadDocAndAssertEmpresa('turnos', shiftId, empresaId);
   const db = admin.firestore();
   const { registrarPresencia } = await import('../fichajes/registrarPresencia');
   const result = await registrarPresencia(db, {
@@ -189,6 +192,8 @@ export async function ejecutarRegistrarAusencia(
     motivo?: string;
   };
   if (!shiftId || !empleadoId || !fecha) throw new Error('Payload incompleto para registrar_ausencia.');
+  await loadDocAndAssertEmpresa('turnos', shiftId, empresaId);
+  await loadDocAndAssertEmpresa('empleados', empleadoId, empresaId);
   const db = admin.firestore();
   await db.collection('turnos').doc(shiftId).update({
     isAbsent: true,
@@ -225,6 +230,10 @@ export async function ejecutarCerrarTurno(
     fecha?: string;
   };
   if (!shiftId) throw new Error('Payload incompleto: falta shiftId.');
+  await loadDocAndAssertEmpresa('turnos', shiftId, empresaId);
+  if (empleadoId) {
+    await loadDocAndAssertEmpresa('empleados', empleadoId, empresaId);
+  }
   const db = admin.firestore();
   const now = Timestamp.now();
 
