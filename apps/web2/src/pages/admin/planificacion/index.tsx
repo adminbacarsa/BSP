@@ -354,6 +354,11 @@ function resolveTitularCoverageName(
     }
 
     for (const s of candidates) {
+        // No tratar docs VACANTE_POR_AUSENCIA como el cubridor
+        if (s.employeeId === 'VACANTE' || s.isUnassigned === true) continue;
+        const origin = String(s.origin || '').toUpperCase();
+        if (origin.startsWith('VACANTE_') || origin === 'SLA_VIRTUAL') continue;
+
         const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
         const coversEmpId = String(s.coversEmployeeId || '');
         const comments = String(s.comments || '').toLowerCase();
@@ -400,6 +405,174 @@ function buildLeaveCellTooltipLabel(opts: {
     if (reason && !reason.includes('gestionado desde planificador')) lines.push(`Motivo: ${reason}`);
     lines.push(`Cubierto por: ${opts.coveredBy || 'Sin cobertura registrada'}`);
     return lines.join('\n');
+}
+
+type PlanningTraceTone = 'slate' | 'rose' | 'amber' | 'emerald' | 'indigo' | 'orange';
+
+type PlanningTraceStep = {
+    key: string;
+    title: string;
+    detail: string;
+    tone: PlanningTraceTone;
+};
+
+const PLANNING_TRACE_TONE: Record<PlanningTraceTone, string> = {
+    slate: 'border-slate-200 bg-slate-50 text-slate-800',
+    rose: 'border-rose-200 bg-rose-50 text-rose-900',
+    amber: 'border-amber-200 bg-amber-50 text-amber-900',
+    emerald: 'border-emerald-200 bg-emerald-50 text-emerald-900',
+    indigo: 'border-indigo-200 bg-indigo-50 text-indigo-900',
+    orange: 'border-orange-200 bg-orange-50 text-orange-900',
+};
+
+/** Cadena legible: planificado → evento → vacante → cobertura (o inverso si es el cubridor). */
+function buildPlanningCellTrace(opts: {
+    role: 'titular' | 'coverer' | 'normal';
+    titularName: string;
+    dateStr: string;
+    plannedCode?: string | null;
+    plannedSchedule?: string | null;
+    plannedPosition?: string | null;
+    plannedService?: string | null;
+    absenceType?: string | null;
+    absenceReason?: string | null;
+    isOpsAbsent?: boolean;
+    isPresent?: boolean;
+    operacionallyCovered?: boolean;
+    coveredByName?: string | null;
+    coveredByCode?: string | null;
+    coveredByHow?: string | null;
+    vacancyOpen?: boolean;
+    covererName?: string | null;
+    coversAbsenceName?: string | null;
+    covererCode?: string | null;
+    covererOrigin?: string | null;
+}): PlanningTraceStep[] {
+    const steps: PlanningTraceStep[] = [];
+    const planBits = [
+        opts.plannedCode || null,
+        opts.plannedSchedule || null,
+        opts.plannedPosition && opts.plannedPosition !== 'General' ? opts.plannedPosition : null,
+        opts.plannedService || null,
+    ].filter(Boolean);
+
+    if (opts.role === 'coverer') {
+        steps.push({
+            key: 'coverer-shift',
+            title: '1 · Turno del cubridor',
+            detail: [
+                opts.covererName || 'Guardia',
+                opts.covererCode || opts.plannedCode || '',
+                opts.plannedSchedule || '',
+            ].filter(Boolean).join(' · ') || 'Turno de cobertura operativa',
+            tone: 'indigo',
+        });
+        steps.push({
+            key: 'coverer-target',
+            title: '2 · Cubrió a',
+            detail: opts.coversAbsenceName
+                ? `${opts.coversAbsenceName}${opts.covererOrigin ? ` · vía ${String(opts.covererOrigin).replace(/_/g, ' ')}` : ''}`
+                : 'Titular no vinculado en el doc (falta coversAbsenceEmployeeName)',
+            tone: opts.coversAbsenceName ? 'emerald' : 'amber',
+        });
+        steps.push({
+            key: 'coverer-effect',
+            title: '3 · Efecto',
+            detail: 'En liquidación/reportes: el titular figura como novedad/ausencia; las horas del puesto las computa este turno de cobertura (no el VACANTE).',
+            tone: 'slate',
+        });
+        return steps;
+    }
+
+    steps.push({
+        key: 'plan',
+        title: '1 · Planificado',
+        detail: [
+            opts.titularName,
+            planBits.length ? planBits.join(' · ') : 'Sin detalle de banda',
+        ].filter(Boolean).join(' — '),
+        tone: 'slate',
+    });
+
+    if (opts.absenceType || opts.isOpsAbsent) {
+        const eventDetail = opts.absenceType
+            ? `${opts.absenceType}${opts.absenceReason ? ` — ${opts.absenceReason}` : ''}`
+            : 'Ausencia operativa (Ops: no se presentó / isAbsent). La celda conserva el código planificado; el punto rojo lo marca.';
+        steps.push({
+            key: 'event',
+            title: '2 · Qué ocurrió',
+            detail: eventDetail,
+            tone: 'rose',
+        });
+    } else if (opts.isPresent) {
+        steps.push({
+            key: 'event',
+            title: '2 · Qué ocurrió',
+            detail: 'Presente / fichada registrada',
+            tone: 'emerald',
+        });
+    } else {
+        steps.push({
+            key: 'event',
+            title: '2 · Qué ocurrió',
+            detail: 'Sin novedad RRHH ni ausencia operativa registrada en este doc',
+            tone: 'slate',
+        });
+    }
+
+    if (opts.vacancyOpen && !opts.coveredByName) {
+        steps.push({
+            key: 'vacancy',
+            title: '3 · Hueco',
+            detail: 'Quedó VACANTE (doc operativo o sin asignación nominal). El puesto no tiene cubridor nominal todavía.',
+            tone: 'amber',
+        });
+    } else if (opts.vacancyOpen && opts.coveredByName) {
+        steps.push({
+            key: 'vacancy',
+            title: '3 · Hueco → resuelto',
+            detail: `Había vacante por ausencia; Ops/plan asignó cobertura a ${opts.coveredByName}.`,
+            tone: 'orange',
+        });
+    } else {
+        steps.push({
+            key: 'vacancy',
+            title: '3 · Hueco',
+            detail: opts.coveredByName
+                ? 'No queda vacante abierta (hay cubridor nominal).'
+                : (opts.absenceType || opts.isOpsAbsent)
+                    ? 'Sin vacante abierta detectada — puede estar descubierto o cubierto solo por capacidad del puesto.'
+                    : 'Sin hueco operativo',
+            tone: opts.coveredByName ? 'emerald' : 'amber',
+        });
+    }
+
+    if (opts.coveredByName) {
+        steps.push({
+            key: 'cover',
+            title: '4 · Cubierto por',
+            detail: [
+                opts.coveredByName,
+                opts.coveredByCode ? `turno ${opts.coveredByCode}` : null,
+                opts.coveredByHow || null,
+                opts.operacionallyCovered ? '✓ cubierto en Ops' : null,
+            ].filter(Boolean).join(' · '),
+            tone: 'emerald',
+        });
+    } else if (opts.absenceType || opts.isOpsAbsent) {
+        steps.push({
+            key: 'cover',
+            title: '4 · Cubierto por',
+            detail: 'Sin cobertura nominal registrada. En grilla: punto rojo = ausente; no implica “esperar 24 h” para ver al cubridor.',
+            tone: 'amber',
+        });
+    }
+
+    return steps;
+}
+
+function formatPlanningTraceTooltip(steps: PlanningTraceStep[]): string {
+    return steps.map(s => `${s.title}: ${s.detail}`).join('\n');
 }
 
 // --- CONFIGURACIÓN VISUAL ---
@@ -5617,6 +5790,8 @@ export default function PlanificacionPage() {
                         coversAbsenceEmployeeName: data.coversAbsenceEmployeeName || data.absenceEmployeeName,
                         coveredByEmployeeName: data.coveredByEmployeeName,
                         absenceShiftId: data.absenceShiftId,
+                        causedByShiftId: data.causedByShiftId,
+                        operacionallyCovered: !!data.operacionallyCovered,
                         isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
                         swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
                         positionName: data.positionName,
@@ -10524,16 +10699,52 @@ export default function PlanificacionPage() {
                                         const _opsCovHint = isOpsCovCell
                                             ? `\n🟠 Cobertura ops${_opsCovName ? ` — cubre: ${_opsCovName}` : ''}`
                                             : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint;
+                                        const _opsAbsent = !!(s && !absence && (s.status === 'ABSENT' || s.isAbsent));
+                                        const _gridCoveredName = (isLeaveCell || _opsAbsent)
+                                            ? resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode)
+                                            : null;
+                                        const _gridCoveredLabel = _gridCoveredName
+                                            ? String(_gridCoveredName).split(',')[0].trim().split(/\s+/)[0].slice(0, 7)
+                                            : null;
+                                        const _covererLabel = _opsCovName
+                                            ? String(_opsCovName).split(',')[0].trim().split(/\s+/)[0].slice(0, 7)
+                                            : null;
+                                        const _opsAbsentCovered = _opsAbsent ? _gridCoveredName : null;
+                                        const _opsAbsentHint = _opsAbsent
+                                            ? `\n🔴 Ausente operativo${_opsAbsentCovered ? ` · Cubierto por: ${_opsAbsentCovered}` : ' · Sin cobertura nominal'}`
+                                            : '';
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint + _opsAbsentHint;
                                         const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                                             ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                                             : null;
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode); const leaveTrace = buildPlanningCellTrace({ role: 'titular', titularName: emp.name || '', dateStr: cellDateStr, plannedCode: cellCode, plannedSchedule: cellRange, plannedPosition: cellPosName, absenceType: absType, absenceReason: reason, isOpsAbsent: !!(s && (s.isAbsent || s.status === 'ABSENT')), coveredByName: covered, vacancyOpen: !covered }); setShiftTooltip({ label: formatPlanningTraceTooltip(leaveTrace), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{isOpsCovCell && (<div className="absolute -bottom-0.5 left-0 right-0 text-[5.5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight" title={_opsCovName ? `Cubre: ${_opsCovName}` : 'Cobertura operativa'}>{_opsCovName ? `Cubre: ${_opsCovName.split(/\s+/)[0]}` : 'COV'}</div>)}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{(isLeaveCell || _opsAbsent) ? (
+                                                        <div
+                                                            className={`absolute -bottom-0.5 left-0 right-0 text-[5px] font-black px-0.5 rounded truncate leading-tight ${
+                                                                _gridCoveredLabel
+                                                                    ? 'bg-orange-600 text-white'
+                                                                    : 'bg-rose-700 text-white'
+                                                            }`}
+                                                            title={
+                                                                _gridCoveredName
+                                                                    ? `Ausente → cubierto por ${_gridCoveredName}`
+                                                                    : 'Ausente · sin cobertura nominal'
+                                                            }
+                                                        >
+                                                            {_gridCoveredLabel ? `→${_gridCoveredLabel}` : 'SIN COV'}
+                                                        </div>
+                                                    ) : (_opsCovName || isOpsCovCell) ? (
+                                                        <div
+                                                            className="absolute -bottom-0.5 left-0 right-0 text-[5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight"
+                                                            title={_opsCovName ? `Cubre a: ${_opsCovName}` : 'Cobertura operativa'}
+                                                        >
+                                                            {_covererLabel ? `cubre ${_covererLabel}` : 'COV'}
+                                                        </div>
+                                                    ) : null}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -12963,8 +13174,48 @@ export default function PlanificacionPage() {
                                         }
                                     }
 
-                                    // 2. Buscar turno de cobertura específico para este titular/ausencia
+                                    const isVacancyCandidate = (c: any) => {
+                                        if (!c) return true;
+                                        if (c.employeeId === 'VACANTE' || c.isUnassigned === true) return true;
+                                        const o = String(c.origin || '').toUpperCase();
+                                        if (o.startsWith('VACANTE_') || o === 'SLA_VIRTUAL') return true;
+                                        if (String(c.employeeName || '').toUpperCase() === 'VACANTE') return true;
+                                        return false;
+                                    };
+
+                                    // 2. Nombre explícito desde Ops / plan (prioridad: no confundir con doc VACANTE)
+                                    const coveredByRaw = shift?.coveredBy
+                                        || shift?.coveredByEmployeeName
+                                        || pending?.coveredBy
+                                        || pending?.coveredByEmployeeName
+                                        || absence?.coveredBy
+                                        || absence?.coveredByEmployeeName;
+
+                                    if (coveredByRaw) {
+                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
+                                        if (nameOnly && nameOnly.toUpperCase() !== 'VACANTE') {
+                                            const matchedCandidate = candidates.find(c => {
+                                                if (isVacancyCandidate(c)) return false;
+                                                const cName = String(c.employeeName || employees.find(e => e.id === c.employeeId)?.name || '').toLowerCase();
+                                                return cName.includes(nameOnly.toLowerCase()) || nameOnly.toLowerCase().includes(cName);
+                                            });
+                                            if (matchedCandidate) {
+                                                return {
+                                                    employeeName: matchedCandidate.employeeName || nameOnly,
+                                                    code: String(matchedCandidate.code || '').toUpperCase(),
+                                                    shift: matchedCandidate,
+                                                    objectiveName: matchedCandidate.objectiveName || (matchedCandidate.objectiveId ? getObjectiveName(matchedCandidate.objectiveId) : serviceName),
+                                                };
+                                            }
+                                            return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
+                                        }
+                                    }
+
+                                    // 3. Buscar turno de cobertura específico para este titular/ausencia
+                                    //    (nunca docs VACANTE — esos son el hueco, no el cubridor)
                                     for (const s of candidates) {
+                                        if (isVacancyCandidate(s)) continue;
+
                                         const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
                                         const coversEmpId = String(s.coversEmployeeId || '');
                                         const absShiftId = String(s.absenceShiftId || '');
@@ -12983,6 +13234,7 @@ export default function PlanificacionPage() {
                                         if (matchesName || matchesId || matchesShift || matchesComments) {
                                             const covEmp = employees.find((e: any) => e.id === s.employeeId);
                                             const covName = covEmp?.name || s.employeeName || '—';
+                                            if (String(covName).toUpperCase() === 'VACANTE') continue;
                                             const covCode = String(s.code || '').toUpperCase();
                                             return {
                                                 employeeName: covName,
@@ -12991,31 +13243,6 @@ export default function PlanificacionPage() {
                                                 objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
                                             };
                                         }
-                                    }
-
-                                    // 3. Revisar si hay un nombre explícito en shift o absence o pending
-                                    const coveredByRaw = shift?.coveredBy
-                                        || shift?.coveredByEmployeeName
-                                        || pending?.coveredBy
-                                        || pending?.coveredByEmployeeName
-                                        || absence?.coveredBy
-                                        || absence?.coveredByEmployeeName;
-
-                                    if (coveredByRaw) {
-                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
-                                        const matchedCandidate = candidates.find(c => {
-                                            const cName = String(c.employeeName || employees.find(e => e.id === c.employeeId)?.name || '').toLowerCase();
-                                            return cName.includes(nameOnly.toLowerCase()) || nameOnly.toLowerCase().includes(cName);
-                                        });
-                                        if (matchedCandidate) {
-                                            return {
-                                                employeeName: matchedCandidate.employeeName || nameOnly,
-                                                code: String(matchedCandidate.code || '').toUpperCase(),
-                                                shift: matchedCandidate,
-                                                objectiveName: matchedCandidate.objectiveName || (matchedCandidate.objectiveId ? getObjectiveName(matchedCandidate.objectiveId) : serviceName),
-                                            };
-                                        }
-                                        return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
                                     }
 
                                     // 4. Si la ausencia está en este objetivo y existe una cobertura operativa en el mismo puesto/objetivo/banda
@@ -13036,6 +13263,7 @@ export default function PlanificacionPage() {
 
                                     if (targetObj) {
                                         const matchingOpsCovers = candidates.filter(c =>
+                                            !isVacancyCandidate(c) &&
                                             isOpsCoverageShift(c) &&
                                             shiftMatchesObjective(c, targetObj)
                                         );
@@ -13101,7 +13329,8 @@ export default function PlanificacionPage() {
 
                                     return null;
                                 };
-                                const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
+                                const isOpsAbsent = !!(shift?.isAbsent || shift?.status === 'ABSENT');
+                                const coverageInfo = (absence || isRRHHCode || isOpsAbsent) ? resolveCoverageForAbsence() : null;
                                 const ABSENCE_FRANCO_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA']);
                                 const isWorkCode = (c: string) => !!c && !ABSENCE_FRANCO_CODES.has(c.toUpperCase());
                                 const resolveOriginalWorkShift = () => {
@@ -13191,7 +13420,7 @@ export default function PlanificacionPage() {
                                     }
                                     return null;
                                 };
-                                const originalWorkShift = (absence || isRRHHCode) ? resolveOriginalWorkShift() : null;
+                                const originalWorkShift = (absence || isRRHHCode || isOpsAbsent) ? resolveOriginalWorkShift() : null;
                                 const absenceTypeLabel = absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
                                 const ABSENCE_STATUS_ES: Record<string, string> = {
                                     APPROVED: 'Aprobada', PENDING: 'Pendiente', REJECTED: 'Rechazada',
@@ -13211,8 +13440,111 @@ export default function PlanificacionPage() {
                                     : (shift?.coveredBy || shift?.coveredByEmployeeName || pending?.coveredBy || pending?.coveredByEmployeeName || null);
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
+                                const coversAbsenceName = String(
+                                    shift?.coversAbsenceEmployeeName || shift?.absenceEmployeeName || shift?.coveredEmployeeName || '',
+                                ).trim();
+                                const isCovererCell = !!coversAbsenceName;
                                 const showRrhhPanel = !!(absence || isRRHHCode);
+                                const showTraceNarrative = !!(showRrhhPanel || isOpsAbsent || isCovererCell);
                                 const isReadOnly = isConsolidated || isSwapPersisted;
+
+                                const findLinkedVacancyOpen = (): boolean => {
+                                    const dateStr = selectedCell.dateStr;
+                                    const titularShiftId = String(shift?.id || '');
+                                    const sources: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`)) continue;
+                                            if (Array.isArray(arr)) sources.push(...arr);
+                                        }
+                                    }
+                                    for (const [k, raw] of Object.entries({ ...shiftsMap, ...pendingChanges })) {
+                                        if (!k.endsWith(`_${dateStr}`)) continue;
+                                        sources.push(raw);
+                                    }
+                                    return sources.some((c: any) => {
+                                        if (!c || c.isDeleted) return false;
+                                        const origin = String(c.origin || '').toUpperCase();
+                                        const isVac =
+                                            c.employeeId === 'VACANTE'
+                                            || c.isUnassigned === true
+                                            || origin.startsWith('VACANTE_')
+                                            || String(c.employeeName || '').toUpperCase() === 'VACANTE';
+                                        if (!isVac) return false;
+                                        const caused = String(c.causedByShiftId || c.absenceShiftId || c.coverageSourceId || '');
+                                        if (titularShiftId && caused === titularShiftId) return true;
+                                        const absEmp = String(c.coversAbsenceEmployeeName || c.absenceEmployeeName || c.causedByEmployeeId || '');
+                                        if (selectedCell.empId && String(c.causedByEmployeeId || '') === selectedCell.empId) return true;
+                                        const titularLast = employeeName.split(',')[0]?.trim().toLowerCase() || '';
+                                        if (titularLast.length > 2 && absEmp.toLowerCase().includes(titularLast)) return true;
+                                        return false;
+                                    });
+                                };
+
+                                const vacancyStillOpen = (absence || isOpsAbsent) ? findLinkedVacancyOpen() : false;
+
+                                const coverHowLabel = (() => {
+                                    const covShift = coverageInfo?.shift;
+                                    if (!covShift) return shift?.coverageType ? String(shift.coverageType) : null;
+                                    if (covShift.isFrancoTrabajado || String(covShift.code || '').toUpperCase() === 'FT') return 'Franco trabajado (FT)';
+                                    if (covShift.isExtended || covShift.coverageRole === 'EXTENSION') return 'Extensión de jornada';
+                                    if (covShift.isEarlyStart || covShift.coverageRole === 'EARLY_START') return 'Adelanto';
+                                    const o = String(covShift.origin || '').toUpperCase();
+                                    if (o === 'RETEN' || covShift.isRetention) return 'Retención (RET)';
+                                    if (o === 'OPERATIONS_COVERAGE') return 'Cobertura Ops';
+                                    if (covShift.resolvedBy === 'OPERACIONES') return 'Resuelto en Ops';
+                                    return o ? o.replace(/_/g, ' ') : null;
+                                })();
+
+                                const traceRole: 'titular' | 'coverer' | 'normal' = isCovererCell && !isOpsAbsent && !showRrhhPanel
+                                    ? 'coverer'
+                                    : (showRrhhPanel || isOpsAbsent ? 'titular' : 'normal');
+
+                                const planningTraceSteps = showTraceNarrative
+                                    ? buildPlanningCellTrace({
+                                        role: traceRole,
+                                        titularName: employeeName,
+                                        dateStr: selectedCell.dateStr,
+                                        plannedCode: originalWorkShift?.code || (NON_ABSENCE_CODES.has(code) ? code : null) || coverageInfo?.code || null,
+                                        plannedSchedule: originalWorkShift?.schedule
+                                            || (shift ? formatShiftScheduleLabel(shift, code) : null),
+                                        plannedPosition: originalWorkShift?.position || coveredPosition,
+                                        plannedService: originalWorkShift?.service || serviceName,
+                                        absenceType: absence?.type || (isRRHHCode ? (LEGEND_DESCRIPTIONS[code] || code) : null) || (isOpsAbsent ? 'Ausencia operativa' : null),
+                                        absenceReason: absence?.reason || shift?.comments || null,
+                                        isOpsAbsent,
+                                        isPresent: !!(shift?.isPresent || shift?.status === 'PRESENT' || shift?.status === 'COMPLETED'),
+                                        operacionallyCovered: !!(shift?.operacionallyCovered || coveringEmployee),
+                                        coveredByName: coverageInfo?.employeeName || (coveringEmployee ? String(coveringEmployee).replace(/\s*\([^)]*\)\s*$/, '').trim() : null),
+                                        coveredByCode: coverageInfo?.code || null,
+                                        coveredByHow: coverHowLabel,
+                                        vacancyOpen: vacancyStillOpen,
+                                        covererName: employeeName,
+                                        coversAbsenceName: coversAbsenceName || null,
+                                        covererCode: code || null,
+                                        covererOrigin: shift?.origin || shift?.coverageType || null,
+                                    })
+                                    : [];
+
+                                const TraceChainPanel = planningTraceSteps.length > 0 ? (
+                                    <div className="rounded-xl border-2 border-indigo-200 bg-white overflow-hidden shadow-sm">
+                                        <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex items-center justify-between gap-2">
+                                            <span className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Cadena · qué pasó</span>
+                                            <span className="text-[9px] font-bold text-indigo-600/80 uppercase">Trazabilidad</span>
+                                        </div>
+                                        <ol className="p-3 space-y-2">
+                                            {planningTraceSteps.map((step, i) => (
+                                                <li key={step.key} className={`rounded-lg border px-3 py-2 ${PLANNING_TRACE_TONE[step.tone]}`}>
+                                                    <p className="text-[10px] font-black uppercase tracking-wide opacity-80">{step.title}</p>
+                                                    <p className="text-xs font-semibold mt-0.5 leading-snug">{step.detail}</p>
+                                                    {i < planningTraceSteps.length - 1 && (
+                                                        <p className="text-[9px] font-black text-slate-400 mt-1">↓</p>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                ) : null;
 
                                 const plannedStart =
                                     (typeof shift?.startTime === 'string') ? shift.startTime
@@ -13244,14 +13576,14 @@ export default function PlanificacionPage() {
                                         : (bandLookup || storedHours || calcHoursFromTs || 0);
                                 const showRealTimes = isConsolidated;
 
-                                if (isReadOnly || showRrhhPanel) {
+                                if (isReadOnly || showTraceNarrative) {
                                     return (
                                         <>
                                             <div className="flex justify-between items-start mb-4">
                                                 <div className="min-w-0">
                                                     <h3 className="font-black text-lg text-slate-800 truncate">{employeeName}</h3>
                                                     <p className="text-xs text-slate-500 font-bold uppercase">{selectedCell.dateStr}</p>
-                                                    <div className="mt-2 flex items-center gap-2">
+                                                    <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                         {isConsolidated && (
                                                             <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
                                                                 Consolidado
@@ -13272,12 +13604,24 @@ export default function PlanificacionPage() {
                                                                 RRHH
                                                             </span>
                                                         )}
+                                                        {isOpsAbsent && !absence && !isRRHHCode && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-rose-50 text-rose-800 border-rose-200">
+                                                                Ausente Ops
+                                                            </span>
+                                                        )}
+                                                        {isCovererCell && !isOpsAbsent && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-indigo-50 text-indigo-800 border-indigo-200">
+                                                                Cubre a otro
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <button onClick={() => setSelectedCell(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
                                             </div>
 
                                             <div className="space-y-3">
+                                                {TraceChainPanel}
+
                                                 {(absence || isRRHHCode) ? (
                                                     <div className="rounded-xl border-2 border-amber-200 bg-white overflow-hidden shadow-sm">
                                                         <div className="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
