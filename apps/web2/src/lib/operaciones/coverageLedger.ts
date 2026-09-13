@@ -61,8 +61,12 @@ export function resolveTitularFromAbsenceOrVacancy(absenceShift: any): {
       ? String(absenceShift.id)
       : null;
 
-  const titularShiftId = caused
-    || (!isVac && absenceShift?.id && !isVirtualShiftId(absenceShift.id) ? String(absenceShift.id) : null);
+  const titularShiftId = absenceShift?.sourceShiftDeleted === true
+    ? null // causedByShiftId es solo auditoría (doc hard-deleted en corrección)
+    : (caused
+      || (!isVac && absenceShift?.id && !isVirtualShiftId(absenceShift.id)
+        ? String(absenceShift.id)
+        : null));
 
   const titularEmployeeId =
     (absenceShift?.causedByEmployeeId && absenceShift.causedByEmployeeId !== 'VACANTE'

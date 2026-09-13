@@ -102,6 +102,7 @@ export const onGuardAbsenceDetected = functions
       causedByShiftId:  turnoId,
       causedByEmployeeId:   after.employeeId   || null,
       causedByEmployeeName: after.employeeName || '',
+      absenceId:        after.absenceId || null,
       actionTarget,
       empresaId,
       draft:  false,

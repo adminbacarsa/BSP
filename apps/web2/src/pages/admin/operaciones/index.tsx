@@ -52,6 +52,7 @@ import {
     writeManualAssistPreference,
 } from '@/lib/operaciones/opsMode';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
+import { revertOpsAbsence, createOpsAbsenceDoc } from '@/lib/operaciones/revertOpsAbsence';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 
@@ -4311,34 +4312,28 @@ export default function OperacionesPage() {
             // Si ya fue marcado automáticamente (AA), evitar doble registro en ausencias
             const alreadyAutoAbsent = shift.isAbsent === true && shift.absenceType === 'AA';
 
-            // 1. Marcar el turno como ausente (confirma la ausencia con origen operador)
+            let absenceId: string | null = shift.absenceId || null;
+            if (!alreadyAutoAbsent) {
+                absenceId = await createOpsAbsenceDoc({
+                    shift,
+                    empresaId: shiftEmpresaId || String(empresaId || ''),
+                    stamp: stampEmpresaId,
+                    dayStart,
+                    dayEnd,
+                });
+            }
+
+            // Marcar turno ausente + anclar absenceId (vacante la crea onGuardAbsenceDetected)
             await updateDocForEmpresa('turnos', shift.id, {
                 status:       'ABSENT',
                 isAbsent:     true,
                 absenceType:  alreadyAutoAbsent ? 'AA' : 'MANUAL_OPS',
                 absenceConfirmedBy: 'OPERACIONES',
                 absenceConfirmedAt: serverTimestamp(),
+                ...(absenceId ? { absenceId } : {}),
             }, empresaId, migracionCompleta);
 
-            // 2. Crear registro en ausencias SOLO si no fue creado automáticamente
-            if (!alreadyAutoAbsent) {
-                await addDoc(collection(db, 'ausencias'), stampEmpresaId({
-                    employeeId:     shift.employeeId,
-                    employeeName:   shift.employeeName,
-                    clientId:       shift.clientId   || null,
-                    type:           'NO_PRESENTACION',   // tipo correcto: no presentación
-                    startDate:      Timestamp.fromDate(dayStart),
-                    endDate:        Timestamp.fromDate(dayEnd),
-                    status:         'Pendiente',
-                    reason:         `No presentación en turno — ${shift.objectiveName} (${shift.positionName})`,
-                    hasCertificate: false,
-                    createdAt:      serverTimestamp(),
-                    origin:         'OPERACIONES',
-                    shiftId:        shift.id,
-                }, shiftEmpresaId));
-            }
-
-            // 3. Notificar a RRHH y Planificación vía novedades
+            // Notificar a RRHH y Planificación vía novedades
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type:         'AUSENCIA_OPERATIVA',
                 title:        'Ausencia confirmada desde Operaciones',
@@ -4348,6 +4343,7 @@ export default function OperacionesPage() {
                 clientId:     shift.clientId   || null,
                 objectiveId:  shift.objectiveId || null,
                 shiftId:      shift.id,
+                absenceId:    absenceId || null,
                 description:  `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${new Date(shiftDate).toLocaleTimeString('es-AR', {hour:'2-digit', minute:'2-digit'})})${alreadyAutoAbsent ? ' [ya detectado automáticamente]' : ''}`,
                 createdAt:    serverTimestamp(),
                 reportedBy:   'OPERACIONES',
@@ -4378,17 +4374,23 @@ export default function OperacionesPage() {
 
     // Revertir ausencia incorrecta (bug sistema o error del operador)
     const handleRevertAbsence = async (shift: any) => {
-        if (!confirm(`Â¿Revertir la ausencia de ${shift.employeeName}?\nSe limpiará el flag de ausencia. Usá esto solo si fue un error.`)) return;
+        if (!confirm(`¿Revertir la ausencia de ${shift.employeeName}?\nSe limpiará el flag, la vacante sin cubrir y el registro RRHH. Usá esto solo si fue un error.`)) return;
         try {
-            await updateDocForEmpresa('turnos', shift.id, {
-                isAbsent:          false,
-                absenceType:       null,
-                absenceDetectedAt: null,
-                absenceDetectedBy: null,
-                status:            'PENDING',
-                absenceRevertedAt: serverTimestamp(),
-                absenceRevertedBy: 'OPERACIONES',
-            }, empresaId, migracionCompleta);
+            const result = await revertOpsAbsence({
+                shiftId: shift.id,
+                empresaId: String(empresaId || shift.empresaId || ''),
+                migracionCompleta,
+            });
+            {
+                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
+                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+                    action: 'REVERT_ABSENT', module: 'OPERACIONES', actorName: _actor,
+                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
+                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName, shiftId: shift.id,
+                    details: `Revertida ausencia de ${shift.employeeName}: vac=${result.cancelledVacancies} aus=${result.cancelledAbsences} nov=${result.cancelledNovedades}.`,
+                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
+            }
             toast.success(`Ausencia de ${shift.employeeName} revertida.`);
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     };
@@ -4397,21 +4399,20 @@ export default function OperacionesPage() {
         const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
         const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
         const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
+        const absenceId = await createOpsAbsenceDoc({
+            shift,
+            empresaId: shiftEmpresaId || String(empresaId || ''),
+            stamp: stampEmpresaId,
+            dayStart,
+            dayEnd,
+        });
         await updateDocForEmpresa('turnos', shift.id, {
             status: 'ABSENT', isAbsent: true,
             absenceType: 'MANUAL_OPS',
             absenceConfirmedBy: 'OPERACIONES',
             absenceConfirmedAt: serverTimestamp(),
+            absenceId,
         }, empresaId, migracionCompleta);
-        await addDoc(collection(db, 'ausencias'), stampEmpresaId({
-            employeeId: shift.employeeId, employeeName: shift.employeeName,
-            clientId: shift.clientId || null, type: 'NO_PRESENTACION',
-            startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
-            status: 'Pendiente',
-            reason: `No presentación en turno — ${shift.objectiveName} (${shift.positionName})`,
-            hasCertificate: false, createdAt: serverTimestamp(),
-            origin: 'OPERACIONES', shiftId: shift.id,
-        }, shiftEmpresaId));
         if (shift.employeeId) {
             await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
                 userId: shift.employeeId, type: 'AUSENCIA_DECLARADA',
@@ -4425,9 +4426,9 @@ export default function OperacionesPage() {
             type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5',
             status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName,
             clientId: shift.clientId || null, objectiveId: shift.objectiveId || null,
-            shiftId: shift.id, objectiveName: shift.objectiveName || '',
+            shiftId: shift.id, absenceId, objectiveName: shift.objectiveName || '',
             positionName: shift.positionName || '',
-            description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${formatTimeRange(shift.shiftDateObj, shift.endDateObj)})`,
+            description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`,
             createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
         }, shiftEmpresaId));
         setCoverageData({ isOpen: true, shift });
