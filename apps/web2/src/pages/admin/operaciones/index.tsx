@@ -4963,6 +4963,14 @@ export default function OperacionesPage() {
                         <div className="flex justify-between items-center mb-1.5">
                             <h2 className="text-sm font-black text-slate-800 flex items-center gap-1.5"><Radio className="text-rose-600 animate-pulse" size={13}/> Estado de Operaciones</h2>
                             <div className="flex items-center gap-1">
+                                <button
+                                    type="button"
+                                    onClick={() => router.push('/admin/operaciones/cobertura')}
+                                    title="Auditoría de coberturas"
+                                    className="p-1.5 rounded-lg text-indigo-600 hover:bg-indigo-50 border border-transparent hover:border-indigo-100"
+                                >
+                                    <GitBranch size={13}/>
+                                </button>
                                 {/* Toggle OBJETIVOS / LISTA */}
                                 <div className="flex p-0.5 bg-slate-100 rounded-lg gap-0.5">
                                     <button onClick={() => setViewMode('objetivos')}
