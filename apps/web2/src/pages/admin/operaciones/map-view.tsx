@@ -13,6 +13,12 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
+import {
+    applyCoverageLedgerToBatch,
+    covererLedgerFields,
+    newCoverageEventId,
+    resolveTitularFromAbsenceOrVacancy,
+} from '@/lib/operaciones/coverageLedger';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -382,29 +388,23 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
     };
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !isVirtual;
-    const markOriginalCovered = (batch: ReturnType<typeof writeBatch>, coverageType: string, coveringEmployee?: any) => {
+    const markOriginalCovered = (batch: ReturnType<typeof writeBatch>, coverageType: string, coveringEmployee?: any, covererShiftId?: string | null) => {
         const covEmpId = coveringEmployee?.id || coveringEmployee?.employeeId || null;
         const covEmpName = coveringEmployee?.fullName || coveringEmployee?.employeeName || coveringEmployee?.name || null;
-        if (isRealVacantShift) {
-            batch.update(doc(db, 'turnos', absenceShift.id), {
-                status: 'COVERED',
-                resolvedBy: 'OPERACIONES',
-                coverageType,
-                coveredAt: serverTimestamp(),
-                coveredByEmployeeId: covEmpId,
-                coveredByEmployeeName: covEmpName,
-            });
-        }
-        if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
-            batch.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
-                operacionallyCovered: true,
-                resolvedBy: 'OPERACIONES',
-                coverageType,
-                coveredAt: serverTimestamp(),
-                coveredByEmployeeId: covEmpId,
-                coveredByEmployeeName: covEmpName,
-            });
-        }
+        if (!covEmpId) return null;
+        const titular = resolveTitularFromAbsenceOrVacancy(absenceShift);
+        return applyCoverageLedgerToBatch(batch, {
+            vacancyShiftId: isRealVacantShift ? absenceShift.id : titular.vacancyShiftId,
+            titularShiftId: titular.titularShiftId,
+            covererShiftId: covererShiftId || null,
+            covererEmployeeId: String(covEmpId),
+            covererEmployeeName: String(covEmpName || ''),
+            titularEmployeeId: titular.titularEmployeeId,
+            titularEmployeeName: titular.titularEmployeeName,
+            coverageType,
+            titularIsAbsence: true,
+            resolvedBy: 'OPERACIONES',
+        });
     };
 
     const handleRetener = async (s: any) => {
@@ -418,7 +418,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                 endTime: Timestamp.fromDate(absenceEnd),
             });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
-            markOriginalCovered(batch, 'RETENTION', s);
+            markOriginalCovered(batch, 'RETENTION', s, s.id);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
@@ -440,7 +440,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                 isEarlyStart: true,
             });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
-            markOriginalCovered(batch, 'EARLY_START', s);
+            markOriginalCovered(batch, 'EARLY_START', s, s.id);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`Turno de ${s.employeeName} adelantado`);
@@ -460,11 +460,8 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
             const empName = emp.fullName || emp.name || '';
             const newRef = doc(collection(db, 'turnos'));
             const batch = writeBatch(db);
-            const titularNameForCover = absenceShift.causedByEmployeeName
-                || (absenceShift.employeeName && !absenceShift.employeeName.startsWith('VACANTE') ? absenceShift.employeeName : '')
-                || '';
-            const titularIdForCover = absenceShift.causedByEmployeeId
-                || (absenceShift.employeeId && absenceShift.employeeId !== 'VACANTE' ? absenceShift.employeeId : null);
+            const titular = resolveTitularFromAbsenceOrVacancy(absenceShift);
+            const coverageEventId = newCoverageEventId();
             batch.set(newRef, stampEmpresaId({
                 employeeId: emp.id,
                 employeeName: empName,
@@ -479,14 +476,31 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                 status: 'PENDING',
                 origin: 'RETEN',
                 isReten: true,
-                absenceShiftId: isRealVacantShift ? absenceShift.id : (absenceShift.causedByShiftId || null),
-                coversAbsenceEmployeeName: titularNameForCover,
-                coversEmployeeId: titularIdForCover,
-                comments: titularNameForCover ? `Cubriendo a ${titularNameForCover} (${absenceShift.code || 'T'})` : '',
                 createdAt: serverTimestamp(),
+                ...covererLedgerFields({
+                    coverageEventId,
+                    covererEmployeeId: emp.id,
+                    covererEmployeeName: empName,
+                    titularEmployeeId: titular.titularEmployeeId,
+                    titularEmployeeName: titular.titularEmployeeName,
+                    vacancyShiftId: isRealVacantShift ? absenceShift.id : titular.vacancyShiftId,
+                    titularShiftId: titular.titularShiftId,
+                    coverageType: 'RETEN',
+                }),
             }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), { userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() });
-            markOriginalCovered(batch, 'RETEN', { id: emp.id, fullName: empName });
+            applyCoverageLedgerToBatch(batch, {
+                vacancyShiftId: isRealVacantShift ? absenceShift.id : titular.vacancyShiftId,
+                titularShiftId: titular.titularShiftId,
+                covererShiftId: null,
+                covererEmployeeId: emp.id,
+                covererEmployeeName: empName,
+                titularEmployeeId: titular.titularEmployeeId,
+                titularEmployeeName: titular.titularEmployeeName,
+                coverageType: 'RETEN',
+                titularIsAbsence: true,
+                coverageEventId,
+            });
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
             toast.success(`${empName} convocado como retén`);
@@ -518,7 +532,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic, onAudit }: any) =
                 comments: `Franco Trabajado (Convocado) — cubre ${absenceShift.objectiveName || 'vacante'}`,
             });
             batch.set(doc(collection(db, 'user_notifications')), { userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() });
-            markOriginalCovered(batch, 'FRANCO', s);
+            markOriginalCovered(batch, 'FRANCO', s, s.id);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);

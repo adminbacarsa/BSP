@@ -353,11 +353,22 @@ function resolveTitularCoverageName(
         }
     }
 
+    const titularKey = `${titularEmpId}_${dateStr}`;
+    const titularDoc = (pendingChanges[titularKey] || shiftsMap[titularKey]) as any;
+    const ledgerEventId = String(titularDoc?.coverageEventId || '').trim();
+
     for (const s of candidates) {
         // No tratar docs VACANTE_POR_AUSENCIA como el cubridor
         if (s.employeeId === 'VACANTE' || s.isUnassigned === true) continue;
         const origin = String(s.origin || '').toUpperCase();
         if (origin.startsWith('VACANTE_') || origin === 'SLA_VIRTUAL') continue;
+
+        if (ledgerEventId && String(s.coverageEventId || '') === ledgerEventId) {
+            const name = s.employeeName || empNameById(s.employeeId);
+            const covCode = String(s.code || '').toUpperCase();
+            if (name && covCode && !LEAVE_CELL_CODES.has(covCode)) return `${name} turno ${covCode}`;
+            return name || null;
+        }
 
         const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
         const coversEmpId = String(s.coversEmployeeId || '');
@@ -5821,6 +5832,7 @@ export default function PlanificacionPage() {
                         coveredByEmployeeName: data.coveredByEmployeeName,
                         absenceShiftId: data.absenceShiftId,
                         causedByShiftId: data.causedByShiftId,
+                        coverageEventId: data.coverageEventId || null,
                         operacionallyCovered: !!data.operacionallyCovered,
                         isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
                         swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
@@ -13252,8 +13264,21 @@ export default function PlanificacionPage() {
 
                                     // 3. Buscar turno de cobertura específico para este titular/ausencia
                                     //    (nunca docs VACANTE — esos son el hueco, no el cubridor)
+                                    const ledgerEventId = String(shift?.coverageEventId || pending?.coverageEventId || absence?.coverageEventId || '').trim();
                                     for (const s of candidates) {
                                         if (isVacancyCandidate(s)) continue;
+
+                                        if (ledgerEventId && String(s.coverageEventId || '') === ledgerEventId) {
+                                            const covEmp = employees.find((e: any) => e.id === s.employeeId);
+                                            const covName = covEmp?.name || s.employeeName || '—';
+                                            if (String(covName).toUpperCase() === 'VACANTE') continue;
+                                            return {
+                                                employeeName: covName,
+                                                code: String(s.code || '').toUpperCase(),
+                                                shift: s,
+                                                objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
+                                            };
+                                        }
 
                                         const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
                                         const coversEmpId = String(s.coversEmployeeId || '');

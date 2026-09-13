@@ -21,6 +21,7 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         coveredByEmployeeName: data.coveredByEmployeeName,
         absenceShiftId: data.absenceShiftId,
         causedByShiftId: data.causedByShiftId,
+        coverageEventId: data.coverageEventId || null,
         operacionallyCovered: !!data.operacionallyCovered,
         origin: data.origin,
         isFrancoTrabajado: data.isFrancoTrabajado || false,
