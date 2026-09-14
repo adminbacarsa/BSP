@@ -35,6 +35,10 @@ export const SHIFT_STYLES: Record<string, string> = {
 
 export const GRUPO_COLOR_HEX = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
 
+export function getDefaultStyle(code: string): string {
+    return SHIFT_STYLES[code] || 'bg-slate-100 text-slate-700 border-slate-300';
+}
+
 /** Mantiene tooltips/modales del pie de cobertura dentro del viewport. */
 export function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number } {
     if (typeof window === 'undefined') return { left: clientX, top: clientY };
