@@ -60,6 +60,7 @@ import {
     isShortBandHours,
     resolveBandHours,
 } from '@/lib/planificacion/planificacionBandHours';
+import { getDateKey, getDayLetter, isDateLocked } from '@/lib/planificacion/utils';
 import {
     formatPlanificacionTime,
     formatShiftScheduleLabel,
@@ -572,25 +573,6 @@ function formatPlanningTraceTooltip(steps: PlanningTraceStep[]): string {
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
 const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
 
-const getDateKey = (dateInput: any) => {
-    const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
-    const parts = new Intl.DateTimeFormat('es-AR', options).formatToParts(d);
-    const day = parts.find(p => p.type === 'day')?.value;
-    const month = parts.find(p => p.type === 'month')?.value;
-    const year = parts.find(p => p.type === 'year')?.value;
-    return `${year}-${month}-${day}`;
-};
-
-const isDateLocked = (dateStr: string) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const cellDate = new Date(y, m - 1, d);
-    cellDate.setHours(23, 59, 59, 999); 
-    const startOfToday = new Date();
-    startOfToday.setHours(0,0,0,0);
-    return cellDate < startOfToday; 
-};
-
 const getDefaultStyle = (code: string) => SHIFT_STYLES[code] || 'bg-slate-100 text-slate-700 border-slate-300';
 
 const formatTime = formatPlanificacionTime;
@@ -611,14 +593,6 @@ const ACTION_LABELS: Record<string, string> = {
     'OVERRIDE_200H': 'Autorización >200h',
     'AUTORIZACION_FRANCO_COBERTURA': 'Autorización franco trabajado (cobertura)',
     'EQUILIBRAR_CRONOGRAMA': 'Equilibrar cronograma',
-};
-
-// Helper para día de la semana (0=Domingo -> 'D')
-const getDayLetter = (dateStr: string) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    const days = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-    return days[date.getDay()];
 };
 
 const posAsEngineDef = (pos: any) => ({
