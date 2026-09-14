@@ -777,18 +777,95 @@ async function cancelSiblingConvocatorias(
   }
 }
 
+/** Vacante / turno ausente ya tiene ganador de cobertura (first-wins). */
+function isShiftAlreadyCovered(data: Record<string, any> | undefined | null): boolean {
+  if (!data) return false;
+  const st = String(data.status || '').toUpperCase();
+  if (st === 'COVERED') return true;
+  if (data.operacionallyCovered === true) return true;
+  if (data.coveredByEmployeeId && data.coverageEventId) return true;
+  if (data.coveredByEmployeeName && data.coverageEventId && st === 'COVERED') return true;
+  return false;
+}
+
+/**
+ * Claim atómico PENDING|ESCALATED → ACCEPTED.
+ * Devuelve false si otro ya ganó o la convocatoria ya no está abierta.
+ */
+async function claimConvocatoriaAccept(
+  db: admin.firestore.Firestore,
+  convocatoriaId: string,
+  respondedBy: string,
+): Promise<boolean> {
+  const ref = db.collection('convocatorias_cobertura').doc(convocatoriaId);
+  try {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      if (!snap.exists) throw new Error('NOT_FOUND');
+      const st = String(snap.data()?.status || '');
+      if (st !== 'PENDING' && st !== 'ESCALATED') throw new Error('ALREADY_CLAIMED');
+      tx.update(ref, {
+        status: 'ACCEPTED',
+        respondedAt: Timestamp.now(),
+        resolvedAt: Timestamp.now(),
+        respondedBy,
+      });
+    });
+    return true;
+  } catch (e: any) {
+    if (e?.message === 'ALREADY_CLAIMED' || e?.message === 'NOT_FOUND') return false;
+    throw e;
+  }
+}
+
 async function resolverCobertura(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc & { id: string },
-): Promise<void> {
+): Promise<'OK' | 'ALREADY_COVERED' | 'SKIPPED'> {
+  const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
+  const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
+
+  // First-wins: no materializar un 2º cubridor si el hueco ya está cubierto
+  if (isShiftAlreadyCovered(vacantData as any)) {
+    // EXT/ADV parcial: permitir la otra mitad del dual
+    const isDualHalf =
+      (conv.type === 'EXTEND' && !(vacantData as any).coverageDualExtBy)
+      || (conv.type === 'ADVANCE' && !(vacantData as any).coverageDualAdvBy);
+    const dualComplete = !!(vacantData as any).coverageDualExtBy && !!(vacantData as any).coverageDualAdvBy;
+    if (!isDualHalf || dualComplete || String((vacantData as any).status || '').toUpperCase() === 'COVERED') {
+      await db.collection('convocatorias_cobertura').doc(conv.id).set({
+        status: 'CANCELLED',
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancelReason: 'VACANTE_YA_CUBIERTA',
+      }, { merge: true });
+      return 'ALREADY_COVERED';
+    }
+  }
+
+  // EXT duplicado / ADV duplicado
+  if (conv.type === 'EXTEND' && (vacantData as any).coverageDualExtBy) {
+    await db.collection('convocatorias_cobertura').doc(conv.id).set({
+      status: 'CANCELLED',
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelReason: 'EXT_YA_ASIGNADO',
+    }, { merge: true });
+    return 'SKIPPED';
+  }
+  if (conv.type === 'ADVANCE' && (vacantData as any).coverageDualAdvBy) {
+    await db.collection('convocatorias_cobertura').doc(conv.id).set({
+      status: 'CANCELLED',
+      cancelledAt: FieldValue.serverTimestamp(),
+      cancelReason: 'ADV_YA_ASIGNADO',
+    }, { merge: true });
+    return 'SKIPPED';
+  }
+
   const batch = db.batch();
 
   const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
     : conv.createdBy === 'AUTO' ? 'AUTO'
       : 'OPERACIONES';
 
-  const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
-  const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
   const titular = resolveTitularFromAbsenceOrVacancy(vacantData);
   const coverageEventId = (vacantData as any).coverageEventId || newCoverageEventId();
   const ledgerBase = {
@@ -1057,6 +1134,7 @@ async function resolverCobertura(
   });
 
   await batch.commit();
+  return 'OK';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1220,12 +1298,14 @@ export const responderConvocatoriaCobertura = functions
     }
 
     if (response === 'ACCEPTED') {
-      await convRef.update({
-        status: 'ACCEPTED',
-        respondedAt: now,
-        resolvedAt: now,
-      });
-      await resolverCobertura(db, { ...conv, id: convocatoriaId });
+      const claimed = await claimConvocatoriaAccept(db, convocatoriaId, uid);
+      if (!claimed) {
+        throw new functions.https.HttpsError('failed-precondition', 'La convocatoria ya fue respondida o cancelada.');
+      }
+      const result = await resolverCobertura(db, { ...conv, id: convocatoriaId, status: 'ACCEPTED' });
+      if (result === 'ALREADY_COVERED') {
+        return { success: true, alreadyCovered: true };
+      }
     } else {
       await convRef.update({
         status: 'REJECTED',
@@ -1359,6 +1439,9 @@ export async function iniciarCascadaCobertura(
   shift: ShiftDataForCascade,
   createdBy = 'AUTO',
 ): Promise<void> {
+  const vacantSnap = await db.collection('turnos').doc(shift.id).get();
+  if (vacantSnap.exists && isShiftAlreadyCovered(vacantSnap.data() as any)) return;
+
   // Solo PENDING bloquea reinicio; ESCALATED solo no impide nueva cascada si quedó colgada
   const existing = await db.collection('convocatorias_cobertura')
     .where('shiftId', '==', shift.id)
@@ -1407,7 +1490,7 @@ export async function iniciarCascadaCobertura(
   });
 }
 
-// ─── MODO DEMO: simular respuestas (no espera al guardia real) ────────────────
+// ─── MODO DEMO: simular respuestas (first-wins por shiftId) ───────────────────
 
 export async function simularRespuestasConvocatorias(
   db: admin.firestore.Firestore,
@@ -1424,28 +1507,100 @@ export async function simularRespuestasConvocatorias(
     .limit(50)
     .get();
 
-  let respondidas = 0;
+  // Una sola aceptación por hueco: ordenar por cascadeStep ASC, createdAt ASC
+  const byShift = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
   for (const convDoc of snap.docs) {
     const conv = convDoc.data() as ConvocatoriaCoberturaDoc;
     if (conv.type === 'LLEGADA_TARDE') continue;
     const createdMs = conv.createdAt instanceof Timestamp ? conv.createdAt.toMillis() : 0;
     if (createdMs > cutoffMs) continue;
+    const list = byShift.get(conv.shiftId) || [];
+    list.push(convDoc);
+    byShift.set(conv.shiftId, list);
+  }
 
-    // Demo: ~90% acepta para que la cascada avance de prueba
-    const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
-    const accept = hashVal <= 8;
+  let respondidas = 0;
+  for (const [shiftId, docs] of byShift) {
+    docs.sort((a, b) => {
+      const ca = a.data() as ConvocatoriaCoberturaDoc;
+      const cb = b.data() as ConvocatoriaCoberturaDoc;
+      const sa = Number(ca.cascadeStep ?? 99);
+      const sb = Number(cb.cascadeStep ?? 99);
+      if (sa !== sb) return sa - sb;
+      const ta = ca.createdAt instanceof Timestamp ? ca.createdAt.toMillis() : 0;
+      const tb = cb.createdAt instanceof Timestamp ? cb.createdAt.toMillis() : 0;
+      return ta - tb;
+    });
 
-    try {
-      if (accept) {
-        await convDoc.ref.update({ status: 'ACCEPTED', respondedAt: now, respondedBy: 'MODO_DEMO' });
-        await resolverCobertura(db, { ...conv, id: convDoc.id, createdBy: 'MODO_DEMO' });
-      } else {
-        await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
-        await maybeAvanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+    // Releer vacante: si ya está cubierta, cancelar todas y seguir
+    const vacantFresh = await db.collection('turnos').doc(shiftId).get();
+    if (vacantFresh.exists && isShiftAlreadyCovered(vacantFresh.data() as any)) {
+      const batch = db.batch();
+      for (const d of docs) {
+        batch.update(d.ref, { status: 'CANCELLED', cancelledAt: FieldValue.serverTimestamp(), cancelReason: 'VACANTE_YA_CUBIERTA' });
       }
-      respondidas++;
-    } catch (e) {
-      console.warn('[simularRespuestasConvocatorias]', convDoc.id, (e as Error)?.message);
+      await batch.commit();
+      continue;
+    }
+
+    let won = false;
+    for (const convDoc of docs) {
+      const conv = convDoc.data() as ConvocatoriaCoberturaDoc;
+
+      // Tras un ganador: cancelar el resto del snapshot (hermanas)
+      if (won) {
+        const live = await convDoc.ref.get();
+        const st = String(live.data()?.status || '');
+        if (st === 'PENDING' || st === 'ESCALATED') {
+          await convDoc.ref.update({
+            status: 'CANCELLED',
+            cancelledAt: FieldValue.serverTimestamp(),
+            cancelReason: 'FIRST_WINS_DEMO',
+          });
+        }
+        continue;
+      }
+
+      // Releer: puede haber sido cancelada por un accept previo
+      const live = await convDoc.ref.get();
+      const liveSt = String(live.data()?.status || '');
+      if (liveSt !== 'PENDING' && liveSt !== 'ESCALATED') continue;
+
+      // Demo: ~90% acepta la primera candidata viable; si rechaza, probar la siguiente
+      const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+      const accept = hashVal <= 8;
+
+      try {
+        if (accept) {
+          const claimed = await claimConvocatoriaAccept(db, convDoc.id, 'MODO_DEMO');
+          if (!claimed) continue;
+          const result = await resolverCobertura(db, {
+            ...conv,
+            id: convDoc.id,
+            createdBy: 'MODO_DEMO',
+            status: 'ACCEPTED',
+          });
+          if (result === 'OK') {
+            won = true;
+            respondidas++;
+          }
+          // ALREADY_COVERED / SKIPPED → seguir buscando no (hueco ya cerrado)
+          if (result === 'ALREADY_COVERED') {
+            won = true;
+          }
+        } else {
+          await convDoc.ref.update({
+            status: 'REJECTED',
+            respondedAt: now,
+            rejectionReason: 'MODO_DEMO_AUTO',
+            respondedBy: 'MODO_DEMO',
+          });
+          await maybeAvanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+          respondidas++;
+        }
+      } catch (e) {
+        console.warn('[simularRespuestasConvocatorias]', convDoc.id, (e as Error)?.message);
+      }
     }
   }
   return respondidas;
