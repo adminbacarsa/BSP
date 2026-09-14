@@ -77,11 +77,7 @@ import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { persistHoursBalancesFromTurnos } from '@/lib/hoursBalance';
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
-  PieChart, Pie, RadialBarChart, RadialBar, AreaChart, Area, Treemap,
-} from 'recharts';
+import { useLazyRecharts } from '@/hooks/useLazyRecharts';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 const MONTHS_SHORT = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
@@ -434,6 +430,7 @@ type FinMode = FinHoursMode;
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
 export default function AnalisisPage() {
   useAuth();
+  const rechartsMod = useLazyRecharts();
   const { empresaId, empresa, loadingEmpresa } = useEmpresa();
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
@@ -2150,7 +2147,7 @@ export default function AnalisisPage() {
   };
 
   // ─────────────────────────────────────────────────────────────────────────────
-  if (loadInit) {
+  if (loadInit || !rechartsMod) {
     const pct = Math.max(0, Math.min(100, loadProgress?.pct ?? 0));
     return (
       <DashboardLayout>
@@ -2191,6 +2188,12 @@ export default function AnalisisPage() {
       </DashboardLayout>
     );
   }
+
+  const {
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
+    PieChart, Pie, RadialBarChart, RadialBar, AreaChart, Area, Treemap,
+  } = rechartsMod;
 
   return (
     <DashboardLayout>

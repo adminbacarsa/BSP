@@ -22,8 +22,6 @@ import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
@@ -3852,7 +3850,11 @@ export default function OperacionesPage() {
         mapWindowRef.current = null;
         setIsExternalMap(false);
     };
-    const generateDailyReport = () => {
+    const generateDailyReport = async () => {
+        const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+            import('jspdf'),
+            import('jspdf-autotable'),
+        ]);
         const pdf = new jsPDF();
         const now = new Date();
         const tz  = 'America/Argentina/Cordoba';

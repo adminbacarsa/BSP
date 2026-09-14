@@ -30,8 +30,6 @@ import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, 
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
-import { exportLiquidacionReportPdf } from '@/lib/reportes/liquidacionReportPdf';
 import {
     formatCctPeriodLabel,
     formatCctPeriodRangeDisplay,
@@ -884,8 +882,9 @@ export default function ReportsPage() {
                         <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
                         <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                                 try {
+                                    const { exportLiquidacionReportPdf } = await import('@/lib/reportes/liquidacionReportPdf');
                                     const sum = (key: string) =>
                                         sourceRows.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
                                     const planCob = sum('horasCobertura');
@@ -2700,8 +2699,9 @@ export default function ReportsPage() {
                                 <button
                                     type="button"
                                     disabled={filtered.length === 0 || svcReportLoading}
-                                    onClick={() => {
+                                    onClick={async () => {
                                         try {
+                                            const { exportServiciosReportPdf } = await import('@/lib/reportes/serviciosReportPdf');
                                             const filterParts: string[] = [];
                                             if (svcStatusFilter === 'active') filterParts.push('solo activos');
                                             if (svcStatusFilter === 'inactive') filterParts.push('solo inactivos');
