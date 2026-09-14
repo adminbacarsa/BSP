@@ -137,6 +137,8 @@ import { usePlanificacionFirestore } from '@/hooks/usePlanificacionFirestore';
 import { usePlanificacionGrupoSla } from '@/hooks/usePlanificacionGrupoSla';
 import { usePlanificacionObjectiveSla } from '@/hooks/usePlanificacionObjectiveSla';
 import { usePlanificacionAutoRotation } from '@/hooks/usePlanificacionAutoRotation';
+import { usePlanificacionPublishState } from '@/hooks/usePlanificacionPublishState';
+import { unpublishPlanificacionMonth } from '@/lib/planificacion/planificacionUnpublish';
 import { computeServiceRuleChanges } from '@/lib/planificacion/planificacionServiceRuleChanges';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
@@ -696,6 +698,20 @@ export default function PlanificacionPage() {
     const autoSelectedCyclesRef = useRef<string[]>([]);
     const [mesRotacionesDesactivadas, setMesRotacionesDesactivadas] = useState<Set<string>>(new Set());
     const [rotMesDropOpen, setRotMesDropOpen] = useState(false);
+
+    const { activateRfzCorrectionFlow } = usePlanificacionPublishState({
+        selectedObjective,
+        currentDate,
+        empresaId,
+        dataRefreshNonce,
+        publishStatusMap,
+        setPublishStatusMap,
+        setMesRotacionesDesactivadas,
+        rfzTodos,
+        canCorrectPlanning,
+        setNeedsRepublishMap,
+        setCorrectionMode,
+    });
 
     const { resetAutoRotAppliedGuard } = usePlanificacionAutoRotation({
         shiftsMapLoaded,
@@ -3869,64 +3885,6 @@ export default function PlanificacionPage() {
         gruposService.getByEmpresa(empresaId).then(setGrupos);
     }, [empresaId]);
 
-    // Cargar estado de publicación cuando cambia objetivo o mes
-    useEffect(() => {
-        if (!selectedObjective) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1;
-        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
-            .then(row => {
-                // Solo publishedAt marca publicación. Asignar puestos crea el mismo doc sin publicar.
-                if (row && row.data.publishedAt) {
-                    setPublishStatusMap(prev => ({
-                        ...prev,
-                        [lookupKey]: {
-                            publishedAt: row.data.publishedAt,
-                            publishedBy: String(row.data.publishedBy ?? ''),
-                        },
-                    }));
-                } else {
-                    setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-                }
-                const disabled = (row?.data.rotacionesDesactivadasMes as string[] | undefined) ?? [];
-                setMesRotacionesDesactivadas(new Set(disabled));
-            }).catch(() => { setMesRotacionesDesactivadas(new Set()); });
-    }, [selectedObjective, currentDate, empresaId, dataRefreshNonce]);
-
-    // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
-    const activateRfzCorrectionFlow = useCallback((opts?: { republishOnly?: boolean }) => {
-        if (!selectedObjective) return;
-        const lookupKey = planificacionPublishLookupKey(
-            selectedObjective,
-            currentDate.getFullYear(),
-            currentDate.getMonth() + 1,
-        );
-        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
-        setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        if (!opts?.republishOnly && canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning]);
-
-    useEffect(() => {
-        if (!selectedObjective) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1;
-        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
-        const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-        const draftRfz = rfzTodos.filter(rfz =>
-            rfz.objectiveId === selectedObjective &&
-            String(rfz.fecha || '').startsWith(monthPrefix) &&
-            rfz.draft === true,
-        );
-        if (draftRfz.length === 0) return;
-        const asignadosSinPublicar = draftRfz.some(rfz => rfz.employeeId && rfz.employeeId !== 'VACANTE');
-        if (asignadosSinPublicar) {
-            setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        }
-        if (canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, canCorrectPlanning]);
-
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
     // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
     useEffect(() => {
@@ -5531,9 +5489,6 @@ export default function PlanificacionPage() {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
-        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const primaryDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-        const legacyDocId = buildPlanificacionEstadoDocId('', selectedObjective, year, month);
 
         const confirmed = confirm(
             `[SUPERADMIN]\n\n¿Despublicar el cronograma de ${objectiveName} — ${String(month).padStart(2, '0')}/${year}?\n\n` +
@@ -5543,64 +5498,14 @@ export default function PlanificacionPage() {
 
         setIsUnpublishing(true);
         try {
-            const auth = getAuth();
-            const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-            const firstDay = new Date(year, month - 1, 1);
-            const lastDay = new Date(year, month, 0, 23, 59, 59, 999);
-            const shiftSnap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-            ));
-            const batch = writeBatch(db);
-            let restoredDrafts = 0;
-
-            shiftSnap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .filter(d => {
-                    const data = d.data();
-                    const start = data.startTime?.toDate?.();
-                    if (!start || start < firstDay || start > lastDay) return false;
-                    if (isOperationalOriginShift(data)) return false;
-                    const code = String(data.code || '').toUpperCase();
-                    if (code === 'RFZ' || code === 'TURA') return false;
-                    return data.draft !== true;
-                })
-                .forEach(d => {
-                    batch.update(d.ref, { draft: true });
-                    restoredDrafts++;
-                });
-
-            // Solo quitar flags de publicación — preservar defaultPositionByEmp / defaultShiftByEmp
-            const clearPublish = {
-                publishedAt: deleteField(),
-                publishedBy: deleteField(),
-            };
-            const primaryRef = doc(db, 'planificacion_estados', primaryDocId);
-            const primarySnap = await getDoc(primaryRef);
-            if (primarySnap.exists()) {
-                batch.update(primaryRef, clearPublish);
-            }
-            if (legacyDocId !== primaryDocId) {
-                const legacyRef = doc(db, 'planificacion_estados', legacyDocId);
-                const legacySnap = await getDoc(legacyRef);
-                if (legacySnap.exists()) {
-                    batch.update(legacyRef, clearPublish);
-                }
-            }
-            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                action: 'DESPUBLICACION_CRONOGRAMA',
-                module: 'PLANIFICADOR',
-                details: `Cronograma despublicado — ${objectiveName} · ${month}/${year} · ${restoredDrafts} turno(s) vuelven a borrador (puestos conservados)`,
-                timestamp: serverTimestamp(),
-                actorName,
-                actorUid: auth.currentUser?.uid || null,
-                objectiveId: selectedObjective,
-                objectiveName,
+            const { restoredDrafts, publishLookupKey } = await unpublishPlanificacionMonth({
+                empresaId,
+                migracionCompleta,
+                selectedObjective,
                 year,
                 month,
-            }, empresaId));
-
-            await batch.commit();
+                objectiveName,
+            });
             setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: null }));
             setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
             setCorrectionMode(false);
