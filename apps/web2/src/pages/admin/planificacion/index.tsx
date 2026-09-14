@@ -35,7 +35,6 @@ import {
     DOTACION_NEARBY_SCAN_CAP,
     NEARBY_KM_STORAGE_KEY,
     ROSTER_KM_PRESETS,
-    buildDotacionMapsFromEmployees,
     clampNearbyKm,
     employeeKmToObjective,
     formatKmLabel,
@@ -109,8 +108,6 @@ import {
     stampEmpresaId,
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
-    fetchPlanificacionEstadoDoc,
-    fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
@@ -138,9 +135,16 @@ import { usePlanificacionObjectiveSla } from '@/hooks/usePlanificacionObjectiveS
 import { usePlanificacionAutoRotation } from '@/hooks/usePlanificacionAutoRotation';
 import { usePlanificacionPublishState } from '@/hooks/usePlanificacionPublishState';
 import { usePlanificacionDotacionOverlay } from '@/hooks/usePlanificacionDotacionOverlay';
+import { usePlanificacionDotacionMigration } from '@/hooks/usePlanificacionDotacionMigration';
 import { unpublishPlanificacionMonth } from '@/lib/planificacion/planificacionUnpublish';
 import { publishPlanificacionMonth } from '@/lib/planificacion/planificacionPublish';
+import {
+    buildPublishConfirmModalState,
+    evaluatePublishSlaState,
+    type PublishConfirmModalState,
+} from '@/lib/planificacion/planificacionPublishConfirm';
 import { executePlanificacionSaveJob } from '@/lib/planificacion/executePlanificacionSaveJob';
+import { loadPlanificacionCronogramaRefresh } from '@/lib/planificacion/refreshPlanificacionCronogramaView';
 import { computeServiceRuleChanges } from '@/lib/planificacion/planificacionServiceRuleChanges';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
@@ -516,7 +520,6 @@ export default function PlanificacionPage() {
     const longPressTimer = useRef<any>(null);
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
-    const dotacionMigratedRef = useRef(false);
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
@@ -567,13 +570,7 @@ export default function PlanificacionPage() {
         slaIdToObjId,
         dataRefreshNonce,
     });
-    const [publishConfirmModal, setPublishConfirmModal] = useState<{
-        isRepublish: boolean;
-        warnings: string[];
-        superAdminOverride: boolean;
-        objectiveName: string;
-        periodLabel: string;
-    } | null>(null);
+    const [publishConfirmModal, setPublishConfirmModal] = useState<PublishConfirmModalState | null>(null);
     const [publishConfirmPin, setPublishConfirmPin] = useState('');
     const [publishConfirmPinError, setPublishConfirmPinError] = useState('');
     const [publishConfirmPinChecking, setPublishConfirmPinChecking] = useState(false);
@@ -3892,32 +3889,7 @@ export default function PlanificacionPage() {
         setEmpDefaultShift,
     });
 
-    useEffect(() => {
-        if (dotacionMigratedRef.current || typeof window === 'undefined' || !employees.length) return;
-        dotacionMigratedRef.current = true;
-        try {
-            const lsPos: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_pos') || '{}');
-            const lsShift: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_shift') || '{}');
-            const allKeys = new Set([...Object.keys(lsPos), ...Object.keys(lsShift)]);
-            for (const key of allKeys) {
-                const sep = key.indexOf('___');
-                if (sep <= 0) continue;
-                const empId = key.slice(0, sep);
-                const objId = key.slice(sep + 3);
-                const emp = employees.find((e) => e.id === empId);
-                if (!emp) continue;
-                const existing = emp.planificacionDotacion?.[objId]?.positionName;
-                const positionName = lsPos[key];
-                if (existing || !positionName) continue;
-                const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
-                nextDotacion[objId] = {
-                    positionName,
-                    ...(lsShift[key] ? { shiftCode: lsShift[key] } : {}),
-                };
-                updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion }).catch(() => {});
-            }
-        } catch { /* noop */ }
-    }, [employees]);
+    usePlanificacionDotacionMigration({ employees });
 
     // ============================================================================
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
@@ -4172,82 +4144,21 @@ export default function PlanificacionPage() {
         try {
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
-            const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-            const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-
-            const [estadoRow, turnosSnap] = await Promise.all([
-                fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month),
-                getDocs(query(
-                    collection(db, 'turnos'),
-                    where('objectiveId', '==', selectedObjective),
-                )),
-            ]);
-
-            if (estadoRow && estadoRow.data.publishedAt) {
-                setPublishStatusMap(prev => ({
-                    ...prev,
-                    [lookupKey]: {
-                        publishedAt: estadoRow.data.publishedAt,
-                        publishedBy: String(estadoRow.data.publishedBy ?? ''),
-                    },
-                }));
-            } else {
-                setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-            }
-
-            const mergedEstado = await fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month);
-            const monthlyPos = (mergedEstado.defaultPositionByEmp as Record<string, string>) || {};
-            const monthlyShift = (mergedEstado.defaultShiftByEmp as Record<string, string>) || {};
-            const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
-            const mergedPos = { ...basePos };
-            const mergedShift = { ...baseShift };
-            for (const [id, p] of Object.entries(monthlyPos)) mergedPos[`${id}___${selectedObjective}`] = p;
-            for (const [id, s] of Object.entries(monthlyShift)) mergedShift[`${id}___${selectedObjective}`] = s;
-            setEmpDefaultPos(mergedPos);
-            setEmpDefaultShift(mergedShift);
-
-            setShiftsMap(prev => {
-                const next = { ...prev };
-                for (const key of Object.keys(next)) {
-                    const s = next[key];
-                    if (!s) continue;
-                    if (String(s.objectiveId || '') !== String(selectedObjective)) continue;
-                    const dateKey = key.includes('_') ? key.slice(key.indexOf('_') + 1) : '';
-                    if (dateKey.startsWith(monthPrefix)) delete next[key];
-                }
-                turnosSnap.docs.forEach(d => {
-                    const data = d.data();
-                    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-                    const code = String(data.code || data.type || '').toUpperCase();
-                    if (code === 'RFZ' || code === 'TURA') return;
-                    if (!data.startTime?.seconds) return;
-                    const dateKey = getDateKey(data.startTime);
-                    if (!dateKey.startsWith(monthPrefix)) return;
-                    const empKey = `${data.employeeId}_${dateKey}`;
-                    next[empKey] = {
-                        id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
-                        startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
-                        status: data.status, isPresent: data.isPresent || false, isAbsent: data.isAbsent || false,
-                        isExtended: data.isExtended || data.isRetention,
-                        isRetention: !!data.isRetention,
-                        isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
-                        origin: data.origin,
-                        coversAbsenceEmployeeName: data.coversAbsenceEmployeeName || data.absenceEmployeeName,
-                        coveredByEmployeeName: data.coveredByEmployeeName,
-                        absenceShiftId: data.absenceShiftId,
-                        causedByShiftId: data.causedByShiftId,
-                        coverageEventId: data.coverageEventId || null,
-                        operacionallyCovered: !!data.operacionallyCovered,
-                        isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
-                        swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
-                        positionName: data.positionName,
-                        coveredBy: data.coveredBy,
-                        draft: data.draft,
-                    };
-                });
-                return next;
+            const refreshed = await loadPlanificacionCronogramaRefresh({
+                empresaId,
+                migracionCompleta,
+                selectedObjective,
+                year,
+                month,
+                employees,
             });
-
+            setPublishStatusMap(prev => ({
+                ...prev,
+                [refreshed.lookupKey]: refreshed.publishStatusEntry,
+            }));
+            setEmpDefaultPos(refreshed.empDefaultPos);
+            setEmpDefaultShift(refreshed.empDefaultShift);
+            setShiftsMap(refreshed.mergeShiftsMap);
             setDataRefreshNonce(n => n + 1);
             toast.success('Cronograma actualizado');
         } catch (e) {
@@ -4670,50 +4581,22 @@ export default function PlanificacionPage() {
         if (!selectedObjective || !canPublishPlanning) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaClosePlanned = objectiveMonthSlaBaseHours;
-        const plannedRounded = Math.round(slaClosePlanned);
-        const slaRounded = Math.round(slaVendidas);
-        const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
-        const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
-            : 0;
-        const hasCoverageGaps = coverageGapDays > 0;
-
-        if (!isSuperAdmin && slaHoursMismatch) {
-            const delta = slaRounded - plannedRounded;
-            toast.error(
-                delta > 0
-                    ? `No se puede publicar: ${plannedRounded}h planificadas ≠ ${slaRounded}h vendidas (SLA). Faltan ${delta}h.`
-                    : `No se puede publicar: ${plannedRounded}h planificadas superan ${slaRounded}h vendidas (SLA) en ${-delta}h.`,
-                { duration: 9000 },
-            );
+        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const sla = evaluatePublishSlaState(objectiveMonthSlaBaseHours, slaVendidas, objectiveCoverageGapReport);
+        const result = buildPublishConfirmModalState({
+            selectedObjective,
+            year,
+            month,
+            objectiveName,
+            isSuperAdmin,
+            publishStatusMap,
+            sla,
+        });
+        if (result.blocked) {
+            toast.error(result.errorMessage, { duration: result.errorDuration });
             return;
         }
-
-        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const isAlreadyPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-        const warnings: string[] = [];
-        if (isSuperAdmin && slaHoursMismatch) {
-            const delta = slaRounded - plannedRounded;
-            warnings.push(
-                delta > 0
-                    ? `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (faltan ${delta}h).`
-                    : `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (excede ${-delta}h).`,
-            );
-        }
-        if (isSuperAdmin && hasCoverageGaps) {
-            warnings.push(`Cobertura: ${coverageGapDays} día(s) con huecos respecto al esquema SLA.`);
-        }
-
-        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
-        setPublishConfirmModal({
-            isRepublish: isAlreadyPublished,
-            warnings,
-            superAdminOverride: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps),
-            objectiveName,
-            periodLabel: `${String(month).padStart(2, '0')}/${year}`,
-        });
+        setPublishConfirmModal(result.modal);
         setPublishConfirmPin('');
         setPublishConfirmPinError('');
     };
@@ -4726,12 +4609,11 @@ export default function PlanificacionPage() {
         }
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const slaClosePlanned = objectiveMonthSlaBaseHours;
-        const slaHoursMismatch = slaVendidas > 0 && Math.round(slaClosePlanned) !== Math.round(slaVendidas);
-        const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
-            : 0;
-        const hasCoverageGaps = coverageGapDays > 0;
+        const { slaHoursMismatch, hasCoverageGaps } = evaluatePublishSlaState(
+            objectiveMonthSlaBaseHours,
+            slaVendidas,
+            objectiveCoverageGapReport,
+        );
         const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
         const clientName = clients.find((c: any) => c.id === selectedClient)?.name || selectedClient || '';
         setPublishConfirmModal(null);
