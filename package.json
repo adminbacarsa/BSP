@@ -71,6 +71,8 @@
     "test:automate-planning-ui": "node scripts/test-automate-planning-ui.mjs",
     "autoplan:real": "node scripts/run-autoplan-real.mjs",
     "seed:planning-demo": "node scripts/seed-planning-demo.mjs",
+    "cleanup:demo-coverages": "node scripts/cleanup-demo-duplicate-coverages.js",
+    "cleanup:demo-coverages:apply": "node scripts/cleanup-demo-duplicate-coverages.js --apply",
     "lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1",
     "lab:full": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -WithExpo -Network -NoCursor",
     "lab:restart": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/start-cosp-lab.ps1 -Restart",
