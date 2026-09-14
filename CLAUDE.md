@@ -184,6 +184,8 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 **Continuidad al fin de banda** (`shiftContinuity` + `autoCompletarTurnos`): 24hs SLA → retención; si el presente tiene **turno posterior** en el mismo objetivo → retención; si hay extensión TURA/D12/N12 → retención; solo sin posterior ni extensión → cierre auto.
 
+**RET/ESC/REF y presencia:** stand-by **no** ficha (`RET_STANDBY_NO_CHECKIN`). Al cubrir → `buildReassignPassiveToVacancyFields` deja el **código real** del hueco; recién ahí se marca presente. Demo **no** simula presencia/ausencia sobre RET/ESC/REF; sanea RET+punto verde fantasma.
+
 **Dual reloj:** puesto/prefactura = `plannedStartTime`/`plannedEndTime` (banda del hueco); liquidación/fichada = `presentAt` / `realStartTime` / `adjustedStartTime`. No inferir fichada al asignar cobertura.
 
 **Baja anticipada:** con compañeros → novedad cubierto; solo → protocolo vacante; **urgencia médica** → salir sin vacante (`leftWithoutCoverage`).

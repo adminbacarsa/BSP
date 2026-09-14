@@ -848,7 +848,73 @@ async function runModoDemoForEmpresa(
     t.employeeId === 'SIN_COBERTURA' ||
     !!t.isUnassigned ||
     !!t.isSinCobertura;
-  const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
+  const isPassiveStandby = (t: any) => {
+    const c = String(t.code || '').toUpperCase();
+    return c === 'RET' || c === 'ESC' || c === 'REF' || t.isReten === true;
+  };
+  // RET/ESC/REF: stand-by — no simular presencia ni ausencia; se activan al cubrir (código real).
+  const skipBase = (t: any) =>
+    t.draft === true || t.isFranco === true || t.isVirtual || isPassiveStandby(t);
+
+  // === Pase 0: sanear RET/ESC/REF con punto verde fantasma (presencia sin turno real) ===
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (!isPassiveStandby(t) || !t.isPresent) continue;
+    const hasLedger =
+      String(t.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+      !!t.coversAbsenceEmployeeName ||
+      !!t.absenceShiftId ||
+      !!t.coveredShiftId ||
+      (!!t.coverageEventId && !!t.previousPassiveCode);
+    if (hasLedger) {
+      // Inconsistente: tiene ledger pero code sigue pasivo → convertir al código del hueco
+      const absId = String(t.absenceShiftId || t.coveredShiftId || '').trim();
+      let vacancyCode = String(t.shiftCode || 'M').toUpperCase();
+      let vacancy: Record<string, any> = t;
+      if (absId) {
+        try {
+          const absDoc = await db.collection('turnos').doc(absId).get();
+          if (absDoc.exists) {
+            vacancy = absDoc.data() || t;
+            vacancyCode = String(vacancy.code || vacancy.shiftCode || 'M').toUpperCase();
+          }
+        } catch { /* keep defaults */ }
+      }
+      if (vacancyCode === 'RET' || vacancyCode === 'ESC' || vacancyCode === 'REF') vacancyCode = 'M';
+      const prev = String(t.previousPassiveCode || t.code || 'RET').toUpperCase();
+      batch.update(doc.ref, {
+        code: vacancyCode,
+        startTime: vacancy.startTime || t.startTime || null,
+        endTime: vacancy.endTime || t.endTime || null,
+        plannedStartTime: vacancy.startTime || t.plannedStartTime || null,
+        plannedEndTime: vacancy.endTime || t.plannedEndTime || null,
+        objectiveId: vacancy.objectiveId || t.objectiveId || null,
+        objectiveName: vacancy.objectiveName || t.objectiveName || null,
+        positionName: vacancy.positionName || t.positionName || null,
+        isReten: false,
+        isFranco: false,
+        origin: 'OPERATIONS_COVERAGE',
+        previousPassiveCode: prev,
+        reassignedFromPassiveAt: nowTs,
+        resolvedBy: t.resolvedBy || 'MODO_DEMO',
+        demoRetHealAt: nowTs,
+      });
+      batchOps += 1;
+    } else {
+      // Presencia fantasma en stand-by puro (p.ej. Demo viejo) → quitar punto verde
+      batch.update(doc.ref, {
+        isPresent: false,
+        status: 'ASSIGNED',
+        presentAt: admin.firestore.FieldValue.delete(),
+        realStartTime: admin.firestore.FieldValue.delete(),
+        checkInTime: admin.firestore.FieldValue.delete(),
+        autoPresencia: admin.firestore.FieldValue.delete(),
+        demoSimulated: admin.firestore.FieldValue.delete(),
+        demoRetPhantomClearedAt: nowTs,
+      });
+      batchOps += 1;
+    }
+  }
 
   // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
@@ -1159,6 +1225,9 @@ export const autoPresenciaYCierre = functions
     for (const doc of snap.docs) {
       const t = doc.data() as any;
       if (t.isAbsent || t.isVirtual) continue;
+      const codeU = String(t.code || '').toUpperCase();
+      // RET/ESC/REF son stand-by: no auto-presencia (evita punto verde sin turno real).
+      if (codeU === 'RET' || codeU === 'ESC' || codeU === 'REF' || t.isReten === true) continue;
       const startMs = (t.startTime?.seconds ?? 0) * 1000;
       const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
       const objectiveId = String(t.objectiveId || '');

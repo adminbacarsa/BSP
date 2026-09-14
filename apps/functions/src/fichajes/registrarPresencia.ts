@@ -1,5 +1,10 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import {
+  buildReassignPassiveToVacancyFields,
+  hasCoverageLedgerWithoutRealCode,
+  isPassiveStandbyCode,
+} from '../coverage/shiftContinuity';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -217,7 +222,32 @@ export async function registrarPresencia(
   const nowMs = nowTs.toMillis();
   const now = FieldValue.serverTimestamp();
 
-  const scheduledStartTs = shiftData.startTime ?? null;
+  /** Heal: RET/ESC/REF con ledger de cobertura pero code aún pasivo → convertir al turno del hueco. */
+  let passiveHealPatch: Record<string, unknown> | null = null;
+  if (isPassiveStandbyCode(shiftData.code)) {
+    if (hasCoverageLedgerWithoutRealCode(shiftData)) {
+      const absId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();
+      let vacancy: Record<string, any> = shiftData;
+      if (absId) {
+        const absDoc = await db.collection('turnos').doc(absId).get();
+        if (absDoc.exists) vacancy = absDoc.data() || shiftData;
+      }
+      const prevCode = String(shiftData.previousPassiveCode || shiftData.code || 'RET').toUpperCase();
+      passiveHealPatch = {
+        ...buildReassignPassiveToVacancyFields(vacancy, {
+          coverageType: String(shiftData.coverageType || prevCode),
+          resolvedBy: String(shiftData.resolvedBy || 'OPERACIONES'),
+          previousCode: prevCode,
+          coverageEventId: shiftData.coverageEventId || undefined,
+        }),
+      };
+    } else {
+      // Stand-by puro: no hay “turno real” hasta asignar cobertura
+      throw new Error('RET_STANDBY_NO_CHECKIN');
+    }
+  }
+
+  const scheduledStartTs = (passiveHealPatch?.startTime as any) ?? shiftData.startTime ?? null;
   const isEarlyStart = shiftData.isEarlyStart === true;
   const realStartTime = isEarlyStart
     ? shiftData.adjustedStartTime || scheduledStartTs || now
@@ -227,6 +257,7 @@ export async function registrarPresencia(
   const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000;
 
   const incomingPatch: Record<string, unknown> = {
+    ...(passiveHealPatch || {}),
     isPresent: true,
     status: 'PRESENT',
     checkInTime: now,

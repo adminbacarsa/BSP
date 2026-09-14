@@ -119,6 +119,31 @@ export function vacancyCoverageLabel(params: {
  * Campos para convertir RET / ESC / REF en el turno real del hueco.
  * Plan/prefactura = banda de la vacante; no usar arrival como startTime del slot.
  */
+/** RET / ESC / REF = stand-by pasivo; no ficha presencia hasta convertirse al turno real del hueco. */
+export function isPassiveStandbyCode(code: unknown): boolean {
+  const c = String(code || '').toUpperCase();
+  return c === 'RET' || c === 'ESC' || c === 'REF';
+}
+
+/** ¿Ya hay ledger de cobertura aunque el `code` siga siendo pasivo (dato inconsistente)? */
+export function hasCoverageLedgerWithoutRealCode(shift: {
+  code?: string | null;
+  origin?: string | null;
+  coversAbsenceEmployeeName?: string | null;
+  absenceEmployeeName?: string | null;
+  absenceShiftId?: string | null;
+  coveredShiftId?: string | null;
+  coverageEventId?: string | null;
+  previousPassiveCode?: string | null;
+}): boolean {
+  if (!isPassiveStandbyCode(shift?.code)) return false;
+  if (String(shift?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return true;
+  if (shift?.coversAbsenceEmployeeName || shift?.absenceEmployeeName) return true;
+  if (shift?.absenceShiftId || shift?.coveredShiftId) return true;
+  if (shift?.coverageEventId && shift?.previousPassiveCode) return true;
+  return false;
+}
+
 export function buildReassignPassiveToVacancyFields(vacancy: {
   objectiveId?: string;
   objectiveName?: string;
