@@ -48,7 +48,7 @@ export const spacing = {
 
 export const shadow = {
   hero: {
-    shadowColor: colors.indigo900,
+    shadowColor: '#8B1A1A',
     shadowOpacity: 0.35,
     shadowRadius: 20,
     shadowOffset: { width: 0, height: 12 },

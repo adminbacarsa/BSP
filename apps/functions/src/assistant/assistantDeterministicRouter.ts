@@ -304,6 +304,8 @@ function matchMyAssignedShiftsIntent(t: string): boolean {
 function matchObjectivePresentAtSiteIntent(t: string): boolean {
   if (/\b(presentes?|fichados?|marcaron|marcacion|marcación|hay\s+ahora)\b/.test(t)) return true;
   if (t.length > 90) return false;
+  // Excluir intenciones de acción (asignar, cubrir, refuerzo, etc.) — no son consultas de presencia
+  if (/\b(asignar|asigna|cubrir|cubra|refuerzo|extende|extender|necesito|quiero|crea|crear|mand[aá])\b/i.test(t)) return false;
   if (/\b(casisa|obrador|malagueno|malagueño|misericordia|san\s+roque|cruz\s+del\s+eje|loteria|lotería)\b/.test(t)) {
     if (/\b(todos los|toda la empresa|cuantos clientes|sla|horas vendidas)\b/.test(t)) return false;
     return true;
@@ -1024,7 +1026,12 @@ function extractFrancoRetTipoFromQuery(t: string, recent: AssistantRecentMessage
 }
 
 function extractObjectiveSiteFromQuery(t: string): string | null {
-  let m = t.match(
+  // "al objetivo X", "en el objetivo X", "del objetivo X", "objetivo X"
+  let m = t.match(/\b(?:al|en\s+el|en|del)\s+objetivo\s+([a-záéíóúñ0-9.\s]{3,50}?)(?:\s+hoy|\s+para|\s+mañana|\s*\?|$)/i);
+  if (m?.[1]?.trim()) return m[1].trim();
+  m = t.match(/\bobjetivo\s+([a-záéíóúñ0-9.\s]{3,50}?)(?:\s+hoy|\s+para|\s+mañana|\s*\?|$)/i);
+  if (m?.[1]?.trim()) return m[1].trim();
+  m = t.match(
     /\bturnos?\s+(?:del?\s+|de\s+(?:el\s+)?)?(?:h\.?\s*|hospital\s*)?([a-záéíóúñ0-9.\s]{2,50}?)(?:\s+hoy|\s*\?|$)/i,
   );
   if (m?.[1]?.trim()) return m[1].trim();
@@ -2125,7 +2132,7 @@ async function tryDeterministicPresentesEnObjetivoReply(
   const siteHint =
     extractObjectiveSiteFromQuery(t) ||
     extractObjectiveHintFromRecentMessages(recent) ||
-    t.trim();
+    (t.trim().split(/\s+/).length <= 4 ? t.trim() : null);
   if (!siteHint || siteHint.length < 3) return null;
 
   const found = await ejecutarBuscarObjetivosPorNombre(toolCtx, { texto: siteHint, limite: 6 });

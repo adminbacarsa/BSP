@@ -15,6 +15,12 @@ export declare const manageAgreements: functions.HttpsFunction & functions.Runna
 export declare const platformHealthCheck: functions.HttpsFunction & functions.Runnable<any>;
 export declare const checkSystemHealth: functions.HttpsFunction & functions.Runnable<any>;
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
+export declare const executeAgentAction: functions.HttpsFunction & functions.Runnable<any>;
+export declare const modoDemoCron: functions.CloudFunction<unknown>;
+export declare const onTurnoAbsenciaDetectada: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot>, {
+    shiftId: string;
+}>>;
+export declare const autoPresenciaYCierre: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
 export { vplanRun } from './vplan';
 export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnable<any>;
@@ -24,10 +30,12 @@ export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Ru
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
+export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
 export { getSwapPeople, getSwapCandidates, createSwapRequest, respondSwapRequest, confirmSwapRequest, cancelSwapRequest, approveSwapRequest, rejectSwapRequestSupervisor, } from './swap/swapPortal';
+export { crearConvocatoriaCobertura, responderConvocatoriaCobertura, cancelarConvocatoriaCobertura, getCandidatosCobertura, checkConvocatoriaTimeouts, } from './coverage/convocatoriasCobertura';
 export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
@@ -37,6 +45,8 @@ export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
+export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
+export { onGuardAbsenceDetected } from './notifications/onGuardAbsenceDetected';
 export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
 export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';
 export { payrollApi } from './payroll-api/handler';
@@ -86,6 +96,8 @@ export declare const processEmpresaMigrateJob: import("firebase-functions/core")
     jobId: string;
 }>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
+export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const tagTurnosArchiveTier: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledBackup: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const updateBackupSchedule: import("firebase-functions/v2/https").CallableFunction<any, Promise<admin.firestore.DocumentData>, unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;

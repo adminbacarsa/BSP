@@ -5,6 +5,7 @@
 
 import { effectiveShiftsForPositionDay } from './autoScheduleEngineV2';
 import { resolveTitularVacancyWorkShift } from './vacancyCoverage';
+import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 
 export const PLANNING_NON_BILLABLE_CODES = new Set([
     'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC', 'SUS', 'SGS', 'EV',
@@ -546,6 +547,7 @@ export function countPositionClosedUnitsFromShifts(
         activeDays?: string[];
         excludedShiftDates?: Record<string, string[]>;
         excludedShiftPaxDates?: Record<string, Record<string, number>>;
+        paxBoostRanges?: Array<{ from: string; to: string; delta: number }>;
     },
     dayLetter: string,
     codeCounts: Record<string, number>,
@@ -586,7 +588,8 @@ export function countPositionClosedUnitsFromShifts(
         const base = (shiftQty != null && Number(shiftQty) > 0)
             ? Math.max(1, Math.floor(Number(shiftQty)))
             : qty;
-        return Math.max(0, base - (paxCuts[c] || 0));
+        const boost = dateStr ? paxBoostDeltaForDate(pos, dateStr) : 0;
+        return Math.max(0, base - (paxCuts[c] || 0) + boost);
     };
 
     if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {

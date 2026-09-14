@@ -68,18 +68,22 @@ export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
               </Text>
               <View style={styles.codesRow}>
                 {cell.codes.length > 0 ? (
-                  cell.codes.map((code) => (
-                    <Text
-                      key={`${cell.key}-${code}`}
-                      style={[
-                        styles.code,
-                        { fontSize: codeSize, color: selected ? palette.onPrimary : accent !== 'transparent' ? accent : palette.onSurfaceMuted },
-                      ]}
-                      numberOfLines={1}
-                    >
-                      {code}
-                    </Text>
-                  ))
+                  <Text
+                    style={[
+                      styles.code,
+                      {
+                        fontSize: codeSize,
+                        color: selected
+                          ? palette.onPrimary
+                          : accent !== 'transparent'
+                            ? accent
+                            : palette.onSurfaceMuted,
+                      },
+                    ]}
+                    numberOfLines={1}
+                  >
+                    {cell.codes.join(' · ')}
+                  </Text>
                 ) : (
                   <View style={styles.codePlaceholder} />
                 )}

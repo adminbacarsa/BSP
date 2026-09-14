@@ -1,13 +1,13 @@
 import React from 'react';
-import { LayoutGrid, Inbox, FileText, MoreHorizontal } from 'lucide-react';
+import { LayoutGrid, Inbox, MapPin } from 'lucide-react';
 import type { SupervisionMainTab } from '@/lib/supervision/supervisionUtils';
+import { SUPERVISION_MAIN_TABS } from '@/lib/supervision/supervisionNav';
 
-const TABS: { id: SupervisionMainTab; label: string; icon: React.ElementType }[] = [
-  { id: 'BANDEJA', label: 'Bandeja', icon: Inbox },
-  { id: 'TABLERO', label: 'Tablero', icon: LayoutGrid },
-  { id: 'NOVEDADES', label: 'Novedades', icon: FileText },
-  { id: 'MAS', label: 'Más', icon: MoreHorizontal },
-];
+const TAB_ICONS: Record<SupervisionMainTab, React.ElementType> = {
+  TABLERO: LayoutGrid,
+  BANDEJA: Inbox,
+  CAMPO: MapPin,
+};
 
 export default function SupervisionBottomNav({
   active,
@@ -24,7 +24,8 @@ export default function SupervisionBottomNav({
       aria-label="Supervisión"
     >
       <div className="flex items-stretch max-w-lg mx-auto">
-        {TABS.map(({ id, label, icon: Icon }) => {
+        {SUPERVISION_MAIN_TABS.map(({ id, label }) => {
+          const Icon = TAB_ICONS[id];
           const isActive = active === id;
           const badge = badges?.[id];
           return (

@@ -1,0 +1,765 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tablero financiero — Facturas electrónicas 07–08/2026</title>
+  <style>
+    :root {
+      --bg: #0f172a; --bg-2: #111827; --card: #1e293b; --stroke: #334155;
+      --text: #f1f5f9; --muted: #94a3b8; --indigo: #6366f1; --indigo-2: #818cf8;
+      --emerald: #34d399; --amber: #fbbf24; --rose: #fb7185; --sky: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Inter, system-ui, sans-serif; min-height: 100%; }
+    body { padding: 28px 28px 64px; }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    .wrap.wide { max-width: 1680px; }
+    header.top {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 24px;
+      padding: 22px 26px; box-shadow: 0 10px 30px rgba(0,0,0,.28); margin-bottom: 18px;
+    }
+    .kicker { color: var(--indigo-2); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; font-weight: 650; }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -.03em; margin-top: 4px; }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 12px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 6px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    .tab {
+      border: 1px solid var(--stroke); background: var(--bg-2); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .tab:hover { background: #1e293b; color: var(--text); }
+    .tab.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .grid { display: grid; gap: 14px; overflow: visible; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 20px;
+      padding: 16px 18px; box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    }
+    .stat .v { font-size: 24px; font-weight: 700; letter-spacing: -.03em; }
+    .stat .l { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .has-tip { position: relative; cursor: help; z-index: 1; }
+    .has-tip:hover, .has-tip:focus-within { z-index: 40; }
+    .tip-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; margin-left: 6px; border-radius: 99px;
+      border: 1px solid #64748b; color: #94a3b8; font-size: 10px; font-weight: 700;
+    }
+    .tip {
+      display: none; position: absolute; left: 10px; right: 10px; top: calc(100% + 8px);
+      z-index: 50; background: #0b1220; border: 1px solid #6366f1; border-radius: 14px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.45; color: #e2e8f0;
+      box-shadow: 0 12px 28px rgba(0,0,0,.45);
+    }
+    .tip b { color: #a5b4fc; font-weight: 650; }
+    .has-tip:hover .tip, .has-tip:focus-within .tip { display: block; }
+    .warn { color: var(--amber); }
+    .danger { color: var(--rose); }
+    .ok { color: var(--emerald); }
+    .info { color: var(--sky); }
+    .callout { border-radius: 20px; padding: 14px 16px; font-size: 14px; line-height: 1.5; margin: 14px 0; }
+    .callout.info { background: #0b1c33; border: 1px solid #1e3a5f; color: #bfdbfe; }
+    .callout.warning { background: #1a1408; border: 1px solid #854d0e; color: #fde68a; }
+    .glosario { margin-bottom: 14px; }
+    .glosario h2 { margin-top: 0; }
+    .glosario .lead { color: var(--muted); font-size: 13px; line-height: 1.5; margin: -2px 0 12px; }
+    details.glosario > summary {
+      list-style: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -.02em;
+      user-select: none;
+    }
+    details.glosario > summary::-webkit-details-marker { display: none; }
+    details.glosario > summary::before {
+      content: "";
+      width: 8px; height: 8px;
+      border-right: 2px solid #818cf8;
+      border-bottom: 2px solid #818cf8;
+      transform: rotate(-45deg);
+      margin-top: -2px;
+      flex-shrink: 0;
+    }
+    details.glosario[open] > summary::before { transform: rotate(45deg); margin-top: 2px; }
+    details.glosario > summary .open-hint {
+      margin-left: auto;
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--indigo-2);
+    }
+    details.glosario[open] > summary .open-hint { display: none; }
+    details.glosario[open] > .lead { margin-top: 12px; }
+    table.glosa { width: 100%; font-size: 13px; }
+    table.glosa th { text-transform: none; letter-spacing: 0; font-size: 11px; color: #64748b; font-weight: 700; }
+    table.glosa td { white-space: normal; line-height: 1.45; vertical-align: top; color: #cbd5e1; }
+    table.glosa td.kpi { width: 140px; white-space: nowrap; font-weight: 700; color: var(--indigo-2); }
+    table.glosa td.kpi.ok { color: var(--emerald); }
+    table.glosa td.kpi.alza { color: var(--rose); }
+    table.glosa td.kpi.ice { color: var(--amber); }
+    table.glosa td.para { color: #94a3b8; }
+    .usage { height: 14px; border-radius: 999px; overflow: hidden; display: flex; background: #0f172a; border: 1px solid var(--stroke); }
+    .usage span { display: block; height: 100%; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 99px; margin-right: 6px; }
+    .hbar { display: grid; grid-template-columns: 220px 1fr 110px; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+    .hbar .track { height: 10px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; }
+    .hbar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    .share-stack { height: 26px; border-radius: 999px; overflow: hidden; display: flex; background: #0f172a; border: 1px solid var(--stroke); }
+    .share-stack span { display: block; height: 100%; min-width: 2px; transition: opacity .15s; }
+    .share-stack span:hover { opacity: .82; }
+    .share-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px 14px; margin-top: 12px; font-size: 12px; }
+    .share-item { display: flex; align-items: flex-start; gap: 8px; line-height: 1.35; color: var(--muted); }
+    .share-item i { width: 10px; height: 10px; border-radius: 99px; flex-shrink: 0; margin-top: 3px; }
+    .share-item b { color: var(--text); font-weight: 650; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 8px 8px; text-align: left; border-bottom: 1px solid #334155; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 650; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; position: sticky; top: 0; background: var(--card); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #243044; }
+    .tbl-wrap { overflow: auto; max-height: 640px; border-radius: 12px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .pill.fc { background: #0c2a3a; color: var(--sky); }
+    .pill.nc { background: #3f1d24; color: var(--rose); }
+    .pill.a { background: #06281f; color: var(--emerald); }
+    .pill.b { background: #1e1b4b; color: var(--indigo-2); }
+    input, select {
+      background: #0f172a; border: 1px solid var(--stroke); color: var(--text);
+      border-radius: 12px; padding: 8px 12px; font-size: 13px;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .sortbtn {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--muted);
+      border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .sortbtn.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .foot { margin-top: 22px; color: #64748b; font-size: 12px; }
+    input.inc { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+    table.roster tr.off { opacity: .45; }
+    table.roster td.chk { width: 34px; text-align: center; }
+    .excl-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .excl-pills button {
+      border: 1px solid #7f1d1d; background: #3f1d24; color: #fb7185;
+      border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    }
+    .btn-ghost, .btn-csv {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--text);
+      border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .btn-xls { border: 0; background: #065f46; color: #ecfdf5; border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    @media (max-width: 980px) { .g4, .g3, .g2 { grid-template-columns: 1fr 1fr; } body { padding: 16px; } .hbar { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .g4, .g3, .g2 { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="kicker">Grupo Bacar · Facturación electrónica</div>
+      <h1>Tablero financiero — Facturas emitidas</h1>
+      <p class="sub" id="subline">Comprobantes con CAE · punto de venta 02 · importes en pesos tal cual el CSV (sin desglose IVA).</p>
+      <div class="toolbar date-bar" style="margin-top:14px">
+        <label class="muted" style="display:flex;align-items:center;gap:6px">Desde
+          <input type="date" id="dateFrom" />
+        </label>
+        <label class="muted" style="display:flex;align-items:center;gap:6px">Hasta
+          <input type="date" id="dateTo" />
+        </label>
+        <button type="button" class="btn-ghost" data-preset="ago2026">Agosto 2026</button>
+        <button type="button" class="btn-ghost" data-preset="julago">Jul–Ago (CSV)</button>
+        <button type="button" class="btn-ghost" data-preset="full">Todo el CSV</button>
+        <span class="muted" id="dateHint"></span>
+      </div>
+      <div class="tabs" id="tabs"></div>
+    </header>
+    <section class="panel on" id="tablero"></section>
+    <section class="panel" id="clientes"></section>
+    <section class="panel" id="comprobantes"></section>
+    <section class="panel" id="planilla"></section>
+    <p class="foot">Fuente: DATOS.CSV (facturas electrónicas emitidas). Neto = facturas − notas de crédito. Destildá clientes en Clientes para sacarlos del cálculo.</p>
+  </div>
+  <script>
+    const DOCS = [{"id":"892865","tipo":"FC","letra":"A","pto":"02","nro":"032922","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":18423470.19,"cae":"86316194060588","reg":"31/07/2026 10:08:57"},{"id":"892866","tipo":"FC","letra":"A","pto":"02","nro":"032923","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":32707758.05,"cae":"86316194744925","reg":"31/07/2026 10:12:14"},{"id":"892867","tipo":"FC","letra":"A","pto":"02","nro":"032924","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":26815148.16,"cae":"86316195301562","reg":"31/07/2026 10:14:59"},{"id":"892868","tipo":"FC","letra":"A","pto":"02","nro":"032925","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":20139662.81,"cae":"86316195851758","reg":"31/07/2026 10:17:53"},{"id":"892890","tipo":"FC","letra":"A","pto":"02","nro":"032926","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":41353671.29,"cae":"86316201623053","reg":"31/07/2026 10:46:53"},{"id":"892894","tipo":"FC","letra":"A","pto":"02","nro":"032927","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":4876612.18,"cae":"86316201972553","reg":"31/07/2026 10:48:50"},{"id":"892899","tipo":"FC","letra":"A","pto":"02","nro":"032928","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":34770244.84,"cae":"86316202418489","reg":"31/07/2026 10:50:59"},{"id":"892903","tipo":"FC","letra":"A","pto":"02","nro":"032929","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":49887742.6,"cae":"86316202828121","reg":"31/07/2026 10:53:04"},{"id":"892905","tipo":"FC","letra":"A","pto":"02","nro":"032930","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":24187996.41,"cae":"86316203229273","reg":"31/07/2026 10:55:10"},{"id":"892906","tipo":"FC","letra":"A","pto":"02","nro":"032931","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":41573118.83,"cae":"86316203682094","reg":"31/07/2026 10:57:22"},{"id":"892907","tipo":"FC","letra":"A","pto":"02","nro":"032932","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":53667117.04,"cae":"86316204057662","reg":"31/07/2026 10:59:16"},{"id":"892908","tipo":"FC","letra":"A","pto":"02","nro":"032933","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":57665939.03,"cae":"86316205087900","reg":"31/07/2026 11:04:21"},{"id":"892909","tipo":"FC","letra":"A","pto":"02","nro":"032934","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":96751985.65,"cae":"86316205781241","reg":"31/07/2026 11:07:49"},{"id":"892910","tipo":"FC","letra":"A","pto":"02","nro":"032935","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":52155367.27,"cae":"86316206490329","reg":"31/07/2026 11:11:17"},{"id":"892911","tipo":"FC","letra":"A","pto":"02","nro":"032936","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":51292261.02,"cae":"86316208097888","reg":"31/07/2026 11:18:51"},{"id":"892956","tipo":"FC","letra":"A","pto":"02","nro":"032937","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":4334311.0,"cae":"86316217578905","reg":"31/07/2026 12:01:14"},{"id":"892972","tipo":"FC","letra":"A","pto":"02","nro":"032938","fecha":"2026-07-31","cli":"TADICOR S.A.","imp":63836471.71,"cae":"86316227649742","reg":"31/07/2026 12:47:50"},{"id":"892973","tipo":"FC","letra":"A","pto":"02","nro":"032939","fecha":"2026-07-31","cli":"AEROSILLA SAIC","imp":1288262.8,"cae":"86316228044607","reg":"31/07/2026 12:49:36"},{"id":"892974","tipo":"FC","letra":"A","pto":"02","nro":"032940","fecha":"2026-07-31","cli":"CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO","imp":16790601.3,"cae":"86316228096921","reg":"31/07/2026 12:50:01"},{"id":"892975","tipo":"FC","letra":"B","pto":"02","nro":"003484","fecha":"2026-07-31","cli":"COMARCA DE ALLENDE S.A.","imp":41907462.34,"cae":"86316229075831","reg":"31/07/2026 12:54:55"},{"id":"892976","tipo":"FC","letra":"A","pto":"02","nro":"032941","fecha":"2026-07-31","cli":"CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO","imp":28274870.9,"cae":"86316230379120","reg":"31/07/2026 12:56:58"},{"id":"892977","tipo":"FC","letra":"B","pto":"02","nro":"003485","fecha":"2026-07-31","cli":"COLEGIO DE ARQUITECTOS DE LA PROVINCIA DE CORDOBA","imp":3595198.27,"cae":"86316229522171","reg":"31/07/2026 12:57:05"},{"id":"892979","tipo":"FC","letra":"A","pto":"02","nro":"032942","fecha":"2026-07-31","cli":"CONIFERAL SACIF","imp":107249258.41,"cae":"86316231161024","reg":"31/07/2026 13:05:17"},{"id":"892980","tipo":"FC","letra":"A","pto":"02","nro":"032943","fecha":"2026-07-31","cli":"CORBLOCK S A I C","imp":15368033.05,"cae":"86316231622735","reg":"31/07/2026 13:07:43"},{"id":"892982","tipo":"FC","letra":"A","pto":"02","nro":"032944","fecha":"2026-07-31","cli":"AGENCIA CORDOBA DEPORTES SOCIEDAD DE ECONOMIA MIXTA","imp":43159993.29,"cae":"86316232354032","reg":"31/07/2026 13:11:32"},{"id":"892983","tipo":"FC","letra":"A","pto":"02","nro":"032945","fecha":"2026-07-31","cli":"LA SEGUNDA COOP.LTDA.DE SEGUROS GRALES.","imp":4950599.23,"cae":"86316232734296","reg":"31/07/2026 13:13:39"},{"id":"892986","tipo":"FC","letra":"A","pto":"02","nro":"032946","fecha":"2026-07-31","cli":"DISTRIBUIDORA JOR.GUS SRL","imp":7359056.02,"cae":"86316233082039","reg":"31/07/2026 13:15:32"},{"id":"892988","tipo":"FC","letra":"A","pto":"02","nro":"032947","fecha":"2026-07-31","cli":"VIFOOD S.A.","imp":9056070.91,"cae":"86316233455078","reg":"31/07/2026 13:17:24"},{"id":"892989","tipo":"FC","letra":"A","pto":"02","nro":"032948","fecha":"2026-07-31","cli":"CREA SINERGIA S.R.L.","imp":2181336.12,"cae":"86316233786618","reg":"31/07/2026 13:19:08"},{"id":"892990","tipo":"FC","letra":"B","pto":"02","nro":"003486","fecha":"2026-07-31","cli":"INSTITUTO PADRE CLARET","imp":12276154.2,"cae":"86316234125142","reg":"31/07/2026 13:20:53"},{"id":"892996","tipo":"FC","letra":"A","pto":"02","nro":"001041","fecha":"2026-07-31","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":44531571.92,"cae":"86316234626460","reg":"31/07/2026 13:23:30"},{"id":"893002","tipo":"FC","letra":"A","pto":"02","nro":"032949","fecha":"2026-07-31","cli":"TADICOR S.A.","imp":4502818.25,"cae":"86316235956505","reg":"31/07/2026 13:31:14"},{"id":"893012","tipo":"FC","letra":"A","pto":"02","nro":"032950","fecha":"2026-07-31","cli":"CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO","imp":282748760.9,"cae":"86316238343042","reg":"31/07/2026 13:40:31"},{"id":"893014","tipo":"NC","letra":"A","pto":"02","nro":"002056","fecha":"2026-07-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":1950644.87,"cae":"86316237995346","reg":"31/07/2026 13:43:08"},{"id":"893018","tipo":"FC","letra":"A","pto":"02","nro":"032951","fecha":"2026-07-31","cli":"TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.","imp":4835147.9,"cae":"86316245046054","reg":"31/07/2026 14:24:33"},{"id":"893031","tipo":"FC","letra":"B","pto":"02","nro":"003487","fecha":"2026-07-31","cli":"SECRETARIA GENERAL DE HABITAT Y DESARROLLO EMPRENDEDOR O. P.","imp":48500000.0,"cae":"86316250525468","reg":"31/07/2026 14:54:03"},{"id":"893035","tipo":"FC","letra":"A","pto":"02","nro":"001042","fecha":"2026-07-31","cli":"TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.","imp":146852236.8,"cae":"86316252180334","reg":"31/07/2026 15:04:58"},{"id":"893036","tipo":"FC","letra":"A","pto":"02","nro":"032952","fecha":"2026-07-31","cli":"R.F.TRANSPORTE S.A.","imp":10344333.46,"cae":"86316253162205","reg":"31/07/2026 15:10:22"},{"id":"893037","tipo":"FC","letra":"A","pto":"02","nro":"001043","fecha":"2026-07-31","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":162951921.56,"cae":"86316253832726","reg":"31/07/2026 15:13:40"},{"id":"893040","tipo":"FC","letra":"A","pto":"02","nro":"032953","fecha":"2026-07-31","cli":"DISTRIBUIDORA DISALGA SRL","imp":2098775.73,"cae":"86316257763037","reg":"31/07/2026 15:35:30"},{"id":"893041","tipo":"FC","letra":"A","pto":"02","nro":"032954","fecha":"2026-07-31","cli":"DISTRIBUIDORA CODESAC S.A.S.","imp":2098775.73,"cae":"86316257978238","reg":"31/07/2026 15:36:42"},{"id":"893042","tipo":"FC","letra":"A","pto":"02","nro":"001044","fecha":"2026-07-31","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":1705875691.25,"cae":"86316258198645","reg":"31/07/2026 15:37:43"},{"id":"893043","tipo":"FC","letra":"A","pto":"02","nro":"032955","fecha":"2026-07-31","cli":"EDIFICIO BELGRANO SRL","imp":1555179.12,"cae":"86316258497721","reg":"31/07/2026 15:39:26"},{"id":"893044","tipo":"FC","letra":"B","pto":"02","nro":"003488","fecha":"2026-07-31","cli":"FUNDACION UNIVERSIDAD PASCAL","imp":53634.46,"cae":"86316258810304","reg":"31/07/2026 15:41:24"},{"id":"893062","tipo":"FC","letra":"A","pto":"02","nro":"001045","fecha":"2026-07-31","cli":"EMBOTELLADORA DEL ATLANTICO S.A.","imp":20300564.31,"cae":"86316267166651","reg":"31/07/2026 16:24:31"},{"id":"893196","tipo":"FC","letra":"A","pto":"02","nro":"032956","fecha":"2026-07-31","cli":"MOCONA MEGAMADERAS S.A.","imp":473117.26,"cae":"86316604921807","reg":"03/08/2026 10:07:39"},{"id":"893199","tipo":"FC","letra":"A","pto":"02","nro":"032957","fecha":"2026-07-31","cli":"NEWCOR S.A.S.","imp":4009901.43,"cae":"86316605390160","reg":"03/08/2026 10:09:53"},{"id":"893200","tipo":"FC","letra":"A","pto":"02","nro":"032958","fecha":"2026-07-31","cli":"OIL PETRO SALSIPUEDES S.A.","imp":1326644.0,"cae":"86316605709178","reg":"03/08/2026 10:11:44"},{"id":"893203","tipo":"FC","letra":"A","pto":"02","nro":"032959","fecha":"2026-07-31","cli":"OIL PETRO SALSIPUEDES SRL","imp":1144176.0,"cae":"86316606157769","reg":"03/08/2026 10:13:45"},{"id":"893204","tipo":"FC","letra":"A","pto":"02","nro":"032960","fecha":"2026-07-31","cli":"ANJOR S.A.","imp":16219256.96,"cae":"86316606335736","reg":"03/08/2026 10:14:15"},{"id":"893208","tipo":"FC","letra":"A","pto":"02","nro":"032961","fecha":"2026-07-31","cli":"OSVALDO FANTINI Y CIA SRL","imp":683744.99,"cae":"86316607212969","reg":"03/08/2026 10:18:18"},{"id":"893214","tipo":"FC","letra":"A","pto":"02","nro":"032962","fecha":"2026-07-31","cli":"CENTRO PRIVADO TOMOGRAFIA COMPUTADA CORDOBA SOC ANON","imp":2492772.04,"cae":"86316608147527","reg":"03/08/2026 10:22:24"},{"id":"893215","tipo":"NC","letra":"A","pto":"02","nro":"002057","fecha":"2026-07-31","cli":"ANJOR S.A.","imp":16219256.95,"cae":"86316608465653","reg":"03/08/2026 10:23:51"},{"id":"893216","tipo":"FC","letra":"A","pto":"02","nro":"032963","fecha":"2026-07-31","cli":"JOSE IGNACIO PAROLA SRL","imp":104172.53,"cae":"86316608597583","reg":"03/08/2026 10:24:30"},{"id":"893217","tipo":"FC","letra":"A","pto":"02","nro":"032964","fecha":"2026-07-31","cli":"LPAVONE S.A.S.","imp":5390802.38,"cae":"86316609342653","reg":"03/08/2026 10:27:46"},{"id":"893218","tipo":"FC","letra":"A","pto":"02","nro":"032965","fecha":"2026-07-31","cli":"ANJOR S.A.","imp":14971621.82,"cae":"86316609522813","reg":"03/08/2026 10:28:18"},{"id":"893220","tipo":"FC","letra":"A","pto":"02","nro":"032966","fecha":"2026-07-31","cli":"PETROLERA SAN JUAN S.A.","imp":2003807.19,"cae":"86316609950499","reg":"03/08/2026 10:30:27"},{"id":"893221","tipo":"FC","letra":"A","pto":"02","nro":"032967","fecha":"2026-07-31","cli":"PETROLERA SAN JUAN S.A.","imp":1863033.43,"cae":"86316610248522","reg":"03/08/2026 10:31:47"},{"id":"893222","tipo":"FC","letra":"A","pto":"02","nro":"032968","fecha":"2026-07-31","cli":"QUIPAR SRL","imp":4470101.79,"cae":"86316610923253","reg":"03/08/2026 10:34:39"},{"id":"893225","tipo":"FC","letra":"A","pto":"02","nro":"001046","fecha":"2026-07-31","cli":"EMBOTELLADORA DEL ATLANTICO S.A.","imp":28133754.15,"cae":"86316611670726","reg":"03/08/2026 10:37:52"},{"id":"893287","tipo":"FC","letra":"A","pto":"02","nro":"032969","fecha":"2026-07-31","cli":"CAMINOS DE LAS SIERRAS S.A.","imp":289195415.59,"cae":"86316621552953","reg":"03/08/2026 11:19:43"},{"id":"893305","tipo":"FC","letra":"A","pto":"02","nro":"032970","fecha":"2026-07-31","cli":"ENRIQUE REYES S.A.","imp":11518922.03,"cae":"86316624978171","reg":"03/08/2026 11:33:57"},{"id":"893317","tipo":"FC","letra":"A","pto":"02","nro":"032971","fecha":"2026-07-31","cli":"SANCHEZ MARTINEZ E HIJOS S A","imp":803650.54,"cae":"86316627524397","reg":"03/08/2026 11:43:44"},{"id":"893318","tipo":"FC","letra":"A","pto":"02","nro":"032972","fecha":"2026-07-31","cli":"CASA MANRIQUE S.A.","imp":5333368.85,"cae":"86316628311343","reg":"03/08/2026 11:46:37"},{"id":"893319","tipo":"FC","letra":"A","pto":"02","nro":"032973","fecha":"2026-07-31","cli":"SANTA LUCIA S.R.L.","imp":623469.44,"cae":"86316629184446","reg":"03/08/2026 11:50:08"},{"id":"893321","tipo":"FC","letra":"A","pto":"02","nro":"032974","fecha":"2026-07-31","cli":"SANTA BARBARA S A","imp":6279249.19,"cae":"86316630045745","reg":"03/08/2026 11:53:37"},{"id":"893325","tipo":"FC","letra":"A","pto":"02","nro":"032975","fecha":"2026-07-31","cli":"SANTA BARBARA S A","imp":2736374.62,"cae":"86316630643376","reg":"03/08/2026 11:55:50"},{"id":"893330","tipo":"FC","letra":"A","pto":"02","nro":"032976","fecha":"2026-07-31","cli":"SAN URBANO SA","imp":4409921.05,"cae":"86316631526636","reg":"03/08/2026 11:59:05"},{"id":"893331","tipo":"FC","letra":"A","pto":"02","nro":"032977","fecha":"2026-07-31","cli":"SAN URBANO SA","imp":2157094.2,"cae":"86316631854477","reg":"03/08/2026 12:00:23"},{"id":"893333","tipo":"FC","letra":"A","pto":"02","nro":"032978","fecha":"2026-07-31","cli":"SERCAT S.A.","imp":1746281.6,"cae":"86316632442700","reg":"03/08/2026 12:02:31"},{"id":"893339","tipo":"FC","letra":"A","pto":"02","nro":"032979","fecha":"2026-07-31","cli":"ACERCO S.A","imp":4716864.8,"cae":"86316635263992","reg":"03/08/2026 12:13:50"},{"id":"893348","tipo":"FC","letra":"A","pto":"02","nro":"032980","fecha":"2026-07-31","cli":"SERVI OESTE S.A.","imp":2555880.88,"cae":"86316637292308","reg":"03/08/2026 12:22:29"},{"id":"893350","tipo":"FC","letra":"A","pto":"02","nro":"032981","fecha":"2026-07-31","cli":"SERVI OESTE S.A.","imp":3142524.66,"cae":"86316637560683","reg":"03/08/2026 12:23:48"},{"id":"893352","tipo":"FC","letra":"A","pto":"02","nro":"032982","fecha":"2026-07-31","cli":"SERVI OESTE S.A.","imp":2187178.24,"cae":"86316638071947","reg":"03/08/2026 12:26:02"},{"id":"893353","tipo":"FC","letra":"A","pto":"02","nro":"032983","fecha":"2026-07-31","cli":"SERVI SUD S.A.","imp":1717541.76,"cae":"86316638590023","reg":"03/08/2026 12:28:02"},{"id":"893355","tipo":"FC","letra":"A","pto":"02","nro":"032984","fecha":"2026-07-31","cli":"NILDO SANTIN LOPEZ S.A.","imp":695653.2,"cae":"86316639254766","reg":"03/08/2026 12:30:37"},{"id":"893361","tipo":"FC","letra":"A","pto":"02","nro":"032985","fecha":"2026-07-31","cli":"SANTA ALBINA SA","imp":695653.2,"cae":"86316639595362","reg":"03/08/2026 12:32:11"},{"id":"893363","tipo":"FC","letra":"A","pto":"02","nro":"032986","fecha":"2026-07-31","cli":"SOCIEDAD DE IMPORTACIONES TECNICAS S.R.L","imp":936074.45,"cae":"86316640038350","reg":"03/08/2026 12:34:00"},{"id":"893366","tipo":"FC","letra":"A","pto":"02","nro":"032987","fecha":"2026-07-31","cli":"SUKKAR S.R.L.","imp":854719.8,"cae":"86316640686407","reg":"03/08/2026 12:36:38"},{"id":"893371","tipo":"FC","letra":"A","pto":"02","nro":"032988","fecha":"2026-07-31","cli":"ALCANO S.R.L.","imp":1104565.44,"cae":"86316641158202","reg":"03/08/2026 12:38:35"},{"id":"893374","tipo":"FC","letra":"A","pto":"02","nro":"032989","fecha":"2026-07-31","cli":"TADICOR S.A.","imp":9874567.01,"cae":"86316641927096","reg":"03/08/2026 12:41:40"},{"id":"893379","tipo":"FC","letra":"A","pto":"02","nro":"032990","fecha":"2026-07-31","cli":"TADICOR S.A.","imp":1187615.0,"cae":"86316642630050","reg":"03/08/2026 12:44:52"},{"id":"893383","tipo":"FC","letra":"A","pto":"02","nro":"032991","fecha":"2026-07-31","cli":"TAMSE TRANSPORTE AUTOMOTOR MUNIC.SE","imp":2635999.52,"cae":"86316643013271","reg":"03/08/2026 12:46:35"},{"id":"893388","tipo":"FC","letra":"A","pto":"02","nro":"032992","fecha":"2026-07-31","cli":"GEOVANEE S.A","imp":310160.51,"cae":"86316643609077","reg":"03/08/2026 12:49:22"},{"id":"893393","tipo":"FC","letra":"A","pto":"02","nro":"032993","fecha":"2026-07-31","cli":"TINSA S.A.","imp":1498373.86,"cae":"86316644159201","reg":"03/08/2026 12:51:51"},{"id":"893394","tipo":"FC","letra":"A","pto":"02","nro":"032994","fecha":"2026-07-31","cli":"JPC OIL S.R.L.","imp":2842789.13,"cae":"86316644564786","reg":"03/08/2026 12:53:52"},{"id":"893395","tipo":"FC","letra":"A","pto":"02","nro":"032995","fecha":"2026-07-31","cli":"VESCAP S.R.L","imp":5153225.14,"cae":"86316644934308","reg":"03/08/2026 12:55:37"},{"id":"893396","tipo":"FC","letra":"A","pto":"02","nro":"032996","fecha":"2026-07-31","cli":"VIFOOD S.A.","imp":2795377.95,"cae":"86316645268010","reg":"03/08/2026 12:57:09"},{"id":"893407","tipo":"FC","letra":"A","pto":"02","nro":"032997","fecha":"2026-07-31","cli":"TECNOINT S.A.","imp":1915651.66,"cae":"86316647263753","reg":"03/08/2026 13:06:41"},{"id":"893414","tipo":"FC","letra":"A","pto":"02","nro":"032998","fecha":"2026-07-31","cli":"EMPRESA SARMIENTO S.R.L.","imp":1109217.25,"cae":"86316648272078","reg":"03/08/2026 13:11:29"},{"id":"893416","tipo":"FC","letra":"A","pto":"02","nro":"032999","fecha":"2026-07-31","cli":"ALT SA.","imp":17806048.87,"cae":"86316649919365","reg":"03/08/2026 13:19:36"},{"id":"893417","tipo":"FC","letra":"A","pto":"02","nro":"033000","fecha":"2026-07-31","cli":"LEON XIV S.A.S.","imp":11134615.85,"cae":"86316650816604","reg":"03/08/2026 13:24:07"},{"id":"893420","tipo":"FC","letra":"A","pto":"02","nro":"033001","fecha":"2026-07-31","cli":"LA ROTONDA S.A.S.S.A.S.","imp":2959344.78,"cae":"86316651226368","reg":"03/08/2026 13:26:14"},{"id":"893421","tipo":"FC","letra":"A","pto":"02","nro":"033002","fecha":"2026-07-31","cli":"LA ROTONDA S.A.S.S.A.S.","imp":2527201.97,"cae":"86316651465203","reg":"03/08/2026 13:27:30"},{"id":"893422","tipo":"FC","letra":"A","pto":"02","nro":"033003","fecha":"2026-07-31","cli":"LA ROTONDA S.A.S.S.A.S.","imp":2587372.73,"cae":"86316651700890","reg":"03/08/2026 13:28:44"},{"id":"893425","tipo":"FC","letra":"A","pto":"02","nro":"033004","fecha":"2026-07-31","cli":"A.G.A.F.SA","imp":1224921.9,"cae":"86316652699272","reg":"03/08/2026 13:34:16"},{"id":"893427","tipo":"FC","letra":"A","pto":"02","nro":"033005","fecha":"2026-07-31","cli":"EL CORRALITO SRL","imp":3421448.03,"cae":"86316653655772","reg":"03/08/2026 13:39:37"},{"id":"893433","tipo":"FC","letra":"A","pto":"02","nro":"033006","fecha":"2026-07-31","cli":"PETROCORD S.A.C.I.F.","imp":3567486.1,"cae":"86316654233214","reg":"03/08/2026 13:42:33"},{"id":"893437","tipo":"FC","letra":"A","pto":"02","nro":"033007","fecha":"2026-07-31","cli":"ESTACION DE SERVICIO LAS FLORES SRL","imp":1339702.32,"cae":"86316654919608","reg":"03/08/2026 13:45:57"},{"id":"893438","tipo":"FC","letra":"A","pto":"02","nro":"033008","fecha":"2026-07-31","cli":"LOS PARAISOS S.R.L.","imp":1539019.23,"cae":"86316655643009","reg":"03/08/2026 13:50:00"},{"id":"893439","tipo":"FC","letra":"A","pto":"02","nro":"033009","fecha":"2026-07-31","cli":"MAG S.R.L.","imp":2567520.71,"cae":"86316656017309","reg":"03/08/2026 13:52:10"},{"id":"893440","tipo":"FC","letra":"A","pto":"02","nro":"033010","fecha":"2026-07-31","cli":"GEOVANEE S.A","imp":340939.76,"cae":"86316658085452","reg":"03/08/2026 14:02:12"},{"id":"893441","tipo":"FC","letra":"A","pto":"02","nro":"033011","fecha":"2026-07-31","cli":"GREEN ARMOR S.A.","imp":5209738.78,"cae":"86316659010004","reg":"03/08/2026 14:06:46"},{"id":"893442","tipo":"FC","letra":"A","pto":"02","nro":"033012","fecha":"2026-07-31","cli":"NOR BRACCA SRL","imp":72600.0,"cae":"86316659438331","reg":"03/08/2026 14:08:55"},{"id":"893444","tipo":"NC","letra":"A","pto":"02","nro":"002058","fecha":"2026-07-31","cli":"GREEN ARMOR S.A.","imp":5209738.78,"cae":"86316660536691","reg":"03/08/2026 14:14:28"},{"id":"893446","tipo":"FC","letra":"A","pto":"02","nro":"001047","fecha":"2026-07-31","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":27284715.5,"cae":"86316662350131","reg":"03/08/2026 14:25:23"},{"id":"893447","tipo":"FC","letra":"A","pto":"02","nro":"033013","fecha":"2026-07-31","cli":"ALMACENES DEL SUR SA","imp":3110857.97,"cae":"86316664688610","reg":"03/08/2026 14:36:07"},{"id":"893448","tipo":"FC","letra":"A","pto":"02","nro":"033014","fecha":"2026-07-31","cli":"LA CUARTA S.A","imp":5582602.18,"cae":"86316664899951","reg":"03/08/2026 14:37:13"},{"id":"893449","tipo":"FC","letra":"A","pto":"02","nro":"033015","fecha":"2026-07-31","cli":"LA CUARTA S.A","imp":877008.0,"cae":"86316665500439","reg":"03/08/2026 14:40:31"},{"id":"893450","tipo":"FC","letra":"A","pto":"02","nro":"033016","fecha":"2026-07-31","cli":"ESTACION DE SERVICIO PANAMERICANA SRL","imp":4937439.24,"cae":"86316666781081","reg":"03/08/2026 14:47:18"},{"id":"893451","tipo":"FC","letra":"B","pto":"02","nro":"003489","fecha":"2026-07-31","cli":"CAJA DE PREVISION SOCIAL PARA PROFESIONALES DE LA SALUD DE LA PROVINCIA DE CBA","imp":198021.92,"cae":"86316666867782","reg":"03/08/2026 14:47:49"},{"id":"893463","tipo":"FC","letra":"A","pto":"02","nro":"033017","fecha":"2026-07-31","cli":"CARUSO CIA.ARG DE SEGUROS S.A.","imp":229172.79,"cae":"86316668667942","reg":"03/08/2026 14:57:11"},{"id":"893468","tipo":"FC","letra":"A","pto":"02","nro":"033018","fecha":"2026-07-31","cli":"FARMACIA LIDER S.A.","imp":8659054.5,"cae":"86316670848024","reg":"03/08/2026 15:07:49"},{"id":"893469","tipo":"FC","letra":"B","pto":"02","nro":"003490","fecha":"2026-07-31","cli":"FEDERACION AMATEUR CORDOBESA DE HOCKEY SOBRE CESPED","imp":192125.96,"cae":"86316671491981","reg":"03/08/2026 15:11:01"},{"id":"893471","tipo":"FC","letra":"A","pto":"02","nro":"033019","fecha":"2026-07-31","cli":"FIRENZE S.R.L.","imp":929186.83,"cae":"86316672218986","reg":"03/08/2026 15:14:38"},{"id":"893472","tipo":"FC","letra":"A","pto":"02","nro":"033020","fecha":"2026-07-31","cli":"FUND.PARA EL PROG.DE UNIV.CATOLICA DE CBA.","imp":701381.34,"cae":"86316672517957","reg":"03/08/2026 15:16:08"},{"id":"893474","tipo":"FC","letra":"A","pto":"02","nro":"033021","fecha":"2026-07-31","cli":"CULTURA CLUB SA","imp":3296197.91,"cae":"86316672823672","reg":"03/08/2026 15:17:46"},{"id":"893475","tipo":"FC","letra":"A","pto":"02","nro":"033022","fecha":"2026-07-31","cli":"GUISI S.A.","imp":1344740.57,"cae":"86316672888251","reg":"03/08/2026 15:18:03"},{"id":"893476","tipo":"FC","letra":"A","pto":"02","nro":"033023","fecha":"2026-07-31","cli":"H G B SA","imp":3145179.98,"cae":"86316673318887","reg":"03/08/2026 15:20:01"},{"id":"893477","tipo":"FC","letra":"A","pto":"02","nro":"033024","fecha":"2026-07-31","cli":"JAMBO S.A.","imp":2767963.33,"cae":"86316674530754","reg":"03/08/2026 15:26:32"},{"id":"893478","tipo":"FC","letra":"A","pto":"02","nro":"033025","fecha":"2026-07-31","cli":"CAMINOS DE LAS SIERRAS S.A.","imp":255584907.68,"cae":"86316675268308","reg":"03/08/2026 15:30:21"},{"id":"893479","tipo":"FC","letra":"A","pto":"02","nro":"033026","fecha":"2026-07-31","cli":"JEMAGAS S.A.S.","imp":4408778.39,"cae":"86316675808975","reg":"03/08/2026 15:33:25"},{"id":"893480","tipo":"FC","letra":"A","pto":"02","nro":"033027","fecha":"2026-07-31","cli":"DANIEL CASTIÑEIRA Y CIA.SRL","imp":524627.93,"cae":"86316676149519","reg":"03/08/2026 15:35:13"},{"id":"893481","tipo":"FC","letra":"A","pto":"02","nro":"033028","fecha":"2026-07-31","cli":"JEMAGAS S.A.S.","imp":1968505.44,"cae":"86316676167788","reg":"03/08/2026 15:35:19"},{"id":"893482","tipo":"FC","letra":"A","pto":"02","nro":"033029","fecha":"2026-07-31","cli":"JEMAGAS S.A.S.","imp":1536152.34,"cae":"86316676482293","reg":"03/08/2026 15:36:57"},{"id":"893483","tipo":"FC","letra":"A","pto":"02","nro":"033030","fecha":"2026-07-31","cli":"KEMAR DISTRIBUCIONES S.R.L.","imp":1030299.27,"cae":"86316677162970","reg":"03/08/2026 15:40:33"},{"id":"893484","tipo":"FC","letra":"A","pto":"02","nro":"033031","fecha":"2026-07-31","cli":"LOGISTICA ZONA SUR S.A.","imp":1707942.83,"cae":"86316678428913","reg":"03/08/2026 15:46:55"},{"id":"893485","tipo":"FC","letra":"A","pto":"02","nro":"033032","fecha":"2026-07-31","cli":"BIFUEL SRL","imp":1049255.86,"cae":"86316679359268","reg":"03/08/2026 15:51:38"},{"id":"893486","tipo":"FC","letra":"A","pto":"02","nro":"033033","fecha":"2026-07-31","cli":"MARCO AURELIO SOSA SACIF","imp":1721699.32,"cae":"86316680292136","reg":"03/08/2026 15:56:34"},{"id":"893487","tipo":"FC","letra":"B","pto":"02","nro":"003491","fecha":"2026-07-31","cli":"CLUB LA TABLADA","imp":1082295.45,"cae":"86316684862552","reg":"03/08/2026 16:20:07"},{"id":"893518","tipo":"NC","letra":"A","pto":"02","nro":"002059","fecha":"2026-07-31","cli":"R.F.TRANSPORTE S.A.","imp":10344333.46,"cae":"86316761996228","reg":"04/08/2026 07:17:32"},{"id":"893521","tipo":"FC","letra":"A","pto":"02","nro":"033034","fecha":"2026-08-03","cli":"R.F.TRANSPORTE S.A.","imp":4121252.35,"cae":"86316763018796","reg":"04/08/2026 07:38:46"},{"id":"893522","tipo":"FC","letra":"A","pto":"02","nro":"033035","fecha":"2026-08-03","cli":"R.F.TRANSPORTE S.A.","imp":1551650.02,"cae":"86316763190451","reg":"04/08/2026 07:41:33"},{"id":"893523","tipo":"FC","letra":"A","pto":"02","nro":"033036","fecha":"2026-08-03","cli":"R.F.TRANSPORTE S.A.","imp":1187615.0,"cae":"86316763365325","reg":"04/08/2026 07:44:42"},{"id":"893524","tipo":"NC","letra":"A","pto":"02","nro":"002060","fecha":"2026-08-03","cli":"R.F.TRANSPORTE S.A.","imp":4121252.35,"cae":"86316763566142","reg":"04/08/2026 07:48:30"},{"id":"893525","tipo":"FC","letra":"A","pto":"02","nro":"033037","fecha":"2026-08-03","cli":"R.F.TRANSPORTE S.A.","imp":618187.85,"cae":"86316763893908","reg":"04/08/2026 07:54:05"},{"id":"893535","tipo":"FC","letra":"A","pto":"02","nro":"033038","fecha":"2026-08-03","cli":"NUEVA VILLA SRL","imp":23315176.01,"cae":"86316771498039","reg":"04/08/2026 09:04:41"},{"id":"893547","tipo":"FC","letra":"A","pto":"02","nro":"001048","fecha":"2026-08-03","cli":"HOSPITAL PRIVADO CTRO.MEDICO DE CBA.S.A.","imp":15726613.85,"cae":"86316776770345","reg":"04/08/2026 09:38:43"},{"id":"893556","tipo":"FC","letra":"A","pto":"02","nro":"033039","fecha":"2026-08-03","cli":"SIMPLE DISTRIBUCIONES S.R.L.","imp":457521.76,"cae":"86316778085370","reg":"04/08/2026 09:46:35"},{"id":"893562","tipo":"FC","letra":"A","pto":"02","nro":"033040","fecha":"2026-08-03","cli":"POLONIA DISTRIBUCIONES S.A.S.","imp":615285.0,"cae":"86316780603166","reg":"04/08/2026 10:01:06"},{"id":"893578","tipo":"FC","letra":"A","pto":"02","nro":"033041","fecha":"2026-08-03","cli":"PANIFICADORA PUGLIESE S.R.L","imp":691227.26,"cae":"86316782749752","reg":"04/08/2026 10:12:01"},{"id":"893583","tipo":"FC","letra":"A","pto":"02","nro":"033042","fecha":"2026-08-03","cli":"FERROCONS S.A.","imp":7318473.13,"cae":"86316788574253","reg":"04/08/2026 10:41:03"},{"id":"893584","tipo":"FC","letra":"A","pto":"02","nro":"033043","fecha":"2026-08-03","cli":"SUCESIÓN DE BLANCH BENJAMIN LUIS","imp":8170726.74,"cae":"86316789079335","reg":"04/08/2026 10:41:59"},{"id":"893591","tipo":"FC","letra":"A","pto":"02","nro":"033044","fecha":"2026-08-03","cli":"SAN PABLO S.R.L.","imp":5756668.33,"cae":"86316792735580","reg":"04/08/2026 11:01:53"},{"id":"893598","tipo":"FC","letra":"A","pto":"02","nro":"033045","fecha":"2026-08-03","cli":"SAN PABLO S.R.L.","imp":1187615.0,"cae":"86316793379393","reg":"04/08/2026 11:04:56"},{"id":"893599","tipo":"FC","letra":"A","pto":"02","nro":"033046","fecha":"2026-08-03","cli":"SENA HUMBERTO FABRICIO","imp":275836.44,"cae":"86316794256788","reg":"04/08/2026 11:09:57"},{"id":"893600","tipo":"FC","letra":"A","pto":"02","nro":"033047","fecha":"2026-08-03","cli":"FASENA ENERGIA SA","imp":275836.44,"cae":"86316794571620","reg":"04/08/2026 11:11:54"},{"id":"893601","tipo":"FC","letra":"A","pto":"02","nro":"033048","fecha":"2026-08-03","cli":"COOP OBRERA TRANSP AUTOM LA CALERA LTDA","imp":1841799.08,"cae":"86316795281623","reg":"04/08/2026 11:14:48"},{"id":"893612","tipo":"FC","letra":"A","pto":"02","nro":"033050","fecha":"2026-08-03","cli":"CANNA MELIS S R L","imp":300328.05,"cae":"86316800034294","reg":"04/08/2026 11:35:20"},{"id":"893626","tipo":"FC","letra":"A","pto":"02","nro":"033051","fecha":"2026-08-03","cli":"COOPERATIVA DE ELECTRICIDAD OBRAS Y SERVICIOS PUBLICOS DE ANISACATE LIMITADA","imp":1403654.45,"cae":"86316800427488","reg":"04/08/2026 11:52:24"},{"id":"893635","tipo":"FC","letra":"A","pto":"02","nro":"033052","fecha":"2026-08-03","cli":"MORYVAN CORDOBA GROUP S.A.S.","imp":233230.28,"cae":"86316800821964","reg":"04/08/2026 12:04:57"},{"id":"893644","tipo":"FC","letra":"A","pto":"02","nro":"033049","fecha":"2026-08-03","cli":"CARLOS PAZ GAS SA","imp":3898198.92,"cae":"86316799403750","reg":"04/08/2026 12:16:32"},{"id":"893665","tipo":"FC","letra":"A","pto":"02","nro":"033053","fecha":"2026-08-03","cli":"CHICOM SA","imp":2193779.54,"cae":"86316802910388","reg":"04/08/2026 12:27:55"},{"id":"893674","tipo":"FC","letra":"A","pto":"02","nro":"033054","fecha":"2026-08-03","cli":"CAR-COR S.R.L.","imp":507549.3,"cae":"86316804120688","reg":"04/08/2026 12:32:50"},{"id":"893684","tipo":"FC","letra":"A","pto":"02","nro":"033055","fecha":"2026-08-03","cli":"CIPRIANO VICTOR","imp":1671658.56,"cae":"86316806022805","reg":"04/08/2026 12:40:25"},{"id":"893690","tipo":"FC","letra":"A","pto":"02","nro":"033057","fecha":"2026-08-03","cli":"CUATRO YNAS S.A.S.","imp":923538.44,"cae":"86316808124160","reg":"04/08/2026 12:46:04"},{"id":"893691","tipo":"FC","letra":"A","pto":"02","nro":"033056","fecha":"2026-08-03","cli":"CAPPDAN S.A.","imp":548687.16,"cae":"86316807867317","reg":"04/08/2026 12:48:35"},{"id":"893692","tipo":"FC","letra":"A","pto":"02","nro":"033058","fecha":"2026-08-03","cli":"CAPELLINO DOMINGO PEDRO","imp":2952083.23,"cae":"86316810546029","reg":"04/08/2026 13:01:47"},{"id":"893712","tipo":"FC","letra":"A","pto":"02","nro":"033059","fecha":"2026-08-03","cli":"SERVI MAX S.R.L.","imp":1539231.17,"cae":"86316816319740","reg":"04/08/2026 13:30:13"},{"id":"893716","tipo":"FC","letra":"A","pto":"02","nro":"033060","fecha":"2026-08-03","cli":"CUATRO YNAS S.A.S.","imp":1187615.0,"cae":"86316817783935","reg":"04/08/2026 13:39:08"},{"id":"893734","tipo":"FC","letra":"B","pto":"02","nro":"003492","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316825960488","reg":"04/08/2026 14:24:13"},{"id":"893738","tipo":"FC","letra":"B","pto":"02","nro":"003493","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":6671280.0,"cae":"86316826418165","reg":"04/08/2026 14:26:47"},{"id":"893742","tipo":"FC","letra":"B","pto":"02","nro":"003494","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316826821855","reg":"04/08/2026 14:29:01"},{"id":"893744","tipo":"FC","letra":"B","pto":"02","nro":"003495","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316827192197","reg":"04/08/2026 14:30:57"},{"id":"893747","tipo":"FC","letra":"B","pto":"02","nro":"003496","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316827518082","reg":"04/08/2026 14:32:51"},{"id":"893749","tipo":"FC","letra":"B","pto":"02","nro":"003497","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316827815577","reg":"04/08/2026 14:34:34"},{"id":"893750","tipo":"FC","letra":"B","pto":"02","nro":"003498","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316828055891","reg":"04/08/2026 14:36:03"},{"id":"893753","tipo":"FC","letra":"A","pto":"02","nro":"033061","fecha":"2026-08-03","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86316829153554","reg":"04/08/2026 14:42:27"},{"id":"893763","tipo":"FC","letra":"A","pto":"02","nro":"033062","fecha":"2026-08-03","cli":"CRUCERO DE ALTA GRACIA S.A.","imp":1843386.72,"cae":"86316831219594","reg":"04/08/2026 14:55:00"},{"id":"893768","tipo":"NC","letra":"B","pto":"02","nro":"0383","fecha":"2026-08-03","cli":"FEDERACION AMATEUR CORDOBESA DE HOCKEY SOBRE CESPED","imp":192125.95,"cae":"86316832072233","reg":"04/08/2026 15:00:09"},{"id":"893782","tipo":"FC","letra":"B","pto":"02","nro":"003499","fecha":"2026-08-03","cli":"FEDERACION AMATEUR CORDOBESA DE HOCKEY SOBRE CESPED","imp":146919.07,"cae":"86316833612055","reg":"04/08/2026 15:08:46"},{"id":"893788","tipo":"FC","letra":"A","pto":"02","nro":"033063","fecha":"2026-08-03","cli":"CYRE S.A.","imp":10942871.36,"cae":"86316836522423","reg":"04/08/2026 15:26:21"},{"id":"893793","tipo":"FC","letra":"A","pto":"02","nro":"033064","fecha":"2026-08-03","cli":"EXITPROG SOCIEDAD POR ACCIONES SIMPLIFICADA","imp":1376162.8,"cae":"86316840933089","reg":"04/08/2026 15:52:04"},{"id":"893807","tipo":"FC","letra":"A","pto":"02","nro":"001049","fecha":"2026-08-03","cli":"DINOSAURIO S.A.","imp":10887951.83,"cae":"86316844605386","reg":"04/08/2026 16:13:13"},{"id":"893817","tipo":"FC","letra":"A","pto":"02","nro":"033065","fecha":"2026-08-03","cli":"DIAZ DANIEL DARIO","imp":1213102.44,"cae":"86316850775364","reg":"04/08/2026 16:48:22"},{"id":"893828","tipo":"NC","letra":"A","pto":"02","nro":"002061","fecha":"2026-08-03","cli":"CAMINOS DE LAS SIERRAS S.A.","imp":7457131.84,"cae":"86316917725946","reg":"05/08/2026 07:08:36"},{"id":"893829","tipo":"NC","letra":"A","pto":"02","nro":"002062","fecha":"2026-08-03","cli":"CAMINOS DE LAS SIERRAS S.A.","imp":8437776.56,"cae":"86316917768967","reg":"05/08/2026 07:10:15"},{"id":"893830","tipo":"FC","letra":"A","pto":"02","nro":"033066","fecha":"2026-08-03","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":193600.0,"cae":"86316918700276","reg":"05/08/2026 07:33:40"},{"id":"893831","tipo":"FC","letra":"B","pto":"02","nro":"003500","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":47810840.0,"cae":"86316919908389","reg":"05/08/2026 07:58:57"},{"id":"893832","tipo":"FC","letra":"B","pto":"02","nro":"003501","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":18266600.0,"cae":"86316920184986","reg":"05/08/2026 08:03:27"},{"id":"893833","tipo":"FC","letra":"B","pto":"02","nro":"003502","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":39392320.0,"cae":"86316920469562","reg":"05/08/2026 08:07:36"},{"id":"893834","tipo":"FC","letra":"B","pto":"02","nro":"003503","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316920761890","reg":"05/08/2026 08:11:18"},{"id":"893835","tipo":"FC","letra":"B","pto":"02","nro":"003504","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":39392320.0,"cae":"86316921035135","reg":"05/08/2026 08:14:53"},{"id":"893837","tipo":"FC","letra":"B","pto":"02","nro":"003505","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":29544240.0,"cae":"86316921324488","reg":"05/08/2026 08:18:10"},{"id":"893838","tipo":"FC","letra":"B","pto":"02","nro":"003506","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":24620200.0,"cae":"86316921686921","reg":"05/08/2026 08:22:18"},{"id":"893839","tipo":"FC","letra":"A","pto":"02","nro":"033067","fecha":"2026-08-03","cli":"DABBAS MARTIN ARIEL","imp":538475.41,"cae":"86316921727947","reg":"05/08/2026 08:22:39"},{"id":"893840","tipo":"FC","letra":"B","pto":"02","nro":"003507","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":19060800.0,"cae":"86316922041562","reg":"05/08/2026 08:26:15"},{"id":"893841","tipo":"FC","letra":"B","pto":"02","nro":"003508","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316922372953","reg":"05/08/2026 08:29:47"},{"id":"893842","tipo":"FC","letra":"B","pto":"02","nro":"003509","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":29544240.0,"cae":"86316922813655","reg":"05/08/2026 08:34:24"},{"id":"893845","tipo":"FC","letra":"B","pto":"02","nro":"003510","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":47810840.0,"cae":"86316924618852","reg":"05/08/2026 08:48:59"},{"id":"893847","tipo":"FC","letra":"B","pto":"02","nro":"003511","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316925229480","reg":"05/08/2026 08:53:40"},{"id":"893848","tipo":"FC","letra":"B","pto":"02","nro":"003512","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":68936560.0,"cae":"86316925666314","reg":"05/08/2026 08:57:07"},{"id":"893849","tipo":"FC","letra":"B","pto":"02","nro":"003513","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":24620200.0,"cae":"86316926007497","reg":"05/08/2026 08:59:47"},{"id":"893852","tipo":"FC","letra":"B","pto":"02","nro":"003514","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":59088480.0,"cae":"86316926610990","reg":"05/08/2026 09:03:43"},{"id":"893853","tipo":"FC","letra":"B","pto":"02","nro":"003515","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316927071582","reg":"05/08/2026 09:06:42"},{"id":"893854","tipo":"FC","letra":"B","pto":"02","nro":"003516","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":42410280.0,"cae":"86316927543983","reg":"05/08/2026 09:09:42"},{"id":"893858","tipo":"FC","letra":"B","pto":"02","nro":"003517","fecha":"2026-08-03","cli":"MINISTERIO DE SALUD","imp":14772120.0,"cae":"86316928442761","reg":"05/08/2026 09:15:34"},{"id":"893860","tipo":"FC","letra":"A","pto":"02","nro":"033068","fecha":"2026-08-03","cli":"EMPRENDIMIENTOS S R L","imp":4178815.82,"cae":"86316930028817","reg":"05/08/2026 09:26:25"},{"id":"894005","tipo":"FC","letra":"A","pto":"02","nro":"033069","fecha":"2026-08-03","cli":"ALT SA.","imp":637058.1,"cae":"86316955892313","reg":"05/08/2026 11:45:21"},{"id":"894080","tipo":"NC","letra":"A","pto":"02","nro":"0023","fecha":"2026-08-03","cli":"EMBOTELLADORA DEL ATLANTICO S.A.","imp":2421715.78,"cae":"86316965270423","reg":"05/08/2026 12:22:34"},{"id":"894098","tipo":"FC","letra":"A","pto":"02","nro":"033070","fecha":"2026-08-03","cli":"AGENCIA CORDOBA DEPORTES SOCIEDAD DE ECONOMIA MIXTA","imp":1238204.91,"cae":"86316969529618","reg":"05/08/2026 12:53:14"},{"id":"894282","tipo":"FC","letra":"A","pto":"02","nro":"033071","fecha":"2026-08-06","cli":"MS FERNANDEZ S.R.L.","imp":1754431.82,"cae":"86327094919710","reg":"06/08/2026 09:44:27"},{"id":"894317","tipo":"FC","letra":"A","pto":"02","nro":"033072","fecha":"2026-08-06","cli":"SAN CAYETANO S.R.L","imp":2073108.97,"cae":"86327100857810","reg":"06/08/2026 10:20:53"},{"id":"894338","tipo":"FC","letra":"A","pto":"02","nro":"033073","fecha":"2026-08-06","cli":"S.C.COMBUSTIBLES S.A.S.","imp":1008747.16,"cae":"86327103964792","reg":"06/08/2026 10:39:56"},{"id":"894494","tipo":"FC","letra":"A","pto":"02","nro":"033074","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327144473274","reg":"06/08/2026 14:45:02"},{"id":"894540","tipo":"FC","letra":"A","pto":"02","nro":"033075","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327259187096","reg":"07/08/2026 09:00:21"},{"id":"894544","tipo":"FC","letra":"A","pto":"02","nro":"033076","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327260400568","reg":"07/08/2026 09:09:00"},{"id":"894553","tipo":"NC","letra":"A","pto":"02","nro":"002063","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327262402020","reg":"07/08/2026 09:22:22"},{"id":"894555","tipo":"NC","letra":"A","pto":"02","nro":"002064","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327262727917","reg":"07/08/2026 09:25:00"},{"id":"894556","tipo":"NC","letra":"A","pto":"02","nro":"002065","fecha":"2026-08-06","cli":"CAÑUELAS GAS S.A.","imp":3317676.98,"cae":"86327263031416","reg":"07/08/2026 09:27:14"},{"id":"894768","tipo":"NC","letra":"A","pto":"02","nro":"002066","fecha":"2026-08-06","cli":"TADICOR S.A.","imp":155166.77,"cae":"86327299116722","reg":"07/08/2026 12:33:45"},{"id":"894884","tipo":"FC","letra":"A","pto":"02","nro":"001050","fecha":"2026-08-07","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":6897198.73,"cae":"86327336961041","reg":"07/08/2026 15:46:18"},{"id":"895171","tipo":"FC","letra":"A","pto":"02","nro":"033077","fecha":"2026-08-10","cli":"GREEN ARMOR S.A.","imp":5445023.95,"cae":"86327703246222","reg":"10/08/2026 11:47:02"},{"id":"895177","tipo":"NC","letra":"A","pto":"02","nro":"0024","fecha":"2026-08-10","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":44531571.92,"cae":"86327707187560","reg":"10/08/2026 11:49:27"},{"id":"895201","tipo":"FC","letra":"A","pto":"02","nro":"001051","fecha":"2026-08-10","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":40078414.73,"cae":"86327707744410","reg":"10/08/2026 12:04:43"},{"id":"895205","tipo":"FC","letra":"A","pto":"02","nro":"033078","fecha":"2026-08-10","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":4453157.19,"cae":"86327708277463","reg":"10/08/2026 12:06:49"},{"id":"895211","tipo":"FC","letra":"A","pto":"02","nro":"033079","fecha":"2026-08-10","cli":"CULTURA CLUB SA","imp":3296197.91,"cae":"86327709537735","reg":"10/08/2026 12:11:49"},{"id":"895240","tipo":"FC","letra":"B","pto":"02","nro":"003518","fecha":"2026-08-10","cli":"FEDERACION AMATEUR CORDOBESA DE HOCKEY SOBRE CESPED","imp":384251.92,"cae":"86327712197238","reg":"10/08/2026 12:24:28"},{"id":"895246","tipo":"FC","letra":"A","pto":"02","nro":"033080","fecha":"2026-08-10","cli":"NUMBERS FOR PLAYERS SRL","imp":730651.82,"cae":"86327712872396","reg":"10/08/2026 12:28:01"},{"id":"895308","tipo":"FC","letra":"A","pto":"02","nro":"033081","fecha":"2026-08-10","cli":"LA ROTONDA S.A.S.S.A.S.","imp":7356.8,"cae":"86327741528332","reg":"10/08/2026 14:45:01"},{"id":"895354","tipo":"NC","letra":"A","pto":"02","nro":"002067","fecha":"2026-08-10","cli":"ALCANO S.R.L.","imp":181500.0,"cae":"86327856033326","reg":"11/08/2026 09:22:41"},{"id":"895980","tipo":"FC","letra":"A","pto":"02","nro":"033082","fecha":"2026-08-10","cli":"AGENCIA CORDOBA DEPORTES SOCIEDAD DE ECONOMIA MIXTA","imp":1265771.71,"cae":"86328071036359","reg":"12/08/2026 15:20:21"},{"id":"897169","tipo":"NC","letra":"A","pto":"02","nro":"002068","fecha":"2026-08-18","cli":"CYRE S.A.","imp":73938.74,"cae":"86338786599165","reg":"18/08/2026 09:08:13"},{"id":"897487","tipo":"FC","letra":"A","pto":"02","nro":"033083","fecha":"2026-08-18","cli":"CULTURA CLUB SA","imp":1977718.74,"cae":"86338826820738","reg":"18/08/2026 12:35:39"},{"id":"897491","tipo":"FC","letra":"A","pto":"02","nro":"033084","fecha":"2026-08-18","cli":"CULTURA CLUB SA","imp":2636958.32,"cae":"86338828071879","reg":"18/08/2026 12:41:47"},{"id":"897492","tipo":"FC","letra":"B","pto":"02","nro":"003519","fecha":"2026-08-18","cli":"ASOCIACION CORDOBA ATHLETIC CLUB","imp":135618.4,"cae":"86338829141365","reg":"18/08/2026 12:47:20"},{"id":"897510","tipo":"FC","letra":"A","pto":"02","nro":"033085","fecha":"2026-08-18","cli":"RADIODIFUSORA DEL CENTRO SA","imp":5717350.49,"cae":"86338839915544","reg":"18/08/2026 13:47:18"},{"id":"897511","tipo":"NC","letra":"B","pto":"02","nro":"0384","fecha":"2026-08-18","cli":"ASOCIACION CORDOBA ATHLETIC CLUB","imp":135618.4,"cae":"86338841620690","reg":"18/08/2026 13:57:58"},{"id":"897512","tipo":"FC","letra":"B","pto":"02","nro":"003520","fecha":"2026-08-18","cli":"ASOCIACION CORDOBA ATHLETIC CLUB","imp":248633.73,"cae":"86338842038438","reg":"18/08/2026 14:00:49"},{"id":"897909","tipo":"FC","letra":"A","pto":"02","nro":"033086","fecha":"2026-08-19","cli":"GEOVANEE S.A","imp":7356.8,"cae":"86339007802846","reg":"19/08/2026 13:55:08"},{"id":"897919","tipo":"NC","letra":"B","pto":"02","nro":"0385","fecha":"2026-08-19","cli":"MINISTERIO DE SALUD","imp":2382599.99,"cae":"86339013491222","reg":"19/08/2026 14:34:49"},{"id":"898840","tipo":"FC","letra":"A","pto":"02","nro":"033087","fecha":"2026-08-24","cli":"CULTURA CLUB SA","imp":3296197.91,"cae":"86349681736903","reg":"24/08/2026 11:41:33"},{"id":"898845","tipo":"FC","letra":"B","pto":"02","nro":"003521","fecha":"2026-08-24","cli":"FEDERACION AMATEUR CORDOBESA DE HOCKEY SOBRE CESPED","imp":384251.92,"cae":"86349682552436","reg":"24/08/2026 11:45:28"},{"id":"899413","tipo":"NC","letra":"B","pto":"02","nro":"0386","fecha":"2026-08-25","cli":"MINISTERIO DE SALUD","imp":1588400.0,"cae":"86349833449911","reg":"25/08/2026 11:13:19"},{"id":"899416","tipo":"NC","letra":"B","pto":"02","nro":"0387","fecha":"2026-08-25","cli":"MINISTERIO DE SALUD","imp":1429559.99,"cae":"86349834113738","reg":"25/08/2026 11:16:42"},{"id":"899926","tipo":"FC","letra":"A","pto":"02","nro":"001052","fecha":"2026-08-27","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":35389228.79,"cae":"86350129666514","reg":"27/08/2026 10:09:42"},{"id":"900176","tipo":"FC","letra":"A","pto":"02","nro":"033088","fecha":"2026-08-27","cli":"MIGUEL BECERRA S.A.","imp":61437754.04,"cae":"86350147311998","reg":"27/08/2026 11:43:04"},{"id":"900187","tipo":"FC","letra":"A","pto":"02","nro":"033089","fecha":"2026-08-27","cli":"MIGUEL BECERRA S.A.","imp":6463578.0,"cae":"86350148621875","reg":"27/08/2026 11:49:42"},{"id":"900585","tipo":"FC","letra":"B","pto":"02","nro":"003522","fecha":"2026-08-28","cli":"PEREZ JULIO CESAR","imp":1814610.0,"cae":"86350325401595","reg":"28/08/2026 13:32:37"},{"id":"900588","tipo":"FC","letra":"A","pto":"02","nro":"033090","fecha":"2026-08-28","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":18405111.1,"cae":"86350333554103","reg":"28/08/2026 14:21:47"},{"id":"900593","tipo":"FC","letra":"A","pto":"02","nro":"001053","fecha":"2026-08-28","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":6897198.73,"cae":"86350341119347","reg":"28/08/2026 15:06:05"},{"id":"900595","tipo":"NC","letra":"A","pto":"02","nro":"0025","fecha":"2026-08-28","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":6897198.73,"cae":"86350342217759","reg":"28/08/2026 15:12:11"},{"id":"900805","tipo":"FC","letra":"A","pto":"02","nro":"033091","fecha":"2026-08-31","cli":"CORBLOCK S A I C","imp":15710187.27,"cae":"86350688455366","reg":"31/08/2026 10:41:56"},{"id":"900809","tipo":"FC","letra":"A","pto":"02","nro":"033092","fecha":"2026-08-31","cli":"CREA SINERGIA S.R.L.","imp":1811793.98,"cae":"86350688837548","reg":"31/08/2026 10:43:48"},{"id":"900813","tipo":"FC","letra":"A","pto":"02","nro":"033093","fecha":"2026-08-31","cli":"CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO","imp":17164425.96,"cae":"86350689251720","reg":"31/08/2026 10:45:47"},{"id":"900821","tipo":"FC","letra":"B","pto":"02","nro":"003523","fecha":"2026-08-31","cli":"COMARCA DE ALLENDE S.A.","imp":46087828.32,"cae":"86350690126225","reg":"31/08/2026 10:49:42"},{"id":"900824","tipo":"FC","letra":"B","pto":"02","nro":"003524","fecha":"2026-08-31","cli":"COLEGIO DE ARQUITECTOS DE LA PROVINCIA DE CORDOBA","imp":2514638.07,"cae":"86350690456042","reg":"31/08/2026 10:51:16"},{"id":"900828","tipo":"FC","letra":"A","pto":"02","nro":"033094","fecha":"2026-08-31","cli":"AGENCIA CORDOBA DEPORTES SOCIEDAD DE ECONOMIA MIXTA","imp":43159993.29,"cae":"86350691491105","reg":"31/08/2026 10:55:35"},{"id":"900838","tipo":"FC","letra":"A","pto":"02","nro":"033095","fecha":"2026-08-31","cli":"LA SEGUNDA COOP.LTDA.DE SEGUROS GRALES.","imp":4819220.25,"cae":"86350694868751","reg":"31/08/2026 11:11:01"},{"id":"900841","tipo":"FC","letra":"B","pto":"02","nro":"003525","fecha":"2026-08-31","cli":"INSTITUTO PADRE CLARET","imp":13822601.86,"cae":"86350695386170","reg":"31/08/2026 11:13:15"},{"id":"900842","tipo":"FC","letra":"A","pto":"02","nro":"033096","fecha":"2026-08-31","cli":"DISTRIBUIDORA JOR.GUS SRL","imp":4849667.72,"cae":"86350696013485","reg":"31/08/2026 11:15:54"},{"id":"900845","tipo":"FC","letra":"A","pto":"02","nro":"033097","fecha":"2026-08-31","cli":"R.F.TRANSPORTE S.A.","imp":1586196.2,"cae":"86350696930407","reg":"31/08/2026 11:19:50"},{"id":"900851","tipo":"FC","letra":"A","pto":"02","nro":"033098","fecha":"2026-08-31","cli":"R.F.TRANSPORTE S.A.","imp":1207277.5,"cae":"86350697698068","reg":"31/08/2026 11:22:54"},{"id":"900854","tipo":"FC","letra":"A","pto":"02","nro":"033099","fecha":"2026-08-31","cli":"VIFOOD S.A.","imp":9257692.96,"cae":"86350698819670","reg":"31/08/2026 11:27:28"},{"id":"900859","tipo":"FC","letra":"A","pto":"02","nro":"033100","fecha":"2026-08-31","cli":"CONIFERAL SACIF","imp":112025917.01,"cae":"86350701556968","reg":"31/08/2026 11:38:15"},{"id":"900894","tipo":"FC","letra":"B","pto":"02","nro":"003526","fecha":"2026-08-31","cli":"SECRETARIA GENERAL DE HABITAT Y DESARROLLO EMPRENDEDOR O. P.","imp":48500000.0,"cae":"86350709501990","reg":"31/08/2026 12:12:09"},{"id":"900908","tipo":"FC","letra":"A","pto":"02","nro":"001054","fecha":"2026-08-31","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":40970705.61,"cae":"86350712168589","reg":"31/08/2026 12:23:51"},{"id":"900912","tipo":"FC","letra":"A","pto":"02","nro":"033101","fecha":"2026-08-31","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":4552300.62,"cae":"86350712597666","reg":"31/08/2026 12:25:50"},{"id":"900928","tipo":"FC","letra":"A","pto":"02","nro":"033102","fecha":"2026-08-31","cli":"TADICOR S.A.","imp":63734727.65,"cae":"86350719712998","reg":"31/08/2026 12:59:18"},{"id":"900932","tipo":"FC","letra":"A","pto":"02","nro":"033103","fecha":"2026-08-31","cli":"TADICOR S.A.","imp":4479992.72,"cae":"86350720050712","reg":"31/08/2026 13:00:54"},{"id":"900940","tipo":"FC","letra":"A","pto":"02","nro":"033104","fecha":"2026-08-31","cli":"TADICOR S.A.","imp":1207277.5,"cae":"86350720647331","reg":"31/08/2026 13:03:47"},{"id":"900959","tipo":"FC","letra":"A","pto":"02","nro":"033105","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":38159490.31,"cae":"86350724178539","reg":"31/08/2026 13:21:37"},{"id":"900960","tipo":"FC","letra":"A","pto":"02","nro":"033106","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":4876612.18,"cae":"86350724513592","reg":"31/08/2026 13:23:17"},{"id":"900961","tipo":"FC","letra":"A","pto":"02","nro":"033107","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":54861887.03,"cae":"86350724866509","reg":"31/08/2026 13:25:01"},{"id":"900962","tipo":"FC","letra":"A","pto":"02","nro":"033108","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":30234995.52,"cae":"86350725311005","reg":"31/08/2026 13:26:51"},{"id":"900963","tipo":"FC","letra":"A","pto":"02","nro":"033109","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":24187996.41,"cae":"86350725724237","reg":"31/08/2026 13:28:53"},{"id":"900965","tipo":"FC","letra":"A","pto":"02","nro":"033110","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":36281994.62,"cae":"86350726096363","reg":"31/08/2026 13:30:41"},{"id":"900966","tipo":"FC","letra":"A","pto":"02","nro":"033111","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":49473230.57,"cae":"86350726448318","reg":"31/08/2026 13:32:28"},{"id":"900968","tipo":"FC","letra":"A","pto":"02","nro":"033112","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":88949406.16,"cae":"86350726864656","reg":"31/08/2026 13:34:29"},{"id":"900971","tipo":"FC","letra":"A","pto":"02","nro":"033113","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":36281994.62,"cae":"86350727265059","reg":"31/08/2026 13:36:24"},{"id":"900973","tipo":"FC","letra":"A","pto":"02","nro":"033114","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":48375992.83,"cae":"86350727599618","reg":"31/08/2026 13:38:01"},{"id":"900974","tipo":"FC","letra":"A","pto":"02","nro":"033115","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":51292261.02,"cae":"86350728155885","reg":"31/08/2026 13:40:56"},{"id":"900982","tipo":"FC","letra":"A","pto":"02","nro":"033116","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":4203407.38,"cae":"86350734141546","reg":"31/08/2026 14:11:54"},{"id":"901041","tipo":"FC","letra":"A","pto":"02","nro":"033117","fecha":"2026-08-31","cli":"TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.","imp":4835147.9,"cae":"86350748099371","reg":"31/08/2026 15:25:53"},{"id":"901045","tipo":"FC","letra":"A","pto":"02","nro":"001055","fecha":"2026-08-31","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":164960033.84,"cae":"86350752132212","reg":"31/08/2026 15:43:51"},{"id":"901047","tipo":"FC","letra":"A","pto":"02","nro":"001056","fecha":"2026-08-31","cli":"BANCO DE LA PROVINCIA DE CORDOBA SA","imp":1561716422.48,"cae":"86350752834564","reg":"31/08/2026 15:47:38"},{"id":"901057","tipo":"FC","letra":"A","pto":"02","nro":"001057","fecha":"2026-08-31","cli":"TRANSPORTADORA DE CAUDALES JUNCADELLA S.A.","imp":131547159.79,"cae":"86350763524171","reg":"31/08/2026 16:38:10"},{"id":"901059","tipo":"FC","letra":"A","pto":"02","nro":"033118","fecha":"2026-08-31","cli":"CAMINOS DE LAS SIERRAS S.A.","imp":281901246.04,"cae":"86350766848303","reg":"31/08/2026 16:53:03"},{"id":"901200","tipo":"FC","letra":"A","pto":"02","nro":"001058","fecha":"2026-08-31","cli":"EMBOTELLADORA DEL ATLANTICO S.A.","imp":20300564.31,"cae":"86350869473199","reg":"01/09/2026 09:45:53"},{"id":"901226","tipo":"FC","letra":"A","pto":"02","nro":"001059","fecha":"2026-08-31","cli":"EMBOTELLADORA DEL ATLANTICO S.A.","imp":28134348.17,"cae":"86350878713688","reg":"01/09/2026 10:27:18"},{"id":"901247","tipo":"NC","letra":"A","pto":"02","nro":"002069","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":1097237.74,"cae":"86350883299955","reg":"01/09/2026 10:45:24"},{"id":"901249","tipo":"FC","letra":"A","pto":"02","nro":"033119","fecha":"2026-08-31","cli":"COOPERATIVA OBRERA LIMITADA DE CONSUMO Y VIVIENDA","imp":193600.0,"cae":"86350886091184","reg":"01/09/2026 10:56:08"},{"id":"901250","tipo":"FC","letra":"A","pto":"02","nro":"033120","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":42328993.72,"cae":"86350886683253","reg":"01/09/2026 10:58:31"},{"id":"901251","tipo":"NC","letra":"A","pto":"02","nro":"002070","fecha":"2026-08-31","cli":"LOTERIA DE LA PROVINCIA DE CORDOBA S.A.U.","imp":36281994.62,"cae":"86350887292907","reg":"01/09/2026 11:00:45"},{"id":"901258","tipo":"FC","letra":"A","pto":"02","nro":"033121","fecha":"2026-08-31","cli":"MEDIAR SA.","imp":532982.74,"cae":"86350895372338","reg":"01/09/2026 11:34:50"},{"id":"901267","tipo":"FC","letra":"A","pto":"02","nro":"033122","fecha":"2026-08-31","cli":"R.F.TRANSPORTE S.A.","imp":625138.39,"cae":"86350896763819","reg":"01/09/2026 11:40:10"},{"id":"901277","tipo":"FC","letra":"A","pto":"02","nro":"033123","fecha":"2026-08-31","cli":"MOCONA MEGAMADERAS S.A.","imp":404876.29,"cae":"86350898394656","reg":"01/09/2026 11:46:20"},{"id":"901280","tipo":"FC","letra":"A","pto":"02","nro":"033124","fecha":"2026-08-31","cli":"NEWCOR S.A.S.","imp":3539254.24,"cae":"86350899345580","reg":"01/09/2026 11:50:02"},{"id":"901284","tipo":"FC","letra":"A","pto":"02","nro":"033125","fecha":"2026-08-31","cli":"OIL PETRO SALSIPUEDES S.A.","imp":1610730.22,"cae":"86350900388946","reg":"01/09/2026 11:53:58"},{"id":"901285","tipo":"FC","letra":"A","pto":"02","nro":"033126","fecha":"2026-08-31","cli":"ANJOR S.A.","imp":13710744.21,"cae":"86350900888543","reg":"01/09/2026 11:55:06"},{"id":"901287","tipo":"FC","letra":"A","pto":"02","nro":"033127","fecha":"2026-08-31","cli":"OIL PETRO SALSIPUEDES SRL","imp":874440.38,"cae":"86350901144191","reg":"01/09/2026 11:55:51"},{"id":"901288","tipo":"FC","letra":"A","pto":"02","nro":"033128","fecha":"2026-08-31","cli":"OSVALDO FANTINI Y CIA SRL","imp":935319.11,"cae":"86350901673026","reg":"01/09/2026 11:58:37"},{"id":"901291","tipo":"FC","letra":"A","pto":"02","nro":"033129","fecha":"2026-08-31","cli":"CENTRO PRIVADO TOMOGRAFIA COMPUTADA CORDOBA SOC ANON","imp":2617576.94,"cae":"86350902204998","reg":"01/09/2026 12:00:58"},{"id":"901295","tipo":"FC","letra":"A","pto":"02","nro":"033130","fecha":"2026-08-31","cli":"JOSE IGNACIO PAROLA SRL","imp":105838.7,"cae":"86350902629780","reg":"01/09/2026 12:02:40"},{"id":"901297","tipo":"FC","letra":"A","pto":"02","nro":"033131","fecha":"2026-08-31","cli":"CET S.A.- CONCESIONARIA DE ENTRETENIMIENTOS Y TURISMO","imp":289086475.73,"cae":"86350902804136","reg":"01/09/2026 12:03:13"},{"id":"901300","tipo":"FC","letra":"A","pto":"02","nro":"033132","fecha":"2026-08-31","cli":"LPAVONE S.A.S.","imp":5642670.25,"cae":"86350903304064","reg":"01/09/2026 12:05:21"},{"id":"901301","tipo":"FC","letra":"A","pto":"02","nro":"033133","fecha":"2026-08-31","cli":"PETROLERA SAN JUAN S.A.","imp":2035874.61,"cae":"86350903996997","reg":"01/09/2026 12:08:09"},{"id":"901302","tipo":"FC","letra":"A","pto":"02","nro":"033134","fecha":"2026-08-31","cli":"PETROLERA SAN JUAN S.A.","imp":2021452.86,"cae":"86350904601835","reg":"01/09/2026 12:10:38"}];
+    const EXCL_LS = "facturas-excluidos-202608";
+    const DATE_LS = "facturas-rango-fechas";
+    const DATA_MIN = DOCS.reduce((m, d) => (!m || d.fecha < m ? d.fecha : m), "");
+    const DATA_MAX = DOCS.reduce((m, d) => (!m || d.fecha > m ? d.fecha : m), "");
+
+    function loadDateRange() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(DATE_LS) || "null");
+        if (raw && raw.from && raw.to) return { from: raw.from, to: raw.to };
+      } catch (e) { /* ignore */ }
+      return { from: "2026-08-01", to: "2026-08-31" };
+    }
+    let dateFrom = loadDateRange().from;
+    let dateTo = loadDateRange().to;
+
+    function saveDateRange() {
+      localStorage.setItem(DATE_LS, JSON.stringify({ from: dateFrom, to: dateTo }));
+    }
+    function inRange(fecha) {
+      return fecha >= dateFrom && fecha <= dateTo;
+    }
+    function fmtRangoISO() {
+      return fmtFecha(dateFrom) + " al " + fmtFecha(dateTo);
+    }
+
+    function loadExcluded() {
+      try {
+        const raw = JSON.parse(localStorage.getItem(EXCL_LS) || "[]");
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+      } catch (e) { return new Set(); }
+    }
+    let excluded = loadExcluded();
+    const leyendaOpen = {};
+    document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (d && d.matches && d.matches("details[data-ley]")) leyendaOpen[d.dataset.ley] = d.open;
+    }, true);
+    function saveExcluded() { localStorage.setItem(EXCL_LS, JSON.stringify([...excluded])); }
+
+    function fmtPeso(n) {
+      const sign = n < 0 ? "-" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + "$ " + (a / 1e6).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " M";
+      return sign + "$ " + a.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+    }
+    function fmtFull(n) {
+      const sign = n < 0 ? "-" : "";
+      return sign + "$ " + Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function pct(n, d) { return d ? ((n / d) * 100).toFixed(1) + "%" : "—"; }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function fmtFecha(iso) {
+      const [y, m, d] = iso.split("-");
+      return d + "/" + m + "/" + y;
+    }
+    function shortCli(n) {
+      return n.length > 42 ? n.slice(0, 40) + "…" : n;
+    }
+    function signImp(d) { return d.tipo === "NC" ? -d.imp : d.imp; }
+
+    function roster() {
+      return DOCS.filter(d => !excluded.has(d.cli) && inRange(d.fecha));
+    }
+
+    function metrics(list) {
+      const T = { n: 0, nFc: 0, nNc: 0, nA: 0, nB: 0, bruto: 0, nc: 0, neto: 0 };
+      const byCli = {};
+      const byDay = {};
+      const byMonth = {};
+      for (const d of list) {
+        T.n += 1;
+        if (d.letra === "A") T.nA += 1; else if (d.letra === "B") T.nB += 1;
+        const day = d.fecha;
+        const mon = d.fecha.slice(0, 7);
+        if (!byDay[day]) byDay[day] = { n: 0, bruto: 0, nc: 0, neto: 0 };
+        if (!byMonth[mon]) byMonth[mon] = { n: 0, bruto: 0, nc: 0, neto: 0 };
+        if (!byCli[d.cli]) byCli[d.cli] = { n: 0, nFc: 0, nNc: 0, bruto: 0, nc: 0, neto: 0 };
+        byDay[day].n += 1;
+        byMonth[mon].n += 1;
+        byCli[d.cli].n += 1;
+        if (d.tipo === "NC") {
+          T.nNc += 1; T.nc += d.imp;
+          byDay[day].nc += d.imp; byMonth[mon].nc += d.imp;
+          byCli[d.cli].nNc += 1; byCli[d.cli].nc += d.imp;
+        } else {
+          T.nFc += 1; T.bruto += d.imp;
+          byDay[day].bruto += d.imp; byMonth[mon].bruto += d.imp;
+          byCli[d.cli].nFc += 1; byCli[d.cli].bruto += d.imp;
+        }
+      }
+      T.neto = T.bruto - T.nc;
+      Object.values(byDay).forEach(v => { v.neto = v.bruto - v.nc; });
+      Object.values(byMonth).forEach(v => { v.neto = v.bruto - v.nc; });
+      Object.values(byCli).forEach(v => { v.neto = v.bruto - v.nc; });
+      const cliArr = Object.entries(byCli).map(([cli, v]) => ({ cli, ...v })).sort((a, b) => b.neto - a.neto);
+      const days = Object.keys(byDay).sort();
+      T.ticket = T.nFc ? T.bruto / T.nFc : 0;
+      T.nCli = cliArr.length;
+      T.avgCli = T.nCli ? T.neto / T.nCli : 0;
+      T.avgDay = days.length ? T.neto / days.length : 0;
+      const top5 = cliArr.slice(0, 5).reduce((a, x) => a + x.neto, 0);
+      const top10 = cliArr.slice(0, 10).reduce((a, x) => a + x.neto, 0);
+      return { T, byCli, byDay, byMonth, cliArr, days, top5, top10, exclList: [...excluded] };
+    }
+
+    function ctx() { return metrics(roster()); }
+
+    function stat(v, l, cls, hint) {
+      return `<div class="card stat${hint?" has-tip":""}"${hint?` tabindex="0"`:""}><div class="v ${cls||""}">${v}</div><div class="l">${l}${hint?` <span class="tip-mark" aria-hidden="true">i</span>`:""}</div>${hint?`<div class="tip" role="tooltip">${hint}</div>`:""}</div>`;
+    }
+    function hbars(items, max, color) {
+      return items.map(([label, val]) => {
+        const w = max ? Math.max(4, (Math.abs(val) / max) * 100) : 0;
+        const col = val < 0 ? "#fb7185" : color;
+        return `<div class="hbar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${w}%;background:${col}"></div></div><div class="val">${fmtPeso(val)}</div></div>`;
+      }).join("");
+    }
+
+    const CHART_COLORS = ["#6366f1", "#34d399", "#fbbf24", "#fb7185", "#38bdf8", "#a78bfa", "#f472b6", "#2dd4bf", "#64748b"];
+
+    function clientShareBar(cliArr, neto, topN) {
+      const nTop = topN || 10;
+      const pos = cliArr.filter(c => c.neto > 0);
+      if (!pos.length || !neto) return `<p class="muted">Sin neto positivo.</p>`;
+      const top = pos.slice(0, nTop);
+      const rest = pos.slice(nTop);
+      const restNeto = rest.reduce((a, c) => a + c.neto, 0);
+      const segs = top.map((c, i) => ({
+        label: shortCli(c.cli),
+        val: c.neto,
+        pct: (c.neto / neto) * 100,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+      }));
+      if (restNeto > 0) {
+        segs.push({ label: `Otros (${rest.length})`, val: restNeto, pct: (restNeto / neto) * 100, color: CHART_COLORS[8] });
+      }
+      const bar = segs.map(s =>
+        `<span style="width:${Math.max(s.pct, 0.4)}%;background:${s.color}" title="${esc(s.label)}: ${s.pct.toFixed(1)}%"></span>`
+      ).join("");
+      const legend = segs.map(s =>
+        `<div class="share-item"><i style="background:${s.color}"></i><span><b>${esc(s.label)}</b> · ${s.pct.toFixed(1)}% · ${fmtPeso(s.val)}</span></div>`
+      ).join("");
+      return `<div class="share-stack">${bar}</div><div class="share-grid">${legend}</div>`;
+    }
+
+    function clientRankingTable(cliArr, neto, limit) {
+      const lim = limit || 15;
+      const pos = cliArr.filter(c => c.neto > 0);
+      if (!pos.length) return `<p class="muted">Sin clientes con neto positivo.</p>`;
+      let cum = 0;
+      const rows = pos.slice(0, lim).map((c, i) => {
+        cum += c.neto;
+        return { rank: i + 1, ...c, pct: (c.neto / neto) * 100, cumPct: (cum / neto) * 100 };
+      });
+      const tail = pos.slice(lim);
+      const tailNeto = tail.reduce((a, c) => a + c.neto, 0);
+      return `<div class="tbl-wrap" style="max-height:420px">
+        <table>
+          <thead><tr>
+            <th class="num">#</th><th>Cliente</th><th class="num">Neto</th><th class="num">%</th>
+            <th class="num">Acum.</th><th class="num">Comp.</th>
+          </tr></thead>
+          <tbody>
+            ${rows.map(r => `<tr>
+              <td class="num">${r.rank}</td>
+              <td>${esc(r.cli)}</td>
+              <td class="num">${fmtFull(r.neto)}</td>
+              <td class="num">${r.pct.toFixed(1)}%</td>
+              <td class="num">${r.cumPct.toFixed(1)}%</td>
+              <td class="num">${r.n}</td>
+            </tr>`).join("")}
+            ${tail.length ? `<tr><td class="num">…</td><td colspan="2">${tail.length} clientes más</td><td class="num">${pct(tailNeto, neto)}</td><td class="num">100%</td><td class="num">—</td></tr>` : ""}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted" style="margin-top:8px"><b>Acum.</b> = % del neto que explican este cliente y todos los de arriba. Con ${pos.length} clientes, el #1 concentra ${rows[0] ? rows[0].pct.toFixed(1) : "0"}%.</p>`;
+    }
+
+    const TABS = [["tablero","Tablero"],["clientes","Clientes"],["comprobantes","Comprobantes"],["planilla","Planilla"]];
+    document.getElementById("tabs").innerHTML = TABS.map(([id, l], i) =>
+      `<button class="tab${i===0?" on":""}" data-tab="${id}">${l}</button>`
+    ).join("");
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const b = e.target.closest(".tab");
+      if (!b) return;
+      document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+      document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === b.dataset.tab));
+      document.querySelector(".wrap").classList.toggle("wide", b.dataset.tab === "planilla");
+    });
+
+    function bindExcl(rootSel) {
+      document.querySelectorAll(rootSel + " [data-in]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          excluded.delete(btn.getAttribute("data-in"));
+          saveExcluded();
+          refresh();
+        });
+      });
+    }
+
+    function renderTablero() {
+      const list = roster();
+      const { T, byDay, byMonth, cliArr, days, top5, top10, exclList } = ctx();
+      const jul = byMonth["2026-07"] || { n:0, bruto:0, nc:0, neto:0 };
+      const ago = byMonth["2026-08"] || { n:0, bruto:0, nc:0, neto:0 };
+      const dayBars = days.map(d => [fmtFecha(d), byDay[d].neto]);
+      const maxDay = Math.max(...dayBars.map(x => x[1]), 1);
+      const ncs = list.filter(d => d.tipo === "NC").sort((a,b) => b.imp - a.imp).slice(0, 8);
+      const allCli = new Set(DOCS.map(d => d.cli)).size;
+      document.getElementById("tablero").innerHTML = `
+        <div class="callout info" style="margin-bottom:14px"><b>Período activo:</b> ${esc(fmtRangoISO())} · ${T.n} comprobantes en el cálculo · neto ${fmtPeso(T.neto)}. Cambiá <b>Desde/Hasta</b> arriba para alinear con ventas y cobranzas (agosto = 01/08–31/08).</div>
+        <details class="card glosario" data-ley="kpi"${leyendaOpen.kpi ? " open" : ""}>
+          <summary>Leyenda — qué es cada KPI y para qué <span class="open-hint">Abrir</span></summary>
+          <p class="lead">El número grande es el dato del universo tildado. No hay desglose de IVA: el CSV trae un solo importe por comprobante. La <b style="color:#a5b4fc">i</b> muestra la cuenta de este corte.</p>
+          <div class="tbl-wrap" style="max-height:none">
+            <table class="glosa">
+              <thead><tr><th>KPI</th><th>Qué es</th><th>Para qué lo mirás</th></tr></thead>
+              <tbody>
+                <tr><td class="kpi ok">Neto</td><td>Facturas emitidas menos notas de crédito. Es lo que realmente se facturó.</td><td class="para">El número de negocio. Si Bancor distorsiona, destildalo en Clientes.</td></tr>
+                <tr><td class="kpi">Bruto</td><td>Suma de facturas, sin restar NC.</td><td class="para">Volumen emitido. Sirve para ver el tamaño de la máquina de facturación.</td></tr>
+                <tr><td class="kpi alza">NC</td><td>Notas de crédito (ajustes / anulaciones). Restan del bruto.</td><td class="para">Calidad de emisión. Un NC grande suele ser refacturación, no “descuento”.</td></tr>
+                <tr><td class="kpi ice">Ticket</td><td>Bruto ÷ cantidad de facturas.</td><td class="para">Tamaño medio. Acá lo mueve Bancor (facturas de $1.500 M+).</td></tr>
+                <tr><td class="kpi">Concentración</td><td>% del neto en los 5 / 10 mayores clientes.</td><td class="para">Dependencia. Si top 5 &gt; 70%, el mes lo define un puñado de cuentas.</td></tr>
+                <tr><td class="kpi">Letra A / B</td><td>Tipo de comprobante AFIP. A = responsable inscripto; B = consumidor final / exento.</td><td class="para">Mix impositivo, no mix de cobrabilidad.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <details class="card glosario" data-ley="univ"${leyendaOpen.univ ? " open" : ""}>
+          <summary>Universo del cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Totales y ranking usan clientes tildados en <b style="color:#a5b4fc">Clientes</b> y comprobantes con fecha de emisión entre <b>${esc(fmtRangoISO())}</b>. Destildá Bancor u otro grande para ver el resto. Mismo corte que ventas y cobranzas si elegís <b>Agosto 2026</b>.</p>
+          <p class="muted">${T.nCli} clientes · ${T.n} comprobantes en el rango · ${exclList.length} clientes afuera · ${allCli} en el CSV · ${DOCS.filter(d => inRange(d.fecha)).length} comp. en fechas (sin exclusiones).</p>
+          ${exclList.length ? `<div class="excl-pills">${exclList.map(c => `<button type="button" data-in="${esc(c)}">${esc(shortCli(c))} ×</button>`).join("")}</div>` : `<p class="muted" style="margin-top:8px">Nadie excluido. En Clientes, destildá la fila para sacarla.</p>`}
+        </details>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.neto), "Neto facturado", "ok", `<b>Bruto − NC</b><br>${fmtFull(T.bruto)} − ${fmtFull(T.nc)} = ${fmtFull(T.neto)}.`)}
+          ${stat(fmtPeso(T.bruto), "Bruto (solo facturas)", "", `<b>Suma de FC</b><br>${T.nFc} facturas = ${fmtFull(T.bruto)}.`)}
+          ${stat(fmtPeso(T.nc), "Notas de crédito", "danger", `<b>Suma de NC (resta)</b><br>${T.nNc} NC = ${fmtFull(T.nc)} (${pct(T.nc, T.bruto)} del bruto).`)}
+          ${stat(fmtPeso(T.ticket), "Ticket medio FC", "warn", `<b>Bruto ÷ cantidad de facturas</b><br>${fmtFull(T.bruto)} / ${T.nFc} = ${fmtFull(T.ticket)}.`)}
+        </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(String(T.n), "Comprobantes", "", `<b>FC + NC</b><br>${T.nFc} facturas y ${T.nNc} notas de crédito.`)}
+          ${stat(String(T.nCli), "Clientes en el cálculo", "", `<b>Destinatarios distintos tildados</b><br>${T.nCli} de ${allCli} del CSV.`)}
+          ${stat(pct(top5, T.neto), "Top 5 del neto", "warn", `<b>Suma neto top 5 / neto total</b><br>${fmtPeso(top5)} de ${fmtPeso(T.neto)}.`)}
+          ${stat(pct(top10, T.neto), "Top 10 del neto", "danger", `<b>Suma neto top 10 / neto total</b><br>${fmtPeso(top10)} de ${fmtPeso(T.neto)}. 10 cuentas concentran el grueso.`)}
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px">
+            <span>Neto ${fmtPeso(T.neto)} · bruto ${fmtPeso(T.bruto)}</span>
+            <span>NC ${fmtPeso(T.nc)} (${pct(T.nc, T.bruto)})</span>
+          </div>
+          <div class="usage">
+            <span style="width:${T.bruto ? (T.neto/T.bruto*100) : 0}%;background:#34d399"></span>
+            <span style="width:${T.bruto ? (T.nc/T.bruto*100) : 0}%;background:#fb7185"></span>
+          </div>
+          <div class="legend">
+            <span><i style="background:#34d399"></i>Neto (queda)</span>
+            <span><i style="background:#fb7185"></i>NC (se resta)</span>
+          </div>
+        </div>
+        <div class="grid g2" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Cierre julio vs agosto</h2>
+            ${hbars([["31/07 (julio)", jul.neto], ["agosto", ago.neto]], Math.max(jul.neto, ago.neto, 1), "#818cf8")}
+            <p class="muted" style="margin-top:8px">Julio ${jul.n} comp. · Agosto ${ago.n} comp. El 31/07 y el 31/08 son los dos cierres: casi todo el volumen va esos días.</p>
+          </div>
+          <div class="card">
+            <h2>Mix letra A / B</h2>
+            ${hbars([["Letra A", T.nA], ["Letra B", T.nB]], Math.max(T.nA, T.nB, 1), "#38bdf8")}
+            <p class="muted" style="margin-top:8px">${T.nA} comprobantes A y ${T.nB} B. Ministerio de Salud mueve el B (lote de facturas iguales).</p>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Neto por día de comprobante (${days.length} fechas)</h2>
+          ${hbars(dayBars, maxDay, "#fbbf24")}
+          <p class="muted">Promedio por día de emisión: ${fmtPeso(T.avgDay)}. No es “por día corrido”: hay ${days.length} fechas con movimiento, no 32 días de calendario.</p>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Facturación por cliente — participación del neto</h2>
+          <p class="sub" style="margin-bottom:12px">Barra 100% = reparto del neto (top 10 + resto). Debajo, ranking con % individual y % acumulado — ahí ves quién factura más, quién menos y cuántos clientes explican el 80% del neto.</p>
+          ${clientShareBar(cliArr, T.neto, 10)}
+          <div style="margin-top:16px">
+            <h2 style="margin-bottom:10px">Ranking por neto (top 15)</h2>
+            ${clientRankingTable(cliArr, T.neto, 15)}
+          </div>
+        </div>
+        <div class="card">
+          <h2>Mayores notas de crédito</h2>
+          ${ncs.length ? hbars(ncs.map(d => [shortCli(d.cli) + " · " + fmtFecha(d.fecha), d.imp]), ncs[0].imp, "#fb7185") : `<p class="muted">Sin NC en el universo.</p>`}
+        </div>
+        <div class="callout warning"><b>Lectura operativa.</b> 1) Dos facturas de Bancor (01-001044 y 01-001056) superan $1.500 M cada una: si las dejás adentro, el promedio y el ticket no describen al resto. 2) Cooperativa Obrera tiene NC de $44,5 M contra una FC de julio: es refacturación, no pérdida neta de ese tamaño. 3) Ministerio de Salud factura en B, en tandas del 03/08.</div>
+      `;
+      bindExcl("#tablero");
+    }
+
+    let cliSort = "neto";
+    let cliQ = "";
+    function renderClientes() {
+      const { T, cliArr, exclList } = ctx();
+      const q = cliQ.trim().toLowerCase();
+      const names = [...new Set(DOCS.map(d => d.cli))].sort();
+      const full = names.map(cli => {
+        const row = cliArr.find(x => x.cli === cli) || { n: 0, nFc: 0, nNc: 0, bruto: 0, nc: 0, neto: 0 };
+        return { cli, on: !excluded.has(cli), ...row };
+      }).filter(r => !q || r.cli.toLowerCase().includes(q))
+        .sort((a, b) => {
+          if (a.on !== b.on) return a.on ? -1 : 1;
+          return (b[cliSort] || 0) - (a[cliSort] || 0);
+        });
+      const vis = full.map(r => r.cli);
+      const wrap = document.querySelector("#clientes .tbl-wrap");
+      const y = wrap ? wrap.scrollTop : 0;
+      const sorts = [["neto","Neto"],["bruto","Bruto"],["nc","NC"],["n","Comp."]];
+      document.getElementById("clientes").innerHTML = `
+        <details class="card glosario" data-ley="clientes"${leyendaOpen.clientes ? " open" : ""}>
+          <summary>Quién entra al cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Destildá Bancor, un organismo o quien no deba promediarse. El Tablero se recalcula al toque.</p>
+          <div class="grid g4">
+            ${stat(T.nCli + " / " + names.length, "Incluidos / CSV", "", `<b>Clientes tildados</b><br>${T.nCli} entran. ${exclList.length} afuera.`)}
+            ${stat(fmtPeso(T.avgCli), "Neto / cliente", "", `<b>Neto ÷ clientes incluidos</b><br>${fmtFull(T.neto)} / ${T.nCli} = ${fmtFull(T.avgCli)}.`)}
+            ${stat(fmtPeso(T.ticket), "Ticket medio FC", "warn", `<b>Bruto ÷ facturas</b><br>${fmtFull(T.ticket)}.`)}
+            ${stat(fmtPeso(T.neto), "Neto universo", "ok", `<b>Bruto − NC de los tildados</b><br>${fmtFull(T.neto)}.`)}
+          </div>
+          ${exclList.length ? `<div class="excl-pills" style="margin-top:12px">${exclList.map(c => `<button type="button" data-in="${esc(c)}">${esc(shortCli(c))} ×</button>`).join("")}</div>` : ""}
+        </details>
+        <div class="toolbar">
+          <input id="cq" type="search" placeholder="Buscar cliente…" value="${esc(cliQ)}" style="width:280px" />
+          ${sorts.map(([id,l]) => `<button class="sortbtn${cliSort===id?" on":""}" data-sort="${id}">${l}</button>`).join("")}
+          <button class="btn-ghost" type="button" id="incAll">Incluir todos</button>
+          <button class="btn-ghost" type="button" id="excVis">Excluir visibles</button>
+          <span class="muted">${full.length} filas · ${T.nCli} en el cálculo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="roster">
+              <thead><tr>
+                <th class="chk"><input type="checkbox" id="chkAll" ${full.length && full.every(r => r.on) ? "checked" : ""} /></th>
+                <th>Cliente</th><th class="num">Comp.</th><th class="num">FC</th><th class="num">NC</th>
+                <th class="num">Bruto</th><th class="num">NC $</th><th class="num">Neto</th><th class="num">% neto</th>
+              </tr></thead>
+              <tbody>
+                ${full.map(r => `<tr class="${r.on?"":"off"}">
+                  <td class="chk"><input type="checkbox" class="inc" data-c="${esc(r.cli)}" ${r.on?"checked":""} /></td>
+                  <td>${esc(r.cli)}</td>
+                  <td class="num">${r.n}</td><td class="num">${r.nFc}</td><td class="num">${r.nNc}</td>
+                  <td class="num">${fmtPeso(r.bruto)}</td>
+                  <td class="num">${r.nc ? fmtPeso(r.nc) : "—"}</td>
+                  <td class="num">${fmtPeso(r.neto)}</td>
+                  <td class="num">${r.on ? pct(r.neto, T.neto) : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      const wrap2 = document.querySelector("#clientes .tbl-wrap");
+      if (wrap2) wrap2.scrollTop = y;
+      const cq = document.getElementById("cq");
+      cq.addEventListener("input", () => { cliQ = cq.value; renderClientes(); const el=document.getElementById("cq"); if(el){ el.focus(); el.setSelectionRange(cliQ.length, cliQ.length);} });
+      document.querySelectorAll("#clientes .sortbtn").forEach(b => b.addEventListener("click", () => { cliSort = b.dataset.sort; renderClientes(); }));
+      document.querySelectorAll("#clientes .inc").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const id = cb.getAttribute("data-c");
+          if (cb.checked) excluded.delete(id); else excluded.add(id);
+          saveExcluded();
+          refresh();
+        });
+      });
+      const chkAll = document.getElementById("chkAll");
+      if (chkAll) chkAll.addEventListener("change", () => {
+        vis.forEach(id => { if (chkAll.checked) excluded.delete(id); else excluded.add(id); });
+        saveExcluded();
+        refresh();
+      });
+      document.getElementById("incAll").addEventListener("click", () => { excluded = new Set(); saveExcluded(); refresh(); });
+      document.getElementById("excVis").addEventListener("click", () => { vis.forEach(id => excluded.add(id)); saveExcluded(); refresh(); });
+      bindExcl("#clientes");
+    }
+
+    let docQ = "";
+    let docTipo = "ALL";
+    function renderComprobantes() {
+      const list = roster().filter(d => {
+        if (docTipo === "FC" && d.tipo !== "FC") return false;
+        if (docTipo === "NC" && d.tipo !== "NC") return false;
+        if (docTipo === "A" && d.letra !== "A") return false;
+        if (docTipo === "B" && d.letra !== "B") return false;
+        const q = docQ.trim().toLowerCase();
+        if (!q) return true;
+        return d.cli.toLowerCase().includes(q) || d.nro.includes(q) || d.cae.includes(q) || d.id.includes(q);
+      }).sort((a,b) => Math.abs(signImp(b)) - Math.abs(signImp(a)));
+      const tipos = [["ALL","Todos"],["FC","Facturas"],["NC","NC"],["A","Letra A"],["B","Letra B"]];
+      document.getElementById("comprobantes").innerHTML = `
+        <div class="toolbar">
+          <input id="dq" type="search" placeholder="Buscar cliente, nro, CAE o Id…" value="${esc(docQ)}" style="width:300px" />
+          ${tipos.map(([id,l]) => `<button class="sortbtn${docTipo===id?" on":""}" data-tipo="${id}">${l}</button>`).join("")}
+          <span class="muted">${list.length} de ${roster().length} en el universo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Fecha</th><th>Tipo</th><th>Letra</th><th>N° </th><th>Cliente</th>
+                <th class="num">Importe</th><th class="num">Signo</th><th>CAE</th>
+              </tr></thead>
+              <tbody>
+                ${list.map(d => `<tr>
+                  <td>${fmtFecha(d.fecha)}</td>
+                  <td><span class="pill ${d.tipo==="NC"?"nc":"fc"}">${d.tipo}</span></td>
+                  <td><span class="pill ${d.letra==="B"?"b":"a"}">${d.letra}</span></td>
+                  <td>${esc(d.pto)}-${esc(d.nro)}</td>
+                  <td>${esc(d.cli)}</td>
+                  <td class="num">${fmtFull(d.imp)}</td>
+                  <td class="num ${d.tipo==="NC"?"danger":"ok"}">${fmtPeso(signImp(d))}</td>
+                  <td>${esc(d.cae)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      const dq = document.getElementById("dq");
+      dq.addEventListener("input", () => { docQ = dq.value; renderComprobantes(); const el=document.getElementById("dq"); if(el){ el.focus(); el.setSelectionRange(docQ.length, docQ.length);} });
+      document.querySelectorAll("#comprobantes .sortbtn").forEach(b => b.addEventListener("click", () => { docTipo = b.dataset.tipo; renderComprobantes(); }));
+    }
+
+    function renderPlanilla() {
+      const rows = roster();
+      document.getElementById("planilla").innerHTML = `
+        <div class="callout info"><b>Planilla del universo tildado.</b> Columnas del CSV más el signo (FC +, NC −). El Excel descarga todos los comprobantes del CSV, no solo los tildados.</div>
+        <div class="toolbar">
+          <button class="btn-xls" type="button" id="dlXls">Descargar Excel (.xls)</button>
+          <button class="btn-csv" type="button" id="dlCsv">Descargar CSV</button>
+          <span class="muted">${rows.length} filas en pantalla · ${DOCS.length} en el archivo origen</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Id</th><th>Fecha</th><th>Tipo</th><th>Letra</th><th>Pto-Nro</th><th>Cliente</th>
+                <th class="num">Importe</th><th class="num">Signo</th><th>CAE</th><th>Fecha reg.</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(d => `<tr>
+                  <td>${esc(d.id)}</td><td>${fmtFecha(d.fecha)}</td><td>${d.tipo}</td><td>${d.letra}</td>
+                  <td>${esc(d.pto)}-${esc(d.nro)}</td><td>${esc(d.cli)}</td>
+                  <td class="num">${fmtFull(d.imp)}</td>
+                  <td class="num">${fmtFull(signImp(d))}</td>
+                  <td>${esc(d.cae)}</td><td>${esc(d.reg)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      document.getElementById("dlCsv").addEventListener("click", downloadCsv);
+      document.getElementById("dlXls").addEventListener("click", downloadXls);
+    }
+
+    function csvEscape(v) {
+      const s = String(v ?? "");
+      if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    function triggerDownload(content, name, mime) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+    function downloadCsv() {
+      const headers = ["Id","Fecha","Tipo","Letra","Punto","Numero","Cliente","Importe","Signo","CAE","Fecha registro"];
+      const body = [headers, ...DOCS.map(d => [d.id, d.fecha, d.tipo, d.letra, d.pto, d.nro, d.cli, d.imp.toFixed(2).replace(".", ","), signImp(d).toFixed(2).replace(".", ","), d.cae, d.reg])]
+        .map(line => line.map(csvEscape).join(";")).join("\r\n");
+      triggerDownload("\uFEFF" + body, "facturas-electronicas-07-08-2026.csv", "text/csv;charset=utf-8");
+    }
+    function xCell(v) { return `<Cell><Data ss:Type="String">${esc(String(v))}</Data></Cell>`; }
+    function xNum(n) { return `<Cell><Data ss:Type="Number">${Number(n).toFixed(2)}</Data></Cell>`; }
+    function downloadXls() {
+      const header = ["Id","Fecha","Tipo","Letra","Punto","Numero","Cliente","Importe","Signo","CAE","Fecha registro"];
+      let rows = "";
+      DOCS.forEach(d => {
+        rows += `<Row>${xCell(d.id)}${xCell(d.fecha)}${xCell(d.tipo)}${xCell(d.letra)}${xCell(d.pto)}${xCell(d.nro)}${xCell(d.cli)}${xNum(d.imp)}${xNum(signImp(d))}${xCell(d.cae)}${xCell(d.reg)}</Row>`;
+      });
+      const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="Comprobantes"><Table>
+    <Row>${header.map(h => xCell(h)).join("")}</Row>
+    ${rows}
+  </Table></Worksheet>
+</Workbook>`;
+      triggerDownload(xml, "facturas-electronicas-07-08-2026.xls", "application/vnd.ms-excel");
+    }
+
+    function bindDateControls() {
+      const df = document.getElementById("dateFrom");
+      const dt = document.getElementById("dateTo");
+      if (!df || !dt) return;
+      df.min = DATA_MIN;
+      df.max = DATA_MAX;
+      dt.min = DATA_MIN;
+      dt.max = DATA_MAX;
+      df.value = dateFrom;
+      dt.value = dateTo;
+      const hint = document.getElementById("dateHint");
+      if (hint) {
+        hint.textContent = `${DOCS.filter(d => inRange(d.fecha)).length} comp. en rango · CSV ${fmtFecha(DATA_MIN)}–${fmtFecha(DATA_MAX)}`;
+      }
+      if (df.dataset.bound) return;
+      df.dataset.bound = "1";
+      const apply = () => {
+        dateFrom = df.value || DATA_MIN;
+        dateTo = dt.value || DATA_MAX;
+        if (dateFrom > dateTo) {
+          const t = dateFrom;
+          dateFrom = dateTo;
+          dateTo = t;
+          df.value = dateFrom;
+          dt.value = dateTo;
+        }
+        saveDateRange();
+        refresh();
+      };
+      df.addEventListener("change", apply);
+      dt.addEventListener("change", apply);
+      document.querySelectorAll("[data-preset]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const p = btn.dataset.preset;
+          if (p === "ago2026") {
+            dateFrom = "2026-08-01";
+            dateTo = "2026-08-31";
+          } else if (p === "julago") {
+            dateFrom = "2026-07-31";
+            dateTo = "2026-08-31";
+          } else if (p === "full") {
+            dateFrom = DATA_MIN;
+            dateTo = DATA_MAX;
+          }
+          df.value = dateFrom;
+          dt.value = dateTo;
+          saveDateRange();
+          refresh();
+        });
+      });
+    }
+
+    function refresh() {
+      const { T, exclList } = ctx();
+      const sub = document.getElementById("subline") || document.querySelector("header.top .sub");
+      if (sub) {
+        sub.textContent = `Comprobantes con CAE · ${fmtRangoISO()} · PV 02 · ${T.n} comp. / ${T.nCli} clientes en el cálculo${exclList.length ? ` (${exclList.length} excluidos)` : ""} · Neto ${fmtPeso(T.neto)} · CSV ${DOCS.length} comp.`;
+      }
+      bindDateControls();
+      const onTab = document.querySelector(".tab.on");
+      const tabId = onTab ? onTab.dataset.tab : "tablero";
+      renderTablero();
+      renderClientes();
+      renderComprobantes();
+      renderPlanilla();
+      if (tabId && tabId !== "tablero") {
+        document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tabId));
+        document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === tabId));
+        document.querySelector(".wrap").classList.toggle("wide", tabId === "planilla");
+      }
+    }
+    refresh();
+  </script>
+</body>
+</html>

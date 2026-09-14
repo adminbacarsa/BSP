@@ -9,50 +9,53 @@ import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, doc, getDoc, addDoc } from 'firebase/firestore';
 import {
   Shield, CheckCircle, XCircle, Users, AlertCircle,
-  RefreshCw, Plus, X, MessageSquare, User, Search, Ban,
+  RefreshCw, Plus, X, User, Search, Pencil, Trash2, Lock,
 } from 'lucide-react';
 import {
   solicitudRefuerzoService,
   SolicitudRefuerzo,
-  SolicitudEstado,
 } from '@/services/solicitudRefuerzoService';
 import { absenceService, Absence } from '@/services/absenceService';
 import { Timestamp } from 'firebase/firestore';
 import { buildRefuerzoNovedadPayload, calcRefuerzoPactadaHours } from '@/lib/refuerzo/refuerzoDisplay';
+import { isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import { applySlaRefuerzoPax, revertSlaRefuerzoPax } from '@/lib/servicios/applySlaRefuerzoPax';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import {
-  fmtTs, urgencyLevel, hoursSincePending, pendingHoursLabel, URGENCY_STYLES,
   filterAbsencesByObjectives, filterSolicitudesByObjectives,
+  listYmdDatesInclusive, formatYmdAr,
+  normalizeSupervisionMainTab,
+  legacyMainTabToCampoSection,
   type SupervisionMainTab,
 } from '@/lib/supervision/supervisionUtils';
+import { supervisionCampoNavBadge } from '@/lib/supervision/supervisionCampoPulse';
 import { useSupervisorScope } from '@/hooks/useSupervisorScope';
+import { useSupervisionCampoPulse } from '@/hooks/useSupervisionCampoPulse';
 import SupervisionBottomNav from '@/components/admin/supervision/SupervisionBottomNav';
+import SupervisionNuevoPedidoButton from '@/components/admin/supervision/SupervisionNuevoPedidoButton';
+import SupervisionPedidosPanel from '@/components/admin/supervision/SupervisionPedidosPanel';
+import SupervisionPedidosViewToggle from '@/components/admin/supervision/SupervisionPedidosViewToggle';
 import SupervisionTablero from '@/components/admin/supervision/SupervisionTablero';
-import SupervisionNovedades from '@/components/admin/supervision/SupervisionNovedades';
-import SupervisionMas from '@/components/admin/supervision/SupervisionMas';
+import SupervisionCampo from '@/components/admin/supervision/SupervisionCampo';
 import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
+import { SupervisorPinInput } from '@/components/ui';
+import { verifySupervisorPin } from '@/lib/auth/verifySupervisorPin';
+import { cancelRefuerzoPuntual } from '@/lib/refuerzo/cancelRefuerzoPuntual';
+import { modifyRefuerzoPuntual } from '@/lib/refuerzo/modifyRefuerzoPuntual';
+import {
+  SUPERVISION_DEFAULT_MAIN_TAB,
+  SUPERVISION_MAIN_TABS,
+  SUPERVISION_PEDIDO_CTA,
+  SUPERVISION_CAMPO_SECTION_STORAGE_KEY,
+  SUPERVISION_PEDIDOS_MES_STORAGE_KEY,
+} from '@/lib/supervision/supervisionNav';
+import {
+  SUPERVISION_PEDIDOS_VIEW_STORAGE_KEY,
+  type SupervisionPedidosView,
+} from '@/lib/supervision/supervisionPedidos';
+import { solicitudEnMes } from '@/lib/supervision/supervisionLinks';
 
 // ─── helpers ───────────────────────────────────────────────────────────────
-
-function estadoBadge(estado: SolicitudEstado) {
-  const map: Record<SolicitudEstado, { label: string; cls: string }> = {
-    PENDIENTE:  { label: 'Pendiente',  cls: 'bg-amber-100 text-amber-700 border border-amber-200' },
-    APROBADA:   { label: 'Aprobada',   cls: 'bg-teal-100 text-teal-700 border border-teal-200' },
-    RECHAZADA:  { label: 'Rechazada',  cls: 'bg-rose-100 text-rose-700 border border-rose-200' },
-    ASIGNADA:   { label: 'Asignada',   cls: 'bg-indigo-100 text-indigo-700 border border-indigo-200' },
-    COMPLETADA: { label: 'Completada', cls: 'bg-slate-100 text-slate-600 border border-slate-200' },
-    CANCELADA:  { label: 'Cancelada',  cls: 'bg-slate-100 text-slate-400 border border-slate-200' },
-  };
-  const { label, cls } = map[estado] || map.PENDIENTE;
-  return <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${cls}`}>{label}</span>;
-}
-
-function tipoBadge(tipo: 'REFUERZO_PUESTO' | 'AGREGADO_TURNO') {
-  return tipo === 'REFUERZO_PUESTO'
-    ? <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-orange-100 text-orange-700 border border-orange-200">Refuerzo</span>
-    : <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-violet-100 text-violet-700 border border-violet-200">Agregado</span>;
-}
 
 // ─── Rechazar modal ─────────────────────────────────────────────────────────
 
@@ -131,6 +134,138 @@ function AprobarModal({ solicitud, onClose, onConfirm }: {
             onClick={() => onConfirm(nota.trim())}
             className="flex-1 py-2.5 bg-teal-600 text-white rounded-xl font-black text-xs hover:bg-teal-700 transition-colors"
           >Aprobar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EliminarRefuerzoModal({ solicitud, onClose, onConfirm, saving }: {
+  solicitud: SolicitudRefuerzo;
+  onClose: () => void;
+  onConfirm: (motivo: string, pin: string) => void;
+  saving: boolean;
+}) {
+  const [motivo, setMotivo] = useState('');
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState('');
+  const code = solicitud.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-slate-100 dark:border-slate-700">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+            <Trash2 size={16} className="text-rose-500"/> Eliminar {code}
+          </h3>
+          <button type="button" onClick={onClose} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          Se quitará de planificación, operaciones, prefactura y trazabilidad de servicios.
+          <strong className="block mt-1 text-slate-700 dark:text-slate-200">{solicitud.objectiveName} · {solicitud.fecha} · {solicitud.startTime}–{solicitud.endTime}</strong>
+        </p>
+        <textarea
+          autoFocus
+          placeholder="Motivo de eliminación (requerido)..."
+          value={motivo}
+          onChange={e => setMotivo(e.target.value)}
+          className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-white resize-none outline-none focus:border-rose-400 mb-3"
+          rows={2}
+        />
+        <label className="text-[10px] font-black uppercase text-slate-500 flex items-center gap-1 mb-1.5">
+          <Lock size={11}/> PIN de supervisión
+        </label>
+        <SupervisorPinInput
+          value={pin}
+          onChange={e => { setPin(e.target.value.replace(/\D/g, '').slice(0, 4)); setPinError(''); }}
+          maxLength={4}
+          className="w-full p-3 border-2 border-slate-200 dark:border-slate-600 rounded-xl text-center text-lg font-black tracking-[0.4em] bg-slate-50 dark:bg-slate-900 outline-none focus:border-rose-400"
+        />
+        {pinError && <p className="text-[10px] text-rose-600 font-bold mt-1">{pinError}</p>}
+        <div className="flex gap-2 mt-4">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">Cancelar</button>
+          <button
+            type="button"
+            disabled={!motivo.trim() || pin.length !== 4 || saving}
+            onClick={() => {
+              if (pin.length !== 4) { setPinError('PIN de 4 dígitos'); return; }
+              onConfirm(motivo.trim(), pin);
+            }}
+            className="flex-1 py-2.5 bg-rose-600 text-white rounded-xl font-black text-xs hover:bg-rose-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-1"
+          >
+            {saving ? <RefreshCw size={13} className="animate-spin"/> : <Trash2 size={13}/>}
+            Eliminar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditarRefuerzoModal({ solicitud, onClose, onConfirm, saving }: {
+  solicitud: SolicitudRefuerzo;
+  onClose: () => void;
+  onConfirm: (patch: { fecha: string; startTime: string; endTime: string; positionName: string; motivo: string }) => void;
+  saving: boolean;
+}) {
+  const [fecha, setFecha] = useState(solicitud.fecha);
+  const [startTime, setStartTime] = useState(String(solicitud.startTime || '').slice(0, 5));
+  const [endTime, setEndTime] = useState(String(solicitud.endTime || '').slice(0, 5));
+  const [positionName, setPositionName] = useState(String(solicitud.positionName || ''));
+  const [motivo, setMotivo] = useState(String(solicitud.motivo || ''));
+  const code = solicitud.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ';
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl w-full max-w-md p-6 shadow-2xl border border-slate-100 dark:border-slate-700 max-h-[90dvh] overflow-y-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+            <Pencil size={16} className="text-indigo-500"/> Modificar {code}
+          </h3>
+          <button type="button" onClick={onClose} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500">Fecha</label>
+            <input type="date" value={fecha} onChange={e => setFecha(e.target.value)}
+              className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Desde</label>
+              <input type="time" value={startTime} onChange={e => setStartTime(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+            </div>
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Hasta</label>
+              <input type="time" value={endTime} onChange={e => setEndTime(e.target.value)}
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold bg-white dark:bg-slate-900"/>
+            </div>
+          </div>
+          {solicitud.tipo === 'AGREGADO_TURNO' && (
+            <div>
+              <label className="text-[10px] font-black uppercase text-slate-500">Imputación prefactura (puesto)</label>
+              <input type="text" value={positionName} onChange={e => setPositionName(e.target.value)} placeholder="Ej. Extras Eventos"
+                className="w-full mt-1 px-3 py-2 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-white dark:bg-slate-900"/>
+            </div>
+          )}
+          <div>
+            <label className="text-[10px] font-black uppercase text-slate-500">Motivo / nota</label>
+            <textarea value={motivo} onChange={e => setMotivo(e.target.value)} rows={2}
+              className="w-full mt-1 p-3 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-medium bg-white dark:bg-slate-900 resize-none"/>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">Cancelar</button>
+          <button
+            type="button"
+            disabled={!fecha || !startTime || !endTime || saving}
+            onClick={() => onConfirm({ fecha, startTime, endTime, positionName: positionName.trim(), motivo: motivo.trim() })}
+            className="flex-1 py-2.5 bg-indigo-600 text-white rounded-xl font-black text-xs hover:bg-indigo-700 transition-colors disabled:opacity-40 flex items-center justify-center gap-1"
+          >
+            {saving ? <RefreshCw size={13} className="animate-spin"/> : <Pencil size={13}/>}
+            Guardar cambios
+          </button>
         </div>
       </div>
     </div>
@@ -220,31 +355,6 @@ function AusenciaCard({ ausencia, showActions, onAprobar, onRechazar, onGenerarR
   );
 }
 
-// ─── ParentShiftInfo ────────────────────────────────────────────────────────
-
-function ParentShiftInfo({ parentShiftId }: { parentShiftId?: string }) {
-  const [info, setInfo] = useState<{ code: string; start: string; end: string } | null>(null);
-  useEffect(() => {
-    if (!parentShiftId) return;
-    getDoc(doc(db, 'turnos', parentShiftId)).then(snap => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      const fmt = (ts: any): string => {
-        if (ts?.seconds) return new Date(ts.seconds * 1000).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-        if (typeof ts === 'string' && ts.includes('T')) return ts.split('T')[1]?.slice(0, 5) || ts;
-        return ts || '';
-      };
-      setInfo({ code: d.code || '?', start: fmt(d.startTime), end: fmt(d.endTime) });
-    }).catch(() => {});
-  }, [parentShiftId]);
-  if (!info) return null;
-  return (
-    <span className="text-[10px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200 px-1.5 py-0.5 rounded-lg">
-      {info.code} {info.start}–{info.end}
-    </span>
-  );
-}
-
 // ─── tipos locales ──────────────────────────────────────────────────────────
 
 interface SlaPosition {
@@ -252,7 +362,8 @@ interface SlaPosition {
   name: string;
   coverageType?: string;
   code?: string;
-  shifts: { code: string; name: string; startTime: string; endTime: string }[];
+  quantity?: number;
+  shifts: { code: string; name: string; startTime: string; endTime: string; quantity?: number }[];
 }
 
 // ─── Página principal ────────────────────────────────────────────────────────
@@ -267,13 +378,36 @@ export default function SupervisionPage() {
   const [ausencias, setAusencias] = useState<Absence[]>([]);
   const [vacaciones, setVacaciones] = useState<Absence[]>([]);
   const [loading, setLoading] = useState(true);
-  const [mainTab, setMainTab] = usePersistedState<SupervisionMainTab>('cosp:sup:mainTab', 'BANDEJA');
+  const [mainTabStored, setMainTabStored] = usePersistedState<string>('cosp:sup:mainTab', SUPERVISION_DEFAULT_MAIN_TAB);
+  const mainTab = useMemo(() => normalizeSupervisionMainTab(mainTabStored), [mainTabStored]);
+  const setMainTab = useCallback((tab: SupervisionMainTab) => setMainTabStored(tab), [setMainTabStored]);
+
+  useEffect(() => {
+    if (mainTabStored === 'NOVEDADES' || mainTabStored === 'MAS') {
+      const section = legacyMainTabToCampoSection(mainTabStored);
+      if (section && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(SUPERVISION_CAMPO_SECTION_STORAGE_KEY, JSON.stringify(section));
+        } catch {
+          // ignore quota errors
+        }
+      }
+      setMainTabStored('CAMPO');
+    }
+  }, [mainTabStored, setMainTabStored]);
   const [tab, setTab] = usePersistedState<'PENDIENTE' | 'TODAS' | 'AUSENCIAS' | 'VACACIONES'>('cosp:sup:tab', 'PENDIENTE');
   const [rechazarTarget, setRechazarTarget] = useState<SolicitudRefuerzo | null>(null);
   const [aprobarTarget, setAprobarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [eliminarTarget, setEliminarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [editarTarget, setEditarTarget] = useState<SolicitudRefuerzo | null>(null);
+  const [refuerzoActionSaving, setRefuerzoActionSaving] = useState(false);
   const [busqueda, setBusqueda] = useState('');
   const [filtroCliente, setFiltroCliente] = useState('');
   const [filtroObjetivo, setFiltroObjetivo] = useState('');
+  const [pedidosView, setPedidosView] = usePersistedState<SupervisionPedidosView>(
+    SUPERVISION_PEDIDOS_VIEW_STORAGE_KEY,
+    'table',
+  );
 
   // Formulario manual supervisor
   const [showManualForm, setShowManualForm] = useState(false);
@@ -281,7 +415,9 @@ export default function SupervisionPage() {
   const [mTipo, setMTipo]   = useState<'REFUERZO_PUESTO' | 'AGREGADO_TURNO'>('REFUERZO_PUESTO');
   const [mClienteId, setMClienteId] = useState('');
   const [mObjetivoId, setMObjetivoId] = useState('');
-  const [mFecha, setMFecha] = useState('');
+  const [mFechaDesde, setMFechaDesde] = useState('');
+  const [mFechaHasta, setMFechaHasta] = useState('');
+  const [mFechaModo, setMFechaModo] = useState<'DIA' | 'RANGO'>('DIA');
   const [mStart, setMStart] = useState('');
   const [mEnd, setMEnd]     = useState('');
   const [mMotivo, setMMotivo]     = useState('');
@@ -299,6 +435,10 @@ export default function SupervisionPage() {
   const todayStr = new Date().toISOString().split('T')[0];
   const [ausenciasFecha, setAusenciasFecha] = useState(todayStr);
   const currentMonthStr = todayStr.slice(0, 7); // YYYY-MM
+  const [pedidosMes, setPedidosMes] = usePersistedState<string>(
+    SUPERVISION_PEDIDOS_MES_STORAGE_KEY,
+    currentMonthStr,
+  );
   const [licenciasMes, setLicenciasMes] = useState(currentMonthStr);
 
   // Cargar puestos del SLA activo cuando cambia el objetivo (para RFZ)
@@ -313,15 +453,18 @@ export default function SupervisionPage() {
         best.forEach((p: any) => {
           const key = p.id || p.name;
           if (!key || posMap.has(key)) return;
+          const posQty = p.quantity != null ? Number(p.quantity) : 1;
           const shifts = (p.allowedShiftTypes || []).map((s: any) => ({
             code: s.code, name: s.name || s.code,
             startTime: s.startTime || '', endTime: s.endTime || '',
+            quantity: s.quantity != null ? Number(s.quantity) : posQty,
           })).filter((s: any) => s.startTime);
           posMap.set(key, {
             id: p.id || p.name,
             name: p.name,
             coverageType: p.coverageType,
             code: p.code,
+            quantity: posQty,
             shifts,
           });
         });
@@ -329,10 +472,38 @@ export default function SupervisionPage() {
       });
   }, [mObjetivoId]);
 
+  const mFechasRfzPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'PUNTUAL' || mFechaModo !== 'RANGO' || !mFechaDesde) return [];
+    return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
+  }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
+
+  const mFechasEstructuralPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || mFechaModo !== 'RANGO' || !mFechaDesde) return [];
+    return listYmdDatesInclusive(mFechaDesde, mFechaHasta);
+  }, [mTipo, mAlcance, mFechaModo, mFechaDesde, mFechaHasta]);
+
+  const mPaxEstructuralPreview = useMemo(() => {
+    if (mTipo !== 'REFUERZO_PUESTO' || mAlcance !== 'ESTRUCTURAL' || !mSelPosId) return null;
+    const pos = slaPositions.find((p) => p.id === mSelPosId);
+    if (!pos) return null;
+    const delta = Math.max(1, Math.floor(Number(mPax) || 1));
+    const posBase = pos.quantity ?? 1;
+    const bands = pos.shifts.map((s) => {
+      const current = s.quantity ?? posBase;
+      return { code: s.code, startTime: s.startTime, endTime: s.endTime, current, next: current + delta };
+    });
+    const currents = bands.map((b) => b.current);
+    const uniformCurrent = currents.length ? Math.min(...currents) : posBase;
+    const uniformNext = uniformCurrent + delta;
+    const allSame = bands.length > 0 && bands.every((b) => b.current === bands[0].current);
+    const isTemporary = mFechaModo === 'RANGO' && !!mFechaHasta;
+    return { posName: pos.name, delta, bands, allSame, uniformCurrent, uniformNext, isTemporary };
+  }, [mTipo, mAlcance, mSelPosId, mPax, mFechaModo, mFechaHasta, slaPositions]);
+
   // Cargar guardias con turno en el objetivo/fecha seleccionados (para TURA)
   useEffect(() => {
     setGuardias(undefined); setMGuardiasTura([]); setMGuardiaManualNombre('');
-    if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFecha) return;
+    if (mTipo !== 'AGREGADO_TURNO' || !mObjetivoId || !mFechaDesde) return;
     setGuardias([]);
     const fmtHora = (val: any): string => {
       if (!val) return '';
@@ -351,7 +522,7 @@ export default function SupervisionPage() {
         const del_dia = snap.docs.map(d => ({ id: d.id, ...d.data() } as any)).filter((t: any) => {
           let tFecha: string = typeof t.fecha === 'string' ? t.fecha : '';
           if (!tFecha && t.startTime?.seconds) tFecha = new Date(t.startTime.seconds * 1000).toISOString().slice(0, 10);
-          return tFecha === mFecha && !t.isAbsent && !t.isFranco
+          return tFecha === mFechaDesde && !t.isAbsent && !t.isFranco
             && t.employeeId && t.employeeId !== 'VACANTE'
             && !seen.has(t.employeeId) && !!seen.add(t.employeeId);
         });
@@ -375,12 +546,14 @@ export default function SupervisionPage() {
             nombre: nombre || t.employeeId,
             empleadoId: t.employeeId,
             horario,
+            shiftStart: t.startTime,
+            shiftEnd: t.endTime,
             code: String(t.code || t.type || '').toUpperCase(),
             puesto: t.positionName || '',
           };
         })).then(lista => setGuardias(lista));
       });
-  }, [mTipo, mObjetivoId, mFecha]);
+  }, [mTipo, mObjetivoId, mFechaDesde]);
 
   // Limpiar estado al cambiar empresa para evitar flash de datos anteriores
   useEffect(() => {
@@ -437,14 +610,19 @@ export default function SupervisionPage() {
         s.solicitadoPorNombre?.toLowerCase().includes(q),
       );
     }
+    if (tab === 'TODAS' && pedidosMes) {
+      list = list.filter(s => solicitudEnMes(s.fecha, pedidosMes));
+    }
     return list;
-  }, [visiblesBase, filtroCliente, filtroObjetivo, busqueda, scopedObjectives]);
+  }, [visiblesBase, filtroCliente, filtroObjetivo, busqueda, scopedObjectives, tab, pedidosMes]);
 
   const abrirRefuerzoDesdeAusencia = useCallback((a: Absence, fechaDia: string) => {
     setMainTab('BANDEJA');
     setTab('PENDIENTE');
     setMTipo('REFUERZO_PUESTO');
-    setMFecha(fechaDia || todayStr);
+    setMFechaDesde(fechaDia || todayStr);
+    setMFechaHasta('');
+    setMFechaModo('DIA');
     setMMotivo(`Cobertura por ausencia de ${a.employeeName}${a.reason ? ` — ${a.reason}` : ''}`);
     setShowManualForm(true);
   }, [todayStr]);
@@ -514,22 +692,30 @@ export default function SupervisionPage() {
       isAbsent:            false,
       isCompleted:         false,
       // TURA = extensión de un guardia ya publicado → se auto-publica (notifica al instante).
-      // RFZ = vacante a asignar en Planificación → queda en borrador hasta republicar.
-      draft:               isAgregado ? false : (opts?.draft ?? false),
+      // RFZ = vacante a planificar → borrador hasta publicar (mismo circuito que portal).
+      draft:               isAgregado ? false : (opts?.draft ?? true),
       autorizadoPorUid:    user?.uid ?? null,
       autorizadoPorNombre: user?.displayName || user?.email || null,
       autorizadoAt:        Timestamp.now(),
     };
 
     const ids: string[] = [];
-    if (isAgregado) {
-      let parentPositionName: string | null = null;
-      if (sol.parentShiftId) {
-        try {
-          const ps = await getDoc(doc(db, 'turnos', sol.parentShiftId));
-          if (ps.exists()) parentPositionName = ps.data().positionName || null;
-        } catch { /* keep null */ }
-      }
+      if (isAgregado) {
+        let parentPositionName: string | null = null;
+        let turaContiguous: boolean | undefined;
+        if (sol.parentShiftId) {
+          try {
+            const ps = await getDoc(doc(db, 'turnos', sol.parentShiftId));
+            if (ps.exists()) {
+              const pdata = ps.data();
+              parentPositionName = pdata.positionName || null;
+              turaContiguous = isTuraContiguousToParent(
+                { ...pdata, fecha: sol.fecha },
+                { startTime: startISO, endTime: endISO, fecha: sol.fecha },
+              );
+            }
+          } catch { /* keep null */ }
+        }
       const ref = await addDoc(collection(db, 'turnos'), {
         ...base,
         employeeId:    sol.parentEmpleadoId  ?? null,
@@ -537,6 +723,7 @@ export default function SupervisionPage() {
         parentShiftId: sol.parentShiftId      ?? null,
         positionId:    sol.positionId ?? null,
         positionName:  sol.positionName || parentPositionName,
+        ...(turaContiguous !== undefined ? { turaContiguous } : {}),
       });
       ids.push(ref.id);
     } else {
@@ -548,6 +735,7 @@ export default function SupervisionPage() {
           employeeId:   'VACANTE',
           positionId:   sol.positionId   ?? null,
           positionName: sol.positionName ?? null,
+          shiftCode:    sol.shiftCode     ?? null,
         });
         ids.push(ref.id);
       }
@@ -564,7 +752,8 @@ export default function SupervisionPage() {
       return;
     }
     const esEstructural = sol.tipo === 'REFUERZO_PUESTO' && sol.alcance === 'ESTRUCTURAL';
-    const vaAPlanificacion = sol.origen === 'PORTAL_CLIENTE' || esEstructural;
+    const esRfzPuntual = sol.tipo === 'REFUERZO_PUESTO' && !esEstructural;
+    const vaAPlanificacion = esEstructural || esRfzPuntual || sol.origen === 'PORTAL_CLIENTE';
     const actor = { uid: user.uid, name: user.displayName || user.email || '' };
 
     try {
@@ -673,7 +862,7 @@ export default function SupervisionPage() {
 
   const resetManualForm = () => {
     setMTipo('REFUERZO_PUESTO'); setMClienteId(''); setMObjetivoId('');
-    setMFecha(''); setMStart(''); setMEnd(''); setMMotivo('');
+    setMFechaDesde(''); setMFechaHasta(''); setMFechaModo('DIA'); setMStart(''); setMEnd(''); setMMotivo('');
     setMSolicitante(''); setMCanal('TELEFONO'); setMPax(1); setMAlcance('PUNTUAL');
     setMPosicionNombre(''); setMGuardiasTura([]); setMGuardiaManualNombre('');
     setSlaPositions([]); setMSelPosId(''); setMSelShiftCode('');
@@ -682,20 +871,56 @@ export default function SupervisionPage() {
   };
 
   const handleCrearManual = async () => {
-    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()) return;
+    if (!user || !empresaId || !mClienteId || !mObjetivoId || !mFechaDesde || !mMotivo.trim()) return;
     setManualSaving(true);
     try {
       const selectedObjective = scopedObjectives.find(obj => obj.id === mObjetivoId);
-      const isOvernight = mEnd < mStart;
-      const nextDay = (d: string) => { const dt = new Date(d + 'T00:00:00'); dt.setDate(dt.getDate() + 1); return dt.toISOString().split('T')[0]; };
-      const fechaFin = isOvernight ? nextDay(mFecha) : mFecha;
-      const startISO = `${mFecha}T${mStart}:00`;
-      const endISO   = `${fechaFin}T${mEnd}:00`;
-
       const isAgregado = mTipo === 'AGREGADO_TURNO';
       const alcance = isAgregado ? 'PUNTUAL' as const : mAlcance;
       const esEstructural = !isAgregado && alcance === 'ESTRUCTURAL';
-      const horasPactadas = calcRefuerzoPactadaHours(mStart, mEnd);
+      const selPosForTimes = esEstructural ? slaPositions.find((p) => p.id === mSelPosId) : undefined;
+      const firstBand = selPosForTimes?.shifts[0];
+      const effectiveStart = mStart || firstBand?.startTime || '08:00';
+      const effectiveEnd = mEnd || firstBand?.endTime || '16:00';
+      if (!isAgregado && !esEstructural && (!mStart || !mEnd)) {
+        toast.error('Indicá horario de inicio y fin');
+        setManualSaving(false);
+        return;
+      }
+      if (isAgregado && (!mStart || !mEnd)) {
+        toast.error('Indicá horario de inicio y fin');
+        setManualSaving(false);
+        return;
+      }
+      const rfzUsaRango = !isAgregado && !esEstructural && mFechaModo === 'RANGO';
+      const estructuralUsaRango = esEstructural && mFechaModo === 'RANGO';
+      const fechasRfz = rfzUsaRango
+        ? listYmdDatesInclusive(mFechaDesde, mFechaHasta)
+        : [mFechaDesde];
+
+      if (rfzUsaRango) {
+        if (!mFechaHasta || mFechaHasta < mFechaDesde) {
+          toast.error('Indicá fecha hasta válida (≥ desde)');
+          return;
+        }
+        if (fechasRfz.length > 31) {
+          toast.error('Máximo 31 días por pedido RFZ');
+          return;
+        }
+      }
+
+      if (estructuralUsaRango) {
+        if (!mFechaHasta || mFechaHasta < mFechaDesde) {
+          toast.error('Indicá vigencia hasta válida (≥ desde)');
+          setManualSaving(false);
+          return;
+        }
+        if (mFechasEstructuralPreview.length > 93) {
+          toast.error('Máximo 93 días de refuerzo temporal (+pax al puesto)');
+          setManualSaving(false);
+          return;
+        }
+      }
       const actor = { uid: user.uid, name: user.displayName || user.email || '' };
       const selectedPos = slaPositions.find(p => p.id === mSelPosId);
       const positionName = mPosicionNombre.trim() || selectedPos?.name || '';
@@ -715,7 +940,25 @@ export default function SupervisionPage() {
         return;
       }
 
-      const buildSolicitudBase = (guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
+      if (!isAgregado && !esEstructural) {
+        const slaPosCobertura = slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0);
+        if (slaPosCobertura.length > 0 && !mSelPosId && !positionName) {
+          toast.error('Seleccioná el puesto del SLA o ingresá el nombre del puesto');
+          setManualSaving(false);
+          return;
+        }
+      }
+
+      if (esEstructural) {
+        const slaPosCobertura = slaPositions.filter((p) => !isEventosPosition(p) && p.shifts.length > 0);
+        if (slaPosCobertura.length > 0 && !mSelPosId) {
+          toast.error('Seleccioná el puesto del SLA para sumar pax');
+          setManualSaving(false);
+          return;
+        }
+      }
+
+      const buildSolicitudBase = (fecha: string, guard?: { shiftId: string; empleadoId: string; nombre: string }) => ({
         empresaId,
         clientId:            mClienteId,
         clientName:          selectedObjective?.clientName || mClienteId,
@@ -723,9 +966,9 @@ export default function SupervisionPage() {
         objectiveName:       selectedObjective?.name || mObjetivoId,
         tipo:                mTipo,
         alcance,
-        fecha:               mFecha,
-        startTime:           mStart,
-        endTime:             mEnd,
+        fecha,
+        startTime:           isAgregado || !esEstructural ? mStart : effectiveStart,
+        endTime:             isAgregado || !esEstructural ? mEnd : effectiveEnd,
         motivo:              mMotivo.trim(),
         origen:              'SUPERVISOR_MANUAL' as const,
         estado:              'APROBADA' as const,
@@ -736,7 +979,13 @@ export default function SupervisionPage() {
         autorizadoPorUid:    user!.uid,
         autorizadoPorNombre: user!.displayName || user!.email || '',
         autorizadoAt:        Timestamp.now(),
-        ...(!isAgregado ? { cantidadPax: mPax, positionName: positionName || undefined, positionId, shiftCode } : {}),
+        ...(estructuralUsaRango && mFechaHasta ? { fechaHasta: mFechaHasta } : {}),
+        ...(!isAgregado ? {
+          cantidadPax: mPax,
+          positionName: positionName || undefined,
+          positionId,
+          ...(esEstructural ? {} : { shiftCode }),
+        } : {}),
         ...(isAgregado && guard ? {
           parentEmpleadoName: guard.nombre || undefined,
           parentEmpleadoId:   guard.empleadoId || undefined,
@@ -746,7 +995,7 @@ export default function SupervisionPage() {
         } : {}),
       });
 
-      const solicitudBase = buildSolicitudBase(isAgregado ? turaTargets[0] : undefined);
+      const solicitudBase = buildSolicitudBase(mFechaDesde, isAgregado ? turaTargets[0] : undefined);
 
       if (esEstructural) {
         const solicitudId = await solicitudRefuerzoService.create({ ...solicitudBase, turnoIds: [], actionTarget: 'PLANIFICACION' });
@@ -756,7 +1005,7 @@ export default function SupervisionPage() {
           cantidadPax: mPax,
           positionName: positionName || undefined,
           positionId,
-          shiftCode,
+          ...(estructuralUsaRango && mFechaHasta ? { fechaHasta: mFechaHasta } : {}),
         };
         const applied = await applySlaRefuerzoPax(manualSol, actor);
         await solicitudRefuerzoService.update(solicitudId, {
@@ -778,47 +1027,22 @@ export default function SupervisionPage() {
           createdAt:      Timestamp.now(),
           origin:         'SUPERVISOR_MANUAL',
         });
-        toast.success(`+${mPax} pax aplicado al SLA. Planificación cubre la demanda extra (sin vacante RFZ).`);
+        toast.success(
+          estructuralUsaRango
+            ? `+${mPax} pax temporal en ${manualSol.positionName || 'puesto'} (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)}) — planificá la dotación extra en ese período`
+            : `+${mPax} pax permanente en ${manualSol.positionName || 'puesto'}. Planificación cubre la demanda extra.`,
+        );
         resetManualForm();
         return;
       }
 
-      const base = {
-        empresaId,
-        objectiveId:   mObjetivoId,
-        objectiveName: selectedObjective?.name || mObjetivoId,
-        clientId:      mClienteId,
-        clientName:    selectedObjective?.clientName || mClienteId,
-        fecha:         mFecha,
-        startTime:     startISO,
-        endTime:       endISO,
-        hours:         horasPactadas,
-        origin:        'CLIENT_REQUEST',
-        code:          isAgregado ? 'TURA' : 'RFZ',
-        isPresent: false, isAbsent: false, isCompleted: false, draft: false,
-        autorizadoPorUid:    user!.uid,
-        autorizadoPorNombre: user!.displayName || user!.email || null,
-        autorizadoAt:        Timestamp.now(),
-      };
-
       if (isAgregado) {
         let created = 0;
         for (const guard of turaTargets) {
-          const turnoExtra: Record<string, unknown> = {
-            ...base,
-            employeeId: 'VACANTE',
-          };
-          if (positionName) turnoExtra.positionName = positionName;
-          if (positionId) turnoExtra.positionId = positionId;
-          if (guard.nombre) turnoExtra.parentEmpleadoName = guard.nombre;
-          if (guard.empleadoId) turnoExtra.parentEmpleadoId = guard.empleadoId;
-          if (guard.shiftId) turnoExtra.parentShiftId = guard.shiftId;
-          const r = await addDoc(collection(db, 'turnos'), turnoExtra);
-          const turnoIds = [r.id];
-          const solBase = buildSolicitudBase(guard);
+          const solBase = buildSolicitudBase(mFechaDesde, guard);
           const solicitudId = await solicitudRefuerzoService.create({
             ...solBase,
-            turnoIds,
+            turnoIds: [],
             actionTarget: 'OPERACIONES',
           });
           const manualSol: SolicitudRefuerzo = {
@@ -831,7 +1055,13 @@ export default function SupervisionPage() {
             parentEmpleadoName: guard.nombre || undefined,
             parentEmpleadoId: guard.empleadoId || undefined,
             parentShiftId: guard.shiftId || undefined,
+            actionTarget: 'OPERACIONES',
           };
+          const turnoIds = await crearTurnosParaSolicitud(manualSol, { draft: false });
+          await solicitudRefuerzoService.update(solicitudId, {
+            turnoIds,
+            estado: guard.empleadoId ? 'ASIGNADA' : 'APROBADA',
+          });
           await addDoc(collection(db, 'novedades'), {
             ...buildRefuerzoNovedadPayload(manualSol, {
               reportedBy: 'SUPERVISION',
@@ -845,45 +1075,48 @@ export default function SupervisionPage() {
           });
           created += 1;
         }
-        toast.success(`${created} TURA${created > 1 ? 's' : ''} creada${created > 1 ? 's' : ''} como vacante operativa`);
+        toast.success(`${created} TURA${created > 1 ? 's' : ''} creada${created > 1 ? 's' : ''} — extensión en plan${created > 1 ? '' : ' del guardia'}`);
         resetManualForm();
         return;
       }
 
-      const n = mPax;
-      const turnoIds: string[] = [];
-      for (let i = 0; i < n; i++) {
-        const turnoExtra: Record<string, unknown> = { ...base, employeeId: 'VACANTE' };
-        if (positionName) turnoExtra.positionName = positionName;
-        if (positionId) turnoExtra.positionId = positionId;
-        const r = await addDoc(collection(db, 'turnos'), turnoExtra);
-        turnoIds.push(r.id);
+      const rfzActionTarget = 'PLANIFICACION' as const;
+      let totalTurnos = 0;
+      for (const fecha of fechasRfz) {
+        const solBase = buildSolicitudBase(fecha);
+        const solicitudId = await solicitudRefuerzoService.create({
+          ...solBase,
+          turnoIds: [],
+          actionTarget: rfzActionTarget,
+        });
+        const manualSol: SolicitudRefuerzo = {
+          ...solBase,
+          id: solicitudId,
+          cantidadPax: mPax,
+          positionName: positionName || undefined,
+          positionId,
+          shiftCode,
+          actionTarget: rfzActionTarget,
+        };
+        const turnoIds = await crearTurnosParaSolicitud(manualSol, { draft: true });
+        totalTurnos += turnoIds.length;
+        await solicitudRefuerzoService.update(solicitudId, { turnoIds, actionTarget: rfzActionTarget });
+        await addDoc(collection(db, 'novedades'), {
+          ...buildRefuerzoNovedadPayload(manualSol, {
+            reportedBy: 'SUPERVISION',
+            actionTarget: rfzActionTarget,
+            turnoIds,
+          }),
+          canalSolicitud: mCanal,
+          createdBy: user.displayName || user.email || '',
+          createdAt: Timestamp.now(),
+          origin: 'SUPERVISOR_MANUAL',
+        });
       }
-      const solicitudId = await solicitudRefuerzoService.create({
-        ...solicitudBase,
-        turnoIds,
-        actionTarget: 'OPERACIONES',
-      });
-      const manualSol: SolicitudRefuerzo = {
-        ...solicitudBase,
-        id:                  solicitudId,
-        cantidadPax:         mPax,
-        positionName:        positionName || undefined,
-        positionId,
-        shiftCode,
-      };
-      await addDoc(collection(db, 'novedades'), {
-        ...buildRefuerzoNovedadPayload(manualSol, {
-          reportedBy: 'SUPERVISION',
-          actionTarget: 'OPERACIONES',
-          turnoIds,
-        }),
-        canalSolicitud: mCanal,
-        createdBy:      user.displayName || user.email || '',
-        createdAt:      Timestamp.now(),
-        origin:         'SUPERVISOR_MANUAL',
-      });
-      toast.success(`${n} turno${n > 1 ? 's' : ''} ${base.code} creado${n > 1 ? 's' : ''} como vacante operativa`);
+      const diasLabel = fechasRfz.length > 1 ? `${fechasRfz.length} días · ` : '';
+      toast.success(
+        `${diasLabel}${totalTurnos} vacante${totalTurnos !== 1 ? 's' : ''} RFZ en Planificación — asigná guardia y publicá`,
+      );
       resetManualForm();
     } catch (e: any) {
       toast.error(`Error: ${e?.message || 'No se pudo crear'}`);
@@ -933,8 +1166,75 @@ export default function SupervisionPage() {
     }
   }, [user]);
 
+  const handleEliminarRefuerzo = useCallback(async (motivo: string, pin: string) => {
+    if (!eliminarTarget?.id || !user) return;
+    setRefuerzoActionSaving(true);
+    try {
+      const pinResult = await verifySupervisorPin(pin);
+      if (!pinResult.ok) {
+        toast.error('PIN de supervisión incorrecto');
+        return;
+      }
+      const actor = {
+        uid: user.uid,
+        name: user.displayName || user.email || 'Supervisor',
+        pinAuthorizerName: pinResult.name,
+      };
+      const { turnosDeleted, novedadesClosed } = await cancelRefuerzoPuntual(eliminarTarget, motivo, actor);
+      toast.success(
+        `${eliminarTarget.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ'} eliminada — ${turnosDeleted} turno(s), ${novedadesClosed} novedad(es). Autorizó: ${pinResult.name}`,
+      );
+      setEliminarTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo eliminar');
+    } finally {
+      setRefuerzoActionSaving(false);
+    }
+  }, [eliminarTarget, user]);
+
+  const handleEditarRefuerzo = useCallback(async (patch: {
+    fecha: string; startTime: string; endTime: string; positionName: string; motivo: string;
+  }) => {
+    if (!editarTarget?.id || !user) return;
+    setRefuerzoActionSaving(true);
+    try {
+      await modifyRefuerzoPuntual(
+        editarTarget,
+        {
+          fecha: patch.fecha,
+          startTime: patch.startTime,
+          endTime: patch.endTime,
+          positionName: patch.positionName || undefined,
+          motivo: patch.motivo,
+        },
+        { uid: user.uid, name: user.displayName || user.email || 'Supervisor' },
+      );
+      toast.success(`${editarTarget.tipo === 'AGREGADO_TURNO' ? 'TURA' : 'RFZ'} actualizada en planificación, prefactura y trazabilidad`);
+      setEditarTarget(null);
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo modificar');
+    } finally {
+      setRefuerzoActionSaving(false);
+    }
+  }, [editarTarget, user]);
+
+  const handleNuevoPedidoDesdeTablero = useCallback((opts: {
+    objectiveId: string;
+    clientId?: string;
+    objectiveName?: string;
+  }) => {
+    setMainTab('BANDEJA');
+    setTab('PENDIENTE');
+    setMClienteId(opts.clientId || '');
+    setMObjetivoId(opts.objectiveId);
+    setMMotivo(opts.objectiveName ? `Refuerzo ${opts.objectiveName}` : '');
+    setShowManualForm(true);
+  }, [setMainTab]);
+
   const userName = user?.displayName || user?.email || 'Supervisor';
   const bandejaBadge = pendientes.length + ausencias.filter(a => a.type !== 'NO_PRESENTACION' && a.status === 'Pendiente').length;
+  const campoPulse = useSupervisionCampoPulse(empresaId, objectiveIds, canViewAllObjectives);
+  const campoBadge = supervisionCampoNavBadge(campoPulse);
 
   return (
     <DashboardLayout>
@@ -959,55 +1259,43 @@ export default function SupervisionPage() {
                 </p>
               </div>
             </div>
-            {mainTab === 'BANDEJA' && (
-              <button
-                type="button"
-                onClick={() => setShowManualForm(true)}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-xl font-black text-[10px] uppercase shadow-sm active:scale-95 transition-transform"
-              >
-                <Plus size={14}/> Urgente
-              </button>
-            )}
           </div>
           <div className="hidden lg:flex gap-2 max-w-5xl mx-auto mt-4">
-            {([
-              ['BANDEJA', 'Bandeja'],
-              ['TABLERO', 'Tablero'],
-              ['NOVEDADES', 'Novedades'],
-              ['MAS', 'Más'],
-            ] as [SupervisionMainTab, string][]).map(([id, label]) => (
+            {SUPERVISION_MAIN_TABS.map(({ id, label }) => {
+              const tabBadge = id === 'BANDEJA' ? bandejaBadge : id === 'CAMPO' ? campoBadge : 0;
+              return (
               <button
                 key={id}
                 type="button"
                 onClick={() => setMainTab(id)}
-                className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
+                className={`relative px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
                   mainTab === id
                     ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'
                     : 'bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 hover:bg-slate-50'
                 }`}
               >
                 {label}
+                {tabBadge > 0 && (
+                  <span className="ml-1.5 inline-flex min-w-[16px] h-4 px-1 rounded-full bg-rose-500 text-white text-[9px] font-black items-center justify-center align-middle">
+                    {tabBadge > 99 ? '99+' : tabBadge}
+                  </span>
+                )}
               </button>
-            ))}
+            );})}
           </div>
         </div>
 
         <div className="flex-1 px-4 pt-3 pb-28 lg:pb-6 max-w-5xl mx-auto w-full overflow-x-hidden">
           {mainTab === 'TABLERO' && (
-            <SupervisionTablero objectiveIds={objectiveIds} canViewAllObjectives={canViewAllObjectives} />
-          )}
-
-          {mainTab === 'NOVEDADES' && user?.uid && (
-            <SupervisionNovedades
+            <SupervisionTablero
               objectiveIds={objectiveIds}
-              objectives={scopedObjectives}
-              userUid={user.uid}
-              userName={userName}
+              canViewAllObjectives={canViewAllObjectives}
+              onNuevoPedido={handleNuevoPedidoDesdeTablero}
             />
           )}
 
-          {mainTab === 'MAS' && empresaId && user?.uid && (
-            <SupervisionMas
+          {mainTab === 'CAMPO' && empresaId && user?.uid && (
+            <SupervisionCampo
               empresaId={empresaId}
               objectiveIds={objectiveIds}
               objectives={scopedObjectives}
@@ -1025,7 +1313,8 @@ export default function SupervisionPage() {
           const licencias   = ausencias.filter(a => a.type !== 'NO_PRESENTACION');
           return (
             <>
-              <div className="flex gap-2 flex-wrap">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div className="flex gap-2 flex-wrap flex-1">
                 {(['PENDIENTE', 'TODAS'] as const).map(t => (
                   <button key={t} onClick={() => setTab(t)}
                     className={`px-4 py-2 rounded-xl text-xs font-black uppercase transition-colors ${
@@ -1046,10 +1335,17 @@ export default function SupervisionPage() {
                   }`}>
                   <Users size={12}/> Vac / Lic ({vacaciones.filter(a => a.status === 'Pendiente').length > 0 ? `${vacaciones.filter(a => a.status === 'Pendiente').length} pend.` : vacaciones.length})
                 </button>
+                </div>
+                {(tab === 'PENDIENTE' || tab === 'TODAS') && (
+                  <SupervisionNuevoPedidoButton
+                    onClick={() => setShowManualForm(true)}
+                    className="hidden sm:flex"
+                  />
+                )}
               </div>
 
               {(tab === 'PENDIENTE' || tab === 'TODAS') && (
-                <div className="flex flex-col sm:flex-row gap-2">
+                <div className="flex flex-col sm:flex-row gap-2 items-stretch sm:items-center">
                   <div className="relative flex-1">
                     <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
                     <input
@@ -1071,6 +1367,31 @@ export default function SupervisionPage() {
                       compact
                     />
                   </div>
+                  <SupervisionPedidosViewToggle value={pedidosView} onChange={setPedidosView} />
+                </div>
+              )}
+
+              {tab === 'TODAS' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <label className="text-[10px] font-black uppercase text-slate-500">Mes</label>
+                  <input
+                    type="month"
+                    value={pedidosMes}
+                    onChange={e => setPedidosMes(e.target.value)}
+                    className="px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl text-xs font-bold focus:outline-none focus:border-indigo-400"
+                  />
+                  {pedidosMes !== currentMonthStr && (
+                    <button
+                      type="button"
+                      onClick={() => setPedidosMes(currentMonthStr)}
+                      className="text-[10px] font-bold text-slate-400 hover:text-slate-600 transition-colors flex items-center gap-1"
+                    >
+                      <X size={11}/> Mes actual
+                    </button>
+                  )}
+                  <span className="text-[10px] text-slate-400 font-medium ml-auto">
+                    {visibles.length} en {pedidosMes.slice(5, 7)}/{pedidosMes.slice(0, 4)}
+                  </span>
                 </div>
               )}
 
@@ -1084,104 +1405,23 @@ export default function SupervisionPage() {
                     <p className="text-slate-500 font-medium text-sm">
                       {tab === 'PENDIENTE' ? 'No hay solicitudes pendientes' : 'No hay solicitudes registradas'}
                     </p>
+                    <p className="text-[11px] text-slate-400 mt-1 mb-4">
+                      {tab === 'PENDIENTE'
+                        ? 'Los pedidos del portal cliente y los que cargues manualmente aparecen acá.'
+                        : 'Creá un RFZ, TURA o +pax cuando el cliente lo solicite por teléfono o WhatsApp.'}
+                    </p>
+                    <SupervisionNuevoPedidoButton onClick={() => setShowManualForm(true)} className="mx-auto" />
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {visibles.map(s => {
-                      const urg = urgencyLevel(s.fecha);
-                      const urgStyle = URGENCY_STYLES[urg];
-                      const pendH = s.estado === 'PENDIENTE' ? pendingHoursLabel(hoursSincePending(s.solicitadoAt)) : null;
-                      return (
-                      <div key={s.id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm hover:shadow-md transition-shadow">
-                        <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap mb-1">
-                              {tipoBadge(s.tipo)}
-                              {estadoBadge(s.estado)}
-                              {s.alcance === 'ESTRUCTURAL' && (
-                                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200">
-                                  Estructural{s.slaApplied ? ' · SLA' : ''}
-                                </span>
-                              )}
-                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase border ${urgStyle.cls}`}>{urgStyle.label}</span>
-                              {pendH && <span className="text-[9px] font-bold text-amber-600">{pendH}</span>}
-                              <span className="text-[9px] text-slate-400 font-mono">{fmtTs(s.solicitadoAt)}</span>
-                            </div>
-                            <p className="font-black text-sm text-slate-800 dark:text-white truncate">{s.objectiveName}</p>
-                            <p className="text-xs text-slate-500 dark:text-slate-400">{s.clientName}</p>
-                            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
-                              <span className="text-xs font-bold text-slate-600 dark:text-slate-300">
-                                📅 {s.fecha} · {s.startTime}–{s.endTime}
-                              </span>
-                              {s.tipo === 'REFUERZO_PUESTO' && (
-                                <>
-                                  {s.cantidadPax && <span className="text-xs text-orange-600 font-bold">+{s.cantidadPax} pax</span>}
-                                  {(s as any).positionName && (
-                                    <span className="text-xs text-slate-500 font-medium flex items-center gap-1">📌 {(s as any).positionName}</span>
-                                  )}
-                                </>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && s.parentEmpleadoName && (
-                                <span className="text-xs text-violet-600 font-bold flex items-center gap-1">
-                                  <User size={10}/>{s.parentEmpleadoName}
-                                </span>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && s.positionName && (
-                                <span className="text-xs text-rose-600 font-bold">→ {s.positionName}</span>
-                              )}
-                              {s.tipo === 'AGREGADO_TURNO' && (s as any).parentShiftId && (
-                                <ParentShiftInfo parentShiftId={(s as any).parentShiftId}/>
-                              )}
-                            </div>
-                            {s.solicitadoPorNombre && (
-                              <p className="mt-1 text-[11px] text-slate-400 flex items-center gap-1">
-                                <User size={10} className="shrink-0"/>
-                                Solicitado por <span className="font-bold text-slate-600 dark:text-slate-300 ml-1">{s.solicitadoPorNombre}</span>
-                              </p>
-                            )}
-                            {s.motivo && (
-                              <p className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400 flex items-start gap-1">
-                                <MessageSquare size={10} className="mt-0.5 shrink-0"/>
-                                <span className="italic">"{s.motivo}"</span>
-                              </p>
-                            )}
-                            {s.motivoRechazo && (
-                              <p className="mt-1 text-[11px] text-rose-500 flex items-start gap-1">
-                                <XCircle size={10} className="mt-0.5 shrink-0"/>
-                                <span>{s.motivoRechazo}</span>
-                              </p>
-                            )}
-                          </div>
-                          {s.estado === 'PENDIENTE' && (
-                            <div className="flex gap-2 shrink-0 w-full sm:w-auto">
-                              <button onClick={() => setRechazarTarget(s)}
-                                className="flex-1 sm:flex-none px-3 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
-                                <XCircle size={13}/> Rechazar
-                              </button>
-                              <button onClick={() => setAprobarTarget(s)}
-                                className="flex-1 sm:flex-none px-3 py-2.5 bg-teal-50 hover:bg-teal-100 text-teal-700 rounded-xl font-black text-xs transition-colors flex items-center justify-center gap-1">
-                                <CheckCircle size={13}/> Aprobar
-                              </button>
-                            </div>
-                          )}
-                          {s.estado === 'APROBADA' && (
-                            <div className="flex flex-col items-end gap-2 shrink-0">
-                              <span className="text-[10px] text-teal-600 font-bold">✓ {s.autorizadoPorNombre}</span>
-                              {s.alcance === 'ESTRUCTURAL' && s.slaApplied && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleCancelarEstructural(s)}
-                                  className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-xl font-black text-[10px] uppercase flex items-center gap-1"
-                                >
-                                  <Ban size={12}/> Revertir +pax
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    );})}
-                  </div>
+                  <SupervisionPedidosPanel
+                    solicitudes={visibles}
+                    view={pedidosView}
+                    onAprobar={setAprobarTarget}
+                    onRechazar={setRechazarTarget}
+                    onEditar={setEditarTarget}
+                    onEliminar={setEliminarTarget}
+                    onRevertirEstructural={handleCancelarEstructural}
+                  />
                 )
               )}
 
@@ -1284,8 +1524,15 @@ export default function SupervisionPage() {
         <SupervisionBottomNav
           active={mainTab}
           onChange={setMainTab}
-          badges={{ BANDEJA: bandejaBadge }}
+          badges={{ BANDEJA: bandejaBadge, CAMPO: campoBadge }}
         />
+
+        {mainTab === 'BANDEJA' && (tab === 'PENDIENTE' || tab === 'TODAS') && !showManualForm && (
+          <SupervisionNuevoPedidoButton
+            variant="fab"
+            onClick={() => setShowManualForm(true)}
+          />
+        )}
       </div>
 
       {rechazarTarget && (
@@ -1302,39 +1549,66 @@ export default function SupervisionPage() {
           onConfirm={handleAprobar}
         />
       )}
+      {eliminarTarget && (
+        <EliminarRefuerzoModal
+          solicitud={eliminarTarget}
+          saving={refuerzoActionSaving}
+          onClose={() => setEliminarTarget(null)}
+          onConfirm={handleEliminarRefuerzo}
+        />
+      )}
+      {editarTarget && (
+        <EditarRefuerzoModal
+          solicitud={editarTarget}
+          saving={refuerzoActionSaving}
+          onClose={() => setEditarTarget(null)}
+          onConfirm={handleEditarRefuerzo}
+        />
+      )}
 
       {/* ── Modal carga manual supervisor ── */}
       {showManualForm && (
-        <div className="fixed inset-0 z-[80] flex flex-col justify-end bg-slate-900/60 backdrop-blur-md" onClick={() => !manualSaving && resetManualForm()}>
-          <div className="bg-white dark:bg-slate-800 rounded-t-3xl w-full max-w-lg mx-auto lg:rounded-2xl lg:my-auto lg:max-h-[90vh] p-6 shadow-2xl border border-slate-100 dark:border-slate-700 space-y-4 max-h-[92dvh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between">
-              <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
-                <span className="px-2 py-0.5 bg-red-100 text-red-700 rounded-lg text-[10px]">Manual</span>
-                Cargar RFZ / TURA
-              </h3>
-              <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+        <div
+          className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-md p-0 sm:p-4"
+          onClick={() => !manualSaving && resetManualForm()}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 w-full max-w-lg flex flex-col max-h-[min(92dvh,820px)] rounded-t-3xl sm:rounded-2xl shadow-2xl border border-slate-100 dark:border-slate-700"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="shrink-0 px-5 sm:px-6 pt-5 sm:pt-6 pb-3 space-y-3 border-b border-slate-100 dark:border-slate-700">
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-slate-900 dark:text-white uppercase text-sm flex items-center gap-2">
+                  <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded-lg text-[10px]">Manual</span>
+                  {SUPERVISION_PEDIDO_CTA.modalTitle}
+                </h3>
+                <button onClick={resetManualForm} className="p-1.5 bg-slate-100 dark:bg-slate-700 rounded-full"><X size={16}/></button>
+              </div>
+              <p className="text-[10px] text-slate-500 font-bold">{SUPERVISION_PEDIDO_CTA.modalSubtitle}</p>
+              <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
+                <AlertCircle size={12}/>
+                {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
+                  ? '+ Pax al puesto: rotación extra (permanente o por período). Planificación cubre la demanda. Queda en trazabilidad del servicio.'
+                  : mTipo === 'AGREGADO_TURNO'
+                    ? 'TURA: extensión del turno del guardia — plan/ops según contigüidad.'
+                    : 'RFZ puntual: vacante extra en fecha → fila VACANTE RFZ → publicar → ops → prefactura.'}
+              </p>
+              <div className="flex gap-2">
+                {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
+                  <button key={t} type="button" onClick={() => {
+                    setMTipo(t);
+                    setMSelPosId('');
+                    setMSelShiftCode('');
+                    setMPosicionNombre('');
+                  }}
+                    className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
+                    {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
+                  </button>
+                ))}
+              </div>
             </div>
-            <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 font-bold flex items-center gap-2">
-              <AlertCircle size={12}/>
-              {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                ? 'Suma pax al contrato (Servicios). Planificación cubre la demanda extra — no se crea vacante RFZ de ese día.'
-                : 'Puntual: vacante operativa — Operaciones recibe la notificación.'}
-            </p>
 
-            {/* Tipo */}
-            <div className="flex gap-2">
-              {(['REFUERZO_PUESTO', 'AGREGADO_TURNO'] as const).map(t => (
-                <button key={t} type="button" onClick={() => {
-                  setMTipo(t);
-                  setMSelPosId('');
-                  setMSelShiftCode('');
-                  setMPosicionNombre('');
-                }}
-                  className={`flex-1 py-2 rounded-xl text-xs font-black uppercase border transition-colors ${mTipo === t ? 'bg-red-600 text-white border-red-600' : 'border-slate-200 text-slate-500 hover:border-red-300'}`}>
-                  {t === 'REFUERZO_PUESTO' ? 'RFZ Refuerzo' : 'TURA Agregado'}
-                </button>
-              ))}
-            </div>
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-4 space-y-4">
 
             <SupervisionClienteObjetivoPicker
               objectives={scopedObjectives}
@@ -1344,18 +1618,39 @@ export default function SupervisionPage() {
               onObjectiveChange={setMObjetivoId}
             />
 
-            {/* RFZ — Puesto del SLA + turnos disponibles */}
+            {/* RFZ — alcance y destino */}
             {mTipo === 'REFUERZO_PUESTO' && (
               <div className="flex gap-2">
                 {([
-                  { id: 'PUNTUAL' as const, label: 'Solo esa fecha' },
-                  { id: 'ESTRUCTURAL' as const, label: 'Sumar al servicio' },
+                  { id: 'PUNTUAL' as const, label: 'RFZ puntual (fecha)' },
+                  { id: 'ESTRUCTURAL' as const, label: '+ Pax al puesto' },
                 ]).map((opt) => (
                   <button
                     key={opt.id}
                     type="button"
-                    onClick={() => setMAlcance(opt.id)}
+                    onClick={() => { setMAlcance(opt.id); if (opt.id === 'ESTRUCTURAL') { setMSelShiftCode(''); setMStart(''); setMEnd(''); } }}
                     className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mAlcance === opt.id ? 'bg-amber-600 text-white border-amber-600' : 'border-slate-200 text-slate-600 hover:border-amber-300'}`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {mTipo === 'REFUERZO_PUESTO' && (
+              <div className="flex gap-2">
+                {([
+                  { id: 'DIA' as const, label: mAlcance === 'ESTRUCTURAL' ? 'Permanente (desde)' : 'Un día' },
+                  { id: 'RANGO' as const, label: 'Desde / hasta' },
+                ]).map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      setMFechaModo(opt.id);
+                      if (opt.id === 'DIA') setMFechaHasta('');
+                    }}
+                    className={`flex-1 py-2 rounded-xl text-[11px] font-black border transition-colors ${mFechaModo === opt.id ? 'bg-slate-800 text-white border-slate-800' : 'border-slate-200 text-slate-600 hover:border-slate-400'}`}
                   >
                     {opt.label}
                   </button>
@@ -1383,14 +1678,52 @@ export default function SupervisionPage() {
                     )}
                   </div>
                   <div>
-                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Cantidad</label>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                      {mAlcance === 'ESTRUCTURAL' ? 'Pax a sumar' : 'Cantidad'}
+                    </label>
                     <input type="number" min={1} max={20} value={mPax} onChange={e => setMPax(Number(e.target.value))}
                       className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
                   </div>
                 </div>
+                {mPaxEstructuralPreview && (
+                  <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    {mPaxEstructuralPreview.posName}
+                    {mPaxEstructuralPreview.allSame
+                      ? ` · todas las bandas: ${mPaxEstructuralPreview.uniformCurrent} → ${mPaxEstructuralPreview.uniformNext} pax`
+                      : ` · +${mPaxEstructuralPreview.delta} pax por banda`}
+                    {mPaxEstructuralPreview.isTemporary
+                      ? ` · temporal${mFechasEstructuralPreview.length ? ` (${mFechasEstructuralPreview.length} días)` : ''}`
+                      : ' · permanente desde la vigencia'}
+                  </p>
+                )}
                 {mSelPosId && (() => {
-                  const shifts = slaPositions.find(p => p.id === mSelPosId)?.shifts || [];
+                  const pos = slaPositions.find(p => p.id === mSelPosId);
+                  const shifts = pos?.shifts || [];
                   if (!shifts.length) return null;
+                  const delta = mAlcance === 'ESTRUCTURAL' ? Math.max(1, Math.floor(Number(mPax) || 1)) : 0;
+                  const posBase = pos?.quantity ?? 1;
+                  if (mAlcance === 'ESTRUCTURAL') {
+                    return (
+                      <div>
+                        <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
+                          Bandas del puesto{mPaxEstructuralPreview?.isTemporary ? ' (solo en el período)' : ' (permanente)'}
+                        </label>
+                        <div className="flex gap-2 flex-wrap">
+                          {shifts.map(s => {
+                            const cur = s.quantity ?? posBase;
+                            const next = cur + delta;
+                            return (
+                              <span key={s.code} className="px-3 py-1.5 rounded-xl text-xs font-black border bg-slate-50 border-slate-200 text-slate-700">
+                                <span>{s.code}</span>
+                                <span className="font-normal opacity-75"> {s.startTime}–{s.endTime}</span>
+                                <span className="ml-1 font-bold text-amber-700"> · {cur} → {next} pax</span>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  }
                   return (
                     <div>
                       <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Turno del puesto</label>
@@ -1399,7 +1732,13 @@ export default function SupervisionPage() {
                           <button key={s.code} type="button"
                             onClick={() => { setMSelShiftCode(s.code); setMStart(s.startTime); setMEnd(s.endTime); }}
                             className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${mSelShiftCode === s.code ? 'bg-red-600 text-white border-red-600' : 'bg-slate-50 border-slate-200 text-slate-600 hover:border-red-300'}`}>
-                            <span>{s.code}</span> <span className="font-normal opacity-75">{s.startTime}–{s.endTime}</span>
+                            <span>{s.code}</span>
+                            <span className="font-normal opacity-75"> {s.startTime}–{s.endTime}</span>
+                            {s.quantity != null && (
+                              <span className={`ml-1 font-bold ${mSelShiftCode === s.code ? 'text-red-100' : 'text-emerald-600'}`}>
+                                · {s.quantity} pax
+                              </span>
+                            )}
                           </button>
                         ))}
                       </div>
@@ -1410,23 +1749,86 @@ export default function SupervisionPage() {
             )}
 
             {/* Fecha y horarios */}
-            <div className="grid grid-cols-3 gap-2">
+            {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Desde</label>
+                    <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Hasta</label>
+                    <input type="date" value={mFechaHasta} min={mFechaDesde || undefined} onChange={e => setMFechaHasta(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                    <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                    <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                </div>
+                {mFechasRfzPreview.length > 0 && (
+                  <p className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 rounded-xl px-3 py-2">
+                    {mFechasRfzPreview.length} día{mFechasRfzPreview.length !== 1 ? 's' : ''} · {formatYmdAr(mFechasRfzPreview[0])}
+                    {mFechasRfzPreview.length > 1 ? ` → ${formatYmdAr(mFechasRfzPreview[mFechasRfzPreview.length - 1])}` : ''}
+                    {' · '}{mPax} pax/día → {mFechasRfzPreview.length * mPax} vacante{mFechasRfzPreview.length * mPax !== 1 ? 's' : ''} RFZ
+                  </p>
+                )}
+              </div>
+            ) : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && mFechaModo === 'RANGO' ? (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde</label>
+                    <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia hasta</label>
+                    <input type="date" value={mFechaHasta} min={mFechaDesde || undefined} onChange={e => setMFechaHasta(e.target.value)}
+                      className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                  </div>
+                </div>
+                {mFechasEstructuralPreview.length > 0 && (
+                  <p className="text-[10px] font-bold text-amber-800 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+                    Refuerzo temporal · {mFechasEstructuralPreview.length} día{mFechasEstructuralPreview.length !== 1 ? 's' : ''}
+                    {' · '}{formatYmdAr(mFechasEstructuralPreview[0])}
+                    {mFechasEstructuralPreview.length > 1 ? ` → ${formatYmdAr(mFechasEstructuralPreview[mFechasEstructuralPreview.length - 1])}` : ''}
+                    {' · '}+{mPax} pax en todas las bandas (vuelve al contrato base fuera del rango)
+                  </p>
+                )}
+              </div>
+            ) : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' ? (
               <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
-                <input type="date" value={mFecha} onChange={e => setMFecha(e.target.value)}
+                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Vigencia desde (permanente)</label>
+                <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
                   className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
-                <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
-                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+            ) : (
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fecha</label>
+                  <input type="date" value={mFechaDesde} onChange={e => setMFechaDesde(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Inicio</label>
+                  <input type="time" value={mStart} onChange={e => setMStart(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
+                <div>
+                  <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
+                  <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
+                    className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
+                </div>
               </div>
-              <div>
-                <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Fin</label>
-                <input type="time" value={mEnd} onChange={e => setMEnd(e.target.value)}
-                  className="w-full px-2 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold focus:outline-none focus:border-red-400"/>
-              </div>
-            </div>
+            )}
 
             {/* TURA — Guardias a ampliar (multi-select) */}
             {mTipo === 'AGREGADO_TURNO' && mObjetivoId && (
@@ -1434,14 +1836,14 @@ export default function SupervisionPage() {
                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">
                   Guardias a ampliar
                   <span className="text-slate-400 font-normal normal-case ml-1">(podés elegir varios)</span>
-                  {!mFecha && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
+                  {!mFechaDesde && <span className="text-slate-300 font-normal ml-1">(seleccioná fecha primero)</span>}
                 </label>
-                {guardias === undefined && mFecha && (
+                {guardias === undefined && mFechaDesde && (
                   <div className="flex items-center gap-2 py-2 text-xs text-slate-400">
                     <RefreshCw size={12} className="animate-spin"/> Buscando guardias…
                   </div>
                 )}
-                {Array.isArray(guardias) && guardias.length === 0 && mFecha && (
+                {Array.isArray(guardias) && guardias.length === 0 && mFechaDesde && (
                   <p className="text-xs text-slate-400 py-1">Sin guardias con turno ese día — ingresá el nombre manualmente</p>
                 )}
                 {Array.isArray(guardias) && guardias.length > 0 && (
@@ -1549,21 +1951,26 @@ export default function SupervisionPage() {
               </div>
             </div>
 
-            {/* Motivo */}
             <div>
               <label className="text-[10px] font-black uppercase text-slate-500 block mb-1">Motivo</label>
               <textarea rows={2} placeholder="Descripción del pedido..." value={mMotivo} onChange={e => setMMotivo(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold resize-none focus:outline-none focus:border-red-400"/>
             </div>
+            </div>
 
-            <div className="flex gap-2">
+            <div className="shrink-0 px-5 sm:px-6 pb-5 sm:pb-6 pt-3 border-t border-slate-100 dark:border-slate-700 flex gap-2 bg-white dark:bg-slate-800 rounded-b-3xl sm:rounded-b-2xl">
               <button type="button" onClick={resetManualForm} disabled={manualSaving}
                 className="flex-1 py-2.5 rounded-xl font-bold text-xs text-slate-500 hover:bg-slate-100 transition-colors">
                 Cancelar
               </button>
               <button type="button"
                 disabled={
-                  manualSaving || !mClienteId || !mObjetivoId || !mFecha || !mStart || !mEnd || !mMotivo.trim()
+                  manualSaving || !mClienteId || !mObjetivoId || !mFechaDesde || !mMotivo.trim()
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance !== 'ESTRUCTURAL' && (!mStart || !mEnd))
+                  || (mTipo === 'AGREGADO_TURNO' && (!mStart || !mEnd))
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL' && mFechaModo === 'RANGO' && !mFechaHasta)
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && mFechaModo === 'RANGO' && !mFechaHasta)
+                  || (mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL' && slaPositions.some((p) => !isEventosPosition(p) && p.shifts.length > 0) && !mSelPosId)
                   || (mTipo === 'AGREGADO_TURNO' && (
                     Array.isArray(guardias) && guardias.length > 0
                       ? mGuardiasTura.length === 0
@@ -1571,13 +1978,21 @@ export default function SupervisionPage() {
                   ))
                 }
                 onClick={handleCrearManual}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
+                className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white rounded-xl font-black text-xs uppercase flex items-center justify-center gap-2 transition-colors">
                 {manualSaving ? <RefreshCw size={14} className="animate-spin"/> : <Plus size={14}/>}
                 {mTipo === 'REFUERZO_PUESTO' && mAlcance === 'ESTRUCTURAL'
-                  ? 'Sumar al SLA'
-                  : mTipo === 'AGREGADO_TURNO' && mGuardiasTura.length > 1
-                    ? `Crear ${mGuardiasTura.length} TURAs`
-                    : 'Crear vacante operativa'}
+                  ? (mFechaModo === 'RANGO' && mFechaHasta
+                    ? `Sumar ${mPax} pax (${formatYmdAr(mFechaDesde)} → ${formatYmdAr(mFechaHasta)})`
+                    : `Sumar ${mPax} pax permanente al puesto`)
+                  : mTipo === 'REFUERZO_PUESTO' && mAlcance === 'PUNTUAL'
+                    ? mFechaModo === 'RANGO' && mFechasRfzPreview.length > 1
+                      ? `Crear ${mFechasRfzPreview.length * mPax} RFZ (${mFechasRfzPreview.length} días)`
+                      : `Crear ${mPax > 1 ? `${mPax} RFZ` : 'RFZ'} en Planificación`
+                    : mTipo === 'AGREGADO_TURNO' && mGuardiasTura.length > 1
+                      ? `Crear ${mGuardiasTura.length} TURAs`
+                      : mTipo === 'AGREGADO_TURNO'
+                        ? 'Crear TURA'
+                        : 'Crear RFZ'}
               </button>
             </div>
           </div>

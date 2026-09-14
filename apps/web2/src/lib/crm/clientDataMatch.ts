@@ -53,6 +53,35 @@ async function fetchTurnosByObjectiveIds(
   }
 }
 
+/** RFZ/TURA guardan startTime ISO + fecha YYYY-MM-DD — no entran en query por Timestamp. */
+async function fetchRefuerzoTurnosByObjectiveIds(
+  objectiveIds: string[],
+  addIfInRange: (id: string, data: Record<string, unknown>) => void,
+  start: Date,
+  end: Date,
+): Promise<void> {
+  const ids = [...new Set(objectiveIds.map((x) => String(x).trim()).filter(Boolean))];
+  if (ids.length === 0) return;
+  const rangeStartKey = getDateKeyInTimezone(start);
+  const rangeEndKey = getDateKeyInTimezone(end);
+  for (const code of ['TURA', 'RFZ'] as const) {
+    await Promise.all(ids.map(async (oid) => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'turnos'),
+          where('objectiveId', '==', oid),
+          where('code', '==', code),
+          where('fecha', '>=', rangeStartKey),
+          where('fecha', '<=', rangeEndKey),
+        ));
+        snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+      } catch {
+        /* índice compuesto opcional */
+      }
+    }));
+  }
+}
+
 export function clientRowMatchesClient(row: Record<string, unknown>, client: ClientRef): boolean {
   const aliases = new Set(getClientIdAliases(client.id));
   const rowCid = String(row.clientId ?? '').trim();
@@ -320,6 +349,7 @@ export async function loadClientTurnosForClient(
 
   if (objectiveIds.length > 0) {
     await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
+    await fetchRefuerzoTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
   }
 
   const empresaId = String(opts?.empresaId ?? '').trim();

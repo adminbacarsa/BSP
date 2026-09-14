@@ -58,7 +58,7 @@ export function buildEncargadoDefaultShift(opts?: { startTime?: string; endTime?
 }
 
 export function buildEncargadoPositionDraft(partial?: Partial<ServicePosition>): ServicePosition {
-    return {
+    const base: ServicePosition = {
         id: '',
         name: 'Encargado',
         code: ENCARGADO_SHIFT_CODE,
@@ -67,9 +67,12 @@ export function buildEncargadoPositionDraft(partial?: Partial<ServicePosition>):
         activeDays: [...ENCARGADO_WEEKDAYS],
         allowedShiftTypes: [buildEncargadoDefaultShift()],
         preferenciaGenero: 'INDISTINTO',
-        ...partial,
-        coverageType: ENCARGADO_COVERAGE_TYPE,
+        includeInSlaTotals: true,
+        encargadoScheduleMode: 'fixed',
+        workPattern: '6x2',
+        workPatternHoursPerDay: 8,
     };
+    return { ...base, ...partial, coverageType: ENCARGADO_COVERAGE_TYPE };
 }
 
 function isEncargadoSlot(

@@ -72,6 +72,14 @@ export function isArgentineHoliday(dateStr: string): boolean {
 }
 
 import { isPositionActiveOnDate, type ServicePosition, type ShiftVariant } from '@/services/slaService';
+import {
+  resolveEncargadoScheduleMode,
+  encargadoRotatingPatternMonthHours,
+  positionIncludeInSlaTotals,
+} from '@/lib/servicios/auxiliaryPositionPolicy';
+import { isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 
 export const WEEK_DAY_CODES = ['D', 'L', 'M', 'X', 'J', 'V', 'S'] as const;
 
@@ -138,7 +146,11 @@ export function computePositionDayComposition(
 ) {
   let dayTotal = 0;
   let dayNight = 0;
-  if (String(pos.coverageType || '').toLowerCase() === 'eventos') return { dayTotal: 0, dayNight: 0 };
+  if (isEventosPosition(pos)) return { dayTotal: 0, dayNight: 0 };
+  if (isEncargadoPosition(pos) && !positionIncludeInSlaTotals(pos)) return { dayTotal: 0, dayNight: 0 };
+  if (isEncargadoPosition(pos) && resolveEncargadoScheduleMode(pos) === 'rotating') {
+    return { dayTotal: 0, dayNight: 0 };
+  }
   const activeDays = pos.activeDays?.length ? pos.activeDays : [...WEEK_DAY_CODES];
   if (!activeDays.includes(dayCode)) return { dayTotal: 0, dayNight: 0 };
 
@@ -153,6 +165,7 @@ export function computePositionDayComposition(
     if (c && pax > 0) cutMap[c] = pax;
   }
   const hasPaxCuts = Object.keys(cutMap).length > 0;
+  const paxBoost = paxBoostDeltaForDate(pos, dateStr);
 
   // Si algún turno tiene quantity propio, usamos PAX por turno y NO aplicamos pos.quantity afuera.
   // Con exclusión parcial de PAX también forzamos modo por banda (base = shift.quantity ?? pos.quantity).
@@ -162,7 +175,7 @@ export function computePositionDayComposition(
     const code = String(v.code || '').toUpperCase();
     if (code && skip.has(code)) return;
     const baseQ = hasPerShiftQty ? (v.quantity ?? pos.quantity ?? 1) : 1;
-    const q = Math.max(0, Math.floor(Number(baseQ) || 1) - (cutMap[code] || 0));
+    const q = Math.max(0, Math.floor(Number(baseQ) || 1) - (cutMap[code] || 0) + paxBoost);
     if (q <= 0) return;
     const timeBlocks =
       Array.isArray(v.blocks) && v.blocks.length >= 2
@@ -312,12 +325,36 @@ export function calculateSlaHoursForMonth(
   const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
   const breakdown = calculateMonthlyBreakdown(positions, startStr, endStr, excludedDates);
   const row = breakdown.find((m) => m.monthKey === monthKey);
+  let total = row?.totalHours ?? 0;
+
+  for (const pos of positions || []) {
+    if (!isEncargadoPosition(pos)) continue;
+    if (!positionIncludeInSlaTotals(pos)) continue;
+    if (resolveEncargadoScheduleMode(pos) !== 'rotating') continue;
+    total += encargadoRotatingPatternMonthHours(pos, startStr, endStr, year, month);
+  }
+
   return {
-    total: row?.totalHours ?? 0,
+    total: Math.round(total * 10) / 10,
     night: row?.nightHours ?? 0,
     holiday: row?.holidayHours ?? 0,
     weekend: row?.weekendHours ?? 0,
   };
+}
+
+export function calculatePositionMonthHours(
+  pos: ServicePosition,
+  startStr: string,
+  endStr: string,
+  excludedDates: string[] | undefined,
+  year: number,
+  month: number,
+): number {
+  if (isEncargadoPosition(pos) && resolveEncargadoScheduleMode(pos) === 'rotating') {
+    return encargadoRotatingPatternMonthHours(pos, startStr, endStr, year, month);
+  }
+  const row = calculateSlaHoursForMonth([pos], startStr, endStr, excludedDates, year, month);
+  return row.total;
 }
 
 export function calculateSlaHoursForDateRange(

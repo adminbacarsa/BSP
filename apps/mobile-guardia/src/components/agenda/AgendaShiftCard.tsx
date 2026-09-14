@@ -1,6 +1,7 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDateAr, formatTimeAr, isEvShift, resolveEvShiftDisplay } from '@cosp/portal-core';
 import type { Evento, ObjectiveLocation, Shift } from '@cosp/portal-types';
+import { isOpsCoverageShift } from '../../lib/agendaCalendar';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
 import { CommandButton } from '../ui/CommandButton';
 import { radius, shadow } from '../../theme/tokens';
@@ -14,18 +15,42 @@ type Props = {
 
 export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
   const { palette } = useTheme();
-  const isFranco = item.isFranco;
+  const isOps = isOpsCoverageShift(item);
+  const isFranco = !!item.isFranco && !isOps && !item.isFrancoTrabajado;
+  const isFt = !!item.isFrancoTrabajado || String(item.code || '').toUpperCase() === 'FT';
   const ev = resolveEvShiftDisplay(item, eventosMap);
   const isEv = isEvShift(item);
   const placement = resolveShiftPlacement(item, objectivesMap);
 
-  const title = isFranco ? 'Franco' : ev?.nombre || placement.objective;
+  const codeLabel = isFranco
+    ? 'F'
+    : isFt
+      ? 'FT'
+      : isEv
+        ? 'EV'
+        : String(item.code || 'T').toUpperCase();
+
+  const title = isOps
+    ? 'Cobertura'
+    : isFranco
+      ? 'Franco'
+      : isFt
+        ? 'Franco trabajado'
+        : ev?.nombre || placement.objective;
 
   const timeLine = isFranco
     ? formatDateAr(item.startTime)
     : ev?.horarioBadge
       ? `${formatDateAr(item.startTime)} · ${ev.horarioBadge}`
       : `${formatDateAr(item.startTime)} · ${formatTimeAr(item.startTime)} – ${formatTimeAr(item.endTime)}`;
+
+  const metaLine = isOps
+    ? `Turno asignado · ${placement.line}`
+    : isFranco
+      ? 'Día libre programado'
+      : placement.line;
+
+  const accentColor = isOps ? '#ea580c' : isEv ? palette.warning : palette.primary;
 
   return (
     <View
@@ -34,26 +59,23 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
         palette.useCardShadow && shadow.card,
         {
           backgroundColor: isEv ? palette.inputBg : palette.card,
-          borderColor: isEv ? palette.warning : palette.cardBorder,
+          borderColor: isOps ? '#fdba74' : isEv ? palette.warning : palette.cardBorder,
         },
       ]}
     >
-      <View style={[styles.rowAccent, { backgroundColor: isEv ? palette.warning : palette.primary }]} />
+      <View style={[styles.rowAccent, { backgroundColor: accentColor }]} />
       <View style={styles.codeBox}>
-        <Text style={[styles.codeText, { color: isEv ? palette.warning : palette.primary }]}>
-          {isFranco ? 'F' : isEv ? 'EV' : String(item.code || 'T').toUpperCase()}
-        </Text>
+        <Text style={[styles.codeText, { color: accentColor }]}>{codeLabel}</Text>
       </View>
       <View style={styles.rowBody}>
         <Text style={[styles.rowTitle, { color: palette.onSurface }]}>{title}</Text>
         <Text style={[styles.rowSub, { color: palette.onSurfaceMuted }]}>{timeLine}</Text>
-        {!isFranco ? (
-          <Text style={[styles.rowMeta, { color: palette.primary }]} numberOfLines={3}>
-            {placement.line}
-          </Text>
-        ) : (
-          <Text style={[styles.rowMeta, { color: palette.onSurfaceMuted }]}>Día libre programado</Text>
-        )}
+        <Text
+          style={[styles.rowMeta, { color: isFranco ? palette.onSurfaceMuted : accentColor }]}
+          numberOfLines={3}
+        >
+          {metaLine}
+        </Text>
         {ev?.eventoNombre && ev.eventoNombre !== ev.nombre ? (
           <Text style={[styles.rowMeta, { color: palette.warning }]}>{ev.eventoNombre}</Text>
         ) : null}
@@ -74,6 +96,10 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
       {item.isPresent ? (
         <View style={styles.badgeOk}>
           <Text style={styles.badgeOkText}>Presente</Text>
+        </View>
+      ) : isOps ? (
+        <View style={styles.badgeOps}>
+          <Text style={styles.badgeOpsText}>Cobertura</Text>
         </View>
       ) : isFranco ? (
         <View style={[styles.badgeFranco, { backgroundColor: palette.inputBg }]}>
@@ -165,6 +191,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#d1fae5',
   },
   badgeOkText: { fontWeight: '800', fontSize: 11 },
+  badgeOps: {
+    alignSelf: 'center',
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: '#ffedd5',
+  },
+  badgeOpsText: { fontWeight: '800', fontSize: 11, color: '#c2410c' },
   badgeFranco: {
     alignSelf: 'center',
     marginRight: 12,

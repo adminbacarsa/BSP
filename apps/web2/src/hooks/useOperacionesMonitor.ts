@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
+import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -23,6 +24,138 @@ const isSameDay = (d1: Date, d2: Date) => d1 && d2 && d1.toLocaleDateString('en-
 const getDuration = (start: Date, end: Date) => { if (!start || !end) return 0; let diff = (end.getTime() - start.getTime()) / 3600000; if (diff < 0) diff += 24; return diff; };
 const createDateFromTime = (timeStr: string, baseDate: Date) => { if (!timeStr) return null; const [hours, minutes] = timeStr.split(':').map(Number); const d = new Date(baseDate); d.setHours(hours, minutes, 0, 0); return d; };
 const getDayCode = (date: Date) => ['D', 'L', 'M', 'X', 'J', 'V', 'S'][date.getDay()];
+
+const FRANCO_REST_CODES = new Set(['F', 'FF', 'FP']);
+
+/** Franco de descanso (F/FF/FP), no FT ni franco ya convocado a trabajar. */
+export function isRestFrancoShift(shift: any): boolean {
+    if (!shift || shift.isFrancoTrabajado) return false;
+    const code = String(shift.code || shift.type || '').toUpperCase();
+    if (FRANCO_REST_CODES.has(code)) return true;
+    if (shift.isFrancoCompensatorio) return true;
+    if (shift.isFranco || shift.objectiveName === 'FRANCO') return true;
+    return false;
+}
+
+/**
+ * Ventana operativa del CC (no solo “día calendario”).
+ * Sin lookahead, un 00:00→08:00 de mañana no aparece en PLAN a la noche
+ * y parece que nadie releva / no hay continuidad.
+ */
+export const OPS_PLAN_LOOKAHEAD_MS = 16 * 60 * 60 * 1000;
+
+export function isOpsShiftHoy(s: any, now: Date): boolean {
+    if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
+    if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
+    if (isSameDay(s.shiftDateObj, now)) return true;
+
+    const nowMs = now.getTime();
+    const startMs = (s.shiftDateObj as Date)?.getTime?.() ?? 0;
+    let endMs = (s.endDateObj as Date)?.getTime?.() ?? 0;
+    if (startMs > 0 && endMs > 0 && endMs <= startMs) endMs += 86400000;
+
+    // Presentes/retenidos de días anteriores (zombies acotados a 48h)
+    if ((s.isPresent || s.isRetention) && !s.isCompleted) {
+        return startMs > 0 && (nowMs - startMs) <= 48 * 60 * 60 * 1000;
+    }
+
+    // Turno en curso por horario (p.ej. N que empezó ayer y termina hoy) — continuidad
+    if (startMs > 0 && endMs > nowMs && startMs <= nowMs) return true;
+
+    // Próximos turnos (madrugada / primer turno de mañana) aunque el start sea “mañana”
+    if (startMs > nowMs && startMs - nowMs <= OPS_PLAN_LOOKAHEAD_MS) return true;
+
+    return false;
+}
+
+/** Etiqueta de día para turnos en ventana operativa (lookahead incluye mañana). */
+export function opsShiftDayLabel(shiftDate: any, now: Date = new Date()): {
+    key: 'hoy' | 'manana' | 'otro';
+    label: string;
+} {
+    const d = shiftDate instanceof Date ? shiftDate : getSafeDate(shiftDate);
+    if (!d) return { key: 'otro', label: '—' };
+    if (isSameDay(d, now)) return { key: 'hoy', label: 'HOY' };
+    const tomorrow = new Date(now);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    if (isSameDay(d, tomorrow)) return { key: 'manana', label: 'MAÑANA' };
+    try {
+        const label = d.toLocaleDateString('es-AR', {
+            weekday: 'short',
+            day: '2-digit',
+            month: '2-digit',
+            timeZone: 'America/Argentina/Cordoba',
+        }).toUpperCase();
+        return { key: 'otro', label };
+    } catch {
+        return { key: 'otro', label: '--/--' };
+    }
+}
+
+/** Fracción del slot ya transcurrida (≥1 = turno terminado). Null si faltan fechas. */
+export const VACANCY_DESCUBIERTO_RATIO = 0.55;
+
+export function getVacancyElapsedRatio(s: any, now: Date = new Date()): number | null {
+    const start = s?.shiftDateObj instanceof Date ? s.shiftDateObj : getSafeDate(s?.shiftDateObj);
+    const end = s?.endDateObj instanceof Date ? s.endDateObj : getSafeDate(s?.endDateObj);
+    if (!start || !end) return null;
+    let startMs = start.getTime();
+    let endMs = end.getTime();
+    if (endMs <= startMs) endMs += 86400000;
+    const dur = endMs - startMs;
+    if (dur <= 0) return null;
+    return (now.getTime() - startMs) / dur;
+}
+
+/** Vacante ya no accionable: slot terminado o >55% del turno, o doc SIN COBERTURA. */
+export function isVacancyDescubierto(s: any, now: Date = new Date()): boolean {
+    if (!s?.isUnassigned) return false;
+    if (s.isSinCobertura || s.status === 'SIN_COBERTURA') return true;
+    if (typeof s.isDescubierto === 'boolean') return s.isDescubierto;
+    const ratio = getVacancyElapsedRatio(s, now);
+    if (ratio == null) return false;
+    return ratio >= VACANCY_DESCUBIERTO_RATIO;
+}
+
+/**
+ * Vacante viva para Ops (tab VAC / sirena / mapa rojo):
+ * sin devolver a planificación y aún dentro de la ventana accionable (<55%).
+ */
+export function isActionableOpsVacancy(s: any, now: Date = new Date()): boolean {
+    if (!s?.isUnassigned) return false;
+    if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
+    if (isVacancyDescubierto(s, now)) return false;
+    return true;
+}
+
+export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
+    switch (viewTab) {
+        case 'TODOS':
+            // Devueltas y descubiertas no son “cola viva”: salen de TODOS/VAC.
+            if (s.isUnassigned && (s.isReportedToPlanning || isVacancyDescubierto(s))) return false;
+            return !s.isFranco;
+        case 'PRIORIDAD':
+            return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco;
+        case 'NO_LLEGO':
+            return (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad;
+        case 'PLAN':
+            return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet;
+        case 'ACTIVOS':
+            return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention;
+        case 'RETENIDOS':
+            return s.isRetention;
+        case 'VACANTES':
+            return isActionableOpsVacancy(s);
+        case 'AUSENTES':
+            // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
+            if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
+            return s.isAbsent || s.isPotentialAbsence;
+        case 'FRANCOS':
+            return s.isFranco;
+        default:
+            return !s.isFranco;
+    }
+}
 
 // HELPER: GAPS (SOLO FALLBACK)
 const findTimeGaps = (shifts: any[], baseDate: Date) => {
@@ -252,6 +385,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             snap.docs.forEach(d => {
                 if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
                 const data = d.data() as Record<string, unknown>;
+                // Solo considerar publicado si el doc tiene publishedAt (un borrador o despublicado no lo tiene)
+                if (!data.publishedAt) return;
                 const parsed = parsePlanificacionEstadoDocId(d.id);
                 if (parsed) {
                     registerPublishedState(map, parsed.objectiveId, parsed.year, parsed.month);
@@ -320,6 +455,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const unsubRfz = onSnapshot(refuerzosQ, (snap) => {
             setRawRefuerzos(snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                .filter(d => d.data().isDeleted !== true)
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) }))
                 .filter((s: any) => {
                     const t = s.shiftDateObj instanceof Date ? s.shiftDateObj.getTime() : NaN;
@@ -337,11 +473,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const map = new Map<string, any>();
         rawShifts.forEach(s => map.set(s.id, s));
         rawRefuerzos.forEach(s => { if (!map.has(s.id)) map.set(s.id, s); });
-        return Array.from(map.values());
+        return Array.from(map.values()).filter((s) => s.isDeleted !== true);
     }, [rawShifts, rawRefuerzos]);
 
     const uniqueClients = useMemo(() => { const map = new Map(); objectives.forEach(obj => map.set(obj.clientId, obj.clientName)); return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)); }, [objectives]);
-    const filteredObjectives = useMemo(() => selectedClientId ? objectives.filter(o => o.clientId === selectedClientId) : objectives, [objectives, selectedClientId]);
+    const foldSearch = (value: unknown) => String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '');
 
     const processedData = useMemo(() => {
         const currentTime = new Date(now.getTime());
@@ -359,23 +499,48 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
         const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
 
+        const suppressedTuraIds = new Set<string>();
+        const parentTuraExt = new Map<string, { turaId: string; endDateObj: Date; tura: any }>();
+        mergedRawShifts.forEach((row) => {
+            const code = String(row.code || row.type || '').toUpperCase();
+            if (code !== 'TURA') return;
+            const parent = findParentShiftForTura(row, mergedRawShifts);
+            if (!parent?.id) return;
+            const parentKey = String(parent.id);
+            const contiguous = row.turaContiguous === true
+                || (row.turaContiguous !== false && isTuraContiguousToParent(parent, row));
+            if (contiguous && row.endDateObj instanceof Date) {
+                suppressedTuraIds.add(row.id);
+                parentTuraExt.set(parentKey, { turaId: row.id, endDateObj: row.endDateObj, tura: row });
+            }
+        });
+
         const realShifts = mergedRawShifts.map(shift => {
             if (!shift.shiftDateObj) return null;
             if (shift.draft === true) return null;
+            if (suppressedTuraIds.has(shift.id)) return null;
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
             // Si es una ausencia, mantener en processedData para tracking RRHH
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
+            const shiftCodeUpper = String(shift.code || shift.type || '').toUpperCase();
+            const isFranco = isRestFrancoShift({ ...shift, code: shiftCodeUpper });
             const rawPos = (shift.positionName || '').trim();
-            if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') return null;
+            if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco) return null;
+            const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
 
-            // Solo mostrar turnos de planificación publicada. Los turnos operativos
-            // (retén, cobertura, auto-reportados) y los ya procesados (presentes/ausentes)
-            // siempre se muestran sin importar el estado de publicación.
-            const isOperationalOrigin = shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'SLA_VIRTUAL' || shift.origin === 'CLIENT_REQUEST' || shift.origin === 'EVENTO' || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
-            // isAbsent incluido: un turno ausente de planificación no publicada igual debe mostrarse
-            // para que PATH-B detecte la vacante. Sin esto, allPosShifts queda vacío → sin vacante.
-            const isAlreadyProcessed = !!shift.isPresent || shift.status === 'PRESENT' || shift.status === 'COMPLETED' || !!shift.isReportedToPlanning || !!shift.isReported || !!shift.isAbsent;
-            if (!isOperationalOrigin && !isAlreadyProcessed) {
+            // Solo mostrar turnos de objetivos con planificación publicada.
+            // Excepción: turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL/EVENTO) siempre visibles
+            // porque no tienen doc en planificacion_estados.
+            const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
+                && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
+            const isOperationalOrigin = shift.origin === 'RETEN'
+                || shift.origin === 'OPERATIONS_COVERAGE'
+                || shift.origin === 'SLA_VIRTUAL'
+                || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado)
+                || shift.origin === 'EVENTO'
+                || !!shift.isReten
+                || shift.resolvedBy === 'OPERACIONES';
+            if (!isOperationalOrigin) {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(
                     shift.objectiveId,
@@ -391,9 +556,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             let finalEmpName = shift.employeeName;
             
             let isValidEmployee = false;
-            if (shift.employeeId && shift.employeeId !== 'VACANTE') {
-                const foundName = empMap.get(shift.employeeId);
+            const parentEmpleadoId = String(shift.parentEmpleadoId || '').trim();
+            const effectiveEmployeeId = (shift.employeeId && shift.employeeId !== 'VACANTE')
+                ? shift.employeeId
+                : (parentEmpleadoId || null);
+
+            if (effectiveEmployeeId && effectiveEmployeeId !== 'VACANTE') {
+                const foundName = empMap.get(effectiveEmployeeId);
                 if (foundName) finalEmpName = foundName;
+                else if (shift.parentEmpleadoName && parentEmpleadoId) finalEmpName = shift.parentEmpleadoName;
                 isValidEmployee = true; 
             } else { finalEmpName = 'VACANTE'; }
 
@@ -426,16 +597,33 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
             const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
+            const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
             if (isRfzVacante) finalEmpName = 'VACANTE: RFZ';
+            if (isTuraVacante) {
+                finalEmpName = shift.parentEmpleadoName
+                    ? `TURA · ${shift.parentEmpleadoName}`
+                    : 'VACANTE: TURA';
+            }
             // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
-            // Para el DISPLAY (contador OBJ, stats, tab VACANTES) se usa isUnassigned directamente
-            // para incluir también las devueltas — ambas representan puestos sin cobertura real.
+            // Display VAC / mapa rojo: solo isActionableOpsVacancy (no DEVUELTO ni >55%/fin).
             const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
-            const isFranco = !!shift.isFranco || shift.objectiveName === 'FRANCO';
-            
+
             const isSinCobertura = !!shift.isSinCobertura;
-            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA y RFZ por ausencia
-            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante) return null;
+            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ y TURA (2º tramo cortado)
+            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante) return null;
+
+            const turaExt = parentTuraExt.get(shift.id);
+            const effectiveEndDateObj = (turaExt?.endDateObj instanceof Date ? turaExt.endDateObj : shift.endDateObj) as Date | undefined;
+            const isDescubierto = isUnassigned && (
+                isSinCobertura ||
+                (() => {
+                    const ratio = getVacancyElapsedRatio(
+                        { shiftDateObj: shift.shiftDateObj, endDateObj: effectiveEndDateObj || shift.endDateObj },
+                        currentTime,
+                    );
+                    return ratio != null && ratio >= VACANCY_DESCUBIERTO_RATIO;
+                })()
+            );
 
             const isEarlyStartScheduled = !!shift.isEarlyStart;
             const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
@@ -460,16 +648,16 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
             // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
-            const isRetentionByTime  = isPresent && !isCompleted && shift.endDateObj && currentTime > shift.endDateObj;
+            const isRetentionByTime  = isPresent && !isCompleted && effectiveEndDateObj && currentTime > effectiveEndDateObj;
             // isRetentionByField: solo mostrar RECARGO si el turno ya terminó O si el operador
             // lo retuvo manualmente Y el turno ya pasó. Si el turno aún está vigente, el badge
             // se mostrará como "ATENCIÓN" pero no como retención activa hasta que pase el endTime.
-            const shiftEnded = shift.endDateObj ? currentTime > shift.endDateObj : false;
+            const shiftEnded = effectiveEndDateObj ? currentTime > effectiveEndDateObj : false;
             const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true && shiftEnded;
             const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
             const isRetention = isRetentionByTime || isRetentionByField;
-            if (isRetentionByTime) {
-                retentionMinutes = Math.floor((currentTime.getTime() - shift.endDateObj.getTime()) / 60000);
+            if (isRetentionByTime && effectiveEndDateObj) {
+                retentionMinutes = Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000);
             } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
             }
@@ -501,11 +689,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
             // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 60;
-            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(60 - minutesPastStart)) : null;
-            // Potencial ausencia: T+60 sin confirmar presencia (fallback administrativo)
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 60;
+            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
+            // Potencial ausencia: T+30 sin confirmar presencia — fallback si el cron no alcanzó a correr
+            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -514,27 +702,41 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
-            // isSinCobertura NO cuenta como cobertura: la vacante debe seguir visible en
-            // el tab VACANTES y en el PDF. Solo suprimimos el duplicado virtual en el dedup.
+            // isSinCobertura / descubierto NO cuentan como cobertura real ni como VAC accionable.
             const countsForCoverage = !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee) ||
                 (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
             );
 
-            const phone = empPhoneMap.get(shift.employeeId) || shift.phone || shift.celular || '';
+            const phone = empPhoneMap.get(effectiveEmployeeId || shift.employeeId) || shift.phone || shift.celular || '';
+
+            const isTuraCutSegment = shiftCode === 'TURA' && !suppressedTuraIds.has(shift.id)
+                && (!!shift.parentShiftId || !!parentEmpleadoId);
 
             return {
-                ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: rawPos,
+                ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: displayPos,
                 phone,
+                employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost, duration: getDuration(shift.shiftDateObj, shift.endDateObj), countsForCoverage, isRetentionByField, isSinCobertura,
-                isRfzVacante, isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
+                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost,
+                duration: getDuration(shift.shiftDateObj, effectiveEndDateObj),
+                endDateObj: effectiveEndDateObj || shift.endDateObj,
+                countsForCoverage, isRetentionByField, isSinCobertura, isDescubierto,
+                isRfzVacante, isTuraVacante, isTuraCutSegment,
+                turaRequiresSeparateCheckIn: isTuraCutSegment,
+                isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
+                ...(turaExt ? {
+                    linkedTuraId: turaExt.turaId,
+                    turaContiguous: true,
+                    turaImputationPos: turaExt.tura.positionName,
+                    turaExtensionRange: combinedContiguousRangeLabel(shift, turaExt.tura),
+                } : {}),
                 vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
                 operacionallyCovered: plannedOperativelyCovered || !!shift.operacionallyCovered,
             };
@@ -556,6 +758,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 const serviceEnd = new Date(sla.endDate + 'T23:59:59');
                 if (now > serviceEnd) return;
             }
+
+            // Sin cronograma publicado para este objetivo/mes → el servicio aún no entró en operación.
+            // No generar vacantes hasta que planificación publique el crono.
+            const nowYear = now.getFullYear();
+            const nowMonth = now.getMonth() + 1;
+            if (!publishStatusMap[planificacionPublishLookupKey(sla.objectiveId, nowYear, nowMonth)]) return;
 
             // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningún documento
             // en `turnos` para este objetivo hoy (p. ej. base vaciada o aún sin planificar),
@@ -637,10 +845,11 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                     id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     vacancyOrigin: slotVacancyOrigin,
+                                    vacancyBand: (slot.name || slot.code).toUpperCase(),
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId,
                                     positionName: pos.name,
-                                    employeeName: `VACANTE: ${(slot.name || slot.code).toUpperCase()}`,
+                                    employeeName: 'VACANTE',
                                     code: slot.code,
                                     shiftDateObj: start, endDateObj: end,
                                     minutesUntilStart: 0, isValidEmployee: false
@@ -689,9 +898,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                     id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     vacancyOrigin: gap24Origin,
+                                    vacancyBand: bestName,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                    employeeName: `VACANTE: ${bestName}`,
+                                    employeeName: 'VACANTE',
                                     shiftDateObj: gap.start, endDateObj: gap.end,
                                     minutesUntilStart: 0, isValidEmployee: false
                                 });
@@ -739,9 +949,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     isPartialPlannedCoverage: isPartial,
                                     vacancyOrigin: custOrigin,
+                                    vacancyBand: (pos.name || 'PUESTO').toUpperCase(),
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                    employeeName: isPartial ? `VACANTE PARCIAL: ${(pos.name || 'PUESTO').toUpperCase()}` : `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
+                                    employeeName: 'VACANTE',
                                     shiftDateObj: refShift.shiftDateObj, endDateObj: refShift.endDateObj,
                                     minutesUntilStart: 0, isValidEmployee: false,
                                     relatedCoveragePackageId: refShift.coveragePackageId || null,
@@ -757,9 +968,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                 id: `V124_CUST_${sla.objectiveId}_${pos.name}_${shiftId}`,
                                 isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                 vacancyOrigin: 'NO_PLANNING',
+                                vacancyBand: (pos.name || 'PUESTO').toUpperCase(),
                                 clientName: objInfo.clientName, clientId: objInfo.clientId,
                                 objectiveName: objInfo.name, objectiveId: sla.objectiveId, positionName: pos.name,
-                                employeeName: `VACANTE: ${(pos.name || 'PUESTO').toUpperCase()}`,
+                                employeeName: 'VACANTE',
                                 shiftDateObj: shift.shiftDateObj, endDateObj: shift.endDateObj,
                                 minutesUntilStart: 0, isValidEmployee: false
                             });
@@ -771,25 +983,46 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
         // ── Deduplicar realShifts por id (evita que un doc duplicado en Firestore se muestre dos veces)
         const seenIds = new Set<string>();
-        const dedupedRealShifts = realShifts.filter(s => {
+        const dedupByIdShifts = realShifts.filter(s => {
             if (seenIds.has(s.id)) return false;
             seenIds.add(s.id);
             return true;
         });
 
-        // ── Suprimir DEVUELTO/SLA_VIRTUAL del display cuando ya no son accionables:
-        //    a) el slot ya terminó (vacante pasada)
-        //    b) hay guardias plan/presentes suficientes para cubrir el slot
-        //       → planning ya asignó alguien; la vacante está resuelta aunque el guardia no llegó
+        // ── Deduplicar por (employeeId, objectiveId, startTime) para eliminar turnos
+        //    OPERATIONS_COVERAGE duplicados que crea la cascada al procesar la misma vacante varias veces.
+        //    Preferir el turno con isPresent:true o el primero encontrado.
+        const seenEmpObjTime = new Map<string, boolean>();
+        const dedupedRealShifts = dedupByIdShifts.filter(s => {
+            if (!s.employeeId || s.employeeId === 'VACANTE') return true; // vacantes siempre
+            const startMs = s.shiftDateObj?.getTime?.() ?? 0;
+            const key = `${s.employeeId}|${s.objectiveId}|${startMs}`;
+            if (seenEmpObjTime.has(key)) {
+                // Ya hay uno — solo reemplazar si este tiene isPresent y el anterior no
+                return false;
+            }
+            seenEmpObjTime.set(key, !!s.isPresent);
+            return true;
+        });
+
+        // ── Ocultar DEVUELTO del display: ya tuvo tratamiento (Planificación).
+        //    Siguen en dedupedRealShifts para cubrir/suprimir virtuales del mismo slot.
+        //    Descubiertos (>55%/fin) salen del tab VAC vía isActionableOpsVacancy; el PDF
+        //    puede seguir viéndolos en processedData como isDescubierto / isSinCobertura.
         const suppressedDevuelto = new Set<string>();
         dedupedRealShifts.forEach(s => {
-            if (!s.isUnassigned || !s.isReportedToPlanning || !s.shiftDateObj || !s.endDateObj) return;
-            // a) Slot ya terminó
-            if (s.endDateObj.getTime() < now.getTime()) {
+            if (!s.isUnassigned || !s.shiftDateObj || !s.endDateObj) return;
+            if (s.isReportedToPlanning) {
                 suppressedDevuelto.add(s.id);
                 return;
             }
-            // b) Cobertura (plan + presentes) suficiente
+            // Slot ya terminado sin doc SIN_COBERTURA: no mostrar como cola viva
+            // (el flag isDescubierto + tab VAC ya los excluye; esto limpia TODOS también)
+            if (!s.isSinCobertura && s.endDateObj.getTime() < now.getTime()) {
+                suppressedDevuelto.add(s.id);
+                return;
+            }
+            // Cobertura (plan + presentes) suficiente → planning ya asignó
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
@@ -809,6 +1042,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
             const vacancyIsToday = isSameDay(v.shiftDateObj, now);
             if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
+            // Descubierto (>55% o fin de turno): no regenerar virtual como VAC
+            if (isVacancyDescubierto(v, now)) return false;
             // normalizePosMatch para que "Puesto Rondín" === "Rondín" (sin prefijo ni acentos)
             const sameSlot = (s: any) =>
                 s.objectiveId === v.objectiveId &&
@@ -822,11 +1057,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 Math.abs((s.shiftDateObj?.getTime() || 0) - (v.shiftDateObj?.getTime() || 0)) < 7200000 &&
                 sameSlot(s))) return false;
             // Suprimir si ya existe el doc autosinc_ SIN COBERTURA para este slot
-            // El doc real reemplaza la vacante virtual — queda visible en VACANTES con badge SIN COB.
             if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
-            // (mejora: un guardia en PLAN ya resuelve la vacante aunque no haya hecho check-in)
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
                 !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
@@ -836,40 +1069,94 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             ).length;
             if (coveringCount >= cap) return false;
             return true;
-        });
+        }).map(v => ({
+            ...v,
+            isDescubierto: isVacancyDescubierto(v, now),
+        }));
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 
+    const filteredObjectives = useMemo(() => {
+        let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
+        const q = foldSearch(filterText);
+        if (!q) return list;
+        const idsFromShifts = new Set(
+            processedData
+                .filter((s: any) =>
+                    foldSearch(s.objectiveName).includes(q) ||
+                    foldSearch(s.positionName).includes(q) ||
+                    foldSearch(s.employeeName).includes(q)
+                )
+                .flatMap((s: any) => [String(s.objectiveId || ''), String(s.objectiveName || '')])
+        );
+        return list.filter((o: any) => {
+            const id = String(o.id || o.objectiveId || '');
+            return foldSearch(o.name).includes(q) ||
+                foldSearch(o.nombre).includes(q) ||
+                foldSearch(o.objectiveName).includes(q) ||
+                foldSearch(o.address).includes(q) ||
+                foldSearch(o.direccion).includes(q) ||
+                idsFromShifts.has(id) ||
+                idsFromShifts.has(String(o.name || ''));
+        });
+    }, [objectives, selectedClientId, filterText, processedData]);
+
     // ... Resto del hook igual ...
     const listData = useMemo(() => {
-        let list = processedData;
+        const vy = now.getFullYear();
+        const vm = now.getMonth() + 1;
+        const isVisible = (s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        };
+        let list = processedData.filter(isVisible);
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
-        if (filterText) { const lower = filterText.toLowerCase(); list = list.filter((s: any) => (s.employeeName||'').toLowerCase().includes(lower) || (s.clientName||'').toLowerCase().includes(lower)); }
-        // Base: solo turnos de hoy — OR turno activo/retenido que arrancó en el nocturno de ayer
-        const hoy = list.filter((s:any) => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        });
-        switch (viewTab) {
-            case 'TODOS':      return hoy.filter((s:any) => !s.isFranco);
-            case 'PRIORIDAD':  return hoy.filter((s:any) => (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco);
-            case 'NO_LLEGO':   return hoy.filter((s:any) => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad);
-            case 'PLAN':       return hoy.filter((s:any) => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet);
-            case 'ACTIVOS':    return hoy.filter((s:any) => s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention);
-            case 'RETENIDOS':  return hoy.filter((s:any) => s.isRetention); // isPendingRetention va en PRIORIDAD, no aquí
-            case 'VACANTES':   return hoy.filter((s:any) => s.isUnassigned); // incluye devueltas — un puesto sin guardia presente ES una vacante
-            case 'AUSENTES':   return hoy.filter((s:any) => s.isAbsent || s.isPotentialAbsence);
-            case 'FRANCOS':    return hoy.filter((s:any) => s.isFranco);
-            default:           return hoy;
+        if (filterText) {
+            const q = foldSearch(filterText);
+            list = list.filter((s: any) =>
+                foldSearch(s.employeeName).includes(q) ||
+                foldSearch(s.clientName).includes(q) ||
+                foldSearch(s.objectiveName).includes(q) ||
+                foldSearch(s.positionName).includes(q)
+            );
         }
-    }, [processedData, viewTab, filterText, selectedClientId, now]);
-    const stats = useMemo(() => { const hoy = processedData.filter(s => {
-            if (s.isCompleted && !s.isRetention) return false;
-            if (s.isVirtual && s.endDateObj && !isSameDay(s.shiftDateObj, now) && s.endDateObj.getTime() < now.getTime()) return false;
-            return isSameDay(s.shiftDateObj, now) || ((s.isPresent || s.isRetention) && !s.isCompleted);
-        }); return { prioridad: hoy.filter(s => (s.isImminent || s.isRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco).length, no_llego: hoy.filter(s => (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad).length, plan: hoy.filter(s => (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet).length, activos: hoy.filter(s => s.isPresent && !s.isCompleted).length, retenidos: hoy.filter(s => s.isRetention).length, vacantes: hoy.filter(s => s.isUnassigned).length, devueltas: hoy.filter(s => s.isUnassigned && s.isReportedToPlanning).length, ausentes: hoy.filter(s => s.isAbsent || s.isPotentialAbsence).length, francos: hoy.filter(s => s.isFranco).length, rrhh_urgente: hoy.filter(s => s.isRRHHUrgent && !s.isFranco).length, rrhh_planificado: hoy.filter(s => s.isRRHHPlanned && !s.isFranco).length, total: hoy.length }; }, [processedData, now]);
+        const hoy = list.filter((s: any) => isOpsShiftHoy(s, now));
+        return hoy.filter((s: any) => shiftMatchesOpsViewTab(s, viewTab));
+    }, [processedData, viewTab, filterText, selectedClientId, now, publishStatusMap]);
+
+    /** Objetivos con geo para el mapa según pestaña/filtro activo (PLAN, ACT, VAC, etc.). */
+    const mapTabObjectives = useMemo(() => {
+        const ids = new Set(
+            listData.map((s: any) => String(s.objectiveId ?? '').trim()).filter(Boolean),
+        );
+        return filteredObjectives.filter((o: any) =>
+            ids.has(String(o.id ?? o.objectiveId ?? '').trim()),
+        );
+    }, [listData, filteredObjectives]);
+
+    const stats = useMemo(() => {
+        const sy = now.getFullYear();
+        const sm = now.getMonth() + 1;
+        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
+            if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
+            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+        });
+        return {
+            prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
+            no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,
+            plan: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PLAN')).length,
+            activos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'ACTIVOS')).length,
+            retenidos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'RETENIDOS')).length,
+            vacantes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'VACANTES')).length,
+            devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
+            ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
+            francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
+            rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
+            rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
+            total: hoy.length,
+        };
+    }, [processedData, now, publishStatusMap]);
     const handleAction = async (action: string, shiftId: string, payload?: any) => {
         try {
             if (action === 'CHECKOUT') {
@@ -1280,7 +1567,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         filterText, setFilterText, isCompact, setIsCompact,
         handleAction,
         viewTab, setViewTab,
-        stats, listData,
+        stats, listData, mapTabObjectives,
         uniqueClients, selectedClientId, setSelectedClientId,
         filteredObjectives,
         employees,

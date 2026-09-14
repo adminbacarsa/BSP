@@ -43,7 +43,23 @@ export interface ServicePosition {
    * Si excludePax >= quantity del turno, equivale a excludedShiftDates.
    */
   excludedShiftPaxDates?: Record<string, Record<string, number>>;
+  /** Refuerzo temporal de rotación (+pax) por rango de fechas sin modificar quantity base. */
+  paxBoostRanges?: Array<{
+    from: string;
+    to: string;
+    delta: number;
+    solicitudId?: string;
+    label?: string;
+  }>;
   preferenciaGenero?: 'M' | 'F' | 'INDISTINTO';
+  /** Encargado/Eventos: si false no suma horas vendidas SLA ni cierre cobertura. Eventos siempre false. */
+  includeInSlaTotals?: boolean;
+  /** Encargado: horario fijo (L–V) vs rotación compartida (patrón 6×2, 5×1…). */
+  encargadoScheduleMode?: 'fixed' | 'rotating';
+  /** Patrón rotativo obligatorio si includeInSlaTotals y mode=rotating. */
+  workPattern?: '6x2' | '5x1' | '4x12' | '6x1';
+  /** Horas por jornada para patrón rotativo (default: turno ENC o 8). */
+  workPatternHoursPerDay?: number;
   /** Soft-delete del puesto: deja de exigir cobertura / horas desde `inactiveFrom`. */
   status?: 'ACTIVE' | 'INACTIVE';
   inactiveFrom?: string;
@@ -54,9 +70,14 @@ export interface ServicePosition {
 export type SlaChangeAction =
   | 'REFUERZO_ESTRUCTURAL'
   | 'REVERT_REFUERZO'
+  | 'CANCEL_REFUERZO_PUNTUAL'
+  | 'MODIFY_REFUERZO_PUNTUAL'
   | 'CANCEL_SERVICE'
   | 'BAJA_PUESTO'
-  | 'REACTIVAR_PUESTO';
+  | 'REACTIVAR_PUESTO'
+  | 'ALTA_PUESTO'
+  | 'EDIT_PUESTO'
+  | 'ELIMINAR_PUESTO';
 
 export interface SlaChangeLogEntry {
   at: string;
@@ -86,10 +107,13 @@ export function appendSlaChangeLog(
   existing: SlaChangeLogEntry[] | undefined,
   entry: Omit<SlaChangeLogEntry, 'at'> & { at?: string },
 ): SlaChangeLogEntry[] {
-  const next: SlaChangeLogEntry = {
+  const raw: SlaChangeLogEntry = {
     ...entry,
     at: entry.at || new Date().toISOString(),
   };
+  const next = Object.fromEntries(
+    Object.entries(raw).filter(([, v]) => v !== undefined),
+  ) as SlaChangeLogEntry;
   return [...(existing || []), next].slice(-80);
 }
 

@@ -1,0 +1,14 @@
+{
+  "_instrucciones": "Drive NO renderiza HTML. Dejá enabled false. Usá carpeta local/red con la misma estructura de subcarpetas y abrí reporting-general/index.html",
+  "enabled": false,
+  "previewUrl": "https://drive.google.com/file/d/{fileId}/preview",
+  "folderId": "1RpkClQ5CduQeGdwgFR0PxW9lPz2mbZ40",
+  "modules": {
+    "control_directivo": "",
+    "ventas_cobranzas": "https://drive.google.com/file/d/1iwtzmYNZbGdpCy130DiUhARsJT1D6Kkt/view?usp=drive_link",
+    "facturas": "https://drive.google.com/file/d/1t-Wx3l9e3oGvHzjuBMvsLIaLi3dk2lv2/view?usp=drive_link",
+    "compras": "https://drive.google.com/file/d/1TVEzApVbM1Fx3hccoCE9w3c8FBNYkrmE/view?usp=drive_link",
+    "mano_obra": "https://drive.google.com/file/d/1YvSHpiWKHEYShPwlf-w2iuggVuCIjLwm/view?usp=drive_link",
+    "camioneros": "https://drive.google.com/file/d/1VXQjJS2ekgkYyLCMau7ARrLc5KhTSxhv/view?usp=drive_link"
+  }
+}

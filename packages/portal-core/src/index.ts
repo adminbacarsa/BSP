@@ -14,6 +14,7 @@ export {
   buildCheckInPayload,
   flushPendingCheckins,
   getCheckInTiming,
+  isOperationsCoverageShift,
   parsePendingCheckins,
   validateCheckInDistance,
 } from './checkIn/portalCheckIn';
@@ -72,3 +73,4 @@ export {
   shiftPlanificacionLookupKey,
 } from './shifts/employeeShiftVisibility';
 export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';
+export { isAbsentLikeShift, isActiveAbsenceRecord } from './shifts/isAbsentLikeShift';
