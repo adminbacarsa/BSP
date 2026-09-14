@@ -136,6 +136,9 @@ import { useAuth } from '@/context/AuthContext';
 import { usePlanificacionFirestore } from '@/hooks/usePlanificacionFirestore';
 import { usePlanificacionGrupoSla } from '@/hooks/usePlanificacionGrupoSla';
 import { usePlanificacionObjectiveSla } from '@/hooks/usePlanificacionObjectiveSla';
+import { usePlanificacionAutoRotation } from '@/hooks/usePlanificacionAutoRotation';
+import { computeServiceRuleChanges } from '@/lib/planificacion/planificacionServiceRuleChanges';
+import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
     planToastBulk,
@@ -312,106 +315,6 @@ import {
 const formatTime = formatPlanificacionTime;
 
 interface Coords { r: number; c: number; }
-
-const isShiftConsolidated = (shift: any) => {
-    if (!shift) return false;
-    if (shift.status === 'PRESENT' || shift.status === 'CHECK_IN' || shift.status === 'COMPLETED') return true;
-    return false;
-};
-
-/** Normaliza documento RFZ para vista de celda / modal de turno. */
-const rfzDocToShiftView = (rfz: any) => ({
-    id: rfz.id,
-    ...rfz,
-    code: 'RFZ',
-    type: rfz.type || 'Refuerzo Cliente',
-    name: 'Refuerzo Cliente',
-    objectiveId: rfz.objectiveId,
-    startTime: rfz.startTime,
-    endTime: rfz.endTime,
-    positionName: rfz.positionName,
-    draft: rfz.draft,
-    hours: rfz.hours,
-    isRfz: true,
-    origin: rfz.origin || 'CLIENT_REQUEST',
-    employeeId: rfz.employeeId,
-    employeeName: rfz.employeeName,
-});
-
-function computeServiceRuleChanges(
-    dateStr: string,
-    rules: import('@/services/slaService').ServiceRule[],
-    pendingChanges: Record<string, any>,
-    shiftsMap: Record<string, any>,
-    employees: any[],
-    objectiveId: string,
-    changedEmpId?: string,
-): Record<string, any> {
-    const additions: Record<string, any> = {};
-    const getEntry = (empId: string) => {
-        const k = `${empId}_${dateStr}`;
-        const p = pendingChanges[k];
-        if (p) return p.isDeleted ? null : p;
-        return shiftsMap[k] ?? null;
-    };
-    const getCode = (empId: string): string | null => {
-        const e = getEntry(empId);
-        if (!e) return null;
-        return String(e.code || e.type || '').toUpperCase() || null;
-    };
-    for (const rule of rules) {
-        if (!rule.triggers.length) continue;
-        if (changedEmpId && !rule.triggers.some((t: import('@/services/slaService').RuleTrigger) => t.employeeId === changedEmpId)) continue;
-        const fires = rule.triggers.every((t: import('@/services/slaService').RuleTrigger) => {
-            const code = getCode(t.employeeId);
-            if (!code) return false;
-            const allowed = (t.shiftCodes?.length ? t.shiftCodes : [t.shiftCode]).map(s => String(s || '').toUpperCase()).filter(Boolean);
-            return allowed.includes(code);
-        });
-        if (!fires) continue;
-        for (const action of rule.actions) {
-            if (action.type === 'EXCLUDE') {
-                for (const emp of employees) {
-                    const e = getEntry(emp.id);
-                    if (!e) continue;
-                    const ec = String(e.code || e.type || '').toUpperCase();
-                    const ep = e.positionName || '';
-                    if (ep === action.positionName && ec === String(action.shiftCode || '').toUpperCase()) {
-                        // Borrar el turno del plan (sin generar vacante)
-                        additions[`${emp.id}_${dateStr}`] = { isDeleted: true };
-                    }
-                }
-            } else if (action.type === 'ASSIGN') {
-                if (action.employeeId && action.positionName && action.shiftCode) {
-                    const e = getEntry(action.employeeId);
-                    // Para idempotencia: si el entry pendiente es auto-rotación, preferir shiftsMap
-                    const eSaved = shiftsMap[`${action.employeeId}_${dateStr}`];
-                    const eCheck = (e && !e.isDeleted && !e._isAutoRotation) ? e : (eSaved && !eSaved.isDeleted ? eSaved : null);
-                    if (eCheck && String(eCheck.code || eCheck.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
-                    const assignCode = String(action.shiftCode || '').toUpperCase();
-                    const bandClock: Record<string, { start: string; end: string; hours: number }> = {
-                        M: { start: '07:00', end: '15:00', hours: 8 },
-                        T: { start: '15:00', end: '23:00', hours: 8 },
-                        N: { start: '23:00', end: '07:00', hours: 8 },
-                        D12: { start: '07:00', end: '19:00', hours: 12 },
-                        N12: { start: '19:00', end: '07:00', hours: 12 },
-                    };
-                    const band = bandClock[assignCode] || { start: '07:00', end: '15:00', hours: 8 };
-                    additions[`${action.employeeId}_${dateStr}`] = {
-                        ...(eCheck || e || {}),
-                        code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
-                        hours: band.hours, startTime: band.start, endTime: band.end,
-                        positionName: action.positionName, isTemp: true, isFranco: false,
-                        objectiveId: (eCheck || e)?.objectiveId ?? objectiveId,
-                        _isAutoRotation: undefined,
-                        _isAutoCondition: true,
-                    };
-                }
-            }
-        }
-    }
-    return additions;
-}
 
 export default function PlanificacionPage() {
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
@@ -791,9 +694,24 @@ export default function PlanificacionPage() {
     const [autoGeneratedReady, setAutoGeneratedReady] = useState(false);
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
-    const autoRotAppliedRef = useRef<string>('');
     const [mesRotacionesDesactivadas, setMesRotacionesDesactivadas] = useState<Set<string>>(new Set());
     const [rotMesDropOpen, setRotMesDropOpen] = useState(false);
+
+    const { resetAutoRotAppliedGuard } = usePlanificacionAutoRotation({
+        shiftsMapLoaded,
+        activeSlaServiceRotations,
+        selectedObjective,
+        hasActiveSLA,
+        currentDate,
+        shiftsMap,
+        selectedGrupo,
+        grupoUnifiedMode,
+        mesRotacionesDesactivadas,
+        positionStructure,
+        activeSlaServiceRules,
+        employees,
+        commitPendingChanges,
+    });
 
     const _saveRotOverrides = useCallback((next: Set<string>, objId: string, yr: number, mo: number, empId: string) => {
         const stateKey = buildPlanificacionEstadoDocId(empId, objId, yr, mo);
@@ -812,8 +730,8 @@ export default function PlanificacionPage() {
             _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
             return next;
         });
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate, empresaId, _saveRotOverrides]);
+        resetAutoRotAppliedGuard();
+    }, [selectedObjective, currentDate, empresaId, _saveRotOverrides, resetAutoRotAppliedGuard]);
 
     const toggleTodasMesRotaciones = useCallback((desactivar: boolean) => {
         if (!selectedObjective || !activeSlaServiceRotations?.length) return;
@@ -823,8 +741,8 @@ export default function PlanificacionPage() {
             : new Set<string>();
         setMesRotacionesDesactivadas(next);
         _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate, empresaId, activeSlaServiceRotations, _saveRotOverrides]);
+        resetAutoRotAppliedGuard();
+    }, [selectedObjective, currentDate, empresaId, activeSlaServiceRotations, _saveRotOverrides, resetAutoRotAppliedGuard]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
@@ -3944,68 +3862,6 @@ export default function PlanificacionPage() {
         setAuthorizedOver200Ids(new Set());
         authorizedOver200IdsRef.current = new Set();
     }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
-
-    // Resetear guard de auto-rotación al cambiar objetivo o mes para que vuelva a pre-cargar
-    useEffect(() => {
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
-
-    // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
-    useEffect(() => {
-        if (!shiftsMapLoaded) return;
-        if (!activeSlaServiceRotations?.length) return;
-        if (!selectedObjective) return;
-        if (!hasActiveSLA) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const periodKey = `${selectedObjective}_${year}_${month}`;
-        if (autoRotAppliedRef.current === periodKey) return;
-        // Verificar si el mes ya tiene turnos guardados en Firestore para este objetivo (o grupo)
-        const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-        const grupoObjIds = (selectedGrupo && grupoUnifiedMode && Array.isArray(selectedGrupo.objectiveIds))
-            ? (selectedGrupo.objectiveIds as string[])
-            : null;
-        const hasAnySaved = Object.entries(shiftsMap).some(([k, v]: [string, any]) => {
-            if (!k.includes(`_${monthPrefix}`) || v?.isDeleted) return false;
-            const objId = v?.objectiveId;
-            if (objId === selectedObjective) return true;
-            if (grupoObjIds && grupoObjIds.includes(objId)) return true;
-            return false;
-        });
-        if (hasAnySaved) {
-            autoRotAppliedRef.current = periodKey;
-            return;
-        }
-        // Filtrar rotaciones desactivadas para este mes
-        const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
-        if (!rotacionesActivas.length) return;
-        autoRotAppliedRef.current = periodKey;
-        // Generar entradas de rotación para todo el mes (respeta shiftsMap vacío)
-        const rotAdditions = applyRotationsForMonth(
-            rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
-        );
-        if (!Object.keys(rotAdditions).length) return;
-        // Si alguna rotación activa tiene cumplirCondicion, también aplicar las reglas del SLA
-        if (activeSlaServiceRules?.length && rotacionesActivas.some((r: any) => r.cumplirCondicion)) {
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                const condChanges = computeServiceRuleChanges(
-                    dateStr, activeSlaServiceRules, rotAdditions, shiftsMap, employees, selectedObjective,
-                );
-                Object.assign(rotAdditions, condChanges);
-            }
-        }
-        commitPendingChanges((prev: Record<string, any>) => {
-            // No sobreescribir si el usuario ya tiene cambios manuales en curso
-            if (Object.values(prev).some((v: any) => v && !v._isAutoRotation && !v._isAutoCondition)) return prev;
-            return { ...prev, ...rotAdditions };
-        });
-        const desactCount = mesRotacionesDesactivadas.size;
-        const totalCount = activeSlaServiceRotations.length;
-        const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
-        toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
-    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees, selectedGrupo, grupoUnifiedMode]);
 
     // Cargar grupos de objetivos
     useEffect(() => {
