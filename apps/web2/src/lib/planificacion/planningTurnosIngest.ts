@@ -91,6 +91,10 @@ export function ingestPlanningTurnosSnapshot(
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
         if (data.isDeleted === true) return;
+        // Demo ops: no ingerir en malla de Planificación
+        if (data.modoDemoAt) return;
+        const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
+        if (rb === 'MODO_DEMO') return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {

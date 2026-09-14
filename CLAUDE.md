@@ -178,7 +178,17 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 **Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front.
 
-**Cascada auto de cobertura** (`apps/functions/src/coverage/`): misma escalera CCT que el protocolo manual — Sin turno → RET → ESC/REF → Ext.12h (EXT+ADV) → FT. En cada paso notifica hasta 5 candidatos en paralelo (`convocatorias_cobertura`); gana el primero que acepta; timeout ~3 min escala al siguiente (ESCALATED sigue aceptando). **Modo demo:** envía notifs y `simularRespuestasConvocatorias` responde sin esperar al guardia real.
+**Cascada auto de cobertura** (`apps/functions/src/coverage/`): misma escalera CCT que el protocolo manual — Sin turno → **RET forzado** (asignación directa, radio 15→30 km, orden por conocimiento; RET/ESC/REF se **convierten al turno real** del hueco) → ESC/REF → Ext.12h (EXT+ADV) → **Intercambio** → FT. En pasos con aceptación notifica hasta 5 candidatos en paralelo (`convocatorias_cobertura`); gana el primero que acepta; timeout ~3 min escala al siguiente (ESCALATED sigue aceptando). Reinicio de cascada solo se bloquea si hay PENDING (no solo ESCALATED).
+
+**Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = solo prueba: escribe en `turnos` con `modoDemoAt` / `resolvedBy: MODO_DEMO`; Planificación **oculta** esos artefactos (`isDemoOpsArtifact`) para no contaminar la malla.
+
+**Continuidad al fin de banda** (`shiftContinuity` + `autoCompletarTurnos`): 24hs SLA → retención; si el presente tiene **turno posterior** en el mismo objetivo → retención; si hay extensión TURA/D12/N12 → retención; solo sin posterior ni extensión → cierre auto.
+
+**Dual reloj:** puesto/prefactura = `plannedStartTime`/`plannedEndTime` (banda del hueco); liquidación/fichada = `presentAt` / `realStartTime` / `adjustedStartTime`. No inferir fichada al asignar cobertura.
+
+**Baja anticipada:** con compañeros → novedad cubierto; solo → protocolo vacante; **urgencia médica** → salir sin vacante (`leftWithoutCoverage`).
+
+**Vacante referenciada:** siempre `vacancyLabel` tipo «Vacante por ausencia de X · turno Y · …» + ledger `coverageEventId`.
 
 **Análisis — snapshot en memoria:** `useAnalisisSnapshot` + `lib/analisis/*`. Catálogo (SLA, empleados, geo, `tipos_novedad`) una vez por empresa; hechos (`turnos` + `ausencias`) = **hot** = mes en curso + **2** meses cerrados (`analisisWorkingWindow` / `dataRetention`). Cambiar día/semana/mes dentro de esa ventana = 0 queries (slice en memoria). Fuera de la ventana (abril, año, etc.) se amplía con merge. Analítica reutiliza el mismo store. Header = **universo real** (clientes, objetivos, puestos/`quantity`, slots SLA por banda, pico simultáneo, plantel) — sin selectores 24/25 ni 8/12. **192 = jornada de referencia** (universo/viabilidad); **200 = techo de liquidación** (`analisisBolsa.ts`). Bolsa realista = plantilla ACTIVE × 200 × (1 − índice ausencia 3 meses cerrados previos); si no hay historial 3m → **sin índice** (se muestra el techo, no se finge capacidad). Solapas: **Operativa** (Informe / Demanda / Cobertura / Capacidad y bandas), **Humana** (Guardias + ART.12; sliders ausentismo = what-if), **Financiera** (hs-hombre: SLA vs consumo plan/real + novedades + FT; **gasto** también suma francos F/FF, RET no activado 8 hs y REF/ESC — horas asignadas no usadas en cobertura; si el RET se usó el mismo día no se duplica; pirámide objetivo → cliente → empresa; **solo horas, sin precios**; novedades V/E/L/A/AA/PG/SUS = jornada del turno (8 o 12 hs), nunca 24 hs de calendario; Financiera desglosa SUS (no va a Otr); licencias sin `objectiveId` se atribuyen al último puesto de malla o quedan en `SIN_OBJETIVO`), **Herramientas** (Viabilidad / Analítica / Proyección). Informe: vendido/plan/realizado/bolsa, novedades, conclusiones (sin estimado $); períodos día/semana/mes/trimestre/semestre/año; export Excel. Demanda: SLA vs plan vs resultante (plan + ext/adel + ops). **Cobertura** usa la misma fuente que Demanda (`buildDemandaByObjective` / plan+vacante); el drill código/guardia viene de la malla. **Capacidad y bandas** también pinta plan/vacante desde Demanda. Deep-link a Planificación: `/admin/planificacion/?objectiveId=&clientId=&year=&month=` (mes 1–12). Selector de período se bloquea hasta terminar la carga. Quien cubre suma el turno (M=8); FT/novedades no inflan cobertura — el recargo FT es costo/liquidación. Ausentismo real COSP (`shiftId` / `isAbsent` / `AUTO_T30`). **Carga:** primero el extracto mensual CRM (`hours_balances`, 1 doc por objetivo/mes — mismo que el dashboard: cambio de mes instantáneo). Si hay extracto, Informe/Demanda/Financiera pintan a nivel objetivo **sin esperar la malla**; banner «actualizando malla» hasta que llegan guardias, F/RET/REF y desglose fino. Ausencias RRHH van con el catálogo. Malla por mes calendario (misma query que Planificación); overlay = ventana hot. Al tener malla se reescribe el extracto. Recargar en el header. **KPIs cruzados (Dashboard / CRM / Análisis):** SLA = contrato vigente (`pickVigenteSlasForPeriod` + `slaHoursForServiceInRange`); plan = malla (`isPlanificadorPlannedHoursShift` + `calcPlanificadorShiftHours`); realizadas = fichadas reales (`isShiftFichado` / `fichadaHoursForShift`) — si nadie fichó queda 0, no se infiere del plan. CRM pisa el SLA del extracto `hours_balances` con el contrato vivo. Smoke: `npm run eval:analisis-queries` (desde `apps/web2`).
 
@@ -250,15 +260,16 @@ Cuando un empleado falta, el sistema busca reemplazante en este orden (menor a m
 
 ```
 1. Sin turno    — empleado disponible ese día (no tiene turno asignado)
-2. RET          — vigilador en retención pasiva (stand-by)
-3. ESC          — empleado en turno escuela (puede redirigirse al puesto)
-4. Ext. 12hs    — extender turno de 8hs → 12hs (D12/N12) de alguien ya en servicio
+2. RET          — retención pasiva OBLIGADA (no pregunta); radio 15→30 km; al cubrir → turno real del hueco
+3. ESC / REF    — comodín no facturable; al cubrir → turno real del hueco
+4. Ext. 12hs    — extender turno de 8hs → 12hs (D12/N12) + adelanto del siguiente (ADV)
                   ⚠ Requiere validación — no siempre acepta
-5. FT           — llamar a empleado de franco a trabajar
+5. Intercambio  — permuta banda con quien tiene turno posterior en el objetivo
+6. FT           — llamar a empleado de franco a trabajar
                   ⚠ Requiere validación + genera costo extra (horas extras CCT)
 ```
 
-Todos los candidatos deben ser del mismo objetivo. La banda a cubrir es la del empleado ausente (M cubre M, N cubre N, etc.).
+RET puede venir de otro objetivo (radio). La banda a cubrir es la del empleado ausente (M cubre M, N cubre N, etc.).
 
 ---
 

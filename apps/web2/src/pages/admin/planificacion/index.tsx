@@ -664,8 +664,17 @@ function shiftMatchesObjective(data: any, objectiveId: string | undefined | null
 }
 
 /** Cobertura operativa: se muestra en grilla (visual) pero no suma CCT. */
+function isDemoOpsArtifact(data: any): boolean {
+    if (!data) return false;
+    if (data.modoDemoAt) return true;
+    const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
+    return rb === 'MODO_DEMO';
+}
+
 function isOpsCoverageShift(data: any): boolean {
     if (!data) return false;
+    // Artefactos Demo no contaminan la malla de Planificación
+    if (isDemoOpsArtifact(data)) return false;
     // El titular ausente o cubierto NO es un turno de cobertura operativa
     if (data?.operacionallyCovered === true || data?.isAbsent === true) return false;
     const o = String(data?.origin || '').toUpperCase();

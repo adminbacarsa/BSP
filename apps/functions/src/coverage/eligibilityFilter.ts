@@ -14,21 +14,28 @@ export type CandidateType =
   | 'ESC' // ESC / REF redirigibles
   | 'EXTEND'
   | 'ADVANCE'
+  | 'INTERCAMBIO'
   | 'FT';
 
 /**
  * Escalera CCT = protocolo manual (CoverageSessionManager.STEPS).
  * Auto y manual comparten este orden; auto notifica en paralelo y gana el 1º que acepta.
+ * RET es forzado (asignación directa, sin esperar aceptación).
  */
-export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'EXT_DUAL' | 'FT';
+export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'EXT_DUAL' | 'INTERCAMBIO' | 'FT';
 
 export const CASCADE_ORDER: CascadeStepType[] = [
   'SIN_TURNO',
   'RET',
   'ESC',
   'EXT_DUAL',
+  'INTERCAMBIO',
   'FT',
 ];
+
+/** Radio RET: primero 15 km, luego ampliar a 30 km. */
+export const RET_RADIUS_KM_PRIMARY = 15;
+export const RET_RADIUS_KM_EXPANDED = 30;
 
 /** Máx. candidatos notificados en paralelo por paso (o por mitad EXT/ADV). */
 export const BROADCAST_LIMIT = 5;
@@ -55,6 +62,7 @@ export function toCascadeStep(type: string): CascadeStepType | null {
   if (type === 'RET') return 'RET';
   if (type === 'ESC') return 'ESC';
   if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL') return 'EXT_DUAL';
+  if (type === 'INTERCAMBIO') return 'INTERCAMBIO';
   if (type === 'FT') return 'FT';
   return null;
 }
@@ -78,6 +86,7 @@ export function checkEligibility(
   ctx: EligibilityContext,
   candidateType: CandidateType,
   distanceKm?: number,
+  maxDistanceKm: number = RET_RADIUS_KM_PRIMARY,
 ): EligibilityResult {
   const today = new Date().toISOString().slice(0, 10);
 
@@ -95,19 +104,11 @@ export function checkEligibility(
 
   if (
     (candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT' || candidateType === 'ESC') &&
-    distanceKm !== undefined
+    distanceKm !== undefined &&
+    Number.isFinite(distanceKm)
   ) {
-    if (distanceKm > 15) {
-      return { eligible: false, reason: 'DISTANCIA_EXCEDE_15KM' };
-    }
-  }
-
-  if (candidateType === 'RET') {
-    const isTitular = employee.preferredObjectiveId === ctx.objectiveId;
-    const hasExp = !!(employee.experienciaObjetivos || {})[ctx.objectiveId];
-    const isVolante = (employee.volante || []).includes(ctx.objectiveId);
-    if (!isTitular && !hasExp && !isVolante) {
-      return { eligible: false, reason: 'SIN_EXPERIENCIA_EN_OBJETIVO' };
+    if (distanceKm > maxDistanceKm) {
+      return { eligible: false, reason: `DISTANCIA_EXCEDE_${maxDistanceKm}KM` };
     }
   }
 

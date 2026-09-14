@@ -31,6 +31,11 @@ import {
 } from './ops/cronLimits';
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
+import {
+  decideShiftCloseOrRetain,
+  employeeHasPosteriorShift,
+  toTimestampMs,
+} from './coverage/shiftContinuity';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -2838,26 +2843,90 @@ export const autoCompletarTurnos = functions
             alertedNoRelief++;
           }
         } else {
-          // CASO C: Puesto CUSTOM/parcial sin continuidad → cerrar turno automáticamente
-          await queueCompleteUpdate(docSnap.ref, {
-            status: 'COMPLETED',
-            isCompleted: true,
-            realEndTime: now,
-            autoCompletedAt: now,
-            autoCompletedBy: 'SYSTEM_SCHEDULER',
-            autoCloseReason: 'SIN_RELEVO_CUSTOM',
+          // Continuidad bandas: turno posterior mismo objetivo / TURA → RETAIN; si no → AUTO_CLOSE
+          let hasPosterior = false;
+          try {
+            const dayStart = new Date(nowMs);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(nowMs);
+            dayEnd.setHours(23, 59, 59, 999);
+            const daySnap = await db.collection('turnos')
+              .where('empresaId', '==', empId || shift.empresaId)
+              .where('employeeId', '==', shift.employeeId)
+              .where('startTime', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+              .where('startTime', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+              .limit(40)
+              .get();
+            const dayShifts = daySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const currentEndMs = toTimestampMs(shift.endTime) || nowMs;
+            hasPosterior = employeeHasPosteriorShift({
+              employeeId: String(shift.employeeId || ''),
+              objectiveId: String(shift.objectiveId || ''),
+              currentShiftId: docSnap.id,
+              currentEndMs,
+              dayShifts,
+            });
+          } catch (e) {
+            console.warn('[autoCompletarTurnos] Error checking posterior shift:', e);
+          }
+
+          const decision = decideShiftCloseOrRetain({
+            shift: { ...shift, id: docSnap.id },
+            requiresContinuousCoverage24h: false,
+            hasPosteriorShift: hasPosterior,
           });
-          const logRef = db.collection('audit_logs').doc();
-          await queueAuditSet(logRef, {
-            action: 'AUTO_COMPLETE_SHIFT',
-            actorName: 'Sistema (Scheduler)',
-            actorUid: 'SYSTEM',
-            module: 'OPERACIONES',
-            shiftId: docSnap.id,
-            details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-            timestamp: now,
-          });
-          completed++;
+
+          if (decision.action === 'RETAIN') {
+            if (!shift.isRetention || !shift.autoRetentionAt) {
+              await queueCompleteUpdate(docSnap.ref, {
+                isRetention: true,
+                retentionReason: decision.reason,
+                autoRetentionAt: now,
+              });
+            }
+            const existingRet = await db.collection('novedades')
+              .where('shiftId', '==', docSnap.id)
+              .where('type', '==', 'RETENCION_SIN_RELEVO')
+              .limit(1).get();
+            if (existingRet.empty) {
+              const novRef = db.collection('novedades').doc();
+              await queueAuditSet(novRef, {
+                type: 'RETENCION_SIN_RELEVO',
+                status: 'PENDIENTE',
+                shiftId: docSnap.id,
+                objectiveId: shift.objectiveId,
+                objectiveName: shift.objectiveName || '',
+                clientId: shift.clientId || null,
+                empresaId: empId || null,
+                employeeName: shift.employeeName || '',
+                positionName: shift.positionName || '',
+                description: `⏰ RETENCIÓN (${decision.reason}): ${shift.employeeName || ''} en ${shift.objectiveName || ''} — continuidad hasta relevo.`,
+                createdAt: now,
+                source: 'SYSTEM_SCHEDULER',
+              });
+              alertedNoRelief++;
+            }
+          } else {
+            await queueCompleteUpdate(docSnap.ref, {
+              status: 'COMPLETED',
+              isCompleted: true,
+              realEndTime: now,
+              autoCompletedAt: now,
+              autoCompletedBy: 'SYSTEM_SCHEDULER',
+              autoCloseReason: decision.reason || 'SIN_RELEVO_CUSTOM',
+            });
+            const logRef = db.collection('audit_logs').doc();
+            await queueAuditSet(logRef, {
+              action: 'AUTO_COMPLETE_SHIFT',
+              actorName: 'Sistema (Scheduler)',
+              actorUid: 'SYSTEM',
+              module: 'OPERACIONES',
+              shiftId: docSnap.id,
+              details: `Turno finalizado (${decision.reason}): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+              timestamp: now,
+            });
+            completed++;
+          }
         }
       }
     }

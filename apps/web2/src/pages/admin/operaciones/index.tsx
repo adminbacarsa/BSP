@@ -527,6 +527,47 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             }
         } catch (e: any) { toast.error('Error al iniciar protocolo: ' + (e?.message || e?.code || String(e))); }
     };
+    const handleMedicalNoCoverage = async () => {
+        try {
+            await updateDocForEmpresa('turnos', shift.id, {
+                status: 'INTERRUPTED',
+                realEndTime: serverTimestamp(),
+                interrupted: true,
+                interruptionReason: 'URGENCIA_MEDICA',
+                leftWithoutCoverage: true,
+            }, empresaId, migracionCompleta);
+            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+            const _shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj || Date.now());
+            const _dateStr = `${_shiftDate.getFullYear()}-${String(_shiftDate.getMonth()+1).padStart(2,'0')}-${String(_shiftDate.getDate()).padStart(2,'0')}`;
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({
+                type: 'BAJA_MEDICA_SIN_COBERTURA',
+                status: 'pending',
+                shiftId: shift.id,
+                clientId: shift.clientId || null,
+                objectiveId: shift.objectiveId || null,
+                objectiveName: shift.objectiveName || null,
+                employeeId: shift.employeeId,
+                employeeName: shift.employeeName,
+                description: `Urgencia médica: ${shift.employeeName || ''} dejó el puesto sin cobertura momentánea en ${shift.objectiveName || ''}.`,
+                createdAt: serverTimestamp(),
+                reportedBy: 'OPERACIONES',
+            }, shiftEmpresaId));
+            addDoc(collection(db, 'ausencias'), stampEmpresaId({
+                employeeId: shift.employeeId, employeeName: shift.employeeName || '',
+                startDate: _dateStr, endDate: _dateStr,
+                type: 'Enfermedad', absenceType: 'E',
+                origin: 'INTERRUPTION_MEDICA', shiftId: shift.id,
+                objectiveId: shift.objectiveId || null, objectiveName: shift.objectiveName || null,
+                positionName: shift.positionName || null,
+                reason: `Urgencia médica — baja sin cobertura · ${shift.objectiveName || ''}`,
+                status: 'Confirmada', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
+            }, shiftEmpresaId)).catch(() => {});
+            toast.success('Baja médica registrada (sin vacante / sin protocolo).');
+            onClose();
+        } catch (e: any) {
+            toast.error('Error: ' + (e?.message || String(e)));
+        }
+    };
     return (
         <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
@@ -561,17 +602,23 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                             {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'}
                         </p>
                     </div>
-                    {isAlone ? (
-                        <button onClick={handleProtocol}
-                            className="w-full py-3.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors text-sm">
-                            INICIAR PROTOCOLO DE COBERTURA
+                    <div className="space-y-2">
+                        {isAlone ? (
+                            <button onClick={handleProtocol}
+                                className="w-full py-3.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors text-sm">
+                                INICIAR PROTOCOLO DE COBERTURA
+                            </button>
+                        ) : (
+                            <button onClick={handleLog}
+                                className="w-full py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition-colors text-sm">
+                                REGISTRAR NOVEDAD (CUBIERTO)
+                            </button>
+                        )}
+                        <button onClick={handleMedicalNoCoverage}
+                            className="w-full py-3 bg-rose-50 text-rose-800 border border-rose-200 font-bold rounded-xl hover:bg-rose-100 transition-colors text-sm">
+                            URGENCIA MÉDICA — SALIR SIN COBERTURA
                         </button>
-                    ) : (
-                        <button onClick={handleLog}
-                            className="w-full py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition-colors text-sm">
-                            REGISTRAR NOVEDAD (CUBIERTO)
-                        </button>
-                    )}
+                    </div>
                 </div>
             </div>
         </div>
