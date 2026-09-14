@@ -10266,7 +10266,7 @@ export default function PlanificacionPage() {
                                         let absence = absencesMap[key];
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
-                                        const coveredByCell = p?.coveredBy || s?.coveredBy;
+                                        const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
                                         let hasConflict = shouldShowLeaveConflictSiren({
                                             shiftCode: effectiveCode,
                                             absence,
@@ -10276,7 +10276,7 @@ export default function PlanificacionPage() {
                                         });
                                         let statusIndicator = null;
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
+                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if ((s.status === 'ABSENT' || s.isAbsent) && (s.operacionallyCovered || s.coveredByEmployeeId || s.coveredByEmployeeName || s.coveredBy || s.coverageStatus === 'COVERED')) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
@@ -12825,7 +12825,7 @@ export default function PlanificacionPage() {
                                             };
                                         }
                                     }
-                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy;
+                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy || shift?.coveredByEmployeeName || pending?.coveredByEmployeeName;
                                     if (coveredByRaw) {
                                         const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
                                         return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };

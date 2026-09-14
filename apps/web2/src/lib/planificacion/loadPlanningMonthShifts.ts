@@ -143,7 +143,7 @@ function turnoToCell(
         dateStr,
         code,
         positionName: String(data.positionName || data.puesto || '').trim() || undefined,
-        coveredBy: data.coveredBy ? String(data.coveredBy) : undefined,
+        coveredBy: data.coveredBy ? String(data.coveredBy) : (data.coveredByEmployeeName ? String(data.coveredByEmployeeName) : undefined),
         coveredByEmployeeId: data.coveredByEmployeeId ? String(data.coveredByEmployeeId) : undefined,
         coveredByEmployeeName: data.coveredByEmployeeName ? String(data.coveredByEmployeeName) : undefined,
         coversEmployeeId: data.coversEmployeeId ? String(data.coversEmployeeId) : undefined,

@@ -23,7 +23,7 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         hasNovedad: data.hasNovedad,
         plannedNovedad: data.plannedNovedad,
         positionName: data.positionName,
-        coveredBy: data.coveredBy,
+        coveredBy: data.coveredBy || data.coveredByEmployeeName || undefined,
         coveragePackageId: data.coveragePackageId,
         coverageSegmentRole: data.coverageSegmentRole,
         coversPositionName: data.coversPositionName,

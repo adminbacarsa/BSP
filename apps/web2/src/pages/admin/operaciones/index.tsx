@@ -27,6 +27,10 @@ import { getFunctions, httpsCallable } from 'firebase/functions';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
 import { app, db, onSnapshotFresh } from '@/lib/firebase';
+import {
+    absentShiftCoveragePatch,
+    syncAusenciaCoberturaGestionada,
+} from '@/lib/operaciones/syncAusenciaCobertura';
 import { getAuth } from 'firebase/auth';
 import {
     novedadActorName,
@@ -842,23 +846,37 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
 
     const isRealVacantShift = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
 
-    const markCoverageResolved = (batch: ReturnType<typeof writeBatch>, coverageType: string, coveringEmployee?: any) => {
+    const markCoverageResolved = async (
+        batch: ReturnType<typeof writeBatch>,
+        coverageType: string,
+        coveringEmployee?: any,
+    ) => {
         if (!absenceShift?.id || absenceShift.isVirtual || String(absenceShift.id).startsWith('V124_') || String(absenceShift.id).startsWith('SLA_GAP')) return;
         if (absenceShift.isUnassigned || absenceShift.isAbsent || absenceShift.isPotentialAbsence) {
             const covEmpId   = coveringEmployee?.id || coveringEmployee?.employeeId || null;
             const covEmpName = coveringEmployee?.fullName || coveringEmployee?.employeeName || coveringEmployee?.name || null;
-            const isAbsence  = absenceShift.isAbsent || absenceShift.isPotentialAbsence;
-            batch.update(doc(db, 'turnos', absenceShift.id), {
-                // Para vacantes: status=COVERED (se oculta de operaciones)
-                // Para ausencias: mantener isAbsent=true, solo agregar info de cobertura (sigue en RRHH)
-                ...(isAbsence ? {} : { status: 'COVERED' }),
-                resolvedBy:            'OPERACIONES',
-                coverageType,                           // RETENTION | EARLY_START | RETEN | FRANCO
-                coveredAt:             serverTimestamp(),
-                coveredByEmployeeId:   covEmpId,        // quién cubrió
-                coveredByEmployeeName: covEmpName,      // nombre para mostrar en planificación
-                operacionallyCovered:  true,            // slot operativo cubierto
-            });
+            const isAbsence  = !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence);
+            // Vacante → status COVERED. Ausencia → no pisar ABSENT; sync RRHH a GESTIONADA.
+            batch.update(
+                doc(db, 'turnos', absenceShift.id),
+                absentShiftCoveragePatch({
+                    coveredByEmployeeId: covEmpId,
+                    coveredByEmployeeName: covEmpName,
+                    coverageType,
+                    isAbsence,
+                }),
+            );
+            await syncAusenciaCoberturaGestionada(
+                db,
+                {
+                    shiftId: absenceShift.id,
+                    coveredByEmployeeId: covEmpId,
+                    coveredByEmployeeName: covEmpName,
+                    coverageType,
+                    empresaId: tenantId(absenceShift) || null,
+                },
+                batch,
+            );
         }
     };
 
@@ -868,7 +886,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'RETENCION', title: 'Quedaste retenido', read: false, body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'RETENTION', s);
+            await markCoverageResolved(batch, 'RETENTION', s);
             await batch.commit();
             await Promise.race([
                 waitForPendingWrites(db),
@@ -897,7 +915,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 : Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
             batch.update(doc(db, 'turnos', s.id), { adjustedStartTime: vacancyStart, isEarlyStart: true });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'ADELANTO', title: 'Turno adelantado', read: false, body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'EARLY_START', s);
+            await markCoverageResolved(batch, 'EARLY_START', s);
             await batch.commit();
             await Promise.race([
                 waitForPendingWrites(db),
@@ -927,7 +945,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
             const batch = writeBatch(db);
             batch.set(newRef, stampEmpresaId({ employeeId: emp.id, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, startTime: Timestamp.fromDate(slotStart), endTime: Timestamp.fromDate(endTime), status: 'PENDING', origin: 'RETEN', isReten: true, absenceShiftId: absenceShift.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: emp.id, type: 'RETEN', title: 'Convocatoria de Retén', read: false, body: `Sos convocado como retén en ${absenceShift.objectiveName} (${absenceShift.positionName}).`, objectiveId: absenceShift.objectiveId, shiftId: newRef.id, createdAt: serverTimestamp() }, tenantId(absenceShift)));
-            markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
+            await markCoverageResolved(batch, 'RETEN', { id: emp.id, fullName: empName });
             await batch.commit();
             await Promise.race([
                 waitForPendingWrites(db),
@@ -968,7 +986,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 comments: `Franco Trabajado (Convocado) — cubre ${absenceShift.objectiveName || 'vacante'}`,
             });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
-            markCoverageResolved(batch, 'FRANCO', s);
+            await markCoverageResolved(batch, 'FRANCO', s);
             await batch.commit();
             await Promise.race([
                 waitForPendingWrites(db),
@@ -1003,7 +1021,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
                 shiftId: s.id, createdAt: serverTimestamp(),
             }, tenantId(s)));
-            markCoverageResolved(batch, 'RET_PASIVO', s);
+            await markCoverageResolved(batch, 'RET_PASIVO', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'RET_ACTIVADO', title: 'Retén pasivo activado', status: 'pending',
@@ -1035,7 +1053,7 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
                 objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
                 shiftId: s.id, createdAt: serverTimestamp(),
             }, tenantId(s)));
-            markCoverageResolved(batch, 'ESCUELA', s);
+            await markCoverageResolved(batch, 'ESCUELA', s);
             await batch.commit();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
                 type: 'ESC_REDIRIGIDO', title: 'Escuela redirigida al puesto', status: 'pending',

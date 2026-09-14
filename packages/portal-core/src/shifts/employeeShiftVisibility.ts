@@ -71,6 +71,10 @@ export function isShiftVisibleToEmployee(
   shift: EmployeeShiftVisibilityInput,
   publishedKeys: Set<string> | null,
 ): boolean {
+  // Ausente: el titular no ve ese turno como fichable (la cobertura es otro doc).
+  const statusEarly = String(shift.status || '').toUpperCase();
+  if (shift.isAbsent === true || statusEarly === 'ABSENT') return false;
+
   // EV / operativos: visibles aunque el mes esté en borrador (no dependen del crono).
   if (isOperationalPortalShift(shift)) return true;
 

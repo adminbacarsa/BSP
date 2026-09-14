@@ -1,6 +1,12 @@
 import type { Shift } from '@cosp/portal-types';
 import { toDate } from '@cosp/portal-core';
 
+
+function isAbsentShift(shift: Shift): boolean {
+  if (shift.isAbsent === true) return true;
+  return String(shift.status || '').toUpperCase() === 'ABSENT';
+}
+
 export function sortShiftsByStart(shifts: Shift[]): Shift[] {
   return [...shifts].sort((a, b) => {
     const ad = toDate(a.startTime)?.getTime() ?? 0;
@@ -24,6 +30,7 @@ export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | un
   endOfDay.setHours(23, 59, 59, 999);
 
   return sorted.find((s) => {
+    if (isAbsentShift(s)) return false;
     const start = toDate(s.startTime);
     const end = toDate(s.endTime);
     if (!start || start < startOfDay || start > endOfDay) return false;
@@ -43,7 +50,7 @@ export function pickNextShift(shifts: Shift[], now = new Date()): Shift | undefi
   const sorted = sortShiftsByStart(shifts);
   const t = now.getTime();
   return sorted.find((s) => {
-    if (s.isFranco) return false;
+    if (s.isFranco || isAbsentShift(s)) return false;
     const start = toDate(s.startTime);
     return !!start && start.getTime() > t;
   });

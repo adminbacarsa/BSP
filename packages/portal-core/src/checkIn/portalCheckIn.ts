@@ -42,6 +42,16 @@ export function getCheckInTiming(
   const diffMinutes = start ? Math.round((start.getTime() - now.getTime()) / 60000) : null;
   const shiftEnded = end ? end.getTime() <= now.getTime() : false;
 
+  // Turno del titular ausente: no fichable (la cobertura es otro documento).
+  if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
+    return {
+      diffMinutes,
+      canCheckIn: false,
+      lateWindow: false,
+      tooEarly: false,
+    };
+  }
+
   // Cobertura ops (urgencia): puede fichar al llegar al objetivo, sin ventana ±15/−5.
   // Turnos normales siguen con la regla de cronograma más abajo.
   if (isOperationsCoverageShift(shift) && !shift.isFranco) {
