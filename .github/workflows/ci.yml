@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, eventos-deploy]
+  pull_request:
+    branches: [main, eventos-deploy]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web2-quality:
+    name: web2 — typecheck, tests, smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web2
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/web2/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck (lib analisis incremental)
+        run: npm run typecheck:ci
+
+      - name: Unit tests (Vitest)
+        run: npm run test
+
+      - name: Smoke eval planificación
+        run: npm run eval:franco-streak
+
+  functions-quality:
+    name: functions — compile
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/functions
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/functions/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript build
+        run: npm run build

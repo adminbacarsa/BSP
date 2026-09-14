@@ -9,6 +9,7 @@
     "start": "next start",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck:ci": "tsc --noEmit -p tsconfig.ci.json",
     "eval:guard-capacity": "npx tsx scripts/eval-guard-capacity.ts",
     "eval:custom-cover": "npx tsx scripts/eval-custom-cover-cycle.ts",
     "eval:multipax-24hs": "npx tsx scripts/eval-multipax-24hs.ts",
