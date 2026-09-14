@@ -4448,6 +4448,15 @@ export default function PlanificacionPage() {
                                 </div>
                                 <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
                                     <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center">
+                                        <div className="w-3 h-3 rounded-full bg-teal-500 border-2 border-white shadow-sm ring-1 ring-slate-100"/>
+                                    </div>
+                                    <div>
+                                        <p className="text-xs font-black text-slate-700">Ausente cubierto</p>
+                                        <p className="text-[10px] text-slate-400">AA con cobertura Ops · no es presencia</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2.5 p-2 rounded-lg hover:bg-slate-50">
+                                    <div className="w-9 h-9 rounded-lg bg-white border border-slate-200 shrink-0 flex items-center justify-center">
                                         <div className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse"/>
                                     </div>
                                     <div>
@@ -10276,7 +10285,15 @@ export default function PlanificacionPage() {
                                         });
                                         let statusIndicator = null;
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if ((s.status === 'ABSENT' || s.isAbsent) && (s.operacionallyCovered || s.coveredByEmployeeId || s.coveredByEmployeeName || s.coveredBy || s.coverageStatus === 'COVERED')) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
+                                        // Punto de estado: verde=presente, rojo=ausente sin cubrir, teal=ausente ya cubierto (NO confundir con presente).
+                                        if (s && !isSnapshotView) {
+                                            const coveredAbs =
+                                                (s.status === 'ABSENT' || s.isAbsent) &&
+                                                (s.operacionallyCovered || s.coveredByEmployeeId || s.coveredByEmployeeName || s.coveredBy || s.coverageStatus === 'COVERED');
+                                            if (coveredAbs) statusIndicator = 'bg-teal-500';
+                                            else if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
+                                            else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
+                                        }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
