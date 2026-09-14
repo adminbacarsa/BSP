@@ -112,12 +112,7 @@ import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     filterSlasForPlanningTenant,
     filterSlasForPlanningContext,
-    formatSlaRangeHint,
     pickSlaForPlanningMonth,
-    planningMonthHasActiveSla,
-    slaBelongsToPlanningClient,
-    buildPlanningPositionStructure,
-    DEFAULT_PLANNING_SHIFTS,
     isPlanningPositionExcludedOnDate,
     isPlanningShiftExcludedOnDate,
     getPlanningExcludedShiftCodesOnDate,
@@ -128,8 +123,6 @@ import {
     abbrevPlanningPositionName,
     excludedPositionsCellLabel,
     excludedPositionsTooltip,
-    resolvePlanningMonthSlaHours,
-    type SlaPlanningRow,
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
@@ -137,6 +130,7 @@ import { rebuildHoursBalanceForObjectiveMonth } from '@/lib/hoursBalance';
 import { useAuth } from '@/context/AuthContext';
 import { usePlanificacionFirestore } from '@/hooks/usePlanificacionFirestore';
 import { usePlanificacionGrupoSla } from '@/hooks/usePlanificacionGrupoSla';
+import { usePlanificacionObjectiveSla } from '@/hooks/usePlanificacionObjectiveSla';
 import { toast } from 'sonner';
 import {
     planToastBulk,
@@ -185,7 +179,7 @@ import {
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
-import { mergeEncargadoIntoAssignments, isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
+import { isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import { positionIncludeInSlaTotals } from '@/lib/servicios/auxiliaryPositionPolicy';
 import { calculatePositionMonthHours } from '@/lib/servicios/slaHoursCalculator';
@@ -762,9 +756,6 @@ export default function PlanificacionPage() {
     const [operatorEmail, setOperatorEmail] = useState('');
     const [usersMap, setUsersMap] = useState<Record<string, string>>({}); 
 
-    const [positionStructure, setPositionStructure] = useState<any[]>([]);
-    const [activePlanningSlaRow, setActivePlanningSlaRow] = useState<SlaPlanningRow | null>(null);
-    const [slaVendidas, setSlaVendidas] = useState<number>(0);
     const [showDiagnostic, setShowDiagnostic] = useState<boolean>(false);
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
     const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
@@ -772,6 +763,27 @@ export default function PlanificacionPage() {
     const [isUnpublishing, setIsUnpublishing] = useState(false);
     const [isRefreshingCrono, setIsRefreshingCrono] = useState(false);
     const [dataRefreshNonce, setDataRefreshNonce] = useState(0);
+    const {
+        positionStructure,
+        activePlanningSlaRow,
+        slaVendidas,
+        hasActiveSLA,
+        slaPlanningHint,
+        activeSlaPositionAssignments,
+        activeSlaServiceRules,
+        activeSlaServiceRotations,
+    } = usePlanificacionObjectiveSla({
+        selectedClient,
+        selectedObjective,
+        currentDate,
+        empresaId,
+        migracionCompleta,
+        scopeEmpresa,
+        clients,
+        tenantClientIds,
+        slaIdToObjId,
+        dataRefreshNonce,
+    });
     const [publishConfirmModal, setPublishConfirmModal] = useState<{
         isRepublish: boolean;
         warnings: string[];
@@ -786,12 +798,6 @@ export default function PlanificacionPage() {
     const [cellEditMode, setCellEditMode] = useState(false);
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
     const [activePosition, setActivePosition] = useState<string | null>(null);
-    const [hasActiveSLA, setHasActiveSLA] = useState<boolean>(true);
-    const [slaPlanningHint, setSlaPlanningHint] = useState('');
-    const [activeSlaPositionAssignments, setActiveSlaPositionAssignments] = useState<import('@/services/slaService').PositionAssignment[] | null>(null);
-    const [activeSlaServiceRules, setActiveSlaServiceRules] = useState<import("@/services/slaService").ServiceRule[] | null>(null);
-    const [activeSlaServiceRotations, setActiveSlaServiceRotations] = useState<import('@/services/slaService').ServiceRotation[] | null>(null);
-
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [showGuardiaSearch, setShowGuardiaSearch] = useState(false);
@@ -4052,102 +4058,6 @@ export default function PlanificacionPage() {
         const unsubAuth = onAuthStateChanged(auth, (user) => { if (user) { setOperatorEmail(user.email || ''); setOperatorName(user.displayName || user.email || "Usuario"); } else { setOperatorName("No Logueado"); } });
         return () => unsubAuth();
     }, []);
-
-    // 🛑 V8.60 - SELECCIÓN DE SERVICIO POR FECHA: usa la versión de servicios_sla vigente para el mes visualizado
-    useEffect(() => {
-        if (!selectedClient || !selectedObjective) {
-            setPositionStructure([]);
-            setActivePlanningSlaRow(null);
-            setHasActiveSLA(true);
-            setSlaVendidas(0);
-            setSlaPlanningHint('');
-            return;
-        }
-        const fetchSLA = async () => {
-            try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
-                const allDocs = filterSlasForPlanningTenant(
-                    snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
-                    empresaId,
-                    scopeEmpresa,
-                    tenantClientIds,
-                );
-                const clientDocs = allDocs.filter((d) =>
-                    slaBelongsToPlanningClient(d, selectedClient, clients),
-                );
-                const matching = filterSlasForPlanningContext(
-                    allDocs,
-                    selectedClient,
-                    selectedObjective,
-                    clients,
-                    slaIdToObjId,
-                );
-
-                const viewYear = currentDate.getFullYear();
-                const viewMonth = currentDate.getMonth();
-                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                const srvForStructure = srv ?? fallback;
-                const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
-
-                if (!monthHasSla) {
-                    if (matching.length > 0) {
-                        setSlaPlanningHint(`contratos del objetivo: ${formatSlaRangeHint(matching)}`);
-                    } else if (clientDocs.length > 0) {
-                        setSlaPlanningHint(`${clientDocs.length} contrato(s) del cliente no vinculan a este objetivo — revisá Servicios`);
-                    } else if (allDocs.length > 0) {
-                        setSlaPlanningHint(`${allDocs.length} contrato(s) en Servicios no coinciden con este cliente (revisá clientId tras restore)`);
-                    } else {
-                        setSlaPlanningHint('sin contratos en Servicios para este cliente');
-                    }
-                } else {
-                    setSlaPlanningHint('');
-                }
-
-                const { structure, usedSlaFallback } = buildPlanningPositionStructure(srvForStructure, {
-                    monthHasSla,
-                    hasExactMatch,
-                });
-                if (structure.length === 0) {
-                    console.warn('CRONO: Sin contrato SLA para este mes; estructura mínima de respaldo.');
-                    structure.push({
-                        positionName: 'General',
-                        shifts: DEFAULT_PLANNING_SHIFTS.map((s) => ({ ...s })),
-                        qty: 1,
-                        activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
-                        coverageType: '24hs',
-                    });
-                } else if (usedSlaFallback) {
-                    console.info('CRONO: Contrato SLA vigente sin puestos/turnos configurados; usando M/T/N por defecto.');
-                }
-                setHasActiveSLA(monthHasSla);
-                setPositionStructure(structure);
-                setActivePlanningSlaRow(srvForStructure ?? null);
-                setActiveSlaPositionAssignments(mergeEncargadoIntoAssignments({
-                    positionAssignments: srvForStructure?.positionAssignments,
-                    encargadoEmployeeId: typeof srvForStructure?.encargadoEmployeeId === 'string' ? srvForStructure.encargadoEmployeeId : undefined,
-                    encargadoEmployeeName: typeof srvForStructure?.encargadoEmployeeName === 'string' ? srvForStructure.encargadoEmployeeName : undefined,
-                    positions: srvForStructure?.positions,
-                }) ?? null);
-                setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
-                const _loadedRot = srvForStructure?.serviceRotations ?? null;
-                console.log('[CRONO rot] slaId:', srvForStructure?.id, '| serviceRotations:', _loadedRot?.length ?? 'null', _loadedRot?.map((r: any) => ({ id: r.id, mode: r.cycleMode, entries: r.periods?.[0]?.entries?.map((e: any) => ({ eid: e.employeeId, sc: e.shiftCode })) })));
-                setActiveSlaServiceRotations(_loadedRot);
-                setSlaVendidas(
-                    monthHasSla && srvForStructure
-                        ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
-                        : 0,
-                );
-            } catch (e) {
-                console.error("CRONO SLA ERROR:", e);
-                setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
-                setActivePlanningSlaRow(null);
-                setHasActiveSLA(false);
-                setSlaVendidas(0);
-                setSlaPlanningHint('error al cargar contratos');
-            }
-        };
-        fetchSLA();
-    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
 
     // Resetear autorización 200h al cambiar de objetivo o mes
     useEffect(() => {
