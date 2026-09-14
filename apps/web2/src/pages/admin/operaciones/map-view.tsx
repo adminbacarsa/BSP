@@ -7,6 +7,7 @@ import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { toast } from 'sonner';
 import { logOpsBackgroundWarn, logOpsError, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
+import { registrarBitacoraOpsBg } from '@/lib/operaciones/registrarBitacoraOps';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
@@ -22,17 +23,6 @@ import {
     newCoverageEventId,
     resolveTitularFromAbsenceOrVacancy,
 } from '@/lib/operaciones/coverageLedger';
-
-const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
-    try {
-        const auth = getAuth();
-        const operatorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
-        const data: any = { action, module: 'OPERACIONES', details, timestamp: serverTimestamp(), actorName: operatorName, actorUid: auth.currentUser?.uid || null };
-        if (extra?.objectiveName != null) data.objectiveName = extra.objectiveName;
-        if (extra?.clientName != null) data.clientName = extra.clientName;
-        await addDoc(collection(db, 'audit_logs'), data);
-    } catch (e) { logOpsError('registrarBitacora', e, { userMessage: 'No se pudo registrar en bitácora.' }); }
-};
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
@@ -1238,11 +1228,12 @@ export default function TacticalMapView() {
                 });
             });
             await batch.commit();
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'DESCARTAR_NOVEDADES_TIPO', module: 'OPERACIONES', actorName,
-                timestamp: serverTimestamp(),
-                details: `Descartó ${toAtend.length} novedades tipo ${type}.`,
-            }, empresaId)).catch(() => {});
+            registrarBitacoraOpsBg(
+                'DESCARTAR_NOVEDADES_TIPO',
+                `Descartó ${toAtend.length} novedades tipo ${type}.`,
+                empresaId,
+                { actorName },
+            );
             toast.success(`${toAtend.length} novedades descartadas`);
         } catch { toast.error('Error al descartar novedades'); }
     };
