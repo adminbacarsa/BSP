@@ -13,6 +13,10 @@ export type OpsAuditLogFields = {
     employeeId?: string;
     employeeName?: string;
     shiftId?: string;
+    /** Campos extra (actorId, userRole, autoStarted, …) */
+    meta?: Record<string, unknown>;
+    /** Por defecto true — algunos eventos de guardia no llevan module. */
+    includeModule?: boolean;
 };
 
 function resolveOpsActorName(override?: string): string {
@@ -34,14 +38,20 @@ export async function registrarBitacoraOps(
 ): Promise<void> {
     try {
         const auth = getAuth();
+        const meta = extra?.meta ?? {};
         const payload: Record<string, unknown> = {
             action,
-            module: 'OPERACIONES',
             details,
             timestamp: serverTimestamp(),
             actorName: resolveOpsActorName(extra?.actorName),
-            actorUid: auth.currentUser?.uid || null,
+            ...meta,
         };
+        if (extra?.includeModule !== false) {
+            payload.module = 'OPERACIONES';
+        }
+        if (!('actorId' in meta) && !('actorUid' in meta)) {
+            payload.actorUid = auth.currentUser?.uid || null;
+        }
         if (extra?.objectiveId != null) payload.objectiveId = extra.objectiveId;
         if (extra?.objectiveName != null) payload.objectiveName = extra.objectiveName;
         if (extra?.clientId != null) payload.clientId = extra.clientId;

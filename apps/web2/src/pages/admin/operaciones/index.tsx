@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { logOpsBackgroundWarn, logOpsError, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
+import { registrarBitacoraOps, registrarBitacoraOpsBg } from '@/lib/operaciones/registrarBitacoraOps';
 import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
@@ -258,14 +259,12 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                 read: false, createdAt: nowTs,
             }, shiftEmpresaId));
 
-            // 4. Audit log
-            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'INTERCAMBIO_TURNO',
-                module: 'OPERACIONES',
-                actorName: 'Operador',
-                timestamp: nowTs,
-                details: `Intercambio: ${incomingShift.employeeName} toma turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)}-${formatTimeSimple(guardBNextShift.endDateObj)})`,
-            }, shiftEmpresaId));
+            await registrarBitacoraOps(
+                'INTERCAMBIO_TURNO',
+                `Intercambio: ${incomingShift.employeeName} toma turno de ${coveringName} en ${guardBNextShift.objectiveName} (${formatTimeSimple(guardBNextShift.shiftDateObj)}-${formatTimeSimple(guardBNextShift.endDateObj)})`,
+                shiftEmpresaId,
+                { actorName: 'Operador' },
+            );
 
             toast.success(`Intercambio realizado. ${incomingShift.employeeName} cubre el turno de ${coveringName}.`);
             onClose();
@@ -463,17 +462,18 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
             await updateDocForEmpresa('turnos', shift.id, { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
             const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-            // Bitácora
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'BAJA_CUBIERTA', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `${shift.employeeName} – baja anticipada (puesto cubierto) en ${shift.objectiveName || ''}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
+            registrarBitacoraOpsBg(
+                'BAJA_CUBIERTA',
+                `${shift.employeeName} – baja anticipada (puesto cubierto) en ${shift.objectiveName || ''}.`,
+                String(shift.empresaId || empresaId || '').trim(),
+                {
+                    employeeId: shift.employeeId,
+                    employeeName: shift.employeeName,
+                    objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName,
+                    shiftId: shift.id,
+                },
+            );
             toast.success("Baja registrada. Puesto cubierto.");
             onClose();
         } catch (e: any) { toast.error('Error al registrar baja: ' + (e?.message || e?.code || String(e))); }
@@ -514,17 +514,18 @@ const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any
                 reason: `Retiro anticipado — ${shift.objectiveName || ''} (${shift.positionName || ''})`,
                 status: 'Confirmada', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
             }, shiftEmpresaId)).catch(() => {});
-            // Bitácora
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'BAJA_PROTOCOLO', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `${shift.employeeName} – baja anticipada (protocolo vacante) en ${shift.objectiveName || ''}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
+            registrarBitacoraOpsBg(
+                'BAJA_PROTOCOLO',
+                `${shift.employeeName} – baja anticipada (protocolo vacante) en ${shift.objectiveName || ''}.`,
+                String(shift.empresaId || empresaId || '').trim(),
+                {
+                    employeeId: shift.employeeId,
+                    employeeName: shift.employeeName,
+                    objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName,
+                    shiftId: shift.id,
+                },
+            );
         } catch (e: any) { toast.error('Error al iniciar protocolo: ' + (e?.message || e?.code || String(e))); }
     };
     const handleMedicalNoCoverage = async () => {
@@ -1036,7 +1037,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención de guardia', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, absenceShiftId: absenceShift.id, description: `${s.employeeName} retenido hasta ${hiEnd} por ausencia de ${absenceShift.employeeName || ''}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'RETENCION', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} retenido hasta ${hiEnd} en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
+            registrarBitacoraOpsBg('RETENCION', `${s.employeeName} retenido hasta ${hiEnd} en ${absenceShift.objectiveName || ''}.`, tenantId(s), { employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id });
             toast.success(`${s.employeeName} retenido hasta ${hiEnd}`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -1069,7 +1070,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto de turno', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `Turno de ${s.employeeName} adelantado desde ${formatTimeSimple(s.shiftDateObj)}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'ADELANTO_TURNO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `Turno de ${s.employeeName} adelantado en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
+            registrarBitacoraOpsBg('ADELANTO_TURNO', `Turno de ${s.employeeName} adelantado en ${absenceShift.objectiveName || ''}.`, tenantId(s), { employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id });
             toast.success(`Turno de ${s.employeeName} adelantado`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -1137,7 +1138,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${empName} convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(absenceShift)));
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'CONVOCATORIA_RETEN', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, details: `${empName} convocado como retén en ${absenceShift.objectiveName || ''}.` }, tenantId(absenceShift))).catch(() => {});
+            registrarBitacoraOpsBg('CONVOCATORIA_RETEN', `${empName} convocado como retén en ${absenceShift.objectiveName || ''}.`, tenantId(absenceShift), { employeeId: emp.id, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id });
             toast.success(`${empName} convocado como retén`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -1178,7 +1179,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 }
             });
             await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, description: `${s.employeeName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tenantId(s)));
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'FRANCO_TRABAJADO', module: 'OPERACIONES', actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador', timestamp: serverTimestamp(), employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id, details: `${s.employeeName} convocado (Franco Trabajado) en ${absenceShift.objectiveName || ''}.` }, tenantId(s))).catch(() => {});
+            registrarBitacoraOpsBg('FRANCO_TRABAJADO', `${s.employeeName} convocado (Franco Trabajado) en ${absenceShift.objectiveName || ''}.`, tenantId(s), { employeeId: s.employeeId, employeeName: s.employeeName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: s.id });
             toast.success(`${s.employeeName} convocado (Franco Trabajado)`);
             onClose();
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
@@ -3043,18 +3044,22 @@ export default function OperacionesPage() {
         const authInst = getAuth();
         const uid = authInst.currentUser?.uid;
         if (!uid || !empresaId) return;
-        addDoc(collection(db, 'audit_logs'), {
-            action: session.isAutoMode ? 'GUARDIA_FINALIZADA' : 'GUARDIA_INICIADA',
-            actorId: uid,
-            actorName: authInst.currentUser?.email?.split('@')[0] || 'Operador',
-            userRole: userRole || 'desconocido',
-            autoStarted: isCCOperator && !session.isAutoMode,
-            empresaId,
-            timestamp: serverTimestamp(),
-            details: session.isAutoMode
+        registrarBitacoraOpsBg(
+            session.isAutoMode ? 'GUARDIA_FINALIZADA' : 'GUARDIA_INICIADA',
+            session.isAutoMode
                 ? 'Operador finalizó guardia en CC'
                 : (isCCOperator ? 'Guardia iniciada automáticamente (rol OPERADOR)' : 'Operador inició guardia manualmente'),
-        }).catch(() => {});
+            empresaId,
+            {
+                actorName: authInst.currentUser?.email?.split('@')[0] || 'Operador',
+                includeModule: false,
+                meta: {
+                    actorId: uid,
+                    userRole: userRole || 'desconocido',
+                    autoStarted: isCCOperator && !session.isAutoMode,
+                },
+            },
+        );
     }, [session.isAutoMode, session.loading]);
 
     const [detailNovedad, setDetailNovedad] = useState<any>(null);
@@ -3504,13 +3509,12 @@ export default function OperacionesPage() {
                 });
             });
             await batch.commit();
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'DESCARTAR_NOVEDADES_TIPO',
-                module: 'OPERACIONES',
-                actorName,
-                timestamp: serverTimestamp(),
-                details: `Descartó ${toAtend.length} novedades tipo ${type}.`,
-            }, empresaId)).catch(() => {});
+            registrarBitacoraOpsBg(
+                'DESCARTAR_NOVEDADES_TIPO',
+                `Descartó ${toAtend.length} novedades tipo ${type}.`,
+                empresaId,
+                { actorName },
+            );
             toast.success(`${toAtend.length} novedades descartadas`);
         } catch(e) { toast.error('Error al descartar novedades'); }
     };
@@ -3569,15 +3573,12 @@ export default function OperacionesPage() {
                 atendidaPor: actorName,
                 atendidaPorUid: auth.currentUser?.uid || null,
             });
-            addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'ATENDER_NOVEDAD',
-                module: 'OPERACIONES',
-                actorName,
-                timestamp: serverTimestamp(),
-                objectiveId: novedad.objectiveId,
-                objectiveName: novedad.objectiveName,
-                details: `Atendió novedad: ${novedad.type}${novedad.description ? ` — ${novedad.description}` : ''}.`,
-            }, String(novedad.empresaId || empresaId || '').trim())).catch(() => {});
+            registrarBitacoraOpsBg(
+                'ATENDER_NOVEDAD',
+                `Atendió novedad: ${novedad.type}${novedad.description ? ` — ${novedad.description}` : ''}.`,
+                String(novedad.empresaId || empresaId || '').trim(),
+                { actorName, objectiveId: novedad.objectiveId, objectiveName: novedad.objectiveName },
+            );
 
             if (novedad.type === 'VACANTE_A_PLANIFICACION') {
                 // Ya fue auto-devuelta, solo informar
@@ -4427,17 +4428,18 @@ export default function OperacionesPage() {
             const msg = alreadyAutoAbsent
                 ? `Ausencia de ${shift.employeeName} confirmada (ya detectada automáticamente).`
                 : `Ausencia de ${shift.employeeName} registrada. Notificado a RRHH y Planificación.`;
-            // Bitácora
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'MARK_ABSENT', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `${shift.employeeName} marcado ausente en ${shift.objectiveName || ''}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
+            registrarBitacoraOpsBg(
+                'MARK_ABSENT',
+                `${shift.employeeName} marcado ausente en ${shift.objectiveName || ''}.`,
+                String(shift.empresaId || empresaId || '').trim(),
+                {
+                    employeeId: shift.employeeId,
+                    employeeName: shift.employeeName,
+                    objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName,
+                    shiftId: shift.id,
+                },
+            );
             toast.success(msg);
         } catch (e: any) {
             toast.error('Error al marcar ausencia: ' + (e?.message || e?.code || String(e)));
@@ -4454,16 +4456,18 @@ export default function OperacionesPage() {
                 empresaId: String(empresaId || shift.empresaId || ''),
                 migracionCompleta,
             });
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'REVERT_ABSENT', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `Revertida ausencia de ${shift.employeeName}: vac=${result.cancelledVacancies} aus=${result.cancelledAbsences} nov=${result.cancelledNovedades}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
+            registrarBitacoraOpsBg(
+                'REVERT_ABSENT',
+                `Revertida ausencia de ${shift.employeeName}: vac=${result.cancelledVacancies} aus=${result.cancelledAbsences} nov=${result.cancelledNovedades}.`,
+                String(shift.empresaId || empresaId || '').trim(),
+                {
+                    employeeId: shift.employeeId,
+                    employeeName: shift.employeeName,
+                    objectiveId: shift.objectiveId,
+                    objectiveName: shift.objectiveName,
+                    shiftId: shift.id,
+                },
+            );
             toast.success(`Ausencia de ${shift.employeeName} revertida.`);
         } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     };
@@ -4580,13 +4584,12 @@ export default function OperacionesPage() {
                 novedadesPendientes: pendingNovedades.length,
                 createdAt: serverTimestamp(),
             }, String(empresaId).trim()));
-            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'GUARDIA_CERRADA',
-                module: 'OPERACIONES',
-                actorName: session.mySession.operatorName || getAuth().currentUser?.displayName || 'Operador',
-                timestamp: serverTimestamp(),
-                details: `Cierre de guardia. ${resumen.ingresos} ingresos, ${resumen.ausencias} ausencias, ${resumen.coberturas} coberturas. Novedades pendientes: ${pendingNovedades.length}.`,
-            }, String(empresaId).trim()));
+            await registrarBitacoraOps(
+                'GUARDIA_CERRADA',
+                `Cierre de guardia. ${resumen.ingresos} ingresos, ${resumen.ausencias} ausencias, ${resumen.coberturas} coberturas. Novedades pendientes: ${pendingNovedades.length}.`,
+                String(empresaId).trim(),
+                { actorName: session.mySession.operatorName || getAuth().currentUser?.displayName || 'Operador' },
+            );
             toast.success('Informe de cierre guardado');
             setCierreGuardiaOpen(false);
             setCierreObs('');

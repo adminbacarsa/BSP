@@ -6,6 +6,7 @@ import { collection, query, where, getDocs, Timestamp, updateDoc, doc, addDoc, s
 import { getAuth } from 'firebase/auth';
 import { toast } from 'sonner';
 import { logOpsBackgroundWarn, logOpsError } from '@/lib/operaciones/logOpsError';
+import { registrarBitacoraOpsBg } from '@/lib/operaciones/registrarBitacoraOps';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
@@ -123,18 +124,22 @@ export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, 
             const realId = await materializeShiftIfNeeded();
             await updateDoc(doc(db, 'turnos', realId), { resolutionStatus: 'RESOLVED', resolutionMethod: method });
 
-            const _actor = getAuth().currentUser?.email?.split('@')[0] || 'Operador';
             const _empId = String(absenceShift.empresaId || empresaId || '').trim();
+            const candidateName = `${selectedCandidate.lastName || ''} ${selectedCandidate.firstName || ''}`.trim();
             if (method === 'EXTENSION') {
                 await updateDoc(doc(db, 'turnos', selectedCandidate.id), { endTime: absenceShift.endDateObj ? Timestamp.fromDate(absenceShift.endDateObj) : Timestamp.now(), isExtraShift: true });
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'EXTENSION_TURNO', module: 'OPERACIONES',
-                    actorName: _actor, timestamp: serverTimestamp(),
-                    employeeId: selectedCandidate.id,
-                    employeeName: `${selectedCandidate.lastName||''} ${selectedCandidate.firstName||''}`.trim(),
-                    objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
-                    details: `Turno extendido para cubrir ausencia en ${absenceShift.objectiveName || ''}.`,
-                }, _empId)).catch(() => {});
+                registrarBitacoraOpsBg(
+                    'EXTENSION_TURNO',
+                    `Turno extendido para cubrir ausencia en ${absenceShift.objectiveName || ''}.`,
+                    _empId,
+                    {
+                        actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador',
+                        employeeId: selectedCandidate.id,
+                        employeeName: candidateName,
+                        objectiveId: absenceShift.objectiveId,
+                        objectiveName: absenceShift.objectiveName,
+                    },
+                );
             } else if (method === 'RELIEF') {
                 const reliefData = {
                     employeeId: selectedCandidate.id,
@@ -149,14 +154,19 @@ export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, 
                 };
                 const reliefRef = await addDoc(collection(db, 'turnos'), cleanPayload(reliefData));
                 await updateDoc(doc(db, 'turnos', realId), { status: 'COVERED_BY_RELIEF', comments: `Cubierto por ${reliefData.employeeName}` });
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'COBERTURA_RELEVO', module: 'OPERACIONES',
-                    actorName: _actor, timestamp: serverTimestamp(),
-                    employeeId: selectedCandidate.id, employeeName: reliefData.employeeName,
-                    objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
-                    shiftId: reliefRef.id,
-                    details: `${reliefData.employeeName} asignado como relevo en ${absenceShift.objectiveName || ''} (${absenceShift.positionName || ''}).`,
-                }, _empId)).catch(() => {});
+                registrarBitacoraOpsBg(
+                    'COBERTURA_RELEVO',
+                    `${reliefData.employeeName} asignado como relevo en ${absenceShift.objectiveName || ''} (${absenceShift.positionName || ''}).`,
+                    _empId,
+                    {
+                        actorName: getAuth().currentUser?.email?.split('@')[0] || 'Operador',
+                        employeeId: selectedCandidate.id,
+                        employeeName: reliefData.employeeName,
+                        objectiveId: absenceShift.objectiveId,
+                        objectiveName: absenceShift.objectiveName,
+                        shiftId: reliefRef.id,
+                    },
+                );
             }
             toast.success("Resuelto"); onResolve(); onClose();
         } catch (e: any) { toast.error("Error al guardar: " + e.message); } finally { setLoading(false); }
