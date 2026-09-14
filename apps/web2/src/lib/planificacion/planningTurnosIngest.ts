@@ -1,6 +1,27 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 
+/**
+ * Artefacto de cobertura operativa creado por Modo Demo.
+ * Distinto de un turno planificado al que Demo solo le puso modoDemoAt al marcar
+ * presente/ausente — ese debe seguir visible en la malla.
+ */
+export function isDemoOpsCoverageArtifact(data: any): boolean {
+    if (!data) return false;
+    const o = String(data.origin || '').toUpperCase();
+    const isOpsOrigin =
+        o === 'OPERATIONS_COVERAGE'
+        || o === 'RETEN'
+        || o === 'INTERCAMBIO'
+        || data.isReten === true
+        || data.isRelief === true
+        || (!!data.coverageRedirectedTo && o !== '' && o !== 'PLANIFICACION');
+    if (!isOpsOrigin) return false;
+    if (data.modoDemoAt) return true;
+    const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
+    return rb === 'MODO_DEMO';
+}
+
 function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
     const data = d.data();
     return {
@@ -91,10 +112,10 @@ export function ingestPlanningTurnosSnapshot(
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
         if (data.isDeleted === true) return;
-        // Demo ops: no ingerir en malla de Planificación
-        if (data.modoDemoAt) return;
-        const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
-        if (rb === 'MODO_DEMO') return;
+        // Solo ocultar artefactos operativos generados por Demo (OPS_COV),
+        // NO turnos planificados que Demo tocó (presente/ausente) — esos llevan modoDemoAt
+        // pero deben seguir en la malla.
+        if (isDemoOpsCoverageArtifact(data)) return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {

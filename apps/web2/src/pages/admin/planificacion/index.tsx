@@ -666,6 +666,15 @@ function shiftMatchesObjective(data: any, objectiveId: string | undefined | null
 /** Cobertura operativa: se muestra en grilla (visual) pero no suma CCT. */
 function isDemoOpsArtifact(data: any): boolean {
     if (!data) return false;
+    // Solo OPS generados por Demo — no turnos de malla con modoDemoAt por presencia simulada
+    const o = String(data.origin || '').toUpperCase();
+    const isOpsOrigin =
+        o === 'OPERATIONS_COVERAGE'
+        || o === 'RETEN'
+        || o === 'INTERCAMBIO'
+        || data.isReten === true
+        || data.isRelief === true;
+    if (!isOpsOrigin) return false;
     if (data.modoDemoAt) return true;
     const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
     return rb === 'MODO_DEMO';
