@@ -11,6 +11,7 @@ export interface ConvocatoriaCoberturaDoc {
     clientId?: string;
     clientName?: string;
     shiftCode?: string;
+    positionName?: string;
     startTime: Timestamp;
     endTime?: Timestamp;
     aptitudesRequeridas?: string[];
@@ -31,6 +32,7 @@ export interface ConvocatoriaCoberturaDoc {
     createdBy: string;
     createdByName?: string;
     respondedAt?: Timestamp;
+    respondedBy?: string;
     rejectionReason?: string;
     resolvedAt?: Timestamp;
 }
@@ -45,6 +47,7 @@ export interface ShiftDataForCascade {
     clientId?: string;
     clientName?: string;
     code?: string;
+    positionName?: string;
     startTime: Timestamp;
     endTime?: Timestamp;
     empresaId: string;

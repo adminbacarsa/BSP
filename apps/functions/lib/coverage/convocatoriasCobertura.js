@@ -11,14 +11,41 @@ const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
 const coverageLedger_1 = require("./coverageLedger");
 const coverage_auth_util_1 = require("./coverage-auth.util");
+const shiftContinuity_1 = require("./shiftContinuity");
+function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLng = ((lng2 - lng1) * Math.PI) / 180;
+    const a = Math.sin(dLat / 2) ** 2 +
+        Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+function empCoords(emp) {
+    const lat = Number(emp.lat ?? emp.location?.lat);
+    const lng = Number(emp.lng ?? emp.location?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng))
+        return null;
+    return { lat, lng };
+}
+function knowledgeScore(emp, objectiveId) {
+    if (emp.preferredObjectiveId === objectiveId)
+        return 3;
+    if ((emp.experienciaObjetivos || {})[objectiveId])
+        return 2;
+    if ((emp.volante || []).includes(objectiveId))
+        return 1;
+    return 0;
+}
 const TIMEOUT_MINUTES = 3;
 const TYPE_LABEL = {
     RET: 'Retención (RET)',
     ESC: 'Escuela / Refuerzo',
     VOLANTE: 'Cobertura volante',
     SIN_TURNO_CON_EXP: 'Cobertura disponible',
+    CROSS_POS: 'Otro puesto (mismo objetivo)',
     EXTEND: 'Extensión de jornada',
     ADVANCE: 'Adelanto de turno',
+    INTERCAMBIO: 'Intercambio de banda',
     SIN_TURNO: 'Cobertura disponible',
     FT: 'Franco Trabajado (FT)',
     LLEGADA_TARDE: '¿Estás en camino?',
@@ -110,6 +137,7 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
     };
     const out = [];
     if (type === 'EXTEND') {
+        const vacPos = String(conv.positionName || '').trim().toLowerCase();
         const active = await db.collection('turnos')
             .where('objectiveId', '==', conv.objectiveId)
             .where('empresaId', '==', conv.empresaId)
@@ -122,6 +150,8 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
                 break;
             const t = d.data();
             if (d.id === conv.shiftId)
+                continue;
+            if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos)
                 continue;
             const code = String(t.code || '').toUpperCase();
             if (code !== 'M' && code !== 'T' && code !== 'N')
@@ -143,6 +173,7 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
         return out;
     }
     if (type === 'ADVANCE') {
+        const vacPos = String(conv.positionName || '').trim().toLowerCase();
         const now = firestore_1.Timestamp.now();
         const windowEnd = firestore_1.Timestamp.fromMillis(now.toMillis() + 12 * 3600 * 1000);
         const next = await db.collection('turnos')
@@ -161,6 +192,8 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             if (!t.employeeId || t.employeeId === 'VACANTE' || d.id === conv.shiftId)
                 continue;
             if (t.isPresent || t.isAbsent || t.isUnassigned || t.isFranco)
+                continue;
+            if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos)
                 continue;
             const empSnap = await db.collection('empleados').doc(t.employeeId).get();
             if (!empSnap.exists)
@@ -197,6 +230,8 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
     const francoShiftByEmp = new Map();
     const retShiftByEmp = new Map();
     const escShiftByEmp = new Map();
+    const posteriorShifts = [];
+    const vacantStartMs = conv.startTime?.toMillis?.() ?? Date.now();
     for (const d of allTodaySnap.docs) {
         const t = d.data();
         if (!t.employeeId || t.employeeId === 'VACANTE')
@@ -205,7 +240,7 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
         if (['F', 'FF', 'FP'].includes(code)) {
             francoShiftByEmp.set(t.employeeId, d.id);
         }
-        else if (code === 'RET' && t.objectiveId === conv.objectiveId) {
+        else if (code === 'RET') {
             retShiftByEmp.set(t.employeeId, d.id);
         }
         else if ((code === 'ESC' || code === 'REF') && t.objectiveId === conv.objectiveId) {
@@ -214,29 +249,154 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
         else if (code !== 'FT') {
             busyEmpIds.add(t.employeeId);
         }
+        if (t.objectiveId === conv.objectiveId
+            && d.id !== conv.shiftId
+            && t.employeeId
+            && !t.isFranco
+            && !t.isAbsent
+            && !t.isUnassigned
+            && !['F', 'FF', 'FP', 'V', 'L', 'E', 'A', 'AA', 'PG', 'SUS', 'RET', 'ESC', 'REF'].includes(code)) {
+            const startMs = t.startTime?.toMillis?.() ?? 0;
+            if (startMs > vacantStartMs + 30 * 60 * 1000) {
+                posteriorShifts.push({
+                    id: d.id,
+                    employeeId: t.employeeId,
+                    employeeName: t.employeeName,
+                    startMs,
+                });
+            }
+        }
+    }
+    let objLat = null;
+    let objLng = null;
+    if (conv.clientId && conv.objectiveId) {
+        try {
+            const clientSnap = await db.collection('clients').doc(conv.clientId).get();
+            const objs = clientSnap.data()?.objetivos || [];
+            const obj = objs.find((o) => o.id === conv.objectiveId || o.objectiveId === conv.objectiveId);
+            if (obj) {
+                const lat = Number(obj.lat ?? obj.latitude ?? obj.location?.lat);
+                const lng = Number(obj.lng ?? obj.longitude ?? obj.location?.lng);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    objLat = lat;
+                    objLng = lng;
+                }
+            }
+        }
+        catch { }
     }
     const alreadyConvocadoIds = await loadAlreadyConvocadoIds(db, conv.empresaId, conv.shiftId);
+    if (type === 'INTERCAMBIO') {
+        for (const ps of posteriorShifts) {
+            if (out.length >= limit)
+                break;
+            if (alreadyConvocadoIds.has(ps.employeeId))
+                continue;
+            const empSnap = await db.collection('empleados').doc(ps.employeeId).get();
+            if (!empSnap.exists)
+                continue;
+            const emp = empSnap.data();
+            if (!(0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'INTERCAMBIO').eligible)
+                continue;
+            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, ps.employeeId, emp);
+            out.push({
+                id: ps.employeeId,
+                name: ps.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+                uid: uid || undefined,
+                convocatoriaType: 'INTERCAMBIO',
+                sourceShiftId: ps.id,
+            });
+        }
+        return out;
+    }
+    if (type === 'RET') {
+        const pool = [];
+        for (const empDoc of empSnap.docs) {
+            const emp = empDoc.data();
+            const empId = empDoc.id;
+            if (!retShiftByEmp.has(empId) || alreadyConvocadoIds.has(empId))
+                continue;
+            const coords = empCoords(emp);
+            let dist = Infinity;
+            if (objLat != null && objLng != null && coords) {
+                dist = haversineKm(objLat, objLng, coords.lat, coords.lng);
+            }
+            const withinPrimary = !Number.isFinite(dist) || dist <= eligibilityFilter_1.RET_RADIUS_KM_PRIMARY;
+            const withinExpanded = !Number.isFinite(dist) || dist <= eligibilityFilter_1.RET_RADIUS_KM_EXPANDED;
+            if (!withinExpanded)
+                continue;
+            const maxKm = withinPrimary ? eligibilityFilter_1.RET_RADIUS_KM_PRIMARY : eligibilityFilter_1.RET_RADIUS_KM_EXPANDED;
+            if (!(0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET', Number.isFinite(dist) ? dist : undefined, maxKm).eligible)
+                continue;
+            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
+            pool.push({
+                id: empId,
+                name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,
+                uid: uid || undefined,
+                convocatoriaType: 'RET',
+                sourceShiftId: retShiftByEmp.get(empId),
+                score: knowledgeScore(emp, conv.objectiveId),
+                dist: Number.isFinite(dist) ? dist : 999,
+            });
+        }
+        pool.sort((a, b) => b.score - a.score || a.dist - b.dist);
+        for (const c of pool.slice(0, limit)) {
+            out.push({
+                id: c.id,
+                name: c.name,
+                uid: c.uid,
+                convocatoriaType: c.convocatoriaType,
+                sourceShiftId: c.sourceShiftId,
+            });
+        }
+        return out;
+    }
+    if (type === 'CROSS_POS') {
+        const vacPos = String(conv.positionName || '').trim().toLowerCase();
+        const workCodes = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1', 'RET', 'ESC', 'REF']);
+        const active = await db.collection('turnos')
+            .where('objectiveId', '==', conv.objectiveId)
+            .where('empresaId', '==', conv.empresaId)
+            .where('isPresent', '==', true)
+            .where('isCompleted', '==', false)
+            .limit(30)
+            .get();
+        for (const d of active.docs) {
+            if (out.length >= limit)
+                break;
+            const t = d.data();
+            if (d.id === conv.shiftId)
+                continue;
+            if (!t.employeeId || t.employeeId === 'VACANTE' || alreadyConvocadoIds.has(t.employeeId))
+                continue;
+            if (t.isAbsent || t.isFranco || t.isUnassigned)
+                continue;
+            if (vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos)
+                continue;
+            const code = String(t.code || '').toUpperCase();
+            if (!workCodes.has(code))
+                continue;
+            const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
+            if (!empSnapOne.exists)
+                continue;
+            const emp = empSnapOne.data();
+            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, t.employeeId, emp);
+            out.push({
+                id: t.employeeId,
+                name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+                uid: uid || undefined,
+                convocatoriaType: 'CROSS_POS',
+                sourceShiftId: d.id,
+            });
+        }
+        return out;
+    }
     for (const empDoc of empSnap.docs) {
         if (out.length >= limit)
             break;
         const emp = empDoc.data();
         const empId = empDoc.id;
         const name = `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId;
-        if (type === 'RET') {
-            if (!retShiftByEmp.has(empId) || alreadyConvocadoIds.has(empId))
-                continue;
-            if (!(0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET').eligible)
-                continue;
-            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-            out.push({
-                id: empId,
-                name,
-                uid: uid || undefined,
-                convocatoriaType: 'RET',
-                sourceShiftId: retShiftByEmp.get(empId),
-            });
-            continue;
-        }
         if (type === 'ESC') {
             if (!escShiftByEmp.has(empId) || alreadyConvocadoIds.has(empId))
                 continue;
@@ -312,14 +472,126 @@ async function findCandidatesForStep(db, conv, step) {
         return findCandidatesForConvType(db, conv, 'RET', eligibilityFilter_1.BROADCAST_LIMIT);
     if (step === 'ESC')
         return findCandidatesForConvType(db, conv, 'ESC', eligibilityFilter_1.BROADCAST_LIMIT);
+    if (step === 'CROSS_POS')
+        return findCandidatesForConvType(db, conv, 'CROSS_POS', eligibilityFilter_1.BROADCAST_LIMIT);
+    if (step === 'INTERCAMBIO')
+        return findCandidatesForConvType(db, conv, 'INTERCAMBIO', eligibilityFilter_1.BROADCAST_LIMIT);
     if (step === 'FT')
         return findCandidatesForConvType(db, conv, 'FT', eligibilityFilter_1.BROADCAST_LIMIT);
     return [];
+}
+async function assignRetForced(db, baseConv, candidate, createdBy) {
+    const now = firestore_1.Timestamp.now();
+    const convRef = db.collection('convocatorias_cobertura').doc();
+    const convDoc = {
+        ...baseConv,
+        type: 'RET',
+        cascadeStepKey: 'RET',
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('RET'),
+        candidateEmployeeId: candidate.id,
+        candidateEmployeeName: candidate.name,
+        candidateUid: candidate.uid,
+        sourceShiftId: candidate.sourceShiftId,
+        status: 'ACCEPTED',
+        timeoutAt: now,
+        createdAt: now,
+        createdBy,
+        respondedAt: now,
+        respondedBy: 'RET_FORZADO',
+    };
+    await convRef.set(convDoc);
+    await resolverCobertura(db, { ...convDoc, id: convRef.id });
+    if (candidate.uid || candidate.id) {
+        await db.collection('user_notifications').add({
+            uid: candidate.uid || null,
+            employeeId: candidate.id,
+            type: 'COBERTURA_ASIGNADA',
+            title: 'RET asignado a cobertura',
+            body: `Tu RET se convirtió en turno real en ${baseConv.objectiveName || 'el puesto'} (${baseConv.shiftCode || ''}). Presentate al puesto.`,
+            empresaId: baseConv.empresaId,
+            convocatoriaId: convRef.id,
+            shiftId: baseConv.shiftId,
+            objectiveId: baseConv.objectiveId,
+            read: false,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+}
+async function assignCrossPosForced(db, baseConv, candidate, createdBy) {
+    const now = firestore_1.Timestamp.now();
+    const convRef = db.collection('convocatorias_cobertura').doc();
+    const convDoc = {
+        ...baseConv,
+        type: 'CROSS_POS',
+        cascadeStepKey: 'CROSS_POS',
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('CROSS_POS'),
+        candidateEmployeeId: candidate.id,
+        candidateEmployeeName: candidate.name,
+        candidateUid: candidate.uid,
+        sourceShiftId: candidate.sourceShiftId,
+        status: 'ACCEPTED',
+        timeoutAt: now,
+        createdAt: now,
+        createdBy,
+        respondedAt: now,
+        respondedBy: 'CROSS_POS_FORZADO',
+    };
+    await convRef.set(convDoc);
+    await resolverCobertura(db, { ...convDoc, id: convRef.id });
+    if (candidate.uid || candidate.id) {
+        await db.collection('user_notifications').add({
+            uid: candidate.uid || null,
+            employeeId: candidate.id,
+            type: 'COBERTURA_ASIGNADA',
+            title: 'Redirección a otro puesto',
+            body: `Pasás a cubrir ${baseConv.positionName || 'el puesto'} en ${baseConv.objectiveName || ''} (${baseConv.shiftCode || ''}). Tu puesto anterior queda vacante.`,
+            empresaId: baseConv.empresaId,
+            convocatoriaId: convRef.id,
+            shiftId: baseConv.shiftId,
+            objectiveId: baseConv.objectiveId,
+            read: false,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
 }
 async function dispararPasoCascada(db, baseConv, step, createdBy) {
     const candidates = await findCandidatesForStep(db, baseConv, step);
     if (candidates.length === 0)
         return false;
+    if (step === 'RET') {
+        await assignRetForced(db, baseConv, candidates[0], createdBy);
+        await db.collection('novedades').add({
+            type: 'COBERTURA_RESUELTA',
+            shiftId: baseConv.shiftId,
+            objectiveId: baseConv.objectiveId,
+            objectiveName: baseConv.objectiveName || '',
+            empresaId: baseConv.empresaId,
+            title: 'RET forzado asignado',
+            message: `${candidates[0].name} (RET) → turno real. Sin aceptación (obligado).`,
+            cascadeStepKey: step,
+            status: 'pending',
+            resolved: true,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        return true;
+    }
+    if (step === 'CROSS_POS') {
+        await assignCrossPosForced(db, baseConv, candidates[0], createdBy);
+        await db.collection('novedades').add({
+            type: 'COBERTURA_RESUELTA',
+            shiftId: baseConv.shiftId,
+            objectiveId: baseConv.objectiveId,
+            objectiveName: baseConv.objectiveName || '',
+            empresaId: baseConv.empresaId,
+            title: 'Otro puesto redirigido',
+            message: `${candidates[0].name} → ${baseConv.positionName || 'puesto'} (mismo objetivo). Liberó su puesto.`,
+            cascadeStepKey: step,
+            status: 'pending',
+            resolved: true,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        return true;
+    }
     await Promise.all(candidates.map((c) => crearConvocatoriaDoc(db, {
         ...baseConv,
         type: c.convocatoriaType,
@@ -458,13 +730,81 @@ async function cancelSiblingConvocatorias(batch, db, shiftId, exceptId, onlyType
         batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
     }
 }
+function isShiftAlreadyCovered(data) {
+    if (!data)
+        return false;
+    const st = String(data.status || '').toUpperCase();
+    if (st === 'COVERED')
+        return true;
+    if (data.operacionallyCovered === true)
+        return true;
+    if (data.coveredByEmployeeId && data.coverageEventId)
+        return true;
+    if (data.coveredByEmployeeName && data.coverageEventId && st === 'COVERED')
+        return true;
+    return false;
+}
+async function claimConvocatoriaAccept(db, convocatoriaId, respondedBy) {
+    const ref = db.collection('convocatorias_cobertura').doc(convocatoriaId);
+    try {
+        await db.runTransaction(async (tx) => {
+            const snap = await tx.get(ref);
+            if (!snap.exists)
+                throw new Error('NOT_FOUND');
+            const st = String(snap.data()?.status || '');
+            if (st !== 'PENDING' && st !== 'ESCALATED')
+                throw new Error('ALREADY_CLAIMED');
+            tx.update(ref, {
+                status: 'ACCEPTED',
+                respondedAt: firestore_1.Timestamp.now(),
+                resolvedAt: firestore_1.Timestamp.now(),
+                respondedBy,
+            });
+        });
+        return true;
+    }
+    catch (e) {
+        if (e?.message === 'ALREADY_CLAIMED' || e?.message === 'NOT_FOUND')
+            return false;
+        throw e;
+    }
+}
 async function resolverCobertura(db, conv) {
+    const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
+    if (isShiftAlreadyCovered(vacantData)) {
+        const isDualHalf = (conv.type === 'EXTEND' && !vacantData.coverageDualExtBy)
+            || (conv.type === 'ADVANCE' && !vacantData.coverageDualAdvBy);
+        const dualComplete = !!vacantData.coverageDualExtBy && !!vacantData.coverageDualAdvBy;
+        if (!isDualHalf || dualComplete || String(vacantData.status || '').toUpperCase() === 'COVERED') {
+            await db.collection('convocatorias_cobertura').doc(conv.id).set({
+                status: 'CANCELLED',
+                cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+                cancelReason: 'VACANTE_YA_CUBIERTA',
+            }, { merge: true });
+            return 'ALREADY_COVERED';
+        }
+    }
+    if (conv.type === 'EXTEND' && vacantData.coverageDualExtBy) {
+        await db.collection('convocatorias_cobertura').doc(conv.id).set({
+            status: 'CANCELLED',
+            cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+            cancelReason: 'EXT_YA_ASIGNADO',
+        }, { merge: true });
+        return 'SKIPPED';
+    }
+    if (conv.type === 'ADVANCE' && vacantData.coverageDualAdvBy) {
+        await db.collection('convocatorias_cobertura').doc(conv.id).set({
+            status: 'CANCELLED',
+            cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+            cancelReason: 'ADV_YA_ASIGNADO',
+        }, { merge: true });
+        return 'SKIPPED';
+    }
     const batch = db.batch();
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
         : conv.createdBy === 'AUTO' ? 'AUTO'
             : 'OPERACIONES';
-    const vacantSnap = await db.collection('turnos').doc(conv.shiftId).get();
-    const vacantData = vacantSnap.exists ? { id: vacantSnap.id, ...vacantSnap.data() } : { id: conv.shiftId };
     const titular = (0, coverageLedger_1.resolveTitularFromAbsenceOrVacancy)(vacantData);
     const coverageEventId = vacantData.coverageEventId || (0, coverageLedger_1.newCoverageEventId)();
     const ledgerBase = {
@@ -528,14 +868,19 @@ async function resolverCobertura(db, conv) {
     }
     else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
         const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
+        const nextSnap = await nextRef.get();
+        const nextData = nextSnap.data() || {};
+        const plannedStart = nextData.plannedStartTime || nextData.startTime || null;
         batch.update(nextRef, {
-            startTime: conv.startTime,
             adjustedStartTime: conv.startTime,
             isAdvanced: true,
             isEarlyStart: true,
             advancedBy: 'CONVOCATORIA',
             advancedAt: firestore_1.FieldValue.serverTimestamp(),
+            startTime: conv.startTime,
+            plannedStartTime: plannedStart,
             resolvedBy,
+            ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
             ...(0, coverageLedger_1.covererLedgerFields)({
                 ...ledgerBase,
                 vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -543,11 +888,17 @@ async function resolverCobertura(db, conv) {
             }),
         });
         const extDone = !!vacantData.coverageDualExtBy;
+        const vacLabel = (0, shiftContinuity_1.vacancyCoverageLabel)({
+            titularName: titular.titularEmployeeName,
+            shiftCode: conv.shiftCode,
+            objectiveName: conv.objectiveName,
+        });
         batch.update(vacantRef, {
             coverageDualAdvBy: conv.candidateEmployeeId,
             coverageDualAdvName: conv.candidateEmployeeName,
             coverageDualAdvShiftId: conv.advanceShiftId,
             coverageEventId,
+            vacancyLabel: vacLabel,
             ...(extDone
                 ? {
                     status: 'COVERED',
@@ -572,13 +923,41 @@ async function resolverCobertura(db, conv) {
             await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id, ['ADVANCE']);
         }
     }
-    else if (conv.type === 'RET' || conv.type === 'ESC') {
+    else if (conv.type === 'RET' || conv.type === 'ESC' || conv.type === 'INTERCAMBIO') {
         const sourceId = conv.sourceShiftId;
+        const vacLabel = (0, shiftContinuity_1.vacancyCoverageLabel)({
+            titularName: titular.titularEmployeeName,
+            shiftCode: conv.shiftCode || vacantData.code,
+            positionName: vacantData.positionName,
+            objectiveName: conv.objectiveName,
+        });
         if (sourceId) {
+            const prevCode = conv.type === 'INTERCAMBIO'
+                ? String((await db.collection('turnos').doc(sourceId).get()).data()?.code || 'M')
+                : conv.type;
             batch.update(db.collection('turnos').doc(sourceId), {
-                coverageRedirectedTo: conv.objectiveId,
-                coverageRedirectedAt: firestore_1.FieldValue.serverTimestamp(),
-                resolvedBy,
+                ...(0, shiftContinuity_1.buildReassignPassiveToVacancyFields)({
+                    objectiveId: conv.objectiveId,
+                    objectiveName: conv.objectiveName,
+                    clientId: conv.clientId,
+                    clientName: conv.clientName,
+                    positionName: vacantData.positionName,
+                    code: conv.shiftCode || vacantData.code,
+                    startTime: conv.startTime || vacantData.startTime,
+                    endTime: conv.endTime || vacantData.endTime,
+                }, {
+                    coverageType: conv.type,
+                    resolvedBy,
+                    previousCode: prevCode,
+                    coverageEventId,
+                }),
+                vacancyLabel: vacLabel,
+                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+                ...(0, coverageLedger_1.covererLedgerFields)({
+                    ...ledgerBase,
+                    vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+                    coverageType: conv.type,
+                }),
             });
         }
         (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
@@ -587,23 +966,118 @@ async function resolverCobertura(db, conv) {
             covererShiftId: sourceId || null,
             coverageType: conv.type,
             markVacancyCovered: true,
+            vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
         });
+        await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
+    }
+    else if (conv.type === 'CROSS_POS') {
+        const sourceId = conv.sourceShiftId;
+        const vacLabel = (0, shiftContinuity_1.vacancyCoverageLabel)({
+            titularName: titular.titularEmployeeName,
+            shiftCode: conv.shiftCode || vacantData.code,
+            positionName: vacantData.positionName,
+            objectiveName: conv.objectiveName,
+        });
+        if (sourceId) {
+            const srcSnap = await db.collection('turnos').doc(sourceId).get();
+            const src = srcSnap.data() || {};
+            const prevCode = String(src.code || 'M').toUpperCase();
+            const prevPos = String(src.positionName || '').trim();
+            const wasPresent = src.isPresent === true;
+            const freedRef = db.collection('turnos').doc();
+            batch.set(freedRef, {
+                empresaId: conv.empresaId,
+                employeeId: 'VACANTE',
+                employeeName: `VACANTE (redir. ${(conv.candidateEmployeeName || '').split(',')[0] || 'guardia'})`,
+                isUnassigned: true,
+                clientId: src.clientId || conv.clientId || null,
+                clientName: src.clientName || conv.clientName || null,
+                objectiveId: src.objectiveId || conv.objectiveId,
+                objectiveName: src.objectiveName || conv.objectiveName || '',
+                positionName: prevPos || src.positionName || null,
+                code: prevCode,
+                startTime: src.startTime || null,
+                endTime: src.endTime || null,
+                plannedStartTime: src.plannedStartTime || src.startTime || null,
+                plannedEndTime: src.plannedEndTime || src.endTime || null,
+                status: 'UNCOVERED',
+                origin: 'VACANTE_POR_REDIRECCION',
+                causedByShiftId: sourceId,
+                causedByEmployeeId: conv.candidateEmployeeId,
+                causedByEmployeeName: conv.candidateEmployeeName,
+                vacancyLabel: `Vacante por redirección · ${prevPos || 'puesto'} → ${vacantData.positionName || 'hueco'}`,
+                coverageEventId,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+                reportedBy: resolvedBy,
+            });
+            batch.update(db.collection('turnos').doc(sourceId), {
+                ...(0, shiftContinuity_1.buildReassignPassiveToVacancyFields)({
+                    objectiveId: conv.objectiveId,
+                    objectiveName: conv.objectiveName,
+                    clientId: conv.clientId,
+                    clientName: conv.clientName,
+                    positionName: vacantData.positionName,
+                    code: conv.shiftCode || vacantData.code,
+                    startTime: conv.startTime || vacantData.startTime,
+                    endTime: conv.endTime || vacantData.endTime,
+                }, {
+                    coverageType: 'CROSS_POSITION',
+                    resolvedBy,
+                    previousCode: prevCode,
+                    previousPositionName: prevPos || null,
+                    coverageEventId,
+                }),
+                isPresent: wasPresent,
+                status: wasPresent ? 'PRESENT' : 'PENDING',
+                vacatedShiftId: freedRef.id,
+                vacancyLabel: vacLabel,
+                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+                ...(0, coverageLedger_1.covererLedgerFields)({
+                    ...ledgerBase,
+                    vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+                    coverageType: 'CROSS_POSITION',
+                }),
+            });
+            (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
+                ...ledgerBase,
+                vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+                covererShiftId: sourceId,
+                coverageType: 'CROSS_POSITION',
+                markVacancyCovered: true,
+                vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
+            });
+        }
         await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
     }
     else if (conv.type === 'FT') {
         if (conv.ftShiftId) {
             const ftRef = db.collection('turnos').doc(conv.ftShiftId);
+            const vacLabel = (0, shiftContinuity_1.vacancyCoverageLabel)({
+                titularName: titular.titularEmployeeName,
+                shiftCode: conv.shiftCode,
+                objectiveName: conv.objectiveName,
+            });
             batch.update(ftRef, {
                 code: 'FT',
                 isFranco: false,
                 isFrancoTrabajado: true,
-                isPresent: true,
-                presentAt: conv.startTime,
-                realStartTime: conv.startTime,
-                realEndTime: conv.endTime || null,
+                startTime: conv.startTime,
+                endTime: conv.endTime || null,
+                plannedStartTime: conv.startTime,
+                plannedEndTime: conv.endTime || null,
                 resolvedBy,
                 coveredShiftId: conv.shiftId,
+                vacancyLabel: vacLabel,
                 assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                francoTrabajadoAt: firestore_1.FieldValue.serverTimestamp(),
+                francoObjectiveId: conv.objectiveId,
+                francoObjectiveName: conv.objectiveName || null,
+                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+                ...(0, coverageLedger_1.covererLedgerFields)({
+                    ...ledgerBase,
+                    vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+                    coverageType: 'FT',
+                }),
             });
             (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
                 ...ledgerBase,
@@ -611,6 +1085,7 @@ async function resolverCobertura(db, conv) {
                 covererShiftId: conv.ftShiftId,
                 coverageType: 'FT',
                 markVacancyCovered: true,
+                vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel },
             });
         }
         await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
@@ -672,6 +1147,7 @@ async function resolverCobertura(db, conv) {
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
     await batch.commit();
+    return 'OK';
 }
 exports.crearConvocatoriaCobertura = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })
@@ -788,12 +1264,14 @@ exports.responderConvocatoriaCobertura = functions
         return { success: true };
     }
     if (response === 'ACCEPTED') {
-        await convRef.update({
-            status: 'ACCEPTED',
-            respondedAt: now,
-            resolvedAt: now,
-        });
-        await resolverCobertura(db, { ...conv, id: convocatoriaId });
+        const claimed = await claimConvocatoriaAccept(db, convocatoriaId, uid);
+        if (!claimed) {
+            throw new functions.https.HttpsError('failed-precondition', 'La convocatoria ya fue respondida o cancelada.');
+        }
+        const result = await resolverCobertura(db, { ...conv, id: convocatoriaId, status: 'ACCEPTED' });
+        if (result === 'ALREADY_COVERED') {
+            return { success: true, alreadyCovered: true };
+        }
     }
     else {
         await convRef.update({
@@ -888,9 +1366,12 @@ exports.getCandidatosCobertura = functions
     return { candidates: results };
 });
 async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
+    const vacantSnap = await db.collection('turnos').doc(shift.id).get();
+    if (vacantSnap.exists && isShiftAlreadyCovered(vacantSnap.data()))
+        return;
     const existing = await db.collection('convocatorias_cobertura')
         .where('shiftId', '==', shift.id)
-        .where('status', 'in', ['PENDING', 'ESCALATED'])
+        .where('status', '==', 'PENDING')
         .limit(1)
         .get();
     if (!existing.empty)
@@ -903,6 +1384,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         clientId: String(shift.clientId || ''),
         clientName: String(shift.clientName || ''),
         shiftCode: String(shift.code || ''),
+        positionName: String(shift.positionName || ''),
         startTime: shift.startTime,
         endTime: shift.endTime,
         aptitudesRequeridas: [],
@@ -942,7 +1424,7 @@ async function simularRespuestasConvocatorias(db, empresaId) {
         .where('status', 'in', ['PENDING', 'ESCALATED'])
         .limit(50)
         .get();
-    let respondidas = 0;
+    const byShift = new Map();
     for (const convDoc of snap.docs) {
         const conv = convDoc.data();
         if (conv.type === 'LLEGADA_TARDE')
@@ -950,21 +1432,86 @@ async function simularRespuestasConvocatorias(db, empresaId) {
         const createdMs = conv.createdAt instanceof firestore_1.Timestamp ? conv.createdAt.toMillis() : 0;
         if (createdMs > cutoffMs)
             continue;
-        const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
-        const accept = hashVal <= 8;
-        try {
-            if (accept) {
-                await convDoc.ref.update({ status: 'ACCEPTED', respondedAt: now, respondedBy: 'MODO_DEMO' });
-                await resolverCobertura(db, { ...conv, id: convDoc.id, createdBy: 'MODO_DEMO' });
+        const list = byShift.get(conv.shiftId) || [];
+        list.push(convDoc);
+        byShift.set(conv.shiftId, list);
+    }
+    let respondidas = 0;
+    for (const [shiftId, docs] of byShift) {
+        docs.sort((a, b) => {
+            const ca = a.data();
+            const cb = b.data();
+            const sa = Number(ca.cascadeStep ?? 99);
+            const sb = Number(cb.cascadeStep ?? 99);
+            if (sa !== sb)
+                return sa - sb;
+            const ta = ca.createdAt instanceof firestore_1.Timestamp ? ca.createdAt.toMillis() : 0;
+            const tb = cb.createdAt instanceof firestore_1.Timestamp ? cb.createdAt.toMillis() : 0;
+            return ta - tb;
+        });
+        const vacantFresh = await db.collection('turnos').doc(shiftId).get();
+        if (vacantFresh.exists && isShiftAlreadyCovered(vacantFresh.data())) {
+            const batch = db.batch();
+            for (const d of docs) {
+                batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp(), cancelReason: 'VACANTE_YA_CUBIERTA' });
             }
-            else {
-                await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
-                await maybeAvanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
-            }
-            respondidas++;
+            await batch.commit();
+            continue;
         }
-        catch (e) {
-            console.warn('[simularRespuestasConvocatorias]', convDoc.id, e?.message);
+        let won = false;
+        for (const convDoc of docs) {
+            const conv = convDoc.data();
+            if (won) {
+                const live = await convDoc.ref.get();
+                const st = String(live.data()?.status || '');
+                if (st === 'PENDING' || st === 'ESCALATED') {
+                    await convDoc.ref.update({
+                        status: 'CANCELLED',
+                        cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+                        cancelReason: 'FIRST_WINS_DEMO',
+                    });
+                }
+                continue;
+            }
+            const live = await convDoc.ref.get();
+            const liveSt = String(live.data()?.status || '');
+            if (liveSt !== 'PENDING' && liveSt !== 'ESCALATED')
+                continue;
+            const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+            const accept = hashVal <= 8;
+            try {
+                if (accept) {
+                    const claimed = await claimConvocatoriaAccept(db, convDoc.id, 'MODO_DEMO');
+                    if (!claimed)
+                        continue;
+                    const result = await resolverCobertura(db, {
+                        ...conv,
+                        id: convDoc.id,
+                        createdBy: 'MODO_DEMO',
+                        status: 'ACCEPTED',
+                    });
+                    if (result === 'OK') {
+                        won = true;
+                        respondidas++;
+                    }
+                    if (result === 'ALREADY_COVERED') {
+                        won = true;
+                    }
+                }
+                else {
+                    await convDoc.ref.update({
+                        status: 'REJECTED',
+                        respondedAt: now,
+                        rejectionReason: 'MODO_DEMO_AUTO',
+                        respondedBy: 'MODO_DEMO',
+                    });
+                    await maybeAvanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+                    respondidas++;
+                }
+            }
+            catch (e) {
+                console.warn('[simularRespuestasConvocatorias]', convDoc.id, e?.message);
+            }
         }
     }
     return respondidas;

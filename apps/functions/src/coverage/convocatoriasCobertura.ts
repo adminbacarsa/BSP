@@ -64,6 +64,7 @@ export interface ConvocatoriaCoberturaDoc {
   clientId?: string;
   clientName?: string;
   shiftCode?: string;
+  positionName?: string;
   startTime: Timestamp;
   endTime?: Timestamp;
   aptitudesRequeridas?: string[];
@@ -104,6 +105,7 @@ const TYPE_LABEL: Record<string, string> = {
   ESC: 'Escuela / Refuerzo',
   VOLANTE: 'Cobertura volante',
   SIN_TURNO_CON_EXP: 'Cobertura disponible',
+  CROSS_POS: 'Otro puesto (mismo objetivo)',
   EXTEND: 'Extensión de jornada',
   ADVANCE: 'Adelanto de turno',
   INTERCAMBIO: 'Intercambio de banda',
@@ -247,6 +249,7 @@ async function findCandidatesForConvType(
   const out: CandidateResult[] = [];
 
   if (type === 'EXTEND') {
+    const vacPos = String(conv.positionName || '').trim().toLowerCase();
     const active = await db.collection('turnos')
       .where('objectiveId', '==', conv.objectiveId)
       .where('empresaId', '==', conv.empresaId)
@@ -259,6 +262,8 @@ async function findCandidatesForConvType(
       if (out.length >= limit) break;
       const t = d.data();
       if (d.id === conv.shiftId) continue;
+      // EXT puro = mismo objetivo Y mismo puesto (otro puesto = redirección, no EXT).
+      if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos) continue;
       const code = String(t.code || '').toUpperCase();
       if (code !== 'M' && code !== 'T' && code !== 'N') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
@@ -277,6 +282,7 @@ async function findCandidatesForConvType(
   }
 
   if (type === 'ADVANCE') {
+    const vacPos = String(conv.positionName || '').trim().toLowerCase();
     const now = Timestamp.now();
     const windowEnd = Timestamp.fromMillis(now.toMillis() + 12 * 3600 * 1000);
     const next = await db.collection('turnos')
@@ -294,6 +300,8 @@ async function findCandidatesForConvType(
       const t = d.data();
       if (!t.employeeId || t.employeeId === 'VACANTE' || d.id === conv.shiftId) continue;
       if (t.isPresent || t.isAbsent || t.isUnassigned || t.isFranco) continue;
+      // ADV puro = mismo objetivo Y mismo puesto.
+      if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos) continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;
       const emp = empSnap.data()!;
@@ -453,6 +461,41 @@ async function findCandidatesForConvType(
     return out;
   }
 
+  // Presente en otro puesto del mismo objetivo → redirección (no EXT).
+  if (type === 'CROSS_POS') {
+    const vacPos = String(conv.positionName || '').trim().toLowerCase();
+    const workCodes = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1', 'RET', 'ESC', 'REF']);
+    const active = await db.collection('turnos')
+      .where('objectiveId', '==', conv.objectiveId)
+      .where('empresaId', '==', conv.empresaId)
+      .where('isPresent', '==', true)
+      .where('isCompleted', '==', false)
+      .limit(30)
+      .get();
+    for (const d of active.docs) {
+      if (out.length >= limit) break;
+      const t = d.data();
+      if (d.id === conv.shiftId) continue;
+      if (!t.employeeId || t.employeeId === 'VACANTE' || alreadyConvocadoIds.has(t.employeeId)) continue;
+      if (t.isAbsent || t.isFranco || t.isUnassigned) continue;
+      if (vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos) continue;
+      const code = String(t.code || '').toUpperCase();
+      if (!workCodes.has(code)) continue;
+      const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
+      if (!empSnapOne.exists) continue;
+      const emp = empSnapOne.data()!;
+      const uid = await findEmployeeUid(db, t.employeeId, emp);
+      out.push({
+        id: t.employeeId,
+        name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+        uid: uid || undefined,
+        convocatoriaType: 'CROSS_POS',
+        sourceShiftId: d.id,
+      });
+    }
+    return out;
+  }
+
   for (const empDoc of empSnap.docs) {
     if (out.length >= limit) break;
     const emp = empDoc.data();
@@ -533,6 +576,7 @@ async function findCandidatesForStep(
   }
   if (step === 'RET') return findCandidatesForConvType(db, conv, 'RET', BROADCAST_LIMIT);
   if (step === 'ESC') return findCandidatesForConvType(db, conv, 'ESC', BROADCAST_LIMIT);
+  if (step === 'CROSS_POS') return findCandidatesForConvType(db, conv, 'CROSS_POS', BROADCAST_LIMIT);
   if (step === 'INTERCAMBIO') return findCandidatesForConvType(db, conv, 'INTERCAMBIO', BROADCAST_LIMIT);
   if (step === 'FT') return findCandidatesForConvType(db, conv, 'FT', BROADCAST_LIMIT);
   return [];
@@ -583,6 +627,51 @@ async function assignRetForced(
   }
 }
 
+/** CROSS_POS: presente en otro puesto del mismo objetivo → redirección forzada. */
+async function assignCrossPosForced(
+  db: admin.firestore.Firestore,
+  baseConv: ConvocatoriaCoberturaDoc,
+  candidate: CandidateResult,
+  createdBy: string,
+): Promise<void> {
+  const now = Timestamp.now();
+  const convRef = db.collection('convocatorias_cobertura').doc();
+  const convDoc: ConvocatoriaCoberturaDoc = {
+    ...baseConv,
+    type: 'CROSS_POS',
+    cascadeStepKey: 'CROSS_POS',
+    cascadeStep: CASCADE_ORDER.indexOf('CROSS_POS'),
+    candidateEmployeeId: candidate.id,
+    candidateEmployeeName: candidate.name,
+    candidateUid: candidate.uid,
+    sourceShiftId: candidate.sourceShiftId,
+    status: 'ACCEPTED',
+    timeoutAt: now,
+    createdAt: now,
+    createdBy,
+    respondedAt: now,
+    respondedBy: 'CROSS_POS_FORZADO',
+  };
+  await convRef.set(convDoc);
+  await resolverCobertura(db, { ...convDoc, id: convRef.id });
+
+  if (candidate.uid || candidate.id) {
+    await db.collection('user_notifications').add({
+      uid: candidate.uid || null,
+      employeeId: candidate.id,
+      type: 'COBERTURA_ASIGNADA',
+      title: 'Redirección a otro puesto',
+      body: `Pasás a cubrir ${baseConv.positionName || 'el puesto'} en ${baseConv.objectiveName || ''} (${baseConv.shiftCode || ''}). Tu puesto anterior queda vacante.`,
+      empresaId: baseConv.empresaId,
+      convocatoriaId: convRef.id,
+      shiftId: baseConv.shiftId,
+      objectiveId: baseConv.objectiveId,
+      read: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
+}
+
 /** Dispara notificaciones en paralelo para un paso. Devuelve true si envió ≥1. */
 async function dispararPasoCascada(
   db: admin.firestore.Firestore,
@@ -604,6 +693,24 @@ async function dispararPasoCascada(
       empresaId: baseConv.empresaId,
       title: 'RET forzado asignado',
       message: `${candidates[0].name} (RET) → turno real. Sin aceptación (obligado).`,
+      cascadeStepKey: step,
+      status: 'pending',
+      resolved: true,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return true;
+  }
+
+  if (step === 'CROSS_POS') {
+    await assignCrossPosForced(db, baseConv, candidates[0], createdBy);
+    await db.collection('novedades').add({
+      type: 'COBERTURA_RESUELTA',
+      shiftId: baseConv.shiftId,
+      objectiveId: baseConv.objectiveId,
+      objectiveName: baseConv.objectiveName || '',
+      empresaId: baseConv.empresaId,
+      title: 'Otro puesto redirigido',
+      message: `${candidates[0].name} → ${baseConv.positionName || 'puesto'} (mismo objetivo). Liberó su puesto.`,
       cascadeStepKey: step,
       status: 'pending',
       resolved: true,
@@ -1033,6 +1140,87 @@ async function resolverCobertura(
       vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
     });
     await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
+  } else if (conv.type === 'CROSS_POS') {
+    const sourceId = conv.sourceShiftId;
+    const vacLabel = vacancyCoverageLabel({
+      titularName: titular.titularEmployeeName,
+      shiftCode: conv.shiftCode || (vacantData as any).code,
+      positionName: (vacantData as any).positionName,
+      objectiveName: conv.objectiveName,
+    });
+    if (sourceId) {
+      const srcSnap = await db.collection('turnos').doc(sourceId).get();
+      const src = srcSnap.data() || {};
+      const prevCode = String(src.code || 'M').toUpperCase();
+      const prevPos = String(src.positionName || '').trim();
+      const wasPresent = src.isPresent === true;
+      const freedRef = db.collection('turnos').doc();
+      batch.set(freedRef, {
+        empresaId: conv.empresaId,
+        employeeId: 'VACANTE',
+        employeeName: `VACANTE (redir. ${(conv.candidateEmployeeName || '').split(',')[0] || 'guardia'})`,
+        isUnassigned: true,
+        clientId: src.clientId || conv.clientId || null,
+        clientName: src.clientName || conv.clientName || null,
+        objectiveId: src.objectiveId || conv.objectiveId,
+        objectiveName: src.objectiveName || conv.objectiveName || '',
+        positionName: prevPos || src.positionName || null,
+        code: prevCode,
+        startTime: src.startTime || null,
+        endTime: src.endTime || null,
+        plannedStartTime: src.plannedStartTime || src.startTime || null,
+        plannedEndTime: src.plannedEndTime || src.endTime || null,
+        status: 'UNCOVERED',
+        origin: 'VACANTE_POR_REDIRECCION',
+        causedByShiftId: sourceId,
+        causedByEmployeeId: conv.candidateEmployeeId,
+        causedByEmployeeName: conv.candidateEmployeeName,
+        vacancyLabel: `Vacante por redirección · ${prevPos || 'puesto'} → ${(vacantData as any).positionName || 'hueco'}`,
+        coverageEventId,
+        createdAt: FieldValue.serverTimestamp(),
+        reportedBy: resolvedBy,
+      });
+      batch.update(db.collection('turnos').doc(sourceId), {
+        ...buildReassignPassiveToVacancyFields(
+          {
+            objectiveId: conv.objectiveId,
+            objectiveName: conv.objectiveName,
+            clientId: conv.clientId,
+            clientName: conv.clientName,
+            positionName: (vacantData as any).positionName,
+            code: conv.shiftCode || (vacantData as any).code,
+            startTime: conv.startTime || (vacantData as any).startTime,
+            endTime: conv.endTime || (vacantData as any).endTime,
+          },
+          {
+            coverageType: 'CROSS_POSITION',
+            resolvedBy,
+            previousCode: prevCode,
+            previousPositionName: prevPos || null,
+            coverageEventId,
+          },
+        ),
+        isPresent: wasPresent,
+        status: wasPresent ? 'PRESENT' : 'PENDING',
+        vacatedShiftId: freedRef.id,
+        vacancyLabel: vacLabel,
+        ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
+        ...covererLedgerFields({
+          ...ledgerBase,
+          vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+          coverageType: 'CROSS_POSITION',
+        }),
+      });
+      applyCoverageLedgerToBatch(batch, db, {
+        ...ledgerBase,
+        vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+        covererShiftId: sourceId,
+        coverageType: 'CROSS_POSITION',
+        markVacancyCovered: true,
+        vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
+      });
+    }
+    await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
   } else if (conv.type === 'FT') {
     if (conv.ftShiftId) {
       const ftRef = db.collection('turnos').doc(conv.ftShiftId);
@@ -1429,6 +1617,7 @@ export interface ShiftDataForCascade {
   clientId?: string;
   clientName?: string;
   code?: string;
+  positionName?: string;
   startTime: Timestamp;
   endTime?: Timestamp;
   empresaId: string;
@@ -1458,6 +1647,7 @@ export async function iniciarCascadaCobertura(
     clientId: String(shift.clientId || ''),
     clientName: String(shift.clientName || ''),
     shiftCode: String(shift.code || ''),
+    positionName: String(shift.positionName || ''),
     startTime: shift.startTime,
     endTime: shift.endTime,
     aptitudesRequeridas: [],

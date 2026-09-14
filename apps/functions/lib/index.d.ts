@@ -46,6 +46,7 @@ export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
 export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
+export { backfillCoverageLedger } from './coverage/backfillCoverageLedger';
 export { onGuardAbsenceDetected } from './notifications/onGuardAbsenceDetected';
 export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
 export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';

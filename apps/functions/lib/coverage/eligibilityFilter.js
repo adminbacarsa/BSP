@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.BROADCAST_LIMIT = exports.CASCADE_ORDER = void 0;
+exports.BROADCAST_LIMIT = exports.RET_RADIUS_KM_EXPANDED = exports.RET_RADIUS_KM_PRIMARY = exports.CASCADE_ORDER = void 0;
 exports.toCascadeStep = toCascadeStep;
 exports.cascadeStepIndex = cascadeStepIndex;
 exports.nextCascadeStep = nextCascadeStep;
@@ -13,9 +13,13 @@ exports.CASCADE_ORDER = [
     'SIN_TURNO',
     'RET',
     'ESC',
+    'CROSS_POS',
     'EXT_DUAL',
+    'INTERCAMBIO',
     'FT',
 ];
+exports.RET_RADIUS_KM_PRIMARY = 15;
+exports.RET_RADIUS_KM_EXPANDED = 30;
 exports.BROADCAST_LIMIT = 5;
 function toCascadeStep(type) {
     if (type === 'VOLANTE' || type === 'SIN_TURNO_CON_EXP' || type === 'SIN_TURNO')
@@ -24,8 +28,12 @@ function toCascadeStep(type) {
         return 'RET';
     if (type === 'ESC')
         return 'ESC';
+    if (type === 'CROSS_POS')
+        return 'CROSS_POS';
     if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL')
         return 'EXT_DUAL';
+    if (type === 'INTERCAMBIO')
+        return 'INTERCAMBIO';
     if (type === 'FT')
         return 'FT';
     return null;
@@ -45,7 +53,7 @@ function nextCascadeStep(current) {
         return null;
     return exports.CASCADE_ORDER[idx + 1];
 }
-function checkEligibility(employee, ctx, candidateType, distanceKm) {
+function checkEligibility(employee, ctx, candidateType, distanceKm, maxDistanceKm = exports.RET_RADIUS_KM_PRIMARY) {
     const today = new Date().toISOString().slice(0, 10);
     const restricObjs = employee.restriccionesObjetivo || [];
     if (restricObjs.some((r) => r.objectiveId === ctx.objectiveId)) {
@@ -58,17 +66,10 @@ function checkEligibility(employee, ctx, candidateType, distanceKm) {
         }
     }
     if ((candidateType === 'RET' || candidateType === 'VOLANTE' || candidateType === 'FT' || candidateType === 'ESC') &&
-        distanceKm !== undefined) {
-        if (distanceKm > 15) {
-            return { eligible: false, reason: 'DISTANCIA_EXCEDE_15KM' };
-        }
-    }
-    if (candidateType === 'RET') {
-        const isTitular = employee.preferredObjectiveId === ctx.objectiveId;
-        const hasExp = !!(employee.experienciaObjetivos || {})[ctx.objectiveId];
-        const isVolante = (employee.volante || []).includes(ctx.objectiveId);
-        if (!isTitular && !hasExp && !isVolante) {
-            return { eligible: false, reason: 'SIN_EXPERIENCIA_EN_OBJETIVO' };
+        distanceKm !== undefined &&
+        Number.isFinite(distanceKm)) {
+        if (distanceKm > maxDistanceKm) {
+            return { eligible: false, reason: `DISTANCIA_EXCEDE_${maxDistanceKm}KM` };
         }
     }
     const required = ctx.aptitudesRequeridas || [];

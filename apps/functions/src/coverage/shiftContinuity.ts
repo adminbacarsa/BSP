@@ -101,17 +101,19 @@ export function buildReassignPassiveToVacancyFields(
     coverageType: string;
     resolvedBy?: string;
     previousCode?: string;
+    previousPositionName?: string | null;
     coverageEventId?: string;
   },
 ): Record<string, unknown> {
   const prev = String(opts.previousCode || opts.coverageType).toUpperCase();
+  const gapPos = vacancy.positionName || null;
   return {
     code: String(vacancy.code || vacancy.shiftCode || 'M').toUpperCase(),
     objectiveId: vacancy.objectiveId || null,
     objectiveName: vacancy.objectiveName || null,
     clientId: vacancy.clientId || null,
     clientName: vacancy.clientName || null,
-    positionName: vacancy.positionName || null,
+    positionName: gapPos,
     startTime: vacancy.startTime || null,
     endTime: vacancy.endTime || null,
     plannedStartTime: vacancy.startTime || null,
@@ -121,6 +123,13 @@ export function buildReassignPassiveToVacancyFields(
     origin: 'OPERATIONS_COVERAGE',
     coverageType: opts.coverageType,
     previousPassiveCode: prev,
+    ...(opts.previousPositionName
+      ? {
+          previousPositionName: opts.previousPositionName,
+          homePositionName: opts.previousPositionName,
+          coversPositionName: gapPos,
+        }
+      : {}),
     reassignedFromPassiveAt: FieldValue.serverTimestamp(),
     resolvedBy: opts.resolvedBy || 'AUTO',
     ...(opts.coverageEventId ? { coverageEventId: opts.coverageEventId } : {}),

@@ -18,6 +18,7 @@ const panel_tenant_auth_util_1 = require("./auth/panel-tenant-auth.util");
 const cronLimits_1 = require("./ops/cronLimits");
 const main_1 = require("./main");
 const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
+const shiftContinuity_1 = require("./coverage/shiftContinuity");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
 const data_management_service_1 = require("./data-management/data-management.service");
@@ -657,7 +658,70 @@ async function runModoDemoForEmpresa(db, empresaId) {
         t.employeeId === 'SIN_COBERTURA' ||
         !!t.isUnassigned ||
         !!t.isSinCobertura;
-    const skipBase = (t) => t.draft === true || t.isFranco === true || t.isVirtual;
+    const isPassiveStandby = (t) => {
+        const c = String(t.code || '').toUpperCase();
+        return c === 'RET' || c === 'ESC' || c === 'REF' || t.isReten === true;
+    };
+    const skipBase = (t) => t.draft === true || t.isFranco === true || t.isVirtual || isPassiveStandby(t);
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (!isPassiveStandby(t) || !t.isPresent)
+            continue;
+        const hasLedger = String(t.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+            !!t.coversAbsenceEmployeeName ||
+            !!t.absenceShiftId ||
+            !!t.coveredShiftId ||
+            (!!t.coverageEventId && !!t.previousPassiveCode);
+        if (hasLedger) {
+            const absId = String(t.absenceShiftId || t.coveredShiftId || '').trim();
+            let vacancyCode = String(t.shiftCode || 'M').toUpperCase();
+            let vacancy = t;
+            if (absId) {
+                try {
+                    const absDoc = await db.collection('turnos').doc(absId).get();
+                    if (absDoc.exists) {
+                        vacancy = absDoc.data() || t;
+                        vacancyCode = String(vacancy.code || vacancy.shiftCode || 'M').toUpperCase();
+                    }
+                }
+                catch { }
+            }
+            if (vacancyCode === 'RET' || vacancyCode === 'ESC' || vacancyCode === 'REF')
+                vacancyCode = 'M';
+            const prev = String(t.previousPassiveCode || t.code || 'RET').toUpperCase();
+            batch.update(doc.ref, {
+                code: vacancyCode,
+                startTime: vacancy.startTime || t.startTime || null,
+                endTime: vacancy.endTime || t.endTime || null,
+                plannedStartTime: vacancy.startTime || t.plannedStartTime || null,
+                plannedEndTime: vacancy.endTime || t.plannedEndTime || null,
+                objectiveId: vacancy.objectiveId || t.objectiveId || null,
+                objectiveName: vacancy.objectiveName || t.objectiveName || null,
+                positionName: vacancy.positionName || t.positionName || null,
+                isReten: false,
+                isFranco: false,
+                origin: 'OPERATIONS_COVERAGE',
+                previousPassiveCode: prev,
+                reassignedFromPassiveAt: nowTs,
+                resolvedBy: t.resolvedBy || 'MODO_DEMO',
+                demoRetHealAt: nowTs,
+            });
+            batchOps += 1;
+        }
+        else {
+            batch.update(doc.ref, {
+                isPresent: false,
+                status: 'ASSIGNED',
+                presentAt: admin.firestore.FieldValue.delete(),
+                realStartTime: admin.firestore.FieldValue.delete(),
+                checkInTime: admin.firestore.FieldValue.delete(),
+                autoPresencia: admin.firestore.FieldValue.delete(),
+                demoSimulated: admin.firestore.FieldValue.delete(),
+                demoRetPhantomClearedAt: nowTs,
+            });
+            batchOps += 1;
+        }
+    }
     const WINDOW_BEFORE_MS = 15 * 60 * 1000;
     const WINDOW_AFTER_MS = 5 * 60 * 1000;
     const LATE_DELAY_MS = 12 * 60 * 1000;
@@ -698,6 +762,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
                 autoPresencia: true,
                 llegadaTarde: true,
                 modoDemoAt: nowTs,
+                demoSimulated: true,
             });
             const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
             batch.set(db.collection('novedades').doc(`demo_late_${safeId}`), {
@@ -744,6 +809,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
                 realStartTime: actualStartTs,
                 autoPresencia: true,
                 modoDemoAt: nowTs,
+                demoSimulated: true,
             });
             batchOps += 1;
         }
@@ -769,6 +835,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
             absenceDetectedAt: nowTs,
             absenceDetectedBy: 'MODO_DEMO',
             modoDemoAt: nowTs,
+            demoSimulated: true,
         });
         const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
         const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
@@ -878,7 +945,7 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         startTime: after.startTime,
         endTime: after.endTime,
         empresaId,
-    }, 'AUTO');
+    }, after.absenceDetectedBy === 'MODO_DEMO' || after.modoDemoAt ? 'MODO_DEMO' : 'AUTO');
 });
 const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 exports.autoPresenciaYCierre = functions
@@ -936,6 +1003,9 @@ exports.autoPresenciaYCierre = functions
     for (const doc of snap.docs) {
         const t = doc.data();
         if (t.isAbsent || t.isVirtual)
+            continue;
+        const codeU = String(t.code || '').toUpperCase();
+        if (codeU === 'RET' || codeU === 'ESC' || codeU === 'REF' || t.isReten === true)
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
         const endMs = (t.endTime?.seconds ?? 0) * 1000;
@@ -2359,25 +2429,89 @@ exports.autoCompletarTurnos = functions
                 }
             }
             else {
-                await queueCompleteUpdate(docSnap.ref, {
-                    status: 'COMPLETED',
-                    isCompleted: true,
-                    realEndTime: now,
-                    autoCompletedAt: now,
-                    autoCompletedBy: 'SYSTEM_SCHEDULER',
-                    autoCloseReason: 'SIN_RELEVO_CUSTOM',
+                let hasPosterior = false;
+                try {
+                    const dayStart = new Date(nowMs);
+                    dayStart.setHours(0, 0, 0, 0);
+                    const dayEnd = new Date(nowMs);
+                    dayEnd.setHours(23, 59, 59, 999);
+                    const daySnap = await db.collection('turnos')
+                        .where('empresaId', '==', empId || shift.empresaId)
+                        .where('employeeId', '==', shift.employeeId)
+                        .where('startTime', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+                        .where('startTime', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+                        .limit(40)
+                        .get();
+                    const dayShifts = daySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                    const currentEndMs = (0, shiftContinuity_1.toTimestampMs)(shift.endTime) || nowMs;
+                    hasPosterior = (0, shiftContinuity_1.employeeHasPosteriorShift)({
+                        employeeId: String(shift.employeeId || ''),
+                        objectiveId: String(shift.objectiveId || ''),
+                        currentShiftId: docSnap.id,
+                        currentEndMs,
+                        dayShifts,
+                    });
+                }
+                catch (e) {
+                    console.warn('[autoCompletarTurnos] Error checking posterior shift:', e);
+                }
+                const decision = (0, shiftContinuity_1.decideShiftCloseOrRetain)({
+                    shift: { ...shift, id: docSnap.id },
+                    requiresContinuousCoverage24h: false,
+                    hasPosteriorShift: hasPosterior,
                 });
-                const logRef = db.collection('audit_logs').doc();
-                await queueAuditSet(logRef, {
-                    action: 'AUTO_COMPLETE_SHIFT',
-                    actorName: 'Sistema (Scheduler)',
-                    actorUid: 'SYSTEM',
-                    module: 'OPERACIONES',
-                    shiftId: docSnap.id,
-                    details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-                    timestamp: now,
-                });
-                completed++;
+                if (decision.action === 'RETAIN') {
+                    if (!shift.isRetention || !shift.autoRetentionAt) {
+                        await queueCompleteUpdate(docSnap.ref, {
+                            isRetention: true,
+                            retentionReason: decision.reason,
+                            autoRetentionAt: now,
+                        });
+                    }
+                    const existingRet = await db.collection('novedades')
+                        .where('shiftId', '==', docSnap.id)
+                        .where('type', '==', 'RETENCION_SIN_RELEVO')
+                        .limit(1).get();
+                    if (existingRet.empty) {
+                        const novRef = db.collection('novedades').doc();
+                        await queueAuditSet(novRef, {
+                            type: 'RETENCION_SIN_RELEVO',
+                            status: 'PENDIENTE',
+                            shiftId: docSnap.id,
+                            objectiveId: shift.objectiveId,
+                            objectiveName: shift.objectiveName || '',
+                            clientId: shift.clientId || null,
+                            empresaId: empId || null,
+                            employeeName: shift.employeeName || '',
+                            positionName: shift.positionName || '',
+                            description: `⏰ RETENCIÓN (${decision.reason}): ${shift.employeeName || ''} en ${shift.objectiveName || ''} — continuidad hasta relevo.`,
+                            createdAt: now,
+                            source: 'SYSTEM_SCHEDULER',
+                        });
+                        alertedNoRelief++;
+                    }
+                }
+                else {
+                    await queueCompleteUpdate(docSnap.ref, {
+                        status: 'COMPLETED',
+                        isCompleted: true,
+                        realEndTime: now,
+                        autoCompletedAt: now,
+                        autoCompletedBy: 'SYSTEM_SCHEDULER',
+                        autoCloseReason: decision.reason || 'SIN_RELEVO_CUSTOM',
+                    });
+                    const logRef = db.collection('audit_logs').doc();
+                    await queueAuditSet(logRef, {
+                        action: 'AUTO_COMPLETE_SHIFT',
+                        actorName: 'Sistema (Scheduler)',
+                        actorUid: 'SYSTEM',
+                        module: 'OPERACIONES',
+                        shiftId: docSnap.id,
+                        details: `Turno finalizado (${decision.reason}): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+                        timestamp: now,
+                    });
+                    completed++;
+                }
             }
         }
     }
@@ -2387,7 +2521,7 @@ exports.autoCompletarTurnos = functions
     return null;
 });
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
-const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
+const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET', 'ESC', 'REF']);
 function shiftEmpresaId(shift) {
     return String(shift.empresaId ?? '').trim();
 }
@@ -3008,73 +3142,78 @@ exports.gestionarVacantes = functions
         }
     }
     console.log(`[gestionarVacantes] Procesados: ${vacantesProcessed}/${snap.size} | A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
-    const GRACE_MINUTES = 60;
-    const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
-    const staleProtos = await db.collection('novedades')
-        .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
-        .where('status', '==', 'PENDIENTE')
-        .where('createdAt', '<=', graceCutoff)
-        .limit(50)
-        .get();
-    let autoClosed = 0;
-    for (const nDoc of staleProtos.docs) {
-        const n = nDoc.data();
-        if (!cc.isEnabled(n.empresaId))
-            continue;
-        if (n.shiftId) {
-            const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
-            if (turnoSnap.exists) {
-                const t = turnoSnap.data();
-                const directlyCovered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
-                    || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES' || t.status === 'COVERED';
-                let coveredByNewShift = false;
-                if (!directlyCovered && t.objectiveId && t.positionName) {
-                    const slotStartMs = t.startTime?.toMillis?.() ?? 0;
-                    const slotEndMs = t.endTime?.toMillis?.() ?? 0;
-                    if (slotStartMs > 0) {
-                        const coverSnap = await db.collection('turnos')
-                            .where('objectiveId', '==', t.objectiveId)
-                            .where('isPresent', '==', true)
-                            .limit(10).get();
-                        coveredByNewShift = coverSnap.docs.some(d => {
-                            const r = d.data();
-                            const rStart = r.startTime?.toMillis?.() ?? 0;
-                            const rEnd = r.endTime?.toMillis?.() ?? slotEndMs;
-                            const samePos = (r.positionName || '').toLowerCase() === (t.positionName || '').toLowerCase();
-                            const overlaps = rStart <= slotEndMs && rEnd >= slotStartMs;
-                            const isOps = ['RETEN', 'OPERATIONS_COVERAGE', 'EARLY_START'].includes(r.origin || '');
-                            return samePos && overlaps && (isOps || r.absenceShiftId === n.shiftId);
-                        });
+    try {
+        const GRACE_MINUTES = 60;
+        const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
+        const staleProtos = await db.collection('novedades')
+            .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
+            .where('status', '==', 'PENDIENTE')
+            .where('createdAt', '<=', graceCutoff)
+            .limit(50)
+            .get();
+        let autoClosed = 0;
+        for (const nDoc of staleProtos.docs) {
+            const n = nDoc.data();
+            if (!cc.isEnabled(n.empresaId))
+                continue;
+            if (n.shiftId) {
+                const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
+                if (turnoSnap.exists) {
+                    const t = turnoSnap.data();
+                    const directlyCovered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
+                        || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES' || t.status === 'COVERED';
+                    let coveredByNewShift = false;
+                    if (!directlyCovered && t.objectiveId && t.positionName) {
+                        const slotStartMs = t.startTime?.toMillis?.() ?? 0;
+                        const slotEndMs = t.endTime?.toMillis?.() ?? 0;
+                        if (slotStartMs > 0) {
+                            const coverSnap = await db.collection('turnos')
+                                .where('objectiveId', '==', t.objectiveId)
+                                .where('isPresent', '==', true)
+                                .limit(10).get();
+                            coveredByNewShift = coverSnap.docs.some(d => {
+                                const r = d.data();
+                                const rStart = r.startTime?.toMillis?.() ?? 0;
+                                const rEnd = r.endTime?.toMillis?.() ?? slotEndMs;
+                                const samePos = (r.positionName || '').toLowerCase() === (t.positionName || '').toLowerCase();
+                                const overlaps = rStart <= slotEndMs && rEnd >= slotStartMs;
+                                const isOps = ['RETEN', 'OPERATIONS_COVERAGE', 'EARLY_START'].includes(r.origin || '');
+                                return samePos && overlaps && (isOps || r.absenceShiftId === n.shiftId);
+                            });
+                        }
+                    }
+                    if (directlyCovered || coveredByNewShift) {
+                        await nDoc.ref.update({ status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'SISTEMA_AUTO', autoResolved: true });
+                        autoClosed++;
+                        continue;
                     }
                 }
-                if (directlyCovered || coveredByNewShift) {
-                    await nDoc.ref.update({ status: 'ATENDIDA', atendidaAt: now, atendidaPor: 'SISTEMA_AUTO', autoResolved: true });
-                    autoClosed++;
-                    continue;
-                }
             }
+            await nDoc.ref.update({
+                status: 'ATENDIDA',
+                atendidaAt: now,
+                atendidaPor: 'SISTEMA_AUTO',
+                autoResolved: true,
+                sinCobertura: true,
+            });
+            await db.collection('audit_logs').add({
+                action: 'COBERTURA_VENCIDA_AUTO',
+                actorName: 'Sistema (Auto)',
+                actorUid: 'SYSTEM',
+                module: 'OPERACIONES',
+                shiftId: n.shiftId || null,
+                details: `Protocolo de cobertura cerrado automáticamente (${GRACE_MINUTES} min sin gestión): ${n.objectiveName || ''} — ${n.positionName || ''}`,
+                objectiveId: n.objectiveId || null,
+                timestamp: now,
+            });
+            autoClosed++;
         }
-        await nDoc.ref.update({
-            status: 'ATENDIDA',
-            atendidaAt: now,
-            atendidaPor: 'SISTEMA_AUTO',
-            autoResolved: true,
-            sinCobertura: true,
-        });
-        await db.collection('audit_logs').add({
-            action: 'COBERTURA_VENCIDA_AUTO',
-            actorName: 'Sistema (Auto)',
-            actorUid: 'SYSTEM',
-            module: 'OPERACIONES',
-            shiftId: n.shiftId || null,
-            details: `Protocolo de cobertura cerrado automáticamente (${GRACE_MINUTES} min sin gestión): ${n.objectiveName || ''} — ${n.positionName || ''}`,
-            objectiveId: n.objectiveId || null,
-            timestamp: now,
-        });
-        autoClosed++;
+        if (autoClosed > 0) {
+            console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+        }
     }
-    if (autoClosed > 0) {
-        console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+    catch (staleErr) {
+        console.warn('[gestionarVacantes] Auto-cierre protocolos omitido:', staleErr?.message || staleErr);
     }
     return null;
 });

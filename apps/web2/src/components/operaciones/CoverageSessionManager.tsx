@@ -31,7 +31,7 @@ import {
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'RETENCION' | 'INTERCAMBIO' | 'FT';
+export type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'OTRO_PUESTO' | 'RETENCION' | 'INTERCAMBIO' | 'FT';
 
 export interface PendingSlot { notifId: string; empId: string; sec: number; candShiftId?: string; }
 
@@ -76,10 +76,14 @@ const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; ti
   { key: 'SIN_TURNO',  label: 'Sin turno',       icon: '1', mandatory: true,  timeoutSec: 60,  desc: 'Empleados disponibles hoy sin turno asignado' },
   { key: 'RET_PASIVO', label: 'Ret. Pasiva',      icon: '2', mandatory: true,  timeoutSec: 180, desc: 'RET obligado: se convierte al turno real del hueco' },
   { key: 'ESC',        label: 'ESC / REF',        icon: '3', mandatory: true,  timeoutSec: 60,  desc: 'Comodín no facturable → se reasigna al turno real' },
-  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '4', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'Extender turno actual (EXT) + adelantar próximo (ADV)' },
-  { key: 'INTERCAMBIO', label: 'Intercambio',     icon: '5', mandatory: false, timeoutSec: 120, desc: 'Permuta banda con quien tiene turno posterior' },
-  { key: 'FT',         label: 'Franco Trabajado', icon: '6', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco disponibles hoy' },
+  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120, desc: 'Presente en otro puesto del mismo objetivo → redirección al hueco (libera su puesto)' },
+  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '5', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'EXT+ADV solo mismo puesto: extender actual + adelantar próximo' },
+  { key: 'INTERCAMBIO', label: 'Intercambio',     icon: '6', mandatory: false, timeoutSec: 120, desc: 'Permuta banda con quien tiene turno posterior' },
+  { key: 'FT',         label: 'Franco Trabajado', icon: '7', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco disponibles hoy' },
 ];
+
+const WORK_CODES_CROSS = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1']);
+const normPos = (p: unknown) => String(p || '').trim().toLowerCase();
 
 const BAND_LABEL: Record<string, string> = {
   M: 'Mañana', T: 'Tarde', N: 'Noche', D12: '12h diurno', N12: '12h nocturno',
@@ -481,6 +485,35 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               hasAffinity: exp.hasExp,
             };
           });
+      case 'OTRO_PUESTO': {
+        const gapPos = normPos(absenceShift.positionName);
+        return (logic.processedData || [])
+          .filter((sh: any) => {
+            if (!sh.isPresent || sh.isCompleted || sh.isAbsent || sh.isFranco || sh.isUnassigned) return false;
+            if (sh.objectiveId !== absenceShift.objectiveId) return false;
+            if (normPos(sh.positionName) === gapPos) return false;
+            if (sh.employeeId === absenceShift.employeeId) return false;
+            if (crossSessionBusy.has(sh.employeeId)) return false;
+            const code = String(sh.code || '').toUpperCase();
+            if (!WORK_CODES_CROSS.has(code) && code !== 'RET' && code !== 'ESC' && code !== 'REF') return false;
+            if (String(sh.id || '').startsWith('V124_') || String(sh.id || '').startsWith('SLA_GAP')) return false;
+            return true;
+          })
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            const dist = getDistanceToObjective(emp, sh);
+            const exp = getCandidateExperience(emp, sh);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+              distance: dist,
+              experience: exp,
+              hasAffinity: exp.hasExp,
+              crossFromPosition: sh.positionName || '—',
+            };
+          });
+      }
       case 'RETENCION':
         return [];
       case 'INTERCAMBIO':
@@ -661,6 +694,16 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.code === 'RET' && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
       } else if (step.key === 'ESC') {
         candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && (sh.code === 'ESC' || sh.code === 'REF') && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
+      } else if (step.key === 'OTRO_PUESTO') {
+        candidateShift = (logic.processedData || []).find((sh: any) =>
+          sh.employeeId === empId
+          && sh.isPresent
+          && sh.objectiveId === absenceShift.objectiveId
+          && normPos(sh.positionName) !== normPos(absenceShift.positionName)
+          && sh.id !== empId
+          && !String(sh.id).startsWith('V124_')
+          && !String(sh.id).startsWith('SLA_GAP')
+        );
       } else if (step.key === 'FT') {
         candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.isFranco && !sh.isFrancoTrabajado && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
       }
@@ -780,6 +823,90 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         markCovered(covType, candidateShiftId);
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: `Cobertura ${step.label}`, status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName}: ${prevCode} → turno real. ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+      } else if (step.key === 'OTRO_PUESTO') {
+        const prevCode = String(candidateShift?.code || 'M').toUpperCase();
+        const prevPos = String(candidateShift?.positionName || '').trim();
+        const wasPresent = !!candidateShift?.isPresent;
+        // Liberar el puesto origen: vacante referenciada (mismo objetivo, puesto X)
+        const freedRef = doc(collection(db, 'turnos'));
+        batch.set(freedRef, stampEmpresaId({
+          employeeId: 'VACANTE',
+          employeeName: `VACANTE (redir. ${empName.split(',')[0] || empName})`,
+          isUnassigned: true,
+          clientId: candidateShift?.clientId || absenceShift.clientId,
+          clientName: candidateShift?.clientName || absenceShift.clientName,
+          objectiveId: candidateShift?.objectiveId || absenceShift.objectiveId,
+          objectiveName: candidateShift?.objectiveName || absenceShift.objectiveName,
+          positionName: prevPos || candidateShift?.positionName,
+          code: prevCode,
+          startTime: candidateShift?.startTime || Timestamp.fromDate(toDate(candidateShift?.shiftDateObj)),
+          endTime: (candidateShift?.endTime || candidateShift?.endDateObj)
+            ? Timestamp.fromDate(toDate(candidateShift.endTime || candidateShift.endDateObj))
+            : Timestamp.fromDate(absenceEnd),
+          plannedStartTime: candidateShift?.plannedStartTime || candidateShift?.startTime || null,
+          plannedEndTime: candidateShift?.plannedEndTime || candidateShift?.endTime || null,
+          status: 'UNCOVERED',
+          origin: 'VACANTE_POR_REDIRECCION',
+          causedByShiftId: candidateShiftId,
+          causedByEmployeeId: empId,
+          causedByEmployeeName: empName,
+          vacancyLabel: `Vacante por redirección de ${empName} · ${prevPos || 'puesto'} → ${absenceShift.positionName || 'hueco'}`,
+          coverageEventId,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+        }, tid));
+        batch.update(doc(db, 'turnos', candidateShiftId), {
+          ...buildReassignPassiveToVacancyFields({
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            clientId: absenceShift.clientId,
+            clientName: absenceShift.clientName,
+            positionName: absenceShift.positionName,
+            code: absenceShift.code,
+            startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+            endTime: Timestamp.fromDate(absenceEnd),
+          }, {
+            coverageType: 'CROSS_POSITION',
+            resolvedBy: 'OPERACIONES',
+            previousCode: prevCode,
+            previousPositionName: prevPos || null,
+            coverageEventId,
+          }),
+          // Ya estaba presente en el objetivo: sigue presente en el puesto destino (mismo predio).
+          isPresent: wasPresent,
+          status: wasPresent ? 'PRESENT' : 'PENDING',
+          coverageRedirectedTo: absenceShift.objectiveId,
+          coverageRedirectedAt: serverTimestamp(),
+          reassignedFromPassiveAt: serverTimestamp(),
+          vacatedShiftId: freedRef.id,
+          vacancyLabel: vacLabel,
+          ...covererLedgerFields({
+            coverageEventId,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            titularEmployeeId: titularIdForCover,
+            titularEmployeeName: titularNameForCover,
+            vacancyShiftId: vacancyId,
+            titularShiftId: titular.titularShiftId,
+            coverageType: 'CROSS_POSITION',
+          }),
+        });
+        markCovered('CROSS_POSITION', candidateShiftId);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'COBERTURA_RESUELTA',
+          title: 'Cobertura otro puesto',
+          status: 'pending',
+          employeeId: empId,
+          employeeName: empName,
+          objectiveId: absenceShift.objectiveId,
+          objectiveName: absenceShift.objectiveName,
+          shiftId: candidateShiftId,
+          coverageEventId,
+          description: `${empName}: ${prevPos || prevCode} → ${absenceShift.positionName || ''} (${absenceShift.code || ''}). Liberó su puesto. ${vacLabel}`,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+        }, tid));
       } else if (step.key === 'INTERCAMBIO') {
         batch.update(doc(db, 'turnos', candidateShiftId), {
           code: absenceShift.code || candidateShift?.code || 'M',
@@ -1445,6 +1572,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-1.5 flex-wrap">
                                 <span className="text-sm font-bold text-slate-800 truncate leading-tight">{name}</span>
+                                {c.crossFromPosition && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Puesto actual → se redirige al hueco">
+                                    desde {c.crossFromPosition}
+                                  </span>
+                                )}
                                 {hasExp ? (
                                   <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
                                     ✓ {expLabel}

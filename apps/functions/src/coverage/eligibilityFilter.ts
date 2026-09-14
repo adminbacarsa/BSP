@@ -12,6 +12,7 @@ export type CandidateType =
   | 'SIN_TURNO_CON_EXP'
   | 'RET'
   | 'ESC' // ESC / REF redirigibles
+  | 'CROSS_POS'
   | 'EXTEND'
   | 'ADVANCE'
   | 'INTERCAMBIO'
@@ -22,12 +23,13 @@ export type CandidateType =
  * Auto y manual comparten este orden; auto notifica en paralelo y gana el 1º que acepta.
  * RET es forzado (asignación directa, sin esperar aceptación).
  */
-export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'EXT_DUAL' | 'INTERCAMBIO' | 'FT';
+export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'CROSS_POS' | 'EXT_DUAL' | 'INTERCAMBIO' | 'FT';
 
 export const CASCADE_ORDER: CascadeStepType[] = [
   'SIN_TURNO',
   'RET',
   'ESC',
+  'CROSS_POS',
   'EXT_DUAL',
   'INTERCAMBIO',
   'FT',
@@ -61,6 +63,7 @@ export function toCascadeStep(type: string): CascadeStepType | null {
   if (type === 'VOLANTE' || type === 'SIN_TURNO_CON_EXP' || type === 'SIN_TURNO') return 'SIN_TURNO';
   if (type === 'RET') return 'RET';
   if (type === 'ESC') return 'ESC';
+  if (type === 'CROSS_POS') return 'CROSS_POS';
   if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL') return 'EXT_DUAL';
   if (type === 'INTERCAMBIO') return 'INTERCAMBIO';
   if (type === 'FT') return 'FT';

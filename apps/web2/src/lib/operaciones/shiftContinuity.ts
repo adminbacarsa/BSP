@@ -155,19 +155,21 @@ export function buildReassignPassiveToVacancyFields(vacancy: {
   endTime?: unknown;
   empresaId?: string;
 }, opts: {
-  coverageType: 'RET' | 'ESC' | 'REF' | string;
+  coverageType: 'RET' | 'ESC' | 'REF' | 'CROSS_POSITION' | string;
   resolvedBy?: string;
   previousCode?: string;
+  previousPositionName?: string | null;
   coverageEventId?: string;
 }): Record<string, unknown> {
   const prev = String(opts.previousCode || opts.coverageType).toUpperCase();
+  const gapPos = vacancy.positionName || null;
   return {
     code: String(vacancy.code || 'M').toUpperCase(),
     objectiveId: vacancy.objectiveId || null,
     objectiveName: vacancy.objectiveName || null,
     clientId: vacancy.clientId || null,
     clientName: vacancy.clientName || null,
-    positionName: vacancy.positionName || null,
+    positionName: gapPos,
     startTime: vacancy.startTime || null,
     endTime: vacancy.endTime || null,
     // Banda plan del puesto (prefactura); fichada real va en presentAt/realStartTime al marcar
@@ -178,6 +180,13 @@ export function buildReassignPassiveToVacancyFields(vacancy: {
     origin: 'OPERATIONS_COVERAGE',
     coverageType: opts.coverageType,
     previousPassiveCode: prev,
+    ...(opts.previousPositionName
+      ? {
+          previousPositionName: opts.previousPositionName,
+          homePositionName: opts.previousPositionName,
+          coversPositionName: gapPos,
+        }
+      : {}),
     reassignedFromPassiveAt: true,
     resolvedBy: opts.resolvedBy || 'OPERACIONES',
     ...(opts.coverageEventId ? { coverageEventId: opts.coverageEventId } : {}),

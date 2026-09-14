@@ -3019,7 +3019,7 @@ export const autoCompletarTurnos = functions
 //   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
 //   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
-const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
+const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET', 'ESC', 'REF']);
 
 function shiftEmpresaId(shift: FirebaseFirestore.DocumentData): string {
   return String(shift.empresaId ?? '').trim();
