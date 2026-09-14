@@ -96,3 +96,68 @@ export function absentShiftCoveragePatch(opts: {
   }
   return patch;
 }
+
+/** Criterio demo/prod: 1 ausencia ya cubierta no debe generar otra cobertura activa. */
+export function isTitularAlreadyCovered(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data) return false;
+  if (data.operacionallyCovered === true) return true;
+  if (String(data.coverageStatus || '').toUpperCase() === 'COVERED') return true;
+  if (data.coveredByEmployeeId) return true;
+  if (data.coveredByEmployeeName) return true;
+  return false;
+}
+
+export function isActiveOpsCoverageDoc(data: Record<string, unknown> | null | undefined): boolean {
+  if (!data) return false;
+  if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
+  if (data.coverageSuperseded === true) return false;
+  if (String(data.status || '').toUpperCase() === 'CANCELLED') return false;
+  if (data.isDeleted === true) return false;
+  return true;
+}
+
+/** Vínculo titular ↔ cobertura para tooltip Plan ("cubre: NOMBRE"). */
+export function opsCoverageLinkFields(
+  titular: Record<string, unknown> | null | undefined,
+  absenceShiftId: string,
+): Record<string, unknown> {
+  return {
+    absenceShiftId,
+    coveredShiftId: absenceShiftId,
+    coversEmployeeId: titular?.employeeId || null,
+    coversEmployeeName: titular?.employeeName || null,
+  };
+}
+
+
+/** Soft-cancel OPERATIONS_COVERAGE previos del mismo absenceShiftId (cliente). */
+export async function supersedeOpsCoveragesForAbsence(
+  db: Firestore,
+  absenceShiftId: string,
+  batch: WriteBatch,
+  opts?: { keepDocId?: string | null; supersededBy?: string | null },
+): Promise<number> {
+  const id = String(absenceShiftId || '').trim();
+  if (!id) return 0;
+  const [byAbsence, byCovered] = await Promise.all([
+    getDocs(query(collection(db, 'turnos'), where('absenceShiftId', '==', id), limit(40))),
+    getDocs(query(collection(db, 'turnos'), where('coveredShiftId', '==', id), limit(40))),
+  ]);
+  const seen = new Set<string>();
+  let n = 0;
+  for (const d of [...byAbsence.docs, ...byCovered.docs]) {
+    if (seen.has(d.id)) continue;
+    seen.add(d.id);
+    if (opts?.keepDocId && d.id === opts.keepDocId) continue;
+    const data = d.data() as Record<string, unknown>;
+    if (!isActiveOpsCoverageDoc(data)) continue;
+    batch.update(d.ref, {
+      coverageSuperseded: true,
+      coverageSupersededAt: serverTimestamp(),
+      coverageSupersededBy: opts?.supersededBy || null,
+      status: 'CANCELLED',
+    });
+    n += 1;
+  }
+  return n;
+}

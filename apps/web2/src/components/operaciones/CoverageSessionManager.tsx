@@ -12,13 +12,16 @@ import {
   AlertTriangle, Users, Clock, Minimize2, Search,
 } from 'lucide-react';
 import {
-  collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot,
+  collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot, getDoc,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import {
   absentShiftCoveragePatch,
   syncAusenciaCoberturaGestionada,
+  isTitularAlreadyCovered,
+  opsCoverageLinkFields,
+  supersedeOpsCoveragesForAbsence,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
 
@@ -399,7 +402,23 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     if (!cand) return;
     setLoading('confirm');
     try {
+      // Idempotencia: si la ausencia ya tiene cobertura activa, no crear otra (evita N COB en Plan).
+      if (absenceShift.id) {
+        const titularSnap = await getDoc(doc(db, 'turnos', absenceShift.id));
+        if (titularSnap.exists() && isTitularAlreadyCovered(titularSnap.data() as Record<string, unknown>)) {
+          toast.message('Esta ausencia ya tiene cobertura activa — no se crea otra.');
+          onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
+          setTimeout(onClose, 1200);
+          return;
+        }
+      }
+
       const batch = writeBatch(db);
+      if (absenceShift.id) {
+        await supersedeOpsCoveragesForAbsence(db, absenceShift.id, batch, {
+          supersededBy: `SESSION_${s.id}`,
+        });
+      }
       const isAbsence =
         !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence || absenceShift.absenceType);
       const canMarkTitular =
@@ -408,6 +427,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         (absenceShift.isUnassigned || isAbsence);
       const empName = cand.fullName || cand.name || cand.employeeName || '';
       const shiftId = cand.id;
+      const linkFields = opsCoverageLinkFields(
+        {
+          employeeId: absenceShift.employeeId,
+          employeeName: absenceShift.employeeName,
+        },
+        String(absenceShift.id || ''),
+      );
       // coveredBy* en el turno ausente alimenta "CUBIERTO POR" en planificación y reportes
       const markCovered = (ct: string) => {
         if (!canMarkTitular) return;
@@ -424,7 +450,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       if (step.key === 'SIN_TURNO') {
         const newRef = doc(collection(db, 'turnos'));
-        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, code: absenceShift.code || 'T', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES', absenceShiftId: absenceShift.id || null, createdAt: serverTimestamp() }, tid));
+        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: empName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, code: absenceShift.code || 'T', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES', ...linkFields, createdAt: serverTimestamp() }, tid));
         markCovered('SIN_TURNO');
         if (absenceShift.id) {
           await syncAusenciaCoberturaGestionada(
@@ -460,7 +486,21 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_COBERTURA', title: `Cobertura ${step.label}`, status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId, description: `${empName} redirigido a cobertura en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
       } else if (step.key === 'FT') {
-        batch.update(doc(db, 'turnos', shiftId), { isFranco: false, isFrancoTrabajado: true, code: 'FT', type: 'EXTRA_FRANCO', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), francoTrabajadoAt: serverTimestamp(), francoObjectiveId: absenceShift.objectiveId, francoObjectiveName: absenceShift.objectiveName, comments: `Franco Trabajado — cubre ${absenceShift.objectiveName}` });
+        batch.update(doc(db, 'turnos', shiftId), {
+          isFranco: false,
+          isFrancoTrabajado: true,
+          code: 'FT',
+          type: 'EXTRA_FRANCO',
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
+          francoTrabajadoAt: serverTimestamp(),
+          francoObjectiveId: absenceShift.objectiveId,
+          francoObjectiveName: absenceShift.objectiveName,
+          comments: `Franco Trabajado — cubre ${absenceShift.employeeName || absenceShift.objectiveName}`,
+          origin: 'OPERATIONS_COVERAGE',
+          resolvedBy: 'OPERACIONES',
+          ...linkFields,
+        });
         markCovered('FRANCO');
         if (absenceShift.id) {
           await syncAusenciaCoberturaGestionada(

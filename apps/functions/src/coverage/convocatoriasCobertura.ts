@@ -509,10 +509,53 @@ async function resolverCobertura(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc & { id: string },
 ): Promise<void> {
-  const { absentShiftCoveragePatch, syncAusenciaCoberturaGestionada } = await import(
-    './syncAusenciaCobertura'
-  );
+  const {
+    absentShiftCoveragePatch,
+    syncAusenciaCoberturaGestionada,
+    isTitularAlreadyCovered,
+    supersedeOpsCoveragesForAbsence,
+    opsCoverageLinkFields,
+  } = await import('./syncAusenciaCobertura');
+
+  const titularRef = db.collection('turnos').doc(conv.shiftId);
+  const convRef = db.collection('convocatorias_cobertura').doc(conv.id);
+
+  // Claim atómico: 1 ausencia → 1 cobertura. Evita N OPERATIONS_COVERAGE en demo/carrera.
+  const claim = await db.runTransaction(async (tx) => {
+    const titularSnap = await tx.get(titularRef);
+    const titularData = titularSnap.data() || {};
+    if (isTitularAlreadyCovered(titularData)) {
+      if (String(titularData.coverageConvocatoriaId || '') === conv.id) {
+        return { ok: true, already: true, titular: titularData };
+      }
+      tx.update(convRef, {
+        status: 'CANCELLED',
+        cancelReason: 'ALREADY_COVERED',
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { ok: false, already: true, titular: titularData };
+    }
+    tx.update(titularRef, {
+      operacionallyCovered: true,
+      coverageStatus: 'COVERED',
+      coveredByEmployeeId: conv.candidateEmployeeId,
+      coveredByEmployeeName: conv.candidateEmployeeName,
+      coverageConvocatoriaId: conv.id,
+      coverageClaimedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    return { ok: true, already: false, titular: titularData };
+  });
+
+  if (!claim.ok) {
+    console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
+    return;
+  }
+
   const batch = db.batch();
+  // Soft-cancel coberturas ops previas del mismo titular (huérfanas / carrera).
+  await supersedeOpsCoveragesForAbsence(db, conv.shiftId, batch, {
+    supersededBy: conv.id,
+  });
 
   // Trazabilidad: quién/qué resolvió la cobertura
   const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
@@ -526,6 +569,7 @@ async function resolverCobertura(
     resolvedBy,
     isAbsence: true,
   });
+  const linkFields = opsCoverageLinkFields(claim.titular, conv.shiftId);
 
   if (conv.type === 'EXTEND' && conv.extendShiftId) {
     const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
@@ -536,6 +580,7 @@ async function resolverCobertura(
       extendedBy: 'CONVOCATORIA',
       extendedAt: FieldValue.serverTimestamp(),
       resolvedBy,
+      ...linkFields,
     });
     batch.update(db.collection('turnos').doc(conv.shiftId), {
       ...coverPatch,
@@ -551,6 +596,7 @@ async function resolverCobertura(
       advancedBy: 'CONVOCATORIA',
       advancedAt: FieldValue.serverTimestamp(),
       resolvedBy,
+      ...linkFields,
     });
     batch.update(db.collection('turnos').doc(conv.shiftId), {
       ...coverPatch,
@@ -598,7 +644,7 @@ async function resolverCobertura(
         origin: 'OPERATIONS_COVERAGE',
         resolvedBy,
         isRetentionActivated: true,
-        absenceShiftId: conv.shiftId,
+        ...linkFields,
         assignedByConvocatoria: conv.id,
         assignedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
@@ -631,7 +677,7 @@ async function resolverCobertura(
         realStartTime: conv.startTime,
         realEndTime: conv.endTime || null,
         resolvedBy,
-        coveredShiftId: conv.shiftId,
+        ...linkFields,
         assignedByConvocatoria: conv.id,
         assignedAt: FieldValue.serverTimestamp(),
         origin: 'OPERATIONS_COVERAGE',
@@ -683,7 +729,7 @@ async function resolverCobertura(
         status: 'PENDING',
         origin: 'OPERATIONS_COVERAGE',
         resolvedBy,
-        absenceShiftId: conv.shiftId,
+        ...linkFields,
         assignedByConvocatoria: conv.id,
         assignedAt: FieldValue.serverTimestamp(),
         createdAt: FieldValue.serverTimestamp(),
@@ -1165,6 +1211,24 @@ export async function iniciarCascadaCobertura(
   shift: ShiftDataForCascade,
   createdBy = 'AUTO',
 ): Promise<void> {
+  const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await import('./syncAusenciaCobertura');
+
+  // Idempotencia: si el titular ya está cubierto, no reabrir cascada (modo demo incluido).
+  const titularSnap = await db.collection('turnos').doc(shift.id).get();
+  if (isTitularAlreadyCovered(titularSnap.data())) {
+    console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
+    return;
+  }
+
+  const priorCov = await db.collection('turnos')
+    .where('absenceShiftId', '==', shift.id)
+    .limit(20)
+    .get();
+  if (priorCov.docs.some((d) => isActiveOpsCoverageDoc(d.data()))) {
+    console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya hay OPERATIONS_COVERAGE activa`);
+    return;
+  }
+
   // Si ya hay una convocatoria activa para este turno, no crear otra
   const existing = await db.collection('convocatorias_cobertura')
     .where('shiftId', '==', shift.id)

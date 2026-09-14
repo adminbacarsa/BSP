@@ -33,6 +33,7 @@
     "eval:sla-active-days": "npx tsx scripts/eval-sla-active-days.ts",
     "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts",
     "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts",
+    "eval:coverage-idempotency": "npx tsx scripts/eval-coverage-idempotency.ts",
     "eval:compare-months": "npx tsx scripts/eval-compare-objective-months.ts",
     "eval:pool-cycle-autolab": "npx tsx scripts/eval-pool-cycle-autolab.ts",
     "eval:planning-roster-24hs": "npx tsx scripts/eval-planning-roster-24hs.ts",
