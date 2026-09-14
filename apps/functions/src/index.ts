@@ -3561,6 +3561,7 @@ export const gestionarVacantes = functions
     // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
     // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
     // se cierra automáticamente como "sin cobertura confirmada".
+    try {
     const GRACE_MINUTES = 60;
     const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
 
@@ -3641,6 +3642,9 @@ export const gestionarVacantes = functions
 
     if (autoClosed > 0) {
       console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+    }
+    } catch (staleErr: any) {
+      console.warn('[gestionarVacantes] Auto-cierre protocolos omitido:', staleErr?.message || staleErr);
     }
 
     return null;
