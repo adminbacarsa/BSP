@@ -54,6 +54,17 @@ import {
     absenceStatusBadgeClass,
     clampPlanifFloatingPos,
 } from '@/lib/planificacion/planificacionGridVisuals';
+import {
+    calcShiftHours,
+    is24hCoverageType,
+    isShortBandHours,
+    resolveBandHours,
+} from '@/lib/planificacion/planificacionBandHours';
+import {
+    formatPlanificacionTime,
+    formatShiftScheduleLabel,
+    resolveShiftDisplayClockParts,
+} from '@/lib/planificacion/planificacionShiftDisplay';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
@@ -259,7 +270,6 @@ import { gruposService, GrupoObjetivos } from '@/services/gruposService';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import {
     shiftCoverageExtensionExtraHours,
-    calcPlanningBillableShiftHours,
     calcPlanningBillableHoursAttributedToPosition,
     calcPlanningSlaReconciliationHours,
     planningShiftBillableBreakdown,
@@ -546,100 +556,8 @@ function formatPlanningTraceTooltip(steps: PlanningTraceStep[]): string {
     return steps.map(s => `${s.title}: ${s.detail}`).join('\n');
 }
 
-const formatShiftScheduleLabel = (shift: any, bandCode: string): string => {
-    const bandFallback = SHIFT_RANGES[String(bandCode || '').toUpperCase()] || '—';
-    const isSameClock = (a: string, b: string) => {
-        const norm = (t: string) => {
-            const raw = String(t || '').trim().toLowerCase()
-                .replace(/\s+/g, ' ')
-                .replace(/\./g, '');
-            // 12:00 a m / 00:00 / 0:00 → medianoche placeholder
-            if (/^(0?0:00|12:00\s*a\s*m)$/.test(raw)) return '00:00';
-            const m = raw.match(/^(\d{1,2}):(\d{2})/);
-            if (!m) return raw;
-            return `${String(Number(m[1])).padStart(2, '0')}:${m[2]}`;
-        };
-        return norm(a) === norm(b);
-    };
-
-    if (typeof shift?.startTime === 'string' && typeof shift?.endTime === 'string') {
-        const s = shift.startTime.trim();
-        const e = shift.endTime.trim();
-        if (s && e && !isSameClock(s, e)) return `${s} - ${e}`;
-        return bandFallback;
-    }
-    if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
-        const s = formatTime(shift.startTime);
-        const e = formatTime(shift.endTime);
-        if (s !== '--:--' && e !== '--:--' && !isSameClock(s, e)) return `${s} - ${e}`;
-    }
-    return bandFallback;
-};
-
-/** Partes start/end para UI; si start≈end usa banda CCT (nunca fingir 24h). */
-const resolveShiftDisplayClockParts = (shift: any, bandCode: string): { start: string; end: string; usedBandFallback: boolean } => {
-    const label = formatShiftScheduleLabel(shift, bandCode);
-    const parts = String(label).split(/\s*[-–—]\s*/);
-    if (parts.length >= 2 && parts[0] && parts[1] && parts[0] !== '—') {
-        const band = SHIFT_RANGES[String(bandCode || '').toUpperCase()];
-        const usedBandFallback = !!band && label === band;
-        return { start: parts[0].trim(), end: parts[1].trim(), usedBandFallback };
-    }
-    return { start: '--:--', end: '--:--', usedBandFallback: true };
-};
-
-/**
- * Horas de banda para cupos 8h vs 12h.
- * Prioriza la definición del puesto en el SLA (ej. M custom 08–20 = 12h), no el lookup CCT estándar (M=8).
- */
-const resolveBandHours = (
-    code: string | undefined | null,
-    shiftLike?: { hours?: unknown; startTime?: unknown; endTime?: unknown } | null,
-    posShifts?: Array<{ code?: string; hours?: unknown; startTime?: unknown; endTime?: unknown }> | null,
-): number => {
-    const upper = String(code || '').toUpperCase();
-    const fromSla = (posShifts || []).find((s) => String(s.code || '').toUpperCase() === upper);
-    const slaH = Number(fromSla?.hours);
-    if (slaH > 0) return slaH;
-    const stored = Number(shiftLike?.hours);
-    if (stored > 0) return stored;
-    // Duración 08:00–20:00 si el turno la trae
-    const st = fromSla?.startTime ?? shiftLike?.startTime;
-    const en = fromSla?.endTime ?? shiftLike?.endTime;
-    if (typeof st === 'string' && typeof en === 'string') {
-        const parseH = (t: string) => {
-            const m = t.match(/^(\d{1,2}):(\d{2})$/);
-            return m ? +m[1] + +m[2] / 60 : null;
-        };
-        const s = parseH(st);
-        const e = parseH(en);
-        if (s !== null && e !== null) {
-            let dur = e - s;
-            // 00:00→00:00 no es 24h; overnight real solo si end < start.
-            if (Math.abs(dur) < 1 / 60) {
-                /* cae al lookup CCT */
-            } else {
-                if (dur < 0) dur += 24;
-                if (dur > 0 && dur <= 24) return dur;
-            }
-        }
-    }
-    return SHIFT_HOURS_LOOKUP[upper] ?? 8;
-};
-
-const isShortBandHours = (hours: number) => hours < 12;
-
-/** Puestos 24hs usan esquema CCT M+T+N / D12+N12. Custom: turnos con nombre libre. */
-const is24hCoverageType = (pos: { coverageType?: unknown } | null | undefined): boolean => {
-    const cov = String(pos?.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
-};
-
 /** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
 const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
-
-const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number =>
-  calcPlanningBillableShiftHours(shift, slaHoursHint);
 
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
 function isOperationalOriginShift(data: any): boolean {
@@ -905,14 +823,7 @@ const isDateLocked = (dateStr: string) => {
 
 const getDefaultStyle = (code: string) => SHIFT_STYLES[code] || 'bg-slate-100 text-slate-700 border-slate-300';
 
-const formatTime = (dateInput: any) => {
-    if (!dateInput) return '--:--';
-    // String "HH:MM" — retornar directamente (new Date("HH:MM") → Invalid Date)
-    if (typeof dateInput === 'string' && /^\d{1,2}:\d{2}$/.test(dateInput.trim())) return dateInput.trim();
-    const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    if (isNaN(d.getTime())) return '--:--';
-    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-};
+const formatTime = formatPlanificacionTime;
 
 const ACTION_LABELS: Record<string, string> = {
     'ASIGNACION': 'Asignación', 'ELIMINACION': 'Eliminación', 'EDICION_MASIVA': 'Edición Masiva',
