@@ -156,6 +156,7 @@ function HoyScreenContent() {
     portalFeatures.checkIn &&
     !!mainShift &&
     !mainShift.isFranco &&
+    !isOpsHero &&
     timing?.lateWindow &&
     !hasPendingRequest &&
     !isConfirmed &&
@@ -303,7 +304,7 @@ function HoyScreenContent() {
                 <View style={styles.heroActions}>
                   {portalFeatures.checkIn && canCheckIn ? (
                     <CommandButton
-                      label="Marcar presente (GPS)"
+                      label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
                       variant="success"
                       loading={busyShiftId === mainShift?.id}
                       onPress={onCheckIn}

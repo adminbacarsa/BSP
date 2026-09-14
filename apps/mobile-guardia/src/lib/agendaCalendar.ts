@@ -1,5 +1,5 @@
 import type { Shift } from '@cosp/portal-types';
-import { toDate } from '@cosp/portal-core';
+import { isOperationsCoverageShift, toDate } from '@cosp/portal-core';
 
 export type AgendaViewMode = 'day' | 'week' | 'month';
 
@@ -107,7 +107,7 @@ export type MonthCell = {
 };
 
 export function isOpsCoverageShift(s: Shift): boolean {
-  return String(s.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  return isOperationsCoverageShift(s);
 }
 
 function shiftCodeLabel(s: Shift): string {

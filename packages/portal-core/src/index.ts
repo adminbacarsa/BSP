@@ -14,6 +14,7 @@ export {
   buildCheckInPayload,
   flushPendingCheckins,
   getCheckInTiming,
+  isOperationsCoverageShift,
   parsePendingCheckins,
   validateCheckInDistance,
 } from './checkIn/portalCheckIn';

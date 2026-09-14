@@ -27,18 +27,35 @@ export type CheckInTimingOptions = {
   relaxWindow?: boolean;
 };
 
+/** Cobertura urgente creada desde Operaciones (hueco por ausencia). */
+export function isOperationsCoverageShift(shift: Pick<Shift, 'origin'> | null | undefined): boolean {
+  return String(shift?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+}
+
 export function getCheckInTiming(
   shift: Shift,
   now = new Date(),
   options?: CheckInTimingOptions,
 ): CheckInTiming {
   const start = toDate(shift.startTime);
+  const end = toDate(shift.endTime);
   const diffMinutes = start ? Math.round((start.getTime() - now.getTime()) / 60000) : null;
+  const shiftEnded = end ? end.getTime() <= now.getTime() : false;
+
+  // Cobertura ops (urgencia): puede fichar al llegar al objetivo, sin ventana ±15/−5.
+  // Turnos normales siguen con la regla de cronograma más abajo.
+  if (isOperationsCoverageShift(shift) && !shift.isFranco) {
+    return {
+      diffMinutes,
+      canCheckIn: !shiftEnded,
+      lateWindow: false,
+      tooEarly: false,
+    };
+  }
+
   const relax = options?.relaxWindow === true && !shift.isFranco;
 
   if (relax && diffMinutes !== null) {
-    const end = toDate(shift.endTime);
-    const shiftEnded = end ? end.getTime() <= now.getTime() : false;
     const canCheckIn = !shiftEnded && diffMinutes <= 240 && diffMinutes >= -240;
     const tooEarly = diffMinutes > 240;
     const lateWindow = !shiftEnded && diffMinutes < -240 && diffMinutes >= -480;
