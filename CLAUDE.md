@@ -178,18 +178,17 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 **Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front.
 
-**Cascada auto de cobertura** (`apps/functions/src/coverage/`): misma escalera CCT que el protocolo manual — Sin turno → **RET forzado** (asignación directa, radio 15→30 km, orden por conocimiento; RET/ESC/REF se **convierten al turno real** del hueco) → ESC/REF → **Otro puesto** (presente en otro `positionName` del mismo objetivo → redirección + libera su puesto) → Ext.12h (EXT+ADV, solo mismo puesto) → **Intercambio** → FT. En pasos con aceptación notifica hasta 5 candidatos en paralelo (`convocatorias_cobertura`); **gana el primero** (claim atómico + `resolverCobertura` aborta si ya `COVERED`); timeout ~3 min escala al siguiente (ESCALATED sigue aceptando salvo hueco ya cubierto). Reinicio de cascada solo se bloquea si hay PENDING o vacante ya COVERED.
+**Cascada auto de cobertura** (`apps/functions/src/coverage/`): misma escalera CCT que el protocolo manual — Sin turno → **RET forzado** (asignación directa, radio 15→30 km, orden por conocimiento; RET/ESC/REF se **convierten al turno real** del hueco) → ESC/REF → **Otro puesto** (presente a jornada completa en otro `positionName` del mismo objetivo → redirección + libera su puesto) → Ext.12h (**EXT+ADV**: bandas vecinas del **mismo objetivo, cualquier puesto**; `coversPositionName` si cubre otro puesto) → **Intercambio** → FT. En pasos con aceptación notifica hasta 5 candidatos en paralelo (`convocatorias_cobertura`); **gana el primero** (claim atómico + `resolverCobertura` aborta si ya `COVERED`); timeout ~3 min escala al siguiente (ESCALATED sigue aceptando salvo hueco ya cubierto). Reinicio de cascada solo se bloquea si hay PENDING o vacante ya COVERED.
 
 **EXT/ADV vs otro puesto:**
 | Situación | Herramienta |
 |-----------|-------------|
-| Mismo objetivo **y** mismo puesto, se queda más | **EXT** (mitad dual) |
-| Mismo objetivo **y** mismo puesto, entra antes el del próximo turno | **ADV** (mitad dual) |
-| Otro puesto (esté en M, RET, ESC o REF) | **Redirección / cobertura** al hueco (como RET/ESC/REF → código real del vacante). No es EXT/ADV. |
+| Mismo objetivo, banda que termina al inicio del hueco (cualquier puesto) | **EXT** (1.er tramo dual) |
+| Mismo objetivo, banda que empieza al fin del hueco (cualquier puesto) | **ADV** (2.º tramo dual) |
+| Presente en otro puesto → se mueve **todo el turno** al hueco y libera el suyo | **Otro puesto / CROSS_POS** (redirección completa) |
 | Franco | **FT** |
-| Primero otro puesto y después el suyo | **Dos piezas**: cobertura ops en el ajeno + turno planificado propio (no un solo `isEarlyStart`) |
 
-EXT/ADV puros parten la vacante en dos mitades **en el mismo puesto**. Si solo se alarga horario sin mover objetivo/puesto cuando la vacante es otro puesto, Ops cree que sigue en X y Y queda mal cubierta. RET pasivo **no ficha**; ficha recién cuando el modal/cascada le asigna el turno real del hueco.
+EXT+ADV parten la vacante en dos mitades por banda vecina; el suplente puede ser de **otro puesto** del mismo objetivo (`coversPositionName`). CROSS_POS es redirección de jornada completa (no mitades). RET pasivo **no ficha**; ficha recién cuando el modal/cascada le asigna el turno real del hueco.
 
 **Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas (ficticias pero bien formadas, con `modoDemoAt` / `source: MODO_DEMO` para auditoría) y dispara el **mismo pipeline** que Auto (cascada, convocatorias, ledger, vacantes). Las respuestas a convocatorias se simulan sin esperar al guardia real. Planificación y Ops **muestran** el resultado para verificar trazabilidad de punta a punta — no se oculta.
 
@@ -275,8 +274,8 @@ Cuando un empleado falta, el sistema busca reemplazante en este orden (menor a m
 1. Sin turno    — empleado disponible ese día (no tiene turno asignado)
 2. RET          — retención pasiva OBLIGADA (no pregunta); radio 15→30 km; al cubrir → turno real del hueco
 3. ESC / REF    — comodín no facturable; al cubrir → turno real del hueco
-3b. Otro puesto — presente en otro puesto del **mismo objetivo** → redirección al hueco (libera su puesto con vacante). Alineado a Planificación (`coversPositionName` / reasignación). No es EXT/ADV.
-4. Ext. 12hs    — EXT+ADV solo mismo objetivo y mismo puesto (2 mitades). Otro puesto = redirección/cobertura al hueco (no EXT/ADV). Adelanto ajeno + luego propio = 2 piezas.
+3b. Otro puesto — presente → redirección de **jornada completa** al hueco (libera su puesto). Distinto de EXT/ADV.
+4. Ext. 12hs    — EXT+ADV: 2 mitades con bandas vecinas del **mismo objetivo** (cualquier puesto; `coversPositionName` si es otro).
                   ⚠ Requiere validación — no siempre acepta
 5. Intercambio  — permuta banda con quien tiene turno posterior en el objetivo
 6. FT           — llamar a empleado de franco a trabajar

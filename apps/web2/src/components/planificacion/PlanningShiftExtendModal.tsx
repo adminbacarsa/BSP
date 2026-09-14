@@ -98,7 +98,7 @@ export default function PlanningShiftExtendModal({
 
   const listCtx = {
     positionStructure,
-    preferSamePosition: true,
+    preferSamePosition: false,
     gapPositionName,
     gapBand: uiBand,
   };

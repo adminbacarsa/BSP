@@ -258,25 +258,31 @@ async function findCandidatesForConvType(
       .limit(20)
       .get();
 
+    const samePos: CandidateResult[] = [];
+    const otherPos: CandidateResult[] = [];
     for (const d of active.docs) {
-      if (out.length >= limit) break;
       const t = d.data();
       if (d.id === conv.shiftId) continue;
-      // EXT puro = mismo objetivo Y mismo puesto (otro puesto = redirección, no EXT).
-      if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos) continue;
+      // Ext+Adel: mismo objetivo, cualquier puesto (mismo puesto primero).
       const code = String(t.code || '').toUpperCase();
       if (code !== 'M' && code !== 'T' && code !== 'N') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;
       const emp = empSnap.data()!;
       if (!checkEligibility(emp, ctx, 'EXTEND').eligible) continue;
-      out.push({
+      const row: CandidateResult = {
         id: t.employeeId,
         name: t.employeeName || '',
         uid: emp.uid,
         convocatoriaType: 'EXTEND',
         extendShiftId: d.id,
-      });
+      };
+      const isSame = vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos;
+      (isSame ? samePos : otherPos).push(row);
+    }
+    for (const c of [...samePos, ...otherPos]) {
+      if (out.length >= limit) break;
+      out.push(c);
     }
     return out;
   }
@@ -295,24 +301,29 @@ async function findCandidatesForConvType(
       .limit(20)
       .get();
 
+    const samePos: CandidateResult[] = [];
+    const otherPos: CandidateResult[] = [];
     for (const d of next.docs) {
-      if (out.length >= limit) break;
       const t = d.data();
       if (!t.employeeId || t.employeeId === 'VACANTE' || d.id === conv.shiftId) continue;
       if (t.isPresent || t.isAbsent || t.isUnassigned || t.isFranco) continue;
-      // ADV puro = mismo objetivo Y mismo puesto.
-      if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos) continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;
       const emp = empSnap.data()!;
       if (!checkEligibility(emp, ctx, 'ADVANCE').eligible) continue;
-      out.push({
+      const row: CandidateResult = {
         id: t.employeeId,
         name: t.employeeName || '',
         uid: emp.uid,
         convocatoriaType: 'ADVANCE',
         advanceShiftId: d.id,
-      });
+      };
+      const isSame = vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos;
+      (isSame ? samePos : otherPos).push(row);
+    }
+    for (const c of [...samePos, ...otherPos]) {
+      if (out.length >= limit) break;
+      out.push(c);
     }
     return out;
   }
@@ -992,6 +1003,11 @@ async function resolverCobertura(
 
   if (conv.type === 'EXTEND' && conv.extendShiftId) {
     const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
+    const extendSnap = await shiftRef.get();
+    const extendData = extendSnap.data() || {};
+    const vacPos = String((vacantData as any).positionName || conv.positionName || '').trim();
+    const srcPos = String(extendData.positionName || '').trim();
+    const crossPos = !!(vacPos && srcPos && vacPos.toLowerCase() !== srcPos.toLowerCase());
     const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
     batch.update(shiftRef, {
       code: newCode,
@@ -1000,6 +1016,12 @@ async function resolverCobertura(
       extendedBy: 'CONVOCATORIA',
       extendedAt: FieldValue.serverTimestamp(),
       resolvedBy,
+      ...(crossPos
+        ? {
+          coversPositionName: vacPos,
+          coverageSegmentRole: 'EXTENSION',
+        }
+        : {}),
       ...covererLedgerFields({
         ...ledgerBase,
         vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1038,6 +1060,9 @@ async function resolverCobertura(
     const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
     const nextSnap = await nextRef.get();
     const nextData = nextSnap.data() || {};
+    const vacPosAdv = String((vacantData as any).positionName || conv.positionName || '').trim();
+    const srcPosAdv = String(nextData.positionName || '').trim();
+    const crossPosAdv = !!(vacPosAdv && srcPosAdv && vacPosAdv.toLowerCase() !== srcPosAdv.toLowerCase());
     // Dual reloj: no pisar plannedStartTime; adjustedStart = llegada/adelanto para liquidación/ops
     const plannedStart = nextData.plannedStartTime || nextData.startTime || null;
     batch.update(nextRef, {
@@ -1050,6 +1075,12 @@ async function resolverCobertura(
       startTime: conv.startTime,
       plannedStartTime: plannedStart,
       resolvedBy,
+      ...(crossPosAdv
+        ? {
+          coversPositionName: vacPosAdv,
+          coverageSegmentRole: 'EARLY_START',
+        }
+        : {}),
       ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
       ...covererLedgerFields({
         ...ledgerBase,

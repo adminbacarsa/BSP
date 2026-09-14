@@ -509,10 +509,13 @@ export function listSegmentCandidates(
   }
 
   let sorted = rows.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-  if (listCtx?.preferSamePosition !== false && listCtx?.gapPositionName) {
-    const pos = listCtx.gapPositionName;
-    const samePos = sorted.filter((r) => r.positionName === pos);
-    if (samePos.length > 0) sorted = samePos;
+  // Ext+Adel: mismo objetivo, cualquier puesto. Ordenar el del hueco primero (nunca excluir otros).
+  if (listCtx?.gapPositionName) {
+    const pos = String(listCtx.gapPositionName);
+    sorted = [
+      ...sorted.filter((r) => r.positionName === pos),
+      ...sorted.filter((r) => r.positionName !== pos),
+    ];
   }
   return sorted;
 }

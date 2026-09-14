@@ -336,26 +336,35 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
       };
     });
 
+  // EXT/ADV: mismo objetivo, cualquier puesto (Ext+Adel = cubrir hueco con banda vecina; coversPositionName si es otro puesto).
   const candidatesExt: any[] = dedupeByEmployee((logic.processedData || [])
     .filter((s: any) =>
       s.isPresent && !s.isCompleted &&
       isSameDay(s.shiftDateObj, targetDate) &&
       s.objectiveId === absenceShift.objectiveId &&
-      s.positionName === absenceShift.positionName &&
       s.id !== absenceShift.id
     )
-  );
+  ).sort((a: any, b: any) => {
+    const gapPos = String(absenceShift.positionName || '');
+    const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+    const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+    return aSame - bSame;
+  });
 
   const candidatesAdv: any[] = dedupeByEmployee((logic.processedData || [])
     .filter((s: any) =>
       !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
       s.objectiveId === absenceShift.objectiveId &&
-      s.positionName === absenceShift.positionName &&
       toDate(s.shiftDateObj) > targetDate &&
       isSameDay(s.shiftDateObj, targetDate)
     )
-    .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
-    .slice(0, 1)
+    .sort((a: any, b: any) => {
+      const gapPos = String(absenceShift.positionName || '');
+      const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+      const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+      if (aSame !== bSame) return aSame - bSame;
+      return toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime();
+    })
   );
 
   const candidatesFt: any[] = (logic.processedData || [])
@@ -875,6 +884,13 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
             isExtended: true,
             retentionEndTime: Timestamp.fromDate(absenceEnd),
             endTime: Timestamp.fromDate(absenceEnd),
+            ...(String(extShift.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EXTENSION',
+                coverageType: 'EXTEND',
+              }
+              : {}),
           });
           await batch.commit();
         }
@@ -927,6 +943,13 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
             adjustedStartTime: vacancyStart,
             startTime: vacancyStart,
             isEarlyStart: true,
+            ...(String(advShift.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EARLY_START',
+                coverageType: 'ADVANCE',
+              }
+              : {}),
           });
           await batch.commit();
         }

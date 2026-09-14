@@ -561,26 +561,34 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     }
   };
 
+  // EXT: presentes del mismo objetivo (cualquier puesto). Mismo puesto primero.
   const candidatesExt = dedupeByEmployee((logic.processedData || []).filter((sh: any) =>
     sh.isPresent && !sh.isCompleted &&
     isSameDay(sh.shiftDateObj, targetDate) &&
     sh.objectiveId === absenceShift.objectiveId &&
-    sh.positionName === absenceShift.positionName &&
     sh.id !== absenceShift.id
-  ));
-  // ADV: turno que aún no empezó en el mismo objective/puesto, dentro de las próximas 12h.
-  // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
+  )).sort((a: any, b: any) => {
+    const gapPos = String(absenceShift.positionName || '');
+    const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+    const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+    return aSame - bSame;
+  });
+  // ADV: turnos próximos del mismo objetivo (cualquier puesto), ventana 12h.
   const advWindowEnd = new Date(targetDate.getTime() + 12 * 3600 * 1000);
   const candidatesAdv = dedupeByEmployee((logic.processedData || [])
     .filter((sh: any) => {
       const shStart = toDate(sh.shiftDateObj);
       return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
         && sh.objectiveId === absenceShift.objectiveId
-        && sh.positionName === absenceShift.positionName
         && shStart > targetDate && shStart <= advWindowEnd;
     })
-    .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
-    .slice(0, 1)
+    .sort((a: any, b: any) => {
+      const gapPos = String(absenceShift.positionName || '');
+      const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+      const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+      if (aSame !== bSame) return aSame - bSame;
+      return toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime();
+    })
   );
 
   const rawCandidates = dedupeByEmployee(byKey(step.key));
@@ -1024,6 +1032,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             isExtended: true,
             retentionEndTime: Timestamp.fromDate(absenceEnd),
             endTime: Timestamp.fromDate(absenceEnd),
+            ...(String(sh.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EXTENSION',
+                coverageType: 'EXTEND',
+              }
+              : {}),
           });
           await batch.commit();
         }
@@ -1104,6 +1119,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             startTime: vacancyStart,
             plannedStartTime: plannedStart,
             isEarlyStart: true,
+            ...(String(sh.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EARLY_START',
+                coverageType: 'ADVANCE',
+              }
+              : {}),
           });
           await batch.commit();
         }
@@ -1295,6 +1317,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{isSelected ? '✓' : initials(name)}</div>
           <div className="flex-1 min-w-0">
             <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>{name}</div>
+            <div className="text-[10px] text-slate-500 truncate">{cand.positionName || '—'} · {cand.code || '—'}</div>
             <div className="text-xs font-mono text-slate-600">📱 {phone}</div>
           </div>
         </div>
@@ -1303,7 +1326,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
     return (
       <div className="flex flex-col gap-2.5">
-        <p className="text-xs text-slate-500 leading-snug">{isPending ? '⏳ Esperando respuesta de cada guardia' : 'Seleccioná uno de cada columna y notificá a ambos.'}</p>
+        <p className="text-xs text-slate-500 leading-snug">{isPending ? '⏳ Esperando respuesta de cada guardia' : 'Seleccioná uno de cada columna (cualquier puesto del objetivo) y notificá a ambos.'}</p>
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1.5 bg-violet-50 border border-violet-200 rounded-xl p-2">
             <div className="text-[9px] font-black text-violet-700 uppercase tracking-wider border-b border-violet-200 pb-1.5 mb-0.5">⟵ 1ª mitad · EXT</div>
