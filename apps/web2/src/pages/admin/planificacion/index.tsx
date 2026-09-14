@@ -10353,11 +10353,9 @@ export default function PlanificacionPage() {
                                                     <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                 );
                                             }
-                                            const empLat = Number(emp.lat ?? emp.latitude ?? 0);
-                                            const empLng = Number(emp.lng ?? emp.longitude ?? 0);
                                             const objLat = Number(selectedObjectiveData?.lat ?? 0);
                                             const objLng = Number(selectedObjectiveData?.lng ?? 0);
-                                            const distKm = (empLat && empLng && objLat && objLng) ? haversineKm(empLat, empLng, objLat, objLng) : null;
+                                            const distKm = employeeKmToObjective(emp, objLat, objLng);
                                             const monthHours = empMonthlyHours[emp.id] || 0;
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
                                             const retDays = empRetDays[emp.id] || 0;
