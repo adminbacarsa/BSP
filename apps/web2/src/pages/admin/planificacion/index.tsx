@@ -10403,7 +10403,7 @@ export default function PlanificacionPage() {
                                                             <span title="Distancia al objetivo" className={`shrink-0 flex items-center gap-0.5 text-[8px] ${distKm >= 9 ? 'text-orange-500' : distKm >= 3 ? 'text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>
                                                                 <MapPin size={7}/>{distKm < 1 ? `${Math.round(distKm * 1000)}m` : `${distKm.toFixed(1)}km`}
                                                             </span>
-                                                        ) : emp.address && !(empLat && empLng) ? (
+                                                        ) : emp.address ? (
                                                             <span title="Sin coordenadas — ir a RRHH y geolocalizar" className="shrink-0 flex items-center gap-0.5 text-[8px] text-amber-400 opacity-60 group-hover:opacity-100">
                                                                 <MapPin size={7}/>?
                                                             </span>
