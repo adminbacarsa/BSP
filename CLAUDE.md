@@ -180,7 +180,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 **Cascada auto de cobertura** (`apps/functions/src/coverage/`): misma escalera CCT que el protocolo manual — Sin turno → **RET forzado** (asignación directa, radio 15→30 km, orden por conocimiento; RET/ESC/REF se **convierten al turno real** del hueco) → ESC/REF → Ext.12h (EXT+ADV) → **Intercambio** → FT. En pasos con aceptación notifica hasta 5 candidatos en paralelo (`convocatorias_cobertura`); gana el primero que acepta; timeout ~3 min escala al siguiente (ESCALATED sigue aceptando). Reinicio de cascada solo se bloquea si hay PENDING (no solo ESCALATED).
 
-**Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = solo prueba: escribe en `turnos` con `modoDemoAt` / `resolvedBy: MODO_DEMO`; Planificación **oculta** esos artefactos (`isDemoOpsArtifact`) para no contaminar la malla.
+**Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas (ficticias pero bien formadas, con `modoDemoAt` / `source: MODO_DEMO` para auditoría) y dispara el **mismo pipeline** que Auto (cascada, convocatorias, ledger, vacantes). Las respuestas a convocatorias se simulan sin esperar al guardia real. Planificación y Ops **muestran** el resultado para verificar trazabilidad de punta a punta — no se oculta.
 
 **Continuidad al fin de banda** (`shiftContinuity` + `autoCompletarTurnos`): 24hs SLA → retención; si el presente tiene **turno posterior** en el mismo objetivo → retención; si hay extensión TURA/D12/N12 → retención; solo sin posterior ni extensión → cierre auto.
 

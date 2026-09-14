@@ -1,27 +1,6 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 
-/**
- * Artefacto de cobertura operativa creado por Modo Demo.
- * Distinto de un turno planificado al que Demo solo le puso modoDemoAt al marcar
- * presente/ausente — ese debe seguir visible en la malla.
- */
-export function isDemoOpsCoverageArtifact(data: any): boolean {
-    if (!data) return false;
-    const o = String(data.origin || '').toUpperCase();
-    const isOpsOrigin =
-        o === 'OPERATIONS_COVERAGE'
-        || o === 'RETEN'
-        || o === 'INTERCAMBIO'
-        || data.isReten === true
-        || data.isRelief === true
-        || (!!data.coverageRedirectedTo && o !== '' && o !== 'PLANIFICACION');
-    if (!isOpsOrigin) return false;
-    if (data.modoDemoAt) return true;
-    const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
-    return rb === 'MODO_DEMO';
-}
-
 function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
     const data = d.data();
     return {
@@ -77,6 +56,9 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         planningDate: data.planningDate,
         extExtraHours: data.extExtraHours,
         extensionExtraHours: data.extensionExtraHours,
+        /** Marca de auditoría Demo (presencia/ausencia simulada); no filtra la malla. */
+        modoDemoAt: data.modoDemoAt || null,
+        resolvedBy: data.resolvedBy || null,
     };
 }
 
@@ -112,10 +94,6 @@ export function ingestPlanningTurnosSnapshot(
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
         if (data.isDeleted === true) return;
-        // Solo ocultar artefactos operativos generados por Demo (OPS_COV),
-        // NO turnos planificados que Demo tocó (presente/ausente) — esos llevan modoDemoAt
-        // pero deben seguir en la malla.
-        if (isDemoOpsCoverageArtifact(data)) return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {

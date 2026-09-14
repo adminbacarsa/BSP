@@ -812,9 +812,10 @@ export const executeAgentAction = functions.https.onCall(executeAgentActionHandl
 
 // =========================================================
 // MODO DEMO CONTINUO — cron cada 5 min (empresas modoDemoEnabled).
-// SOLO GENERADOR de eventos: presente / tarde / ausente + respuestas
-// a convocatorias. El pipeline Auto (autoCompletarTurnos, useAutoMonitor,
-// cascada onTurnoAbsenciaDetectada) procesa coberturas y cierres.
+// Laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas
+// (ficticias, selladas con modoDemoAt) y dispara el MISMO pipeline que Auto
+// (onTurnoAbsenciaDetectada → cascada CCT → convocatorias → ledger).
+// Las respuestas a convocatorias se simulan sin esperar al guardia real.
 // =========================================================
 async function runModoDemoForEmpresa(
   db: admin.firestore.Firestore,
@@ -883,9 +884,11 @@ async function runModoDemoForEmpresa(
         status: 'PRESENT',
         presentAt: lateTs,
         realStartTime: lateTs,
+        // Dual reloj: plannedStartTime se conserva; fichada = realStartTime
         autoPresencia: true,
         llegadaTarde: true,
         modoDemoAt: nowTs,
+        demoSimulated: true,
       });
       const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
       batch.set(db.collection('novedades').doc(`demo_late_${safeId}`), {
@@ -926,6 +929,7 @@ async function runModoDemoForEmpresa(
         realStartTime: actualStartTs,
         autoPresencia: true,
         modoDemoAt: nowTs,
+        demoSimulated: true,
       });
       batchOps += 1;
     }
@@ -948,8 +952,10 @@ async function runModoDemoForEmpresa(
       status: 'ABSENT',
       absenceType: 'AA',
       absenceDetectedAt: nowTs,
+      // Misma forma que AUTO_T30 / scheduler; sello Demo para auditoría/trazabilidad
       absenceDetectedBy: 'MODO_DEMO',
       modoDemoAt: nowTs,
+      demoSimulated: true,
     });
 
     const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
@@ -1076,7 +1082,7 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       startTime: after.startTime,
       endTime:   after.endTime,
       empresaId,
-    }, 'AUTO');
+    }, after.absenceDetectedBy === 'MODO_DEMO' || after.modoDemoAt ? 'MODO_DEMO' : 'AUTO');
   }
 );
 

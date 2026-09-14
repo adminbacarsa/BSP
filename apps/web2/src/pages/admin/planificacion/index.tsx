@@ -664,26 +664,8 @@ function shiftMatchesObjective(data: any, objectiveId: string | undefined | null
 }
 
 /** Cobertura operativa: se muestra en grilla (visual) pero no suma CCT. */
-function isDemoOpsArtifact(data: any): boolean {
-    if (!data) return false;
-    // Solo OPS generados por Demo — no turnos de malla con modoDemoAt por presencia simulada
-    const o = String(data.origin || '').toUpperCase();
-    const isOpsOrigin =
-        o === 'OPERATIONS_COVERAGE'
-        || o === 'RETEN'
-        || o === 'INTERCAMBIO'
-        || data.isReten === true
-        || data.isRelief === true;
-    if (!isOpsOrigin) return false;
-    if (data.modoDemoAt) return true;
-    const rb = String(data.resolvedBy || data.createdBy || data.source || '').toUpperCase();
-    return rb === 'MODO_DEMO';
-}
-
 function isOpsCoverageShift(data: any): boolean {
     if (!data) return false;
-    // Artefactos Demo no contaminan la malla de Planificación
-    if (isDemoOpsArtifact(data)) return false;
     // El titular ausente o cubierto NO es un turno de cobertura operativa
     if (data?.operacionallyCovered === true || data?.isAbsent === true) return false;
     const o = String(data?.origin || '').toUpperCase();
@@ -693,6 +675,8 @@ function isOpsCoverageShift(data: any): boolean {
     if (data?.coverageRedirectedTo) return true;
     if (data?.coversAbsenceEmployeeName || data?.absenceShiftId || data?.coversEmployeeId) return true;
     if (data?.resolvedBy === 'OPERACIONES' && (o === 'OPERATIONS_COVERAGE' || o === 'RETEN' || data?.coversAbsenceEmployeeName || data?.absenceShiftId)) return true;
+    // Demo usa el mismo circuito Auto: OPS_COV con resolvedBy MODO_DEMO también se ve (trazabilidad)
+    if (String(data?.resolvedBy || '').toUpperCase() === 'MODO_DEMO' && (o === 'OPERATIONS_COVERAGE' || o === 'RETEN' || o === 'INTERCAMBIO')) return true;
     return false;
 }
 
