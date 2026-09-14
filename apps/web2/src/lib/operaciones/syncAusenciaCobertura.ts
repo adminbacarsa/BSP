@@ -86,6 +86,13 @@ export function absentShiftCoveragePatch(opts: {
   };
   if (!opts.isAbsence) {
     patch.status = 'COVERED';
+  } else {
+    // Forzar verdad del titular: sin esto la app sigue mostrando 7–15 como "próximo turno".
+    patch.isAbsent = true;
+    patch.status = 'ABSENT';
+    if (!opts.coverageType) {
+      patch.absenceType = 'AA';
+    }
   }
   return patch;
 }

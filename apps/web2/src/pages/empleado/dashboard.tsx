@@ -111,13 +111,20 @@ const SWAP_PEOPLE_CACHE_KEY = 'swap_people_cache';
 
 const isFinalizedShift = (shift: Shift, now: Date) => {
   const status = (shift.status || '').toString().toLowerCase();
+  const absType = String((shift as any).absenceType || '').toUpperCase();
   const endDate = toDate(shift.endTime);
   const startDate = toDate(shift.startTime);
   const startDay = startDate ? new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate()) : null;
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const covered =
+    (shift as any).operacionallyCovered === true ||
+    !!(shift as any).coveredByEmployeeId ||
+    String((shift as any).coverageStatus || '').toUpperCase() === 'COVERED';
   return (
     shift.isCompleted ||
     shift.isAbsent ||
+    covered ||
+    absType === 'AA' ||
     status === 'completed' ||
     status === 'finalizado' ||
     status === 'finalized' ||
@@ -870,6 +877,25 @@ export default function EmployeeDashboard() {
     });
   }, [shifts]);
 
+  /** Turno de hoy ausente (AA / isAbsent): no es "próximo a trabajar", es novedad. */
+  const todayAbsentShift = useMemo(() => {
+    const startOfDay = new Date(now);
+    startOfDay.setHours(0, 0, 0, 0);
+    const endOfDay = new Date(now);
+    endOfDay.setHours(23, 59, 59, 999);
+    return sortedShifts.find((s) => {
+      const start = toDate(s.startTime);
+      if (!start || start < startOfDay || start > endOfDay) return false;
+      const status = String(s.status || '').toUpperCase();
+      const absType = String((s as any).absenceType || '').toUpperCase();
+      const covered =
+        (s as any).operacionallyCovered === true ||
+        !!(s as any).coveredByEmployeeId ||
+        String((s as any).coverageStatus || '').toUpperCase() === 'COVERED';
+      return s.isAbsent === true || status === 'ABSENT' || status === 'AUSENTE' || absType === 'AA' || covered;
+    });
+  }, [sortedShifts, now]);
+
   const todayShiftAny = useMemo(() => {
     const startOfDay = new Date(now);
     startOfDay.setHours(0, 0, 0, 0);
@@ -879,6 +905,8 @@ export default function EmployeeDashboard() {
       const start = toDate(s.startTime);
       const end = toDate(s.endTime);
       if (!start || start < startOfDay || start > endOfDay) return false;
+      // Ausente / finalizado: no es hero de trabajo (la cobertura es otro doc).
+      if (isFinalizedShift(s, now)) return false;
       // Si el turno ya terminó, no mostrarlo en el hero (pasar al siguiente)
       if (end && end < now) return false;
       return true;
@@ -894,7 +922,9 @@ export default function EmployeeDashboard() {
     const today = dateKey(now);
     return sortedShifts.find((s) => {
       const start = toDate(s.startTime);
-      return start && dateKey(start) > today && !s.isFranco;
+      if (!start || dateKey(start) <= today || s.isFranco) return false;
+      if (isFinalizedShift(s, now)) return false;
+      return true;
     });
   }, [sortedShifts]);
 
@@ -2476,6 +2506,18 @@ export default function EmployeeDashboard() {
                   <span className="px-4 py-2 bg-emerald-500/25 border border-emerald-400/30 rounded-2xl text-sm font-black text-emerald-200 inline-flex items-center gap-2">
                     🌿 Franco — Día libre
                   </span>
+                </div>
+              ) : todayAbsentShift && !todayShift ? (
+                <div className="mt-3 space-y-2">
+                  <span className="px-4 py-2 bg-rose-500/25 border border-rose-400/30 rounded-2xl text-sm font-black text-rose-100 inline-flex items-center gap-2">
+                    ⛔ Ausente — no corresponde fichar
+                  </span>
+                  <p className="text-sm font-bold text-indigo-100/80">
+                    Turno original {formatTime(todayAbsentShift.startTime)} – {formatTime(todayAbsentShift.endTime)}
+                    {(todayAbsentShift as any).coveredByEmployeeName
+                      ? ` · cubierto por ${(todayAbsentShift as any).coveredByEmployeeName}`
+                      : ''}
+                  </p>
                 </div>
               ) : (
                 <p className="text-xl font-bold text-indigo-100 mt-1">

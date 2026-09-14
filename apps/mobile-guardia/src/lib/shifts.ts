@@ -4,7 +4,20 @@ import { toDate } from '@cosp/portal-core';
 
 function isAbsentShift(shift: Shift): boolean {
   if (shift.isAbsent === true) return true;
-  return String(shift.status || '').toUpperCase() === 'ABSENT';
+  const status = String(shift.status || '').toUpperCase();
+  if (status === 'ABSENT' || status === 'AUSENTE') return true;
+  const absType = String((shift as { absenceType?: string }).absenceType || '').toUpperCase();
+  if (absType === 'AA') return true;
+  // Cubierto por Ops: el titular no trabaja ese slot (aunque falte isAbsent en docs viejos).
+  const any = shift as {
+    operacionallyCovered?: boolean;
+    coveredByEmployeeId?: string | null;
+    coverageStatus?: string;
+  };
+  if (any.operacionallyCovered === true) return true;
+  if (any.coveredByEmployeeId) return true;
+  if (String(any.coverageStatus || '').toUpperCase() === 'COVERED') return true;
+  return false;
 }
 
 export function sortShiftsByStart(shifts: Shift[]): Shift[] {

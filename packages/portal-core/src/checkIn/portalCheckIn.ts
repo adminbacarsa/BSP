@@ -42,14 +42,31 @@ export function getCheckInTiming(
   const diffMinutes = start ? Math.round((start.getTime() - now.getTime()) / 60000) : null;
   const shiftEnded = end ? end.getTime() <= now.getTime() : false;
 
-  // Turno del titular ausente: no fichable (la cobertura es otro documento).
-  if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
-    return {
-      diffMinutes,
-      canCheckIn: false,
-      lateWindow: false,
-      tooEarly: false,
+  // Turno del titular ausente/cubierto: no fichable (la cobertura es otro documento).
+  {
+    const st = String(shift.status || '').toUpperCase();
+    const absType = String((shift as { absenceType?: string }).absenceType || '').toUpperCase();
+    const any = shift as {
+      operacionallyCovered?: boolean;
+      coveredByEmployeeId?: string | null;
+      coverageStatus?: string;
     };
+    if (
+      shift.isAbsent === true ||
+      st === 'ABSENT' ||
+      st === 'AUSENTE' ||
+      absType === 'AA' ||
+      any.operacionallyCovered === true ||
+      !!any.coveredByEmployeeId ||
+      String(any.coverageStatus || '').toUpperCase() === 'COVERED'
+    ) {
+      return {
+        diffMinutes,
+        canCheckIn: false,
+        lateWindow: false,
+        tooEarly: false,
+      };
+    }
   }
 
   // Cobertura ops (urgencia): puede fichar al llegar al objetivo, sin ventana ±15/−5.
