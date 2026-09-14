@@ -8,6 +8,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
+import { logOpsBackgroundWarn, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -580,7 +581,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                 .map(d => ({ id: d.id, ...d.data(), shiftDateObj: getSafeDate(d.data().startTime), endDateObj: getSafeDate(d.data().endTime) })));
             readyFlags.current.shifts = true; checkReady();
         }, (err) => {
-            console.warn('[useOperacionesMonitor] turnos listener error, forzando reconexión:', err.code);
+            logOpsListenerWarn('useOperacionesMonitor.turnos', err);
             setRefreshKey(k => k + 1);
         });
 
@@ -603,7 +604,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                     return !isNaN(t) && t >= startMs && t <= endMs;
                 }));
         }, (err) => {
-            console.warn('[useOperacionesMonitor] refuerzos listener error:', err.code);
+            logOpsListenerWarn('useOperacionesMonitor.refuerzos', err);
         });
 
         return () => { unsub(); unsubRfz(); };
@@ -1434,7 +1435,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                             createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                         }, shiftEmpresaId));
                     })
-                    .catch(e => console.warn('[autoAlertVacante:plan]', e));
+                    .catch(e => logOpsBackgroundWarn('autoAlertVacante:plan', e));
             }
 
             // ── PASO 3: T+120 → auto-declarar SIN COBERTURA ─────────────────
@@ -1469,7 +1470,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         .then(() => toast.info(`Sin cobertura: ${v.positionName} en ${v.objectiveName}`))
                         .catch(e => {
                             alertedVacancyIds.current.delete(sinCobKey);
-                            console.warn('[autoSinCobertura]', e);
+                            logOpsBackgroundWarn('autoSinCobertura', e);
                         });
                     }).catch(() => alertedVacancyIds.current.delete(sinCobKey));
                 }
@@ -1507,7 +1508,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                     minutesUntilStart: Math.round(minutesUntil),
                     createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                 }, shiftEmpresaId), { merge: false })
-                    .catch(e => console.warn('[autoAlertVacante:prot]', e));
+                    .catch(e => logOpsBackgroundWarn('autoAlertVacante:prot', e));
             }).catch(() => {
                 // Si falla getDoc, no crear para evitar recrear novedades atendidas
                 alertedVacancyIds.current.delete(protKey);
@@ -1534,7 +1535,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoCustomKey);
-                        console.warn('[autoEndCustomPost]', e);
+                        logOpsBackgroundWarn('autoEndCustomPost', e);
                     });
                 }
                 continue;
@@ -1587,7 +1588,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                             description: `${relevoShift.employeeName || 'Relevo'} llega a las ${etaLabel}. Relevar a ${s.employeeName} en ${s.objectiveName || s.positionName}.`,
                             createdAt: serverTimestamp(),
                             source: 'SYSTEM_SCHEDULER',
-                        }, String(s.empresaId || empresaId || '').trim())).catch(e => console.warn('[relevodInminente]', e));
+                        }, String(s.empresaId || empresaId || '').trim())).catch(e => logOpsBackgroundWarn('relevoInminente', e));
                     }
 
                     // Mientras el ETA + 15 min no haya pasado: no auto-cerrar (esperar al relevo)
@@ -1617,7 +1618,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         if (ok) toast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoEndKey);
-                        console.warn('[autoEndRetention]', e);
+                        logOpsBackgroundWarn('autoEndRetention', e);
                     });
                     continue; // no generar alerta de retención larga para este turno
                 }
@@ -1666,7 +1667,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoShiftEndKey);
-                        console.warn('[autoEndShift]', e);
+                        logOpsBackgroundWarn('autoEndShift', e);
                     });
                     continue;
                 }
@@ -1687,7 +1688,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                     if (ok) toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
                 }).catch(e => {
                     alertedVacancyIds.current.delete(autoTimeKey);
-                    console.warn('[autoEndRetentionTime]', e);
+                    logOpsBackgroundWarn('autoEndRetentionTime', e);
                 });
                 continue;
             }
@@ -1713,9 +1714,9 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         description: `${s.employeeName || 'Guardia'} lleva ${Math.round(minutesOvertime)} min retenido en ${s.objectiveName || 'su puesto'}.`,
                         createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
                     }, String(s.empresaId || empresaId || '').trim()))
-                    .catch(e => console.warn('[retentionLarga]', e));
+                    .catch(e => logOpsBackgroundWarn('retentionLarga', e));
                 })
-                .catch(e => console.warn('[retentionLarga:check]', e));
+                .catch(e => logOpsBackgroundWarn('retentionLarga:check', e));
         }
     }, [enabled, processedData, empresaId, now, servicesSLA]);
 

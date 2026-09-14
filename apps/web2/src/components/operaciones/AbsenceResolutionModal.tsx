@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, Timestamp, updateDoc, doc, addDoc, serverTimestamp, limit } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import { toast } from 'sonner';
+import { logOpsBackgroundWarn, logOpsError } from '@/lib/operaciones/logOpsError';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
@@ -56,7 +57,7 @@ export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, 
             const q = query(collection(db, 'turnos'), where('objectiveId', '==', absenceShift.objectiveId), where('status', '==', 'PRESENT'));
             const snap = await getDocs(q);
             setActiveGuards(snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })));
-        } catch (e) { console.error('[ops] checkActiveGuards error:', e); }
+        } catch (e) { logOpsBackgroundWarn('checkActiveGuards', e); }
     };
 
     const materializeShiftIfNeeded = async () => {
@@ -112,8 +113,7 @@ export default function AbsenceResolutionModal({ isOpen, onClose, absenceShift, 
             setCandidates(available);
             setPhase('SELECTION');
         } catch (e: any) { 
-            console.error(e); 
-            toast.error("Error buscando: " + e.message); 
+            logOpsError('loadCandidates', e, { userMessage: 'Error buscando: ' + e.message }); 
         } finally { setLoading(false); }
     };
 

@@ -34,6 +34,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { logOpsError } from '@/lib/operaciones/logOpsError';
 
 const ROLE_LABEL: Record<CoverageChainRole, string> = {
   titular: 'Titular',
@@ -226,8 +227,7 @@ export default function CoberturaAuditPage() {
       }
       setNovedadesByEvent(novMap);
     } catch (e: any) {
-      console.error('[cobertura-audit]', e);
-      toast.error(e?.message || 'Error cargando coberturas');
+      logOpsError('cobertura-audit', e, { userMessage: e?.message || 'Error cargando coberturas' });
       setShifts([]);
       setNovedadesByEvent({});
     } finally {
@@ -284,7 +284,7 @@ export default function CoberturaAuditPage() {
       toast.success(msg);
       if (!dryRun) await load();
     } catch (e: any) {
-      toast.error(e?.message || 'Backfill falló');
+      logOpsError('cobertura-backfill', e, { userMessage: e?.message || 'Backfill falló' });
     } finally {
       setBackfillBusy(false);
     }

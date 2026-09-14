@@ -6,6 +6,7 @@ import { useRouter } from 'next/router';
 import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { toast } from 'sonner';
+import { logOpsBackgroundWarn, logOpsError, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, getDocs } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
 import { getAuth } from 'firebase/auth';
@@ -30,7 +31,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
         if (extra?.objectiveName != null) data.objectiveName = extra.objectiveName;
         if (extra?.clientName != null) data.clientName = extra.clientName;
         await addDoc(collection(db, 'audit_logs'), data);
-    } catch (e) { console.error('Error registrando bitácora', e); toast.error('No se pudo registrar en bitácora.'); }
+    } catch (e) { logOpsError('registrarBitacora', e, { userMessage: 'No se pudo registrar en bitácora.' }); }
 };
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
@@ -140,8 +141,9 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                 toast.message('Presente OK — no había saliente para relevar.');
             }
         }).catch((e: any) => {
-            console.error('[HandoverModal map]', e);
-            toast.error('Error al guardar ingreso: ' + (e?.message || e?.code || String(e)));
+            logOpsError('HandoverModal map', e, {
+                userMessage: 'Error al guardar ingreso: ' + (e?.message || e?.code || String(e)),
+            });
             lockingRef.current = false;
         });
     };
@@ -1157,7 +1159,7 @@ export default function TacticalMapView() {
                 docs.sort((a: any, b: any) => (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0));
                 setEmpNovedades(docs);
             }, err => {
-                console.warn('[map-view] novedades listener error, reconectando:', err.code);
+                logOpsListenerWarn('map-view.novedades', err);
                 setRefreshKey(k => k + 1);
             }
         );
@@ -1205,7 +1207,7 @@ export default function TacticalMapView() {
                 });
             } catch (e) {
                 autoExpiredRef.current.delete(n.id);
-                console.warn('[auto-expire] Error cerrando novedad vencida', e);
+                logOpsBackgroundWarn('auto-expire', e);
             }
         });
     }, [empNovedades]);
@@ -1443,7 +1445,7 @@ export default function TacticalMapView() {
                     const allowed = ['TODOS', 'PRIORIDAD', 'NO_LLEGO', 'PLAN', 'ACTIVOS', 'RETENIDOS', 'VACANTES', 'AUSENTES', 'FRANCOS'];
                     if (tab && allowed.includes(tab)) logic.setViewTab(tab as typeof logic.viewTab);
                     else logic.setViewTab('TODOS');
-                } catch (e) { console.error(e); logic.setViewTab('TODOS'); }
+                } catch (e) { logOpsBackgroundWarn('syncFilters', e); logic.setViewTab('TODOS'); }
             } else {
                 logic.setViewTab('TODOS');
             }

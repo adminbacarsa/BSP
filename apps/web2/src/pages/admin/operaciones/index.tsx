@@ -14,6 +14,7 @@ import {
     Bot, Sparkles, Pause, Play
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { logOpsBackgroundWarn, logOpsError, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
 import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
@@ -737,7 +738,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
         );
         const unsub = onSnapshot(q, (snap) => {
             setPendingConvocatorias(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        }, (err) => console.error('[convocatoria modal]', err));
+        }, (err) => logOpsListenerWarn('convocatoria modal', err));
         return () => unsub();
     }, [absenceShift?.id]);
 
@@ -1270,7 +1271,7 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 else if (stepKeyToUse === 'ft') await handleFranco(cand);
                 else if (activeStep?.resolveCandidate) await activeStep.resolveCandidate(cand);
             } catch (err: any) {
-                console.error('[demoSimulateAccept]', err);
+                logOpsBackgroundWarn('demoSimulateAccept', err);
             }
         }, 900);
     };
@@ -2983,7 +2984,7 @@ export default function OperacionesPage() {
         if (session.isMySession) return;
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
-        session.startSession().catch(e => console.warn('[CC auto-start]', e));
+        session.startSession().catch(e => logOpsBackgroundWarn('CC auto-start', e));
     }, [centroControlEnabled, isCCOperator, modoDemoActivo, logic.isReady, session.loading, session.isMySession]);
 
     // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
@@ -3042,8 +3043,7 @@ export default function OperacionesPage() {
                     : 'Demo OFF — volvés a Auto (realidad, sin simulador)',
             );
         } catch (e) {
-            console.error(e);
-            toast.error('No se pudo cambiar el modo demo');
+            logOpsError('toggleModoDemo', e, { userMessage: 'No se pudo cambiar el modo demo' });
         } finally {
             setToggleModoDemoLoading(false);
         }
@@ -3059,8 +3059,7 @@ export default function OperacionesPage() {
             await session.startSession();
             toast.success('Demo OFF · Auto OFF · Manual ON');
         } catch (e) {
-            console.error(e);
-            toast.error('No se pudo iniciar guardia manual');
+            logOpsError('startManualGuardia', e, { userMessage: 'No se pudo iniciar guardia manual' });
         } finally {
             setGuardiaActionLoading(false);
         }
@@ -3073,8 +3072,7 @@ export default function OperacionesPage() {
             setConfirmEndSession(false);
             toast.success('Demo OFF · Auto ON · Manual OFF');
         } catch (e) {
-            console.error(e);
-            toast.error('No se pudo cerrar la guardia manual');
+            logOpsError('endManualGuardia', e, { userMessage: 'No se pudo cerrar la guardia manual' });
         } finally {
             setGuardiaActionLoading(false);
         }
@@ -3313,7 +3311,7 @@ export default function OperacionesPage() {
                 setEmpNovedades(docs);
             },
             err => {
-                console.warn('[operaciones] novedades listener error, reconectando:', err.code);
+                logOpsListenerWarn('operaciones.novedades', err);
                 setListenerRefreshKey(k => k + 1);
             }
         );
@@ -3365,7 +3363,7 @@ export default function OperacionesPage() {
                 setAuthorizedAbsences(docs);
             },
             err => {
-                console.warn('[operaciones] ausencias listener error, reconectando:', err.code);
+                logOpsListenerWarn('operaciones.ausencias', err);
                 setListenerRefreshKey(k => k + 1);
             }
         );
@@ -3710,7 +3708,7 @@ export default function OperacionesPage() {
                 });
             } catch (e) {
                 autoExpiredRef.current.delete(n.id);
-                console.warn('[auto-expire] Error cerrando novedad vencida', e);
+                logOpsBackgroundWarn('auto-expire', e);
             }
         });
     }, [empNovedades]);
@@ -3740,7 +3738,7 @@ export default function OperacionesPage() {
                 });
             } catch (e) {
                 autoFinAttendedRef.current.delete(n.id);
-                console.warn('[auto-fin] Error atendiendo novedad ruido', e);
+                logOpsBackgroundWarn('auto-fin', e);
             }
         });
     }, [empNovedades, logic.processedData]);
@@ -4589,8 +4587,9 @@ export default function OperacionesPage() {
             }, String(shift.empresaId || empresaId || '').trim()));
             toast.success('Reporte enviado correctamente');
         } catch (e: any) {
-            console.error('[operaciones] handleReportPlanning error:', e);
-            toast.error('Error al reportar: ' + (e?.message || e?.code || String(e)));
+            logOpsError('handleReportPlanning', e, {
+                userMessage: 'Error al reportar: ' + (e?.message || e?.code || String(e)),
+            });
         }
     };
 
