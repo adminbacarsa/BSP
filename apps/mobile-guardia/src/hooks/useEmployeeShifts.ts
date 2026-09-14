@@ -14,6 +14,8 @@ import {
   isShiftVisibleToEmployee,
   shiftPlanificacionLookupKey,
   toDate,
+  isAbsentLikeShift,
+  isActiveAbsenceRecord,
 } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { sortShiftsByStart } from '../lib/shifts';
@@ -90,12 +92,28 @@ function hasPublishedAt(data: Record<string, unknown> | undefined): boolean {
   return v != null && v !== '';
 }
 
+/** Ops guarda startDate/endDate como Timestamp; RRHH a veces como ISO string. */
+function absenceDayBound(val: unknown): string | null {
+  if (val == null || val === '') return null;
+  if (typeof val === 'string') {
+    const s = val.trim().slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+  }
+  const d = toDate(val as never);
+  if (!d || Number.isNaN(d.getTime())) return null;
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 export function useEmployeeShifts(
   empDocId: string | null,
   authUid: string | null,
   monthAnchor: Date = new Date(),
 ) {
   const [rawShifts, setRawShifts] = useState<Shift[]>([]);
+  const [absentShiftIds, setAbsentShiftIds] = useState<Set<string>>(new Set());
   const [publishedKeys, setPublishedKeys] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -190,6 +208,75 @@ export function useEmployeeShifts(
     };
   }, [employeeKeys.join('|'), monthKey]);
 
+  // Ausencias RRHH: si el turno no trae isAbsent, igual no debe ser "próximo turno".
+  useEffect(() => {
+    if (employeeKeys.length === 0) {
+      setAbsentShiftIds(new Set());
+      return;
+    }
+    const { db } = getPortalFirebase();
+    const unsubs: Unsubscribe[] = [];
+    const byKey = new Map<string, { shiftIds: Set<string>; ranges: Array<{ from: string; to: string }> }>();
+
+    const publish = () => {
+      const merged = new Set<string>();
+      for (const bucket of byKey.values()) {
+        for (const id of bucket.shiftIds) merged.add(id);
+      }
+      // También marcar turnos crudos que caen en rangos de ausencia sin shiftId.
+      for (const s of rawShifts) {
+        const start = toDate(s.startTime);
+        if (!start) continue;
+        const y = start.getFullYear();
+        const m = String(start.getMonth() + 1).padStart(2, '0');
+        const d = String(start.getDate()).padStart(2, '0');
+        const dayKey = `${y}-${m}-${d}`;
+        for (const bucket of byKey.values()) {
+          if (bucket.ranges.some((r) => dayKey >= r.from && dayKey <= r.to)) {
+            merged.add(s.id);
+          }
+        }
+      }
+      setAbsentShiftIds(merged);
+    };
+
+    for (const key of employeeKeys) {
+      byKey.set(key, { shiftIds: new Set(), ranges: [] });
+      unsubs.push(
+        onSnapshot(
+          query(collection(db, 'ausencias'), where('employeeId', '==', key)),
+          (snap) => {
+            const shiftIds = new Set<string>();
+            const ranges: Array<{ from: string; to: string }> = [];
+            for (const d of snap.docs) {
+              const data = d.data() as Record<string, unknown>;
+              if (!isActiveAbsenceRecord(data)) continue;
+              const shiftId = String(data.shiftId || data.turnoId || '').trim();
+              if (shiftId) shiftIds.add(shiftId);
+              const from = absenceDayBound(data.startDate ?? data.fechaDesde);
+              const to =
+                absenceDayBound(data.endDate ?? data.fechaHasta) ||
+                absenceDayBound(data.startDate ?? data.fechaDesde);
+              if (from && to) {
+                ranges.push({ from, to: to < from ? from : to });
+              }
+            }
+            byKey.set(key, { shiftIds, ranges });
+            publish();
+          },
+          () => {
+            byKey.set(key, { shiftIds: new Set(), ranges: [] });
+            publish();
+          },
+        ),
+      );
+    }
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [employeeKeys.join('|'), rawShifts]);
+
   // Solo mostrar planificación si hay publishedAt en planificacion_estados.
   useEffect(() => {
     const { db } = getPortalFirebase();
@@ -263,16 +350,31 @@ export function useEmployeeShifts(
     };
   }, [rawShifts]);
 
-  const shifts = useMemo(
-    () =>
-      sortShiftsByStart(
-        rawShifts.filter((s) => isShiftVisibleToEmployee(s as never, publishedKeys)),
+  const shifts = useMemo(() => {
+    const marked = rawShifts.map((s) => {
+      if (!absentShiftIds.has(s.id)) return s;
+      if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) return s;
+      return { ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift;
+    });
+    return sortShiftsByStart(
+      marked.filter((s) => isShiftVisibleToEmployee(s as never, publishedKeys)),
+    );
+  }, [rawShifts, publishedKeys, absentShiftIds]);
+
+  /** Incluye ausentes (para hero "Ausente" en Hoy). */
+  const allShifts = useMemo(() => {
+    return sortShiftsByStart(
+      rawShifts.map((s) =>
+        absentShiftIds.has(s.id)
+          ? ({ ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift)
+          : s,
       ),
-    [rawShifts, publishedKeys],
-  );
+    );
+  }, [rawShifts, absentShiftIds]);
 
   return {
     shifts,
+    allShifts,
     loading: loading || (rawShifts.length > 0 && publishedKeys == null),
     error,
     hasEmployeeKey: employeeKeys.length > 0,

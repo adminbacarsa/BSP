@@ -1,6 +1,7 @@
 import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { toDate } from '../utils/dates';
 import { haversineKm, isWithinCheckInRadius } from '../geo/haversine';
+import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
 
 export const PENDING_CHECKINS_STORAGE_KEY = 'pending_checkins';
 
@@ -43,30 +44,13 @@ export function getCheckInTiming(
   const shiftEnded = end ? end.getTime() <= now.getTime() : false;
 
   // Turno del titular ausente/cubierto: no fichable (la cobertura es otro documento).
-  {
-    const st = String(shift.status || '').toUpperCase();
-    const absType = String((shift as { absenceType?: string }).absenceType || '').toUpperCase();
-    const any = shift as {
-      operacionallyCovered?: boolean;
-      coveredByEmployeeId?: string | null;
-      coverageStatus?: string;
+  if (isAbsentLikeShift(shift as unknown as Record<string, unknown>)) {
+    return {
+      diffMinutes,
+      canCheckIn: false,
+      lateWindow: false,
+      tooEarly: false,
     };
-    if (
-      shift.isAbsent === true ||
-      st === 'ABSENT' ||
-      st === 'AUSENTE' ||
-      absType === 'AA' ||
-      any.operacionallyCovered === true ||
-      !!any.coveredByEmployeeId ||
-      String(any.coverageStatus || '').toUpperCase() === 'COVERED'
-    ) {
-      return {
-        diffMinutes,
-        canCheckIn: false,
-        lateWindow: false,
-        tooEarly: false,
-      };
-    }
   }
 
   // Cobertura ops (urgencia): puede fichar al llegar al objetivo, sin ventana ±15/−5.

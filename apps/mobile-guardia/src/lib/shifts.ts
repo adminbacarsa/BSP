@@ -1,24 +1,5 @@
 import type { Shift } from '@cosp/portal-types';
-import { toDate } from '@cosp/portal-core';
-
-
-function isAbsentShift(shift: Shift): boolean {
-  if (shift.isAbsent === true) return true;
-  const status = String(shift.status || '').toUpperCase();
-  if (status === 'ABSENT' || status === 'AUSENTE') return true;
-  const absType = String((shift as { absenceType?: string }).absenceType || '').toUpperCase();
-  if (absType === 'AA') return true;
-  // Cubierto por Ops: el titular no trabaja ese slot (aunque falte isAbsent en docs viejos).
-  const any = shift as {
-    operacionallyCovered?: boolean;
-    coveredByEmployeeId?: string | null;
-    coverageStatus?: string;
-  };
-  if (any.operacionallyCovered === true) return true;
-  if (any.coveredByEmployeeId) return true;
-  if (String(any.coverageStatus || '').toUpperCase() === 'COVERED') return true;
-  return false;
-}
+import { toDate, isAbsentLikeShift } from '@cosp/portal-core';
 
 export function sortShiftsByStart(shifts: Shift[]): Shift[] {
   return [...shifts].sort((a, b) => {
@@ -43,7 +24,7 @@ export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | un
   endOfDay.setHours(23, 59, 59, 999);
 
   return sorted.find((s) => {
-    if (isAbsentShift(s)) return false;
+    if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
     const start = toDate(s.startTime);
     const end = toDate(s.endTime);
     if (!start || start < startOfDay || start > endOfDay) return false;
@@ -63,9 +44,24 @@ export function pickNextShift(shifts: Shift[], now = new Date()): Shift | undefi
   const sorted = sortShiftsByStart(shifts);
   const t = now.getTime();
   return sorted.find((s) => {
-    if (s.isFranco || isAbsentShift(s)) return false;
+    if (s.isFranco || isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
     const start = toDate(s.startTime);
     return !!start && start.getTime() > t;
+  });
+}
+
+/** Turno de hoy ausente/cubierto (para hero "Ausente" en vez de Próximo turno). */
+export function pickTodayAbsentShift(shifts: Shift[], now = new Date()): Shift | undefined {
+  const sorted = sortShiftsByStart(shifts);
+  const startOfDay = new Date(now);
+  startOfDay.setHours(0, 0, 0, 0);
+  const endOfDay = new Date(now);
+  endOfDay.setHours(23, 59, 59, 999);
+  return sorted.find((s) => {
+    if (!isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
+    const start = toDate(s.startTime);
+    if (!start || start < startOfDay || start > endOfDay) return false;
+    return true;
   });
 }
 

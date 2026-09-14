@@ -1,4 +1,5 @@
 import { toDate } from '../utils/dates';
+import { isAbsentLikeShift } from './isAbsentLikeShift';
 
 export type EmployeeShiftVisibilityInput = {
   draft?: boolean | null;
@@ -17,6 +18,7 @@ export type EmployeeShiftVisibilityInput = {
   objectiveId?: string | null;
   startTime?: unknown;
   eventoId?: string | null;
+  [key: string]: unknown;
 };
 
 /** Orígenes / códigos que el vigilador debe ver aunque el mes no esté publicado. */
@@ -76,17 +78,7 @@ export function isShiftVisibleToEmployee(
   publishedKeys: Set<string> | null,
 ): boolean {
   // Ausente / cubierto: el titular no ve ese turno como fichable (la cobertura es otro doc).
-  const statusEarly = String(shift.status || '').toUpperCase();
-  const absType = String(shift.absenceType || '').toUpperCase();
-  if (
-    shift.isAbsent === true ||
-    statusEarly === 'ABSENT' ||
-    statusEarly === 'AUSENTE' ||
-    absType === 'AA' ||
-    shift.operacionallyCovered === true ||
-    !!shift.coveredByEmployeeId ||
-    String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
-  ) {
+  if (isAbsentLikeShift(shift as Record<string, unknown>)) {
     return false;
   }
 

@@ -34,6 +34,7 @@
     "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts",
     "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts",
     "eval:coverage-idempotency": "npx tsx scripts/eval-coverage-idempotency.ts",
+    "eval:absent-like-shift": "npx tsx scripts/eval-absent-like-shift.ts",
     "eval:compare-months": "npx tsx scripts/eval-compare-objective-months.ts",
     "eval:pool-cycle-autolab": "npx tsx scripts/eval-pool-cycle-autolab.ts",
     "eval:planning-roster-24hs": "npx tsx scripts/eval-planning-roster-24hs.ts",

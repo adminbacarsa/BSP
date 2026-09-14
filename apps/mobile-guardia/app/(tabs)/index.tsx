@@ -20,6 +20,7 @@ import {
   heroShift,
   isShiftInProgress,
   shiftStartsToday,
+  pickTodayAbsentShift,
 } from '../../src/lib/shifts';
 import { resolveShiftPlacement } from '../../src/lib/shiftPlacement';
 import { appRoutes } from '../../src/lib/appRoutes';
@@ -70,7 +71,7 @@ function HoyScreenContent() {
     isPreviewMode,
     previewEmpDocId,
   } = usePortalAuth();
-  const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
+  const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
   const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } =
     useCheckIn();
@@ -123,8 +124,11 @@ function HoyScreenContent() {
   }, [navigation, headerTitle]);
 
   const now = useClockNow(30_000);
-  const mainShift = heroShift(shifts, now, { empDocId, authUid: user?.uid ?? null });
-  const placement = resolveShiftPlacement(mainShift, objectivesMap);
+  const todayAbsentShift = pickTodayAbsentShift(allShifts ?? shifts, now);
+  const mainShift = todayAbsentShift
+    ? undefined
+    : heroShift(shifts, now, { empDocId, authUid: user?.uid ?? null });
+  const placement = resolveShiftPlacement(todayAbsentShift || mainShift, objectivesMap);
   const objective = placement.objectiveLocation;
   const labRelaxedCheckIn = isEmulatorMode() && objective?.allowRemoteCheckIn === true;
   const timing = mainShift ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn }) : null;
@@ -132,11 +136,13 @@ function HoyScreenContent() {
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
   const isOpsHero =
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
-  const heroSectionLabel = isOpsHero
-    ? 'Turno asignado'
-    : heroInProgress
-      ? 'Turno actual'
-      : 'Próximo turno';
+  const heroSectionLabel = todayAbsentShift
+    ? 'Ausente'
+    : isOpsHero
+      ? 'Turno asignado'
+      : heroInProgress
+        ? 'Turno actual'
+        : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
@@ -178,11 +184,13 @@ function HoyScreenContent() {
   }
 
   const heroSub =
-    mainShift?.isFranco
-      ? 'Día de descanso programado'
-      : mainShift
-        ? formatHeroTimeRange(mainShift)
-        : 'No hay turnos en el mes actual';
+    todayAbsentShift
+      ? 'Hoy no corresponde asistir — turno marcado ausente'
+      : mainShift?.isFranco
+        ? 'Día de descanso programado'
+        : mainShift
+          ? formatHeroTimeRange(mainShift)
+          : 'No hay turnos en el mes actual';
 
   const mainShiftEv =
     mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
@@ -272,7 +280,7 @@ function HoyScreenContent() {
               }
               onRetry={() => refreshEmployee()}
             />
-          ) : shifts.length === 0 && !loading ? (
+          ) : shifts.length === 0 && !todayAbsentShift && !loading ? (
             <CommandCard title="Sin turnos este mes">
               <Text style={[styles.emptyShifts, { color: palette.onSurfaceMuted }]}>
                 {isEmulatorMode()
@@ -283,24 +291,39 @@ function HoyScreenContent() {
             </CommandCard>
           ) : (
             <HeroShiftPanel
-              headline={formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })}
-              subline={heroSub}
-              shift={mainShift}
+              headline={
+                todayAbsentShift
+                  ? 'HOY'
+                  : formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
+              }
+              subline={
+                todayAbsentShift
+                  ? `${formatHeroTimeRange(todayAbsentShift)}\nHoy no corresponde asistir — turno marcado ausente`
+                  : heroSub
+              }
+              shift={todayAbsentShift || mainShift}
               placement={placement}
               empresaNombre={empresaNombre || 'Tu empresa'}
               sectionLabel={heroSectionLabel}
               statusSlot={
-                <>
-                  <CheckInStatusBanner view={checkInStatusView} />
-                  {mainShiftEv ? <EvShiftDetails ev={mainShiftEv} compact /> : null}
-                  {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
-                    <Text style={styles.pendingLine}>
-                      {pendingCount} fichada(s) pendientes de sincronizar (otros turnos)
-                    </Text>
-                  ) : null}
-                </>
+                todayAbsentShift ? (
+                  <Text style={[styles.pendingLine, { color: palette.warning || '#b45309' }]}>
+                    No fichar — cobertura / ausencia operativa
+                  </Text>
+                ) : (
+                  <>
+                    <CheckInStatusBanner view={checkInStatusView} />
+                    {mainShiftEv ? <EvShiftDetails ev={mainShiftEv} compact /> : null}
+                    {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
+                      <Text style={styles.pendingLine}>
+                        {pendingCount} fichada(s) pendientes de sincronizar (otros turnos)
+                      </Text>
+                    ) : null}
+                  </>
+                )
               }
               footer={
+                todayAbsentShift ? null : (
                 <View style={styles.heroActions}>
                   {portalFeatures.checkIn && canCheckIn ? (
                     <CommandButton
@@ -319,6 +342,7 @@ function HoyScreenContent() {
                     />
                   ) : null}
                 </View>
+                )
               }
             />
           )}

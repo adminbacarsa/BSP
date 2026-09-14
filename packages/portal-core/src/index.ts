@@ -73,3 +73,4 @@ export {
   shiftPlanificacionLookupKey,
 } from './shifts/employeeShiftVisibility';
 export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';
+export { isAbsentLikeShift, isActiveAbsenceRecord } from './shifts/isAbsentLikeShift';
