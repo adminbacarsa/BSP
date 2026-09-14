@@ -43,6 +43,8 @@ const getHeaderGradient = (statusText: string): string => {
     return 'linear-gradient(135deg, #9f1239, #be123c)';
   if (statusText === 'TARDE') return 'linear-gradient(135deg, #92400e, #b45309)';
   if (statusText === 'ACTIVO' || statusText === 'A TIEMPO') return 'linear-gradient(135deg, #065f46, #059669)';
+  if (statusText === 'RETÉN' || statusText === 'ESC' || statusText === 'REF' || statusText === 'FRANCO')
+    return 'linear-gradient(135deg, #1e3a8a, #2563eb)';
   return 'linear-gradient(135deg, #1e293b, #0f172a)';
 };
 
@@ -222,8 +224,15 @@ export function OperacionesMapPopup({
             let statusLabel = 'PLAN';
             let statusColor = '#94a3b8';
             const refuerzoLabel = getRefuerzoLabel(shift);
+            const codeU = String(shift.code || '').toUpperCase();
+            const isPassiveStandby = shift.isPassiveStandby === true
+              || ((codeU === 'RET' || codeU === 'ESC' || codeU === 'REF')
+                && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             if (shift.isFranco) {
               statusLabel = 'FRANCO';
+              statusColor = '#3b82f6';
+            } else if (isPassiveStandby) {
+              statusLabel = codeU === 'ESC' ? 'ESC' : codeU === 'REF' ? 'REF' : 'RETÉN';
               statusColor = '#3b82f6';
             } else if (shift.isSinCobertura) {
               statusLabel = 'SIN COB.';
@@ -394,7 +403,7 @@ export function OperacionesMapPopup({
                       {shift.vacancyOrigin === 'ABSENCE' ? 'ausencia' : 'sin plan'}
                     </span>
                   )}
-                  {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && !shift.isAbsent && !shift.isFranco &&
+                  {!isPassiveStandby && !shift.isPresent && !shift.isUnassigned && !shift.isCompleted && !shift.isAbsent && !shift.isFranco &&
                     (diffMin > 30 ? (
                       <button
                         onClick={() => onOpenAttendance(shift)}
@@ -431,6 +440,20 @@ export function OperacionesMapPopup({
                         {diffMin > 5 ? 'LLEGÓ?' : 'PRES.'}
                       </button>
                     ))}
+                  {isPassiveStandby && !shift.isPresent && (
+                    <span
+                      style={{
+                        fontSize: '8px',
+                        color: '#64748b',
+                        fontWeight: 700,
+                        display: 'block',
+                        textAlign: 'center',
+                      }}
+                      title="Stand-by: se activa al cubrir un hueco"
+                    >
+                      STBY
+                    </span>
+                  )}
                   {(shift.isPresent || shift.status === 'PRESENT') && (
                     <button
                       onClick={() => onOpenInterrupt(shift)}

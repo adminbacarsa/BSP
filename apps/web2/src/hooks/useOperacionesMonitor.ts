@@ -216,8 +216,9 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
             // Solo vacantes vivas (no DEVUELTO, no COVERED, horario no finalizado)
             return isActionableOpsVacancy(s);
         case 'AUSENTES':
-            // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
-            if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
+            // RET/ESC/REF nunca "faltan": stand-by pasivo hasta convertirse al turno real
+            if (s.isPassiveStandby || s.isRetention || s.origin === 'RETEN' || s.isReten
+                || ['RET', 'ESC', 'REF'].includes(String(s.code || '').toUpperCase())) return false;
             return s.isAbsent || s.isPotentialAbsence;
         case 'FRANCOS':
             return s.isFranco;
@@ -855,15 +856,20 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
             const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
 
-            const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
+            // RET/ESC/REF = stand-by pasivo: no fichan ni generan ausencia/tardanza hasta convertirse al turno real.
+            const isPassiveStandby =
+                (shiftCode === 'RET' || shiftCode === 'ESC' || shiftCode === 'REF')
+                && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE';
+
+            const isImminent = !isPassiveStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
             const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
             // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateNotified = !isPassiveStandby && !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateUnnotified = !isPassiveStandby && !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
             const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
             // Potencial ausencia: T+30 sin confirmar presencia — fallback si el cron no alcanzó a correr
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
+            const isPotentialAbsence = !isPassiveStandby && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -889,6 +895,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
+                isPassiveStandby,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,

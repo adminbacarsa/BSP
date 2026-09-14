@@ -81,6 +81,10 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
                 : s.shiftDateObj
               : new Date();
             const diffMin = (now.getTime() - start.getTime()) / 60000;
+            const codeU = String(s.code || '').toUpperCase();
+            const isPassiveStandby = s.isPassiveStandby === true
+              || ((codeU === 'RET' || codeU === 'ESC' || codeU === 'REF')
+                && String(s.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             const isReportedOrReturned = s.isUnassigned && s.isReportedToPlanning;
             const isDescubierto = s.isUnassigned && (s.isDescubierto || isVacancyDescubierto(s, now));
             const isActionableVac = isActionableOpsVacancy(s, now);
@@ -90,7 +94,7 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               iconPreset = 'RED';
               statusText = event ? 'EVENTO · VACANTE/AUS' : 'VACANTE';
               priority = 5;
-            } else if ((s.isAbsent || s.isPotentialAbsence) && priority < 5) {
+            } else if (!isPassiveStandby && (s.isAbsent || s.isPotentialAbsence) && priority < 5) {
               iconPreset = 'RED';
               statusText = event ? 'EVENTO · VACANTE/AUS' : 'AUSENCIA';
               priority = 5;
@@ -112,6 +116,7 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               statusText = 'RETENCIÓN';
               priority = 4;
             } else if (
+              !isPassiveStandby &&
               !s.isPresent &&
               !s.isAbsent &&
               !s.isPotentialAbsence &&
@@ -124,10 +129,18 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               iconPreset = 'YELLOW';
               statusText = event ? 'EVENTO · TARDE' : 'TARDE';
               priority = 3;
-            } else if ((s.isPresent || (diffMin >= -15 && diffMin <= 5 && !s.isPresent)) && priority < 2) {
+            } else if (
+              !isPassiveStandby &&
+              (s.isPresent || (diffMin >= -15 && diffMin <= 5 && !s.isPresent)) &&
+              priority < 2
+            ) {
               iconPreset = event ? 'AMBER' : 'GREEN';
               statusText = event ? (s.isPresent ? 'EVENTO · ACTIVO' : 'EVENTO') : s.isPresent ? 'ACTIVO' : 'A TIEMPO';
               priority = event ? 4.5 : 2;
+            } else if (isPassiveStandby && priority < 1.5) {
+              iconPreset = 'BLUE';
+              statusText = codeU === 'ESC' ? 'ESC' : codeU === 'REF' ? 'REF' : 'RETÉN';
+              priority = 1.5;
             } else if (s.isFranco && priority < 1) {
               iconPreset = 'BLUE';
               statusText = 'FRANCO';
