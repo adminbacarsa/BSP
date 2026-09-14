@@ -1,7 +1,7 @@
 /**
  * cleanup-ret-phantom-presence.js
  *
- * Quita isPresent fantasma en RET/ESC/REF (punto verde sin turno real),
+ * Quita isPresent / COMPLETED fantasma en RET/ESC/REF (punto verde sin turno real),
  * o convierte a código del hueco si ya hay ledger de cobertura.
  *
  *   node scripts/cleanup-ret-phantom-presence.js [--dry-run] [--apply] [--empresaId=] [--emulator]
@@ -50,30 +50,43 @@ function hasLedger(data) {
   return false;
 }
 
+/** Presencia “fantasma” en UI: isPresent O status PRESENT/COMPLETED (punto verde en Plan). */
+function looksPresentInUi(data) {
+  if (data.isPresent === true) return true;
+  const st = String(data.status || '').toUpperCase();
+  return st === 'PRESENT' || st === 'COMPLETED';
+}
+
 async function run() {
-  console.log(`\n${DRY_RUN ? '🔍 DRY RUN' : '🗑️  APPLY'} — RET/ESC/REF con presencia fantasma\n`);
+  console.log(`\n${DRY_RUN ? '🔍 DRY RUN' : '🗑️  APPLY'} — RET/ESC/REF con presencia/COMPLETED fantasma\n`);
 
   const snap = await db.collection('turnos').orderBy('startTime', 'desc').limit(8000).get();
   const candidates = snap.docs
     .map((d) => ({ id: d.id, data: d.data() }))
     .filter((d) => {
       if (empresaArg && String(d.data.empresaId || '') !== empresaArg) return false;
-      return isPassive(d.data) && d.data.isPresent === true;
+      return isPassive(d.data) && looksPresentInUi(d.data);
     });
 
-  console.log(`Leídos ${snap.size} → ${candidates.length} pasivos con isPresent\n`);
+  console.log(`Leídos ${snap.size} → ${candidates.length} pasivos con presencia UI\n`);
 
   const toClear = [];
   const toHeal = [];
 
   for (const c of candidates) {
-    if (hasLedger(c.data)) toHeal.push(c);
-    else toClear.push(c);
+    if (hasLedger(c.data) && (c.data.absenceShiftId || c.data.coveredShiftId || c.data.coversAbsenceEmployeeName)) {
+      toHeal.push(c);
+    } else if (hasLedger(c.data) && String(c.data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' && isPassive(c.data)) {
+      // OPS_COV con code aún pasivo y sin absId: limpiar flags de presencia, no inventar banda
+      toClear.push(c);
+    } else {
+      toClear.push(c);
+    }
   }
 
-  console.log(`Limpiar presencia (stand-by puro): ${toClear.length}`);
-  toClear.slice(0, 12).forEach((c) => {
-    console.log(`  · ${c.data.employeeName || c.data.employeeId} | ${c.data.code} | ${c.id.slice(0, 8)}`);
+  console.log(`Limpiar presencia/COMPLETED (stand-by puro): ${toClear.length}`);
+  toClear.slice(0, 20).forEach((c) => {
+    console.log(`  · ${c.data.employeeName || c.data.employeeId} | ${c.data.code} | status=${c.data.status || '—'} | ${c.id.slice(0, 8)}`);
   });
   console.log(`Convertir a turno real (tienen ledger): ${toHeal.length}`);
   toHeal.slice(0, 12).forEach((c) => {
@@ -98,11 +111,14 @@ async function run() {
       id: c.id,
       data: {
         isPresent: false,
+        isCompleted: false,
         status: 'ASSIGNED',
         presentAt: FieldValue.delete(),
         realStartTime: FieldValue.delete(),
+        realEndTime: FieldValue.delete(),
         checkInTime: FieldValue.delete(),
         autoPresencia: FieldValue.delete(),
+        autoCierre: FieldValue.delete(),
         demoSimulated: FieldValue.delete(),
         retPhantomClearedAt: FieldValue.serverTimestamp(),
       },

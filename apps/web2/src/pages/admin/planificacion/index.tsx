@@ -10464,7 +10464,18 @@ export default function PlanificacionPage() {
                                         });
                                         let statusIndicator = null;
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500'; }
+                                        if (s && !isSnapshotView) {
+                                            const _codeU = String(s.code || effectiveCode || '').toUpperCase();
+                                            const _passiveStandby = _codeU === 'RET' || _codeU === 'ESC' || _codeU === 'REF' || s.isReten === true;
+                                            // RET/ESC/REF stand-by: no punto verde por COMPLETED/PRESENT fantasma (Demo).
+                                            // Solo turno real (M/T/N/…) o cobertor ya convertido muestra presencia.
+                                            if (!_passiveStandby) {
+                                                if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
+                                                else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
+                                            } else if (s.status === 'ABSENT' || s.isAbsent) {
+                                                statusIndicator = 'bg-rose-500';
+                                            }
+                                        }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
@@ -13467,7 +13478,12 @@ export default function PlanificacionPage() {
                                         absenceType: absence?.type || (isRRHHCode ? (LEGEND_DESCRIPTIONS[code] || code) : null) || (isOpsAbsent ? 'Ausencia operativa' : null),
                                         absenceReason: absence?.reason || shift?.comments || null,
                                         isOpsAbsent,
-                                        isPresent: !!(shift?.isPresent || shift?.status === 'PRESENT' || shift?.status === 'COMPLETED'),
+                                        isPresent: (() => {
+                                            const cu = String(shift?.code || code || '').toUpperCase();
+                                            const passive = cu === 'RET' || cu === 'ESC' || cu === 'REF' || shift?.isReten === true;
+                                            if (passive) return false;
+                                            return !!(shift?.isPresent || shift?.status === 'PRESENT' || shift?.status === 'COMPLETED');
+                                        })(),
                                         operacionallyCovered: !!(shift?.operacionallyCovered || coveringEmployee),
                                         coveredByName: coverageInfo?.employeeName || (coveringEmployee ? String(coveringEmployee).replace(/\s*\([^)]*\)\s*$/, '').trim() : null),
                                         coveredByCode: coverageInfo?.code || null,
