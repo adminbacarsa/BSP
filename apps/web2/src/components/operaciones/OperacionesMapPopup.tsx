@@ -43,8 +43,10 @@ const getHeaderGradient = (statusText: string): string => {
     return 'linear-gradient(135deg, #9f1239, #be123c)';
   if (statusText === 'TARDE') return 'linear-gradient(135deg, #92400e, #b45309)';
   if (statusText === 'ACTIVO' || statusText === 'A TIEMPO') return 'linear-gradient(135deg, #065f46, #059669)';
-  if (statusText === 'RETÉN' || statusText === 'ESC' || statusText === 'REF' || statusText === 'FRANCO')
+  if (statusText === 'RETÉN' || statusText === 'FRANCO')
     return 'linear-gradient(135deg, #1e3a8a, #2563eb)';
+  if (statusText === 'ESC' || statusText === 'REF')
+    return 'linear-gradient(135deg, #0f766e, #14b8a6)';
   return 'linear-gradient(135deg, #1e293b, #0f172a)';
 };
 
@@ -215,7 +217,7 @@ export function OperacionesMapPopup({
                   : new Date(shift.endTime)
                 : null;
             const diffMin = (now.getTime() - start.getTime()) / 60000;
-            const canCheckIn = diffMin >= -15 && diffMin <= 60 && !shift.isPresent;
+            const canCheckIn = !isPassiveStandby && diffMin >= -15 && diffMin <= 60 && !shift.isPresent;
             const s = getShiftStatusStyle(shift, diffMin);
             const t1 = start.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
             const t2 = end ? end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -226,13 +228,13 @@ export function OperacionesMapPopup({
             const refuerzoLabel = getRefuerzoLabel(shift);
             const codeU = String(shift.code || '').toUpperCase();
             const isPassiveStandby = shift.isPassiveStandby === true
-              || ((codeU === 'RET' || codeU === 'ESC' || codeU === 'REF')
+              || ((codeU === 'RET' || shift.isReten === true)
                 && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             if (shift.isFranco) {
               statusLabel = 'FRANCO';
               statusColor = '#3b82f6';
             } else if (isPassiveStandby) {
-              statusLabel = codeU === 'ESC' ? 'ESC' : codeU === 'REF' ? 'REF' : 'RETÉN';
+              statusLabel = 'RETÉN';
               statusColor = '#3b82f6';
             } else if (shift.isSinCobertura) {
               statusLabel = 'SIN COB.';

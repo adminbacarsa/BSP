@@ -2419,6 +2419,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isResolvedByOps)   { accentColor = 'bg-indigo-500';  rowBg = 'bg-indigo-50/40'; }
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
+    else if (String(shift.code || '').toUpperCase() === 'RET' || shift.isReten === true) { accentColor = 'bg-violet-500'; rowBg = 'bg-violet-50/30'; }
     else if (shift.isPresent)          { accentColor = 'bg-emerald-500'; rowBg = 'bg-emerald-50/20'; }
     else if (shift.isAbsent)           { accentColor = 'bg-slate-700';   rowBg = 'bg-slate-100'; }
     else if (shift.isPotentialAbsence) { accentColor = 'bg-red-600';     rowBg = 'bg-red-50/40'; }
@@ -2429,11 +2430,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const now = new Date();
     const start = toDate(shift.shiftDateObj);
     const diff = (now.getTime() - start.getTime()) / 60000;
-    const canCheckIn = !shift.isPresent && (
+    const codeU = String(shift.code || '').toUpperCase();
+    const isRetStandby = (codeU === 'RET' || shift.isReten === true)
+        && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE';
+    // RET stand-by no ficha. ESC/REF sí (van al puesto).
+    const canCheckIn = !isRetStandby && !shift.isPresent && (
         shift.isEarlyStart ||
         shift.isAwaitingCoverageCheckIn ||
-        shift.origin === 'RETEN' ||
-        !!shift.isReten ||
         (diff >= -15 && diff <= 120)
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
@@ -2484,6 +2487,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
     else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
+    else if (isRetStandby) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0">RETÉN</span>;
+    else if (codeU === 'ESC' && !shift.isPresent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-600 text-white shrink-0">ESC</span>;
+    else if (codeU === 'REF' && !shift.isPresent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-teal-700 text-white shrink-0">REF</span>;
     else if (shift.isPresent)        badge =<span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.coverageSegmentRole === 'EARLY_START' ? 'ADEL PLAN' : shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;
@@ -4805,6 +4811,7 @@ export default function OperacionesPage() {
             case 'VACANTES':  return o.vacant > 0;
             case 'PLAN':      return o.plan > 0;
             case 'FRANCOS':   return (o.shifts || []).some((s: any) => s.isFranco);
+            case 'RETEN':     return (o.shifts || []).some((s: any) => shiftMatchesOpsViewTab(s, 'RETEN'));
             case 'PRIORIDAD':
             case 'NO_LLEGO':
             case 'TODOS':
@@ -4856,12 +4863,13 @@ export default function OperacionesPage() {
 
     const modalSetters = { setCheckoutData, setAttendanceData, setHandoverData, setInterruptData, setCoverageData, setManualRetentionData };
     const tabs = [
-        { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600' },
-        { id: 'ACTIVOS',   label: 'ACT',     count: logic.stats.activos,   color: 'text-emerald-600' },
-        { id: 'RETENIDOS', label: 'RET',     count: logic.stats.retenidos, color: 'text-orange-600' },
-        { id: 'VACANTES',  label: 'VAC',     count: logic.stats.vacantes,  color: 'text-slate-800' },
-        { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700' },
-        { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600' }
+        { id: 'PLAN',      label: 'PLAN',    count: logic.stats.plan,      color: 'text-indigo-600', title: 'Turnos futuros / planificados' },
+        { id: 'ACTIVOS',   label: 'ACT',     count: logic.stats.activos,   color: 'text-emerald-600', title: 'Presentes en puesto (incluye ESC/REF fichados)' },
+        { id: 'RETENIDOS', label: 'HOLD',    count: logic.stats.retenidos, color: 'text-orange-600', title: 'Retención de jornada (sin relevo / recargo)' },
+        { id: 'VACANTES',  label: 'VAC',     count: logic.stats.vacantes,  color: 'text-slate-800', title: 'Vacantes accionables' },
+        { id: 'AUSENTES',  label: 'AUS',     count: logic.stats.ausentes,  color: 'text-rose-700', title: 'Ausentes / potencial ausencia' },
+        { id: 'RETEN',     label: 'RETÉN',   count: logic.stats.reten,     color: 'text-violet-600', title: 'Pool RET del día (stand-by, no ficha)' },
+        { id: 'FRANCOS',   label: 'FRANC',   count: logic.stats.francos,   color: 'text-blue-600', title: 'Francos del día' }
     ];
 
     const mapVisible = !isExternalMap && !mapCollapsed;
@@ -5227,6 +5235,7 @@ export default function OperacionesPage() {
                                 const isActive = logic.viewTab === t.id;
                                 return (
                                     <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
+                                        title={(t as any).title || t.label}
                                         className={`relative flex-1 px-1 py-1 lg:py-1 rounded-lg transition-all active:scale-95 whitespace-nowrap flex flex-col items-center gap-0
                                             ${isActive
                                                 ? (isUrgent ? 'bg-rose-600 text-white shadow' : 'bg-slate-800 text-white shadow')
@@ -5352,11 +5361,13 @@ export default function OperacionesPage() {
                     <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-                        {viewMode === 'objetivos' && logic.viewTab === 'FRANCOS' && (
+                        {viewMode === 'objetivos' && (logic.viewTab === 'FRANCOS' || logic.viewTab === 'RETEN') && (
                         <div className={`p-2 ${objectivesLayoutClass}`}>
                             {logic.listData.length === 0 ? (
                                 <div className="text-center py-10 text-slate-400 text-xs col-span-full">
-                                    {logic.filterText.trim() ? 'Sin francos que coincidan con la búsqueda' : 'Sin guardias de franco hoy'}
+                                    {logic.viewTab === 'RETEN'
+                                        ? (logic.filterText.trim() ? 'Sin RETÉN que coincidan con la búsqueda' : 'Sin retención pasiva (RET) hoy')
+                                        : (logic.filterText.trim() ? 'Sin francos que coincidan con la búsqueda' : 'Sin guardias de franco hoy')}
                                 </div>
                             ) : (
                                 logic.listData.map((s: any) => (
@@ -5379,7 +5390,7 @@ export default function OperacionesPage() {
                             )}
                         </div>
                         )}
-                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && (
+                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && logic.viewTab !== 'RETEN' && (
                         <div className={`p-2 ${objectivesLayoutClass}`}>
                             {(filteredEventsWithAlerts.length === 0 && filteredObjectivesWithAlerts.length === 0) ? (
                                 <div className="text-center py-10 text-slate-400 text-xs">

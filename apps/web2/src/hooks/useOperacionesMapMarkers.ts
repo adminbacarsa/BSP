@@ -83,7 +83,7 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
             const diffMin = (now.getTime() - start.getTime()) / 60000;
             const codeU = String(s.code || '').toUpperCase();
             const isPassiveStandby = s.isPassiveStandby === true
-              || ((codeU === 'RET' || codeU === 'ESC' || codeU === 'REF')
+              || ((codeU === 'RET' || s.isReten === true)
                 && String(s.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             const isReportedOrReturned = s.isUnassigned && s.isReportedToPlanning;
             const isDescubierto = s.isUnassigned && (s.isDescubierto || isVacancyDescubierto(s, now));

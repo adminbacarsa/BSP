@@ -248,12 +248,21 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
             // Solo vacantes vivas (no DEVUELTO, no COVERED, horario no finalizado)
             return isActionableOpsVacancy(s);
         case 'AUSENTES':
-            // RET/ESC/REF nunca "faltan": stand-by pasivo hasta convertirse al turno real
+            // RET stand-by no "falta": no ficha hasta convertirse al turno real.
+            // ESC/REF sí se controlan (fichan / ausentan como turno de puesto).
             if (s.isPassiveStandby || s.isRetention || s.origin === 'RETEN' || s.isReten
-                || ['RET', 'ESC', 'REF'].includes(String(s.code || '').toUpperCase())) return false;
+                || String(s.code || '').toUpperCase() === 'RET') return false;
             return s.isAbsent || s.isPotentialAbsence;
         case 'FRANCOS':
             return s.isFranco;
+        case 'RETEN':
+            // Pool de retención pasiva del día (información operativa, como FRANCOS).
+            {
+                const codeU = String(s.code || '').toUpperCase();
+                if (s.isFranco || s.isCompleted) return false;
+                if (String(s.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return false;
+                return codeU === 'RET' || s.isReten === true || s.origin === 'RETEN';
+            }
         default:
             return !s.isFranco;
     }
@@ -472,7 +481,7 @@ const countPresentOnSlot = (
 ).length;
 
 export type OperacionesMonitorViewTab =
-    | 'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'TODOS';
+    | 'PRIORIDAD' | 'NO_LLEGO' | 'PLAN' | 'ACTIVOS' | 'RETENIDOS' | 'VACANTES' | 'AUSENTES' | 'FRANCOS' | 'RETEN' | 'TODOS';
 
 export type OperacionesMonitorShared = {
     processedData: any[];
@@ -919,9 +928,10 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
             const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
 
-            // RET/ESC/REF = stand-by pasivo: no fichan ni generan ausencia/tardanza hasta convertirse al turno real.
+            // Solo RET = stand-by pasivo: no ficha ni genera ausencia/tardanza hasta convertirse al turno real.
+            // ESC/REF van al puesto, fichan y pueden salir ACTIVO / ausente / tarde.
             const isPassiveStandby =
-                (shiftCode === 'RET' || shiftCode === 'ESC' || shiftCode === 'REF')
+                (shiftCode === 'RET' || !!shift.isReten)
                 && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE';
 
             const isImminent = !isPassiveStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
@@ -1929,6 +1939,7 @@ function useOperacionesMonitorDerived(
             devueltas: hoy.filter((s) => s.isUnassigned && s.isReportedToPlanning).length,
             ausentes: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'AUSENTES')).length,
             francos: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'FRANCOS')).length,
+            reten: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'RETEN')).length,
             rrhh_urgente: hoy.filter((s) => s.isRRHHUrgent && !s.isFranco).length,
             rrhh_planificado: hoy.filter((s) => s.isRRHHPlanned && !s.isFranco).length,
             total: hoy.length,

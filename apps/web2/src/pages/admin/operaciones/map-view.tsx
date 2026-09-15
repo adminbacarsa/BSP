@@ -1432,7 +1432,7 @@ export default function TacticalMapView() {
                     const { client, text, tab } = JSON.parse(saved);
                     logic.setSelectedClientId(client ?? '');
                     logic.setFilterText(text ?? '');
-                    const allowed = ['TODOS', 'PRIORIDAD', 'NO_LLEGO', 'PLAN', 'ACTIVOS', 'RETENIDOS', 'VACANTES', 'AUSENTES', 'FRANCOS'];
+                    const allowed = ['TODOS', 'PRIORIDAD', 'NO_LLEGO', 'PLAN', 'ACTIVOS', 'RETENIDOS', 'VACANTES', 'AUSENTES', 'FRANCOS', 'RETEN'];
                     if (tab && allowed.includes(tab)) logic.setViewTab(tab as typeof logic.viewTab);
                     else logic.setViewTab('TODOS');
                 } catch (e) { logOpsBackgroundWarn('syncFilters', e); logic.setViewTab('TODOS'); }
@@ -1460,9 +1460,10 @@ export default function TacticalMapView() {
         { id: 'NO_LLEGO', label: 'NO LLEGO', count: logic.stats.no_llego, color: 'text-amber-600' },
         { id: 'PLAN', label: 'PLAN', count: logic.stats.plan, color: 'text-indigo-600' },
         { id: 'ACTIVOS', label: 'ACT', count: logic.stats.activos, color: 'text-emerald-600' },
-        { id: 'RETENIDOS', label: 'RET', count: logic.stats.retenidos, color: 'text-orange-600' },
+        { id: 'RETENIDOS', label: 'HOLD', count: logic.stats.retenidos, color: 'text-orange-600' },
         { id: 'VACANTES', label: 'VAC', count: logic.stats.vacantes, color: 'text-slate-800' },
         { id: 'AUSENTES', label: 'AUS', count: logic.stats.ausentes, color: 'text-slate-500' },
+        { id: 'RETEN', label: 'RETÉN', count: logic.stats.reten, color: 'text-violet-600' },
         { id: 'FRANCOS', label: 'FRAN', count: logic.stats.francos, color: 'text-blue-600' }
     ];
 

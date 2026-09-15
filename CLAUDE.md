@@ -189,13 +189,15 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 | Presente en otro objetivo ≤10 km (≥2 pax en origen) → mueve **todo el turno** al hueco | **Traslado / CROSS_OBJ** |
 | Franco | **FT** |
 
-EXT+ADV parten la vacante en dos mitades por banda vecina; el suplente puede ser de **otro puesto** del mismo objetivo (`coversPositionName`). CROSS_POS / CROSS_OBJ son redirección de jornada completa (no mitades). RET pasivo **no ficha**; ficha recién cuando el modal/cascada le asigna el turno real del hueco.
+EXT+ADV parten la vacante en dos mitades por banda vecina; el suplente puede ser de **otro puesto** del mismo objetivo (`coversPositionName`). CROSS_POS / CROSS_OBJ son redirección de jornada completa (no mitades). **RET** pasivo **no ficha**; ficha recién cuando el modal/cascada le asigna el turno real del hueco. **ESC/REF** van al puesto, **sí fichan** y salen **ACTIVO** en CC (no facturan SLA; sí se controlan).
 
 **Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = laboratorio: **inventa** el trigger (presente/ausente/tarde ficticios, sellados `modoDemoAt` / `source: MODO_DEMO`) y dispara el **mismo pipeline** que Auto (cascada, convocatorias, ledger, vacantes). Las respuestas a convocatorias se simulan; al cubrir, Demo también **simula la fichada del cubridor** para que ACTIVO/trazabilidad queden iguales a un circuito real ya fichado. Cron `modoDemoCron`: `*/5 * * * *` TZ `America/Argentina/Buenos_Aires` (cae en :00/:05/…); presencia puntual/tarde mientras el turno esté vigente (no solo 5 min post-inicio). Auto en prod hace lo mismo sin inventar: ausencias reales + check-in real del cubridor. Planificación y Ops muestran el resultado de punta a punta.
 
 **Continuidad al fin de banda** (`shiftContinuity` + `autoCompletarTurnos`): 24hs SLA → retención; si el presente tiene **turno posterior** en el mismo objetivo → retención; si hay extensión TURA/D12/N12 → retención; solo sin posterior ni extensión → cierre auto.
 
-**RET/ESC/REF y presencia:** stand-by **no** ficha (`RET_STANDBY_NO_CHECKIN`). Al cubrir → `buildReassignPassiveToVacancyFields` deja el **código real** del hueco; recién ahí se marca presente. Demo **no** simula presencia/ausencia sobre RET/ESC/REF; sanea RET+punto verde fantasma.
+**RET / ESC / REF y presencia:**
+- **RET** = stand-by pasivo (`RET_STANDBY_NO_CHECKIN`): no ficha ni genera tardanza/ausencia. Al cubrir → `buildReassignPassiveToVacancyFields` deja el **código real** del hueco; recién ahí se marca presente. Demo **no** simula presencia/ausencia sobre RET; sanea RET+punto verde fantasma. En Ops hay solapa **RETÉN** (lista del día, como FRANCOS). La solapa **HOLD** es retención de jornada (recargo / sin relevo), no el pool RET.
+- **ESC / REF** = turnos agregados no facturables pero **controlados**: van al puesto, fichan, salen **ACTIVO** (o ausente/tarde si no llegan). Siguen siendo comodín de cascada (se pueden convertir al turno real del hueco).
 
 **Dual reloj:** puesto/prefactura = `plannedStartTime`/`plannedEndTime` (banda del hueco); liquidación/fichada = `presentAt` / `realStartTime` / `adjustedStartTime`. No inferir fichada al asignar cobertura.
 
@@ -243,9 +245,9 @@ EXT+ADV parten la vacante en dos mitades por banda vecina; el suplente puede ser
 | `N` | Noche | 8h | ✅ | Banda fija nocturna |
 | `D12` | Diurno 12h | 12h | ✅ | Extensión/rotativo diurno |
 | `N12` | Nocturno 12h | 12h | ✅ | Extensión/rotativo nocturno |
-| `RET` | Retención pasiva | 0h billables | — | Empleado en stand-by; disponible para cubrir. No genera horas facturables. Referencia interna: 8h stand-by. |
-| `ESC` | Escuela | 8h | ✅ | Sobreturno de capacitación: el vigilador va al puesto a aprender. Se usa como fuente de cobertura (prioridad 3). |
-| `REF` | Refuerzo | 8h | ✅ | Turno de refuerzo puntual, cobertura extra programada. |
+| `RET` | Retención pasiva | 0h billables | — | Stand-by: **no ficha** hasta cubrir hueco. Pool visible en Ops solapa **RETÉN**. Referencia interna: 8h. |
+| `ESC` | Escuela | 8h | ✅ | Capacitación en puesto: **ficha → ACTIVO** en CC; no cierra SLA. Comodín de cascada. |
+| `REF` | Refuerzo | 8h | ✅ | Refuerzo programado: **ficha → ACTIVO**; no es cobertura SLA facturable. Comodín de cascada. |
 
 ### Francos / Descansos
 

@@ -6026,8 +6026,8 @@ export default function PlanificacionPage() {
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
                                         if (s && !isSnapshotView) {
                                             const _codeU = String(s.code || effectiveCode || '').toUpperCase();
-                                            const _passiveStandby = _codeU === 'RET' || _codeU === 'ESC' || _codeU === 'REF' || s.isReten === true;
-                                            // RET/ESC/REF stand-by: no punto verde por COMPLETED/PRESENT fantasma (Demo).
+                                            const _passiveStandby = _codeU === 'RET' || s.isReten === true;
+                                            // RET stand-by: no punto verde fantasma. ESC/REF sí pueden estar presentes.
                                             // Solo turno real (M/T/N/…) o cobertor ya convertido muestra presencia.
                                             if (!_passiveStandby) {
                                                 if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
@@ -9027,7 +9027,7 @@ export default function PlanificacionPage() {
                                         isOpsAbsent,
                                         isPresent: (() => {
                                             const cu = String(shift?.code || code || '').toUpperCase();
-                                            const passive = cu === 'RET' || cu === 'ESC' || cu === 'REF' || shift?.isReten === true;
+                                            const passive = cu === 'RET' || shift?.isReten === true;
                                             if (passive) return false;
                                             return !!(shift?.isPresent || shift?.status === 'PRESENT' || shift?.status === 'COMPLETED');
                                         })(),

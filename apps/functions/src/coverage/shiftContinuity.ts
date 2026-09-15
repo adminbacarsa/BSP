@@ -79,15 +79,20 @@ export function vacancyCoverageLabel(params: {
   ].filter(Boolean).join(' · ');
 }
 
-/** RET / ESC / REF = stand-by pasivo; no ficha presencia hasta convertirse al turno real del hueco. */
+/** Solo RET = stand-by pasivo: no ficha hasta convertirse al turno real del hueco. */
 export function isPassiveStandbyCode(code: unknown): boolean {
+  return String(code || '').toUpperCase() === 'RET';
+}
+
+/** RET / ESC / REF se pueden redirigir al hueco (comodines de cascada). */
+export function isCoverageRedirectableCode(code: unknown): boolean {
   const c = String(code || '').toUpperCase();
   return c === 'RET' || c === 'ESC' || c === 'REF';
 }
 
-/** ¿Ya hay ledger de cobertura aunque el `code` siga siendo pasivo (dato inconsistente)? */
+/** ¿Ya hay ledger de cobertura aunque el `code` siga siendo RET/ESC/REF (dato inconsistente)? */
 export function hasCoverageLedgerWithoutRealCode(shift: Record<string, any>): boolean {
-  if (!isPassiveStandbyCode(shift?.code)) return false;
+  if (!isCoverageRedirectableCode(shift?.code)) return false;
   if (String(shift?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return true;
   if (shift?.coversAbsenceEmployeeName || shift?.absenceEmployeeName) return true;
   if (shift?.absenceShiftId || shift?.coveredShiftId) return true;

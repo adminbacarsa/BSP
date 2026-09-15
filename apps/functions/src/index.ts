@@ -850,13 +850,13 @@ async function runModoDemoForEmpresa(
     !!t.isSinCobertura;
   const isPassiveStandby = (t: any) => {
     const c = String(t.code || '').toUpperCase();
-    return c === 'RET' || c === 'ESC' || c === 'REF' || t.isReten === true;
+    return c === 'RET' || t.isReten === true;
   };
-  // RET/ESC/REF: stand-by — no simular presencia ni ausencia; se activan al cubrir (código real).
+  // Solo RET: stand-by — no simular presencia/ausencia. ESC/REF fichan y se controlan.
   const skipBase = (t: any) =>
     t.draft === true || t.isFranco === true || t.isVirtual || isPassiveStandby(t);
 
-  // === Pase 0: sanear RET/ESC/REF con punto verde fantasma (presencia sin turno real) ===
+  // === Pase 0: sanear RET con punto verde fantasma (presencia sin turno real) ===
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (!isPassiveStandby(t) || !t.isPresent) continue;
@@ -1298,8 +1298,8 @@ export const autoPresenciaYCierre = functions
       const t = doc.data() as any;
       if (t.isAbsent || t.isVirtual) continue;
       const codeU = String(t.code || '').toUpperCase();
-      // RET/ESC/REF son stand-by: no auto-presencia (evita punto verde sin turno real).
-      if (codeU === 'RET' || codeU === 'ESC' || codeU === 'REF' || t.isReten === true) continue;
+      // Solo RET es stand-by: no auto-presencia. ESC/REF fichan (Demo/Auto pueden marcarlos).
+      if (codeU === 'RET' || t.isReten === true) continue;
       const startMs = (t.startTime?.seconds ?? 0) * 1000;
       const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
       const objectiveId = String(t.objectiveId || '');
@@ -3091,7 +3091,7 @@ export const autoCompletarTurnos = functions
 //   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
 //   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
-const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET', 'ESC', 'REF']);
+const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET']);
 
 function shiftEmpresaId(shift: FirebaseFirestore.DocumentData): string {
   return String(shift.empresaId ?? '').trim();
