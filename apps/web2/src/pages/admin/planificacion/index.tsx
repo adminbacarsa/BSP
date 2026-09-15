@@ -185,6 +185,10 @@ import { submitPlanificacionRRHHNovedad } from '@/lib/planificacion/submitPlanif
 import { resetPlanificacionVacancyModal } from '@/lib/planificacion/resetPlanificacionVacancyModal';
 import { handlePlanificacionMouseUp } from '@/lib/planificacion/handlePlanificacionMouseUp';
 import { applyPlanificacionPrevMonthTemplate } from '@/lib/planificacion/applyPlanificacionPrevMonthTemplate';
+import {
+    loadPlanificacionAbsencesForRange,
+    mergePlanificacionAbsencesFromLocalGrid,
+} from '@/lib/planificacion/loadPlanificacionAbsencesForRange';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -254,7 +258,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
 import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planificacion/leaveCoverage';
 import {
     listDateRangeInclusive,
@@ -5261,79 +5265,30 @@ export default function PlanificacionPage() {
     };
 
 
-    /**
-     * Carga las ausencias que SOLAPAN con el rango [monthStart, monthEnd], no solo
-     * las que ARRANCAN dentro del mes. Esto soluciona el caso de vacaciones / ART
-     * que empezaron antes y siguen vigentes en el mes a planificar.
-     *
-     * - Query: startDate dentro de [monthStart - 2 meses, monthEnd] para evitar
-     *   pedir un índice nuevo sobre endDate y aún así capturar la cola.
-     * - Filtra en cliente por endDate >= monthStart.
-     * - Excluye ausencias rechazadas/canceladas (status).
-     * - Infere el código (V/L/E/A/PG/AA) desde `absenceType`, `code` o `type`.
-     */
-    const loadAbsencesForRange = async (
-        monthStart: Date,
-        monthEnd: Date,
-    ): Promise<Record<string, Map<string, string>>> => {
-        const absSnap = await getDocs(empresaCollectionQuery('ausencias', empresaId, scopeEmpresa));
-        const monthStartStr = toCalendarDateStr(monthStart) || getDateKey(monthStart);
-        const monthEndStr = toCalendarDateStr(monthEnd) || getDateKey(monthEnd);
-        const absences: Record<string, Map<string, string>> = {};
-        absSnap.docs.forEach(d => {
-            const data = d.data() as any;
-            if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-            const empId = data.employeeId;
-            if (!empId) return;
-            if (!isActiveAbsence(data)) return;
-            const startStr = toCalendarDateStr(data.startDate);
-            const endStr = toCalendarDateStr(data.endDate);
-            if (!startStr || !endStr) return;
-            const range = validateAbsenceDateRange(startStr, endStr);
-            if (!range.ok) return;
-            if (range.endDate < monthStartStr || range.startDate > monthEndStr) return;
-            const code = inferAbsenceCode(data);
-            if (!absences[empId]) absences[empId] = new Map();
-            iterateCalendarDateRange(range.startDate, range.endDate).forEach((dateStr) => {
-                if (dateStr < monthStartStr || dateStr > monthEndStr) return;
-                const [y, m, day] = dateStr.split('-').map(Number);
-                absences[empId].set(getDateKey(new Date(y, m - 1, day, 12, 0, 0, 0)), code);
-            });
+    const loadAbsencesForRange = async (monthStart: Date, monthEnd: Date) =>
+        loadPlanificacionAbsencesForRange({
+            monthStart,
+            monthEnd,
+            empresaId,
+            scopeEmpresa,
+            migracionCompleta,
         });
-        return absences;
-    };
 
-    const RRHH_ABSENCE_GRID = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
-
-    /** Licencias/ausencias ya visibles en grilla o pendientes (no solo colección ausencias). */
     const mergeAbsencesFromLocalGrid = (
         absences: Record<string, Map<string, string>>,
         empIds: string[],
         monthStart: Date,
         monthEnd: Date,
     ) => {
-        const idSet = new Set(empIds);
-        const mergeCell = (empId: string, dateStr: string, code: string) => {
-            if (!idSet.has(empId)) return;
-            const d = new Date(`${dateStr}T12:00:00`);
-            if (d < monthStart || d > monthEnd) return;
-            if (!absences[empId]) absences[empId] = new Map();
-            if (!absences[empId].has(dateStr)) absences[empId].set(dateStr, code);
-        };
-        const scan = (src: Record<string, any>) => {
-            Object.entries(src).forEach(([key, cell]) => {
-                if (!cell || cell.isDeleted) return;
-                if (cell.objectiveId && cell.objectiveId !== selectedObjective) return;
-                const code = String(cell.code || '').toUpperCase();
-                if (!RRHH_ABSENCE_GRID.has(code)) return;
-                const empId = String(cell.employeeId || key.split('_')[0] || '');
-                const dateStr = String(cell.dateStr || key.slice(empId.length + 1) || '');
-                if (!empId || !dateStr) return;
-                mergeCell(empId, dateStr, code);
-            });
-        };
-        scan(shiftsMap);
-        scan(pendingChanges);
+        mergePlanificacionAbsencesFromLocalGrid({
+            absences,
+            empIds,
+            monthStart,
+            monthEnd,
+            selectedObjective,
+            shiftsMap,
+            pendingChanges,
+        });
     };
 
     const bumpAutoV2Progress = async (pct: number, label: string) => {
@@ -6903,7 +6858,7 @@ export default function PlanificacionPage() {
         const compareCompact = !!gridOpts?.compactRows;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
-            <thead className="sticky top-0 z-10 bg-slate-100 shadow-md">
+            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
                     <th className="planning-sticky-corner bg-slate-100 p-1.5 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
@@ -8253,72 +8208,6 @@ export default function PlanificacionPage() {
                                 );
                             })()}
 
-                            {selectedObjective && (() => {
-                                const publishLookupKey = planificacionPublishLookupKey(
-                                    selectedObjective,
-                                    currentDate.getFullYear(),
-                                    currentDate.getMonth() + 1,
-                                );
-                                const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-                                const needsRepublish = !!needsRepublishMap[publishLookupKey];
-                                return (
-                                    <div className="flex items-center gap-2 no-print">
-                                        <button
-                                            type="button"
-                                            onClick={() => void refreshCronogramaView()}
-                                            disabled={isRefreshingCrono}
-                                            title="Actualizar turnos y puestos sin recargar la página"
-                                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm disabled:opacity-60"
-                                        >
-                                            <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
-                                            {isRefreshingCrono ? '…' : 'ACTUALIZAR'}
-                                        </button>
-                                        {published ? (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-                                                <CheckCircle size={12}/> PUBLICADO
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl">
-                                                <Ghost size={12}/> BORRADOR
-                                            </span>
-                                        )}
-                                        {canPublishPlanning && (!published || needsRepublish) && (
-                                            <button
-                                                onClick={openPublishConfirm}
-                                                disabled={isPublishing}
-                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
-                                                    ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
-                                                    : undefined}
-                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : isSuperAdmin ? 'bg-indigo-600 hover:bg-indigo-700 ring-1 ring-indigo-300/50' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                            >
-                                                {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
-                                                {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
-                                            </button>
-                                        )}
-                                        {published && canCorrectPlanning && (
-                                            <button
-                                                onClick={() => setCorrectionMode(v => !v)}
-                                                title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
-                                            >
-                                                <ShieldAlert size={12}/>
-                                                {correctionMode ? 'CORRECCIÓN ACTIVA' : 'CORREGIR'}
-                                            </button>
-                                        )}
-                                        {published && isSuperAdmin && (
-                                            <button
-                                                onClick={handleUnpublish}
-                                                disabled={isUnpublishing}
-                                                title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
-                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                                            >
-                                                {isUnpublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarX size={12}/>}
-                                                DESPUBLICAR
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })()}
                             {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                 <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
                                     {backgroundSaveCount > 0 && (
@@ -8437,6 +8326,73 @@ export default function PlanificacionPage() {
                                     </>,
                                     document.body,
                                 )}
+
+                                {/* ACCIONES PUBLICACIÓN — compactas, entre selector y mes */}
+                                {selectedObjective && (() => {
+                                    const publishLookupKey = planificacionPublishLookupKey(
+                                        selectedObjective,
+                                        currentDate.getFullYear(),
+                                        currentDate.getMonth() + 1,
+                                    );
+                                    const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
+                                    const needsRepublish = !!needsRepublishMap[publishLookupKey];
+                                    return (
+                                        <div className="flex items-center gap-1 no-print">
+                                            <button
+                                                type="button"
+                                                onClick={() => void refreshCronogramaView()}
+                                                disabled={isRefreshingCrono}
+                                                title="Actualizar turnos y puestos"
+                                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60"
+                                            >
+                                                <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
+                                            </button>
+                                            {published ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">
+                                                    <CheckCircle size={10}/> PUB
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg">
+                                                    <Ghost size={10}/> BOR
+                                                </span>
+                                            )}
+                                            {canPublishPlanning && (!published || needsRepublish) && (
+                                                <button
+                                                    onClick={openPublishConfirm}
+                                                    disabled={isPublishing}
+                                                    title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                        ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
+                                                        : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
+                                                    className={`flex items-center gap-1 disabled:opacity-60 text-white px-2 py-1 rounded-lg text-[9px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                >
+                                                    {isPublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarCheck size={10}/>}
+                                                    {published ? 'RE-PUB' : 'PUBLICAR'}
+                                                </button>
+                                            )}
+                                            {published && canCorrectPlanning && (
+                                                <button
+                                                    onClick={() => setCorrectionMode(v => !v)}
+                                                    title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
+                                                >
+                                                    <ShieldAlert size={10}/>
+                                                    {correctionMode ? 'CORR ●' : 'CORR'}
+                                                </button>
+                                            )}
+                                            {published && isSuperAdmin && (
+                                                <button
+                                                    onClick={handleUnpublish}
+                                                    disabled={isUnpublishing}
+                                                    title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
+                                                    className="p-1.5 rounded-lg border bg-white text-slate-500 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                                                >
+                                                    {isUnpublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarX size={10}/>}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+                                <div className="w-px h-5 bg-slate-200 shrink-0"/>
 
                                 {/* < MES > — siempre visible */}
                                 <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className={`px-3 font-black text-xs w-24 text-center capitalize ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
