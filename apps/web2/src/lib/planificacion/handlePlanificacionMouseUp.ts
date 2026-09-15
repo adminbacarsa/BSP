@@ -33,6 +33,8 @@ export type HandlePlanificacionMouseUpParams = {
     publishStatusMap: Record<string, unknown>;
     getObjectiveName: (objectiveId: string) => string;
     isPlanningDateLocked: (dateStr: string) => boolean;
+    /** Publicado sin modo Corregir: la gestión de ausencias queda en solo lectura. */
+    planningEditsLocked: boolean;
     findNeighbors: (problemShift: any, dateStr: string) => void;
     setIsDragging: (value: boolean) => void;
     clearLongPressTimer: () => void;
@@ -74,6 +76,7 @@ export function handlePlanificacionMouseUp({
     publishStatusMap,
     getObjectiveName,
     isPlanningDateLocked,
+    planningEditsLocked,
     findNeighbors,
     setIsDragging,
     clearLongPressTimer,
@@ -129,8 +132,9 @@ export function handlePlanificacionMouseUp({
             return;
         }
         const isLocked = isPlanningDateLocked(dateStr);
+        const absenceFlowLocked = isLocked || planningEditsLocked;
         const absenceAlreadyHandled = effectiveShift && ['V', 'L', 'PG', 'A', 'E', 'AA'].includes(effectiveShift.code || '');
-        if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) {
+        if (!absenceFlowLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) {
             findNeighbors(effectiveShift, dateStr);
             setSelectedCell({ empId: emp.id, dateStr, currentShift: effectiveShift, absence });
             if (absence && absence.type) {
@@ -139,7 +143,7 @@ export function handlePlanificacionMouseUp({
             } else {
                 setShowConflictModal(true);
             }
-        } else if (!isLocked && absence && !effectiveShift) {
+        } else if (!absenceFlowLocked && absence && !effectiveShift) {
             setSelectedCell({ empId: emp.id, dateStr, currentShift: effectiveShift, absence });
             setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr });
             setShowVacancyModal(true);

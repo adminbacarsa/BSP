@@ -5158,6 +5158,7 @@ export default function PlanificacionPage() {
             absencesMap,
             empDefaultPos,
             dominantPositionName: dominantPosition.positionName,
+            planningEditsLocked: enforcePlanningClosureRules,
             currentDate,
             correctionMode,
             publishStatusMap,
@@ -9210,13 +9211,21 @@ export default function PlanificacionPage() {
                                                                 <p className="px-4 pb-3 text-[10px] font-bold text-emerald-700 text-center">
                                                                     Licencia cubierta — en reportes/liquidación figura como novedad RRHH; las horas del puesto las computa {coverageInfo.employeeName}.
                                                                 </p>
-                                                            ) : (
+                                                            ) : !enforcePlanningClosureRules ? (
                                                                 <p className="px-4 pb-3 text-[10px] font-bold text-amber-800/80 text-center">
                                                                     Novedad RRHH — podés re-procesar cobertura abajo si el día no está consolidado.
                                                                 </p>
-                                                            )
+                                                            ) : null
                                                         )}
-                                                        {isRRHHCode && !isConsolidated && !pending && absence && (
+                                                        {enforcePlanningClosureRules && isRRHHCode && !isConsolidated && !pending && (
+                                                            <div className="px-4 pb-4">
+                                                                <div className="flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11px] font-bold text-slate-600">
+                                                                    <LockKeyhole size={13} className="shrink-0"/>
+                                                                    Cronograma publicado — activá modo Corregir para gestionar esta ausencia.
+                                                                </div>
+                                                            </div>
+                                                        )}
+                                                        {!enforcePlanningClosureRules && isRRHHCode && !isConsolidated && !pending && absence && (
                                                             <div className="px-4 pb-4">
                                                                 <button
                                                                     onClick={() => {
@@ -9231,7 +9240,7 @@ export default function PlanificacionPage() {
                                                                 </button>
                                                             </div>
                                                         )}
-                                                        {isRRHHCode && !isConsolidated && !pending && !absence && (
+                                                        {!enforcePlanningClosureRules && isRRHHCode && !isConsolidated && !pending && !absence && (
                                                             <div className="px-4 pb-4">
                                                                 <button
                                                                     onClick={() => {
