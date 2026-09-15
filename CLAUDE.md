@@ -142,16 +142,25 @@ Fuente: `apps/web2/src/lib/dataRetention.ts` (mirror `apps/functions/src/ops/dat
 ### Regla crítica: turno operativo vs planificado
 
 ```typescript
-const isOperationalOrigin = (shift) =>
-    shift.origin === 'RETEN' ||
-    shift.origin === 'OPERATIONS_COVERAGE' ||
-    shift.origin === 'SLA_VIRTUAL' ||
-    !!shift.isReten ||
-    shift.resolvedBy === 'OPERACIONES';
+import { isOperationalOriginShift } from '@cosp/domain/operationalShift';
 ```
 
 Los turnos **operativos** siempre se muestran en operaciones.
 Los turnos **planificados** solo se muestran si la planificación está publicada (`planificacion_estados`).
+
+Fuente canónica: `apps/functions/shared-domain/operationalShift.js`, consumida por Functions y web2 mediante `@cosp/domain/operationalShift`. `CLIENT_REQUEST`, `EVENTO`, `MODO_DEMO`, `isVirtual` y otros casos de cada pantalla son extensiones locales y no deben incorporarse silenciosamente a la regla canónica.
+
+### Invariantes de datos y trazabilidad
+
+- `turnos` no tiene un único estado lineal: `status`, flags, `origin` y `draft` son proyecciones ortogonales. No reemplazarlos por una máquina de estados única sin migración y compatibilidad completa.
+- `ausencias` es la fuente RRHH; el turno/celda `NOVEDAD` es su proyección en la malla. Una ausencia debe vincularse por `shiftId` y no duplicarse como segundo expediente.
+- `planificacion_estados.publishedAt` habilita la visibilidad del crono planificado. Los turnos operativos usan la regla canónica anterior y permanecen visibles sin publicación.
+- `hours_balances` es un extracto derivado y eventualmente consistente, no un libro mayor. Un fallo al refrescarlo puede ser no bloqueante; el dato fuente continúa siendo SLA + turnos + ausencias.
+- Los IDs de cliente/objetivo son canónicos. Los alias y reparaciones por nombre existen solo para leer legado; toda escritura nueva debe persistir IDs válidos.
+- La automatización de Operaciones debe converger hacia escritores server-side idempotentes. Mientras exista materialización legacy desde cliente, toda creación automática debe llevar clave determinística o protección transaccional.
+- Auditoría de cierre, liquidación y cobertura es crítica: no debe ignorarse silenciosamente. Cache, telemetría y sincronizaciones derivadas sí pueden continuar con alerta no bloqueante.
+- Acortar la vigencia de un SLA no elimina turnos, ausencias ni novedades existentes. Si algún turno afectado tiene `payrollLockedAt`/`payrollCycleId`, el cambio se bloquea.
+- Un ciclo cerrado se lee desde `payroll_cycles_locks/{cycleId}.snapshot`; no se recalcula sobre datos vivos. Turnos y ausencias sellados por payroll no admiten update/delete desde clientes Firestore.
 
 ---
 
