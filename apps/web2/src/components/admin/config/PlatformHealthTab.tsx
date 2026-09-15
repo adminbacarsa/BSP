@@ -72,6 +72,40 @@ type ClosureChecklistUiResult = {
   recomendaciones: string[];
 };
 
+type CoverageRecommendUiResult = {
+  ok: boolean;
+  objectiveName: string;
+  fecha: string;
+  banda: string;
+  urgency: string;
+  candidates: Array<{
+    employeeName: string;
+    cascadeStep: string;
+    score: number;
+    costScore: number;
+    riskScore: number;
+    reason: string;
+  }>;
+  notes?: string[];
+};
+
+type DailyReplanUiResult = {
+  ok: boolean;
+  runId: string;
+  windowDays: number;
+  vacanciesFound: number;
+  recommendations: number;
+  draftsCreated: number;
+  dryRun: boolean;
+  items?: Array<{
+    date: string;
+    objectiveName: string;
+    code: string;
+    action: string;
+    detail: string;
+  }>;
+};
+
 const STATUS_ICON: Record<CheckStatus, React.ElementType> = {
   idle: AlertCircle,
   running: Loader2,
@@ -346,6 +380,14 @@ export default function PlatformHealthTab() {
   const [closureBusy, setClosureBusy] = useState(false);
   const [closureResult, setClosureResult] = useState<ClosureChecklistUiResult | null>(null);
   const [automationError, setAutomationError] = useState<string | null>(null);
+  const [replanBusy, setReplanBusy] = useState(false);
+  const [replanDryRun, setReplanDryRun] = useState(true);
+  const [replanWindowDays, setReplanWindowDays] = useState(3);
+  const [replanApplyRet, setReplanApplyRet] = useState(false);
+  const [replanResult, setReplanResult] = useState<DailyReplanUiResult | null>(null);
+  const [coverageBusy, setCoverageBusy] = useState(false);
+  const [coverageBanda, setCoverageBanda] = useState('M');
+  const [coverageResult, setCoverageResult] = useState<CoverageRecommendUiResult | null>(null);
 
   const canOperatePlanning = isSuperAdmin || canReadModule('PLANNING');
   const canOperateOps = isSuperAdmin || canReadModule('OPERATIONS');
@@ -635,6 +677,66 @@ export default function PlatformHealthTab() {
     }
   }
 
+  async function runDailyReplanNow() {
+    if (!currentEmpresaId) return;
+    setReplanBusy(true);
+    setAutomationError(null);
+    try {
+      const fn = httpsCallable<
+        {
+          empresaId: string;
+          windowDays: number;
+          objectiveId?: string;
+          dryRun: boolean;
+          autoApplyRet: boolean;
+          maxVacancies: number;
+        },
+        DailyReplanUiResult
+      >(functions, 'runDailyReplanP1', { timeout: 300000 });
+      const { data } = await fn({
+        empresaId: currentEmpresaId,
+        windowDays: replanWindowDays,
+        objectiveId: selectedObjectiveId || undefined,
+        dryRun: replanDryRun,
+        autoApplyRet: !replanDryRun && replanApplyRet,
+        maxVacancies: 40,
+      });
+      setReplanResult(data);
+    } catch (e: any) {
+      setAutomationError(e?.message || 'No se pudo ejecutar el replan diario.');
+    } finally {
+      setReplanBusy(false);
+    }
+  }
+
+  async function runCoverageRecommendNow() {
+    if (!currentEmpresaId || !selectedObjectiveId) return;
+    setCoverageBusy(true);
+    setAutomationError(null);
+    try {
+      const fn = httpsCallable<
+        {
+          empresaId: string;
+          objectiveId: string;
+          banda: string;
+          limite: number;
+        },
+        CoverageRecommendUiResult
+      >(functions, 'recommendCoverageCandidatesP1', { timeout: 120000 });
+      const { data } = await fn({
+        empresaId: currentEmpresaId,
+        objectiveId: selectedObjectiveId,
+        banda: coverageBanda,
+        limite: 12,
+      });
+      setCoverageResult(data);
+    } catch (e: any) {
+      setAutomationError(e?.message || 'No se pudo recomendar cobertura.');
+    } finally {
+      setCoverageBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -868,6 +970,122 @@ export default function PlatformHealthTab() {
                   <p>Pendientes marcación: {closureResult.totals.marcacionesPendientes}</p>
                   <p>Ausencias sin resolver: {closureResult.totals.ausenciasSinResolver}</p>
                   <p>Gap SLA vs Plan: {closureResult.horas.gapSlaVsPlan} hs</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="rounded-2xl border border-emerald-700/40 bg-slate-900 p-5 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-black text-white">Replan y cobertura (P1)</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Ventana rolling de vacantes/ausencias con ranking CCT por costo/riesgo. El cron diario corre en simulación si la empresa tiene piloto auto.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3 space-y-2">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Replan diario</p>
+            <div className="grid grid-cols-2 gap-2">
+              <label className="text-[11px] text-slate-400">
+                Días ventana
+                <input
+                  type="number"
+                  min={1}
+                  max={14}
+                  className="mt-1 w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                  value={replanWindowDays}
+                  onChange={(e) => setReplanWindowDays(Number(e.target.value))}
+                />
+              </label>
+              <div className="space-y-1 text-[11px] text-slate-300 pt-5">
+                <label className="flex items-center gap-2">
+                  <input type="checkbox" checked={replanDryRun} onChange={(e) => setReplanDryRun(e.target.checked)} />
+                  Simulación
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={replanApplyRet}
+                    onChange={(e) => setReplanApplyRet(e.target.checked)}
+                    disabled={replanDryRun}
+                  />
+                  Aplicar borradores RET
+                </label>
+              </div>
+            </div>
+            <p className="text-[10px] text-slate-500">
+              Objetivo filtro: {selectedObjectiveId ? 'usa el seleccionado arriba' : 'toda la empresa'}
+            </p>
+            <button
+              type="button"
+              onClick={runDailyReplanNow}
+              disabled={!canOperateOps || !currentEmpresaId || replanBusy}
+              className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {replanBusy ? 'Replanificando…' : 'Ejecutar replan P1'}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3 space-y-2">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Recomendador de cobertura</p>
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white"
+              value={coverageBanda}
+              onChange={(e) => setCoverageBanda(e.target.value)}
+            >
+              {['M', 'T', 'N', 'D12', 'N12'].map((b) => (
+                <option key={b} value={b}>{b}</option>
+              ))}
+            </select>
+            <p className="text-[10px] text-slate-500">
+              Usa el objetivo seleccionado en la sección P0.
+            </p>
+            <button
+              type="button"
+              onClick={runCoverageRecommendNow}
+              disabled={!canOperateOps || !currentEmpresaId || !selectedObjectiveId || coverageBusy}
+              className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {coverageBusy ? 'Rankeando…' : 'Recomendar cobertura P1'}
+            </button>
+          </div>
+        </div>
+
+        {(replanResult || coverageResult) && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Resultado replan</p>
+              {replanResult ? (
+                <div className="text-xs text-slate-200 space-y-1">
+                  <p>Run: <span className="font-mono text-emerald-300">{replanResult.runId}</span></p>
+                  <p>Ventana: {replanResult.windowDays} día(s)</p>
+                  <p>Vacantes: <span className="font-bold">{replanResult.vacanciesFound}</span></p>
+                  <p>Recomendaciones: <span className="font-bold">{replanResult.recommendations}</span></p>
+                  <p>Borradores: {replanResult.draftsCreated} · {replanResult.dryRun ? 'simulación' : 'aplicación'}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Top cobertura</p>
+              {coverageResult ? (
+                <div className="text-xs text-slate-200 space-y-1">
+                  <p>{coverageResult.objectiveName} · {coverageResult.banda} · {coverageResult.urgency}</p>
+                  {(coverageResult.candidates || []).slice(0, 5).map((c, idx) => (
+                    <p key={`${c.employeeName}_${idx}`}>
+                      {idx + 1}. <span className="font-bold">{c.employeeName}</span> · {c.cascadeStep} · score {c.score}
+                    </p>
+                  ))}
+                  {!(coverageResult.candidates || []).length && (
+                    <p className="text-slate-500">Sin candidatos elegibles.</p>
+                  )}
                 </div>
               ) : (
                 <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>

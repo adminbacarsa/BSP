@@ -79,6 +79,12 @@ import {
   type OperationalAlertScanResult,
   type PlanningAutomationResult,
 } from './automation/operationalAutomation';
+import {
+  recommendCoverageCandidates,
+  runDailyReplanWindow,
+  type CoverageRecommendResult,
+  type DailyReplanResult,
+} from './automation/operationalAutomationP1';
 import { runAutoScheduleHandler } from './scheduling/runAutoSchedule';
 import { runAjustarCronoHandler } from './scheduling/runAjustarCrono';
 import { runEquilibrarCronoHandler } from './scheduling/runEquilibrarCrono';
@@ -1343,6 +1349,43 @@ export const operationalAlertsCron = functions
   });
 
 // =========================================================
+// REPLAN DIARIO P1 — rolling window (recomendaciones)
+// Corre a las 06:00 AR. Solo dryRun (no escribe turnos); persistiendo
+// automation_runs tipo DAILY_REPLAN_P1 para revisión operativa.
+// =========================================================
+export const dailyReplanCron = functions
+  .runWith({ timeoutSeconds: 300, memory: '1GB' as const })
+  .pubsub.schedule('0 6 * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+      const empresaId = empresaDoc.id;
+      const data = empresaDoc.data() || {};
+      if (data.active === false) continue;
+      if (data.centroControlEnabled === false) continue;
+      if (data.pilotoAutoEnabled !== true) continue;
+      try {
+        const out = await runDailyReplanWindow({
+          empresaId,
+          windowDays: 3,
+          dryRun: true,
+          autoApplyRet: false,
+          maxVacancies: 40,
+        });
+        if (out.vacanciesFound > 0) {
+          console.log(
+            `[dailyReplanCron] ${empresaId}: vacancies=${out.vacanciesFound} recommendations=${out.recommendations} run=${out.runId}`,
+          );
+        }
+      } catch (e: any) {
+        console.warn(`[dailyReplanCron] ${empresaId}:`, String(e?.message ?? e));
+      }
+    }
+  });
+
+// =========================================================
 // TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
 // Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
 // En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
@@ -1743,6 +1786,100 @@ async function runOperationalClosureChecklistHandler(
 export const runOperationalClosureChecklist = functions
   .runWith({ timeoutSeconds: 120, memory: '256MB' })
   .https.onCall(runOperationalClosureChecklistHandler);
+
+async function recommendCoverageCandidatesP1Handler(
+  data: {
+    empresaId?: string;
+    shiftId?: string;
+    objectiveId?: string;
+    fecha?: string;
+    banda?: string;
+    limite?: number;
+  },
+  context: functions.https.CallableContext,
+): Promise<CoverageRecommendResult> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+  await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+
+  const empresaId = String(data?.empresaId ?? '').trim();
+  if (!empresaId) {
+    throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+  }
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para recomendar cobertura.',
+  );
+
+  try {
+    return await recommendCoverageCandidates({
+      empresaId,
+      shiftId: data?.shiftId,
+      objectiveId: data?.objectiveId,
+      fecha: data?.fecha,
+      banda: data?.banda,
+      limite: data?.limite,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? 'Error en recomendación de cobertura');
+    throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+  }
+}
+
+export const recommendCoverageCandidatesP1 = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' })
+  .https.onCall(recommendCoverageCandidatesP1Handler);
+
+async function runDailyReplanP1Handler(
+  data: {
+    empresaId?: string;
+    windowDays?: number;
+    objectiveId?: string;
+    dryRun?: boolean;
+    autoApplyRet?: boolean;
+    maxVacancies?: number;
+  },
+  context: functions.https.CallableContext,
+): Promise<DailyReplanResult> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+  await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+
+  const empresaId = String(data?.empresaId ?? '').trim();
+  if (!empresaId) {
+    throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+  }
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar replan diario.',
+  );
+
+  try {
+    return await runDailyReplanWindow({
+      empresaId,
+      windowDays: data?.windowDays,
+      objectiveId: data?.objectiveId,
+      dryRun: data?.dryRun !== false,
+      autoApplyRet: data?.autoApplyRet === true,
+      maxVacancies: data?.maxVacancies,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? 'Error en replan diario');
+    throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+  }
+}
+
+export const runDailyReplanP1 = functions
+  .runWith({ timeoutSeconds: 300, memory: '1GB' })
+  .https.onCall(runDailyReplanP1Handler);
 
 // --- VPLAN (experimental, paralelo — ver docs/VPLAN.md; handler bloquea fuera de emulador) ---
 export { vplanRun } from './vplan';

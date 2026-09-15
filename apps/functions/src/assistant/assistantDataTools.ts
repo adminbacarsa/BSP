@@ -3860,6 +3860,24 @@ async function dispatchAssistantToolCallInner(
       mes: args.mes != null ? Number(args.mes) : undefined,
       persistir_snapshot: args.persistir_snapshot !== false,
     });
+  } else if (name === 'recomendar_cobertura_vacante') {
+    raw = await ejecutarRecomendarCoberturaVacante(ctx, {
+      shift_id: args.shift_id != null ? String(args.shift_id) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      banda: args.banda != null ? String(args.banda) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'ejecutar_replan_diario') {
+    raw = await ejecutarReplanDiario(ctx, {
+      dias_ventana: args.dias_ventana != null ? Number(args.dias_ventana) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      simulacion: args.simulacion !== false,
+      aplicar_ret: args.aplicar_ret === true,
+      max_vacantes: args.max_vacantes != null ? Number(args.max_vacantes) : undefined,
+    });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4776,5 +4794,121 @@ async function ejecutarChecklistCierreOperativoMes(
     mensaje_cierre: result.checks.listoParaCierre
       ? `Checklist ${result.period}: listo para cierre operativo.`
       : `Checklist ${result.period}: hay pendientes antes del cierre.`,
+  };
+}
+
+async function ejecutarRecomendarCoberturaVacante(
+  ctx: AssistantToolContext,
+  args: {
+    shift_id?: string;
+    id_objetivo?: string;
+    texto_objetivo?: string;
+    fecha?: string;
+    banda?: string;
+    limite?: number;
+  },
+): Promise<Record<string, unknown>> {
+  if (ctx.persona !== 'SYSTEM') return { error: 'sin_permiso_recomendar_cobertura' };
+  if (!ctx.empresaId.trim()) return { error: 'sin_empresa' };
+  if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'PLANNING', 'CONFIG'].includes(k))) {
+    return { error: 'sin_permiso_recomendar_cobertura' };
+  }
+
+  let objectiveId = args.id_objetivo?.trim() || undefined;
+  if (!objectiveId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (!found) return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+    objectiveId = found.id;
+  }
+  if (!args.shift_id && !objectiveId) {
+    return { error: 'falta_shift_o_objetivo' };
+  }
+
+  const { recommendCoverageCandidates } = await import('../automation/operationalAutomationP1');
+  const result = await recommendCoverageCandidates({
+    empresaId: ctx.empresaId,
+    shiftId: args.shift_id,
+    objectiveId,
+    fecha: args.fecha || ctx.referenceDateYsMmDd,
+    banda: args.banda,
+    limite: args.limite,
+  });
+
+  return {
+    objetivo: result.objectiveName,
+    fecha: result.fecha,
+    banda: result.banda,
+    urgencia: result.urgency,
+    total_candidatos: result.candidates.length,
+    top_candidatos: result.candidates.slice(0, 8).map((c) => ({
+      empleado: c.employeeName,
+      paso_cascada: c.cascadeStep,
+      score: c.score,
+      costo: c.costScore,
+      riesgo: c.riskScore,
+      distancia_km: c.distanceKm,
+      motivo: c.reason,
+    })),
+    notas: result.notes,
+    mensaje:
+      result.candidates.length > 0
+        ? `Mejor opción: ${result.candidates[0].employeeName} (${result.candidates[0].cascadeStep}, score ${result.candidates[0].score}).`
+        : 'Sin candidatos elegibles para esa vacante.',
+  };
+}
+
+async function ejecutarReplanDiario(
+  ctx: AssistantToolContext,
+  args: {
+    dias_ventana?: number;
+    id_objetivo?: string;
+    texto_objetivo?: string;
+    simulacion?: boolean;
+    aplicar_ret?: boolean;
+    max_vacantes?: number;
+  },
+): Promise<Record<string, unknown>> {
+  if (ctx.persona !== 'SYSTEM') return { error: 'sin_permiso_replan_diario' };
+  if (!ctx.empresaId.trim()) return { error: 'sin_empresa' };
+  if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'PLANNING', 'CONFIG'].includes(k))) {
+    return { error: 'sin_permiso_replan_diario' };
+  }
+
+  let objectiveId = args.id_objetivo?.trim() || undefined;
+  if (!objectiveId && args.texto_objetivo) {
+    const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+    if (!found) return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+    objectiveId = found.id;
+  }
+
+  const dryRun = args.simulacion !== false;
+  const { runDailyReplanWindow } = await import('../automation/operationalAutomationP1');
+  const result = await runDailyReplanWindow({
+    empresaId: ctx.empresaId,
+    windowDays: args.dias_ventana,
+    objectiveId,
+    dryRun,
+    autoApplyRet: !dryRun && args.aplicar_ret === true,
+    maxVacancies: args.max_vacantes,
+  });
+
+  return {
+    run_id: result.runId,
+    ventana_dias: result.windowDays,
+    vacantes_encontradas: result.vacanciesFound,
+    recomendaciones: result.recommendations,
+    borradores_creados: result.draftsCreated,
+    simulacion: result.dryRun,
+    muestra: result.items.slice(0, 15).map((it) => ({
+      fecha: it.date,
+      objetivo: it.objectiveName,
+      banda: it.code,
+      accion: it.action,
+      detalle: it.detail,
+      mejor: it.recommended
+        ? `${it.recommended.employeeName} (${it.recommended.cascadeStep})`
+        : null,
+    })),
+    mensaje: `Replan P1: ${result.vacanciesFound} vacante(s), ${result.recommendations} recomendación(es), ${result.draftsCreated} borrador(es). Run \`${result.runId}\`.`,
   };
 }
