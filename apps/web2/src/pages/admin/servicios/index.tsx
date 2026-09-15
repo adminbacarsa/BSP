@@ -21,7 +21,7 @@ import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
-  collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, deleteDocsByIdsForEmpresa, TenantIsolationError,
+  collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, TenantIsolationError,
   empresaCollectionQuery,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
@@ -1366,24 +1366,25 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     const turnosBelong = (data: Record<string, unknown>) =>
       !scopeEmpresa || belongsToEmpresa(data, empresaId, true);
 
-    // ── Cleanup al cambiar fechas ────────────────────────────────────────────
-    // Si la fecha de inicio se adelantó o la de fin se retrasó, eliminar todos los
-    // turnos, ausencias y novedades del objetivo fuera del nuevo rango.
+    // Cambiar la vigencia del contrato nunca elimina historia operativa/RRHH.
+    // Si el rango toca un ciclo liquidado, el contrato tampoco puede acortarse.
     if (isEditing && form.id) {
       const oldService = services.find(s => s.id === form.id);
       if (oldService) {
         const oldStart = parseDate(oldService.startDate);
         const oldEnd   = parseDate(oldService.endDate);
-
-        const turnosToDelete: string[] = [];
+        const affectedTurnos = new Map<string, Record<string, unknown>>();
 
         if (oldStart && startDate > oldStart) {
           const snap = await getDocs(query(
             collection(db, 'turnos'),
             where('objectiveId', '==', form.objectiveId),
+            where('startTime', '>=', Timestamp.fromDate(oldStart)),
             where('startTime', '<', Timestamp.fromDate(startDate))
           ));
-          snap.docs.forEach(d => { if (turnosBelong(d.data())) turnosToDelete.push(d.id); });
+          snap.docs.forEach(d => {
+            if (turnosBelong(d.data())) affectedTurnos.set(d.id, d.data());
+          });
         }
 
         if (oldEnd && endDate < oldEnd) {
@@ -1391,37 +1392,32 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           const snap = await getDocs(query(
             collection(db, 'turnos'),
             where('objectiveId', '==', form.objectiveId),
-            where('startTime', '>', Timestamp.fromDate(newEndOfDay))
+            where('startTime', '>', Timestamp.fromDate(newEndOfDay)),
+            where('startTime', '<=', Timestamp.fromDate(oldEnd))
           ));
-          snap.docs.forEach(d => { if (turnosBelong(d.data())) turnosToDelete.push(d.id); });
+          snap.docs.forEach(d => {
+            if (turnosBelong(d.data())) affectedTurnos.set(d.id, d.data());
+          });
         }
 
-        if (turnosToDelete.length > 0) {
-          const ausToDelete: string[] = [];
-          const novToDelete: string[] = [];
-          for (let i = 0; i < turnosToDelete.length; i += 10) {
-            const chunk = turnosToDelete.slice(i, i + 10);
-            const [ausSnap, novSnap] = await Promise.all([
-              getDocs(query(collection(db, 'ausencias'), where('shiftId', 'in', chunk))),
-              getDocs(query(collection(db, 'novedades'), where('shiftId', 'in', chunk))),
-            ]);
-            ausSnap.docs.forEach(d => ausToDelete.push(d.id));
-            novSnap.docs.forEach(d => novToDelete.push(d.id));
+        if (affectedTurnos.size > 0) {
+          const lockedCount = [...affectedTurnos.values()].filter(
+            data => data.payrollLockedAt || data.payrollCycleId,
+          ).length;
+          if (lockedCount > 0) {
+            addToast(
+              `No se puede acortar la vigencia: ${lockedCount} turno(s) pertenecen a ciclos de liquidación cerrados`,
+              'error',
+            );
+            return;
           }
 
-          const msg = `⚠️ Cambio de fechas detectado.\n\nSe eliminarán:\n• ${turnosToDelete.length} turno(s)\n• ${ausToDelete.length} ausencia(s)\n• ${novToDelete.length} novedad(es)\n\ndel objetivo "${form.objectiveName}" fuera del nuevo rango.\n\n¿Confirmar?`;
+          const msg = `⚠️ Cambio de vigencia detectado.\n\nHay ${affectedTurnos.size} turno(s) fuera del nuevo rango.\n\nPor seguridad NO se eliminarán turnos, ausencias ni novedades: quedarán como historial operativo y de RRHH.\n\n¿Guardar igualmente la nueva vigencia del SLA?`;
           if (!confirm(msg)) return;
-
-          await Promise.all([
-            deleteDocsByIdsForEmpresa('turnos', turnosToDelete, empresaId, migracionCompleta),
-            deleteDocsByIdsForEmpresa('ausencias', ausToDelete, empresaId, migracionCompleta),
-            deleteDocsByIdsForEmpresa('novedades', novToDelete, empresaId, migracionCompleta),
-          ]);
-          addToast(`${turnosToDelete.length} turno(s) eliminados del objetivo`, 'success');
+          addToast(`${affectedTurnos.size} turno(s) históricos fueron preservados`, 'success');
         }
       }
     }
-    // ─────────────────────────────────────────────────────────────────────────
 
     // JSON round-trip elimina campos undefined que Firestore no acepta
     const encPosToSave = findEncargadoPosition(form.positions);
