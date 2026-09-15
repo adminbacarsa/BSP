@@ -152,6 +152,11 @@ export default function ServiciosSLAPage() {
   });
 
   const [showPositionModal, setShowPositionModal] = useState(false);
+  /** Renombres de puesto aceptados en el form: los turnos se re-etiquetan al guardar el contrato. */
+  const [pendingPositionRenames, setPendingPositionRenames] = useState<Array<{ from: string; to: string }>>([]);
+  useEffect(() => {
+    if (view === 'list') setPendingPositionRenames([]);
+  }, [view]);
   const [positionForm, setPositionForm] = useState<ServicePosition>({
     id: '', name: 'Puesto 1', code: '', coverageType: '24hs', quantity: 1,
     activeDays: ['L','M','X','J','V','S','D'], allowedShiftTypes: [], preferenciaGenero: 'INDISTINTO',
@@ -761,6 +766,51 @@ export default function ServiciosSLAPage() {
     return ops.length;
   };
 
+  /**
+   * La cobertura matchea turno↔puesto por `positionName` exacto: si se renombra un puesto
+   * y los turnos quedan con el nombre viejo, el cronograma pasa a contar 0 cerrados.
+   */
+  const buscarTurnosPorPuesto = async (
+    objectiveId: string,
+    positionName: string,
+    desde: string,
+    hasta: string,
+  ) => {
+    if (!objectiveId || !positionName || !desde || !hasta) return [];
+    const desdeTs = Timestamp.fromDate(new Date(`${desde}T00:00:00`));
+    const hastaTs = Timestamp.fromDate(new Date(`${hasta}T23:59:59`));
+    const snap = await getDocs(
+      query(
+        collection(db, 'turnos'),
+        where('objectiveId', '==', objectiveId),
+        where('startTime', '>=', desdeTs),
+      ),
+    );
+    const target = positionName.trim();
+    return snap.docs.filter(d => {
+      const data = d.data();
+      if (!data.startTime || data.startTime.seconds > hastaTs.seconds) return false;
+      return String(data.positionName || '').trim() === target;
+    });
+  };
+
+  const renombrarPuestoEnTurnos = async (
+    objectiveId: string,
+    from: string,
+    to: string,
+    desde: string,
+    hasta: string,
+  ): Promise<number> => {
+    const docs = await buscarTurnosPorPuesto(objectiveId, from, desde, hasta);
+    const CHUNK = 400;
+    for (let i = 0; i < docs.length; i += CHUNK) {
+      const batch = writeBatch(db);
+      for (const d of docs.slice(i, i + CHUNK)) batch.update(d.ref, { positionName: to });
+      await batch.commit();
+    }
+    return docs.length;
+  };
+
   const handleApplyHorarioVersion = async () => {
     if (!form.id || !horarioFormDesde) { addToast('Ingresá la fecha de inicio del cambio', 'error'); return; }
     const today = new Date().toISOString().slice(0, 10);
@@ -846,7 +896,44 @@ export default function ServiciosSLAPage() {
 
   // ── Fin historial de horarios ─────────────────────────────────────────────────
 
-  const handleSavePosition = () => {
+  /**
+   * Avisa cuántos turnos del período quedarían con el nombre viejo (cobertura en 0)
+   * y deja agendado el re-etiquetado para cuando se guarde el contrato.
+   */
+  const confirmarRenombreDePuesto = async (from: string, to: string): Promise<'OK' | 'CANCELAR'> => {
+    if (!form.id || !form.objectiveId || !form.startDate || !form.endDate) return 'OK';
+    let afectados = 0;
+    try {
+      const docs = await buscarTurnosPorPuesto(form.objectiveId, from, form.startDate, form.endDate);
+      afectados = docs.length;
+    } catch (e) {
+      console.warn('[servicios] no se pudieron contar turnos del puesto', e);
+      return 'OK';
+    }
+    if (afectados === 0) return 'OK';
+
+    const reetiquetar = confirm(
+      `Hay ${afectados} turno(s) cargados como "${from}" entre ${form.startDate} y ${form.endDate}.\n\n`
+      + `La cobertura del cronograma cruza turno y puesto por nombre exacto: si los dejás con el nombre viejo, `
+      + `esos días van a mostrar 0 cerrados.\n\n`
+      + `¿Re-etiquetarlos a "${to}" al guardar el contrato?`,
+    );
+    if (reetiquetar) {
+      setPendingPositionRenames(prev => [...prev.filter(r => r.from !== from), { from, to }]);
+      addToast(`${afectados} turno(s) se van a re-etiquetar a "${to}" cuando guardes`, 'info');
+      return 'OK';
+    }
+
+    const renombrarIgual = confirm(
+      `¿Renombrar igual sin tocar los turnos?\n\n`
+      + `La cobertura de ${afectados} turno(s) va a dar 0 hasta que los corrijas a mano.`,
+    );
+    if (!renombrarIgual) return 'CANCELAR';
+    addToast(`Puesto renombrado sin re-etiquetar — la cobertura va a dar 0 en ${afectados} turno(s)`, 'error');
+    return 'OK';
+  };
+
+  const handleSavePosition = async () => {
       if (!positionForm.name) return addToast('Nombre requerido', 'error');
       const isEventos = positionForm.coverageType === EVENTOS_COVERAGE_TYPE;
       const isEncargado = positionForm.coverageType === ENCARGADO_COVERAGE_TYPE;
@@ -870,6 +957,10 @@ export default function ServiciosSLAPage() {
       if (positionForm.id) {
         updatedPositions = updatedPositions.map(p => p.id === positionForm.id ? newPosition : p);
         const prev = form.positions.find((p) => p.id === positionForm.id);
+        if (prev && prev.name !== newPosition.name) {
+          const relabeled = await confirmarRenombreDePuesto(prev.name, newPosition.name);
+          if (relabeled === 'CANCELAR') return;
+        }
         if (prev) {
           const detailParts: string[] = [];
           if (prev.name !== newPosition.name) detailParts.push(`nombre: ${prev.name} → ${newPosition.name}`);
@@ -1352,6 +1443,25 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           // Actualización optimista: no esperar al snapshot
           setServices(prev => prev.map(s => s.id === form.id ? { ...dataToSave, id: form.id } : s));
           await registrarAuditoria('UPDATE_CONTRACT', `Editó contrato: ${form.clientName} - ${form.objectiveName}`);
+          if (pendingPositionRenames.length > 0) {
+            let total = 0;
+            for (const r of pendingPositionRenames) {
+              try {
+                total += await renombrarPuestoEnTurnos(
+                  dataToSave.objectiveId, r.from, r.to, dataToSave.startDate, dataToSave.endDate,
+                );
+                await registrarAuditoria(
+                  'RENOMBRAR_PUESTO_TURNOS',
+                  `Re-etiquetó turnos "${r.from}" → "${r.to}" · ${form.clientName} - ${form.objectiveName}`,
+                );
+              } catch (e) {
+                console.error('[servicios] re-etiquetado de turnos', e);
+                addToast(`No se pudieron re-etiquetar los turnos de "${r.from}"`, 'error');
+              }
+            }
+            setPendingPositionRenames([]);
+            if (total > 0) addToast(`${total} turno(s) re-etiquetado(s) al nuevo nombre de puesto`, 'success');
+          }
       } else {
           delete dataToSave.id; // garantizar que no va id undefined al crear
           const ref = await slaService.add(dataToSave, empresaId);
