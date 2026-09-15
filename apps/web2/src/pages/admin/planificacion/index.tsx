@@ -8565,7 +8565,7 @@ export default function PlanificacionPage() {
                 {/* 1. MODAL SELECTOR DE TURNOS */}
                 {selectedCell && !showConflictModal && !showSwapModal && !showRRHHModal && !showVacancyModal && !pendingAssignment && (
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
-                        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-[540px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
+                        <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-[540px] max-h-[90vh] overflow-y-auto custom-scrollbar mx-4 animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
                                 const employeeName = employees.find(e => e.id === selectedCell.empId)?.name || 'Empleado';
                                 const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
