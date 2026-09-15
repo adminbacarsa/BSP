@@ -55,7 +55,10 @@ export type DemandaObjectiveRow = {
   name: string;
   client: string;
   slaHours: number;
+  /** Plan comprometido (publicado, coalesce, +FT). */
   planHours: number;
+  /** Plan grilla = publicado + borrador (solo calidad/avance interno). */
+  planHoursTotal: number;
   extHours: number;
   adelHours: number;
   ftHours: number;

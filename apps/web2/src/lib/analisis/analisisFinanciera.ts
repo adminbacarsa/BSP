@@ -1,16 +1,19 @@
-/**
+﻿/**
  * Financiera COSP: consumo de hs-hombre e impacto.
- * Pirámide objetivo → cliente → empresa. Sin precios ni tarifas.
+ * Pir├ímide objetivo ÔåÆ cliente ÔåÆ empresa. Sin precios ni tarifas.
  * Modo planificado | real + novedades (V/L/E/A/AA/PG) + FT + extras
  * + gasto de horas no usadas: francos (F/FF), RET no activado y REF/ESC.
  */
 
 import {
   calcPlanificadorShiftHours,
+  calcPlanningSlaReconciliationHours,
   isOperationalOriginShift,
   isPlanificadorPlannedHoursShift,
+  isPublishedPlanificadorPlannedHoursShift,
   shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   deploymentStatKind,
   isDeploymentOrPoolShift,
@@ -25,6 +28,7 @@ import {
   buildObjectiveClientIndex,
   resolveObjectiveClientForId,
 } from '@/lib/crm/objectiveIdentity';
+import { buildSlaCodeHoursHintByObjectiveId } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { isProformaVacancyShift } from '@/lib/crm/proformaVacancy';
@@ -55,7 +59,7 @@ import {
   shiftStartMs,
 } from './analisisQueries';
 
-/** Franco de descanso: día asignado que no se usó en cobertura. Gasto = jornada de referencia. */
+/** Franco de descanso: d├¡a asignado que no se us├│ en cobertura. Gasto = jornada de referencia. */
 const FRANCO_GASTO_HOURS = 8;
 
 export type FinHoursMode = 'planned' | 'real';
@@ -68,20 +72,20 @@ export type FinNovedades = {
   inj: number;
   total: number;
   eventos: number;
-  /** Horas por código de grilla (V, E, L, A, AA, PG, SUS, SGS…). */
+  /** Horas por c├│digo de grilla (V, E, L, A, AA, PG, SUS, SGSÔÇª). */
   byCode: Record<string, number>;
 };
 
-/** Códigos de novedad que se muestran desglosados en Financiera. */
+/** C├│digos de novedad que se muestran desglosados en Financiera. */
 export const FIN_NOV_BREAKDOWN_CODES = ['V', 'E', 'L', 'A', 'AA', 'PG', 'SUS'] as const;
-/** Columnas de novedad en tabla: códigos + Otr. */
+/** Columnas de novedad en tabla: c├│digos + Otr. */
 export const FIN_NOV_HEAD_COLS = FIN_NOV_BREAKDOWN_CODES.length + 1;
 
-/** Etiqueta UI para códigos de novedad (A → ART). */
+/** Etiqueta UI para c├│digos de novedad (A ÔåÆ ART). */
 export function finNovLabel(code: string): string {
   const c = String(code || '').trim().toUpperCase();
   if (c === 'A') return 'ART';
-  return c || '—';
+  return c || 'ÔÇö';
 }
 
 export type FinSumadaColKey = 'ev' | 'ft' | 'extra' | 'franco' | 'ret' | 'ref';
@@ -399,7 +403,7 @@ export function finNovOtros(n: FinNovedades | undefined): number {
   return r1(Math.max(0, (n?.total || 0) - known));
 }
 
-/** Solo columnas con datos en el período — evita scroll horizontal por celdas vacías. */
+/** Solo columnas con datos en el per├¡odo ÔÇö evita scroll horizontal por celdas vac├¡as. */
 export function computeFinTableColumns(fin: FinEmpresaView): FinTableColumns {
   const rows = fin.clients;
   const allObjs = rows.flatMap((c) => c.rows);
@@ -445,9 +449,12 @@ export function finGuardNovOtros(g: FinGuardRow): number {
   return r1(Math.max(0, (g.hsNovedad || 0) - known));
 }
 
-/** Horas que se suman al plan: novedades + EV + FT + extra/ops + F/RET/REF. */
+/**
+ * Horas que se suman al plan_pub (ya incluye FT 1×).
+ * Novedades + EV + ext/ops + F/RET/REF — sin FT (evitar doble-cuenta).
+ */
 export function finSumadasHours(row: {
-  hsFt: number;
+  hsFt?: number;
   hsExtra: number;
   hsOps: number;
   hsFranco?: number;
@@ -458,23 +465,24 @@ export function finSumadasHours(row: {
   hsNovedad?: number;
 }): number {
   const nov = row.novedades?.total ?? row.hsNovedad ?? 0;
-  return r1(nov + (row.hsEv || 0) + row.hsFt + row.hsExtra + row.hsOps + finIdleHours({
+  return r1(nov + (row.hsEv || 0) + row.hsExtra + row.hsOps + finIdleHours({
     hsFranco: row.hsFranco || 0,
     hsRet: row.hsRet || 0,
     hsDespliegue: row.hsDespliegue || 0,
   }));
 }
 
+/** Consumo = plan_pub (+ novedades en modo plan) + ext/ops/EV/idle. FT ya va en hsPlan. */
 export function finConsumoHours(row: FinObjectiveBase, mode: FinHoursMode): number {
   const malla = finMallaHours(row, mode);
   const novedad = mode === 'real' ? row.novedades.total : 0;
-  return r1(malla + row.hsFt + row.hsExtra + row.hsOps + novedad + finIdleHours(row) + (row.hsEv || 0));
+  return r1(malla + row.hsExtra + row.hsOps + novedad + finIdleHours(row) + (row.hsEv || 0));
 }
 
 export function finGuardConsumo(g: FinGuardRow, mode: FinHoursMode): number {
   const malla = mode === 'real' ? g.hsReal : r1(g.hsPlan + g.hsNovedad);
   const novedad = mode === 'real' ? g.hsNovedad : 0;
-  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + novedad + finIdleHours(g) + (g.hsEv || 0));
+  return r1(malla + g.hsExtra + g.hsOps + novedad + finIdleHours(g) + (g.hsEv || 0));
 }
 
 function decorate(base: FinObjectiveBase, mode: FinHoursMode): FinViewRow {
@@ -545,7 +553,7 @@ export function buildAnalisisFinanciera(opts: {
   turnos: any[];
   ausenciasStats: AusenciasStats | null;
   vigenteServices: any[];
-  /** Catálogo SLA completo (vigente o no) para resolver cliente del objetivo. */
+  /** Cat├ílogo SLA completo (vigente o no) para resolver cliente del objetivo. */
   allServices?: any[];
   periodStart: Date;
   periodEnd: Date;
@@ -586,6 +594,19 @@ export function buildAnalisisFinanciera(opts: {
 
   const homeByEmp = homeObjectiveByEmployee(turnos, objectiveAliases);
   const homeLookback = homeObjectiveByEmployee(historial, objectiveAliases);
+  const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(vigenteServices);
+
+  const planCellGroups = new Map<string, Map<string, any[]>>();
+  const pushPlanCell = (objId: string, cellKey: string, t: any) => {
+    let byCell = planCellGroups.get(objId);
+    if (!byCell) {
+      byCell = new Map();
+      planCellGroups.set(objId, byCell);
+    }
+    const list = byCell.get(cellKey) || [];
+    list.push(t);
+    byCell.set(cellKey, list);
+  };
 
   const workedDays = new Set<string>();
   turnos.forEach((t: any) => {
@@ -598,6 +619,15 @@ export function buildAnalisisFinanciera(opts: {
     const ms = shiftStartMs(t);
     const plannedStart = ms != null ? new Date(ms) : (t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null);
     const scheduleDateKey = plannedStart ? getDateKeyInTimezone(plannedStart) : '';
+    if (scheduleDateKey) {
+      const periodStartKey = getDateKeyInTimezone(periodStart);
+      const periodEndKey = getDateKeyInTimezone(periodEnd);
+      if (scheduleDateKey < periodStartKey || scheduleDateKey > periodEndKey) return;
+    } else if (plannedStart) {
+      if (plannedStart < periodStart || plannedStart > periodEnd) return;
+    } else {
+      return;
+    }
     if (
       plannedStart &&
       isTurnoOnSlaExcludedSlot(t, slaExclusionCtx, {
@@ -627,24 +657,21 @@ export function buildAnalisisFinanciera(opts: {
       resolveEmployeeDisplayName(String(t.employeeId || ''), String(t.employeeName || ''), nameIndex),
     );
 
+    const isDraft = t?.draft === true;
+
     if (isFrancoTrabajadoShift(t) && !isVacantShift(t)) {
-      const extra = shiftCoverageExtensionExtraHours(t);
+      if (isDraft) return;
       const gross = isPlanificadorPlannedHoursShift(t)
         ? calcPlanificadorShiftHours(t)
         : coverageHoursFromShift(t);
-      const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
-      if (base > 0) {
-        row.plan += base;
-        if (g) g.hsPlan += base;
-      }
-      if (extra > 0) {
-        row.extra += extra;
-        if (g) g.hsExtra += extra;
-      }
       const ftHs = coverageHoursFromShift(t) || gross;
       if (ftHs > 0) {
+        row.plan += ftHs;
         row.ft += ftHs;
-        if (g) g.hsFt += ftHs;
+        if (g) {
+          g.hsPlan += ftHs;
+          g.hsFt += ftHs;
+        }
       }
       if (g && isShiftFichado(t) && !isAusenteTurno(t)) {
         const done = gross > 0 ? gross : ftHs;
@@ -657,12 +684,14 @@ export function buildAnalisisFinanciera(opts: {
     }
 
     if (isFrancoRestShift(t)) {
+      if (isDraft) return;
       row.franco += FRANCO_GASTO_HOURS;
       if (g) g.hsFranco += FRANCO_GASTO_HOURS;
       return;
     }
 
     if (isDeploymentOrPoolShift(t) && !isVacantShift(t)) {
+      if (isDraft) return;
       const kind = deploymentStatKind(t);
       const hs = resolveDeploymentStatHours(t) || (kind === 'RET' ? RET_STANDBY_REFERENCE_HOURS : 0);
       if (hs <= 0) return;
@@ -679,6 +708,7 @@ export function buildAnalisisFinanciera(opts: {
     }
 
     if (isEventoShift(t) && !isVacantShift(t)) {
+      if (isDraft) return;
       const hs = calcPlanificadorShiftHours(t) || coverageHoursFromShift(t);
       if (hs > 0) {
         row.ev += hs;
@@ -692,6 +722,7 @@ export function buildAnalisisFinanciera(opts: {
     }
 
     if (isOperationalOriginShift(t) && !isVacantShift(t) && !isProformaVacancyShift(t)) {
+      if (isDraft) return;
       const hs = coverageHoursFromShift(t);
       if (hs > 0) {
         row.ops += hs;
@@ -701,7 +732,7 @@ export function buildAnalisisFinanciera(opts: {
       return;
     }
 
-    if (!isPlanificadorPlannedHoursShift(t)) return;
+    if (!isPublishedPlanificadorPlannedHoursShift(t)) return;
     if (isProformaVacancyShift(t)) return;
     const extra = shiftCoverageExtensionExtraHours(t);
     const gross = calcPlanificadorShiftHours(t);
@@ -710,7 +741,9 @@ export function buildAnalisisFinanciera(opts: {
       if (base > 0) row.vacant += base;
       return;
     }
-    if (base > 0) {
+    if (t.employeeId && t.employeeId !== 'VACANTE' && scheduleDateKey) {
+      pushPlanCell(oid, `${String(t.employeeId)}_${scheduleDateKey}`, t);
+    } else if (base > 0) {
       row.plan += base;
       if (g) g.hsPlan += base;
     }
@@ -727,6 +760,28 @@ export function buildAnalisisFinanciera(opts: {
         g.hsReal += done;
       }
     }
+  });
+
+  planCellGroups.forEach((byCell, objId) => {
+    const row = byObj.get(objId);
+    if (!row) return;
+    const hint = slaCodeHoursHintByObjective[objId];
+    byCell.forEach((cellTurnos) => {
+      const merged = coalescePlannedTurnosForCell(cellTurnos, hint);
+      if (!merged) return;
+      const base = calcPlanningSlaReconciliationHours(merged, hint);
+      if (base <= 0) return;
+      row.plan += base;
+      const eid = String(merged.employeeId || cellTurnos[0]?.employeeId || '').trim();
+      if (eid && eid !== 'VACANTE') {
+        const g = guardOf(
+          row,
+          eid,
+          resolveEmployeeDisplayName(eid, String(merged.employeeName || cellTurnos[0]?.employeeName || ''), nameIndex),
+        );
+        if (g) g.hsPlan += base;
+      }
+    });
   });
 
   (ausenciasStats?.detalle || []).forEach((ev) => {

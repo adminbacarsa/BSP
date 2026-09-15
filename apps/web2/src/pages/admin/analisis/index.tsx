@@ -39,6 +39,7 @@ import {
   rollAnalisisFinanciera,
   type FinHoursMode,
 } from '@/lib/analisis/analisisFinanciera';
+import { buildAnalisisCalidadKpis, sumExtractHours } from '@/lib/analisis/analisisCalidad';
 import {
   buildInformeAnalitico,
   buildInformeSeries,
@@ -56,7 +57,7 @@ import {
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
   Shield, AlertCircle, ArrowUp, ArrowDown, Minus, Calendar, ChevronDown,
   Filter, PieChart as PieIcon, BarChart2, Download, RefreshCw, Scale,
-  MapPin, Wallet, FileText, FileSpreadsheet, Building2, Layers, Briefcase, ExternalLink,
+  MapPin, Wallet, FileText, FileSpreadsheet, Building2, Layers, Briefcase, ExternalLink, Database,
 } from 'lucide-react';
 import { buildViabilityRangeReport } from '@/utils/viabilityAnalysis';
 import {
@@ -416,6 +417,7 @@ type AnalisisTab =
   | 'demanda'
   | 'financiera'
   | 'proyeccion'
+  | 'calidad'
   | 'viabilidad'
   | 'art12'
   | 'analitica';
@@ -1172,6 +1174,10 @@ export default function AnalisisPage() {
         demandaTotals: demanda.totals,
         ausenciasStats,
         turnos,
+        extractRealHours:
+          extractReady && turnos.length === 0
+            ? sumExtractHours(extractRows).real
+            : undefined,
         bolsa: {
           inicial: bolsaRealista.bolsaInicial,
           techo: bolsaRealista.techoBruto,
@@ -1182,7 +1188,21 @@ export default function AnalisisPage() {
           modo: bolsaRealista.modo,
         },
       }),
-    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
+    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista, extractReady, extractRows],
+  );
+
+  const calidadKpis = useMemo(
+    () =>
+      buildAnalisisCalidadKpis({
+        demandaTotals: demanda.totals,
+        informe,
+        fin,
+        turnos: turnosLive,
+        extractRows,
+        extractReady,
+        mallaReady,
+      }),
+    [demanda.totals, informe, fin, turnosLive, extractRows, extractReady, mallaReady],
   );
 
   const informeSeriesMeta = useMemo(() => {
@@ -2049,7 +2069,7 @@ export default function AnalisisPage() {
       ['Informe analítico operativo', periodRange.labelShort],
       ['Dotación activa', informe.dotacionActiva],
       ['Horas vendidas (SLA)', informe.hsVendidas],
-      ['Horas planificadas', informe.hsPlanificadas],
+      ['Plan comprometido', informe.hsPlanificadas],
       ['Horas realizadas', informe.hsRealizadas],
       ['Bolsa inicial hs', informe.bolsaInicial],
       ['Bolsa modo', informe.bolsaModo === 'sin_indice' ? 'Techo 200×N (sin índice)' : 'Capacidad realista'],
@@ -2058,8 +2078,8 @@ export default function AnalisisPage() {
       ['Hs efectivas / guardia', informe.bolsaHsEfectivasGuardia],
       ['Ventana índice', informe.bolsaLookbackLabel],
       ['Bolsa disponible', informe.bolsaDisponible],
-      ['Cobertura plan %', informe.coberturaPlanPct],
-      ['Cobertura efectiva %', informe.coberturaEfectivaPct],
+      ['Cobertura de plan %', informe.coberturaPlanPct],
+      ['Cumplimiento real %', informe.coberturaEfectivaPct],
       ['Desvío extras (hs)', informe.desvioExtras],
     ];
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(resumen), 'Resumen');
@@ -2098,8 +2118,8 @@ export default function AnalisisPage() {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
       ['Financiera hs-hombre', periodRange.labelShort, modo],
       ['SLA empresa', r(fin.slaHours)],
-      ['Hs plan', r(finPlanHours(fin, finHoursMode))],
-      ['Horas sumadas', r(finSumadasHours(fin))],
+      ['Plan comprometido', r(finPlanHours(fin, finHoursMode))],
+      ['Σ sumadas (FT ya en plan)', r(finSumadasHours(fin))],
       ['Consumo', r(fin.hsConsumo)],
       ...FIN_NOV_BREAKDOWN_CODES.map((c) => [c, r(finNovCode(fin.novedades, c))]),
       ['Otras novedades', r(finNovOtros(fin.novedades))],
@@ -2117,7 +2137,7 @@ export default function AnalisisPage() {
       ['Eficiencia SLA/consumo %', Math.round(fin.eficienciaPct)],
     ]), 'Empresa');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivos', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
+      ['Cliente', 'Objetivos', 'SLA', 'Plan comprometido', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas (FT ya en plan)', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'Δ SLA'],
       ...fin.clients.map((c) => [
         c.name, c.objetivos, r(c.slaHours), r(finPlanHours(c, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(c.novedades, code))),
@@ -2126,7 +2146,7 @@ export default function AnalisisPage() {
       ]),
     ]), 'Clientes');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'SLA', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
+      ['Cliente', 'Objetivo', 'SLA', 'Plan comprometido', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas (FT ya en plan)', 'Consumo', 'Vacante', 'Guardias', 'Hs/g', 'SLA/g', 'Δ SLA'],
       ...fin.clients.flatMap((c) => c.rows.map((o) => [
         c.name, o.name, r(o.slaHours), r(finPlanHours(o, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finNovCode(o.novedades, code))),
@@ -2135,7 +2155,7 @@ export default function AnalisisPage() {
       ])),
     ]), 'Objetivos');
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
-      ['Cliente', 'Objetivo', 'Guardia', 'Hs plan', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas', 'Consumo'],
+      ['Cliente', 'Objetivo', 'Guardia', 'Plan comprometido', ...FIN_NOV_BREAKDOWN_CODES.map((c) => finNovLabel(c)), 'Otr nov', 'EV', 'FT', 'Extra', 'Ops', 'Francos', 'RET', 'REF/ESC', 'Σ sumadas (FT ya en plan)', 'Consumo'],
       ...fin.clients.flatMap((c) => c.rows.flatMap((o) => o.guards.map((g) => [
         c.name, o.name, empNameById[g.employeeId] || g.name, r(finPlanHours(g, finHoursMode)),
         ...FIN_NOV_BREAKDOWN_CODES.map((code) => r(finGuardNovCode(g, code))),
@@ -2465,7 +2485,7 @@ export default function AnalisisPage() {
                 const group =
                   activeTab === 'financiera' ? 'financiera'
                   : (activeTab === 'guardias' || activeTab === 'art12') ? 'humana'
-                  : (activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion') ? 'herramientas'
+                  : (activeTab === 'calidad' || activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion') ? 'herramientas'
                   : 'operativa';
                 const Icon = g.icon;
                 const isActive = group === g.id;
@@ -2494,8 +2514,18 @@ export default function AnalisisPage() {
                         { id: 'guardias', label: 'Guardias', icon: Users, alert: false },
                         { id: 'art12', label: 'ART.12', icon: MapPin, alert: false },
                       ]
-                    : (activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion')
+                    : (activeTab === 'calidad' || activeTab === 'viabilidad' || activeTab === 'analitica' || activeTab === 'proyeccion')
                       ? [
+                          {
+                            id: 'calidad',
+                            label: 'Calidad de dato',
+                            icon: Database,
+                            alert:
+                              calidadKpis.mallaVaciaConExtracto
+                              || calidadKpis.pctMallaPublicada < 95
+                              || calidadKpis.presentAtSinIsPresent > 0
+                              || (calidadKpis.deltaPlanExtractVsMalla != null && Math.abs(calidadKpis.deltaPlanExtractVsMalla) > 8),
+                          },
                           { id: 'viabilidad', label: 'Viabilidad', icon: Scale, alert: superavitGlobal < 0 },
                           { id: 'analitica', label: 'Analítica', icon: Filter, alert: false },
                           { id: 'proyeccion', label: 'Proyección', icon: TrendingUp, alert: false },
@@ -2849,8 +2879,8 @@ export default function AnalisisPage() {
 
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA empresa" value={fmtFinHs(fin.slaHours)} unit="hs" subtext={`${fin.clientes} clientes · ${fin.objetivos} objetivos`}/>
-                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Hs plan (fichada)' : 'Hs plan'} value={fmtFinHs(finPlanHours(fin, finHoursMode))} unit="hs" subtext={finHoursMode === 'real' ? `Plan ${fmtFinHs(fin.hsPlan)} hs` : 'Cobertura de malla, sin novedades'}/>
-                <KpiCard icon={Layers} color="#0f766e" label="Consumo hs-hombre" value={fmtFinHs(fin.hsConsumo)} unit="hs" subtext={`Plan ${fmtFinHs(finPlanHours(fin, finHoursMode))} + sumadas ${fmtFinHs(finSumadasHours(fin))}`} alert={fin.deltaVsSla > 8}/>
+                <KpiCard icon={Clock} color="#0284c7" label={finHoursMode === 'real' ? 'Plan comprometido (fichado)' : 'Plan comprometido'} value={fmtFinHs(finPlanHours(fin, finHoursMode))} unit="hs" subtext={finHoursMode === 'real' ? `Malla ${fmtFinHs(fin.hsPlan)} hs` : 'Publicado + coalesce + FT'}/>
+                <KpiCard icon={Layers} color="#0f766e" label="Consumo hs-hombre" value={fmtFinHs(fin.hsConsumo)} unit="hs" subtext={`Plan ${fmtFinHs(finPlanHours(fin, finHoursMode))} + sumadas ${fmtFinHs(finSumadasHours(fin))} (FT ya en plan)`} alert={fin.deltaVsSla > 8}/>
                 <KpiCard icon={Users} color="#0891b2" label="Hs / guardia" value={fmtFinHs(fin.hsConsumoPorGuardia)} unit="hs" subtext={`${fin.guardias} guardias · SLA ${fmtFinHs(fin.hsSlaPorGuardia)} hs/c/u`}/>
                 <KpiCard icon={AlertTriangle} color="#ea580c" label="FT + extras + no usadas" value={fmtFinHs(fin.hsFt + fin.hsExtra + fin.hsOps + finIdleHours(fin))} unit="hs" subtext={`FT ${fmtFinHs(fin.hsFt)} · ext ${fmtFinHs(fin.hsExtra)} · ops ${fmtFinHs(fin.hsOps)} · F ${fmtFinHs(fin.hsFranco)} · RET ${fmtFinHs(fin.hsRet)} · REF/ESC ${fmtFinHs(fin.hsDespliegue)}`}/>
                 <KpiCard icon={Activity} color={fin.eficienciaPct >= 90 ? '#059669' : fin.eficienciaPct >= 75 ? '#d97706' : '#dc2626'} label="Eficiencia SLA/consumo" value={`${Math.round(fin.eficienciaPct)}%`} subtext={`Novedades ${fmtFinHs(fin.novedades.total)} · vacante ${fmtFinHs(fin.hsVacante)}`} alert={fin.eficienciaPct < 75}/>
@@ -3196,14 +3226,14 @@ export default function AnalisisPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Users} color="#0891b2" label="Dotación activa" value={informe.dotacionActiva} subtext="Legajos activos"/>
                 <KpiCard icon={Target} color="#4f46e5" label="Horas vendidas" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs" subtext="SLA / contrato"/>
-                <KpiCard icon={Clock} color="#6366f1" label="Horas planificadas" value={informe.hsPlanificadas.toLocaleString('es-AR')} unit="hs" subtext="Malla crono"/>
+                <KpiCard icon={Clock} color="#6366f1" label="Plan comprometido" value={informe.hsPlanificadas.toLocaleString('es-AR')} unit="hs" subtext="Publicado + coalesce + FT"/>
                 <KpiCard icon={CheckCircle} color="#059669" label="Horas realizadas" value={informe.hsRealizadas.toLocaleString('es-AR')} unit="hs"
                   subtext={informe.hsPendientesFichada > 0 ? `${informe.hsPendientesFichada.toLocaleString('es-AR')} hs sin fichar` : 'Presencia / cierre'}/>
                 <KpiCard icon={Wallet} color="#7c3aed" label="Bolsa disponible" value={informe.bolsaDisponible.toLocaleString('es-AR')} unit="hs"
                   subtext={`Inicial ${informe.bolsaInicial.toLocaleString('es-AR')} · techo ${informe.bolsaTecho.toLocaleString('es-AR')} · índice 3m ${informe.bolsaIndicePct}% · ${informe.bolsaHsEfectivasGuardia} hs/g`}/>
                 <KpiCard icon={Activity} color={informe.coberturaEfectivaPct >= 95 ? '#059669' : informe.coberturaEfectivaPct >= 85 ? '#d97706' : '#dc2626'}
-                  label="Cobertura operativa" value={`${informe.coberturaEfectivaPct}%`}
-                  subtext={`Plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
+                  label="Cumplimiento real" value={`${informe.coberturaEfectivaPct}%`}
+                  subtext={`Cobertura de plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
                   alert={informe.coberturaEfectivaPct < 90}/>
               </div>
 
@@ -3393,15 +3423,15 @@ export default function AnalisisPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 p-5">
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
                     <p className="text-3xl font-black text-indigo-600">{informe.coberturaPlanPct}%</p>
-                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cobertura planificada</p>
-                    <p className="text-[10px] text-slate-400 mt-1">Hs plan / hs vendidas</p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cobertura de plan</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Plan comprometido / hs vendidas</p>
                   </div>
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
                     <p className={`text-3xl font-black ${informe.coberturaEfectivaPct >= 95 ? 'text-emerald-600' : informe.coberturaEfectivaPct >= 85 ? 'text-amber-600' : 'text-rose-600'}`}>
                       {informe.coberturaEfectivaPct}%
                     </p>
-                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cobertura efectiva</p>
-                    <p className="text-[10px] text-slate-400 mt-1">(Realizadas o resultante) / vendidas</p>
+                    <p className="text-[9px] font-black uppercase text-slate-400 mt-1">Cumplimiento real</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Realizadas / hs vendidas</p>
                   </div>
                   <div className="rounded-xl border border-slate-100 dark:border-slate-700 p-4 text-center">
                     <p className={`text-3xl font-black ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
@@ -4251,8 +4281,8 @@ export default function AnalisisPage() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Target} color="#4f46e5" label="SLA vendidas" value={demanda.totals.slaHours.toLocaleString('es-AR')} unit="hs"/>
-                <KpiCard icon={Clock} color="#6366f1" label="Plan (cobertura)" value={demanda.totals.planHours.toLocaleString('es-AR')} unit="hs"
-                  subtext="Turno cubierto (M=8). Sin novedades ni recargo FT"/>
+                <KpiCard icon={Clock} color="#6366f1" label="Plan comprometido" value={demanda.totals.planHours.toLocaleString('es-AR')} unit="hs"
+                  subtext="Publicado + coalesce + FT · sin ext/adel/ops"/>
                 <KpiCard icon={Activity} color="#059669" label="Resultante" value={demanda.totals.resultante.toLocaleString('es-AR')} unit="hs"
                   subtext="Plan + ext/adel + ops (sin FT/novedades)"/>
                 <KpiCard icon={demanda.totals.deltaSla >= 0 ? ArrowUp : ArrowDown}
@@ -4270,7 +4300,7 @@ export default function AnalisisPage() {
                 <SectionCard title={`SLA vs plan vs resultante · ${periodRange.labelShort}`} icon={BarChart3} loading={loadTurnos}>
                   <LegendRow items={[
                     { color: '#4f46e5', label: 'SLA vendidas' },
-                    { color: '#6366f1', label: 'Plan' },
+                    { color: '#6366f1', label: 'Plan comprometido' },
                     { color: '#059669', label: 'Resultante' },
                   ]}/>
                   <div className="px-5 pb-5 pt-2">
@@ -4567,6 +4597,66 @@ export default function AnalisisPage() {
                   ))}
                 </div>
               </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════════════
+              TAB: CALIDAD DE DATO
+          ══════════════════════════════════════════════════════════════ */}
+          {activeTab === 'calidad' && (
+            <div className="space-y-4">
+              <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
+                Higiene de malla, fichada y conciliación con el extracto <strong>hours_balances</strong> — misma fuente que Informe, Demanda y Financiera.
+                No recalcula motores paralelos; audita publicación, borrador, gaps Ops↔Análisis y Δ extracto↔malla.
+              </p>
+
+              {calidadKpis.mallaVaciaConExtracto && (
+                <div className="rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50/80 dark:bg-amber-950/30 px-4 py-3 shadow-sm">
+                  <p className="text-xs font-black uppercase text-amber-800 dark:text-amber-300">Extracto con datos · malla aún vacía o cargando</p>
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1">
+                    Plan extracto {calidadKpis.extractPlanHs?.toLocaleString('es-AR')} hs · real extracto {calidadKpis.extractRealHs?.toLocaleString('es-AR')} hs.
+                    Los KPIs de plan/real usan extracto donde corresponde hasta que llegue la malla.
+                  </p>
+                </div>
+              )}
+
+              <SectionCard title={`Higiene de malla · ${periodRange.labelShort}`} icon={Database} loading={loadTurnos && !extractReady}>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-5">
+                  <KpiCard icon={Clock} color="#6366f1" label="Plan comprometido" value={fmtFinHs(calidadKpis.planPubHs)} unit="hs" subtext="Publicado + coalesce + FT"/>
+                  <KpiCard icon={Layers} color="#7c3aed" label="Plan grilla total" value={fmtFinHs(calidadKpis.planTotalHs)} unit="hs" subtext={`${calidadKpis.pctMallaPublicada}% publicada`}/>
+                  <KpiCard icon={FileText} color="#d97706" label="Solo borrador" value={fmtFinHs(calidadKpis.hsSoloBorrador)} unit="hs" subtext="No entra en plan_pub" alert={calidadKpis.hsSoloBorrador > 8}/>
+                  <KpiCard icon={CheckCircle} color="#059669" label="Horas realizadas" value={fmtFinHs(calidadKpis.realHs)} unit="hs" subtext={`Avance fichada ${calidadKpis.avanceFichadaPct}%`}/>
+                  <KpiCard icon={AlertTriangle} color="#ea580c" label="Pendiente fichada" value={fmtFinHs(calidadKpis.pendienteFichadaHs)} unit="hs" subtext="Plan − real" alert={calidadKpis.pendienteFichadaHs > 16}/>
+                  <KpiCard icon={AlertCircle} color="#dc2626" label="presentAt sin isPresent" value={calidadKpis.presentAtSinIsPresent} subtext="Gap Ops ↔ Análisis" alert={calidadKpis.presentAtSinIsPresent > 0}/>
+                </div>
+              </SectionCard>
+
+              <SectionCard title="Extracto mensual vs malla" icon={Wallet} loading={!extractReady && loadTurnos}>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-5">
+                  <KpiCard icon={Target} color="#4f46e5" label="Plan extracto" value={calidadKpis.extractPlanHs != null ? fmtFinHs(calidadKpis.extractPlanHs) : '—'} unit={calidadKpis.extractPlanHs != null ? 'hs' : undefined} subtext="Σ hours_balances.planned"/>
+                  <KpiCard icon={Activity} color="#059669" label="Real extracto" value={calidadKpis.extractRealHs != null ? fmtFinHs(calidadKpis.extractRealHs) : '—'} unit={calidadKpis.extractRealHs != null ? 'hs' : undefined} subtext="Σ hours_balances.real"/>
+                  <KpiCard icon={ArrowUp} color={calidadKpis.deltaPlanExtractVsMalla != null && Math.abs(calidadKpis.deltaPlanExtractVsMalla) > 8 ? '#dc2626' : '#64748b'} label="Δ plan extracto−malla" value={calidadKpis.deltaPlanExtractVsMalla != null ? `${calidadKpis.deltaPlanExtractVsMalla > 0 ? '+' : ''}${calidadKpis.deltaPlanExtractVsMalla}` : '—'} unit={calidadKpis.deltaPlanExtractVsMalla != null ? 'hs' : undefined} alert={calidadKpis.deltaPlanExtractVsMalla != null && Math.abs(calidadKpis.deltaPlanExtractVsMalla) > 8}/>
+                  <KpiCard icon={ArrowDown} color={calidadKpis.deltaRealExtractVsMalla != null && Math.abs(calidadKpis.deltaRealExtractVsMalla) > 8 ? '#dc2626' : '#64748b'} label="Δ real extracto−malla" value={calidadKpis.deltaRealExtractVsMalla != null ? `${calidadKpis.deltaRealExtractVsMalla > 0 ? '+' : ''}${calidadKpis.deltaRealExtractVsMalla}` : '—'} unit={calidadKpis.deltaRealExtractVsMalla != null ? 'hs' : undefined} alert={calidadKpis.deltaRealExtractVsMalla != null && Math.abs(calidadKpis.deltaRealExtractVsMalla) > 8}/>
+                </div>
+                {!extractReady && (
+                  <p className="px-5 pb-4 text-[10px] text-slate-400">Sin extracto para el período — recargá el header o esperá la persistencia desde malla.</p>
+                )}
+              </SectionCard>
+
+              <SectionCard title="Tablero de gestión (unidad de negocio)" icon={BarChart3}>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 p-5">
+                  <KpiCard icon={Target} color="#4f46e5" label="Cobertura de plan" value={`${calidadKpis.coberturaPlanPct}%`} subtext="plan_pub / SLA"/>
+                  <KpiCard icon={CheckCircle} color="#059669" label="Cumplimiento real" value={`${calidadKpis.coberturaRealPct}%`} subtext="real / SLA"/>
+                  <KpiCard icon={Clock} color="#0284c7" label="Avance fichada" value={`${calidadKpis.avanceFichadaPct}%`} subtext="real / plan_pub"/>
+                  <KpiCard icon={Briefcase} color="#0891b2" label="Objetivos con SLA" value={calidadKpis.objetivosConSla} subtext={`${fmtFinHs(calidadKpis.hsSlaSinPlan)} hs SLA sin plan`}/>
+                  <KpiCard icon={Shield} color="#059669" label="Hs ops" value={fmtFinHs(calidadKpis.opsHs)} unit="hs" subtext="RETEN / COVERAGE / SLA_VIRTUAL"/>
+                  <KpiCard icon={Activity} color={calidadKpis.eficienciaSlaConsumo >= 90 ? '#059669' : '#d97706'} label="Eficiencia SLA/consumo" value={`${Math.round(calidadKpis.eficienciaSlaConsumo)}%`} subtext={`Nov ${calidadKpis.pctConsumoNovedades}% · ops ${calidadKpis.pctConsumoOps}% · idle ${calidadKpis.pctConsumoIdle}%`}/>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-2 gap-3 px-5 pb-5">
+                  <KpiCard icon={Users} color="#6366f1" label="Plan / guardia" value={fmtFinHs(calidadKpis.hsPlanPorGuardia)} unit="hs" subtext="plan_pub ÷ guardias activos"/>
+                  <KpiCard icon={Users} color="#059669" label="Real / guardia" value={fmtFinHs(calidadKpis.hsRealPorGuardia)} unit="hs" subtext="real ÷ guardias activos"/>
+                </div>
+              </SectionCard>
             </div>
           )}
 

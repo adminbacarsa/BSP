@@ -11,7 +11,6 @@ import {
   isVacantShift,
 } from './analisisQueries';
 import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
-import { coveragePlannedBillableHours } from './analisisDemanda';
 import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
 
 export type InformeBalanceRow = {
@@ -91,6 +90,8 @@ export function buildInformeAnalitico(opts: {
   demandaTotals: DemandaObjectiveRow;
   ausenciasStats: AusenciasStats | null;
   turnos: any[];
+  /** Fallback desde hours_balances cuando la malla aún no está en memoria. */
+  extractRealHours?: number | null;
   bolsa?: {
     inicial: number;
     techo: number;
@@ -101,11 +102,11 @@ export function buildInformeAnalitico(opts: {
     modo?: 'con_indice' | 'sin_indice';
   };
 }): InformeAnalitico {
-  const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
+  const { plantel, demandaTotals: d, ausenciasStats, turnos, extractRealHours, bolsa } = opts;
   const hsVendidas = r1(d.slaHours);
   const hsPlanBase = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
-  const hsPlanificadas = coveragePlannedBillableHours(d.planHours, d.extHours, d.adelHours);
+  const hsPlanificadas = hsPlanBase;
   const hsFT100 = r1(d.ftHours);
   const hsOps = r1(d.opsHours);
   const hsVacante = r1(d.vacantHours);
@@ -129,7 +130,11 @@ export function buildInformeAnalitico(opts: {
     }
   });
 
-  hsRealizadas = r1(hsRealizadas);
+  if (hsRealizadas <= 0 && extractRealHours != null && extractRealHours > 0) {
+    hsRealizadas = r1(extractRealHours);
+  } else {
+    hsRealizadas = r1(hsRealizadas);
+  }
   hsPendientesFichada = r1(hsPendientesFichada);
   hsNormales = r1(hsNormales);
 
@@ -146,7 +151,7 @@ export function buildInformeAnalitico(opts: {
   const sobreBolsa = r1(Math.max(0, bolsaConsumida - bolsaInicial));
   const desvioRealVsVendido = r1(hsRealizadas - hsVendidas);
   const desvioExtras = r1(hsExtras50 + hsFT100 + hsOps);
-  const coberturaPlanPct = hsVendidas > 0 ? Math.round((hsPlanificadas / hsVendidas) * 1000) / 10 : 0;
+  const coberturaPlanPct = hsVendidas > 0 ? Math.round((hsPlanBase / hsVendidas) * 1000) / 10 : 0;
   const coberturaEfectivaPct = hsVendidas > 0
     ? Math.round((hsRealizadas / hsVendidas) * 1000) / 10
     : 0;
@@ -158,9 +163,9 @@ export function buildInformeAnalitico(opts: {
       observacion: 'Compromiso asumido con los clientes en el período.',
     },
     {
-      concepto: 'Horas planificadas',
+      concepto: 'Plan comprometido (publicado)',
       horas: hsPlanificadas,
-      observacion: 'Malla de cobertura crono (sin FT ni tramos extra).',
+      observacion: 'Malla publicada coalesce (+ FT). Sin borradores ni tramos ext/adel.',
     },
     {
       concepto: bolsaModo === 'sin_indice' ? 'Bolsa de horas (techo 200, sin índice)' : 'Bolsa de horas (capacidad realista)',
