@@ -4,7 +4,6 @@ type PlanificacionNavigationUiReset = {
     setSearchTerm: (value: string) => void;
     setShowGuardiaSearch: (value: boolean) => void;
     setPinnedExternalEmpIds: (value: Set<string>) => void;
-    setBandFilter: (value: null) => void;
     setForceShowAll: (value: boolean) => void;
     setDotacionPoolSearch: (value: string) => void;
     setSelection: (value: { start: null; end: null }) => void;
@@ -17,7 +16,6 @@ function resetPlanificacionNavigationUi({
     setSearchTerm,
     setShowGuardiaSearch,
     setPinnedExternalEmpIds,
-    setBandFilter,
     setForceShowAll,
     setDotacionPoolSearch,
     setSelection,
@@ -28,7 +26,6 @@ function resetPlanificacionNavigationUi({
     setSearchTerm('');
     setShowGuardiaSearch(false);
     setPinnedExternalEmpIds(new Set());
-    setBandFilter(null);
     setForceShowAll(false);
     setDotacionPoolSearch('');
     setSelection({ start: null, end: null });
