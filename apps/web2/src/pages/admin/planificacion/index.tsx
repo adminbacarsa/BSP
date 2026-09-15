@@ -169,6 +169,7 @@ import {
     confirmPlanificacionPendingAssignment,
     resetPlanificacionPendingAssignment,
 } from '@/lib/planificacion/confirmPlanificacionPendingAssignment';
+import { applyPlanificacionRecompositionPackage } from '@/lib/planificacion/applyPlanificacionRecompositionPackage';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -4797,27 +4798,16 @@ export default function PlanificacionPage() {
         pkg: RecompositionPackage,
         novedad?: PendingAbsenceNovedad,
     ) => {
-        setPendingChanges(prev => {
-            const next = { ...prev };
-            for (const [k, v] of Object.entries(updates)) {
-                next[k] = { ...v, isTemp: true };
-            }
-            return next;
+        applyPlanificacionRecompositionPackage({
+            updates,
+            pkg,
+            novedad,
+            setPendingChanges,
+            setPendingNovedades,
+            setPendingRecompositionPackages,
+            setSelectedCell,
+            setRecompositionModalOpen,
         });
-        if (novedad) {
-            const key = `${novedad.employeeId}_${novedad.startDate}`;
-            setPendingNovedades(prev => ({ ...prev, [key]: novedad }));
-        }
-        setPendingRecompositionPackages(prev => [...prev.filter(p => p.id !== pkg.id), pkg]);
-        setSelectedCell(null);
-        setRecompositionModalOpen(false);
-        toast.success(
-            novedad?.absenceType === 'RA' || novedad?.type === 'Retiro anticipado'
-                ? 'Retiro anticipado y cobertura aplicados (pendiente de guardar)'
-                : novedad
-                    ? 'Novedad RRHH y cobertura aplicadas (pendiente de guardar)'
-                    : 'Paquete cobertura/liberación aplicado (pendiente de guardar)',
-        );
     };
 
     const handleAssignDeployment = (intent: 'SURPLUS' | 'TRAINING') => {
