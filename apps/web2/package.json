@@ -46,6 +46,7 @@
     "auto-lab:versions": "node scripts/list-auto-lab-versions.js"
   },
   "dependencies": {
+    "@cosp/domain": "file:../functions/shared-domain",
     "@headlessui/react": "^2.2.9",
     "@imgly/background-removal": "^1.7.0",
     "@react-google-maps/api": "^2.20.8",

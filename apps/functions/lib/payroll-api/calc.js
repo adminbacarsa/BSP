@@ -4,6 +4,7 @@ exports.buildLiquidacionSnapshot = buildLiquidacionSnapshot;
 const admin = require("firebase-admin");
 const cycle_1 = require("./cycle");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
+const operationalShift_1 = require("../shared/operationalShift");
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const SHIFT_HOURS_FALLBACK = {
@@ -185,11 +186,6 @@ async function buildLiquidacionSnapshot(params) {
         turnosBorrador: 0,
         ausenciasContadas: 0,
     };
-    const isOperationalTurno = (data) => data?.origin === 'RETEN' ||
-        data?.origin === 'OPERATIONS_COVERAGE' ||
-        data?.origin === 'SLA_VIRTUAL' ||
-        !!data?.isReten ||
-        data?.resolvedBy === 'OPERACIONES';
     const getAcc = (empId) => {
         let cur = acc.get(empId);
         if (cur)
@@ -241,7 +237,7 @@ async function buildLiquidacionSnapshot(params) {
             return;
         if (data.draft === true) {
             diagnostics.turnosBorrador++;
-            if (hoursMode !== 'planned' && !isOperationalTurno(data))
+            if (hoursMode !== 'planned' && !(0, operationalShift_1.isOperationalOriginShift)(data))
                 return;
         }
         if (data.isUnassigned === true)

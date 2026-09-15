@@ -4,6 +4,7 @@ import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/pl
 import { checkLlegadaTardeReiterada } from '../ausencias/llegadaTardeUtils';
 import { updateLiquidacionOnTurnoComplete } from '../liquidacion/updateLiquidacionOnTurnoComplete';
 import { enqueueShiftNotifDigest, type DigestEventType } from './shiftNotifDigest';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -165,12 +166,9 @@ export const onTurnoWrite = functions
         .trim()
         .toUpperCase();
       const isOperational =
-        origin === 'RETEN' ||
-        origin === 'OPERATIONS_COVERAGE' ||
+        isOperationalOriginShift(turn) ||
         origin === 'CLIENT_REQUEST' ||
         origin === 'EVENTO' ||
-        turn.isReten === true ||
-        String(turn.resolvedBy || '').toUpperCase() === 'OPERACIONES' ||
         code === 'EV' ||
         !!turn.eventoId;
 

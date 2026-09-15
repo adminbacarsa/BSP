@@ -1,5 +1,6 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 const db = () => admin.firestore();
 
@@ -114,14 +115,6 @@ function normBanda8(code: string): Banda8 | null {
     if (c === 'N12') return 'N';
     if (c === 'M' || c === 'T' || c === 'N') return c;
     return null;
-}
-
-function isOperacional(s: any): boolean {
-    return s.origin === 'RETEN'
-        || s.origin === 'OPERATIONS_COVERAGE'
-        || s.origin === 'SLA_VIRTUAL'
-        || !!s.isReten
-        || s.resolvedBy === 'OPERACIONES';
 }
 
 const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET']);
@@ -277,7 +270,7 @@ export const runAjustarCronoHandler = async (
         for (const s of snap.docs) {
             const d = s.data();
             if (d.draft === true) continue;
-            if (isOperacional(d)) continue;
+            if (isOperationalOriginShift(d)) continue;
             const code = String(d.code || d.type || '').toUpperCase();
             if (!WORK_CODES.has(code)) continue;
             const banda = normBanda8(code);

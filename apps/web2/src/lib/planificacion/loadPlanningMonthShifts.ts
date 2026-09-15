@@ -8,6 +8,7 @@ import {
     iterateCalendarDateRange,
     toCalendarDateStr,
 } from './absenceCodes';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 /** Rango del mes calendario (month = 1..12). */
 export function planningMonthBounds(year: number, month: number): { firstDay: Date; lastDay: Date } {
@@ -95,13 +96,6 @@ export function buildPlanningMonthTuraQuery(params: {
     month: number;
 }): Query {
     return buildPlanningMonthRefuerzoQuery({ ...params, code: 'TURA' });
-}
-
-function isOperationalOriginShift(data: Record<string, unknown>): boolean {
-    const o = String(data?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-    if (data?.resolvedBy === 'OPERACIONES') return true;
-    return false;
 }
 
 function toDateStr(startTime: unknown): string | null {

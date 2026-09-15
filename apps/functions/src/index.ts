@@ -51,6 +51,7 @@ import { migrateAbsenceCertificateToDrive } from './rrhh/migrateAbsenceCertifica
 import { loadCentroControlState } from './ops/centroControlGuard';
 import { PatternService } from './scheduling/pattern.service';
 import { LaborAgreementService } from './data-management/labor-agreement.service';
+import { isOperationalOriginShift } from './shared/operationalShift';
 
 // Interfaces
 import { EmployeeRole } from './common/interfaces/employee.interface';
@@ -3978,8 +3979,7 @@ export const gestionarVacantes = functions
       const sh = docSnap.data();
       if (sh.draft === true) continue;
       if (sh.isUnassigned !== true && sh.employeeId !== 'VACANTE') continue;
-      const shOrigin = String(sh.origin || '');
-      const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!sh.isReten || sh.resolvedBy === 'OPERACIONES';
+      const isOps = isOperationalOriginShift(sh);
       if (!isOps && sh.objectiveId) {
         const startMs = sh.startTime?.toMillis?.() ?? 0;
         if (startMs) {
@@ -4020,8 +4020,7 @@ export const gestionarVacantes = functions
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
       // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)
       {
-        const shOrigin = String(shift.origin || '');
-        const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
+        const isOps = isOperationalOriginShift(shift);
         if (!isOps && shift.objectiveId) {
           const startMs2 = shift.startTime?.toMillis?.() ?? 0;
           if (startMs2) {

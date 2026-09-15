@@ -26,6 +26,7 @@ import {
     queryEmpleadosDocsScoped,
     tenantEmpresaIdsMatch,
 } from '../assistant/assistantEmpresaScope';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 /** Códigos que no aportan jornada laboral “normal” (FT se trata aparte). */
@@ -318,13 +319,6 @@ export async function buildLiquidacionSnapshot(
         ausenciasContadas: 0,
     };
 
-    const isOperationalTurno = (data: any): boolean =>
-        data?.origin === 'RETEN' ||
-        data?.origin === 'OPERATIONS_COVERAGE' ||
-        data?.origin === 'SLA_VIRTUAL' ||
-        !!data?.isReten ||
-        data?.resolvedBy === 'OPERACIONES';
-
     const getAcc = (empId: string): Acc => {
         let cur = acc.get(empId);
         if (cur) return cur;
@@ -377,7 +371,7 @@ export async function buildLiquidacionSnapshot(
         // Fichadas: solo publicados / operativos (un draft no fichado no liquida).
         if (data.draft === true) {
             diagnostics.turnosBorrador++;
-            if (hoursMode !== 'planned' && !isOperationalTurno(data)) return;
+            if (hoursMode !== 'planned' && !isOperationalOriginShift(data)) return;
         }
         if (data.isUnassigned === true) return;
         if (String(data.type || '').toUpperCase() === 'NOVEDAD') return;

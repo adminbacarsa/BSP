@@ -16,6 +16,7 @@ import {
   planificacionEstadoLookupKey,
   ymCordobaParts,
 } from './planificacionEstadoKeys';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 /** Zona operativa alineada al planificador web (Argentina). */
 const AR_DAY_OFFSET = '-03:00';
@@ -305,12 +306,7 @@ async function queryTurnosVisiblesOperacionesEmpresaDia(
     const rawPos = String(shift.positionName ?? '').trim();
     if (!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') continue;
 
-    const isOp =
-      shift.origin === 'RETEN' ||
-      shift.origin === 'OPERATIONS_COVERAGE' ||
-      shift.origin === 'SLA_VIRTUAL' ||
-      !!shift.isReten ||
-      shift.resolvedBy === 'OPERACIONES';
+    const isOp = isOperationalOriginShift(shift);
     const isAlreadyProcessed =
       !!shift.isPresent ||
       shift.status === 'PRESENT' ||

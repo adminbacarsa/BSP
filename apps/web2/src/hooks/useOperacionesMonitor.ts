@@ -10,6 +10,7 @@ import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShift
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { logOpsBackgroundWarn, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
 import { countPositionClosedUnitsFromShifts } from '@/lib/planificacion/positionCoverageUnits';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -751,13 +752,10 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             // porque no tienen doc en planificacion_estados.
             const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
                 && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
-            const isOperationalOrigin = shift.origin === 'RETEN'
-                || shift.origin === 'OPERATIONS_COVERAGE'
-                || shift.origin === 'SLA_VIRTUAL'
+            const isOperationalOrigin = isOperationalOriginShift(shift)
                 || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado)
                 || shift.origin === 'EVENTO'
-                || !!shift.isReten
-                || shift.resolvedBy === 'OPERACIONES';
+                || shift.eventoId;
             if (!isOperationalOrigin) {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(

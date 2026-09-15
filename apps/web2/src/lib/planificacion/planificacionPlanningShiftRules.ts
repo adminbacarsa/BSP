@@ -1,14 +1,11 @@
 import type { GrupoObjetivos } from '@/services/gruposService';
+import { isOperationalOriginShift as isCanonicalOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 /** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
 export function isOperationalOriginShift(data: any): boolean {
     if (!data) return false;
     if (data?.operacionallyCovered === true || data?.coveredBy || data?.coveredByEmployeeName || data?.isAbsent === true) return false;
-    const o = String(data?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-    if (data?.isReten === true || data?.isRelief === true) return true;
-    if (data?.resolvedBy === 'OPERACIONES' && (data?.coversAbsenceEmployeeName || data?.absenceShiftId || o === 'RETEN' || o === 'OPERATIONS_COVERAGE')) return true;
-    return false;
+    return isCanonicalOperationalOriginShift(data) || data?.isRelief === true;
 }
 
 /** Comprueba si el turno coincide con el objetivo (directo o por cobertura/franco/redirección). */

@@ -1,6 +1,7 @@
 import { normalizePlanningPositionName, PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
 import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
   M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9,
@@ -94,13 +95,7 @@ export function shiftCoverageExtensionExtraHours(
   return 0;
 }
 
-/** Turnos de cobertura operativa (reten, ops) — no son crono planificado del objetivo. */
-export function isOperationalOriginShift(data: any): boolean {
-  const o = String(data?.origin || '').toUpperCase();
-  if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-  if (data?.resolvedBy === 'OPERACIONES') return true;
-  return false;
-}
+export { isOperationalOriginShift };
 
 /** Misma regla que el pie «Hs. Plan.» del planificador por objetivo. */
 export function isPlanningScheduledCoverageShift(t: any): boolean {

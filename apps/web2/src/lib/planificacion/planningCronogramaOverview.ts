@@ -14,6 +14,7 @@ import {
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -41,13 +42,6 @@ export interface CronogramaOverviewRow {
   lastModifiedAt: Date | null;
   lastModifiedBy: string;
   lookupKey: string;
-}
-
-function isOperationalOriginShift(data: Record<string, unknown>): boolean {
-  const o = String(data?.origin || '').toUpperCase();
-  if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-  if (data?.resolvedBy === 'OPERACIONES') return true;
-  return false;
 }
 
 function turnoCuentaParaCrono(data: Record<string, unknown>, objectiveId: string): boolean {

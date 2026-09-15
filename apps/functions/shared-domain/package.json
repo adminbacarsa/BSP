@@ -1,0 +1,12 @@
+{
+  "name": "@cosp/domain",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "exports": {
+    "./operationalShift": {
+      "types": "./operationalShift.d.ts",
+      "default": "./operationalShift.js"
+    }
+  }
+}

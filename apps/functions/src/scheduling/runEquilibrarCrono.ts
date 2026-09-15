@@ -1,6 +1,7 @@
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 import { Timestamp, getFirestore, FieldValue } from 'firebase-admin/firestore';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 const db = () => getFirestore();
 
@@ -92,11 +93,6 @@ interface Block {
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
 
-function isOperacional(d: FirebaseFirestore.DocumentData): boolean {
-    return d.origin === 'RETEN' || d.origin === 'OPERATIONS_COVERAGE'
-        || d.origin === 'SLA_VIRTUAL' || !!d.isReten || d.resolvedBy === 'OPERACIONES';
-}
-
 /** Convierte un Timestamp a YYYY-MM-DD en zona AR (UTC-3). */
 function tsToDateStrAR(ts: Timestamp): string {
     const ms = ts.toMillis() - 3 * 60 * 60 * 1000;
@@ -177,7 +173,7 @@ export const runEquilibrarCronoHandler = async (
 
     for (const doc of snap.docs) {
         const d = doc.data();
-        if (isOperacional(d)) { skippedOps++; continue; }
+        if (isOperationalOriginShift(d)) { skippedOps++; continue; }
         if (!d.startTime || !d.endTime) { skippedNoTs++; continue; }
         const code = String(d.code || '').toUpperCase();
         const isFranco  = d.isFranco === true || FRANCO_CODES.has(code);

@@ -13,6 +13,7 @@ import {
     shouldScopeQueriesToEmpresa,
 } from '@/lib/multiempresa';
 import { iterateCalendarDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
+import { isOperationalOriginShift as isCanonicalOperationalOriginShift } from '@/lib/shifts/operationalShift';
 import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES, resolveLeaveCode } from '@/lib/planificacion/leaveCoverage';
 import {
     deploymentShiftHours,
@@ -88,10 +89,7 @@ function parseShiftInstant(val: unknown): Date | null {
 
 const isOperationalOriginShift = (shift: any): boolean => {
     const o = String(shift?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL' || o === 'CLIENT_REQUEST') return true;
-    if (shift?.resolvedBy === 'OPERACIONES') return true;
-    if (shift?.isReten === true) return true;
-    return false;
+    return isCanonicalOperationalOriginShift(shift) || o === 'CLIENT_REQUEST';
 };
 
 const shiftHasRealCheckIn = (shift: any): boolean => {

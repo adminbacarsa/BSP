@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runAjustarCrono = exports.runAjustarCronoHandler = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const operationalShift_1 = require("../shared/operationalShift");
 const db = () => admin.firestore();
 function eachDayUTC(fromStr, toStr) {
     const days = [];
@@ -64,13 +65,6 @@ function normBanda8(code) {
     if (c === 'M' || c === 'T' || c === 'N')
         return c;
     return null;
-}
-function isOperacional(s) {
-    return s.origin === 'RETEN'
-        || s.origin === 'OPERATIONS_COVERAGE'
-        || s.origin === 'SLA_VIRTUAL'
-        || !!s.isReten
-        || s.resolvedBy === 'OPERACIONES';
 }
 const WORK_CODES = new Set(['M', 'T', 'N', 'D12', 'N12', 'RET']);
 function autoComprimir12h(shifts, liberarId) {
@@ -186,7 +180,7 @@ const runAjustarCronoHandler = async (data, context) => {
             const d = s.data();
             if (d.draft === true)
                 continue;
-            if (isOperacional(d))
+            if ((0, operationalShift_1.isOperationalOriginShift)(d))
                 continue;
             const code = String(d.code || d.type || '').toUpperCase();
             if (!WORK_CODES.has(code))

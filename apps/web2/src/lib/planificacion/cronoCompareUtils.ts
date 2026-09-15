@@ -1,4 +1,5 @@
 import { inferAbsenceCode } from '@/lib/planificacion/absenceCodes';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 export const CRONO_COMPARE_SHIFT_STYLES: Record<string, string> = {
     M: 'bg-white text-blue-700 border border-blue-400 font-bold',
@@ -39,12 +40,7 @@ export function cronoCompareDayLetter(dateStr: string): string {
     return ['D', 'L', 'M', 'X', 'J', 'V', 'S'][date.getDay()];
 }
 
-export function isOperationalOriginShift(data: any): boolean {
-    const o = String(data?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-    if (data?.resolvedBy === 'OPERACIONES') return true;
-    return false;
-}
+export { isOperationalOriginShift };
 
 export function resolveCommittedShiftAtObjective(
     empId: string,

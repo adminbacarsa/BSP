@@ -7,6 +7,7 @@ const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys"
 const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
 const updateLiquidacionOnTurnoComplete_1 = require("../liquidacion/updateLiquidacionOnTurnoComplete");
 const shiftNotifDigest_1 = require("./shiftNotifDigest");
+const operationalShift_1 = require("../shared/operationalShift");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -153,12 +154,9 @@ exports.onTurnoWrite = functions
         const code = String(turn.code ?? '')
             .trim()
             .toUpperCase();
-        const isOperational = origin === 'RETEN' ||
-            origin === 'OPERATIONS_COVERAGE' ||
+        const isOperational = (0, operationalShift_1.isOperationalOriginShift)(turn) ||
             origin === 'CLIENT_REQUEST' ||
             origin === 'EVENTO' ||
-            turn.isReten === true ||
-            String(turn.resolvedBy || '').toUpperCase() === 'OPERACIONES' ||
             code === 'EV' ||
             !!turn.eventoId;
         if (!isOperational) {

@@ -6,6 +6,7 @@
 import { inferAbsenceCode, isActiveAbsence, iterateCalendarDateRange, toCalendarDateStr } from '@/lib/planificacion/absenceCodes';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
 import type { NovedadType } from '@/lib/rrhh/novedadTypes';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 export type MsRange = { startMs: number; endMs: number };
 
@@ -370,10 +371,7 @@ export function resolveAbsenceCode(doc: any, tiposNovedad: NovedadType[] = []): 
 }
 
 export function isOperationalOriginShiftLite(t: any): boolean {
-  const o = String(t?.origin || '').toUpperCase();
-  if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-  if (t?.resolvedBy === 'OPERACIONES') return true;
-  return false;
+  return isOperationalOriginShift(t);
 }
 
 export function coverageHoursFromShift(t: any): number {

@@ -3,13 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.runEquilibrarCrono = exports.runEquilibrarCronoHandler = void 0;
 const functions = require("firebase-functions/v1");
 const firestore_1 = require("firebase-admin/firestore");
+const operationalShift_1 = require("../shared/operationalShift");
 const db = () => (0, firestore_1.getFirestore)();
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
 const ABSENCE_CODES = new Set(['V', 'L', 'E', 'A', 'AA', 'PG']);
-function isOperacional(d) {
-    return d.origin === 'RETEN' || d.origin === 'OPERATIONS_COVERAGE'
-        || d.origin === 'SLA_VIRTUAL' || !!d.isReten || d.resolvedBy === 'OPERACIONES';
-}
 function tsToDateStrAR(ts) {
     const ms = ts.toMillis() - 3 * 60 * 60 * 1000;
     const d = new Date(ms);
@@ -65,7 +62,7 @@ const runEquilibrarCronoHandler = async (data, context) => {
         let skippedOps = 0, skippedNoTs = 0, skippedOtherMonth = 0;
         for (const doc of snap.docs) {
             const d = doc.data();
-            if (isOperacional(d)) {
+            if ((0, operationalShift_1.isOperationalOriginShift)(d)) {
                 skippedOps++;
                 continue;
             }
