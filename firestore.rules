@@ -278,13 +278,17 @@ service cloud.firestore {
       return isSuperAdmin() || (docEmpresaId(data) == userEmpresaId() && userEmpresaId() != '');
     }
 
+    function payrollUnlocked(data) {
+      return !('payrollLockedAt' in data) && !('payrollCycleId' in data);
+    }
+
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
         || clientUserMatchesTurno(resource.data)
         || employeeOwnsShift(resource.data);
       allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate();
-      allow delete: if tenantAdminDelete();
+      allow update: if payrollUnlocked(resource.data) && tenantAdminUpdate();
+      allow delete: if payrollUnlocked(resource.data) && tenantAdminDelete();
     }
 
     match /empleados/{employeeId} {
@@ -292,8 +296,8 @@ service cloud.firestore {
         || clientUserMatchesEmpleado(resource.data)
         || employeeCanReadEmpleadoDoc(employeeId);
       allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate() || request.auth != null;
-      allow delete: if tenantAdminDelete();
+      allow update: if payrollUnlocked(resource.data) && (tenantAdminUpdate() || request.auth != null);
+      allow delete: if payrollUnlocked(resource.data) && tenantAdminDelete();
     }
 
     match /ausencias/{absenceId} {
