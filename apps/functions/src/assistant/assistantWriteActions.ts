@@ -321,8 +321,42 @@ export async function ejecutarPlanificarObjetivoMes(
   if (!objetivoId || !year || !month) throw new Error('Payload incompleto para planificar_objetivo_mes.');
 
   const { runAutoScheduleCore } = await import('../scheduling/runAutoSchedule');
+  const { optimizeScheduleAssignmentsWithGemini } = await import('./assistantPlanningWithGemini');
+
   const result = await runAutoScheduleCore({ objectiveId: objetivoId, year, month, empresaId });
   if (!result.ok && result.error) throw new Error(result.error);
+  if (!result.assignments?.length) {
+    throw new Error(
+      'El motor no generó turnos. Revisá que el objetivo tenga SLA con puestos y legajos ACTIVE con preferredObjective (o sin preferido).',
+    );
+  }
+
+  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+  const mesNombre = MESES[(month - 1)] ?? String(month);
+  const sitio = objetivoNombre ?? objetivoId;
+  const mesLabel = `${mesNombre} ${year}`;
+
+  let assignments = result.assignments;
+  let aiLine = 'Ajuste fino IA: no aplicado (sin semilla del motor).';
+  if (result.plannerSeed) {
+    const opt = await optimizeScheduleAssignmentsWithGemini({
+      mesLabel,
+      objetivoNombre: sitio,
+      seed: result.plannerSeed,
+      result,
+    });
+    assignments = opt.assignments;
+    if (opt.usedAi && opt.gemini?.bloqueoEstructural) {
+      aiLine = `IA: bloqueo estructural — ${opt.gemini.razonBloqueo || 'dotación insuficiente'}`;
+    } else if (opt.usedAi) {
+      aiLine =
+        `Ajuste fino Gemini: **${opt.applied}** celdas corregidas` +
+        (opt.skipped ? ` · ${opt.skipped} omitidas` : '') +
+        (opt.gemini?.resumen ? `\n_${opt.gemini.resumen}_` : '');
+    } else {
+      aiLine = `Ajuste fino IA no disponible (${opt.aiError || 'sin GEMINI_API_KEY'}); se guardó la base CCT del motor.`;
+    }
+  }
 
   const db = admin.firestore();
   const agentAt = Timestamp.now();
@@ -339,7 +373,7 @@ export async function ejecutarPlanificarObjetivoMes(
   let batchOps = 0;
   const commits: Promise<FirebaseFirestore.WriteResult[]>[] = [];
 
-  for (const a of result.assignments) {
+  for (const a of assignments) {
     if (batchOps >= BATCH_SIZE) {
       commits.push(currentBatch.commit());
       currentBatch = db.batch();
@@ -355,6 +389,7 @@ export async function ejecutarPlanificarObjetivoMes(
       clientId: clientId ?? '',
       empresaId,
       code: a.code,
+      positionName: a.positionName || '',
       startTime: Timestamp.fromDate(startUtc),
       endTime: Timestamp.fromDate(endUtc),
       isFranco: a.isFranco ?? false,
@@ -364,6 +399,7 @@ export async function ejecutarPlanificarObjetivoMes(
       draft: true,
       createdByAgent: true,
       createdByAgentAt: agentAt,
+      createdByAgentPipeline: 'cct_motor_plus_gemini',
     });
     batchOps++;
     written++;
@@ -371,13 +407,15 @@ export async function ejecutarPlanificarObjetivoMes(
   if (batchOps > 0) commits.push(currentBatch.commit());
   await Promise.all(commits);
 
-  const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
-  const mesNombre = MESES[(month - 1)] ?? String(month);
-  const sitio = objetivoNombre ?? objetivoId;
   const pct = Math.round((result.coverage?.coverageRatio ?? 0) * 100);
 
   return {
     ok: true,
-    message: `✓ Planificación generada en borrador para **${sitio}** — ${mesNombre} ${year}.\n- **${written}** turnos creados · Cobertura: **${pct}%** SLA\n- **${result.meta.employeeCount}** empleados · **${result.meta.positionCount}** puestos\n\nRevisá en **Planificación** y publicá cuando estés listo.`,
+    message:
+      `✓ Planificación generada en borrador para **${sitio}** — ${mesLabel}.\n` +
+      `- **${written}** turnos · Cobertura motor: **${pct}%** slots\n` +
+      `- **${result.meta.employeeCount}** empleados · **${result.meta.positionCount}** puestos\n` +
+      `- ${aiLine}\n\n` +
+      `Revisá en **Planificación** y publicá cuando estés listo.`,
   };
 }
