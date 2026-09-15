@@ -183,6 +183,7 @@ import { findPlanificacionConflictNeighbors } from '@/lib/planificacion/findPlan
 import { resolvePlanificacionConflict } from '@/lib/planificacion/resolvePlanificacionConflict';
 import { submitPlanificacionRRHHNovedad } from '@/lib/planificacion/submitPlanificacionRRHHNovedad';
 import { resetPlanificacionVacancyModal } from '@/lib/planificacion/resetPlanificacionVacancyModal';
+import { handlePlanificacionMouseUp } from '@/lib/planificacion/handlePlanificacionMouseUp';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -5155,50 +5156,41 @@ export default function PlanificacionPage() {
     }, [allowPlanningMultiSelect, selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
 
     const handleMouseUp = () => {
-        setIsDragging(false);
-        clearTimeout(longPressTimer.current);
-        if (columnSelectMode) return; // keep selection visible for copy action
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); setSelection({ start: null, end: null }); return; }
-        if (selection.start && selection.end && selection.start.r === selection.end.r && selection.start.c === selection.end.c) {
-            const emp = displayedEmployees[selection.start.r]; 
-            const day = daysInMonth[selection.start.c]; 
-            const dateStr = getDateKey(day); 
-            const key = `${emp.id}_${dateStr}`; 
-            const rfzOnCell = rfzByEmpDate[key];
-            const { s: cellS, p: cellP } = resolveCellShiftDisplay(
-                emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap, cellTurnosMap,
-            );
-            const absence = absencesMap[key]; 
-            if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
-            {
-                // Si la celda tiene borrado pendiente, tratar como vacía para permitir reasignar sin guardar
-                const effectiveShift = pendingChanges[key]?.isDeleted
-                    ? null
-                    : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null) || shiftsMap[key] || (cellTurnosMap?.[key] && cellTurnosMap[key][0]) || null);
-                const effObjId = effectiveShift?.objectiveId;
-                if (
-                    effectiveShift &&
-                    selectedObjective &&
-                    !(selectedGrupo && grupoUnifiedMode) &&
-                    isCrossObjectivePlanningReadOnly(effectiveShift, selectedObjective)
-                ) {
-                    toast.message(`Turno en ${getObjectiveName(effObjId)} — solo lectura en este cronograma.`);
-                    return;
-                }
-                const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
-                const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
-                setActivePosition(defaultPos);
-                if (isShiftConsolidated(effectiveShift)) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); return; }
-                const isLocked = isPlanningDateLocked(dateStr);
-                const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
-                if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
-                else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
-                else { if (!isLocked) { setModifiers({ plannedNovedad: effectiveShift?.plannedNovedad || '' }); setFrancoMode('NONE'); }
-                    const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
-                    setCellEditMode(correctionMode && isPlanificacionPublished(publishStatusMap[pubKey]));
-                    setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
-            }
-        } 
+        handlePlanificacionMouseUp({
+            columnSelectMode,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            displayedEmployees,
+            daysInMonth,
+            rfzByEmpDate,
+            selectedObjective,
+            selectedGrupo,
+            grupoUnifiedMode,
+            pendingChanges,
+            shiftsMap,
+            cellTurnosMap,
+            absencesMap,
+            empDefaultPos,
+            dominantPositionName: dominantPosition.positionName,
+            currentDate,
+            correctionMode,
+            publishStatusMap,
+            getObjectiveName,
+            isPlanningDateLocked,
+            findNeighbors,
+            setIsDragging,
+            clearLongPressTimer: () => clearTimeout(longPressTimer.current),
+            setSelection,
+            setActivePosition,
+            setSelectedCell,
+            setVacancyData,
+            setShowVacancyModal,
+            setShowConflictModal,
+            setModifiers,
+            setFrancoMode,
+            setCellEditMode,
+        });
     };
     const handleMouseDown = (r: number, c: number) => { if (!selectedObjective || comparingSnapshot || isServiceLocked) return; setIsDragging(true); setSelection({ start: {r, c}, end: {r, c} }); };
     const handleMouseEnter = (r: number, c: number) => {
