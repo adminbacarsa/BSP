@@ -166,3 +166,41 @@ export function applyCoverageLedgerToBatch(
 
   return coverageEventId;
 }
+
+/**
+ * Cierra docs hermanos VACANTE_POR_AUSENCIA cuando se cubre el titular / la vacante.
+ * Evita que Ops muestre POR AUSENCIA + virtual MAÑANA con la ausencia ya cubierta en AUS.
+ */
+export async function closeAbsenceSiblingVacanciesInBatch(
+  batch: WriteBatch,
+  db: admin.firestore.Firestore,
+  input: CoverageLedgerInput,
+  coverageEventId: string,
+): Promise<number> {
+  const causeIds = new Set<string>();
+  if (input.titularShiftId && !isVirtualShiftId(input.titularShiftId)) {
+    causeIds.add(String(input.titularShiftId));
+  }
+  if (input.vacancyShiftId && !isVirtualShiftId(input.vacancyShiftId)) {
+    causeIds.add(String(input.vacancyShiftId));
+  }
+  if (causeIds.size === 0) return 0;
+
+  let closed = 0;
+  const payload = { ...input, coverageEventId };
+  for (const causeId of causeIds) {
+    const snap = await db.collection('turnos')
+      .where('causedByShiftId', '==', causeId)
+      .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+      .limit(5)
+      .get();
+    for (const d of snap.docs) {
+      if (d.id === input.vacancyShiftId) continue;
+      const st = String(d.data()?.status || '').toUpperCase();
+      if (st === 'COVERED' || st === 'CANCELLED') continue;
+      batch.update(d.ref, coveredPartyLedgerFields(payload, 'vacancy'));
+      closed += 1;
+    }
+  }
+  return closed;
+}

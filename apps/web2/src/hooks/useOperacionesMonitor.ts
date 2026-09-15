@@ -345,6 +345,29 @@ const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyP
     return shiftContributesToVacancySlot(s, slotStart, slotEnd, vacancyPos);
 };
 
+/**
+ * Solape horario + puesto (sirve también para docs VACANTE / isUnassigned).
+ * shiftCoversVacancySlot exige persona asignada y falla al deduplicar POR AUSENCIA vs virtual MAÑANA.
+ */
+const vacancySlotTimeOverlaps = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string): boolean => {
+    if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
+    if (!s?.shiftDateObj || !s?.endDateObj || !slotStart || !slotEnd) return false;
+    const overlapH = overlapHoursWithSlot(s, slotStart, slotEnd);
+    if (overlapH < 0.25) return false;
+    let slotDur = (slotEnd.getTime() - slotStart.getTime()) / 3600000;
+    if (slotDur <= 0) slotDur += 24;
+    if (overlapH >= 3) return true;
+    if (slotDur > 0 && overlapH / slotDur >= 0.5) return true;
+    return overlapH >= 1;
+};
+
+const isShiftOperativelyCovered = (s: any): boolean =>
+    !!s?.operacionallyCovered
+    || !!s?.coveredByEmployeeId
+    || !!s?.coveredByEmployeeName
+    || String(s?.coverageStatus || '').toUpperCase() === 'COVERED'
+    || String(s?.status || '').toUpperCase() === 'COVERED';
+
 const assessPlannedPackageStatus = (rows: any[]): 'COVERED' | 'PARTIAL' | 'NONE' => {
     if (!rows.length) return 'NONE';
     const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION');
@@ -1234,6 +1257,19 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                     suppressedDevuelto.add(s.id);
                     return;
                 }
+                // Si el titular ausente ya figura cubierto en AUS, el doc hermano POR AUSENCIA no es cola viva.
+                if (isShiftOperativelyCovered(s)) {
+                    suppressedDevuelto.add(s.id);
+                    return;
+                }
+                const causeId = String(s.causedByShiftId || '').trim();
+                if (causeId) {
+                    const titular = dedupedRealShifts.find((t) => t.id === causeId);
+                    if (titular && isShiftOperativelyCovered(titular)) {
+                        suppressedDevuelto.add(s.id);
+                        return;
+                    }
+                }
                 const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
                 if (cap > 0) {
                     const coveringCount = dedupedRealShifts.filter(cover =>
@@ -1277,21 +1313,26 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             if (!vacancyIsToday && v.endDateObj.getTime() < now.getTime()) return false;
             // Descubierto (>55% o fin de turno): no regenerar virtual como VAC
             if (isVacancyDescubierto(v, now)) return false;
-            // normalizePosMatch para que "Puesto Rondín" === "Rondín" (sin prefijo ni acentos)
-            const sameSlot = (s: any) =>
+            // Slot real (vacante/ausente) vs virtual: solape horario — no usar shiftCoversVacancySlot
+            // (ese helper exige persona asignada y no deduplicaba POR AUSENCIA vs "VACANTE · MAÑANA").
+            const sameSlotWindow = (s: any) =>
                 s.objectiveId === v.objectiveId &&
-                shiftMatchesVacancyPosition(s, v.positionName) &&
-                shiftCoversVacancySlot(s, v.shiftDateObj, v.endDateObj, v.positionName);
+                vacancySlotTimeOverlaps(s, v.shiftDateObj, v.endDateObj, v.positionName);
             // Suprimir si ya hay un DEVUELTO real para este slot (el doc ya representa la vacante)
             // Solo suprimir si el doc tiene startTime cercano al slot virtual (±2h) Y aún no expiró,
             // para evitar que docs expirados o con timestamps erróneos supriman slots correctos
             if (dedupedRealShifts.some(s => s.isUnassigned && s.isReportedToPlanning &&
                 s.endDateObj && s.endDateObj.getTime() > now.getTime() &&
                 Math.abs((s.shiftDateObj?.getTime() || 0) - (v.shiftDateObj?.getTime() || 0)) < 7200000 &&
-                sameSlot(s))) return false;
+                sameSlotWindow(s))) return false;
             // Suprimir si ya existe el doc autosinc_ SIN COBERTURA para este slot
-            if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlot(s))) return false;
-            if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
+            if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlotWindow(s))) return false;
+            // Doc real VACANTE_POR_AUSENCIA / ops vacante = misma cola (no inventar "MAÑANA" encima)
+            if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlotWindow(s))) return false;
+            // Ausencia del slot ya cubierta en AUS → no regenerar virtual
+            if (dedupedRealShifts.some(s =>
+                !s.isUnassigned && (s.isAbsent || s.isPotentialAbsence) && isShiftOperativelyCovered(s) && sameSlotWindow(s)
+            )) return false;
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>

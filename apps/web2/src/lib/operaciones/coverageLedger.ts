@@ -2,7 +2,7 @@
  * Ledger mínimo de cobertura Ops ↔ Plan ↔ RRHH.
  * Un coverageEventId une: vacante + turno titular ausente + turno del cubridor.
  */
-import { doc, serverTimestamp, type WriteBatch } from 'firebase/firestore';
+import { collection, doc, getDocs, limit, query, serverTimestamp, where, type WriteBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export type CoverageLedgerInput = {
@@ -151,4 +151,42 @@ export function applyCoverageLedgerToBatch(
   }
 
   return coverageEventId;
+}
+
+/**
+ * Cierra docs hermanos VACANTE_POR_AUSENCIA al cubrir el titular (manual Ops).
+ * Llamar antes del commit del mismo batch.
+ */
+export async function closeAbsenceSiblingVacanciesInBatch(
+  batch: WriteBatch,
+  input: CoverageLedgerInput,
+  coverageEventId: string,
+): Promise<number> {
+  const causeIds = new Set<string>();
+  if (input.titularShiftId && !isVirtualShiftId(input.titularShiftId)) {
+    causeIds.add(String(input.titularShiftId));
+  }
+  if (input.vacancyShiftId && !isVirtualShiftId(input.vacancyShiftId)) {
+    causeIds.add(String(input.vacancyShiftId));
+  }
+  if (causeIds.size === 0) return 0;
+
+  let closed = 0;
+  const payload = { ...input, coverageEventId };
+  for (const causeId of causeIds) {
+    const snap = await getDocs(query(
+      collection(db, 'turnos'),
+      where('causedByShiftId', '==', causeId),
+      where('origin', '==', 'VACANTE_POR_AUSENCIA'),
+      limit(5),
+    ));
+    for (const d of snap.docs) {
+      if (d.id === input.vacancyShiftId) continue;
+      const st = String(d.data()?.status || '').toUpperCase();
+      if (st === 'COVERED' || st === 'CANCELLED') continue;
+      batch.update(doc(db, 'turnos', d.id), coveredPartyLedgerFields(payload, 'vacancy'));
+      closed += 1;
+    }
+  }
+  return closed;
 }

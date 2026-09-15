@@ -18,6 +18,7 @@ import {
 } from './eligibilityFilter';
 import {
   applyCoverageLedgerToBatch,
+  closeAbsenceSiblingVacanciesInBatch,
   covererLedgerFields,
   newCoverageEventId,
   resolveTitularFromAbsenceOrVacancy,
@@ -1351,6 +1352,14 @@ async function resolverCobertura(
     resolved: false,
     createdAt: FieldValue.serverTimestamp(),
   });
+
+  await closeAbsenceSiblingVacanciesInBatch(batch, db, {
+    ...ledgerBase,
+    vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+    titularShiftId: titular.titularShiftId || conv.shiftId,
+    coverageType: conv.type,
+    markVacancyCovered: true,
+  }, coverageEventId);
 
   await batch.commit();
   return 'OK';
