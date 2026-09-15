@@ -7170,40 +7170,6 @@ export default function PlanificacionPage() {
                                 </div>
                             )}
 
-                            {/* DIAGNÓSTICO DE COBERTURA — qué falta por objetivo/mes */}
-                            {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
-                                const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
-                                const _ok = _rpt.worstDays.length === 0;
-                                return (
-                                <div className="relative hidden md:block">
-                                    <button
-                                        ref={coverageDiagnosticBtnRef}
-                                        onClick={() => {
-                                            if (showCoverageDiagnostic) {
-                                                setShowCoverageDiagnostic(false);
-                                            } else {
-                                                repositionCoveragePanel();
-                                                setShowCoverageDiagnostic(true);
-                                            }
-                                        }}
-                                        className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
-                                            _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
-                                        }`}
-                                    >
-                                        <ShieldCheck size={14} className={_ok ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Diagnóstico Cobertura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                                <span className="text-emerald-600 font-black">{_rpt.daysFull} días OK</span>
-                                                <span className="text-slate-300">|</span>
-                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty} con huecos</span>
-                                            </span>
-                                        </div>
-                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
-                                    </button>
-                                </div>
-                                );
-                            })()}
 
                             {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                 <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
@@ -7323,6 +7289,40 @@ export default function PlanificacionPage() {
                                     </>,
                                     document.body,
                                 )}
+
+                                {/* DIAGNÓSTICO COBERTURA — compacto, en toolbar derecho */}
+                                {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
+                                    const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
+                                    const _ok = _rpt.worstDays.length === 0;
+                                    return (
+                                        <div className="relative hidden md:block">
+                                            <button
+                                                ref={coverageDiagnosticBtnRef}
+                                                onClick={() => {
+                                                    if (showCoverageDiagnostic) {
+                                                        setShowCoverageDiagnostic(false);
+                                                    } else {
+                                                        repositionCoveragePanel();
+                                                        setShowCoverageDiagnostic(true);
+                                                    }
+                                                }}
+                                                className={`flex px-2.5 py-1.5 border rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm transition-colors ${
+                                                    _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                                                }`}
+                                            >
+                                                <ShieldCheck size={12} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
+                                                <div className="flex flex-col leading-none">
+                                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Cobertura</span>
+                                                    <span className="text-[9px] font-bold text-slate-700 flex items-center gap-1">
+                                                        <span className="text-emerald-600 font-black">{_rpt.daysFull}OK</span>
+                                                        {(_rpt.daysPartial + _rpt.daysEmpty) > 0 && <><span className="text-slate-300">|</span><span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty}✗</span></>}
+                                                    </span>
+                                                </div>
+                                                <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
 
                                 {/* ACCIONES PUBLICACIÓN — compactas, entre selector y mes */}
                                 {selectedObjective && (() => {
@@ -9184,6 +9184,9 @@ export default function PlanificacionPage() {
                                     if (src.isFrancoTrabajado || String(src.code || '').toUpperCase() === 'FT') return 'Franco trabajado (FT)';
                                     if (src.isExtended || src.coverageRole === 'EXTENSION' || src.coverageSegmentRole === 'EXTENSION') return 'Extensión de jornada';
                                     if (src.isEarlyStart || src.coverageRole === 'EARLY_START' || src.coverageSegmentRole === 'EARLY_START') return 'Adelanto (cobertura)';
+                                    const ct = String(src.coverageType || '').toUpperCase();
+                                    if (ct === 'CROSS_POSITION' || ct === 'OTRO_PUESTO') return 'Otro puesto (mismo objetivo)';
+                                    if (ct === 'CROSS_OBJECTIVE' || ct === 'TRASLADO' || ct === 'CROSS_OBJ') return 'Traslado (otro objetivo ≤10 km)';
                                     const o = String(src.origin || '').toUpperCase();
                                     if (o === 'RETEN' || src.isRetention) return 'Retención (RET)';
                                     if (o === 'OPERATIONS_COVERAGE') return 'Cobertura Ops';
