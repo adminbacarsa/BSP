@@ -12,8 +12,10 @@ import {
   ONBOARDING_STATUS_LABEL,
   ONBOARDING_TRACK_LABEL,
   ONBOARDING_TRACKS,
+  filterTracksByRolePermissions,
   formatOnboardingTracksLabel,
   normalizeOnboardingGuideState,
+  tracksAvailableForRolePermissions,
   type OnboardingGuideState,
   type OnboardingTrack,
 } from '@/lib/onboardingGuide';
@@ -63,9 +65,24 @@ export default function OnboardingTab() {
   const [loading, setLoading] = useState(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
   const [selectedTracks, setSelectedTracks] = useState<OnboardingTrack[]>(['OPERATIONS']);
+  const [rolesById, setRolesById] = useState<Record<string, { permissions?: Record<string, string[]> }>>({});
 
   const getEmpresaName = (id?: string) =>
     empresas.find((e) => e.id === id)?.name || id || 'Sin asignar';
+
+  const tracksForUserRole = (roleId?: string, desired?: OnboardingTrack[]) => {
+    const isSa = isSuperAdminRole(roleId);
+    const perms = rolesById[String(roleId ?? '')]?.permissions ?? null;
+    const base = desired?.length ? desired : selectedTracks;
+    return filterTracksByRolePermissions(base, perms, isSa);
+  };
+
+  const availableTracksForUserRole = (roleId?: string) => {
+    const isSa = isSuperAdminRole(roleId);
+    const perms = rolesById[String(roleId ?? '')]?.permissions ?? null;
+    return tracksAvailableForRolePermissions(perms, isSa);
+  };
+
 
   const toggleTrack = (track: OnboardingTrack) => {
     setSelectedTracks((prev) => {
@@ -82,8 +99,17 @@ export default function OnboardingTab() {
   const loadRows = async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(query(collection(db, 'system_users'), orderBy('lastName')));
-      const raw = snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as SystemUserRow[];
+      const [usersSnap, rolesSnap] = await Promise.all([
+        getDocs(query(collection(db, 'system_users'), orderBy('lastName'))),
+        getDocs(collection(db, 'roles')),
+      ]);
+      const rolesMap: Record<string, { permissions?: Record<string, string[]> }> = {};
+      rolesSnap.docs.forEach((d) => {
+        rolesMap[d.id] = d.data() as { permissions?: Record<string, string[]> };
+      });
+      setRolesById(rolesMap);
+
+      const raw = usersSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as SystemUserRow[];
       const activeRows = raw.filter((u) => String(u.status ?? 'ACTIVE').toUpperCase() !== 'INACTIVE');
       const visible = isSuperAdmin
         ? activeRows
@@ -126,9 +152,13 @@ export default function OnboardingTab() {
   }, [rows]);
 
   const assignGuide = async (uid: string, required: boolean, tracks?: OnboardingTrack[]) => {
-    const effectiveTracks = tracks?.length ? tracks : selectedTracks;
+    const user = rows.find((r) => r.id === uid);
+    const desired = tracks?.length ? tracks : selectedTracks;
+    const effectiveTracks = required
+      ? tracksForUserRole(user?.role, desired)
+      : (desired.length ? desired : selectedTracks);
     if (required && !effectiveTracks.length) {
-      toast.error('Elegí al menos un recorrido');
+      toast.error('Elegí al menos un recorrido visible para el rol del usuario');
       return;
     }
     setBusyUid(uid);
@@ -223,7 +253,7 @@ export default function OnboardingTab() {
           <span className="font-black text-slate-700 dark:text-slate-200">
             {formatOnboardingTracksLabel(selectedTracks)}
           </span>
-          . Podés exigir Operaciones + Planificación, CRM + RRHH, o cualquier combinación.
+          . Al exigir, se cruzan con lo que el <span className="font-black">rol del usuario</span> puede ver (módulos con lectura).
         </p>
       </div>
 
@@ -344,6 +374,7 @@ export default function OnboardingTab() {
                         <button
                           type="button"
                           disabled={isBusy}
+                          title={`Según rol: ${formatOnboardingTracksLabel(tracksForUserRole(u.role, selectedTracks))}`}
                           onClick={() => assignGuide(u.id, true, selectedTracks)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black hover:bg-indigo-700 disabled:opacity-60"
                         >

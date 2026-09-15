@@ -113,6 +113,15 @@ const ONBOARDING_TRACK_VALUES = ['OPERATIONS', 'PLANNING', 'CRM', 'SERVICES', 'R
 type OnboardingTrackValue = (typeof ONBOARDING_TRACK_VALUES)[number];
 const ONBOARDING_TRACKS = new Set<string>(ONBOARDING_TRACK_VALUES);
 
+/** Módulos del panel que habilitan cada recorrido (alineado con web2 onboardingGuide.ts). */
+const ONBOARDING_TRACK_MODULES: Record<OnboardingTrackValue, string[]> = {
+  OPERATIONS: ['OPERATIONS', 'DASHBOARD'],
+  PLANNING: ['PLANNING'],
+  CRM: ['CLIENTS'],
+  SERVICES: ['SERVICES'],
+  RRHH: ['RRHH'],
+};
+
 function normalizeOnboardingTrack(raw: unknown): OnboardingTrackValue {
   const value = String(raw ?? '').trim().toUpperCase();
   if (ONBOARDING_TRACKS.has(value)) return value as OnboardingTrackValue;
@@ -132,6 +141,71 @@ function normalizeOnboardingTracks(raw: unknown, fallbackTrack?: unknown): Onboa
   }
   if (unique.length) return unique;
   return [normalizeOnboardingTrack(fallbackTrack)];
+}
+
+function roleHasModuleRead(
+  permissions: Record<string, string[]> | null | undefined,
+  moduleKey: string,
+): boolean {
+  const actions = permissions?.[moduleKey];
+  return Array.isArray(actions) && actions.includes('read');
+}
+
+function tracksAvailableForRolePermissions(
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrackValue[] {
+  if (isSuperAdmin) return [...ONBOARDING_TRACK_VALUES];
+  const available = ONBOARDING_TRACK_VALUES.filter((track) => {
+    const modules = ONBOARDING_TRACK_MODULES[track] || [];
+    return modules.some((m) => roleHasModuleRead(permissions, m));
+  });
+  return available.length ? available : ['OPERATIONS'];
+}
+
+function filterTracksByRolePermissions(
+  tracks: OnboardingTrackValue[],
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrackValue[] {
+  const allowed = tracksAvailableForRolePermissions(permissions, isSuperAdmin);
+  const filtered = tracks.filter((t) => allowed.includes(t));
+  return filtered.length ? filtered : allowed.slice(0, 1);
+}
+
+async function loadRolePermissionsForOnboarding(
+  roleId: unknown,
+): Promise<{ permissions: Record<string, string[]> | null; isSuperAdmin: boolean }> {
+  if (isSuperAdminBackupRole(roleId)) {
+    return { permissions: null, isSuperAdmin: true };
+  }
+  const id = String(roleId ?? '').trim();
+  if (!id) return { permissions: null, isSuperAdmin: false };
+  try {
+    const snap = await admin.firestore().collection('roles').doc(id).get();
+    if (!snap.exists) return { permissions: null, isSuperAdmin: false };
+    const raw = snap.data()?.permissions;
+    if (!raw || typeof raw !== 'object') return { permissions: null, isSuperAdmin: false };
+    const permissions: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        permissions[key] = value.map((x) => String(x));
+      }
+    }
+    return { permissions, isSuperAdmin: false };
+  } catch {
+    return { permissions: null, isSuperAdmin: false };
+  }
+}
+
+async function resolveOnboardingTracksForRole(
+  roleId: unknown,
+  rawTracks: unknown,
+  fallbackTrack?: unknown,
+): Promise<OnboardingTrackValue[]> {
+  const requested = normalizeOnboardingTracks(rawTracks, fallbackTrack);
+  const { permissions, isSuperAdmin } = await loadRolePermissionsForOnboarding(roleId);
+  return filterTracksByRolePermissions(requested, permissions, isSuperAdmin);
 }
 
 function normalizeOnboardingStatus(raw: unknown): 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' {
@@ -1478,7 +1552,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   
   const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack, onboardingTracks: rawOnboardingTracks } = data;
   const roleNorm = normalizeBackupRole(role);
-  const onboardingTracks = normalizeOnboardingTracks(rawOnboardingTracks, rawOnboardingTrack);
+  const onboardingTracks = await resolveOnboardingTracksForRole(roleNorm, rawOnboardingTracks, rawOnboardingTrack);
   const onboardingTrack = onboardingTracks[0];
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
@@ -1603,9 +1677,17 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
     throw new functions.https.HttpsError('not-found', 'Perfil de usuario no encontrado.');
   }
 
-  const currentGuide = userSnap.data()?.onboardingGuide || {};
-  const requiredTracks = normalizeOnboardingTracks(currentGuide.tracks, currentGuide.track || payload.track);
-  const track = normalizeOnboardingTrack(payload.track ?? requiredTracks[0]);
+  const userData = userSnap.data() || {};
+  const currentGuide = userData.onboardingGuide || {};
+  const storedTracks = normalizeOnboardingTracks(currentGuide.tracks, currentGuide.track || payload.track);
+  const roleMeta = await loadRolePermissionsForOnboarding(userData.role);
+  const requiredTracks = filterTracksByRolePermissions(
+    storedTracks,
+    roleMeta.permissions,
+    roleMeta.isSuperAdmin,
+  );
+  const requestedTrack = normalizeOnboardingTrack(payload.track ?? requiredTracks[0]);
+  const track = requiredTracks.includes(requestedTrack) ? requestedTrack : requiredTracks[0];
   const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
   const progressRaw = Number(payload.progressPct ?? 0);
   const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
@@ -1749,7 +1831,11 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
   }
 
   const required = payload.required !== false;
-  const tracks = normalizeOnboardingTracks(payload.tracks, payload.track);
+  const tracks = await resolveOnboardingTracksForRole(
+    targetData.role,
+    payload.tracks,
+    payload.track,
+  );
   const track = tracks[0];
   const resetProgress = payload.resetProgress !== false;
   const now = admin.firestore.FieldValue.serverTimestamp();

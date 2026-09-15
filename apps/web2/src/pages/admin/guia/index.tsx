@@ -10,6 +10,7 @@ import { toast } from 'sonner';
 import {
   ONBOARDING_TRACK_LABEL,
   ONBOARDING_TRACKS,
+  filterTracksByCanReadModule,
   formatOnboardingTracksLabel,
   normalizeOnboardingGuideState,
   normalizeOnboardingTrack,
@@ -95,15 +96,10 @@ export default function GuiaInteractivaPage() {
 
   const requiredTracks = useMemo<OnboardingTrack[]>(() => {
     if (onboardingGuide?.required) {
-      return normalizeOnboardingTracks(onboardingGuide.tracks, onboardingGuide.track);
+      const assigned = normalizeOnboardingTracks(onboardingGuide.tracks, onboardingGuide.track);
+      return filterTracksByCanReadModule(assigned, canReadModule);
     }
-    const opts: OnboardingTrack[] = [];
-    if (canReadModule('OPERATIONS') || canReadModule('DASHBOARD')) opts.push('OPERATIONS');
-    if (canReadModule('PLANNING')) opts.push('PLANNING');
-    if (canReadModule('CLIENTS')) opts.push('CRM');
-    if (canReadModule('SERVICES')) opts.push('SERVICES');
-    if (canReadModule('RRHH')) opts.push('RRHH');
-    return opts.length ? opts : ['OPERATIONS'];
+    return filterTracksByCanReadModule([...ONBOARDING_TRACKS], canReadModule);
   }, [onboardingGuide, canReadModule]);
 
   const tracksProgress = useMemo(

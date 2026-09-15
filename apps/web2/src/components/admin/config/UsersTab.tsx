@@ -8,7 +8,13 @@ import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
-import { ONBOARDING_TRACK_LABEL, ONBOARDING_TRACKS, normalizeOnboardingTrack, normalizeOnboardingTracks, type OnboardingTrack } from '@/lib/onboardingGuide';
+import {
+    ONBOARDING_TRACK_LABEL,
+    filterTracksByRolePermissions,
+    normalizeOnboardingTracks,
+    tracksAvailableForRolePermissions,
+    type OnboardingTrack,
+} from '@/lib/onboardingGuide';
 import {
     ALL_EMPRESAS_VALUE,
     isAllEmpresasUser,
@@ -148,9 +154,17 @@ export default function UsersTab() {
                     roleIsSuperAdmin,
                 );
 
+                const roleDoc = rolesList.find((r) => r.id === formData.role);
+                const rolePerms = (roleDoc?.permissions as Record<string, string[]> | undefined) || null;
+                const filteredTracks = filterTracksByRolePermissions(
+                    normalizeOnboardingTracks(formData.onboardingTracks, formData.onboardingTracks?.[0]),
+                    rolePerms,
+                    roleIsSuperAdmin,
+                );
+
                 if (editMode) {
                     const existingGuide = (users.find(u => u.id === formData.id) as any)?.onboardingGuide || {};
-                    const nextTracks = normalizeOnboardingTracks(formData.onboardingTracks, formData.onboardingTracks?.[0]);
+                    const nextTracks = filteredTracks;
                     const prevTracks = normalizeOnboardingTracks(existingGuide?.tracks, existingGuide?.track);
                     const tracksChanged =
                         nextTracks.join('|') !== prevTracks.join('|');
@@ -190,8 +204,8 @@ export default function UsersTab() {
                         empresaId:     efectivaEmpresaId,
                         allEmpresas,
                         supervisorPin: formData.supervisorPin || null,
-                        onboardingTrack: formData.onboardingTracks[0],
-                        onboardingTracks: formData.onboardingTracks,
+                        onboardingTrack: filteredTracks[0],
+                        onboardingTracks: filteredTracks,
                     });
                     resolve('Usuario creado y acceso concedido');
                 }
@@ -235,6 +249,24 @@ export default function UsersTab() {
         empresas.find(e => e.id === id)?.name || id || '—';
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
+    const selectedRoleDoc = rolesList.find((r) => r.id === formData.role);
+    const rolePermissionsForForm =
+        (selectedRoleDoc?.permissions as Record<string, string[]> | undefined) || null;
+    const availableOnboardingTracks = tracksAvailableForRolePermissions(
+        rolePermissionsForForm,
+        formRoleIsSuperAdmin,
+    );
+
+    const applyRoleAndTracks = (role: string) => {
+        const roleDoc = rolesList.find((r) => r.id === role);
+        const perms = (roleDoc?.permissions as Record<string, string[]> | undefined) || null;
+        const isSa = isSuperAdminRole(role);
+        setFormData((prev) => ({
+            ...prev,
+            role,
+            onboardingTracks: filterTracksByRolePermissions(prev.onboardingTracks, perms, isSa),
+        }));
+    };
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -380,7 +412,7 @@ export default function UsersTab() {
                                 <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">Rol</label>
                                 <select required
                                     className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-indigo-600 outline-none"
-                                    value={formData.role} onChange={e => setFormData({ ...formData, role: e.target.value })}>
+                                    value={formData.role} onChange={e => applyRoleAndTracks(e.target.value)}>
                                     <option value="">Seleccionar Rol...</option>
                                     {isSuperAdmin && (
                                         <option value="SUPERADMIN">⭐ Superadmin</option>
@@ -402,37 +434,52 @@ export default function UsersTab() {
                                     Recorridos onboarding
                                 </label>
                                 <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl">
-                                    {ONBOARDING_TRACKS.map((track) => {
-                                        const active = formData.onboardingTracks.includes(track);
-                                        return (
-                                            <button
-                                                key={track}
-                                                type="button"
-                                                onClick={() => {
-                                                    setFormData((prev) => {
-                                                        const exists = prev.onboardingTracks.includes(track);
-                                                        const next = exists
-                                                            ? prev.onboardingTracks.filter((t) => t !== track)
-                                                            : [...prev.onboardingTracks, track];
-                                                        return {
-                                                            ...prev,
-                                                            onboardingTracks: next.length ? next : prev.onboardingTracks,
-                                                        };
-                                                    });
-                                                }}
-                                                className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${
-                                                    active
-                                                        ? 'bg-indigo-600 text-white border-indigo-700'
-                                                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
-                                                }`}
-                                            >
-                                                {ONBOARDING_TRACK_LABEL[track]}
-                                            </button>
-                                        );
-                                    })}
+                                    {!formData.role ? (
+                                        <p className="text-[11px] text-slate-400 font-medium px-1 py-1">
+                                            Seleccioná un rol para ver los recorridos disponibles.
+                                        </p>
+                                    ) : availableOnboardingTracks.length === 0 ? (
+                                        <p className="text-[11px] text-amber-600 font-medium px-1 py-1">
+                                            Este rol no tiene módulos con lectura para guía.
+                                        </p>
+                                    ) : (
+                                        availableOnboardingTracks.map((track) => {
+                                            const active = formData.onboardingTracks.includes(track);
+                                            return (
+                                                <button
+                                                    key={track}
+                                                    type="button"
+                                                    onClick={() => {
+                                                        setFormData((prev) => {
+                                                            const exists = prev.onboardingTracks.includes(track);
+                                                            const next = exists
+                                                                ? prev.onboardingTracks.filter((t) => t !== track)
+                                                                : [...prev.onboardingTracks, track];
+                                                            const scoped = filterTracksByRolePermissions(
+                                                                next.length ? next : prev.onboardingTracks,
+                                                                rolePermissionsForForm,
+                                                                formRoleIsSuperAdmin,
+                                                            );
+                                                            return {
+                                                                ...prev,
+                                                                onboardingTracks: scoped,
+                                                            };
+                                                        });
+                                                    }}
+                                                    className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${
+                                                        active
+                                                            ? 'bg-indigo-600 text-white border-indigo-700'
+                                                            : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                                                    }`}
+                                                >
+                                                    {ONBOARDING_TRACK_LABEL[track]}
+                                                </button>
+                                            );
+                                        })
+                                    )}
                                 </div>
                                 <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                                    Podés exigir uno o varios recorridos (ej. Operaciones + Planificación). Obligatorios al primer ingreso.
+                                    Solo se listan recorridos que el rol puede ver (permiso de lectura del módulo). Obligatorios al primer ingreso.
                                 </p>
                             </div>
 

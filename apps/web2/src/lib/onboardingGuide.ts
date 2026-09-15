@@ -31,6 +31,74 @@ export const ONBOARDING_TRACK_LABEL: Record<OnboardingTrack, string> = {
   RRHH: 'RRHH',
 };
 
+/** Módulos del panel (SYSTEM_MODULES) que habilitan cada recorrido de guía. */
+export const ONBOARDING_TRACK_MODULES: Record<OnboardingTrack, string[]> = {
+  OPERATIONS: ['OPERATIONS', 'DASHBOARD'],
+  PLANNING: ['PLANNING'],
+  CRM: ['CLIENTS'],
+  SERVICES: ['SERVICES'],
+  RRHH: ['RRHH'],
+};
+
+function roleHasModuleRead(
+  permissions: Record<string, string[]> | null | undefined,
+  moduleKey: string,
+): boolean {
+  const actions = permissions?.[moduleKey];
+  return Array.isArray(actions) && actions.includes('read');
+}
+
+/** ¿El rol puede ver el módulo asociado a este recorrido? */
+export function roleCanAccessOnboardingTrack(
+  permissions: Record<string, string[]> | null | undefined,
+  track: OnboardingTrack,
+  isSuperAdmin = false,
+): boolean {
+  if (isSuperAdmin) return true;
+  const modules = ONBOARDING_TRACK_MODULES[track] || [];
+  return modules.some((m) => roleHasModuleRead(permissions, m));
+}
+
+/** Recorridos disponibles según permisos de lectura del rol. */
+export function tracksAvailableForRolePermissions(
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrack[] {
+  if (isSuperAdmin) return [...ONBOARDING_TRACKS];
+  const available = ONBOARDING_TRACKS.filter((t) =>
+    roleCanAccessOnboardingTrack(permissions, t, false),
+  );
+  return available.length ? available : ['OPERATIONS'];
+}
+
+/** Interseca recorridos elegidos con lo que el rol puede ver. */
+export function filterTracksByRolePermissions(
+  tracks: OnboardingTrack[],
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrack[] {
+  const allowed = tracksAvailableForRolePermissions(permissions, isSuperAdmin);
+  const filtered = tracks.filter((t) => allowed.includes(t));
+  return filtered.length ? filtered : allowed.slice(0, 1);
+}
+
+/** Variante con `canReadModule` del AuthContext (guía del usuario logueado). */
+export function filterTracksByCanReadModule(
+  tracks: OnboardingTrack[],
+  canReadModule: (moduleKey: string) => boolean,
+): OnboardingTrack[] {
+  const filtered = tracks.filter((track) => {
+    const modules = ONBOARDING_TRACK_MODULES[track] || [];
+    return modules.some((m) => canReadModule(m));
+  });
+  if (filtered.length) return filtered;
+  const fallback = ONBOARDING_TRACKS.filter((track) => {
+    const modules = ONBOARDING_TRACK_MODULES[track] || [];
+    return modules.some((m) => canReadModule(m));
+  });
+  return fallback.length ? fallback : ['OPERATIONS'];
+}
+
 export const ONBOARDING_STATUS_LABEL: Record<OnboardingStatus, string> = {
   NOT_STARTED: 'No iniciado',
   IN_PROGRESS: 'En curso',

@@ -9,7 +9,7 @@ ADMIN — módulos típicos (menú lateral; al hablar con el usuario usá estos 
 - Clientes y objetivos (CRM): clientes con objetivos embebidos.
 - Servicios y SLA: contratos SLA, puestos; herramientas de esquema de turnos.
 - Reportes, Análisis operativo, Configuración: exportes y métricas; usuarios y roles por módulo (permisos read/create/update/delete). isSuperAdmin bypasea todo.
-- Guía interactiva / Onboarding obligatorio (menú **Guía** y Configuración → **Onboarding**): todo usuario admin nuevo debe completar la guía de su(s) recorrido(s) (Operaciones, Planificación, CRM, Servicios, RRHH; uno o varios) antes de usar el resto del panel. El progreso se guarda en system_users.onboardingGuide.
+- Guía interactiva / Onboarding obligatorio (menú **Guía** y Configuración → **Onboarding**): todo usuario admin nuevo debe completar la guía de su(s) recorrido(s) (Operaciones, Planificación, CRM, Servicios, RRHH; uno o varios) **filtrados por los módulos que su rol puede leer** antes de usar el resto del panel. El progreso se guarda en system_users.onboardingGuide.
 
 Portal empleado (vista guardia): turnos propios, presencia según políticas GPS/portal, solicitud de ausencias.
 
@@ -117,7 +117,7 @@ Guía interactiva (onboarding obligatorio) en COSP:
 - Seguimiento admin: **Configuración → Onboarding** (quién completó / en curso / no iniciado).
 
 **Regla de negocio**
-- Todo usuario admin **nuevo** nace con onboarding obligatorio (\`system_users.onboardingGuide.required = true\`).
+- Todo usuario admin **nuevo** nace con onboarding obligatorio (\`system_users.onboardingGuide.required = true\`). Los recorridos asignados se limitan a los módulos con permiso de lectura del rol del usuario.
 - Mientras el estado no sea **COMPLETED**, el panel redirige a la guía y bloquea el resto de módulos.
 - Recorridos posibles: **OPERATIONS**, **PLANNING**, **CRM**, **SERVICES**, **RRHH**. Se puede exigir **uno o varios a la vez** (ej. Operaciones + Planificación, CRM + RRHH, o todos).
 
