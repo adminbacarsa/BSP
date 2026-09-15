@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target, Check, Search } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
-import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
@@ -56,9 +56,13 @@ export default function UsersTab() {
 
             const allUsers = uSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[];
 
+            const activeUsers = allUsers.filter(
+                (u) => String(u.status ?? 'Active').toLowerCase() !== 'inactive',
+            );
+
             const filtered = isSuperAdmin
-                ? allUsers
-                : allUsers.filter(u =>
+                ? activeUsers
+                : activeUsers.filter(u =>
                     isSuperAdminRole(u.role) ||
                     isAllEmpresasUser(u) ||
                     (u.empresaId || 'bacarsa') === myEmpresaId
@@ -177,15 +181,19 @@ export default function UsersTab() {
     };
 
     const handleDelete = async (userId: string) => {
-        toast('¿Estás seguro?', {
+        toast('¿Desactivar este usuario de plataforma?', {
             action: {
-                label: 'Eliminar',
+                label: 'Desactivar',
                 onClick: async () => {
                     try {
-                        await deleteDoc(doc(db, 'system_users', userId));
-                        toast.success('Usuario eliminado');
+                        const fn = httpsCallable(functions, 'manageSystemUsers');
+                        await fn({
+                            action: 'UPDATE_USER',
+                            payload: { uid: userId, data: { status: 'Inactive' } },
+                        });
+                        toast.success('Usuario desactivado');
                         loadData();
-                    } catch { toast.error('No se pudo eliminar'); }
+                    } catch { toast.error('No se pudo desactivar'); }
                 }
             },
             cancel: { label: 'Cancelar', onClick: () => {} }

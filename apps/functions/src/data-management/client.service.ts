@@ -64,7 +64,10 @@ export class ClientService {
   }
 
   async deleteClient(id: string): Promise<void> {
-    await this.getDb().collection(COLL_CLIENTS).doc(id).delete();
+    await this.getDb().collection(COLL_CLIENTS).doc(id).update({
+      status: 'INACTIVO',
+      deactivatedAt: admin.firestore.Timestamp.now(),
+    });
   }
 
   // ==========================================

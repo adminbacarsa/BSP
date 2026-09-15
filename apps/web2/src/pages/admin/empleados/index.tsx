@@ -272,7 +272,7 @@ export default function EmployeesPage() {
       }
       await employeeService.delete(id);
       loadData();
-      addToast('Legajo eliminado', 'info');
+      addToast('Legajo dado de baja (INACTIVE)', 'info');
     }
   };
 

@@ -16,7 +16,7 @@ export function planningMonthBounds(year: number, month: number): { firstDay: Da
     return { firstDay, lastDay };
 }
 
-/** Listener/getDocs: solo turnos del mes (no toda la colección). */
+/** Listener/getDocs: turnos del mes (+ margen 1 día por desfase TZ AR). */
 export function buildPlanningMonthTurnosQuery(params: {
     empresaId: string;
     scopeEmpresa?: boolean;
@@ -25,8 +25,14 @@ export function buildPlanningMonthTurnosQuery(params: {
 }): Query {
     const { empresaId, scopeEmpresa = true, year, month } = params;
     const { firstDay, lastDay } = planningMonthBounds(year, month);
-    const startTs = Timestamp.fromDate(firstDay);
-    const endTs = Timestamp.fromDate(lastDay);
+    const startPad = new Date(firstDay);
+    startPad.setDate(startPad.getDate() - 1);
+    startPad.setHours(0, 0, 0, 0);
+    const endPad = new Date(lastDay);
+    endPad.setDate(endPad.getDate() + 1);
+    endPad.setHours(23, 59, 59, 999);
+    const startTs = Timestamp.fromDate(startPad);
+    const endTs = Timestamp.fromDate(endPad);
     const col = collection(db, 'turnos');
     const id = String(empresaId ?? '').trim();
     if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {
@@ -40,14 +46,15 @@ export function buildPlanningMonthTurnosQuery(params: {
     return query(col, where('startTime', '>=', startTs), where('startTime', '<=', endTs));
 }
 
-/** RFZ con campo fecha (sin startTime Firestore) dentro del mes. */
-export function buildPlanningMonthRfzQuery(params: {
+/** RFZ / TURA con campo fecha (startTime string ISO, no Timestamp) dentro del mes. */
+export function buildPlanningMonthRefuerzoQuery(params: {
     empresaId: string;
     scopeEmpresa?: boolean;
     year: number;
     month: number;
+    code: 'RFZ' | 'TURA';
 }): Query {
-    const { empresaId, scopeEmpresa = true, year, month } = params;
+    const { empresaId, scopeEmpresa = true, year, month, code } = params;
     const monthStr = String(month).padStart(2, '0');
     const monthStart = `${year}-${monthStr}-01`;
     const lastDay = new Date(year, month, 0).getDate();
@@ -58,17 +65,36 @@ export function buildPlanningMonthRfzQuery(params: {
         return query(
             col,
             where('empresaId', '==', id),
-            where('code', '==', 'RFZ'),
+            where('code', '==', code),
             where('fecha', '>=', monthStart),
             where('fecha', '<=', monthEnd),
         );
     }
     return query(
         col,
-        where('code', '==', 'RFZ'),
+        where('code', '==', code),
         where('fecha', '>=', monthStart),
         where('fecha', '<=', monthEnd),
     );
+}
+
+/** @deprecated Usar buildPlanningMonthRefuerzoQuery con code RFZ */
+export function buildPlanningMonthRfzQuery(params: {
+    empresaId: string;
+    scopeEmpresa?: boolean;
+    year: number;
+    month: number;
+}): Query {
+    return buildPlanningMonthRefuerzoQuery({ ...params, code: 'RFZ' });
+}
+
+export function buildPlanningMonthTuraQuery(params: {
+    empresaId: string;
+    scopeEmpresa?: boolean;
+    year: number;
+    month: number;
+}): Query {
+    return buildPlanningMonthRefuerzoQuery({ ...params, code: 'TURA' });
 }
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {

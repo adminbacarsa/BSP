@@ -1,11 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Head from 'next/head';
-import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
     Users, Building, Download, Printer,
     Calendar, User, X, ChevronRight, ChevronDown, Sun, Moon, BarChart3, FileText, CalendarDays, TrendingUp,
-    Shield, CheckCircle2, Minus, RotateCw, Zap, Search, Loader2, Clock
+    Shield, CheckCircle2, Minus, RotateCw, Zap, Search, Loader2
 } from 'lucide-react';
 import { PageShell, PageHeader, TabBar, ContentCard } from '@/components/ui';
 import {
@@ -30,8 +29,6 @@ import { useReportes, resolveShiftDurationHours, dedupeShiftsByAbsencePriority, 
 import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
-import { exportLiquidacionReportPdf } from '@/lib/reportes/liquidacionReportPdf';
 import {
     formatCctPeriodLabel,
     formatCctPeriodRangeDisplay,
@@ -884,8 +881,9 @@ export default function ReportsPage() {
                         <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
                         <button
                             type="button"
-                            onClick={() => {
+                            onClick={async () => {
                                 try {
+                                    const { exportLiquidacionReportPdf } = await import('@/lib/reportes/liquidacionReportPdf');
                                     const sum = (key: string) =>
                                         sourceRows.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
                                     const planCob = sum('horasCobertura');
@@ -2040,16 +2038,6 @@ export default function ReportsPage() {
                         title="Centro de Reportes"
                         subtitle="Liquidación CCT 507/07 · período 26 al 25"
                         icon={BarChart3}
-                        actions={(
-                            <Link
-                                href="/admin/reportes/marcaciones"
-                                prefetch={false}
-                                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-2xl bg-indigo-600 text-white text-xs font-black uppercase tracking-wide hover:bg-indigo-700 shadow-lg active:scale-95"
-                            >
-                                <Clock size={14} />
-                                Marcaciones CC
-                            </Link>
-                        )}
                     />
                     <TabBar
                         tabs={[
@@ -2063,20 +2051,6 @@ export default function ReportsPage() {
                         active={activeTab}
                         onChange={id => setActiveTab(id as typeof activeTab)}
                     />
-                    <Link
-                        href="/admin/reportes/marcaciones"
-                        prefetch={false}
-                        className="mt-4 flex items-center gap-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 shadow-sm hover:bg-indigo-100 transition-colors"
-                    >
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-white">
-                            <Clock size={18} />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                            <span className="block text-sm font-black uppercase tracking-wide text-indigo-950">Marcaciones CC</span>
-                            <span className="block text-xs font-medium text-indigo-800">Mapear centros de costo e importar fichadas desde Excel</span>
-                        </span>
-                        <ChevronRight size={18} className="shrink-0 text-indigo-500" />
-                    </Link>
                 </div>
 
                 <ContentCard padding={false} className="p-5 flex flex-col gap-4 no-print shadow-sm">
@@ -2700,8 +2674,9 @@ export default function ReportsPage() {
                                 <button
                                     type="button"
                                     disabled={filtered.length === 0 || svcReportLoading}
-                                    onClick={() => {
+                                    onClick={async () => {
                                         try {
+                                            const { exportServiciosReportPdf } = await import('@/lib/reportes/serviciosReportPdf');
                                             const filterParts: string[] = [];
                                             if (svcStatusFilter === 'active') filterParts.push('solo activos');
                                             if (svcStatusFilter === 'inactive') filterParts.push('solo inactivos');

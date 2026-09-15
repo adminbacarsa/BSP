@@ -25,10 +25,24 @@ service firebase.storage {
         : '';
     }
 
-    function isPanelTokenType() {
+    function isSystemUser() {
       return isSignedIn() && request.auth.token.type in [
         'SYSTEM', 'system_user', 'SYSTEM_USER', 'system'
       ];
+    }
+
+    function isEmployeeClaim() {
+      return isSignedIn() && (
+        request.auth.token.role == 'employee' ||
+        request.auth.token.role == 'EMPLOYEE' ||
+        request.auth.token.type == 'employee' ||
+        request.auth.token.type == 'EMPLOYEE'
+      );
+    }
+
+    function isClientUser() {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/client_users/$(request.auth.uid));
     }
 
     function isSuperAdminRole(roleLower) {
@@ -38,35 +52,150 @@ service firebase.storage {
         || roleLower.matches('super[_\\s-]*admin');
     }
 
-    function normalizedTokenRoleUpper() {
-      return tokenRoleLower().replace(' ', '_').upper();
+    function roleValueIsSuperAdmin(role) {
+      return role == 'SuperAdmin' ||
+        role == 'SUPERADMIN' ||
+        role == 'SUPER_ADMIN' ||
+        role == 'SP' ||
+        role == 'superadmin';
     }
 
-    function normalizedSystemRoleUpper() {
-      return isSystemUserDoc()
-        ? systemUserRoleLower().replace(' ', '_').upper()
-        : '';
+    function systemUserIsSuperAdmin() {
+      return isSystemUserDoc() &&
+        roleValueIsSuperAdmin(systemUserData().get('role', ''));
     }
 
     function isSuperAdmin() {
       return isSignedIn() && (
         isSuperAdminRole(tokenRoleLower())
-        || normalizedTokenRoleUpper() == 'SUPERADMIN'
-        || normalizedTokenRoleUpper() == 'SUPER_ADMIN'
-        || (isSystemUserDoc() && (
-          isSuperAdminRole(systemUserRoleLower())
-          || normalizedSystemRoleUpper() == 'SUPERADMIN'
-          || normalizedSystemRoleUpper() == 'SUPER_ADMIN'
-        ))
+        || roleValueIsSuperAdmin(request.auth.token.role)
+        || systemUserIsSuperAdmin()
       );
     }
 
+    function panelRoleFromToken() {
+      return request.auth.token.role == 'admin' ||
+        request.auth.token.role == 'Admin' ||
+        request.auth.token.role == 'ADMIN' ||
+        request.auth.token.role == 'SuperAdmin' ||
+        request.auth.token.role == 'SUPERADMIN' ||
+        request.auth.token.role == 'SUPER_ADMIN' ||
+        request.auth.token.role == 'SP' ||
+        request.auth.token.role == 'Manager' ||
+        request.auth.token.role == 'MANAGER' ||
+        request.auth.token.role == 'Scheduler' ||
+        request.auth.token.role == 'SCHEDULER' ||
+        request.auth.token.role == 'Supervisor' ||
+        request.auth.token.role == 'SUPERVISOR' ||
+        request.auth.token.role == 'Operator' ||
+        request.auth.token.role == 'OPERATOR' ||
+        request.auth.token.role == 'HR_Manager' ||
+        request.auth.token.role == 'HR_MANAGER';
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        !isClientUser() &&
+        (
+          isSuperAdmin() ||
+          panelRoleFromToken() ||
+          isSystemUser() ||
+          isSystemUserDoc()
+        );
+    }
+
     function systemUserEmpresaId() {
-      return systemUserData().get('empresaId', '');
+      return isSystemUserDoc()
+        ? systemUserData().get('empresaId', '')
+        : '';
+    }
+
+    function authEmpresaId() {
+      return isSignedIn() && request.auth.token.empresaId is string
+        ? request.auth.token.empresaId
+        : systemUserEmpresaId();
+    }
+
+    function userEmpresaId() {
+      return systemUserEmpresaId();
+    }
+
+    function systemUserHasAllEmpresas() {
+      return isSystemUserDoc() && systemUserData().get('allEmpresas', false) == true;
+    }
+
+    function bacarsaLegacyOpen() {
+      return userEmpresaId() == 'bacarsa' &&
+        firestore.exists(/databases/(default)/documents/empresas/bacarsa) &&
+        firestore.get(/databases/(default)/documents/empresas/bacarsa).data.get('migracionCompleta', false) != true;
+    }
+
+    function docEmpresaId(data) {
+      return data.get('empresaId', '');
+    }
+
+    function bacarsaTenantDocMatches(data) {
+      return userEmpresaId() == 'bacarsa' && (
+        docEmpresaId(data) == '' || docEmpresaId(data) == 'bacarsa'
+      );
+    }
+
+    function tenantMatches(data) {
+      return isSuperAdmin() || systemUserHasAllEmpresas() || (
+        userEmpresaId() != '' && (
+          docEmpresaId(data) == userEmpresaId() ||
+          bacarsaTenantDocMatches(data) ||
+          (bacarsaLegacyOpen() && userEmpresaId() == 'bacarsa' && docEmpresaId(data) == '')
+        )
+      );
+    }
+
+    function tenantMatchesEmpresaId(empresaId) {
+      return tenantMatches({ 'empresaId': empresaId });
     }
 
     function empresaIdsMatch(pathEmpresaId, profileEmpresaId) {
       return pathEmpresaId.lower() == profileEmpresaId.lower();
+    }
+
+    function empleadoDocOwnedByAuth(empleadoId) {
+      return isSignedIn() && (
+        empleadoId == request.auth.uid ||
+        (
+          firestore.exists(/databases/(default)/documents/empleados/$(empleadoId)) &&
+          firestore.get(/databases/(default)/documents/empleados/$(empleadoId)).data.get('uid', '') == request.auth.uid
+        )
+      );
+    }
+
+    function empleadoDocExists(empleadoId) {
+      return firestore.exists(/databases/(default)/documents/empleados/$(empleadoId));
+    }
+
+    function empleadoDocData(empleadoId) {
+      return firestore.get(/databases/(default)/documents/empleados/$(empleadoId)).data;
+    }
+
+    function employeeTenantMatches(data) {
+      return isEmployeeClaim() && authEmpresaId() != '' && (
+        docEmpresaId(data) == authEmpresaId() ||
+        (authEmpresaId() == 'bacarsa' && (docEmpresaId(data) == '' || docEmpresaId(data) == 'bacarsa'))
+      );
+    }
+
+    function empleadoTenantAdminAccess(empleadoId) {
+      return isAdmin()
+        && empleadoDocExists(empleadoId)
+        && tenantMatches(empleadoDocData(empleadoId));
+    }
+
+    function canAccessCredenciales(empDocId) {
+      return empleadoDocOwnedByAuth(empDocId)
+        || empleadoTenantAdminAccess(empDocId);
+    }
+
+    function canAccessLibroGuardiaStorage() {
+      return isAdmin() || (isEmployeeClaim() && !isClientUser());
     }
 
     function validBackupJsonUpload(fileName) {
@@ -80,15 +209,44 @@ service firebase.storage {
         );
     }
 
+    function validAbsenceUpload() {
+      return request.resource.size < 10 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('application/pdf.*')
+          || request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
+    function validMediaUpload() {
+      return request.resource.size < 20 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType.matches('audio/.*')
+          || request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
+    function validLogoUpload() {
+      return request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    function validCredencialPhotoUpload(fileName) {
+      return fileName.matches('foto(_sb)?\\.png')
+        && request.resource.size < 5 * 1024 * 1024
+        && (
+          request.resource.contentType.matches('image/.*')
+          || request.resource.contentType == 'application/octet-stream'
+        );
+    }
+
     function canUploadBackupRestore(empresaId) {
-      return isSignedIn() && (
+      return isAdmin() && (
         isSuperAdmin()
-        || (
-          (isSystemUserDoc() || isPanelTokenType()) && (
-            empresaIdsMatch(empresaId, systemUserEmpresaId())
-            || empresaId == 'platform'
-          )
-        )
+        || systemUserHasAllEmpresas()
+        || empresaIdsMatch(empresaId, userEmpresaId())
+        || empresaId == 'platform'
       );
     }
 
@@ -98,19 +256,35 @@ service firebase.storage {
     }
 
     match /absences/{userId}/{fileName} {
-      allow read, write: if isSignedIn() && request.auth.uid == userId;
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn()
+        && request.auth.uid == userId
+        && validAbsenceUpload();
     }
 
     match /credenciales/{empDocId}/{fileName} {
-      allow read, write: if isSignedIn();
+      allow read: if canAccessCredenciales(empDocId);
+      allow write: if canAccessCredenciales(empDocId)
+        && validCredencialPhotoUpload(fileName);
     }
 
     match /libro_guardia/{objectiveId}/{fileName} {
-      allow read, write: if isSignedIn();
+      allow read: if canAccessLibroGuardiaStorage();
+      allow write: if canAccessLibroGuardiaStorage()
+        && validMediaUpload();
     }
 
     match /supervision_visitas/{objectiveId}/{fileName} {
-      allow read, write: if isSignedIn();
+      allow read: if isAdmin();
+      allow write: if isAdmin()
+        && validMediaUpload();
+    }
+
+    match /empresas/{empresaId}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin()
+        && tenantMatchesEmpresaId(empresaId)
+        && validLogoUpload();
     }
   }
 }

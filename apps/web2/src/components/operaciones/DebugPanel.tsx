@@ -75,6 +75,53 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
 
     const now = new Date();
 
+    const handleDownload = () => {
+        const byObj: Record<string, any> = {};
+        processedData.forEach((s: any) => {
+            const key = s.objectiveId || 'unknown';
+            if (!byObj[key]) byObj[key] = { name: s.objectiveName || key, client: s.clientName || '', shifts: [] };
+            byObj[key].shifts.push({
+                id: s.id,
+                employee: s.employeeName || '—',
+                position: s.positionName || '—',
+                date: s.shiftDateObj instanceof Date ? s.shiftDateObj.toISOString() : null,
+                end: s.endDateObj instanceof Date ? s.endDateObj.toISOString() : null,
+                origin: s.origin || null,
+                isPresent: s.isPresent, isAbsent: s.isAbsent, isCompleted: s.isCompleted,
+                isUnassigned: s.isUnassigned, isFuture: s.isFuture, isVirtual: s.isVirtual,
+                countsForCoverage: s.countsForCoverage, status: s.status,
+            });
+        });
+        const dump = {
+            timestamp: new Date().toISOString(),
+            stats: {
+                presentes: processedData.filter((s:any) => s.isPresent && !s.isCompleted).length,
+                ausentes: processedData.filter((s:any) => s.isAbsent).length,
+                posiblesAusencias: processedData.filter((s:any) => s.isPotentialAbsence).length,
+                vacantes: processedData.filter((s:any) => s.isUnassigned).length,
+                planificados: processedData.filter((s:any) => s.isFuture).length,
+                completados: processedData.filter((s:any) => s.isCompleted).length,
+                totalProcessed: processedData.length,
+                totalRaw: rawShifts.length,
+                descartados: rawShifts.length - processedData.length,
+            },
+            publishStatusMap,
+            byObjective: byObj,
+            discardedRaw: rawShifts
+                .filter((s: any) => !processedData.find((p: any) => p.id === s.id))
+                .map((s: any) => ({
+                    id: s.id, employee: s.employeeName, objective: s.objectiveName,
+                    position: s.positionName, origin: s.origin, status: s.status,
+                    isAbsent: s.isAbsent, isPresent: s.isPresent, draft: s.draft,
+                })),
+        };
+        const blob = new Blob([JSON.stringify(dump, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `debug-ops-${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.json`;
+        a.click(); URL.revokeObjectURL(url);
+    };
+
     // Agrupar processedData por objetivo
     const byObjective = useMemo(() => {
         const map = new Map<string, { name: string; clientName: string; shifts: any[] }>();
@@ -151,6 +198,13 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                     <AlertTriangle size={16} className="text-amber-400" />
                     <span className="text-white font-bold text-sm flex-1">🔍 Panel de Diagnóstico — Operaciones</span>
                     <span className="text-slate-400 text-xs">{processedData.length} turnos procesados · {rawShifts.length} raw</span>
+                    <button
+                        onClick={handleDownload}
+                        className="px-2 py-1 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded transition-colors"
+                        title="Descargar datos de diagnóstico como JSON"
+                    >
+                        ⬇ Descargar JSON
+                    </button>
                     <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors">
                         <X size={16} />
                     </button>

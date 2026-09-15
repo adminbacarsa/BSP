@@ -2,7 +2,7 @@
 import * as functions from 'firebase-functions/v1';
 import { onCall as onCallV2, HttpsError as HttpsErrorV2 } from 'firebase-functions/v2/https';
 import { onSchedule as onScheduleV2 } from 'firebase-functions/v2/scheduler';
-import { onDocumentWritten as onDocumentWrittenV2 } from 'firebase-functions/v2/firestore';
+import { onDocumentWritten as onDocumentWrittenV2, onDocumentUpdated as onDocumentUpdatedV2 } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup, getBackupDb } from './backup/backup.service';
@@ -22,7 +22,20 @@ import {
   isSuperAdminBackupRole,
   isAdminBackupRole,
 } from './backup/backup-auth.util';
+import { assertPanelTenantCallable } from './auth/panel-tenant-auth.util';
+import {
+  CRON_V1_RUNTIME,
+  CRON_QUERY_MAX_DOCS,
+  CRON_BATCH_WRITE_LIMIT,
+  cronShouldStop,
+} from './ops/cronLimits';
 import { createNestApp } from './main';
+import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
+import {
+  decideShiftCloseOrRetain,
+  employeeHasPosteriorShift,
+  toTimestampMs,
+} from './coverage/shiftContinuity';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -42,6 +55,16 @@ import { LaborAgreementService } from './data-management/labor-agreement.service
 // Interfaces
 import { EmployeeRole } from './common/interfaces/employee.interface';
 import { runPlatformAssistant, type AssistantChatPayload } from './assistant/runPlatformAssistant';
+import {
+  ejecutarExtenderJornada,
+  ejecutarCubrirAusencia,
+  ejecutarCrearTurnoRefuerzo,
+  ejecutarConfirmarPresencia,
+  ejecutarRegistrarAusencia,
+  ejecutarCerrarTurno,
+  ejecutarPlanificarObjetivoMes,
+  type AgentActionPayload,
+} from './assistant/assistantWriteActions';
 import {
   classifyAssistantOutcome,
   extractLastUserQuestion,
@@ -278,7 +301,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
       case 'GET_CLIENT': return { success: true, data: await clientService.getClient(payload.id) };
       case 'GET_ALL_CLIENTS': return { success: true, data: await clientService.findAllClients() };
       case 'UPDATE_CLIENT': await clientService.updateClient(payload.id, payload.data); return { success: true, message: 'Cliente actualizado' };
-      case 'DELETE_CLIENT': await clientService.deleteClient(payload.id); return { success: true, message: 'Cliente eliminado' };
+      case 'DELETE_CLIENT': await clientService.deleteClient(payload.id); return { success: true, message: 'Cliente desactivado' };
 
       case 'CREATE_OBJECTIVE': return { success: true, data: await clientService.createObjective(payload) };
       case 'UPDATE_OBJECTIVE': await clientService.updateObjective(payload.id, payload.data); return { success: true, message: 'Objetivo actualizado correctamente' };
@@ -332,7 +355,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         
       case 'DELETE_EMPLOYEE':
         await employeeService.deleteEmployee(payload.uid);
-        return { success: true, message: 'Empleado eliminado.' };
+        return { success: true, message: 'Empleado desactivado.' };
 
       // ðŸ›' NUEVO: IMPORTACIÓN MASIVA
       case 'IMPORT_EMPLOYEES':
@@ -378,7 +401,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
         return { success: true, message: 'Administrador actualizado.' };
       case 'DELETE_USER':
         await sysUserService.deleteSystemUser(payload.uid);
-        return { success: true, message: 'Administrador eliminado.' };
+        return { success: true, message: 'Administrador desactivado.' };
       default:
         throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
     }
@@ -744,6 +767,596 @@ export const chatPlatformAssistant =
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
 
+// =========================================================
+// AGENTE: ejecutar acción propuesta (con confirmación humana)
+// =========================================================
+const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo', 'confirmar_presencia', 'registrar_ausencia', 'cerrar_turno', 'planificar_objetivo_mes'] as const;
+type AgentWriteAction = (typeof AGENT_WRITE_ACTIONS)[number];
+
+async function executeAgentActionHandler(
+  data: { action: string; payload: AgentActionPayload; empresaId: string },
+  context: functions.https.CallableContext,
+): Promise<{ ok: boolean; message: string }> {
+  const { action, payload, empresaId } = data;
+  if (!AGENT_WRITE_ACTIONS.includes(action as AgentWriteAction)) {
+    throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
+  }
+  if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar acciones del agente.',
+  );
+
+  const role = String(context.auth!.token.role ?? '');
+  console.info('[executeAgentAction]', { uid: context.auth!.uid, role, action, empresaId });
+
+  try {
+    if (action === 'extender_jornada') return await ejecutarExtenderJornada(empresaId, payload);
+    if (action === 'cubrir_ausencia') return await ejecutarCubrirAusencia(empresaId, payload);
+    if (action === 'crear_turno_refuerzo') return await ejecutarCrearTurnoRefuerzo(empresaId, payload);
+    if (action === 'confirmar_presencia') return await ejecutarConfirmarPresencia(empresaId, payload);
+    if (action === 'registrar_ausencia') return await ejecutarRegistrarAusencia(empresaId, payload);
+    if (action === 'cerrar_turno') return await ejecutarCerrarTurno(empresaId, payload);
+    if (action === 'planificar_objetivo_mes') return await ejecutarPlanificarObjetivoMes(empresaId, payload);
+  } catch (e: any) {
+    console.error('[executeAgentAction] error', e?.message);
+    throw new functions.https.HttpsError('internal', e?.message ?? 'Error al ejecutar la acción.');
+  }
+  throw new functions.https.HttpsError('internal', 'Acción no implementada.');
+}
+
+export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
+
+// =========================================================
+// MODO DEMO CONTINUO — cron cada 5 min alineado al reloj AR (:00/:05/…).
+// Laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas
+// (ficticias, selladas con modoDemoAt) y dispara el MISMO pipeline que Auto
+// (onTurnoAbsenciaDetectada → cascada CCT → convocatorias → ledger).
+// Las respuestas a convocatorias se simulan sin esperar al guardia real.
+// =========================================================
+async function runModoDemoForEmpresa(
+  db: admin.firestore.Firestore,
+  empresaId: string,
+): Promise<{
+  presencias: number;
+  ausenciasDemo: number;
+  convRespuestas: number;
+}> {
+  const now = new Date();
+  const nowTs = admin.firestore.Timestamp.fromDate(now);
+  const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000));
+  const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
+
+  const snap = await db.collection('turnos')
+    .where('empresaId', '==', empresaId)
+    .where('startTime', '>=', windowStart)
+    .where('startTime', '<=', windowEnd)
+    .limit(600)
+    .get();
+
+  const batch = db.batch();
+  let presencias = 0;
+  let ausenciasDemo = 0;
+  let batchOps = 0;
+
+  const isVacant = (t: any) =>
+    !t.employeeId ||
+    t.employeeId === 'VACANTE' ||
+    t.employeeId === 'SIN_COBERTURA' ||
+    !!t.isUnassigned ||
+    !!t.isSinCobertura;
+  const isPassiveStandby = (t: any) => {
+    const c = String(t.code || '').toUpperCase();
+    return c === 'RET' || c === 'ESC' || c === 'REF' || t.isReten === true;
+  };
+  // RET/ESC/REF: stand-by — no simular presencia ni ausencia; se activan al cubrir (código real).
+  const skipBase = (t: any) =>
+    t.draft === true || t.isFranco === true || t.isVirtual || isPassiveStandby(t);
+
+  // === Pase 0: sanear RET/ESC/REF con punto verde fantasma (presencia sin turno real) ===
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (!isPassiveStandby(t) || !t.isPresent) continue;
+    const hasLedger =
+      String(t.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' ||
+      !!t.coversAbsenceEmployeeName ||
+      !!t.absenceShiftId ||
+      !!t.coveredShiftId ||
+      (!!t.coverageEventId && !!t.previousPassiveCode);
+    if (hasLedger) {
+      // Inconsistente: tiene ledger pero code sigue pasivo → convertir al código del hueco
+      const absId = String(t.absenceShiftId || t.coveredShiftId || '').trim();
+      let vacancyCode = String(t.shiftCode || 'M').toUpperCase();
+      let vacancy: Record<string, any> = t;
+      if (absId) {
+        try {
+          const absDoc = await db.collection('turnos').doc(absId).get();
+          if (absDoc.exists) {
+            vacancy = absDoc.data() || t;
+            vacancyCode = String(vacancy.code || vacancy.shiftCode || 'M').toUpperCase();
+          }
+        } catch { /* keep defaults */ }
+      }
+      if (vacancyCode === 'RET' || vacancyCode === 'ESC' || vacancyCode === 'REF') vacancyCode = 'M';
+      const prev = String(t.previousPassiveCode || t.code || 'RET').toUpperCase();
+      batch.update(doc.ref, {
+        code: vacancyCode,
+        startTime: vacancy.startTime || t.startTime || null,
+        endTime: vacancy.endTime || t.endTime || null,
+        plannedStartTime: vacancy.startTime || t.plannedStartTime || null,
+        plannedEndTime: vacancy.endTime || t.plannedEndTime || null,
+        objectiveId: vacancy.objectiveId || t.objectiveId || null,
+        objectiveName: vacancy.objectiveName || t.objectiveName || null,
+        positionName: vacancy.positionName || t.positionName || null,
+        isReten: false,
+        isFranco: false,
+        origin: 'OPERATIONS_COVERAGE',
+        previousPassiveCode: prev,
+        reassignedFromPassiveAt: nowTs,
+        resolvedBy: t.resolvedBy || 'MODO_DEMO',
+        demoRetHealAt: nowTs,
+      });
+      batchOps += 1;
+    } else {
+      // Presencia fantasma en stand-by puro (p.ej. Demo viejo) → quitar punto verde
+      batch.update(doc.ref, {
+        isPresent: false,
+        status: 'ASSIGNED',
+        presentAt: admin.firestore.FieldValue.delete(),
+        realStartTime: admin.firestore.FieldValue.delete(),
+        checkInTime: admin.firestore.FieldValue.delete(),
+        autoPresencia: admin.firestore.FieldValue.delete(),
+        demoSimulated: admin.firestore.FieldValue.delete(),
+        demoRetPhantomClearedAt: nowTs,
+      });
+      batchOps += 1;
+    }
+  }
+
+  // === Pase 0b: Demo — cubridores OPERATIONS_COVERAGE sin fichada → presente simulado
+  // (mismo circuito que Auto ya fichado; arregla lab donde solo quedó «cubre X» en el ausente)
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isCompleted || t.isAbsent) continue;
+    if (isVacant(t) || isPassiveStandby(t)) continue;
+    // Franco planificado puro no; FT / cobertura sí
+    if (t.isFranco === true && !t.isFrancoTrabajado) continue;
+    const resolved = String(t.resolvedBy || '').toUpperCase();
+    const origin = String(t.origin || '').toUpperCase();
+    const isDemoCover =
+      resolved === 'MODO_DEMO'
+      || resolved === 'AUTO'
+      || resolved === 'OPERACIONES'
+      || !!t.modoDemoAt
+      || !!t.isFrancoTrabajado
+      || (origin === 'OPERATIONS_COVERAGE' && (
+        !!t.coverageEventId
+        || !!t.coversAbsenceEmployeeName
+        || !!t.absenceShiftId
+        || !!t.coveredShiftId
+        || !!t.coversEmployeeId
+        || !!t.coverageConvocatoriaId
+      ));
+    if (!isDemoCover) continue;
+    const startMs = (t.adjustedStartTime?.seconds ?? t.startTime?.seconds ?? 0) * 1000;
+    const endMs = (t.endTime?.seconds ?? 0) * 1000;
+    // No adelantar ACTIVO de turnos que aún no deberían haber empezado
+    if (startMs > now.getTime() + 15 * 60 * 1000) continue;
+    // Si el turno ya cerró hace >2h, no reabrir ACTIVO
+    if (endMs && endMs < now.getTime() - 2 * 3600 * 1000) continue;
+    const startTs = t.adjustedStartTime || t.startTime || nowTs;
+    const gapOid = String(t.francoObjectiveId || t.coverageRedirectedTo || '').trim();
+    const curOid = String(t.objectiveId || '').trim();
+    const posHeal = String(t.positionName || t.coversPositionName || '').trim();
+    const patch: Record<string, unknown> = {};
+    if (!t.isPresent) {
+      patch.isPresent = true;
+      patch.status = 'PRESENT';
+      patch.presentAt = startTs;
+      patch.realStartTime = startTs;
+      patch.autoPresencia = true;
+      patch.demoSimulated = true;
+      patch.modoDemoAt = nowTs;
+      patch.demoCovererHealAt = nowTs;
+    }
+    // FT viejo: francoObjectiveId = hueco pero objectiveId quedó en el franco origen → Ops no lo lista
+    if (gapOid && gapOid !== curOid) {
+      patch.objectiveId = gapOid;
+      if (t.francoObjectiveName) patch.objectiveName = t.francoObjectiveName;
+      patch.origin = origin || 'OPERATIONS_COVERAGE';
+      patch.demoObjectiveHealAt = nowTs;
+    }
+    if ((!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') && t.coversPositionName) {
+      patch.positionName = t.coversPositionName;
+    } else if (!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') {
+      patch.positionName = 'Cobertura';
+    }
+    if (Object.keys(patch).length === 0) continue;
+    batch.update(doc.ref, patch);
+    batchOps += 1;
+    if (patch.isPresent) presencias++;
+  }
+
+  // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
+  // Ventanas amplias: el cron cae en :00/:05/... AR; si un tick se atrasa,
+  // igual marcamos presencia mientras el turno esté vigente (hasta endTime).
+  const WINDOW_BEFORE_MS = 15 * 60 * 1000;
+  const LATE_DELAY_MS = 12 * 60 * 1000;
+  type ShiftCat = 'puntual' | 'late' | 'absent';
+  const shiftCategory = (empId: string): ShiftCat => {
+    let h = 0;
+    for (let i = 0; i < empId.length; i++) h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
+    const m = h % 10;
+    if (m === 0) return 'absent';
+    if (m <= 3) return 'late';
+    return 'puntual';
+  };
+
+  // === Pase 1: Simular presentes (puntual / tarde) ===
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (t.isAbsent || t.isPresent || t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    const empId = String(t.employeeId || '');
+    const cat = shiftCategory(empId);
+    const oid = String(t.objectiveId || '');
+    if (cat === 'absent') continue;
+
+    if (cat === 'late') {
+      // Tarde: desde 5 min después del inicio hasta el fin del turno (no solo 15 min)
+      if (startMs > now.getTime() + 10 * 60 * 1000) continue;
+      if (startMs > now.getTime() - 5 * 60 * 1000) continue; // aún no "tarde"
+      const endMsLate = (t.endTime?.seconds ?? 0) * 1000;
+      if (endMsLate && endMsLate < now.getTime()) continue;
+      const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
+      batch.update(doc.ref, {
+        isPresent: true,
+        status: 'PRESENT',
+        presentAt: lateTs,
+        realStartTime: lateTs,
+        // Dual reloj: plannedStartTime se conserva; fichada = realStartTime
+        autoPresencia: true,
+        llegadaTarde: true,
+        modoDemoAt: nowTs,
+        demoSimulated: true,
+      });
+      const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+      batch.set(db.collection('novedades').doc(`demo_late_${safeId}`), {
+        type: 'LLEGADA_TARDE',
+        status: 'pending',
+        title: 'Llegada Tarde',
+        description: `${t.employeeName || 'Guardia'} llegó ${LATE_DELAY_MS / 60000} min tarde — ${t.objectiveName || ''}`,
+        shiftId: doc.id,
+        clientId: t.clientId || null,
+        objectiveId: oid || null,
+        objectiveName: t.objectiveName || null,
+        employeeId: empId || null,
+        employeeName: t.employeeName || null,
+        positionName: t.positionName || null,
+        empresaId,
+        createdAt: nowTs,
+        reportedBy: 'SISTEMA_AUTO',
+        source: 'MODO_DEMO',
+        modoDemoAt: nowTs,
+      }, { merge: true });
+      batchOps += 2;
+    } else {
+      const isEarlyShift = t.isEarlyStart === true && !!t.adjustedStartTime;
+      const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
+      const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
+      const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
+      // Puntual: desde 15 min antes del inicio hasta el fin del turno.
+      // Antes solo 5 min después del start → si el cron no caía en punto, nunca ACTIVO.
+      if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
+      if (shiftEndMs && shiftEndMs < now.getTime()) continue;
+      if (!shiftEndMs && actualStartMs < now.getTime() - 8 * 3600 * 1000) continue;
+      batch.update(doc.ref, {
+        isPresent: true,
+        status: 'PRESENT',
+        presentAt: actualStartTs,
+        realStartTime: actualStartTs,
+        autoPresencia: true,
+        modoDemoAt: nowTs,
+        demoSimulated: true,
+      });
+      batchOps += 1;
+    }
+    presencias++;
+  }
+
+  // === Pase 1b: Simular ausencias AA (dispara cascada real vía onTurnoAbsenciaDetectada) ===
+  const ABSENT_MIN_MS = 5 * 60 * 1000;
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (skipBase(t) || isVacant(t)) continue;
+    if (t.isAbsent || t.isPresent || t.isCompleted) continue;
+    const startMs = (t.startTime?.seconds ?? 0) * 1000;
+    if (startMs > now.getTime() - ABSENT_MIN_MS) continue;
+    const empId = String(t.employeeId || '');
+    if (shiftCategory(empId) !== 'absent') continue;
+
+    batch.update(doc.ref, {
+      isAbsent: true,
+      status: 'ABSENT',
+      absenceType: 'AA',
+      absenceDetectedAt: nowTs,
+      // Misma forma que AUTO_T30 / scheduler; sello Demo para auditoría/trazabilidad
+      absenceDetectedBy: 'MODO_DEMO',
+      modoDemoAt: nowTs,
+      demoSimulated: true,
+    });
+
+    const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
+    const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
+    const dateStr2 = `${arDate2.getUTCFullYear()}-${String(arDate2.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate2.getUTCDate()).padStart(2, '0')}`;
+    const st2 = t.startTime?.toDate ? t.startTime.toDate() : new Date(startMs2);
+    const et2 = t.endTime?.seconds ? new Date((t.endTime.seconds) * 1000) : null;
+    const fmtT2 = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+    const horario2 = et2 ? `${fmtT2(st2)} - ${fmtT2(et2)}` : fmtT2(st2);
+    const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
+
+    batch.set(db.collection('ausencias').doc(`demo_ausencia_${safeId}`), {
+      employeeId: empId,
+      employeeName: t.employeeName || '',
+      startDate: dateStr2,
+      endDate: dateStr2,
+      type: 'No Presentacion',
+      absenceType: 'AA',
+      origin: 'AUTO_DEMO',
+      shiftId: doc.id,
+      objectiveId: t.objectiveId || null,
+      objectiveName: t.objectiveName || '',
+      clientId: t.clientId || null,
+      empresaId,
+      positionName: t.positionName || '',
+      shiftCode: (t.code || '').toUpperCase() || null,
+      reason: `No presentacion al turno ${horario2} - ${t.objectiveName || ''} (${t.positionName || ''})`,
+      status: 'Confirmada',
+      hasCertificate: false,
+      createdAt: nowTs,
+      source: 'MODO_DEMO',
+      modoDemoAt: nowTs,
+    }, { merge: true });
+
+    batch.set(db.collection('novedades').doc(`demo_aus_${safeId}`), {
+      type: 'AUSENCIA_AUTO',
+      status: 'pending',
+      title: 'Ausencia Automática (Demo)',
+      description: `${t.employeeName || 'Empleado'} no se presentó — ${t.objectiveName || ''} (MODO DEMO)`,
+      shiftId: doc.id,
+      clientId: t.clientId || null,
+      objectiveId: t.objectiveId || null,
+      objectiveName: t.objectiveName || null,
+      employeeId: empId || null,
+      employeeName: t.employeeName || null,
+      positionName: t.positionName || null,
+      empresaId,
+      createdAt: nowTs,
+      reportedBy: 'MODO_DEMO',
+      source: 'MODO_DEMO',
+      modoDemoAt: nowTs,
+    }, { merge: true });
+
+    batchOps += 3;
+    ausenciasDemo++;
+  }
+
+  if (batchOps > 0) {
+    await batch.commit();
+  }
+
+  // === Pase 8: Simular respuestas de convocatorias (cubre el protocolo real) ===
+  let convRespuestas = 0;
+  try {
+    convRespuestas = await simularRespuestasConvocatorias(db, empresaId);
+  } catch (e8) {
+    console.warn('[modoDemoCron] simularRespuestas error:', (e8 as Error)?.message);
+  }
+
+  return { presencias, ausenciasDemo, convRespuestas };
+}
+
+// =========================================================
+// MODO DEMO CONTINUO — cron cada 5 min ALINEADO al reloj AR
+// ( :00 :05 :10 … ). Así turnos que arrancan en punto (10/11/12/13/14…)
+// caen dentro del mismo tick y no se pierden por deriva de "every 5 minutes".
+// =========================================================
+export const modoDemoCron = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .pubsub.schedule('*/5 * * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const empSnap = await db.collection('empresas').where('modoDemoEnabled', '==', true).get();
+    if (empSnap.empty) return;
+    for (const empDoc of empSnap.docs) {
+      try {
+        const res = await runModoDemoForEmpresa(db, empDoc.id);
+        if (res.presencias + res.ausenciasDemo + res.convRespuestas > 0) {
+          console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} absDemo=${res.ausenciasDemo} conv=${res.convRespuestas} (solo generador)`);
+        }
+      } catch (e) {
+        console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
+      }
+    }
+  });
+
+// =========================================================
+// TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
+// Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
+// En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
+// En MODO AUTO los guardias/operadores lo hacen → mismo trigger.
+export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
+  { document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 60 },
+  async (event) => {
+    const before = event.data.before.data() as any;
+    const after  = event.data.after.data()  as any;
+
+    // Solo cuando isAbsent cambia de false/undefined a true
+    if (before.isAbsent === after.isAbsent || !after.isAbsent) return;
+    // Ignorar borradores y turnos virtuales
+    if (after.draft || after.isVirtual) return;
+
+    // Fallback 'bacarsa' para turnos legacy sin empresaId (mismo patrón que centroControlGuard)
+    const empresaId: string = String(after.empresaId || '').trim() || 'bacarsa';
+
+    const db = admin.firestore();
+    const empresaDoc = await db.doc(`empresas/${empresaId}`).get();
+    if (!empresaDoc.exists) return;
+    const centroControlEnabled = empresaDoc.data()?.centroControlEnabled !== false;
+    if (!centroControlEnabled) return;
+
+    await iniciarCascadaCobertura(db, {
+      id: event.params.shiftId,
+      objectiveId:    String(after.objectiveId   || ''),
+      objectiveName:  String(after.objectiveName  || ''),
+      clientId:       String(after.clientId       || ''),
+      clientName:     String(after.clientName     || ''),
+      code:           String(after.code           || ''),
+      startTime: after.startTime,
+      endTime:   after.endTime,
+      empresaId,
+    }, after.absenceDetectedBy === 'MODO_DEMO' || after.modoDemoAt ? 'MODO_DEMO' : 'AUTO');
+  }
+);
+
+// =========================================================
+// AUTO PRESENCIA Y CIERRE — callable SuperAdmin (modo prueba)
+// Marca presencia en turnos planificados que ya iniciaron
+// y cierra los que ya terminaron y siguen presentes.
+// =========================================================
+const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
+
+export const autoPresenciaYCierre = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .https.onCall(async (data: { empresaId?: string; dryRun?: boolean }, context) => {
+    if (!context.auth?.uid) throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión.');
+    const role = String((context.auth.token as any)?.role ?? '');
+    if (!SUPER_ADMIN_ROLES_AP.includes(role)) {
+      throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede ejecutar este comando.');
+    }
+
+    const empresaId = data?.empresaId || String((context.auth.token as any)?.empresaId ?? '');
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+    const dryRun = data?.dryRun !== false;
+
+    const db = admin.firestore();
+    const now = new Date();
+    const nowTs = admin.firestore.Timestamp.fromDate(now);
+
+    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowEnd   = admin.firestore.Timestamp.fromDate(new Date(now.getTime() +  2 * 3600000));
+
+    const snap = await db.collection('turnos')
+      .where('empresaId', '==', empresaId)
+      .where('startTime', '>=', windowStart)
+      .where('startTime', '<=', windowEnd)
+      .where('draft', '==', false)
+      .where('isFranco', '==', false)
+      .limit(500)
+      .get();
+
+    // Índice: set de objetivoId con turno activo entrante (relevo aun no fichado)
+    // Relevo = turno que empieza cerca del endTime del saliente y NO tiene presencia aún
+    // Construimos mapa objectiveId → turnos de la ventana para el chequeo de relevo
+    const byObjective = new Map<string, Array<{ startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean }>>();
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      const oid = String(t.objectiveId || '');
+      if (!oid) continue;
+      if (!byObjective.has(oid)) byObjective.set(oid, []);
+      byObjective.get(oid)!.push({
+        startMs: (t.startTime?.seconds ?? 0) * 1000,
+        endMs:   (t.endTime?.seconds   ?? 0) * 1000,
+        isPresent: !!t.isPresent,
+        isCompleted: !!t.isCompleted,
+        isAbsent: !!t.isAbsent,
+      });
+    }
+
+    // ¿Tiene relevo pendiente? = hay un turno en el mismo objetivo cuyo startTime está
+    // dentro de ±90 min del endTime del turno saliente Y ese relevo aún no fichó ni es ausente.
+    function hayRelevoPendiente(objectiveId: string, shiftEndMs: number): boolean {
+      const turnos = byObjective.get(objectiveId) ?? [];
+      return turnos.some(r =>
+        !r.isPresent && !r.isAbsent && !r.isCompleted &&
+        Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
+      );
+    }
+
+    const presenciaMarcada: string[] = [];
+    const turnosCerrados: string[] = [];
+    const turnosEnRetencion: string[] = [];
+    const batch = db.batch();
+    let ops = 0;
+
+    for (const doc of snap.docs) {
+      const t = doc.data() as any;
+      if (t.isAbsent || t.isVirtual) continue;
+      const codeU = String(t.code || '').toUpperCase();
+      // RET/ESC/REF son stand-by: no auto-presencia (evita punto verde sin turno real).
+      if (codeU === 'RET' || codeU === 'ESC' || codeU === 'REF' || t.isReten === true) continue;
+      const startMs = (t.startTime?.seconds ?? 0) * 1000;
+      const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
+      const objectiveId = String(t.objectiveId || '');
+      const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? objectiveId}`;
+
+      // Marcar presencia: turno ya inició, no tiene presencia ni ausencia
+      if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
+        presenciaMarcada.push(label);
+        if (!dryRun) {
+          batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+          ops++;
+        }
+      }
+
+      // Cerrar: turno terminó, sigue presente — pero solo si no hay relevo esperando
+      if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
+        if (objectiveId && hayRelevoPendiente(objectiveId, endMs)) {
+          // Relevo no llegó → retención, no cerramos
+          turnosEnRetencion.push(label);
+        } else {
+          turnosCerrados.push(label);
+          if (!dryRun) {
+            batch.update(doc.ref, {
+              status: 'COMPLETED', isCompleted: true, isPresent: false,
+              realEndTime: nowTs, autoCierre: true,
+            });
+            ops++;
+            db.collection('novedades')
+              .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+              .then(ns => {
+                if (ns.empty) return;
+                const b2 = db.batch();
+                ns.docs.filter(d => ['RETENCION_LARGA','RECARGO_12H','RETENCION_DETECTADA'].includes(d.data().type))
+                  .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_CIERRE_ADMIN' }));
+                return b2.commit();
+              }).catch(() => {});
+          }
+        }
+      }
+    }
+
+    if (!dryRun && ops > 0) await batch.commit();
+
+    return {
+      dryRun,
+      empresaId,
+      turnosEvaluados: snap.size,
+      presenciaMarcada: presenciaMarcada.length,
+      turnosCerrados: turnosCerrados.length,
+      turnosEnRetencion: turnosEnRetencion.length,
+      detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion },
+      mensaje: dryRun
+        ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente).`
+        : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado).`,
+    };
+  });
+
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
 
 async function optimizePlanningGeminiHandler(
@@ -1020,39 +1633,104 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     }
 });
 
+/**
+ * Motor único de presencia + auto-relevo FIFO 1:1.
+ * Canales: OPERATIONS | VIGI (vía executeAgentAction) | PORTAL (vía requestCheckIn).
+ */
+export const registrarPresencia = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) {
+    throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  }
+
+  const role = String(context.auth.token.role ?? '');
+  const allowedOps = [
+    'admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP',
+    'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador', 'ADMIN',
+  ];
+  const isOps = allowedOps.includes(role) || ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'].includes(role);
+  if (!isOps) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo operadores pueden registrar presencia por este canal.');
+  }
+
+  const sourceRaw = String(data?.source || 'OPERATIONS').toUpperCase();
+  const source =
+    sourceRaw === 'VIGI' || sourceRaw === 'DEMO' || sourceRaw === 'MANUAL_RADIO' || sourceRaw === 'MANUAL_PHONE'
+      ? (sourceRaw as 'VIGI' | 'DEMO' | 'MANUAL_RADIO' | 'MANUAL_PHONE')
+      : 'OPERATIONS';
+
+  let overrideRelieveShiftId: string | null | undefined = undefined;
+  if (data?.skipAutoRelevo === true) {
+    overrideRelieveShiftId = null;
+  } else if (typeof data?.overrideRelieveShiftId === 'string' && data.overrideRelieveShiftId.trim()) {
+    overrideRelieveShiftId = data.overrideRelieveShiftId.trim();
+  } else if (data?.overrideRelieveShiftId === null) {
+    overrideRelieveShiftId = null;
+  }
+
+  const db = admin.firestore();
+  const { registrarPresencia: run } = await import('./fichajes/registrarPresencia');
+
+  try {
+    const result = await run(db, {
+      shiftId,
+      source,
+      operatorUid: context.auth.uid,
+      actorName: context.auth.token.name || context.auth.token.email || 'Operador',
+      overrideRelieveShiftId,
+      skipAutoRelevo: data?.skipAutoRelevo === true,
+      coords: data?.coords || null,
+      recordedAt: data?.recordedAt || null,
+    });
+    return {
+      success: true,
+      alreadyPresent: result.alreadyPresent === true,
+      relieved: result.relieved,
+    };
+  } catch (e) {
+    const msg = (e as Error)?.message || '';
+    if (msg === 'TURNO_NOT_FOUND') {
+      throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    }
+    if (msg === 'SHIFT_ABSENT') {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        'El turno está marcado como ausencia. Revertí la ausencia antes de dar presente.',
+      );
+    }
+    throw new functions.https.HttpsError('internal', msg || 'Error al registrar presencia.');
+  }
+});
+
 // 1. Fichada Manual (Operador de Radio / Supervisor)
 export const registrarFichadaManual = functions.https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
     
-    // data: { shiftId, notes, method: 'RADIO' | 'PHONE' }
     const { shiftId, notes, method } = data;
+    if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
     const db = admin.firestore();
+    const source =
+      String(method || '').toUpperCase() === 'PHONE' ? 'MANUAL_PHONE' as const : 'MANUAL_RADIO' as const;
 
     try {
-        const shiftRef = db.collection('turnos').doc(shiftId);
-        const shiftDoc = await shiftRef.get();
-
-        if (!shiftDoc.exists) throw new Error("Turno no encontrado");
-
-        // Actualizamos el turno a estado "PRESENT"
-        await shiftRef.update({
-            status: 'PRESENT',
-            checkInTime: admin.firestore.FieldValue.serverTimestamp(),
-            checkInMethod: method || 'MANUAL', // 'RADIO', 'PHONE', 'WHATSAPP'
-            checkInOperator: context.auth.uid, // QuiÃ©n validÃ³ la fichada
-            operatorNotes: notes || ''
+        const { registrarPresencia: run } = await import('./fichajes/registrarPresencia');
+        const result = await run(db, {
+          shiftId,
+          source,
+          operatorUid: context.auth.uid,
+          actorName: context.auth.token.name || context.auth.token.email || 'Operador',
         });
-
-        // Log de auditorÃ­a (opcional)
-        await db.collection('audit_logs').add({
-            action: 'MANUAL_CHECKIN',
-            shiftId,
-            operator: context.auth.uid,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-        });
-
-        return { success: true };
+        if (notes) {
+          await db.collection('turnos').doc(shiftId).update({ operatorNotes: notes }).catch(() => {});
+        }
+        return { success: true, alreadyPresent: result.alreadyPresent === true, relieved: result.relieved };
     } catch (error: any) {
+        const msg = error?.message || '';
+        if (msg === 'TURNO_NOT_FOUND') throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+        if (msg === 'SHIFT_ABSENT') throw new functions.https.HttpsError('failed-precondition', msg);
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
@@ -1102,11 +1780,6 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
 
         const shiftData = shiftSnap.data() as any;
 
-        const cc = await loadCentroControlState(db);
-        if (!cc.isEnabled(shiftData.empresaId)) {
-            return { success: true, skipped: 'centro_control_off' };
-        }
-
         await shiftRef.update({
             lateArrivalAt: now,
             checkInStatus: 'LATE_PENDING',
@@ -1149,6 +1822,14 @@ export {
   approveSwapRequest,
   rejectSwapRequestSupervisor,
 } from './swap/swapPortal';
+
+export {
+  crearConvocatoriaCobertura,
+  responderConvocatoriaCobertura,
+  cancelarConvocatoriaCobertura,
+  getCandidatosCobertura,
+  checkConvocatoriaTimeouts,
+} from './coverage/convocatoriasCobertura';
 
 export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 
@@ -1330,11 +2011,20 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         const existing = await admin.auth().getUserByEmail(email);
         uid = existing.uid;
         alreadyExisted = true;
+        await admin.auth().setCustomUserClaims(uid, {
+          role: 'employee',
+          type: 'employee',
+          ...(empresaId ? { empresaId } : {}),
+        });
       } catch (e: any) {
         if (e.code === 'auth/user-not-found') {
           const tempPass = Math.random().toString(36).slice(2, 14) + Math.random().toString(36).slice(2, 6).toUpperCase();
           const newUser = await admin.auth().createUser({ email, password: tempPass, displayName: name });
-          await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+          await admin.auth().setCustomUserClaims(newUser.uid, {
+            role: 'employee',
+            type: 'employee',
+            ...(empresaId ? { empresaId } : {}),
+          });
           uid = newUser.uid;
         } else {
           throw e;
@@ -1497,8 +2187,21 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   const email = userRecord.email;
   if (!email) throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
 
-  // 1. Establecer contraseÃ±a
+  // 1. Establecer contraseña
   await admin.auth().updateUser(uid, { password });
+
+  // Claim empresaId para reglas Firestore (eventos / solicitudes)
+  try {
+    const empSnap = await db.collection('empleados').doc(employeeId).get();
+    const empEmpresaId = (empSnap.data()?.empresaId || '').toString();
+    await admin.auth().setCustomUserClaims(uid, {
+      role: 'employee',
+      type: 'employee',
+      ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
+    });
+  } catch (e) {
+    console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
+  }
 
   // 2. Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
@@ -1761,6 +2464,9 @@ export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
+export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
+export { backfillCoverageLedger } from './coverage/backfillCoverageLedger';
+export { onGuardAbsenceDetected } from './notifications/onGuardAbsenceDetected';
 export { onSolicitudEventoCreated } from './notifications/onSolicitudEventoCreated';
 export { flushShiftNotifDigests } from './notifications/shiftNotifDigest';
 
@@ -1943,8 +2649,10 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
 //   C) Turno sin relevo programado → cerrar directamente al vencimiento
 export const autoCompletarTurnos = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -1962,16 +2670,54 @@ export const autoCompletarTurnos = functions
     const snap = await db.collection('turnos')
       .where('status', '==', 'PRESENT')
       .where('endTime', '<=', cutoff)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
 
-    const completeBatch  = db.batch();
-    const auditBatch     = db.batch();
+    let completeBatch  = db.batch();
+    let auditBatch     = db.batch();
+    let completeOps = 0;
+    let auditOps = 0;
     let completed = 0;
     let alertedNoRelief = 0;
+    let processed = 0;
+
+    const flushCompleteBatch = async () => {
+      if (completeOps === 0) return;
+      await completeBatch.commit();
+      completeBatch = db.batch();
+      completeOps = 0;
+    };
+    const flushAuditBatch = async () => {
+      if (auditOps === 0) return;
+      await auditBatch.commit();
+      auditBatch = db.batch();
+      auditOps = 0;
+    };
+    const queueCompleteUpdate = async (
+      ref: FirebaseFirestore.DocumentReference,
+      data: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData>,
+    ) => {
+      completeBatch.update(ref, data);
+      completeOps++;
+      if (completeOps >= CRON_BATCH_WRITE_LIMIT) await flushCompleteBatch();
+    };
+    const queueAuditSet = async (
+      ref: FirebaseFirestore.DocumentReference,
+      data: FirebaseFirestore.WithFieldValue<FirebaseFirestore.DocumentData>,
+    ) => {
+      auditBatch.set(ref, data);
+      auditOps++;
+      if (auditOps >= CRON_BATCH_WRITE_LIMIT) await flushAuditBatch();
+    };
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[autoCompletarTurnos] Wall-clock alcanzado tras ${processed} turnos`);
+        break;
+      }
+      processed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
@@ -1994,7 +2740,7 @@ export const autoCompletarTurnos = functions
           if (minutesInRetention < 120) continue; // <2h → esperar más
         }
         // >2h de retención automática o >6h de retención manual → auto-cerrar
-        completeBatch.update(docSnap.ref, {
+        await queueCompleteUpdate(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
           isPresent: false,
@@ -2014,14 +2760,16 @@ export const autoCompletarTurnos = functions
       const windowStart = admin.firestore.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
       const windowEnd   = admin.firestore.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
 
-      const relieveSnap = await db.collection('turnos')
+      let relieveQ: FirebaseFirestore.Query = db.collection('turnos')
         .where('objectiveId',  '==', shift.objectiveId)
-        .where('positionName', '==', shift.positionName)
         .where('startTime', '>=', windowStart)
-        .where('startTime', '<=', windowEnd)
-        .get();
+        .where('startTime', '<=', windowEnd);
+      if (shift.positionName) {
+        relieveQ = relieveQ.where('positionName', '==', shift.positionName);
+      }
+      const relieveSnap = await relieveQ.get();
 
-      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente estÃ¡ etiquetado
+      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente está etiquetado
       const relieveDocs = relieveSnap.docs.filter(d =>
         d.id !== docSnap.id && sameTenantShift(shift, d.data()),
       );
@@ -2031,8 +2779,6 @@ export const autoCompletarTurnos = functions
         return s === 'PRESENT' || s === 'COMPLETED';
       });
       // Solo contar como relevo pendiente un turno con empleado REAL asignado.
-      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos —
-      // si se cuentan, el turno saliente nunca se cierra y queda como retenido indefinidamente.
       const relievePending = relieveDocs.find(d => {
         const data = d.data();
         if (!data.employeeId || data.employeeId === 'VACANTE') return false;
@@ -2041,15 +2787,20 @@ export const autoCompletarTurnos = functions
         return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
       });
 
-      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
+      // Relevo ausente o vacante activa:
       const relieveAbsent = relieveDocs.find(d => {
         const data = d.data();
         return data.isAbsent === true || data.status === 'ABSENT';
       });
+      const relieveVacant = relieveDocs.find(d => {
+        const data = d.data();
+        return (data.isUnassigned === true || data.employeeId === 'VACANTE' || data.origin === 'VACANTE_POR_AUSENCIA')
+          && data.status !== 'COVERED' && data.status !== 'COMPLETED';
+      });
 
       if (relievePresent) {
-        // CASO A: El relevo ya estÃ¡ presente — safety net, cerrar el turno saliente
-        completeBatch.update(docSnap.ref, {
+        // CASO A: El relevo ya está presente — safety net, cerrar el turno saliente
+        await queueCompleteUpdate(docSnap.ref, {
           status: 'COMPLETED',
           isCompleted: true,
           realEndTime: now,
@@ -2058,7 +2809,7 @@ export const autoCompletarTurnos = functions
           autoCloseReason: 'RELEVO_PRESENTE',
         });
         const logRef = db.collection('audit_logs').doc();
-        auditBatch.set(logRef, {
+        await queueAuditSet(logRef, {
           action: 'AUTO_COMPLETE_SHIFT',
           actorName: 'Sistema (Scheduler)',
           actorUid: 'SYSTEM',
@@ -2070,10 +2821,10 @@ export const autoCompletarTurnos = functions
         completed++;
 
       } else if (relievePending) {
-        // CASO B: Relevo programado pero no llegÃ³ → retener al guardia + push + novedad
+        // CASO B: Relevo programado pero no llegó → retener al guardia + push + novedad
         // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
         if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
+          await queueCompleteUpdate(docSnap.ref, {
             isRetention: true,
             retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
             autoRetentionAt: now,
@@ -2101,7 +2852,7 @@ export const autoCompletarTurnos = functions
           .limit(1).get();
         if (existingB.empty) {
           const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
+          await queueAuditSet(novRef, {
             type: 'RETENCION_SIN_RELEVO',
             status: 'PENDIENTE',
             shiftId: docSnap.id,
@@ -2120,13 +2871,14 @@ export const autoCompletarTurnos = functions
           alertedNoRelief++;
         }
 
-      } else if (relieveAbsent) {
-        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
+      } else if (relieveAbsent || relieveVacant) {
+        // CASO B2: El relevo está ausente o hay vacante activa en el puesto
         // → Retención forzada + push + novedad
+        const absentOrVacLabel = relieveAbsent?.data()?.employeeName || relieveVacant?.data()?.causedByEmployeeName || 'puesto vacante';
         if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
+          await queueCompleteUpdate(docSnap.ref, {
             isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
+            retentionReason: `RELEVO_AUSENTE: relevo no se presentó (${absentOrVacLabel})`,
             autoRetentionAt: now,
           });
         }
@@ -2137,7 +2889,7 @@ export const autoCompletarTurnos = functions
             tokens: retTokensB2,
             notification: {
               title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
+              body: `El relevo no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
@@ -2151,7 +2903,7 @@ export const autoCompletarTurnos = functions
           .limit(1).get();
         if (existing.empty) {
           const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
+          await queueAuditSet(novRef, {
             type: 'RETENCION_SIN_RELEVO',
             status: 'PENDIENTE',
             shiftId: docSnap.id,
@@ -2195,7 +2947,7 @@ export const autoCompletarTurnos = functions
         if (requiresContinuousCoverage) {
           // CASO C2: Puesto 24HS sin relevo → retener al guardia + push
           if (!shift.isRetention || !shift.autoRetentionAt) {
-            completeBatch.update(docSnap.ref, {
+            await queueCompleteUpdate(docSnap.ref, {
               isRetention: true,
               retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
               autoRetentionAt: now,
@@ -2221,7 +2973,7 @@ export const autoCompletarTurnos = functions
             .limit(1).get();
           if (existingC.empty) {
             const novRef = db.collection('novedades').doc();
-            auditBatch.set(novRef, {
+            await queueAuditSet(novRef, {
               type: 'RETENCION_SIN_RELEVO',
               status: 'PENDIENTE',
               shiftId: docSnap.id,
@@ -2238,33 +2990,97 @@ export const autoCompletarTurnos = functions
             alertedNoRelief++;
           }
         } else {
-          // CASO C: Puesto CUSTOM/parcial sin continuidad → cerrar turno automáticamente
-          completeBatch.update(docSnap.ref, {
-            status: 'COMPLETED',
-            isCompleted: true,
-            realEndTime: now,
-            autoCompletedAt: now,
-            autoCompletedBy: 'SYSTEM_SCHEDULER',
-            autoCloseReason: 'SIN_RELEVO_CUSTOM',
+          // Continuidad bandas: turno posterior mismo objetivo / TURA → RETAIN; si no → AUTO_CLOSE
+          let hasPosterior = false;
+          try {
+            const dayStart = new Date(nowMs);
+            dayStart.setHours(0, 0, 0, 0);
+            const dayEnd = new Date(nowMs);
+            dayEnd.setHours(23, 59, 59, 999);
+            const daySnap = await db.collection('turnos')
+              .where('empresaId', '==', empId || shift.empresaId)
+              .where('employeeId', '==', shift.employeeId)
+              .where('startTime', '>=', admin.firestore.Timestamp.fromDate(dayStart))
+              .where('startTime', '<=', admin.firestore.Timestamp.fromDate(dayEnd))
+              .limit(40)
+              .get();
+            const dayShifts = daySnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const currentEndMs = toTimestampMs(shift.endTime) || nowMs;
+            hasPosterior = employeeHasPosteriorShift({
+              employeeId: String(shift.employeeId || ''),
+              objectiveId: String(shift.objectiveId || ''),
+              currentShiftId: docSnap.id,
+              currentEndMs,
+              dayShifts,
+            });
+          } catch (e) {
+            console.warn('[autoCompletarTurnos] Error checking posterior shift:', e);
+          }
+
+          const decision = decideShiftCloseOrRetain({
+            shift: { ...shift, id: docSnap.id },
+            requiresContinuousCoverage24h: false,
+            hasPosteriorShift: hasPosterior,
           });
-          const logRef = db.collection('audit_logs').doc();
-          auditBatch.set(logRef, {
-            action: 'AUTO_COMPLETE_SHIFT',
-            actorName: 'Sistema (Scheduler)',
-            actorUid: 'SYSTEM',
-            module: 'OPERACIONES',
-            shiftId: docSnap.id,
-            details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-            timestamp: now,
-          });
-          completed++;
+
+          if (decision.action === 'RETAIN') {
+            if (!shift.isRetention || !shift.autoRetentionAt) {
+              await queueCompleteUpdate(docSnap.ref, {
+                isRetention: true,
+                retentionReason: decision.reason,
+                autoRetentionAt: now,
+              });
+            }
+            const existingRet = await db.collection('novedades')
+              .where('shiftId', '==', docSnap.id)
+              .where('type', '==', 'RETENCION_SIN_RELEVO')
+              .limit(1).get();
+            if (existingRet.empty) {
+              const novRef = db.collection('novedades').doc();
+              await queueAuditSet(novRef, {
+                type: 'RETENCION_SIN_RELEVO',
+                status: 'PENDIENTE',
+                shiftId: docSnap.id,
+                objectiveId: shift.objectiveId,
+                objectiveName: shift.objectiveName || '',
+                clientId: shift.clientId || null,
+                empresaId: empId || null,
+                employeeName: shift.employeeName || '',
+                positionName: shift.positionName || '',
+                description: `⏰ RETENCIÓN (${decision.reason}): ${shift.employeeName || ''} en ${shift.objectiveName || ''} — continuidad hasta relevo.`,
+                createdAt: now,
+                source: 'SYSTEM_SCHEDULER',
+              });
+              alertedNoRelief++;
+            }
+          } else {
+            await queueCompleteUpdate(docSnap.ref, {
+              status: 'COMPLETED',
+              isCompleted: true,
+              realEndTime: now,
+              autoCompletedAt: now,
+              autoCompletedBy: 'SYSTEM_SCHEDULER',
+              autoCloseReason: decision.reason || 'SIN_RELEVO_CUSTOM',
+            });
+            const logRef = db.collection('audit_logs').doc();
+            await queueAuditSet(logRef, {
+              action: 'AUTO_COMPLETE_SHIFT',
+              actorName: 'Sistema (Scheduler)',
+              actorUid: 'SYSTEM',
+              module: 'OPERACIONES',
+              shiftId: docSnap.id,
+              details: `Turno finalizado (${decision.reason}): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
+              timestamp: now,
+            });
+            completed++;
+          }
         }
       }
     }
 
-    await completeBatch.commit();
-    await auditBatch.commit();
-    console.log(`[autoCompletarTurnos] Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
+    await flushCompleteBatch();
+    await flushAuditBatch();
+    console.log(`[autoCompletarTurnos] Procesados: ${processed}/${snap.size} | Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
     return null;
   });
 
@@ -2275,7 +3091,7 @@ export const autoCompletarTurnos = functions
 //   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
 //   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
-const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
+const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET', 'ESC', 'REF']);
 
 function shiftEmpresaId(shift: FirebaseFirestore.DocumentData): string {
   return String(shift.empresaId ?? '').trim();
@@ -2303,8 +3119,10 @@ async function getEmployeeTokens(db: admin.firestore.Firestore, employeeId: stri
 
 export const detectarAusencias = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -2323,11 +3141,19 @@ export const detectarAusencias = functions
     const earlySnap = await db.collection('turnos')
       .where('startTime', '>=', earlyFrom)
       .where('startTime', '<=', earlyTo)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
+    let earlyProcessed = 0;
     for (const earlyDoc of earlySnap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[detectarAusencias] Wall-clock en bloque temprano tras ${earlyProcessed} turnos`);
+        break;
+      }
+      earlyProcessed++;
       const s = earlyDoc.data();
       if (!cc.isEnabled(s.empresaId)) continue;
+      if (cc.isDemo(s.empresaId)) continue; // Demo genera sus propios eventos
       if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
       if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
@@ -2340,8 +3166,29 @@ export const detectarAusencias = functions
 
       if (!s.objectiveId || !posName || !empId) continue;
 
-      // Marcar que ya se enviÃ³ la alerta temprana
+      // Marcar que ya se procesó la alerta temprana
       await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
+
+      // Preguntar al guardia tardío si viene antes de marcarlo ausente
+      try {
+        const empUidSnap = await db.collection('empleados').doc(s.employeeId).get();
+        const empUid: string | undefined = empUidSnap.data()?.uid;
+        await crearConvocatoriaLlegadaTarde(db, {
+          id: earlyDoc.id,
+          empresaId: empId,
+          objectiveId: s.objectiveId,
+          objectiveName: s.objectiveName || '',
+          clientId: s.clientId || '',
+          shiftCode: (s.code || '').toUpperCase(),
+          startTime: s.startTime,
+          endTime: s.endTime,
+          employeeId: s.employeeId,
+          employeeName: s.employeeName || '',
+          employeeUid: empUid,
+        });
+      } catch (e) {
+        console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
+      }
 
       // Buscar guardia saliente presente en el mismo puesto
       try {
@@ -2389,17 +3236,25 @@ export const detectarAusencias = functions
     const snap = await db.collection('turnos')
       .where('startTime', '>=', windowFrom)
       .where('startTime', '<=', windowTo)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
 
     let alerts = 0;
     let absents = 0;
+    let block2Processed = 0;
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[detectarAusencias] Wall-clock en bloque AA tras ${block2Processed} turnos`);
+        break;
+      }
+      block2Processed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
+      if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
       // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
       if (SKIP_STATUSES.has(shift.status || '')) continue;
@@ -2427,8 +3282,7 @@ export const detectarAusencias = functions
       const elapsedMin = (nowMs - startMs) / 60000;
 
       // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
-      // T+60: guardia tiene 60 min para marcar presencia antes de ser marcado AA
-      if (elapsedMin >= 60) {
+      if (elapsedMin >= 30) {
         // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
         if (shift.absenceDetectedAt) {
           // Corrección retroactiva: turnos nocturnos cuya ausencia fue guardada con fecha UTC en vez de UTC-3
@@ -2664,15 +3518,17 @@ export const detectarAusencias = functions
       }
     }
 
-    console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
+    console.log(`[detectarAusencias] Bloque1: ${earlyProcessed}/${earlySnap.size} | Bloque2: ${block2Processed}/${snap.size} | Alertas: ${alerts} | Ausentes: ${absents}`);
     return null;
   });
 
 // =========================================================
 export const gestionarVacantes = functions
   .region('us-central1')
+  .runWith(CRON_V1_RUNTIME)
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
+    const startedAt = Date.now();
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
     if (!cc.anyEnabled) {
@@ -2690,19 +3546,71 @@ export const gestionarVacantes = functions
     const snap = await db.collection('turnos')
       .where('startTime', '>=', windowStart)
       .where('startTime', '<=', windowEnd)
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) return null;
 
+    // Pre-fetch planificacion_estados para todos los objetivos con vacantes de planning
+    // Los turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL) siempre se procesan.
+    const planKeySet = new Set<string>();
+    for (const docSnap of snap.docs) {
+      const sh = docSnap.data();
+      if (sh.draft === true) continue;
+      if (sh.isUnassigned !== true && sh.employeeId !== 'VACANTE') continue;
+      const shOrigin = String(sh.origin || '');
+      const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!sh.isReten || sh.resolvedBy === 'OPERACIONES';
+      if (!isOps && sh.objectiveId) {
+        const startMs = sh.startTime?.toMillis?.() ?? 0;
+        if (startMs) {
+          const d = new Date(startMs);
+          planKeySet.add(`${sh.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`);
+        }
+      }
+    }
+    const publishedPlanKeys = new Set<string>();
+    const planKeyArr = Array.from(planKeySet);
+    for (let i = 0; i < planKeyArr.length; i += 30) {
+      const chunk = planKeyArr.slice(i, i + 30);
+      if (chunk.length === 0) continue;
+      const pubSnap = await db.collection('planificacion_estados')
+        .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
+        .get();
+      for (const d of pubSnap.docs) {
+        publishedPlanKeys.add(d.id);
+      }
+    }
+
     let sentToPlanning = 0;
     let sentToProtocol = 0;
+    let vacantesProcessed = 0;
 
     for (const docSnap of snap.docs) {
+      if (cronShouldStop(startedAt)) {
+        console.warn(`[gestionarVacantes] Wall-clock alcanzado tras ${vacantesProcessed} vacantes`);
+        break;
+      }
+      vacantesProcessed++;
       const shift = docSnap.data();
 
       if (!cc.isEnabled(shift.empresaId)) continue;
+      // Ignorar borradores de planificación (draft flag)
+      if (shift.draft === true) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
+      // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)
+      {
+        const shOrigin = String(shift.origin || '');
+        const isOps = ['RETEN','OPERATIONS_COVERAGE','SLA_VIRTUAL'].includes(shOrigin) || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
+        if (!isOps && shift.objectiveId) {
+          const startMs2 = shift.startTime?.toMillis?.() ?? 0;
+          if (startMs2) {
+            const d = new Date(startMs2);
+            const planKey = `${shift.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
+            if (!publishedPlanKeys.has(planKey)) continue;
+          }
+        }
+      }
 
       // Ignorar si ya fue cancelada o resuelta
       const st = (shift.status || '').toUpperCase();
@@ -2718,26 +3626,26 @@ export const gestionarVacantes = functions
       if (minutesUntil < 0 && !shift.vacanteProtocoloAt) {
         await docSnap.ref.update({ vacanteProtocoloAt: now, vacanteEscalada: true });
 
-        const existsProto = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
-          .limit(1).get();
-
-        if (existsProto.empty) {
-          await db.collection('novedades').add({
-            type: 'VACANTE_PROTOCOLO_COBERTURA',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
-            minutesUntilStart: Math.round(minutesUntil),
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
+        {
+          const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
+          const existDoc = await protRef.get();
+          if (!existDoc.exists) {
+            await protRef.set({
+              type: 'VACANTE_PROTOCOLO_COBERTURA',
+              status: 'PENDIENTE',
+              shiftId: docSnap.id,
+              objectiveId: shift.objectiveId || null,
+              objectiveName: shift.objectiveName || '',
+              clientId: shift.clientId || null,
+              empresaId: shiftEmpresaId(shift) || null,
+              positionName: shift.positionName || '',
+              description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
+              minutesUntilStart: Math.round(minutesUntil),
+              createdAt: now,
+              source: 'SYSTEM_SCHEDULER',
+            });
+          }
         }
 
         await db.collection('audit_logs').add({
@@ -2751,6 +3659,18 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
+        // Disparar cascade automática para la vacante ya iniciada
+        await iniciarCascadaCobertura(db, {
+          id: docSnap.id,
+          empresaId: shiftEmpresaId(shift) || 'bacarsa',
+          objectiveId: String(shift.objectiveId || ''),
+          objectiveName: String(shift.objectiveName || ''),
+          clientId: String(shift.clientId || ''),
+          clientName: String(shift.clientName || ''),
+          code: String(shift.code || ''),
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+        }, 'AUTO');
         continue;
       }
 
@@ -2761,27 +3681,27 @@ export const gestionarVacantes = functions
           vacanteEscalada: true,
         });
 
-        // Evitar duplicar novedad
-        const existsProto = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'VACANTE_PROTOCOLO_COBERTURA')
-          .limit(1).get();
-
-        if (existsProto.empty) {
-          await db.collection('novedades').add({
-            type: 'VACANTE_PROTOCOLO_COBERTURA',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
-            minutesUntilStart: Math.round(minutesUntil),
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
+        // ID determinístico = mismo que usa el front (autodev_prot_) para evitar duplicar
+        {
+          const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+          const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
+          const existDoc = await protRef.get();
+          if (!existDoc.exists) {
+            await protRef.set({
+              type: 'VACANTE_PROTOCOLO_COBERTURA',
+              status: 'PENDIENTE',
+              shiftId: docSnap.id,
+              objectiveId: shift.objectiveId || null,
+              objectiveName: shift.objectiveName || '',
+              clientId: shift.clientId || null,
+              empresaId: shiftEmpresaId(shift) || null,
+              positionName: shift.positionName || '',
+              description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
+              minutesUntilStart: Math.round(minutesUntil),
+              createdAt: now,
+              source: 'SYSTEM_SCHEDULER',
+            });
+          }
         }
 
         await db.collection('audit_logs').add({
@@ -2795,6 +3715,18 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
+        // Disparar cascade automática para la vacante a T-1h
+        await iniciarCascadaCobertura(db, {
+          id: docSnap.id,
+          empresaId: shiftEmpresaId(shift) || 'bacarsa',
+          objectiveId: String(shift.objectiveId || ''),
+          objectiveName: String(shift.objectiveName || ''),
+          clientId: String(shift.clientId || ''),
+          clientName: String(shift.clientName || ''),
+          code: String(shift.code || ''),
+          startTime: shift.startTime,
+          endTime: shift.endTime,
+        }, 'AUTO');
 
       // ── T-3h: Devolver a Planificación ────────────────────────────
       } else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {
@@ -2840,11 +3772,12 @@ export const gestionarVacantes = functions
       }
     }
 
-    console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
+    console.log(`[gestionarVacantes] Procesados: ${vacantesProcessed}/${snap.size} | A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
 
     // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
     // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
     // se cierra automáticamente como "sin cobertura confirmada".
+    try {
     const GRACE_MINUTES = 60;
     const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
 
@@ -2925,6 +3858,9 @@ export const gestionarVacantes = functions
 
     if (autoClosed > 0) {
       console.log(`[gestionarVacantes] Protocolos auto-cerrados: ${autoClosed}`);
+    }
+    } catch (staleErr: any) {
+      console.warn('[gestionarVacantes] Auto-cierre protocolos omitido:', staleErr?.message || staleErr);
     }
 
     return null;
@@ -3314,6 +4250,41 @@ export const onAusenciaCreatedFromPortal = functions
     return null;
   });
 
+/**
+ * Retención: etiqueta archiveTier en turnos fuera de hot (diario 04:15 AR).
+ * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
+ */
+export const scheduledTagTurnosArchiveTier = onScheduleV2(
+  {
+    schedule: '15 4 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { tagTurnosArchiveTier } = await import('./ops/tagTurnosArchiveTier');
+    await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
+  },
+);
+
+export const tagTurnosArchiveTier = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const role = String(context.auth.token.role ?? '');
+  const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+  if (!allowed.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo admin puede etiquetar archivo.');
+  }
+  const { tagTurnosArchiveTier: run } = await import('./ops/tagTurnosArchiveTier');
+  return run({
+    empresaId: data?.empresaId ? String(data.empresaId) : undefined,
+    dryRun: data?.dryRun === true,
+    maxDocs: typeof data?.maxDocs === 'number' ? data.maxDocs : 5000,
+  });
+});
+
 // Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
 export const scheduledBackup = onScheduleV2(
   {
@@ -3485,6 +4456,7 @@ export const scheduledAutoInjustificada = functions
     const snap = await db.collection('ausencias')
       .where('startDate', '==', todayStr)
       .where('status', '==', 'Confirmada')
+      .limit(CRON_QUERY_MAX_DOCS)
       .get();
 
     if (snap.empty) {
@@ -3492,27 +4464,35 @@ export const scheduledAutoInjustificada = functions
       return null;
     }
 
-    const batch = db.batch();
+    let batch = db.batch();
+    let batchOps = 0;
     let count = 0;
 
-    snap.docs.forEach((doc) => {
+    for (const doc of snap.docs) {
       const data = doc.data();
-      // Solo AA sin certificado
       const absType = String(data.absenceType || data.type || '').toUpperCase();
       const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
-      if (!isAA) return;
-      if (data.certificateUrl) return; // tiene certificado → no tocar
+      if (!isAA) continue;
+      if (data.certificateUrl) continue;
       batch.update(doc.ref, {
         status: 'Injustificada',
         autoInjustificadaAt: now,
         reason: `${data.reason || 'No presentación'} — Auto-injustificada por sistema (sin certificado al 23:45)`,
       });
       count++;
-    });
+      batchOps++;
+      if (batchOps >= CRON_BATCH_WRITE_LIMIT) {
+        await batch.commit();
+        batch = db.batch();
+        batchOps = 0;
+      }
+    }
 
-    if (count > 0) {
+    if (batchOps > 0) {
       await batch.commit();
-      console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada.`);
+    }
+    if (count > 0) {
+      console.log(`[autoInjustificada] ${count} ausencias marcadas Injustificada (escaneadas ${snap.size}).`);
     }
     return null;
   });
@@ -3603,7 +4583,11 @@ export const cleanupSlaDevueltas = functions
   .runWith({ timeoutSeconds: 120, memory: '256MB' })
   .https.onRequest(async (req, res) => {
     const secret = req.query.secret as string | undefined;
-    const expectedSecret = process.env.CLEANUP_SECRET || 'crono-cleanup-2024';
+    const expectedSecret = String(process.env.CLEANUP_SECRET ?? '').trim();
+    if (!expectedSecret) {
+      res.status(503).json({ error: 'CLEANUP_SECRET no configurado en el servidor.' });
+      return;
+    }
     if (secret !== expectedSecret) {
       res.status(403).json({ error: 'Forbidden' });
       return;
@@ -3718,11 +4702,23 @@ export const setEmployeePortalPassword = functions.https.onCall(async (data, con
   } catch (e: any) {
     if (e.code === 'auth/user-not-found') {
       const newUser = await admin.auth().createUser({ email, password, displayName: empName });
-      await admin.auth().setCustomUserClaims(newUser.uid, { role: 'employee', type: 'employee' });
+      await admin.auth().setCustomUserClaims(newUser.uid, {
+        role: 'employee',
+        type: 'employee',
+        ...(empresaId ? { empresaId } : {}),
+      });
       uid = newUser.uid;
     } else {
       throw e;
     }
+  }
+
+  if (alreadyExisted) {
+    await admin.auth().setCustomUserClaims(uid, {
+      role: 'employee',
+      type: 'employee',
+      ...(empresaId ? { empresaId } : {}),
+    });
   }
 
   await db.collection('empleados').doc(employeeId).update({
@@ -3747,7 +4743,18 @@ export const setEmployeePortalPassword = functions.https.onCall(async (data, con
   return { success: true, email, alreadyExisted, uid };
 });
 
-export const geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
+export const geocodeAddressProxy = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      'Solo usuarios del panel pueden geocodificar direcciones.',
+    );
+  }
+
   const { address } = data as { address: string };
   if (!address?.trim()) throw new functions.https.HttpsError('invalid-argument', 'address requerido.');
 

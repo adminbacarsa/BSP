@@ -63,20 +63,34 @@ export class EmployeeService {
   async deleteEmployee(uid: string): Promise<void> {
     try {
         try {
-            await this.getAuth().deleteUser(uid);
+            await this.getAuth().updateUser(uid, { disabled: true });
         } catch (e: any) {
             if (e.code !== 'auth/user-not-found') throw e;
         }
-        // Eliminar por uid field (doc ID puede diferir del Auth UID)
-        const snap = await this.getDb().collection(COLL_EMPLOYEES).where('uid', '==', uid).get();
-        const batch = this.getDb().batch();
-        snap.docs.forEach(d => batch.delete(d.ref));
-        // Por compatibilidad también intenta por doc ID = uid
-        batch.delete(this.getDb().collection(COLL_EMPLOYEES).doc(uid));
-        await batch.commit();
+
+        const db = this.getDb();
+        const now = admin.firestore.Timestamp.now();
+        const inactivePatch = {
+          status: 'INACTIVE',
+          isAvailable: false,
+          inactiveAt: now,
+        };
+
+        const snap = await db.collection(COLL_EMPLOYEES).where('uid', '==', uid).get();
+        const batch = db.batch();
+        snap.docs.forEach(d => batch.update(d.ref, inactivePatch));
+
+        const uidDoc = await db.collection(COLL_EMPLOYEES).doc(uid).get();
+        if (uidDoc.exists) {
+          batch.update(uidDoc.ref, inactivePatch);
+        }
+
+        if (!snap.empty || uidDoc.exists) {
+          await batch.commit();
+        }
     } catch (error) {
         console.error('[DELETE_EMPLOYEE_ERROR]', error);
-        throw new InternalServerErrorException('Error al eliminar el empleado.');
+        throw new InternalServerErrorException('Error al desactivar el empleado.');
     }
   }
 

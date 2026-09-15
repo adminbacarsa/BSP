@@ -7,11 +7,14 @@ export const getDateKey = (dateInput: any) => {
     const year = parts.find((p: any) => p.type === 'year')?.value;
     return year + '-' + month + '-' + day;
 };
+/** Fecha pasada (calendario AR): bloquea edición en grilla. */
 export const isDateLocked = (dateStr: string) => {
-    const parts = dateStr.split('-').map(Number);
-    const cellDate = new Date(parts[0], parts[1] - 1, parts[2]);
+    const [y, m, d] = dateStr.split('-').map(Number);
+    const cellDate = new Date(y, m - 1, d);
     cellDate.setHours(23, 59, 59, 999);
-    return cellDate < new Date();
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    return cellDate < startOfToday;
 };
 export const isShiftConsolidated = (shift: any) => shift && ['PRESENT', 'CHECK_IN', 'COMPLETED'].includes(shift.status);
 export const getDayLetter = (dateStr: string) => {

@@ -11,6 +11,7 @@ import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
 import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 import { useAdminFcm } from '@/hooks/useAdminFcm';
+import { OperacionesMonitorProvider } from '@/context/OperacionesMonitorContext';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
@@ -24,6 +25,7 @@ const AssistantFloatingBubble = dynamic(
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
+  const isOperacionesRoute = router.pathname.startsWith('/admin/operaciones');
   const showAssistant = !router.pathname.startsWith('/empleado')
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
@@ -68,7 +70,13 @@ export default function App({ Component, pageProps }: AppProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
         <AdminFcmRegistrar />
-        <Component {...pageProps} />
+        {isOperacionesRoute ? (
+          <OperacionesMonitorProvider>
+            <Component {...pageProps} />
+          </OperacionesMonitorProvider>
+        ) : (
+          <Component {...pageProps} />
+        )}
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>

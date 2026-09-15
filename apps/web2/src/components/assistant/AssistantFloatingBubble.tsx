@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
-import { X, SendHorizontal, Trash2 } from 'lucide-react';
+import { X, SendHorizontal, Trash2, Mic, MicOff, CheckCircle, XCircle } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
@@ -16,6 +16,43 @@ import {
 } from '@/lib/appBuildInfo';
 
 type ChatMsg = { role: 'user' | 'assistant'; content: string };
+
+type PendingAction = {
+  type: string;
+  label: string;
+  payload: Record<string, unknown>;
+};
+
+const ACTION_MARKER_RE = /<!--COSP_ACTION:([\s\S]*?)-->/;
+
+const MODULE_SUGGESTIONS: Record<string, string[]> = {
+  OPERATIONS:  ['¿Cuántos guardias activos hay ahora?', 'Marcá presente a [nombre]', '¿Hay vacantes sin cubrir hoy?'],
+  PLANNING:    ['¿Cuántas horas planificadas tiene [guardia] este mes?', '¿Qué puestos tienen vacantes en [objetivo]?', 'Automatizá la planificación de [objetivo]'],
+  RRHH:        ['¿Cuántas ausencias tiene [guardia] este mes?', '¿Qué guardias están de vacaciones?', 'Registrá una ausencia para [guardia]'],
+  CLIENTS:     ['¿Cuántos clientes activos hay?', '¿Qué objetivos tiene el cliente [nombre]?'],
+  SERVICES:    ['¿Cuántos SLA vigentes hay?', '¿Cuáles son las horas contratadas de [cliente]?'],
+  REPORTS:     ['¿Cuántas horas realizó [guardia] en julio?', 'Mostrá el resumen de cobertura del mes'],
+  ANALYSIS:    ['¿Cuál es la cobertura real vs SLA este mes?', '¿Cuánto ausentismo hubo en los últimos 3 meses?'],
+  DASHBOARD:   ['¿Cómo estamos hoy operativamente?', '¿Cuántos guardias están activos ahora?'],
+  CONFIG:      ['¿Qué roles hay configurados?', '¿Cuántos usuarios tiene la empresa?'],
+};
+
+function buildGreeting(moduleKey: string | null, moduleName: string): string {
+  const suggestions = MODULE_SUGGESTIONS[moduleKey || ''] ?? MODULE_SUGGESTIONS['DASHBOARD']!;
+  const lines = suggestions.map((s) => `· ${s}`).join('\n');
+  return `¡Hola! Soy **VIGI**, tu asistente COSP.\nEstás en **${moduleName}**. Algunas cosas que podés consultarme:\n\n${lines}\n\nEscribí o hablá lo que necesitás.`;
+}
+
+function parseActionProposal(text: string): { cleanText: string; action: PendingAction | null } {
+  const match = text.match(ACTION_MARKER_RE);
+  if (!match) return { cleanText: text, action: null };
+  try {
+    const action = JSON.parse(match[1]) as PendingAction;
+    return { cleanText: text.replace(ACTION_MARKER_RE, '').trim(), action };
+  } catch {
+    return { cleanText: text, action: null };
+  }
+}
 
 const FAB_PX = 64;
 const FAB_GAP_PX = 14;
@@ -187,6 +224,11 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const [input, setInput] = useState('');
   const [msgs, setMsgs] = useState<ChatMsg[]>([]);
   const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [greetingDone, setGreetingDone] = useState(false);
+  const currentPathRef = useRef('');
+  const recognitionRef = useRef<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
   const [fabPos, setFabPos] = useState<FabPos>({ bottom: 20, right: 20 });
@@ -222,6 +264,9 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const pathname = router.pathname || '/';
   const fullPath = (router.asPath || router.pathname || '/').split('?')[0] || pathname;
 
+  // Mantener ref actualizada con el path actual
+  currentPathRef.current = fullPath || pathname;
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [msgs, open, busy]);
@@ -230,13 +275,71 @@ export function AssistantFloatingBubble(): React.ReactNode {
     if (!user) {
       setMsgs([]);
       setOpen(false);
+      setGreetingDone(false);
     }
   }, [user]);
+
+  // Mostrar saludo con sugerencias al abrir, bloquea input hasta que aparezca
+  useEffect(() => {
+    if (!open || greetingDone) return;
+    const moduleKey = inferModuleKeyFromPath(currentPathRef.current);
+    const moduleName = moduleTitleEs(moduleKey);
+    const greeting = buildGreeting(moduleKey, moduleName);
+    setMsgs([{ role: 'assistant', content: greeting }]);
+    setGreetingDone(true);
+  }, [open, greetingDone]);
+
+  const startListening = useCallback(() => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR) return;
+    const r = new SR();
+    r.lang = 'es-AR';
+    r.interimResults = false;
+    r.maxAlternatives = 1;
+    r.onresult = (e: any) => {
+      const transcript: string = e.results[0][0].transcript;
+      setInput((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript));
+      setListening(false);
+    };
+    r.onerror = () => setListening(false);
+    r.onend = () => setListening(false);
+    recognitionRef.current = r;
+    r.start();
+    setListening(true);
+  }, []);
+
+  const stopListening = useCallback(() => {
+    recognitionRef.current?.stop();
+    setListening(false);
+  }, []);
+
+  const executeAction = useCallback(async (action: PendingAction) => {
+    setBusy(true);
+    try {
+      const call = httpsCallable(functions, 'executeAgentAction', { timeout: 30000 });
+      const res = await call({ action: action.type, payload: action.payload, empresaId: empresaCtxId || '' });
+      const data = res.data as { ok: boolean; message?: string };
+      setMsgs((prev) => [...prev, { role: 'assistant', content: data?.message || '✓ Acción ejecutada correctamente.' }]);
+    } catch (e: any) {
+      const msg = e?.message || 'Error desconocido.';
+      setMsgs((prev) => [...prev, { role: 'assistant', content: `⚠️ No se pudo ejecutar: ${msg}` }]);
+    } finally {
+      setBusy(false);
+    }
+  }, [empresaCtxId]);
+
+  const confirmAction = useCallback(async () => {
+    const action = pendingAction;
+    if (!action) return;
+    setPendingAction(null);
+    await executeAction(action);
+  }, [pendingAction, executeAction]);
 
   const send = useCallback(async () => {
     const text = input.trim();
     if (!text || !user || busy) return;
     setInput('');
+    setPendingAction(null);
     const next: ChatMsg[] = [...msgs, { role: 'user', content: text }];
     setMsgs(next);
     setBusy(true);
@@ -252,8 +355,16 @@ export function AssistantFloatingBubble(): React.ReactNode {
         clientDeploy: clientDeployForAssistant(deployCtx),
       });
       const data = res.data as { reply?: string };
-      const reply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
-      setMsgs([...next, { role: 'assistant', content: reply }]);
+      const rawReply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
+      const { cleanText, action } = parseActionProposal(rawReply);
+      setMsgs([...next, { role: 'assistant', content: cleanText }]);
+      if (action) {
+        if (empresa?.pilotoAutoEnabled) {
+          await executeAction(action);
+        } else {
+          setPendingAction(action);
+        }
+      }
     } catch (e: any) {
       const code = String(e?.code ?? '').replace(/^functions\//, '');
       const rawMsg =
@@ -291,7 +402,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [busy, empresaCtxId, fullPath, input, isSuperAdmin, msgs, pathname, user]);
+  }, [busy, empresa, empresaCtxId, executeAction, fullPath, input, isSuperAdmin, msgs, pathname, user]);
 
   const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
       const d = dragRef.current;
@@ -404,33 +515,20 @@ export function AssistantFloatingBubble(): React.ReactNode {
             <div className="flex min-w-0 items-center gap-2.5">
               <CospShieldIcon size={36} className="" style={{ color: brandColor } as React.CSSProperties} />
               <div className="min-w-0">
-                <p className="text-[11px] font-black uppercase tracking-wide dark:text-indigo-100" style={{ color: brandColor }}>
-                  Asistente COSP
+                <p className="text-[13px] font-black uppercase tracking-wide leading-tight dark:text-indigo-100" style={{ color: brandColor }}>
+                  VIGI
                 </p>
-                <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400" title={fullPath}>
+                <p className="text-[9px] font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-tight">
+                  Asistente Virtual COSP
+                </p>
+                <p className="truncate text-[10px] font-medium text-slate-600 dark:text-slate-400 mt-0.5" title={fullPath}>
                   {moduleTitleEs(inferModuleKeyFromPath(fullPath || pathname))}
-                </p>
-                <p
-                  className="truncate text-[9px] font-bold text-slate-500 dark:text-slate-500"
-                  title={deployCtx.versionLabel}
-                >
-                  <span
-                    className={
-                      deployCtx.environment === 'emulator'
-                        ? 'text-amber-700 dark:text-amber-400'
-                        : 'text-emerald-700 dark:text-emerald-400'
-                    }
-                  >
-                    {deployCtx.environment === 'emulator' ? 'Lab' : 'Prod'}
-                  </span>
-                  {' · '}
-                  {deployCtx.buildHash}
                 </p>
               </div>
             </div>
             <button
               type="button"
-              onClick={() => setMsgs([])}
+              onClick={() => { setMsgs([]); setGreetingDone(false); }}
               className="shrink-0 rounded-xl p-2 text-slate-500 hover:bg-white/90 dark:hover:bg-slate-800"
               title="Limpiar conversación (sesión temporal)"
             >
@@ -445,14 +543,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
             {msgs.length === 0 && (
               <div className="rounded-xl border px-3 py-2.5 dark:bg-indigo-950/25"
                 style={{ borderColor: `${brandColor}30`, backgroundColor: `${brandColor}0d` }}>
-                <p className="text-[12px] leading-snug text-slate-600 dark:text-slate-400">
-                  Datos de la empresa o ayuda con este módulo. Por ejemplo:{' '}
-                  <span className="text-slate-700 dark:text-slate-300">
-                    «¿Cuántos empleados?» · «Horas de X en mayo» · «¿Quién está de turno hoy?»
-                  </span>
-                </p>
-                <p className="mt-1.5 text-[10px] text-slate-400 dark:text-slate-500">
-                  La charla no se guarda al cerrar sesión.
+                <p className="text-[12px] font-medium text-slate-500 dark:text-slate-400">
+                  Iniciando VIGI…
                 </p>
               </div>
             )}
@@ -470,10 +562,37 @@ export function AssistantFloatingBubble(): React.ReactNode {
                 </div>
               </div>
             ))}
+            {pendingAction && !busy && (
+              <div className="rounded-xl border px-3 py-2.5 dark:bg-indigo-950/20"
+                style={{ borderColor: `${brandColor}60`, backgroundColor: `${brandColor}0e` }}>
+                <p className="text-[12px] font-semibold text-slate-700 dark:text-slate-200 mb-2">
+                  {pendingAction.label}
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => void confirmAction()}
+                    className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm"
+                    style={{ backgroundColor: brandColor }}
+                  >
+                    <CheckCircle size={13} />
+                    Confirmar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPendingAction(null)}
+                    className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-semibold text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                  >
+                    <XCircle size={13} />
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             {busy && (
               <p className="rounded-xl border border-dashed px-3 py-2 text-[12px] font-medium dark:bg-indigo-950/30 dark:text-indigo-200"
                 style={{ borderColor: `${brandColor}50`, backgroundColor: `${brandColor}12`, color: brandColor }}>
-                Consultando datos…
+                {pendingAction ? 'Ejecutando…' : 'Consultando datos…'}
               </p>
             )}
           </div>
@@ -484,14 +603,30 @@ export function AssistantFloatingBubble(): React.ReactNode {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && (e.preventDefault(), send())}
-              placeholder="Escribí tu pregunta…"
+              placeholder={!greetingDone ? 'Cargando…' : listening ? 'Escuchando…' : 'Escribí o hablá…'}
               className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-medium leading-normal text-slate-800 outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-200 dark:border-slate-600 dark:bg-slate-950 dark:text-slate-100 dark:focus:ring-indigo-900"
-              disabled={busy}
+              disabled={busy || !greetingDone}
             />
+            {typeof window !== 'undefined' &&
+              ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition) && (
+              <button
+                type="button"
+                onClick={listening ? stopListening : startListening}
+                disabled={busy || !greetingDone}
+                className={`shrink-0 rounded-xl px-2.5 py-2 text-white shadow-sm disabled:opacity-40 transition-colors ${
+                  listening ? 'animate-pulse' : ''
+                }`}
+                style={{ backgroundColor: listening ? '#e11d48' : `${brandColor}99` }}
+                aria-label={listening ? 'Detener grabación' : 'Hablar'}
+                title={listening ? 'Detener' : 'Hablar'}
+              >
+                {listening ? <MicOff size={17} /> : <Mic size={17} />}
+              </button>
+            )}
             <button
               type="button"
               onClick={() => void send()}
-              disabled={busy || !input.trim()}
+              disabled={busy || !greetingDone || !input.trim()}
               className="shrink-0 rounded-xl px-3 py-2.5 text-white shadow-sm disabled:opacity-40"
               style={{ backgroundColor: brandColor }}
               aria-label="Enviar"

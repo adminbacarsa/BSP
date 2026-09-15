@@ -47,9 +47,10 @@ service cloud.firestore {
       );
     }
 
-    function isAdmin() {
-      return request.auth != null && (
-        request.auth.token.role == 'admin' ||
+    // Panel admin: rol explícito en JWT, doc system_users o type system.
+    // NO usar "cualquier no-empleado" — portal cliente/objetivo quedaría como admin.
+    function panelRoleFromToken() {
+      return request.auth.token.role == 'admin' ||
         request.auth.token.role == 'Admin' ||
         request.auth.token.role == 'ADMIN' ||
         request.auth.token.role == 'SuperAdmin' ||
@@ -65,11 +66,18 @@ service cloud.firestore {
         request.auth.token.role == 'Operator' ||
         request.auth.token.role == 'OPERATOR' ||
         request.auth.token.role == 'HR_Manager' ||
-        request.auth.token.role == 'HR_MANAGER' ||
-        isSystemUser() ||
-        isSystemUserDoc() ||
-        !isEmployeeClaim()
-      );
+        request.auth.token.role == 'HR_MANAGER';
+    }
+
+    function isAdmin() {
+      return request.auth != null &&
+        !isClientUser() &&
+        (
+          isSuperAdmin() ||
+          panelRoleFromToken() ||
+          isSystemUser() ||
+          isSystemUserDoc()
+        );
     }
 
     function isClientUser() {
@@ -95,6 +103,27 @@ service cloud.firestore {
     function userEmpresaId() {
       return isSystemUserDoc()
         ? get(/databases/$(database)/documents/system_users/$(request.auth.uid)).data.get('empresaId', '')
+        : '';
+    }
+
+    // Empresa del token Auth (empleados portal) o system_users (admins).
+    function authEmpresaId() {
+      return request.auth != null && request.auth.token.empresaId is string
+        ? request.auth.token.empresaId
+        : userEmpresaId();
+    }
+
+    // Tenant para portal guardia: claim empresaId en el JWT.
+    function employeeTenantMatches(data) {
+      return isEmployeeClaim() && authEmpresaId() != '' && (
+        docEmpresaId(data) == authEmpresaId() ||
+        (authEmpresaId() == 'bacarsa' && (docEmpresaId(data) == '' || docEmpresaId(data) == 'bacarsa'))
+      );
+    }
+
+    function empleadoEmpresaId(empleadoId) {
+      return exists(/databases/$(database)/documents/empleados/$(empleadoId))
+        ? get(/databases/$(database)/documents/empleados/$(empleadoId)).data.get('empresaId', '')
         : '';
     }
 
@@ -204,6 +233,39 @@ service cloud.firestore {
       );
     }
 
+    // Portal guardia: solo turnos propios (employeeId / employeeUid del JWT).
+    function employeeOwnsShift(data) {
+      return isEmployeeClaim() && (
+        data.get('employeeUid', '') == request.auth.uid ||
+        empleadoDocOwnedByAuth(data.get('employeeId', ''))
+      ) && (
+        docEmpresaId(data) == '' || employeeTenantMatches(data)
+      );
+    }
+
+    // Portal guardia: solo legajo propio (doc id, uid o email del token).
+    function employeeCanReadEmpleadoDoc(employeeId) {
+      return isEmployeeClaim() && (
+        employeeId == request.auth.uid ||
+        resource.data.get('uid', '') == request.auth.uid ||
+        (request.auth.token.email != null &&
+          resource.data.get('email', '') == request.auth.token.email)
+      ) && (
+        docEmpresaId(resource.data) == '' || employeeTenantMatches(resource.data)
+      );
+    }
+
+    // Portal guardia: solo ausencias propias.
+    function employeeOwnsAusencia(data) {
+      return isEmployeeClaim() && (
+        data.get('employeeUid', '') == request.auth.uid ||
+        data.get('employeeId', '') == request.auth.uid ||
+        empleadoDocOwnedByAuth(data.get('employeeId', ''))
+      ) && (
+        docEmpresaId(data) == '' || employeeTenantMatches(data)
+      );
+    }
+
     function eventoActivoReadable(data) {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
@@ -218,8 +280,8 @@ service cloud.firestore {
 
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
-        || clientUserMatchesTurno(resource.data);
+        || clientUserMatchesTurno(resource.data)
+        || employeeOwnsShift(resource.data);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -227,15 +289,15 @@ service cloud.firestore {
 
     match /empleados/{employeeId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
-        || clientUserMatchesEmpleado(resource.data);
+        || clientUserMatchesEmpleado(resource.data)
+        || employeeCanReadEmpleadoDoc(employeeId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();
     }
 
     match /ausencias/{absenceId} {
-      allow read: if tenantAdminRead() || request.auth != null;
+      allow read: if tenantAdminRead() || employeeOwnsAusencia(resource.data);
       allow create: if tenantAdminCreate() || request.auth != null;
       allow update: if tenantAdminUpdate() || request.auth != null;
       allow delete: if tenantAdminDelete();
@@ -692,7 +754,7 @@ service cloud.firestore {
 
     match /eventos/{eventoId} {
       allow read:   if tenantAdminRead()
-                       || (isEmployeeClaim() && tenantMatches(resource.data) && eventoActivoReadable(resource.data));
+                       || (employeeTenantMatches(resource.data) && eventoActivoReadable(resource.data));
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
       allow delete: if tenantAdminDelete();
@@ -703,10 +765,20 @@ service cloud.firestore {
     match /solicitudes_evento/{solicitudId} {
       allow read:   if tenantAdminRead() || empleadoDocOwnedByAuth(resource.data.empleadoId);
       allow create: if tenantAdminCreate()
-                       || (request.auth != null && tenantMatches(request.resource.data)
-                           && empleadoDocOwnedByAuth(request.resource.data.empleadoId));
+                       || (isEmployeeClaim()
+                           && empleadoDocOwnedByAuth(request.resource.data.empleadoId)
+                           && request.resource.data.empresaId == empleadoEmpresaId(request.resource.data.empleadoId));
       allow update: if tenantAdminUpdate()
                        || empleadoDocOwnedByAuth(resource.data.empleadoId);
+      allow delete: if tenantAdminDelete();
+    }
+
+    // Convocatorias de cobertura operativa (cascada CCT).
+    // Admin: CRUD completo del tenant. Empleado: lee y actualiza la suya para responder.
+    match /convocatorias_cobertura/{convId} {
+      allow read:   if tenantAdminRead() || empleadoDocOwnedByAuth(resource.data.candidateEmployeeId);
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate() || empleadoDocOwnedByAuth(resource.data.candidateEmployeeId);
       allow delete: if tenantAdminDelete();
     }
   }

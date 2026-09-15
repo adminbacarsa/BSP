@@ -1,0 +1,19 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "src/lib/analisis/analisisQueries.ts",
+    "src/lib/analisis/analisisBolsa.ts",
+    "src/lib/analisis/analisisUniverso.ts",
+    "src/lib/dataRetention.ts",
+    "src/lib/planificacion/absenceCodes.ts",
+    "src/lib/crm/crmDateUtils.ts",
+    "src/lib/rrhh/novedadTypes.ts",
+    "src/lib/analisis/*.test.ts",
+    "vitest.config.ts"
+  ],
+  "exclude": ["node_modules", "auto-lab-versions", ".next", "out", "build"]
+}

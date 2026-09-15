@@ -1,0 +1,1493 @@
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { X, Phone, ChevronRight, ChevronLeft, CheckCircle, Clock, AlertTriangle, Users, SkipForward, MapPin, Search } from 'lucide-react';
+import { collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { stampEmpresaId } from '@/lib/multiempresa';
+import { toast } from 'sonner';
+import { getAuth } from 'firebase/auth';
+import {
+  applyCoverageLedgerToBatch,
+  covererLedgerFields,
+  newCoverageEventId,
+  resolveTitularFromAbsenceOrVacancy,
+} from '@/lib/operaciones/coverageLedger';
+import {
+  buildReassignPassiveToVacancyFields,
+  vacancyCoverageLabel,
+} from '@/lib/operaciones/shiftContinuity';
+import { buildFrancoTrabajadoCoverageFields } from '@/lib/operaciones/francoTrabajadoCoverage';
+
+// ─── Tipos ──────────────────────────────────────────────────────────────────
+
+type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'OTRO_PUESTO' | 'RETENCION' | 'INTERCAMBIO' | 'FT';
+type SessionStatus = 'SELECTING' | 'PENDING' | 'PENDING_DUAL' | 'CONFIRMED' | 'FAILED';
+
+interface PendingSlot {
+  notifId: string;
+  empId: string;
+  sec: number;
+  candShiftId?: string;
+}
+
+interface Session {
+  status: SessionStatus;
+  currentStep: number;
+  pending: PendingSlot | null;
+  pendingExt: PendingSlot | null;
+  pendingAdv: PendingSlot | null;
+  confirmedExt: string | null;
+  confirmedAdv: string | null;
+  awaitingPhone: boolean;
+  selectedExtId: string | null;
+  selectedAdvId: string | null;
+}
+
+// ─── Constantes de protocolo ─────────────────────────────────────────────────
+
+const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; timeoutSec: number; isDual?: boolean }[] = [
+  { key: 'SIN_TURNO',  label: 'Sin turno',       icon: '1', mandatory: true,  timeoutSec: 60  },
+  { key: 'RET_PASIVO', label: 'Retención Pasiva', icon: '2', mandatory: true,  timeoutSec: 180 },
+  { key: 'ESC',        label: 'ESC / REF',        icon: '3', mandatory: true,  timeoutSec: 60  },
+  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120 },
+  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '5', mandatory: false, timeoutSec: 60, isDual: true },
+  { key: 'INTERCAMBIO', label: 'Intercambio',     icon: '6', mandatory: false, timeoutSec: 120 },
+  { key: 'FT',         label: 'Franco Trabajado',  icon: '7', mandatory: false, timeoutSec: 180 },
+];
+
+const WORK_CODES_CROSS = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1']);
+const normPos = (p: unknown) => String(p || '').trim().toLowerCase();
+
+const fmtCountdown = (sec: number) => {
+  const m = Math.floor(sec / 60).toString().padStart(2, '0');
+  const s = (sec % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+};
+
+const simPhone = (id: string) => {
+  const n = parseInt(id.replace(/\D/g, '')) || 1;
+  return `+54 9 351 ${String(n * 1317 % 10000).padStart(4, '0')}-${String(n * 7531 % 10000).padStart(4, '0')}`;
+};
+
+// ─── Helpers de fecha ────────────────────────────────────────────────────────
+
+const toDate = (d: any): Date => {
+  if (!d) return new Date();
+  if (d instanceof Date) return d;
+  if (d.seconds) return new Date(d.seconds * 1000);
+  return new Date(d);
+};
+
+const fmtTime = (d: any) => {
+  try {
+    return toDate(d).toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
+  } catch { return '--:--'; }
+};
+
+const isSameDay = (d1: any, d2: any) => {
+  if (!d1 || !d2) return false;
+  return toDate(d1).toLocaleDateString('en-CA') === toDate(d2).toLocaleDateString('en-CA');
+};
+
+const calculateDistance = (lat1: number | null | undefined, lon1: number | null | undefined, lat2: number | null | undefined, lon2: number | null | undefined): number => {
+  if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return Infinity;
+  const nLat1 = Number(lat1);
+  const nLon1 = Number(lon1);
+  const nLat2 = Number(lat2);
+  const nLon2 = Number(lon2);
+  if (isNaN(nLat1) || isNaN(nLon1) || isNaN(nLat2) || isNaN(nLon2)) return Infinity;
+  const R = 6371;
+  const dLat = (nLat2 - nLat1) * (Math.PI / 180);
+  const dLon = (nLon2 - nLon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(nLat1 * (Math.PI / 180)) * Math.cos(nLat2 * (Math.PI / 180)) *
+    Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+};
+
+const formatDistanceKm = (dist: number): string => {
+  if (!Number.isFinite(dist)) return 'Sin GPS';
+  if (dist < 1) return `${Math.round(dist * 1000)}m`;
+  return `${dist.toFixed(1)} km`;
+};
+
+// ─── Componente principal ────────────────────────────────────────────────────
+
+interface Props {
+  isOpen: boolean;
+  onClose: () => void;
+  absenceShift: any;
+  logic: any;
+  onAudit?: (action: string, detail: string) => void;
+}
+
+export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, onAudit }: Props) {
+  const { empresaId } = useEmpresa();
+  const tid = String(absenceShift?.empresaId || empresaId || '').trim();
+
+  const [session, setSession] = useState<Session>({
+    status: 'SELECTING',
+    currentStep: 0,
+    pending: null,
+    pendingExt: null,
+    pendingAdv: null,
+    confirmedExt: null,
+    confirmedAdv: null,
+    awaitingPhone: false,
+    selectedExtId: null,
+    selectedAdvId: null,
+  });
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState<string | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const dualTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
+
+  const upd = useCallback((patch: Partial<Session>) => setSession(s => ({ ...s, ...patch })), []);
+
+  // Limpiar timers al desmontar
+  useEffect(() => () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    if (dualTimerRef.current) clearInterval(dualTimerRef.current);
+    if (unsubRef.current) unsubRef.current();
+  }, []);
+
+  // ─── Coordenadas del objetivo ausente ─────────────────────────────────────
+  const objCoords = useMemo(() => {
+    let lat = absenceShift?.lat;
+    let lng = absenceShift?.lng;
+    if ((lat == null || lng == null) && logic.clients) {
+      for (const cl of (logic.clients || [])) {
+        const obj = (cl.objetivos || []).find((o: any) => o.id === absenceShift?.objectiveId);
+        if (obj && (obj.lat != null || obj.location?.lat != null)) {
+          lat = obj.lat ?? obj.location?.lat;
+          lng = obj.lng ?? obj.location?.lng;
+          break;
+        }
+      }
+    }
+    return {
+      lat: Number(lat) || -31.4201,
+      lng: Number(lng) || -64.1888,
+    };
+  }, [absenceShift, logic.clients]);
+
+  const getDistanceToObjective = useCallback((emp: any, cand?: any): number => {
+    const lat = emp?.lat ?? cand?.lat ?? emp?.location?.lat;
+    const lng = emp?.lng ?? cand?.lng ?? emp?.location?.lng;
+    if (lat == null || lng == null) return Infinity;
+    return calculateDistance(objCoords.lat, objCoords.lng, Number(lat), Number(lng));
+  }, [objCoords]);
+
+  const getCandidateExperience = useCallback((emp: any, cand?: any) => {
+    const objId = absenceShift?.objectiveId;
+    if (!objId) return { hasExp: false, label: 'Sin exp.', level: 0 };
+    const e = emp || cand || {};
+    const empId = e.id || cand?.employeeId || cand?.id;
+
+    if (e.preferredObjectiveId === objId) {
+      return { hasExp: true, label: 'Titular objetivo', level: 3 };
+    }
+
+    const expMap = e.experienciaObjetivos || {};
+    const entry = expMap[objId];
+    if (entry) {
+      const turnosTotal =
+        (entry.turnosRegulares ?? 0) +
+        (entry.turnosRefuerzo ?? 0) +
+        (entry.turnosConvocado ?? 0) +
+        (entry.turnosEscuela ?? 0) +
+        (entry.count ?? 0);
+      if (turnosTotal > 0 || (entry.nivel && entry.nivel !== 'NINGUNO')) {
+        return {
+          hasExp: true,
+          label: turnosTotal > 0 ? `${turnosTotal}T exp.` : 'Con experiencia',
+          level: 2,
+        };
+      }
+    }
+
+    if (empId && (logic.processedData || []).some((sh: any) => sh.employeeId === empId && sh.objectiveId === objId)) {
+      return { hasExp: true, label: 'Turnos previos', level: 1 };
+    }
+
+    return { hasExp: false, label: 'Sin exp.', level: 0 };
+  }, [absenceShift, logic.processedData]);
+
+  if (!isOpen || !absenceShift) return null;
+
+  const now = new Date();
+  const absenceEnd = toDate(absenceShift.endDateObj);
+  const hiStart = fmtTime(absenceShift.shiftDateObj);
+  const hiEnd = fmtTime(absenceShift.endDateObj);
+  const step = STEPS[session.currentStep];
+
+  // ─── Candidatos por paso ─────────────────────────────────────────────────
+
+  const targetDate = toDate(absenceShift.shiftDateObj);
+
+  // Empleados que ya tienen turno o descanso asignado en la fecha del turno ausente
+  const hasShiftOnTargetDate = new Set<string>(
+    (logic.processedData || [])
+      .filter((s: any) => isSameDay(s.shiftDateObj, targetDate))
+      .map((s: any) => s.employeeId)
+  );
+
+  const busyIds = new Set<string>([
+    ...hasShiftOnTargetDate,
+  ]);
+
+  const dedupeByEmployee = (list: any[]) => {
+    const seen = new Set<string>();
+    return list.filter((cand: any) => {
+      const id = cand.employeeId || cand.id;
+      if (!id || seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+  };
+
+  const candidatesBySin: any[] = (logic.employees || [])
+    .filter((e: any) => !busyIds.has(e.id) && e.id !== absenceShift.employeeId)
+    .map((e: any) => {
+      const dist = getDistanceToObjective(e);
+      const exp = getCandidateExperience(e);
+      return {
+        ...e,
+        fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '',
+        phone: e.phone || e.celular || '',
+        distance: dist,
+        experience: exp,
+        hasAffinity: exp.hasExp,
+      };
+    });
+
+  const candidatesRet: any[] = (logic.processedData || [])
+    .filter((s: any) =>
+      s.code === 'RET' &&
+      isSameDay(s.shiftDateObj, targetDate) &&
+      !s.isAbsent &&
+      !s.isCompleted &&
+      s.status !== 'COMPLETED' &&
+      s.employeeId !== absenceShift.employeeId
+    )
+    .map((s: any) => {
+      const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+      const dist = getDistanceToObjective(emp, s);
+      const exp = getCandidateExperience(emp, s);
+      return {
+        ...s,
+        fullName: s.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+        phone: s.phone || emp?.phone || emp?.celular || '',
+        distance: dist,
+        experience: exp,
+        hasAffinity: exp.hasExp,
+      };
+    });
+
+  const candidatesEsc: any[] = (logic.processedData || [])
+    .filter((s: any) =>
+      (s.code === 'ESC' || s.code === 'REF') &&
+      isSameDay(s.shiftDateObj, targetDate) &&
+      !s.isAbsent &&
+      !s.isCompleted &&
+      s.status !== 'COMPLETED' &&
+      s.employeeId !== absenceShift.employeeId
+    )
+    .map((s: any) => {
+      const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+      const dist = getDistanceToObjective(emp, s);
+      const exp = getCandidateExperience(emp, s);
+      return {
+        ...s,
+        fullName: s.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+        phone: s.phone || emp?.phone || emp?.celular || '',
+        distance: dist,
+        experience: exp,
+        hasAffinity: exp.hasExp,
+      };
+    });
+
+  const gapPosNorm = normPos(absenceShift.positionName);
+  const candidatesOtroPuesto: any[] = (logic.processedData || [])
+    .filter((s: any) => {
+      if (!s.isPresent || s.isCompleted || s.isAbsent || s.isFranco || s.isUnassigned) return false;
+      if (s.objectiveId !== absenceShift.objectiveId) return false;
+      if (normPos(s.positionName) === gapPosNorm) return false;
+      if (s.employeeId === absenceShift.employeeId) return false;
+      const code = String(s.code || '').toUpperCase();
+      if (!WORK_CODES_CROSS.has(code) && code !== 'RET' && code !== 'ESC' && code !== 'REF') return false;
+      if (String(s.id || '').startsWith('V124_') || String(s.id || '').startsWith('SLA_GAP')) return false;
+      return true;
+    })
+    .map((s: any) => {
+      const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+      const dist = getDistanceToObjective(emp, s);
+      const exp = getCandidateExperience(emp, s);
+      return {
+        ...s,
+        fullName: s.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+        phone: s.phone || emp?.phone || emp?.celular || '',
+        distance: dist,
+        experience: exp,
+        hasAffinity: exp.hasExp,
+        crossFromPosition: s.positionName || '—',
+      };
+    });
+
+  // EXT/ADV: mismo objetivo, cualquier puesto (Ext+Adel = cubrir hueco con banda vecina; coversPositionName si es otro puesto).
+  const candidatesExt: any[] = dedupeByEmployee((logic.processedData || [])
+    .filter((s: any) =>
+      s.isPresent && !s.isCompleted &&
+      isSameDay(s.shiftDateObj, targetDate) &&
+      s.objectiveId === absenceShift.objectiveId &&
+      s.id !== absenceShift.id
+    )
+  ).sort((a: any, b: any) => {
+    const gapPos = String(absenceShift.positionName || '');
+    const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+    const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+    return aSame - bSame;
+  });
+
+  const candidatesAdv: any[] = dedupeByEmployee((logic.processedData || [])
+    .filter((s: any) =>
+      !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
+      s.objectiveId === absenceShift.objectiveId &&
+      toDate(s.shiftDateObj) > targetDate &&
+      isSameDay(s.shiftDateObj, targetDate)
+    )
+    .sort((a: any, b: any) => {
+      const gapPos = String(absenceShift.positionName || '');
+      const aSame = String(a.positionName || '') === gapPos ? 0 : 1;
+      const bSame = String(b.positionName || '') === gapPos ? 0 : 1;
+      if (aSame !== bSame) return aSame - bSame;
+      return toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime();
+    })
+  );
+
+  const candidatesFt: any[] = (logic.processedData || [])
+    .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, targetDate) && !s.isFrancoTrabajado && !s.isAbsent && s.employeeId !== absenceShift.employeeId)
+    .map((s: any) => {
+      const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
+      const dist = getDistanceToObjective(emp, s);
+      const exp = getCandidateExperience(emp, s);
+      return {
+        ...s,
+        fullName: s.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+        phone: s.phone || emp?.phone || emp?.celular || '',
+        distance: dist,
+        experience: exp,
+        hasAffinity: exp.hasExp,
+      };
+    });
+
+  const rawStepCandidates = (() => {
+    switch (step.key) {
+      case 'SIN_TURNO':  return dedupeByEmployee(candidatesBySin);
+      case 'RET_PASIVO': return dedupeByEmployee(candidatesRet);
+      case 'ESC':        return dedupeByEmployee(candidatesEsc);
+      case 'OTRO_PUESTO': return dedupeByEmployee(candidatesOtroPuesto);
+      case 'RETENCION':  return [];  // dual: handled separately
+      case 'INTERCAMBIO':
+        return dedupeByEmployee((logic.processedData || [])
+          .filter((sh: any) => {
+            const shStart = toDate(sh.shiftDateObj);
+            return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
+              && sh.objectiveId === absenceShift.objectiveId
+              && sh.employeeId && sh.employeeId !== absenceShift.employeeId
+              && shStart > toDate(absenceShift.shiftDateObj)
+              && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP');
+          })
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+            };
+          }));
+      case 'FT':         return dedupeByEmployee(candidatesFt);
+      default: return [];
+    }
+  })();
+
+  const sortedCandidates = [...rawStepCandidates].sort((a: any, b: any) => {
+    const distA = Number.isFinite(a.distance) ? a.distance : Infinity;
+    const distB = Number.isFinite(b.distance) ? b.distance : Infinity;
+    if (distA !== distB) {
+      return distA - distB;
+    }
+    const expA = a.experience?.level ?? (a.hasAffinity ? 1 : 0);
+    const expB = b.experience?.level ?? (b.hasAffinity ? 1 : 0);
+    if (expB !== expA) {
+      return expB - expA;
+    }
+    return (a.fullName || '').localeCompare(b.fullName || '');
+  });
+
+  const within15 = sortedCandidates.filter((c: any) => Number.isFinite(c.distance) && c.distance <= 15);
+  const within30 = sortedCandidates.filter((c: any) => Number.isFinite(c.distance) && c.distance <= 30);
+
+  let activeRadiusKm: 15 | 30 | null = 15;
+  let radiusFilteredCandidates: any[] = [];
+
+  if (within15.length > 0) {
+    activeRadiusKm = 15;
+    radiusFilteredCandidates = within15;
+  } else if (within30.length > 0) {
+    activeRadiusKm = 30;
+    radiusFilteredCandidates = within30;
+  } else {
+    activeRadiusKm = null;
+    radiusFilteredCandidates = sortedCandidates;
+  }
+
+  const allStepCandidates = radiusFilteredCandidates;
+  const candidates = search.trim()
+    ? allStepCandidates.filter((c: any) => {
+        const name = (c.fullName || c.employeeName || c.name || '').toLowerCase();
+        return name.includes(search.trim().toLowerCase());
+      })
+    : allStepCandidates;
+
+  // ─── Timers ──────────────────────────────────────────────────────────────
+
+  const startTimer = (totalSec: number) => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    timerRef.current = setInterval(() => {
+      setSession(s => {
+        if (!s.pending) { clearInterval(timerRef.current!); timerRef.current = null; return s; }
+        const next = s.pending.sec - 1;
+        if (next <= 0) {
+          clearInterval(timerRef.current!); timerRef.current = null;
+          return { ...s, pending: { ...s.pending, sec: 0 }, awaitingPhone: true };
+        }
+        return { ...s, pending: { ...s.pending, sec: next } };
+      });
+    }, 1000);
+  };
+
+  const startDualTimer = () => {
+    if (dualTimerRef.current) clearInterval(dualTimerRef.current);
+    dualTimerRef.current = setInterval(() => {
+      setSession(s => {
+        const newExt = s.pendingExt && s.pendingExt.sec > 0 ? { ...s.pendingExt, sec: s.pendingExt.sec - 1 } : s.pendingExt;
+        const newAdv = s.pendingAdv && s.pendingAdv.sec > 0 ? { ...s.pendingAdv, sec: s.pendingAdv.sec - 1 } : s.pendingAdv;
+        if (!newExt && !newAdv) { clearInterval(dualTimerRef.current!); dualTimerRef.current = null; }
+        return { ...s, pendingExt: newExt, pendingAdv: newAdv };
+      });
+    }, 1000);
+  };
+
+  // ─── Listener de respuesta del empleado ──────────────────────────────────
+
+  const listenNotif = (notifId: string, role: 'single' | 'ext' | 'adv') => {
+    if (unsubRef.current) unsubRef.current();
+    const unsub = onSnapshot(doc(db, 'user_notifications', notifId), snap => {
+      const data = snap.data();
+      if (!data) return;
+      if (data.response === 'ACCEPTED') {
+        if (role === 'single') { upd({ pending: null, awaitingPhone: false }); toast.info('El guardia aceptó la notificación'); }
+        else if (role === 'ext') upd({ pendingExt: null, confirmedExt: data.userId });
+        else if (role === 'adv') upd({ pendingAdv: null, confirmedAdv: data.userId });
+      } else if (data.response === 'REJECTED') {
+        if (role === 'single') { upd({ pending: null, awaitingPhone: false, status: 'SELECTING' }); toast.info('El guardia rechazó la notificación'); }
+        else if (role === 'ext') upd({ pendingExt: null });
+        else if (role === 'adv') upd({ pendingAdv: null });
+      }
+    });
+    unsubRef.current = unsub;
+  };
+
+  // ─── Acciones del protocolo ───────────────────────────────────────────────
+
+  const sendNotification = async (emp: any) => {
+    const empId = emp.employeeId || emp.id;
+    const candShiftId = (emp.employeeId && emp.id && emp.id !== emp.employeeId)
+      ? emp.id
+      : (emp.shiftId && emp.shiftId !== empId ? emp.shiftId : undefined);
+    setLoading('notif_' + (emp.id || empId));
+    try {
+      const notifData: any = {
+        userId: empId,
+        type: step.key === 'SIN_TURNO' ? 'CONVOCATORIA_COBERTURA'
+            : step.key === 'RET_PASIVO' ? 'CONVOCATORIA_COBERTURA'
+            : step.key === 'ESC'        ? 'CONVOCATORIA_COBERTURA'
+            : 'CONVOCATORIA_COBERTURA',
+        title: `Convocatoria de cobertura · ${step.label}`,
+        body: `Se te solicita cubrir el turno en ${absenceShift.objectiveName} (${hiStart}–${hiEnd}).`,
+        objectiveId: absenceShift.objectiveId,
+        shiftId: absenceShift.id || null,
+        protocolStep: step.key,
+        read: false,
+        createdAt: serverTimestamp(),
+      };
+      const ref = await addDoc(collection(db, 'user_notifications'), stampEmpresaId(notifData, tid));
+      const slot: PendingSlot = { notifId: ref.id, empId, sec: step.timeoutSec, candShiftId };
+      upd({ status: 'PENDING', pending: slot, awaitingPhone: false });
+      startTimer(step.timeoutSec);
+      listenNotif(ref.id, 'single');
+      onAudit?.('NOTIF_ENVIADA', `[${step.key}] ${emp.fullName || emp.employeeName}`);
+    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    finally { setLoading(null); }
+  };
+
+  const confirmCandidate = async () => {
+    if (!session.pending) return;
+    const empId = session.pending.empId;
+    const emp = (logic.employees || []).find((e: any) => e.id === empId);
+    const empName = emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '';
+
+    // Buscar si el candidato tiene un turno real en Firestore para redirigir/transformar
+    let candidateShift: any = null;
+    const givenShiftId = session.pending.candShiftId;
+    if (givenShiftId && givenShiftId !== empId && !String(givenShiftId).startsWith('V124_') && !String(givenShiftId).startsWith('SLA_GAP')) {
+      candidateShift = (logic.processedData || []).find((sh: any) => sh.id === givenShiftId);
+    }
+    if (!candidateShift && step.key !== 'SIN_TURNO') {
+      if (step.key === 'RET_PASIVO') {
+        candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.code === 'RET' && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
+      } else if (step.key === 'ESC') {
+        candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && (sh.code === 'ESC' || sh.code === 'REF') && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
+      } else if (step.key === 'OTRO_PUESTO') {
+        candidateShift = (logic.processedData || []).find((sh: any) =>
+          sh.employeeId === empId
+          && sh.isPresent
+          && sh.objectiveId === absenceShift.objectiveId
+          && normPos(sh.positionName) !== normPos(absenceShift.positionName)
+          && sh.id !== empId
+          && !String(sh.id).startsWith('V124_')
+          && !String(sh.id).startsWith('SLA_GAP')
+        );
+      } else if (step.key === 'FT') {
+        candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.isFranco && !sh.isFrancoTrabajado && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
+      }
+      if (!candidateShift) {
+        candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.id && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
+      }
+    }
+
+    const candidateShiftId = candidateShift?.id || (givenShiftId && givenShiftId !== empId && !String(givenShiftId).startsWith('V124_') && !String(givenShiftId).startsWith('SLA_GAP') ? givenShiftId : null);
+
+    setLoading('confirm');
+    try {
+      const batch = writeBatch(db);
+      const isRealVacant = absenceShift.isUnassigned && absenceShift.id && !absenceShift.isVirtual && !String(absenceShift.id).startsWith('V124_') && !String(absenceShift.id).startsWith('SLA_GAP');
+      const titular = resolveTitularFromAbsenceOrVacancy(absenceShift);
+      const titularNameForCover = titular.titularEmployeeName
+        || (absenceShift.employeeName && !absenceShift.employeeName.startsWith('VACANTE') ? absenceShift.employeeName : '')
+        || '';
+      const titularIdForCover = titular.titularEmployeeId;
+      const coverageEventId = newCoverageEventId();
+      const markCovered = (coverageType: string, covererShiftId?: string | null) => {
+        applyCoverageLedgerToBatch(batch, {
+          vacancyShiftId: isRealVacant ? absenceShift.id : titular.vacancyShiftId,
+          titularShiftId: titular.titularShiftId,
+          covererShiftId: covererShiftId || null,
+          covererEmployeeId: empId,
+          covererEmployeeName: empName,
+          titularEmployeeId: titularIdForCover,
+          titularEmployeeName: titularNameForCover,
+          coverageType,
+          titularIsAbsence: true,
+          coverageEventId,
+        });
+      };
+
+      if (step.key === 'SIN_TURNO' || !candidateShiftId) {
+        const newRef = doc(collection(db, 'turnos'));
+        batch.set(newRef, stampEmpresaId({
+          employeeId: empId, employeeName: empName,
+          clientId: absenceShift.clientId, clientName: absenceShift.clientName,
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          positionName: absenceShift.positionName, code: absenceShift.code || 'T',
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
+          status: 'PENDING', origin: 'RETEN', isReten: true,
+          coverageType: step.key,
+          createdAt: serverTimestamp(),
+          ...covererLedgerFields({
+            coverageEventId,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            titularEmployeeId: titularIdForCover,
+            titularEmployeeName: titularNameForCover,
+            vacancyShiftId: isRealVacant ? absenceShift.id : titular.vacancyShiftId,
+            titularShiftId: titular.titularShiftId,
+            coverageType: step.key === 'SIN_TURNO' ? 'RETEN' : step.key,
+          }),
+        }, tid));
+        markCovered('RETEN', null);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_RETEN', title: 'Convocatoria retén', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, coverageEventId, description: `Convocado como retén en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
+      } else if (step.key === 'RET_PASIVO' || step.key === 'ESC') {
+        const prevCode = String(candidateShift?.code || (step.key === 'ESC' ? 'ESC' : 'RET')).toUpperCase();
+        const covType = step.key === 'ESC' ? (prevCode === 'REF' ? 'REF' : 'ESC') : 'RET';
+        const vacLabel = vacancyCoverageLabel({
+          titularName: titularNameForCover,
+          shiftCode: absenceShift.code,
+          positionName: absenceShift.positionName,
+          objectiveName: absenceShift.objectiveName,
+        });
+        batch.update(doc(db, 'turnos', candidateShiftId), {
+          ...buildReassignPassiveToVacancyFields({
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            clientId: absenceShift.clientId,
+            clientName: absenceShift.clientName,
+            positionName: absenceShift.positionName,
+            code: absenceShift.code,
+            startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+            endTime: Timestamp.fromDate(absenceEnd),
+          }, {
+            coverageType: covType,
+            resolvedBy: 'OPERACIONES',
+            previousCode: prevCode,
+            coverageEventId,
+          }),
+          reassignedFromPassiveAt: serverTimestamp(),
+          vacancyLabel: vacLabel,
+          ...covererLedgerFields({
+            coverageEventId,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            titularEmployeeId: titularIdForCover,
+            titularEmployeeName: titularNameForCover,
+            vacancyShiftId: isRealVacant ? absenceShift.id : titular.vacancyShiftId,
+            titularShiftId: titular.titularShiftId,
+            coverageType: covType,
+          }),
+        });
+        markCovered(covType, candidateShiftId);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: `Cobertura por ${step.label}`, status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName}: ${prevCode} → turno real. ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
+      } else if (step.key === 'OTRO_PUESTO' && candidateShiftId) {
+        const prevCode = String(candidateShift?.code || 'M').toUpperCase();
+        const prevPos = String(candidateShift?.positionName || '').trim();
+        const wasPresent = !!candidateShift?.isPresent;
+        const vacLabel = vacancyCoverageLabel({
+          titularName: titularNameForCover,
+          shiftCode: absenceShift.code,
+          positionName: absenceShift.positionName,
+          objectiveName: absenceShift.objectiveName,
+        });
+        const freedRef = doc(collection(db, 'turnos'));
+        batch.set(freedRef, stampEmpresaId({
+          employeeId: 'VACANTE',
+          employeeName: `VACANTE (redir. ${empName.split(',')[0] || empName})`,
+          isUnassigned: true,
+          clientId: candidateShift?.clientId || absenceShift.clientId,
+          clientName: candidateShift?.clientName || absenceShift.clientName,
+          objectiveId: candidateShift?.objectiveId || absenceShift.objectiveId,
+          objectiveName: candidateShift?.objectiveName || absenceShift.objectiveName,
+          positionName: prevPos || candidateShift?.positionName,
+          code: prevCode,
+          startTime: candidateShift?.startTime || Timestamp.fromDate(toDate(candidateShift?.shiftDateObj)),
+          endTime: (candidateShift?.endTime || candidateShift?.endDateObj)
+            ? Timestamp.fromDate(toDate(candidateShift.endTime || candidateShift.endDateObj))
+            : Timestamp.fromDate(absenceEnd),
+          plannedStartTime: candidateShift?.plannedStartTime || candidateShift?.startTime || null,
+          plannedEndTime: candidateShift?.plannedEndTime || candidateShift?.endTime || null,
+          status: 'UNCOVERED',
+          origin: 'VACANTE_POR_REDIRECCION',
+          causedByShiftId: candidateShiftId,
+          causedByEmployeeId: empId,
+          causedByEmployeeName: empName,
+          vacancyLabel: `Vacante por redirección de ${empName} · ${prevPos || 'puesto'} → ${absenceShift.positionName || 'hueco'}`,
+          coverageEventId,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+        }, tid));
+        batch.update(doc(db, 'turnos', candidateShiftId), {
+          ...buildReassignPassiveToVacancyFields({
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            clientId: absenceShift.clientId,
+            clientName: absenceShift.clientName,
+            positionName: absenceShift.positionName,
+            code: absenceShift.code,
+            startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+            endTime: Timestamp.fromDate(absenceEnd),
+          }, {
+            coverageType: 'CROSS_POSITION',
+            resolvedBy: 'OPERACIONES',
+            previousCode: prevCode,
+            previousPositionName: prevPos || null,
+            coverageEventId,
+          }),
+          isPresent: wasPresent,
+          status: wasPresent ? 'PRESENT' : 'PENDING',
+          reassignedFromPassiveAt: serverTimestamp(),
+          vacatedShiftId: freedRef.id,
+          vacancyLabel: vacLabel,
+          ...covererLedgerFields({
+            coverageEventId,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            titularEmployeeId: titularIdForCover,
+            titularEmployeeName: titularNameForCover,
+            vacancyShiftId: isRealVacant ? absenceShift.id : titular.vacancyShiftId,
+            titularShiftId: titular.titularShiftId,
+            coverageType: 'CROSS_POSITION',
+          }),
+        });
+        markCovered('CROSS_POSITION', candidateShiftId);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'COBERTURA_RESUELTA',
+          title: 'Cobertura otro puesto',
+          status: 'pending',
+          employeeId: empId,
+          employeeName: empName,
+          objectiveId: absenceShift.objectiveId,
+          objectiveName: absenceShift.objectiveName,
+          shiftId: candidateShiftId,
+          coverageEventId,
+          description: `${empName}: ${prevPos || prevCode} → ${absenceShift.positionName || ''}. Liberó su puesto. ${vacLabel}`,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+          protocolStep: step.key,
+        }, tid));
+      } else if (step.key === 'INTERCAMBIO' && candidateShiftId) {
+        const vacLabel = vacancyCoverageLabel({
+          titularName: titularNameForCover,
+          shiftCode: absenceShift.code,
+          positionName: absenceShift.positionName,
+          objectiveName: absenceShift.objectiveName,
+        });
+        batch.update(doc(db, 'turnos', candidateShiftId), {
+          code: absenceShift.code || candidateShift?.code || 'M',
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
+          plannedStartTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          plannedEndTime: Timestamp.fromDate(absenceEnd),
+          positionName: absenceShift.positionName || candidateShift?.positionName,
+          origin: 'INTERCAMBIO',
+          coverageType: 'INTERCAMBIO',
+          vacancyLabel: vacLabel,
+          intercambioAt: serverTimestamp(),
+          resolvedBy: 'OPERACIONES',
+          ...covererLedgerFields({
+            coverageEventId,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            titularEmployeeId: titularIdForCover,
+            titularEmployeeName: titularNameForCover,
+            vacancyShiftId: isRealVacant ? absenceShift.id : titular.vacancyShiftId,
+            titularShiftId: titular.titularShiftId,
+            coverageType: 'INTERCAMBIO',
+          }),
+        });
+        markCovered('INTERCAMBIO', candidateShiftId);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: 'Intercambio de turno', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName} intercambio · ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
+      } else if (step.key === 'FT') {
+        batch.update(doc(db, 'turnos', candidateShiftId), {
+          ...buildFrancoTrabajadoCoverageFields(absenceShift),
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
+          plannedStartTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          plannedEndTime: Timestamp.fromDate(absenceEnd),
+          francoTrabajadoAt: serverTimestamp(),
+          resolvedBy: 'OPERACIONES',
+          vacancyLabel: vacLabel,
+        });
+        markCovered('FRANCO', candidateShiftId);
+        await batch.commit();
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName} trabaja su franco en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
+      }
+
+      if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      toast.success('Cobertura confirmada');
+      onAudit?.('COBERTURA_CONFIRMADA', `[${step.key}] ${empName}`);
+      upd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
+      setTimeout(() => onClose(), 1500);
+    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    finally { setLoading(null); }
+  };
+
+  const rejectCandidate = () => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (unsubRef.current) { unsubRef.current(); unsubRef.current = null; }
+    upd({ status: 'SELECTING', pending: null, awaitingPhone: false });
+  };
+
+  const goToStep = (targetStep: number) => {
+    if (targetStep < 0 || targetStep >= STEPS.length) return;
+    if (session.status === 'CONFIRMED') return;
+    rejectCandidate();
+    upd({ currentStep: targetStep, status: 'SELECTING', pending: null, pendingExt: null, pendingAdv: null, awaitingPhone: false });
+  };
+
+  const prevStep = () => {
+    if (session.currentStep > 0) {
+      goToStep(session.currentStep - 1);
+    }
+  };
+
+  const skipStep = () => {
+    rejectCandidate();
+    const next = session.currentStep + 1;
+    if (next < STEPS.length) upd({ currentStep: next, status: 'SELECTING', pending: null, awaitingPhone: false });
+    else upd({ status: 'FAILED' });
+  };
+
+  // ─── Dual (RETENCION) ─────────────────────────────────────────────────────
+
+  const sendDualNotification = async () => {
+    const extId = session.selectedExtId;
+    const advId = session.selectedAdvId;
+    if (!extId || !advId) return;
+    setLoading('dual');
+    try {
+      const extShift = candidatesExt.find((s: any) => s.id === extId || s.employeeId === extId);
+      const advShift = candidatesAdv.find((s: any) => s.id === advId || s.employeeId === advId);
+      const extEmpId = extShift?.employeeId || extId;
+      const advEmpId = advShift?.employeeId || advId;
+
+      const [extRef, advRef] = await Promise.all([
+        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: extEmpId, type: 'RETENCION', title: 'Extensión de jornada', body: `Tu turno en ${absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, shiftId: extShift?.id || null, protocolStep: 'RETENCION_EXT', read: false, createdAt: serverTimestamp() }, tid)),
+        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: advEmpId, type: 'ADELANTO', title: 'Adelanto de turno', body: `Tu turno en ${absenceShift.objectiveName} fue adelantado. Confirmá llegada.`, objectiveId: absenceShift.objectiveId, shiftId: advShift?.id || null, protocolStep: 'RETENCION_ADV', read: false, createdAt: serverTimestamp() }, tid)),
+      ]);
+
+      upd({
+        status: 'PENDING_DUAL',
+        pendingExt: { notifId: extRef.id, empId: extEmpId, sec: step.timeoutSec },
+        pendingAdv: { notifId: advRef.id, empId: advEmpId, sec: step.timeoutSec },
+      });
+      startDualTimer();
+      onAudit?.('DUAL_NOTIF', `EXT ${extShift?.employeeName} + ADV ${advShift?.employeeName}`);
+    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    finally { setLoading(null); }
+  };
+
+  const confirmDual = async (role: 'ext' | 'adv') => {
+    const slot = role === 'ext' ? session.pendingExt : session.pendingAdv;
+    if (!slot) return;
+    setLoading('confirm_' + role);
+    try {
+      const isRealVacant = !!(
+        absenceShift.id
+        && !absenceShift.isVirtual
+        && !String(absenceShift.id).startsWith('V124_')
+        && !String(absenceShift.id).startsWith('SLA_GAP')
+      );
+      const isRealShiftDoc = (sh: any, empId: string) =>
+        !!(sh && sh.id && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP') && sh.id !== empId);
+
+      if (role === 'ext') {
+        const extShift = candidatesExt.find((s: any) => s.employeeId === slot.empId);
+        const isRealExt = isRealShiftDoc(extShift, slot.empId);
+        if (isRealExt) {
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'turnos', extShift.id), {
+            isRetention: true,
+            isExtended: true,
+            retentionEndTime: Timestamp.fromDate(absenceEnd),
+            endTime: Timestamp.fromDate(absenceEnd),
+            ...(String(extShift.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EXTENSION',
+                coverageType: 'EXTEND',
+              }
+              : {}),
+          });
+          await batch.commit();
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'RETENCION', title: 'Retención de guardia (EXT)', status: 'pending',
+          employeeId: slot.empId, employeeName: extShift?.employeeName || '',
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          shiftId: isRealExt ? extShift.id : null,
+          description: `${extShift?.employeeName} retenido hasta ${hiEnd} — cobertura 1ª mitad`,
+          createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: 'RETENCION_EXT',
+        }, tid));
+        if (session.confirmedAdv) {
+          const advSh = candidatesAdv.find((s: any) => s.employeeId === session.confirmedAdv);
+          const extName = (extShift?.employeeName || '').split(' ')[0];
+          const advName = (advSh?.employeeName || '').split(' ')[0];
+          const covLabel = `${extName} ext + ${advName} adel`;
+          const batch2 = writeBatch(db);
+          if (isRealVacant) {
+            batch2.update(doc(db, 'turnos', absenceShift.id), {
+              status: 'COVERED',
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
+            batch2.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          await batch2.commit();
+          toast.success('Cobertura completa — ambos confirmados');
+          upd({ status: 'CONFIRMED', confirmedExt: slot.empId, pendingExt: null });
+          setTimeout(onClose, 1500);
+        } else {
+          upd({ confirmedExt: slot.empId, pendingExt: null });
+        }
+      } else {
+        const advShift = candidatesAdv.find((s: any) => s.employeeId === slot.empId);
+        const isRealAdv = isRealShiftDoc(advShift, slot.empId);
+        const vacancyStart = Timestamp.fromDate(toDate(absenceShift.shiftDateObj));
+        if (isRealAdv) {
+          const batch = writeBatch(db);
+          batch.update(doc(db, 'turnos', advShift.id), {
+            adjustedStartTime: vacancyStart,
+            startTime: vacancyStart,
+            isEarlyStart: true,
+            ...(String(advShift.positionName || '') !== String(absenceShift.positionName || '')
+              ? {
+                coversPositionName: absenceShift.positionName || null,
+                coverageSegmentRole: 'EARLY_START',
+                coverageType: 'ADVANCE',
+              }
+              : {}),
+          });
+          await batch.commit();
+        }
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'ADELANTO_TURNO', title: 'Adelanto de turno (ADV)', status: 'pending',
+          employeeId: slot.empId, employeeName: advShift?.employeeName || '',
+          objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName,
+          shiftId: isRealAdv ? advShift.id : null,
+          description: `${advShift?.employeeName} adelantado — cobertura 2ª mitad`,
+          createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: 'RETENCION_ADV',
+        }, tid));
+        if (session.confirmedExt) {
+          const extSh = candidatesExt.find((s: any) => s.employeeId === session.confirmedExt);
+          const extName = (extSh?.employeeName || '').split(' ')[0];
+          const advName = (advShift?.employeeName || '').split(' ')[0];
+          const covLabel = `${extName} ext + ${advName} adel`;
+          const batch2 = writeBatch(db);
+          if (isRealVacant) {
+            batch2.update(doc(db, 'turnos', absenceShift.id), {
+              status: 'COVERED',
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          if (absenceShift.causedByShiftId && !String(absenceShift.causedByShiftId).startsWith('V124_') && !String(absenceShift.causedByShiftId).startsWith('SLA_GAP')) {
+            batch2.update(doc(db, 'turnos', absenceShift.causedByShiftId), {
+              operacionallyCovered: true,
+              resolvedBy: 'OPERACIONES',
+              coverageType: 'RETENCION',
+              coveredAt: serverTimestamp(),
+              coveredByEmployeeName: covLabel,
+            });
+          }
+          await batch2.commit();
+          toast.success('Cobertura completa — ambos confirmados');
+          upd({ status: 'CONFIRMED', confirmedAdv: slot.empId, pendingAdv: null });
+          setTimeout(onClose, 1500);
+        } else {
+          upd({ confirmedAdv: slot.empId, pendingAdv: null });
+        }
+      }
+    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    finally { setLoading(null); }
+  };
+
+  const rejectDual = (role: 'ext' | 'adv') => {
+    if (role === 'ext') upd({ pendingExt: null, selectedExtId: null });
+    else upd({ pendingAdv: null, selectedAdvId: null });
+    if (!session.pendingExt && !session.pendingAdv && !session.confirmedExt && !session.confirmedAdv) {
+      if (dualTimerRef.current) { clearInterval(dualTimerRef.current); dualTimerRef.current = null; }
+      upd({ status: 'SELECTING', pendingExt: null, pendingAdv: null });
+    }
+  };
+
+  // ─── Render helpers ───────────────────────────────────────────────────────
+
+  const isBusy = (k: string) => loading === k || loading?.startsWith(k);
+
+  const CandCard = ({ cand, role }: { cand: any; role?: 'ext' | 'adv' }) => {
+    const empId = cand.employeeId || cand.id;
+    const name = cand.fullName || cand.employeeName || cand.name || '—';
+    const phone = cand.phone || cand.celular || simPhone(empId);
+    const isSelected = role === 'ext' ? session.selectedExtId === (cand.id || empId) : role === 'adv' ? session.selectedAdvId === (cand.id || empId) : false;
+    const isPendingThis = role === 'ext' ? session.pendingExt?.empId === empId : role === 'adv' ? session.pendingAdv?.empId === empId : false;
+    const isConfirmedThis = role === 'ext' ? session.confirmedExt === empId : role === 'adv' ? session.confirmedAdv === empId : false;
+    const sec = role === 'ext' ? session.pendingExt?.sec : session.pendingAdv?.sec;
+    const isDual = !!role;
+
+    if (isConfirmedThis) {
+      return (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl border-2 border-emerald-400 bg-emerald-50">
+          <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-content-center text-white text-xs font-black flex-shrink-0 flex items-center justify-center">✓</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-emerald-800">{name}</div>
+            <div className="text-[10px] text-emerald-600 font-semibold">Confirmado</div>
+          </div>
+          <CheckCircle size={16} className="text-emerald-500" />
+        </div>
+      );
+    }
+
+    if (isDual && isPendingThis) {
+      return (
+        <div className="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-400 bg-amber-50">
+          <div className="w-8 h-8 rounded-full bg-amber-400 flex items-center justify-center text-amber-900 text-[9px] font-black flex-shrink-0 font-mono">{fmtCountdown(sec ?? 0)}</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-xs font-bold text-amber-900">{name}</div>
+            <div className="text-[11px] font-bold text-amber-800 font-mono bg-white border border-amber-300 rounded px-1.5 py-0.5 inline-block mt-1">📱 {phone}</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (isDual) {
+      const otherPending = role === 'ext' ? !!session.pendingExt : !!session.pendingAdv;
+      const otherConfirmed = role === 'ext' ? !!session.confirmedExt : !!session.confirmedAdv;
+      const slotBusy = otherPending || otherConfirmed;
+      const clickable = !slotBusy;
+      const handleSel = () => {
+        if (!clickable) return;
+        const key = cand.id || empId;
+        if (role === 'ext') upd({ selectedExtId: session.selectedExtId === key ? null : key });
+        else upd({ selectedAdvId: session.selectedAdvId === key ? null : key });
+      };
+      return (
+        <div onClick={handleSel} style={{ opacity: slotBusy ? 0.35 : 1 }} className={`flex items-center gap-2 p-2.5 rounded-xl border-2 transition-all ${isSelected ? 'border-indigo-500 bg-indigo-50 cursor-pointer' : 'border-slate-200 bg-white cursor-pointer hover:border-slate-300'}`}>
+          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{isSelected ? '✓' : (name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase())}</div>
+          <div className="flex-1 min-w-0">
+            <div className={`text-xs font-bold ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>{name}</div>
+            <div className="text-[11px] font-bold text-slate-600 font-mono bg-slate-50 border border-slate-200 rounded px-1.5 py-0.5 inline-block mt-1">📱 {phone}</div>
+          </div>
+          {isSelected && <div className="text-[9px] font-bold text-indigo-600 bg-white border border-indigo-300 rounded px-1.5 py-0.5">SEL.</div>}
+        </div>
+      );
+    }
+
+    // Single candidate card
+    const hasExp = !!cand.experience?.hasExp;
+    const expLabel = cand.experience?.label || (cand.hasAffinity ? 'Con experiencia' : 'Sin exp.');
+    return (
+      <div className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
+        <div className="relative shrink-0">
+          <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black ${
+            hasExp ? 'bg-emerald-100 text-emerald-800 ring-2 ring-emerald-300' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+          </div>
+          {hasExp && (
+            <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-600 border-2 border-white flex items-center justify-center text-[9px] text-white" title={expLabel}>
+              🎯
+            </div>
+          )}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-sm font-bold text-slate-800 truncate leading-tight">{name}</span>
+            {hasExp ? (
+              <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 shrink-0">
+                ✓ {expLabel}
+              </span>
+            ) : (
+              <span className="text-[9px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 shrink-0">
+                Sin exp.
+              </span>
+            )}
+          </div>
+          {cand.positionName && <div className="text-[10px] text-slate-500 mt-0.5 truncate">{cand.positionName}</div>}
+          <div className="flex items-center gap-2 flex-wrap mt-1">
+            <span className="text-xs font-bold font-mono text-slate-600">📱 {phone}</span>
+            {Number.isFinite(cand.distance) ? (
+              <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0">
+                <MapPin size={10} className="text-indigo-500" />
+                {formatDistanceKm(cand.distance)}
+              </span>
+            ) : (
+              <span className="text-[10px] font-medium text-slate-400 bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded flex items-center gap-0.5 shrink-0" title="Empleado sin coordenadas GPS registradas">
+                <MapPin size={10} className="text-slate-300" />
+                Sin GPS
+              </span>
+            )}
+          </div>
+        </div>
+        <button
+          onClick={() => sendNotification(cand)}
+          disabled={!!loading || session.status !== 'SELECTING'}
+          className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg transition-colors whitespace-nowrap shrink-0"
+        >
+          {isBusy('notif_' + empId) ? '...' : 'Notificar'}
+        </button>
+      </div>
+    );
+  };
+
+  // ─── Vista de paso activo ─────────────────────────────────────────────────
+
+  const renderPendingView = () => {
+    const emp = (logic.employees || []).find((e: any) => e.id === session.pending?.empId)
+      || (logic.processedData || []).find((s: any) => s.employeeId === session.pending?.empId);
+    const name = emp?.fullName || emp?.employeeName || emp?.name || '—';
+    const phone = emp?.phone || emp?.celular || simPhone(session.pending?.empId || '');
+    const timedOut = session.awaitingPhone;
+    const pct = timedOut ? 0 : (session.pending?.sec ?? 0) / step.timeoutSec;
+    const r = 36, circ = 2 * Math.PI * r;
+
+    return (
+      <div className="flex flex-col items-center gap-4 py-4">
+        {/* Countdown ring */}
+        <div className="relative w-20 h-20">
+          <svg viewBox="0 0 88 88" className="w-full h-full -rotate-90">
+            <circle cx="44" cy="44" r={r} fill="none" strokeWidth="6" className="stroke-slate-200" />
+            <circle cx="44" cy="44" r={r} fill="none" strokeWidth="6"
+              stroke={timedOut ? '#EF4444' : '#F59E0B'}
+              strokeDasharray={circ.toFixed(1)}
+              strokeDashoffset={(circ * (1 - pct)).toFixed(1)}
+              strokeLinecap="round" />
+          </svg>
+          <div className="absolute inset-0 flex items-center justify-center">
+            {timedOut ? <Phone size={22} className="text-red-500" /> : <span className="text-sm font-black text-slate-700 font-mono">{fmtCountdown(session.pending?.sec ?? 0)}</span>}
+          </div>
+        </div>
+
+        <div className="text-center">
+          <div className={`text-sm font-black ${timedOut ? 'text-amber-700' : 'text-slate-700'}`}>
+            {timedOut ? 'Sin respuesta · Llamar directamente' : 'Notificación enviada · Esperando confirmación'}
+          </div>
+          {step.mandatory && <div className="text-[10px] text-orange-600 font-bold mt-1">Asignación obligatoria — no puede rechazar</div>}
+        </div>
+
+        {/* Card del guardia */}
+        <div className={`w-full rounded-xl border-2 p-4 ${timedOut ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+          <div className="flex items-center gap-3 mb-3">
+            <div className={`w-10 h-10 rounded-full flex items-center justify-center text-xs font-black flex-shrink-0 ${timedOut ? 'bg-amber-200 text-amber-800' : 'bg-indigo-100 text-indigo-700'}`}>
+              {name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()}
+            </div>
+            <div>
+              <div className="text-sm font-bold text-slate-800">{name}</div>
+              <div className="text-[10px] text-slate-500">{step.label}</div>
+            </div>
+          </div>
+          <div>
+            <div className={`text-[10px] font-bold uppercase tracking-wide mb-1 ${timedOut ? 'text-amber-700' : 'text-slate-500'}`}>
+              {timedOut ? '📞 Llamar ahora' : '📱 Teléfono de contacto'}
+            </div>
+            <div className={`text-base font-black font-mono rounded-lg px-3 py-2 text-center ${timedOut ? 'bg-white border-2 border-amber-400 text-amber-900' : 'bg-slate-50 border border-slate-200 text-slate-800'}`}>
+              {phone}
+            </div>
+          </div>
+        </div>
+
+        {/* Acciones */}
+        <div className="w-full flex flex-col gap-2">
+          <div className="text-[10px] text-center text-slate-400 font-semibold uppercase tracking-widest">— Resultado —</div>
+          <button
+            onClick={confirmCandidate}
+            disabled={!!loading}
+            className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-xl transition-colors"
+          >
+            {loading === 'confirm' ? 'Confirmando...' : step.mandatory ? '✓ Confirmó / Asignado' : timedOut ? '✓ Acepta por teléfono' : '✓ Acepta'}
+          </button>
+          {!step.mandatory && (
+            <button onClick={rejectCandidate} className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-colors">
+              ✗ {timedOut ? 'No contesta / No puede' : 'Rechaza'} — siguiente candidato
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderDualPanel = () => {
+    const canNotify = session.selectedExtId && session.selectedAdvId && session.status !== 'PENDING_DUAL';
+    const isPending = session.status === 'PENDING_DUAL';
+
+    return (
+      <div className="flex flex-col gap-3">
+        <p className="text-[11px] text-slate-500 font-semibold">
+          {isPending ? '⏳ Notificaciones enviadas · esperando respuesta de cada guardia' : 'Seleccioná un candidato de cada columna y notificá a ambos simultáneamente.'}
+        </p>
+
+        {/* Grilla EXT / ADV */}
+        <div className="grid grid-cols-2 gap-2">
+          {/* Columna EXT */}
+          <div className="flex flex-col gap-2 bg-violet-50 border border-violet-200 rounded-xl p-2.5">
+            <div className="text-[9px] font-black text-violet-700 uppercase tracking-wider border-b border-violet-200 pb-1.5 mb-0.5">⟵ 1ª mitad · EXT</div>
+            {session.confirmedExt ? (
+              <CandCard cand={candidatesExt.find((s: any) => s.employeeId === session.confirmedExt) || { id: session.confirmedExt, employeeId: session.confirmedExt }} role="ext" />
+            ) : session.pendingExt ? (
+              <>
+                <CandCard cand={candidatesExt.find((s: any) => s.employeeId === session.pendingExt!.empId) || { id: session.pendingExt.empId, employeeId: session.pendingExt.empId }} role="ext" />
+              </>
+            ) : candidatesExt.length === 0 ? (
+              <p className="text-[10px] text-slate-400 italic py-2 text-center">Sin candidatos EXT</p>
+            ) : (
+              candidatesExt.map((c: any) => <CandCard key={c.id} cand={c} role="ext" />)
+            )}
+          </div>
+
+          {/* Columna ADV */}
+          <div className="flex flex-col gap-2 bg-sky-50 border border-sky-200 rounded-xl p-2.5">
+            <div className="text-[9px] font-black text-sky-700 uppercase tracking-wider border-b border-sky-200 pb-1.5 mb-0.5">2ª mitad · ADV ⟶</div>
+            {session.confirmedAdv ? (
+              <CandCard cand={candidatesAdv.find((s: any) => s.employeeId === session.confirmedAdv) || { id: session.confirmedAdv, employeeId: session.confirmedAdv }} role="adv" />
+            ) : session.pendingAdv ? (
+              <>
+                <CandCard cand={candidatesAdv.find((s: any) => s.employeeId === session.pendingAdv!.empId) || { id: session.pendingAdv.empId, employeeId: session.pendingAdv.empId }} role="adv" />
+              </>
+            ) : candidatesAdv.length === 0 ? (
+              <p className="text-[10px] text-slate-400 italic py-2 text-center">Sin candidatos ADV</p>
+            ) : (
+              candidatesAdv.map((c: any) => <CandCard key={c.id} cand={c} role="adv" />)
+            )}
+          </div>
+        </div>
+
+        {/* Botones de simulación (cuando hay pendientes) */}
+        {isPending && (session.pendingExt || session.pendingAdv) && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-3">
+            <div className="text-[10px] font-bold text-amber-800 uppercase tracking-wide mb-2">Resultado de cada guardia</div>
+            <div className="flex flex-col gap-2">
+              {session.pendingExt && !session.confirmedExt && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black text-violet-700 w-8">EXT</span>
+                  <button onClick={() => confirmDual('ext')} disabled={!!loading} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg">✓ Acepta</button>
+                  <button onClick={() => rejectDual('ext')} disabled={!!loading} className="flex-1 py-2 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg">✗ Rechaza</button>
+                </div>
+              )}
+              {session.pendingAdv && !session.confirmedAdv && (
+                <div className="flex items-center gap-2">
+                  <span className="text-[9px] font-black text-sky-700 w-8">ADV</span>
+                  <button onClick={() => confirmDual('adv')} disabled={!!loading} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg">✓ Acepta</button>
+                  <button onClick={() => rejectDual('adv')} disabled={!!loading} className="flex-1 py-2 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg">✗ Rechaza</button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Botón notificar a ambos */}
+        {!isPending && (
+          <button
+            onClick={sendDualNotification}
+            disabled={!canNotify || !!loading}
+            className={`w-full py-3 font-black rounded-xl text-sm transition-colors ${canNotify ? 'bg-violet-700 hover:bg-violet-800 text-white cursor-pointer' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}
+          >
+            {loading === 'dual' ? '...'
+              : canNotify
+                ? `⚡ Notificar a ambos simultáneamente`
+                : session.selectedExtId ? 'Falta seleccionar ADV →'
+                : session.selectedAdvId ? '← Falta seleccionar EXT'
+                : 'Seleccioná un candidato de cada columna'}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  // ─── Layout principal ─────────────────────────────────────────────────────
+
+  const candidates = candidatesForStep();
+  const isConfirmed = session.status === 'CONFIRMED';
+  const isFailed = session.status === 'FAILED';
+
+  return (
+    <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-end sm:items-center justify-center p-2 sm:p-4 animate-in fade-in">
+      <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[92vh]">
+
+        {/* Header */}
+        <div className="p-4 bg-rose-600 text-white flex justify-between items-start shrink-0">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-black text-base shrink-0">
+              {(absenceShift.employeeName || 'V')[0].toUpperCase()}
+            </div>
+            <div>
+              <p className="text-[10px] font-bold opacity-70 uppercase tracking-wide">Protocolo de Cobertura CCT</p>
+              <p className="font-black text-base leading-tight">{absenceShift.employeeName || 'Vacante'}</p>
+              <p className="text-xs font-semibold opacity-80 mt-0.5">{absenceShift.objectiveName} · {hiStart}–{hiEnd}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="bg-white/20 p-1.5 rounded-lg hover:bg-white/30 transition-colors shrink-0"><X size={18} /></button>
+        </div>
+
+        {/* Progress steps */}
+        <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 shrink-0 overflow-x-auto">
+          <div className="flex items-center gap-1 min-w-max">
+            {STEPS.map((st, i) => {
+              const done = i < session.currentStep || isConfirmed;
+              const active = i === session.currentStep && !isConfirmed && !isFailed;
+              return (
+                <React.Fragment key={st.key}>
+                  <button
+                    type="button"
+                    onClick={() => goToStep(i)}
+                    disabled={isConfirmed}
+                    title={`Ir al paso ${i + 1}: ${st.label}`}
+                    className={`flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black transition-all whitespace-nowrap cursor-pointer hover:opacity-90 active:scale-95 disabled:cursor-default disabled:opacity-100 ${
+                      done ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                      : active ? 'bg-rose-600 text-white shadow-sm ring-2 ring-rose-300'
+                      : 'bg-white text-slate-500 border border-slate-200 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
+                  >
+                    <span>{done ? '✓' : st.icon}</span>
+                    <span>{st.label}</span>
+                    {active && session.status === 'PENDING' && <span className="font-mono ml-1">{fmtCountdown(session.pending?.sec ?? 0)}</span>}
+                    {active && session.status === 'PENDING_DUAL' && <Clock size={10} className="ml-1" />}
+                  </button>
+                  {i < STEPS.length - 1 && <ChevronRight size={10} className="text-slate-300 flex-shrink-0" />}
+                </React.Fragment>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-4">
+
+          {isConfirmed && (
+            <div className="flex flex-col items-center gap-3 py-8">
+              <CheckCircle size={48} className="text-emerald-500" />
+              <div className="text-lg font-black text-emerald-700">Cobertura confirmada</div>
+              <div className="text-sm text-slate-500">El turno ha sido cubierto exitosamente.</div>
+            </div>
+          )}
+
+          {isFailed && (
+            <div className="flex flex-col items-center gap-3 py-8">
+              <AlertTriangle size={48} className="text-amber-500" />
+              <div className="text-lg font-black text-amber-700">Protocolo agotado</div>
+              <div className="text-sm text-slate-500">No se encontró cobertura disponible.</div>
+              <button onClick={() => { upd({ status: 'FAILED' }); addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'SIN_COBERTURA', title: 'Puesto sin cobertura', status: 'pending', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || '', positionName: absenceShift.positionName || '', employeeId: absenceShift.employeeId || null, employeeName: absenceShift.employeeName || null, description: `Protocolo CCT agotado — sin cobertura disponible`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid)).then(() => { toast.info('Registrado sin cobertura'); onClose(); }); }} className="px-4 py-2 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-sm">Registrar sin cobertura</button>
+            </div>
+          )}
+
+          {!isConfirmed && !isFailed && (
+            <>
+              {/* Paso activo */}
+              <div className="mb-2">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Paso {session.currentStep + 1} de {STEPS.length}</span>
+                    <h3 className="text-base font-black text-slate-800">{step.label}</h3>
+                    {step.mandatory && <span className="text-[10px] text-orange-600 font-bold">Asignación obligatoria</span>}
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {session.status === 'SELECTING' && session.currentStep > 0 && (
+                      <button onClick={prevStep} className="flex items-center gap-0.5 text-[11px] text-slate-500 hover:text-slate-800 font-bold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                        <ChevronLeft size={13} /> Anterior
+                      </button>
+                    )}
+                    {session.status === 'SELECTING' && session.currentStep < STEPS.length - 1 && !step.isDual && (
+                      <button onClick={skipStep} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold transition-colors px-2 py-1 rounded-lg hover:bg-slate-100">
+                        <SkipForward size={12} /> Saltear
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Pending o selección */}
+                {session.status === 'PENDING' ? renderPendingView()
+                  : step.isDual ? renderDualPanel()
+                  : candidates.length === 0 && allStepCandidates.length === 0
+                    ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <Users size={32} className="text-slate-300" />
+                        <div className="text-sm text-slate-400">Sin candidatos para este paso</div>
+                        <div className="flex items-center gap-2 justify-center mt-2">
+                          {session.currentStep > 0 && (
+                            <button onClick={prevStep} className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-sm flex items-center gap-1 transition-colors">
+                              <ChevronLeft size={14} /> Anterior
+                            </button>
+                          )}
+                          {session.currentStep < STEPS.length - 1 && (
+                            <button onClick={skipStep} className="px-4 py-2 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-2 transition-colors">
+                              <SkipForward size={14} /> Siguiente paso
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                    : (
+                      <div className="flex flex-col gap-2">
+                        {/* Búsqueda — cuando hay más de 5 candidatos */}
+                        {allStepCandidates.length > 5 && (
+                          <div className="relative">
+                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                            <input
+                              type="text"
+                              placeholder={`Buscar entre ${allStepCandidates.length} candidatos...`}
+                              value={search}
+                              onChange={e => setSearch(e.target.value)}
+                              className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:border-indigo-400 focus:bg-white transition-colors"
+                            />
+                          </div>
+                        )}
+
+                        {/* Banner de radio de distancia y estado */}
+                        <div className="rounded-xl border p-2 text-[10px] font-semibold">
+                          {activeRadiusKm === 15 ? (
+                            <div className="flex items-center justify-between text-indigo-700 bg-indigo-50/70 -m-2 p-2 rounded-xl">
+                              <span className="flex items-center gap-1">
+                                <MapPin size={11} className="text-indigo-600" /> Radio: <strong>≤ 15 km</strong> del objetivo
+                              </span>
+                              <span className="font-bold text-indigo-900">{candidates.length}{search ? ` de ${allStepCandidates.length}` : ''} disponibles</span>
+                            </div>
+                          ) : activeRadiusKm === 30 ? (
+                            <div className="flex items-center justify-between text-amber-800 bg-amber-50 -m-2 p-2 rounded-xl">
+                              <span className="flex items-center gap-1">
+                                <MapPin size={11} className="text-amber-600" /> Sin candidatos a 15 km · Ampliado a <strong>≤ 30 km</strong>
+                              </span>
+                              <span className="font-bold text-amber-900">{candidates.length}{search ? ` de ${allStepCandidates.length}` : ''} disponibles</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center justify-between text-slate-600 bg-slate-100 -m-2 p-2 rounded-xl">
+                              <span className="flex items-center gap-1">
+                                <MapPin size={11} className="text-slate-400" /> Sin candidatos dentro de 30 km · Mostrando disponibles
+                              </span>
+                              <span className="font-bold text-slate-800">{candidates.length}{search ? ` de ${allStepCandidates.length}` : ''} disponibles</span>
+                            </div>
+                          )}
+                        </div>
+
+                        {candidates.length === 0 && search && (
+                          <div className="text-center py-4 text-xs text-slate-400">Sin resultados para "{search}"</div>
+                        )}
+
+                        {candidates.map((c: any) => <CandCard key={c.id || c.employeeId} cand={c} />)}
+                      </div>
+                    )
+                }
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!isConfirmed && !isFailed && (
+          <div className="px-4 py-3 border-t border-slate-100 bg-slate-50 shrink-0 flex items-center justify-between">
+            <button onClick={onClose} className="text-xs text-slate-400 hover:text-slate-600 font-semibold transition-colors">Cerrar</button>
+            <div className="flex items-center gap-2">
+              {session.currentStep > 0 && session.status === 'SELECTING' && (
+                <button onClick={prevStep} className="flex items-center gap-0.5 text-xs text-slate-600 hover:text-slate-800 font-bold transition-colors">
+                  <ChevronLeft size={13} /> Paso anterior
+                </button>
+              )}
+              {session.currentStep < STEPS.length - 1 && session.status === 'SELECTING' && (
+                <button onClick={skipStep} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-700 font-bold transition-colors">
+                  Saltear paso <SkipForward size={12} />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

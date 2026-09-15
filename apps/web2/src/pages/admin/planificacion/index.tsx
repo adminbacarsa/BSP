@@ -25,76 +25,76 @@ import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQu
 import { db, getDocsOnce, functions } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
-import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, serverTimestamp, Timestamp, where, getDocs, getDoc, updateDoc, writeBatch, setDoc, deleteField } from 'firebase/firestore';
 
-type PlanificacionDotacionEntry = { positionName: string; shiftCode?: string };
-type PlanificacionDotacionMap = Record<string, PlanificacionDotacionEntry>;
-
-function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDotacion?: PlanificacionDotacionMap }[]) {
-    const pos: Record<string, string> = {};
-    const shift: Record<string, string> = {};
-    for (const e of employees) {
-        const dot = e.planificacionDotacion;
-        if (!dot) continue;
-        for (const [objId, cfg] of Object.entries(dot)) {
-            if (cfg?.positionName) pos[`${e.id}___${objId}`] = cfg.positionName;
-            if (cfg?.shiftCode) shift[`${e.id}___${objId}`] = cfg.shiftCode;
-        }
-    }
-    return { pos, shift };
-}
-
-const DOTACION_NEARBY_KM_DEFAULT = 10;
-const DOTACION_NEARBY_KM_MIN = 5;
-const DOTACION_NEARBY_KM_MAX = 100;
-const DOTACION_NEARBY_ROW_CAP = 40;
-const DOTACION_NEARBY_SCAN_CAP = 150;
-const ASSIGN_SEARCH_LIMIT = 50;
-const ROSTER_KM_PRESETS = [5, 10, 20, 40, 80] as const;
-const NEARBY_KM_STORAGE_KEY = 'planif_nearby_km';
-
-function clampNearbyKm(v: number): number {
-    if (!Number.isFinite(v)) return DOTACION_NEARBY_KM_DEFAULT;
-    return Math.min(DOTACION_NEARBY_KM_MAX, Math.max(DOTACION_NEARBY_KM_MIN, Math.round(v)));
-}
-
-function readStoredNearbyKm(): number {
-    if (typeof window === 'undefined') return DOTACION_NEARBY_KM_DEFAULT;
-    try {
-        const stored = parseInt(localStorage.getItem(NEARBY_KM_STORAGE_KEY) || '', 10);
-        if (Number.isFinite(stored)) return clampNearbyKm(stored);
-    } catch { /* ignore */ }
-    return DOTACION_NEARBY_KM_DEFAULT;
-}
-
-function formatKmLabel(km: number | null | undefined): string {
-    if (km == null || !Number.isFinite(km) || km >= 9999) return '';
-    if (km < 1) return `${Math.round(km * 1000)}m`;
-    return `${km.toFixed(1)}km`;
-}
-
-function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
-    const toRad = (deg: number) => (deg * Math.PI) / 180;
-    const R = 6371;
-    const dLat = toRad(lat2 - lat1);
-    const dLon = toRad(lng2 - lng1);
-    const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-}
-
-function employeeKmToObjective(emp: { lat?: number; lng?: number; latitude?: number; longitude?: number }, objLat: number, objLng: number): number | null {
-    const empLat = Number(emp.lat ?? emp.latitude ?? 0);
-    const empLng = Number(emp.lng ?? emp.longitude ?? 0);
-    if (!empLat || !empLng || !objLat || !objLng) return null;
-    return haversineKm(empLat, empLng, objLat, objLng);
-}
-
-function isEmpExcludedFromPlanningDotacion(emp: { planificacionDotacion?: PlanificacionDotacionMap }, objectiveId: string | null | undefined): boolean {
-    if (!objectiveId || !emp?.planificacionDotacion) return false;
-    return isDeploymentSurplusCode(emp.planificacionDotacion[objectiveId]?.shiftCode);
-}
+import {
+    ASSIGN_SEARCH_LIMIT,
+    DOTACION_NEARBY_KM_DEFAULT,
+    DOTACION_NEARBY_ROW_CAP,
+    DOTACION_NEARBY_SCAN_CAP,
+    NEARBY_KM_STORAGE_KEY,
+    ROSTER_KM_PRESETS,
+    clampNearbyKm,
+    employeeKmToObjective,
+    formatKmLabel,
+    isEmpExcludedFromPlanningDotacion,
+    readStoredNearbyKm,
+    type PlanificacionDotacionMap,
+} from '@/lib/planificacion/planificacionDotacionUtils';
+import {
+    DEFAULT_LIMITS,
+    GRUPO_COLOR_HEX,
+    LEGEND_DESCRIPTIONS,
+    PLANNING_ENGINE_VERSION,
+    SHIFT_HOURS_LOOKUP,
+    SHIFT_RANGES,
+    SHIFT_STYLES,
+    absenceStatusBadgeClass,
+    clampPlanifFloatingPos,
+    getDefaultStyle,
+} from '@/lib/planificacion/planificacionGridVisuals';
+import { isPosActiveOnDay } from '@/lib/planificacion/planificacionPositionEngine';
+import {
+    dailyCoverageHoursTargetWithPerShiftPax,
+    filterShiftsForPlanningDay,
+    isPosExcludedOnDate,
+} from '@/lib/planificacion/planificacionDailyCoverage';
+import {
+    calcShiftHours,
+    is24hCoverageType,
+    isShortBandHours,
+    resolveBandHours,
+} from '@/lib/planificacion/planificacionBandHours';
+import { getDateKey, getDayLetter, isDateLocked } from '@/lib/planificacion/utils';
+import { planificacionActionLabel } from '@/lib/planificacion/planificacionActionLabels';
+import {
+    PLANNING_TRACE_TONE,
+    buildPlanningCellTrace,
+    formatPlanningTraceTooltip,
+} from '@/lib/planificacion/planificacionPlanningTrace';
+import {
+    formatPlanificacionTime,
+    formatShiftScheduleLabel,
+    resolveShiftDisplayClockParts,
+} from '@/lib/planificacion/planificacionShiftDisplay';
+import {
+    OTHER_OBJECTIVE_CELL_STYLE,
+    isCrossObjectivePlanningReadOnly,
+    isOperationalOriginShift,
+    isOpsCoverageShift,
+    isPlanificacionPublished,
+    isShiftAtOtherObjective,
+    resolveCellShiftAtObjective,
+    resolveCellShiftDisplay,
+    shiftMatchesObjective,
+    shiftPlanningCodeUpper,
+    turnoCuentaParaCronoPlanificado,
+} from '@/lib/planificacion/planificacionPlanningShiftRules';
+import {
+    LEAVE_CELL_CODES,
+    resolveTitularCoverageName,
+} from '@/lib/planificacion/planificacionTitularCoverage';
 import { useEmpresa } from '@/context/EmpresaContext';
 import {
     belongsToEmpresaView,
@@ -108,20 +108,13 @@ import {
     stampEmpresaId,
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
-    fetchPlanificacionEstadoDoc,
-    fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
     filterSlasForPlanningTenant,
     filterSlasForPlanningContext,
-    formatSlaRangeHint,
     pickSlaForPlanningMonth,
-    planningMonthHasActiveSla,
-    slaBelongsToPlanningClient,
-    buildPlanningPositionStructure,
-    DEFAULT_PLANNING_SHIFTS,
     isPlanningPositionExcludedOnDate,
     isPlanningShiftExcludedOnDate,
     getPlanningExcludedShiftCodesOnDate,
@@ -132,25 +125,93 @@ import {
     abbrevPlanningPositionName,
     excludedPositionsCellLabel,
     excludedPositionsTooltip,
-    resolvePlanningMonthSlaHours,
-    type SlaPlanningRow,
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
-import { rebuildHoursBalanceForObjectiveMonth } from '@/lib/hoursBalance';
 import { useAuth } from '@/context/AuthContext';
+import { usePlanificacionFirestore } from '@/hooks/usePlanificacionFirestore';
+import { usePlanificacionGrupoSla } from '@/hooks/usePlanificacionGrupoSla';
+import { usePlanificacionObjectiveSla } from '@/hooks/usePlanificacionObjectiveSla';
+import { usePlanificacionAutoRotation } from '@/hooks/usePlanificacionAutoRotation';
+import { usePlanificacionPublishState } from '@/hooks/usePlanificacionPublishState';
+import { usePlanificacionDotacionOverlay } from '@/hooks/usePlanificacionDotacionOverlay';
+import { usePlanificacionDotacionMigration } from '@/hooks/usePlanificacionDotacionMigration';
+import { unpublishPlanificacionMonth } from '@/lib/planificacion/planificacionUnpublish';
+import { publishPlanificacionMonth } from '@/lib/planificacion/planificacionPublish';
+import {
+    buildPublishConfirmModalState,
+    evaluatePublishSlaState,
+    type PublishConfirmModalState,
+} from '@/lib/planificacion/planificacionPublishConfirm';
+import { executePlanificacionSaveJob } from '@/lib/planificacion/executePlanificacionSaveJob';
+import { loadPlanificacionCronogramaRefresh } from '@/lib/planificacion/refreshPlanificacionCronogramaView';
+import {
+    clearPlanificacionObjectivePositions,
+    savePlanificacionEmpPosition,
+} from '@/lib/planificacion/planificacionDotacionActions';
+import {
+    applyPlanificacionVacancyCoverage,
+    buildVacancyProcessDays,
+    collectPlanificacionVacancyFrancoConflicts,
+    toastVacancyApplyError,
+    toastVacancyApplyResult,
+} from '@/lib/planificacion/processPlanificacionVacancy';
+import { applyPlanificacionBulkChange } from '@/lib/planificacion/applyPlanificacionBulkChange';
+import { applyPlanificacionBulkPositionFill } from '@/lib/planificacion/applyPlanificacionBulkPositionFill';
+import {
+    evaluatePlanificacionRestricciones,
+    isPlanificacionBulkCovBlocked,
+} from '@/lib/planificacion/planificacionRestricciones';
+import { assignPlanificacionShift } from '@/lib/planificacion/assignPlanificacionShift';
+import { applyPlanificacionToPending } from '@/lib/planificacion/applyPlanificacionToPending';
+import { checkPlanificacionLaborRules } from '@/lib/planificacion/checkPlanificacionLaborRules';
+import {
+    confirmPlanificacionPendingAssignment,
+    resetPlanificacionPendingAssignment,
+} from '@/lib/planificacion/confirmPlanificacionPendingAssignment';
+import { applyPlanificacionRecompositionPackage } from '@/lib/planificacion/applyPlanificacionRecompositionPackage';
+import {
+    executePlanificacionSwap,
+    getPlanificacionShiftFor,
+} from '@/lib/planificacion/executePlanificacionSwap';
+import {
+    copyPlanificacionSelectionToClipboard,
+    cutPlanificacionSelection,
+    pastePlanificacionClipboardAt,
+} from '@/lib/planificacion/planificacionClipboard';
+import { findPlanificacionConflictNeighbors } from '@/lib/planificacion/findPlanificacionConflictNeighbors';
+import { resolvePlanificacionConflict } from '@/lib/planificacion/resolvePlanificacionConflict';
+import { submitPlanificacionRRHHNovedad } from '@/lib/planificacion/submitPlanificacionRRHHNovedad';
+import { resetPlanificacionVacancyModal } from '@/lib/planificacion/resetPlanificacionVacancyModal';
+import { handlePlanificacionMouseUp } from '@/lib/planificacion/handlePlanificacionMouseUp';
+import { applyPlanificacionPrevMonthTemplate } from '@/lib/planificacion/applyPlanificacionPrevMonthTemplate';
+import {
+    loadPlanificacionAbsencesForRange,
+    mergePlanificacionAbsencesFromLocalGrid,
+} from '@/lib/planificacion/loadPlanificacionAbsencesForRange';
+import {
+    applyPlanificacionContextChange,
+    applyPlanificacionGrupoChange,
+} from '@/lib/planificacion/planificacionContextNavigation';
+import {
+    deletePlanificacionGrupo,
+    savePlanificacionGrupo,
+} from '@/lib/planificacion/planificacionGrupoCrud';
+import {
+    generatePlanificacionAutoScheduleV2,
+} from '@/lib/planificacion/generatePlanificacionAutoScheduleV2';
+import { applyPlanificacionAutoScheduleV2 } from '@/lib/planificacion/applyPlanificacionAutoScheduleV2';
+import { runPlanificacionAutoV2PlanningAgentGemini } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
+import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
     planToastBulk,
-    planToastChangeApplied,
-    planToastSaveError,
-    planToastSaved,
     planToastSaving,
     planToastWarnMany,
 } from '@/lib/planificacion/planToast';
-import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
+import { checkRestBetweenShifts } from '@/lib/planificacion/restBetweenShifts';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
-import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
+import { generateScheduleV4 } from '@/lib/planificacion/autoScheduleEngineV4';
 import { runPlanningGeneration, resolvePlanningGenerationRoute } from '@/lib/planificacion/planningGenerationRouter';
 import { resolveObjectiveScheduleFlags, shouldBypassFixedBandFloater } from '@/lib/planificacion/scheduleObjectiveFlags';
 import {
@@ -162,7 +223,7 @@ import {
 import ObjectiveServiceAnalysisCard from '@/components/planificacion/ObjectiveServiceAnalysisCard';
 import { resolveCronogramPlanningRules } from '@/lib/planificacion/cronogramPlanningRules';
 import { dominantDotacionFromPlanningCells } from '@/lib/planificacion/seedDotacionFromPrevMonth';
-import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
+import { fetchPlanningMonthShifts, buildPlanningMonthTurnosQuery, buildPlanningMonthRfzQuery, buildPlanningMonthTuraQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { matchesEmployeeSearch } from '@/lib/planificacion/employeeSearch';
 import {
     adjacentPlanningMonths,
@@ -170,7 +231,13 @@ import {
     planningMonthCacheKey,
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
+import { planningMonthAccess, classifyYearMonth } from '@/lib/dataRetention';
 import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
+import {
+    buildPlanningEventosCellsByDay,
+    formatPlanningEventosTooltip,
+} from '@/lib/planificacion/planningEventosExtras';
+import { formatShiftClockRange, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -181,8 +248,10 @@ import {
     type AutoPlanningBrainResult,
 } from '@/lib/planificacion/autoPlanningBrain';
 import { applySlaContractDotacion, buildPositionAssignmentsByEmp, buildSlaRotationByDate } from '@/lib/planificacion/slaContractPlanning';
-import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
-import { applyRotationsForMonth } from '@/lib/planificacion/slaRotationMonthPlanner';
+import { isEncargadoPosition } from '@/lib/servicios/encargadoPosition';
+import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { positionIncludeInSlaTotals } from '@/lib/servicios/auxiliaryPositionPolicy';
+import { calculatePositionMonthHours } from '@/lib/servicios/slaHoursCalculator';
 import {
     countPositionClosedUnitsFromShifts,
     is24hsSinglePaxBandMixBlocked,
@@ -202,7 +271,7 @@ import {
     formatDayDemandSummary,
     type ObjectiveCoveragePreflight,
 } from '@/lib/planificacion/objectiveCoverageDemand';
-import { inferAbsenceCode, isActiveAbsence, buildAbsencesMapFromDocs, toCalendarDateStr, iterateCalendarDateRange, validateAbsenceDateRange, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
+import { inferAbsenceCode, absenceGridDisplayCode } from '@/lib/planificacion/absenceCodes';
 import { isEmployeeOnLeave, shouldShowLeaveConflictSiren } from '@/lib/planificacion/leaveCoverage';
 import {
     listDateRangeInclusive,
@@ -254,16 +323,9 @@ import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/component
 import PlanningShiftExtendModal, { type ShiftExtendModalData } from '@/components/planificacion/PlanningShiftExtendModal';
 import { isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionApply';
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
-import { touchPlanificacionEstadoActivity } from '@/lib/planificacion/planningCronogramaOverview';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
-import { extractPackagesFromPending, emitRecompositionNotifications } from '@/lib/planificacion/planningRecompositionNotify';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
-import {
-    buildPlannerContextFromAutoRun,
-    runPlanningAgentOptimizeStep,
-    shouldRunGeminiOptimizeStep,
-} from '@/lib/planificacion/planningAgentPipeline';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
 import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
 import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
@@ -286,11 +348,11 @@ import {
     shiftCountsForEmployeeCronoHours,
 } from '@/lib/planificacion/deploymentRoles';
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
-import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
+import { experienciaBadgeForReplacement } from '@/lib/planificacion/experienciaObjetivos';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
+import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import {
     shiftCoverageExtensionExtraHours,
-    calcPlanningBillableShiftHours,
     calcPlanningBillableHoursAttributedToPosition,
     calcPlanningSlaReconciliationHours,
     planningShiftBillableBreakdown,
@@ -303,682 +365,9 @@ import {
     type PlanningCellHoursContext,
 } from '@/lib/planificacion/planningEmployeeCellHours';
 
-const LEAVE_CELL_CODES = new Set(['V', 'L', 'PG', 'A', 'ART', 'E', 'AA', 'LT', 'SGS', 'SUS']);
-
-function resolveTitularCoverageName(
-    titularEmpId: string,
-    titularName: string,
-    dateStr: string,
-    shiftsMap: Record<string, any>,
-    pendingChanges: Record<string, any>,
-    empNameById: (id: string) => string | undefined,
-    coveredByFromCell?: string | null,
-): string | null {
-    if (coveredByFromCell) {
-        return String(coveredByFromCell).replace(/\s*\([^)]*\)\s*$/, '').trim() || null;
-    }
-    const allSources = { ...shiftsMap, ...pendingChanges };
-    for (const [k, raw] of Object.entries(allSources)) {
-        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${titularEmpId}_`)) continue;
-        const s = raw as any;
-        if (s?.isDeleted) continue;
-        if (String(s.comments || '').includes(`Cubriendo a ${titularName}`)) {
-            const covEmpId = k.replace(`_${dateStr}`, '');
-            const name = empNameById(covEmpId);
-            const covCode = String(s.code || '').toUpperCase();
-            if (name && covCode && !LEAVE_CELL_CODES.has(covCode)) return `${name} turno ${covCode}`;
-            return name || null;
-        }
-    }
-    return null;
-}
-
-function buildLeaveCellTooltipLabel(opts: {
-    absenceType?: string | null;
-    reason?: string | null;
-    coveredBy?: string | null;
-}): string {
-    const lines: string[] = [];
-    if (opts.absenceType) lines.push(`Tipo: ${opts.absenceType}`);
-    const reason = String(opts.reason || '').trim();
-    if (reason && !reason.includes('gestionado desde planificador')) lines.push(`Motivo: ${reason}`);
-    lines.push(`Cubierto por: ${opts.coveredBy || 'Sin cobertura registrada'}`);
-    return lines.join('\n');
-}
-
-// --- CONFIGURACIÓN VISUAL ---
-const SHIFT_STYLES: any = {
-    'M':   'bg-white text-blue-700 border-blue-400 font-bold',
-    'T':   'bg-white text-orange-600 border-orange-400 font-bold',
-    'N':   'bg-white text-indigo-700 border-indigo-500 font-bold',
-    'D12': 'bg-white text-cyan-700 border-cyan-400 font-bold',
-    'N12': 'bg-white text-purple-700 border-purple-400 font-bold',
-    'F':   'bg-green-500 text-white border-green-600 font-black shadow-sm',
-    'PU':  'bg-white text-pink-700 border-pink-400 font-bold',
-    'A':   'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
-    'ART': 'bg-white text-red-700 border-red-400 font-black pattern-diagonal',
-    'V':   'bg-emerald-700 text-white border-emerald-800 font-black shadow-sm',
-    'L':   'bg-white text-purple-700 border-purple-400 font-black',
-    'E':   'bg-white text-rose-700 border-rose-400 font-black',
-    'AA':  'bg-white text-amber-700 border-amber-400',
-    'LT':  'bg-orange-50 text-orange-700 border-orange-400 font-black',
-    'RET': 'bg-slate-100 text-slate-700 border border-slate-400 font-bold',
-    'SGS': 'bg-orange-50 text-orange-700 border border-orange-300 font-bold',
-    'SUS': 'bg-red-100 text-red-700 border border-red-400 font-bold',
-    'REF': 'bg-violet-100 text-violet-800 border-violet-500 font-black',
-    'RFZ': 'bg-red-500 text-white border-red-600 font-black',
-    'TURA': 'bg-red-600 text-white border-red-700 font-black',
-    'EXTENDED': 'bg-red-600 text-white border-red-700 font-black shadow-sm',
-    'ESC': 'bg-sky-100 text-sky-800 border-sky-500 font-black',
-    'EV':  'bg-yellow-400 text-yellow-900 border-yellow-500 font-black',
-    'PG':  'bg-white text-blue-700 border-blue-400 font-black',
-    'LOCKED': 'bg-slate-200 text-slate-500 border-slate-300 pattern-grid',
-    'PAST':   'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed',
-    'C':   'bg-white text-slate-600 border-slate-400 font-bold opacity-90',
-    'FT':  'bg-violet-600 text-white border-violet-700 font-black shadow-sm',
-    'FF':  'bg-green-600 text-white border-green-700 font-black shadow-sm',
-    'SWAP':         'bg-cyan-50 text-cyan-700 border-cyan-300 border-dashed font-bold',
-    'SWAP_PENDING': 'bg-amber-100 text-amber-700 border-amber-300 border-dashed font-bold'
-};
-
-const GRUPO_COLOR_HEX = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'];
-
-/** Mantiene tooltips/modales del pie de cobertura dentro del viewport. */
-function clampPlanifFloatingPos(clientX: number, clientY: number, panelW = 320, panelH = 220): { left: number; top: number } {
-    if (typeof window === 'undefined') return { left: clientX, top: clientY };
-    const pad = 24;
-    const vw = window.innerWidth;
-    const vh = window.innerHeight;
-    let left = clientX + 12;
-    let top = clientY + 12;
-    if (left + panelW > vw - pad) left = Math.max(pad, vw - panelW - pad);
-    if (left < pad) left = pad;
-    if (top + panelH > vh - pad) top = Math.max(pad, clientY - panelH - 16);
-    if (top < pad) top = pad;
-    return { left, top };
-}
-
-const LEGEND_DESCRIPTIONS: Record<string, string> = {
-    'M': 'Turno Mañana (Estándar)',
-    'T': 'Turno Tarde (Estándar)',
-    'N': 'Turno Noche (Estándar)',
-    'D12': 'Jornada Diurna 12hs',
-    'N12': 'Jornada Nocturna 12hs',
-    'F': 'Franco Compensatorio',
-    'RET': 'Guardia Retén',
-    'REF': 'Refuerzo interno (no cuenta cobertura SLA)',
-    'RFZ': 'Refuerzo solicitado por cliente (facturable)',
-    'TURA': 'Turno Agregado por cliente (facturable)',
-    'ESC': 'Escuela / formación (no cuenta cobertura SLA ni horas planificadas)',
-    'PU': 'Puesto Único / Especial',
-    'A': 'ART / Autorizada',
-    'ART': 'ART (carpeta)',
-    'V': 'Vacaciones',
-    'L': 'Licencia Esp.',
-    'E': 'Enfermedad',
-    'AA': 'No Presentó',
-    'RA': 'Retiro anticipado',
-    'LT': 'Llegada Tarde',
-    'LOCKED': 'Bloqueado (Cerrado/Pasado)',
-    'PAST': 'Fecha Pasada',
-    'C': 'Turno Consolidado (Fichado)',
-    'FT': 'Franco Trabajado (Pago Doble)',
-    'FF': 'Franco x Franco (Devolución)',
-    'SWAP': 'Intercambio de Turno',
-    'SWAP_PENDING': 'Intercambio pendiente de autorización',
-    'EXTENDED': 'Turno extendido o adelantado (cobertura / horas extra)',
-    'EV': 'Evento especial (recital, partido, operativo)',
-};
-
-const SHIFT_RANGES: Record<string, string> = {
-    'M': '07:00 - 15:00',
-    'T': '15:00 - 23:00',
-    'N': '23:00 - 07:00',
-    'D12': '07:00 - 19:00',
-    'N12': '19:00 - 07:00',
-    'PU': 'Horario Personalizado',
-    'FT': 'Cobertura Extra (100%)'
-};
-
-const ABSENCE_STATUS_STYLES: Record<string, string> = {
-    'Justificada': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    'Autorizada': 'bg-emerald-100 text-emerald-700 border-emerald-200',
-    'En verificación': 'bg-violet-100 text-violet-700 border-violet-200',
-    'Pendiente': 'bg-amber-100 text-amber-800 border-amber-200',
-    'Injustificada': 'bg-rose-100 text-rose-700 border-rose-200',
-    'Rechazada': 'bg-rose-100 text-rose-700 border-rose-200',
-};
-
-const absenceStatusBadgeClass = (status: string) =>
-    ABSENCE_STATUS_STYLES[status] || 'bg-slate-100 text-slate-600 border-slate-200';
-
-const formatShiftScheduleLabel = (shift: any, bandCode: string): string => {
-    if (typeof shift?.startTime === 'string' && typeof shift?.endTime === 'string') {
-        return `${shift.startTime} - ${shift.endTime}`;
-    }
-    if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
-        const s = formatTime(shift.startTime);
-        const e = formatTime(shift.endTime);
-        if (s !== '--:--' && e !== '--:--' && s !== e) return `${s} - ${e}`;
-    }
-    return SHIFT_RANGES[bandCode] || '—';
-};
-
-const DEFAULT_LIMITS = { weekly: 48, monthly: 200 };
-
-/** Versión del motor de planificación — visible en UI durante generación para verificar deploy. */
-const PLANNING_ENGINE_VERSION = '2.8';
-
-const SHIFT_HOURS_LOOKUP: Record<string, number> = {
-    'M': 8, 'T': 8, 'N': 8, 'D12': 12, 'N12': 12, 'PU': 12, 'EN': 9, 'ENC': 8, 'F': 0, 'FF': 0, 'FP': 0, 'FT': 0, 'V': 0, 'L': 0, 'A': 0, 'E': 0, 'AA': 0, 'LT': 0, 'PG': 0, 'RET': 0, 'REF': 8, 'RFZ': 8, 'TURA': 8, 'ESC': 8, 'C': 8, 'EV': 8,
-};
-
-/**
- * Horas de banda para cupos 8h vs 12h.
- * Prioriza la definición del puesto en el SLA (ej. M custom 08–20 = 12h), no el lookup CCT estándar (M=8).
- */
-const resolveBandHours = (
-    code: string | undefined | null,
-    shiftLike?: { hours?: unknown; startTime?: unknown; endTime?: unknown } | null,
-    posShifts?: Array<{ code?: string; hours?: unknown; startTime?: unknown; endTime?: unknown }> | null,
-): number => {
-    const upper = String(code || '').toUpperCase();
-    const fromSla = (posShifts || []).find((s) => String(s.code || '').toUpperCase() === upper);
-    const slaH = Number(fromSla?.hours);
-    if (slaH > 0) return slaH;
-    const stored = Number(shiftLike?.hours);
-    if (stored > 0) return stored;
-    // Duración 08:00–20:00 si el turno la trae
-    const st = fromSla?.startTime ?? shiftLike?.startTime;
-    const en = fromSla?.endTime ?? shiftLike?.endTime;
-    if (typeof st === 'string' && typeof en === 'string') {
-        const parseH = (t: string) => {
-            const m = t.match(/^(\d{1,2}):(\d{2})$/);
-            return m ? +m[1] + +m[2] / 60 : null;
-        };
-        const s = parseH(st);
-        const e = parseH(en);
-        if (s !== null && e !== null) {
-            let dur = e - s;
-            if (dur <= 0) dur += 24;
-            if (dur > 0 && dur <= 24) return dur;
-        }
-    }
-    return SHIFT_HOURS_LOOKUP[upper] ?? 8;
-};
-
-const isShortBandHours = (hours: number) => hours < 12;
-
-/** Puestos 24hs usan esquema CCT M+T+N / D12+N12. Custom: turnos con nombre libre. */
-const is24hCoverageType = (pos: { coverageType?: unknown } | null | undefined): boolean => {
-    const cov = String(pos?.coverageType || '').toLowerCase();
-    return cov === '24hs' || cov === '24' || cov === '24h';
-};
-
-/** No computan como "hs planificadas de cobertura" en el objetivo (retén, francos, licencias). */
-const OBJECTIVE_NON_BILLABLE_CODES = PLANNING_NON_BILLABLE_CODES;
-
-const calcShiftHours = (shift: any, slaHoursHint?: Record<string, number>): number =>
-  calcPlanningBillableShiftHours(shift, slaHoursHint);
-
-/** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
-function isOperationalOriginShift(data: any): boolean {
-    const o = String(data?.origin || '').toUpperCase();
-    if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-    if (data?.resolvedBy === 'OPERACIONES') return true;
-    return false;
-}
-
-/**
- * Publicado = tiene publishedAt. El doc planificacion_estados también guarda
- * defaultPositionByEmp (asignación de puestos) sin publicar el cronograma.
- */
-function isPlanificacionPublished(
-    status: { publishedAt?: unknown; publishedBy?: string } | null | undefined,
-): boolean {
-    return status != null && status.publishedAt != null && status.publishedAt !== '';
-}
-
-/**
- * Horas CCT / pie de grilla: solo turnos del objetivo en pantalla y NO operativos.
- * Importante: los borradores (draft:true) sí cuentan — son el crono planificado todavía
- * no publicado, hay que verlos en la grilla y sumarlos.
- * Evita "200h en abril" por turnos de OTRO objetivo o cobertura de ops mezclados en
- * `turnos` con la misma fecha+empleado.
- */
-function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefined | null): boolean {
-    if (!data || !objectiveId) return false;
-    if (String(data.objectiveId || '') !== String(objectiveId)) return false;
-    if (isOperationalOriginShift(data)) return false;
-    return true;
-}
-
-const OTHER_OBJECTIVE_CELL_STYLE =
-    'bg-slate-700 text-slate-200 border-slate-600 ring-2 ring-slate-500 ring-offset-2 dark:ring-offset-slate-900 font-bold opacity-90';
-
-function shiftPlanningCodeUpper(shift: any): string {
-    return String(shift?.code || shift?.type || '').toUpperCase();
-}
-
-function isShiftAtOtherObjective(
-    s: any,
-    p: any,
-    selectedObjective: string | null | undefined,
-): boolean {
-    if (!selectedObjective) return false;
-    if (p?.isDeleted) return false;
-    const active = p && !p.isDeleted ? p : s;
-    if (!active) return false;
-    const obj = active.objectiveId;
-    if (obj == null || obj === '') return false;
-    return String(obj) !== String(selectedObjective);
-}
-
-/** Turno de otro objetivo: solo lectura en este crono, salvo RET y Franco (F/FF → flujo FT). */
-function isCrossObjectivePlanningReadOnly(
-    shift: any,
-    selectedObjective: string | null | undefined,
-): boolean {
-    if (!shift || !selectedObjective) return false;
-    if (isOperationalOriginShift(shift)) return true;
-    const obj = shift.objectiveId;
-    if (obj == null || obj === '') return false;
-    if (String(obj) === String(selectedObjective)) return false;
-    const code = shiftPlanningCodeUpper(shift);
-    if (code === 'RET') return false;
-    if (code === 'F' || code === 'FF') return false;
-    return true;
-}
-
-/** Turno guardado en Firestore de otro objetivo (solo visualización en el crono activo). */
-function pickCrossObjectiveSavedShift(
-    rawS: any,
-    selectedObjective: string | undefined | null,
-): any | null {
-    if (!rawS || !selectedObjective) return null;
-    if (isOperationalOriginShift(rawS)) return null;
-    const obj = rawS.objectiveId;
-    if (obj == null || obj === '') return null;
-    if (String(obj) === String(selectedObjective)) return null;
-    return rawS;
-}
-
-/** Turno visible en celda del crono para el objetivo activo (pending o publicado). */
-function resolveCellShiftAtObjective(
-    empId: string,
-    dateStr: string,
-    selectedObjective: string | undefined | null,
-    pendingChanges: Record<string, any>,
-    shiftsMap: Record<string, any>,
-): any | null {
-    if (!selectedObjective) return null;
-    const key = `${empId}_${dateStr}`;
-    const pending = pendingChanges[key];
-    const existing = shiftsMap[key];
-    if (pending?.isDeleted) return null;
-    const activeShift = pending && !pending.isDeleted ? pending : existing;
-    if (!activeShift) return null;
-    if (pending && !pending.isDeleted) {
-        const obj = activeShift.objectiveId;
-        if (obj != null && obj !== '' && String(obj) !== String(selectedObjective)) return null;
-        return activeShift;
-    }
-    if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return null;
-    return activeShift;
-}
-
-/** Turno(s) visibles en celda según objetivo activo o grupo unificado. */
-function resolveCellShiftDisplay(
-    empId: string,
-    dateStr: string,
-    selectedObjective: string | null | undefined,
-    selectedGrupo: GrupoObjetivos | null | undefined,
-    grupoUnifiedMode: boolean,
-    pendingChanges: Record<string, any>,
-    shiftsMap: Record<string, any>,
-): { s: any | null; p: any | null } {
-    const key = `${empId}_${dateStr}`;
-    const rawP = pendingChanges[key];
-    const rawS = shiftsMap[key];
-
-    if (rawP?.isDeleted) {
-        const crossAfterDelete = pickCrossObjectiveSavedShift(rawS, selectedObjective);
-        return { s: crossAfterDelete ?? rawS ?? null, p: rawP };
-    }
-
-    if (selectedGrupo && grupoUnifiedMode) {
-        const active = rawP && !rawP.isDeleted ? rawP : rawS;
-        if (!active) {
-            return { s: rawS ?? null, p: rawP && !rawP.isDeleted ? rawP : null };
-        }
-        const objId = active.objectiveId != null && active.objectiveId !== ''
-            ? String(active.objectiveId)
-            : null;
-        if (rawP && !rawP.isDeleted) {
-            if (objId && !selectedGrupo.objectiveIds.includes(objId)) {
-                return { s: null, p: null };
-            }
-            return { s: rawS ?? null, p: rawP };
-        }
-        if (objId && selectedGrupo.objectiveIds.includes(objId) && !isOperationalOriginShift(active)) {
-            return { s: rawS, p: null };
-        }
-        return { s: null, p: null };
-    }
-
-    const resolved = resolveCellShiftAtObjective(empId, dateStr, selectedObjective, pendingChanges, shiftsMap);
-    if (resolved) {
-        if (rawP && !rawP.isDeleted) {
-            return { s: rawS ?? null, p: rawP };
-        }
-        return { s: resolved, p: null };
-    }
-
-    const crossSaved = pickCrossObjectiveSavedShift(rawS, selectedObjective);
-    if (crossSaved) {
-        return { s: crossSaved, p: null };
-    }
-
-    if (rawP && !rawP.isDeleted) {
-        const pObj = rawP.objectiveId;
-        if (
-            pObj != null && pObj !== '' && String(pObj) !== String(selectedObjective) &&
-            !isOperationalOriginShift(rawP)
-        ) {
-            return { s: rawP, p: null };
-        }
-    }
-
-    return { s: null, p: null };
-}
-
-const getDateKey = (dateInput: any) => {
-    const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    const options: Intl.DateTimeFormatOptions = { timeZone: 'America/Argentina/Cordoba', year: 'numeric', month: '2-digit', day: '2-digit' };
-    const parts = new Intl.DateTimeFormat('es-AR', options).formatToParts(d);
-    const day = parts.find(p => p.type === 'day')?.value;
-    const month = parts.find(p => p.type === 'month')?.value;
-    const year = parts.find(p => p.type === 'year')?.value;
-    return `${year}-${month}-${day}`;
-};
-
-const isDateLocked = (dateStr: string) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const cellDate = new Date(y, m - 1, d);
-    cellDate.setHours(23, 59, 59, 999); 
-    const startOfToday = new Date();
-    startOfToday.setHours(0,0,0,0);
-    return cellDate < startOfToday; 
-};
-
-const getDefaultStyle = (code: string) => SHIFT_STYLES[code] || 'bg-slate-100 text-slate-700 border-slate-300';
-
-const formatTime = (dateInput: any) => {
-    if (!dateInput) return '--:--';
-    // String "HH:MM" — retornar directamente (new Date("HH:MM") → Invalid Date)
-    if (typeof dateInput === 'string' && /^\d{1,2}:\d{2}$/.test(dateInput.trim())) return dateInput.trim();
-    const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-    if (isNaN(d.getTime())) return '--:--';
-    return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
-};
-
-const ACTION_LABELS: Record<string, string> = {
-    'ASIGNACION': 'Asignación', 'ELIMINACION': 'Eliminación', 'EDICION_MASIVA': 'Edición Masiva',
-    'ASIGNACION_MASIVA': 'Asignación Múltiple', 'CAMBIO_FRANCO_TURNO': 'Franco x Turno (FT)', 'CAMBIO_TURNO_FRANCO': 'Turno x Franco (FF)',
-    'Devolución a Planificación': 'Devolución desde Operaciones',
-    'PUBLICACION_CRONOGRAMA': 'Publicación de cronograma',
-    'DESPUBLICACION_CRONOGRAMA': 'Despublicación de cronograma',
-    'CORRECCION_SUPERADMIN': 'Corrección (SuperAdmin)',
-    'CORRECCION_PLANIFICACION': 'Corrección planificación',
-    'CORRECCION_CODIGO': 'Corrección de código',
-    'ELIMINACION_MASIVA': 'Eliminación masiva',
-    'CAMBIO_DIAGRAMA': 'Cambio de diagrama',
-    'TRANSFERENCIA_OBJETIVO': 'Transferencia de objetivo',
-    'DESVINCULACION_OBJETIVO': 'Desvinculación de objetivo',
-    'OVERRIDE_200H': 'Autorización >200h',
-    'AUTORIZACION_FRANCO_COBERTURA': 'Autorización franco trabajado (cobertura)',
-    'EQUILIBRAR_CRONOGRAMA': 'Equilibrar cronograma',
-};
-
-// Helper para día de la semana (0=Domingo -> 'D')
-const getDayLetter = (dateStr: string) => {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const date = new Date(y, m - 1, d);
-    const days = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-    return days[date.getDay()];
-};
-
-const posAsEngineDef = (pos: any) => ({
-    positionName: String(pos?.positionName ?? ''),
-    qty: pos?.qty,
-    shifts: pos?.shifts,
-    activeDays: pos?.activeDays,
-    coverageType: pos?.coverageType,
-    excludedDates: pos?.excludedDates,
-    excludedShiftDates: pos?.excludedShiftDates,
-    excludedShiftPaxDates: pos?.excludedShiftPaxDates,
-});
-
-const isPosActiveOnDay = (pos: any, dayLetter: string, dateStr?: string): boolean =>
-    positionIsActiveOn(posAsEngineDef(pos), dayLetter, dateStr);
-
-const PLANNING_REST_SHIFT_CODES = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'RET', 'REF', 'ESC']);
-
-/** Horas SLA del día según bandas activas (respeta shift.days, fechas específicas y exclusiones parciales). */
-function dailyCoverageHoursTargetForPos(pos: any, dayLetter: string, cycles?: string[], dateStr?: string): number {
-    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
-    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') {
-        if (dateStr && isPlanningPositionExcludedOnDate(pos, dateStr)) return 0;
-        // Con exclusión parcial de banda/PAX, no forzamos 24: sumamos bandas restantes abajo.
-        const hasPartial = dateStr && (
-            getPlanningExcludedShiftCodesOnDate(pos, dateStr).length > 0
-            || Object.keys(getPlanningExcludedShiftPaxOnDate(pos, dateStr)).length > 0
-        );
-        if (!hasPartial) return 24;
-    }
-    let eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
-    if (dateStr) {
-        const skip = new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr));
-        const paxCuts = getPlanningExcludedShiftPaxOnDate(pos, dateStr);
-        if (skip.size > 0) eff = eff.filter((s) => !skip.has(String(s.code || '').toUpperCase()));
-        // Bandas con PAX efectivo 0 (corte total vía excludedShiftPaxDates) no suman horas.
-        if (Object.keys(paxCuts).length > 0) {
-            eff = eff.filter((s) => {
-                const code = String(s.code || '').toUpperCase();
-                const cut = paxCuts[code] || 0;
-                if (cut <= 0) return true;
-                const base = (s as any).quantity != null && Number((s as any).quantity) > 0
-                    ? Math.floor(Number((s as any).quantity))
-                    : Math.max(1, Number(pos?.qty) || 1);
-                return base - cut > 0;
-            });
-        }
-    }
-    if (eff.length > 0) {
-        return eff.reduce((acc, s) => acc + (Number(s.hours) || 8), 0);
-    }
-    const dayShifts = (pos?.shifts || []).filter((s: any) => {
-        const code = String(s.code || '').toUpperCase();
-        if (dateStr && isPlanningShiftExcludedOnDate(pos, dateStr, code)) return false;
-        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
-            return dateStr ? s.specificDates.includes(dateStr) : false;
-        }
-        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
-        return true;
-    });
-    const sum = dayShifts.reduce((acc: number, s: any) => acc + (Number(s.hours) || 8), 0);
-    return sum > 0 ? sum : 8;
-}
-
-/** Horas SLA del día con PAX por turno. Para custom: suma shift.quantity × shift.hours; fallback globalPax × suma. */
-function dailyCoverageHoursTargetWithPerShiftPax(pos: any, globalPax: number, dayLetter: string, cycles?: string[], dateStr?: string): number {
-    const coverageType = String(pos?.coverageType || 'custom').toLowerCase();
-    if (coverageType === '24hs' || coverageType === '24' || coverageType === '24h') return 24 * globalPax;
-    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
-    const shifts: any[] = eff.length > 0 ? eff : (pos?.shifts || []).filter((s: any) => {
-        if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
-            return dateStr ? s.specificDates.includes(dateStr) : false;
-        }
-        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
-        return true;
-    });
-    if (shifts.length === 0) return globalPax * 8;
-    const paxCuts = dateStr ? getPlanningExcludedShiftPaxOnDate(pos, dateStr) : {};
-    const fullSkip = dateStr ? new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr)) : new Set<string>();
-    const hasPerShiftPax = shifts.some((s: any) => (s as any).quantity != null && Number((s as any).quantity) > 0)
-        || Object.keys(paxCuts).length > 0;
-    if (!hasPerShiftPax) {
-        const sum = shifts.reduce((acc: number, s: any) => {
-            const code = String(s.code || '').toUpperCase();
-            if (fullSkip.has(code)) return acc;
-            return acc + (Number(s.hours) || 8);
-        }, 0);
-        return globalPax * (sum > 0 ? sum : 8);
-    }
-    return shifts.reduce((acc: number, s: any) => {
-        const code = String(s.code || '').toUpperCase();
-        if (fullSkip.has(code)) return acc;
-        const sq = (s as any).quantity;
-        const base = (sq != null && Number(sq) > 0) ? Math.floor(Number(sq)) : globalPax;
-        const sp = Math.max(0, base - (paxCuts[code] || 0));
-        if (sp <= 0) return acc;
-        return acc + sp * (Number(s.hours) || 8);
-    }, 0);
-}
-
-function filterShiftsForPlanningDay(
-    shifts: any[],
-    pos: any,
-    dayLetter: string,
-    dateStr: string | undefined,
-    cycles?: string[],
-): any[] {
-    if (!shifts?.length) return [];
-    const skipCodes = dateStr ? new Set(getPlanningExcludedShiftCodesOnDate(pos, dateStr)) : new Set<string>();
-    const fullExcluded = dateStr ? isPlanningPositionExcludedOnDate(pos, dateStr) : false;
-    // Para puestos 24hs o CUSTOM se muestran todos los turnos del SLA sin filtrar por ciclo
-    const ct = String(pos?.coverageType ?? '').toLowerCase();
-    if (ct === '24hs' || ct === 'custom') {
-        return shifts.filter((s: any) => {
-            const code = String(s.code || '').toUpperCase();
-            if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
-            if (fullExcluded && isPlanningWorkShiftCode(code)) return false;
-            if (skipCodes.has(code)) return false;
-            if (Array.isArray(s.specificDates) && s.specificDates.length > 0) {
-                return dateStr ? s.specificDates.includes(dateStr) : false;
-            }
-            if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
-            return true;
-        });
-    }
-    const eff = effectiveShiftsForPositionDay(posAsEngineDef(pos), dayLetter, cycles, dateStr);
-    const effCodes = new Set(eff.map((s) => String(s.code || '').toUpperCase()));
-    return shifts.filter((s: any) => {
-        const code = String(s.code || '').toUpperCase();
-        if (PLANNING_REST_SHIFT_CODES.has(code)) return true;
-        if (fullExcluded && isPlanningWorkShiftCode(code)) return false;
-        if (skipCodes.has(code)) return false;
-        if (effCodes.size > 0) return effCodes.has(code);
-        if (Array.isArray(s.days) && s.days.length > 0) return s.days.includes(dayLetter);
-        return true;
-    });
-}
-
-const isPosExcludedOnDate = (pos: any, dateStr: string): boolean =>
-    isPlanningPositionExcludedOnDate(pos, dateStr);
+const formatTime = formatPlanificacionTime;
 
 interface Coords { r: number; c: number; }
-
-const isShiftConsolidated = (shift: any) => {
-    if (!shift) return false;
-    if (shift.status === 'PRESENT' || shift.status === 'CHECK_IN' || shift.status === 'COMPLETED') return true;
-    return false;
-};
-
-/** Normaliza documento RFZ para vista de celda / modal de turno. */
-const rfzDocToShiftView = (rfz: any) => ({
-    id: rfz.id,
-    ...rfz,
-    code: 'RFZ',
-    type: rfz.type || 'Refuerzo Cliente',
-    name: 'Refuerzo Cliente',
-    objectiveId: rfz.objectiveId,
-    startTime: rfz.startTime,
-    endTime: rfz.endTime,
-    positionName: rfz.positionName,
-    draft: rfz.draft,
-    hours: rfz.hours,
-    isRfz: true,
-    origin: rfz.origin || 'CLIENT_REQUEST',
-    employeeId: rfz.employeeId,
-    employeeName: rfz.employeeName,
-});
-
-function computeServiceRuleChanges(
-    dateStr: string,
-    rules: import('@/services/slaService').ServiceRule[],
-    pendingChanges: Record<string, any>,
-    shiftsMap: Record<string, any>,
-    employees: any[],
-    objectiveId: string,
-    changedEmpId?: string,
-): Record<string, any> {
-    const additions: Record<string, any> = {};
-    const getEntry = (empId: string) => {
-        const k = `${empId}_${dateStr}`;
-        const p = pendingChanges[k];
-        if (p) return p.isDeleted ? null : p;
-        return shiftsMap[k] ?? null;
-    };
-    const getCode = (empId: string): string | null => {
-        const e = getEntry(empId);
-        if (!e) return null;
-        return String(e.code || e.type || '').toUpperCase() || null;
-    };
-    for (const rule of rules) {
-        if (!rule.triggers.length) continue;
-        if (changedEmpId && !rule.triggers.some((t: import('@/services/slaService').RuleTrigger) => t.employeeId === changedEmpId)) continue;
-        const fires = rule.triggers.every((t: import('@/services/slaService').RuleTrigger) => {
-            const code = getCode(t.employeeId);
-            if (!code) return false;
-            const allowed = (t.shiftCodes?.length ? t.shiftCodes : [t.shiftCode]).map(s => String(s || '').toUpperCase()).filter(Boolean);
-            return allowed.includes(code);
-        });
-        if (!fires) continue;
-        for (const action of rule.actions) {
-            if (action.type === 'EXCLUDE') {
-                for (const emp of employees) {
-                    const e = getEntry(emp.id);
-                    if (!e) continue;
-                    const ec = String(e.code || e.type || '').toUpperCase();
-                    const ep = e.positionName || '';
-                    if (ep === action.positionName && ec === String(action.shiftCode || '').toUpperCase()) {
-                        // Borrar el turno del plan (sin generar vacante)
-                        additions[`${emp.id}_${dateStr}`] = { isDeleted: true };
-                    }
-                }
-            } else if (action.type === 'ASSIGN') {
-                if (action.employeeId && action.positionName && action.shiftCode) {
-                    const e = getEntry(action.employeeId);
-                    // Para idempotencia: si el entry pendiente es auto-rotación, preferir shiftsMap
-                    const eSaved = shiftsMap[`${action.employeeId}_${dateStr}`];
-                    const eCheck = (e && !e.isDeleted && !e._isAutoRotation) ? e : (eSaved && !eSaved.isDeleted ? eSaved : null);
-                    if (eCheck && String(eCheck.code || eCheck.type || '').toUpperCase() === String(action.shiftCode || '').toUpperCase()) continue;
-                    additions[`${action.employeeId}_${dateStr}`] = {
-                        ...(eCheck || e || {}),
-                        code: action.shiftCode, type: action.shiftCode, name: action.shiftCode,
-                        hours: 8, startTime: '00:00', endTime: '00:00',
-                        positionName: action.positionName, isTemp: true, isFranco: false,
-                        objectiveId: (eCheck || e)?.objectiveId ?? objectiveId,
-                        _isAutoRotation: undefined,
-                        _isAutoCondition: true,
-                    };
-                }
-            }
-        }
-    }
-    return additions;
-}
 
 export default function PlanificacionPage() {
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
@@ -1000,6 +389,24 @@ export default function PlanificacionPage() {
     // 1. ESTADOS (NIVEL 0)
     // ============================================================================
     const [currentDate, setCurrentDate] = useState(new Date());
+    const goToPlanningMonth = useCallback((year: number, monthIndex0: number) => {
+        const month = monthIndex0 + 1;
+        const access = planningMonthAccess(year, month);
+        if (!access.allowed) {
+            toast.error(access.message);
+            return false;
+        }
+        if (access.tier === 'warm' && access.message) {
+            toast.message(access.message);
+        }
+        setCurrentDate(new Date(year, monthIndex0, 1));
+        return true;
+    }, []);
+    const planningMonthTier = useMemo(() => {
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth() + 1;
+        return classifyYearMonth(y, m);
+    }, [currentDate]);
     const [selectedClient, setSelectedClient] = useState('');
     const [selectedObjective, setSelectedObjective] = useState('');
     const [forceShowAll, setForceShowAll] = useState(false);
@@ -1024,37 +431,47 @@ export default function PlanificacionPage() {
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
     const [statsHoursView, setStatsHoursView] = useState<'total' | 'detalle'>('total');
 
-    const [isDataSyncing, setIsDataSyncing] = useState(false);
-    const dataSyncRef = useRef<{ employees: boolean; clients: boolean }>({ employees: false, clients: false });
-    const [employees, setEmployees] = useState<any[]>([]);
-    const [slaIdToObjId, setSlaIdToObjId] = useState<Record<string, string>>({});
-    const [shiftsMap, setShiftsMap] = useState<Record<string, any>>({});
-    const [cellTurnosMap, setCellTurnosMap] = useState<Record<string, any[]>>({});
-    const [shiftsMapLoaded, setShiftsMapLoaded] = useState(false);
-    const [turaMap, setTuraMap] = useState<Record<string, any>>({});       // parentShiftId → turno TURA
-    const [rfzVacantes, setRfzVacantes] = useState<any[]>([]);             // RFZ sin guardia asignado
-    const [rfzTodos, setRfzTodos] = useState<any[]>([]);                  // RFZ del mes (asignados + vacantes) para fila de refuerzos
+    const {
+        isDataSyncing,
+        employees,
+        slaIdToObjId,
+        shiftsMap,
+        setShiftsMap,
+        cellTurnosMap,
+        setCellTurnosMap,
+        shiftsMapLoaded,
+        turaMap,
+        rfzVacantes,
+        rfzTodos,
+        allShiftIds,
+        absencesMap,
+        clients,
+        agreements,
+        unifiedLogs,
+        notifLogs,
+        latestLog,
+        clearLatestLogNotification,
+        notifications,
+        setNotifications,
+        hasUnread,
+        setHasUnread,
+        secondBlockMap,
+    } = usePlanificacionFirestore({
+        empresaId,
+        migracionCompleta,
+        scopeEmpresa,
+        currentDate,
+    });
+    const tenantClientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
     const [rfzAsignando, setRfzAsignando] = useState<any>(null);          // RFZ vacante abierto para asignación
-    // allShiftIds[empId_dateKey] = array de TODOS los doc IDs para esa clave.
-    // shiftsMap solo guarda el último (sobrescribe), pero necesitamos borrar TODOS al guardar.
-    const [allShiftIds, setAllShiftIds] = useState<Record<string, string[]>>({});
-    const [absencesMap, setAbsencesMap] = useState<Record<string, any>>({});
-    const [clients, setClients] = useState<any[]>([]);
-    const [agreements, setAgreements] = useState<any[]>([]);
-    const [unifiedLogs, setUnifiedLogs] = useState<any[]>([]);
-    const [notifLogs, setNotifLogs] = useState<any[]>([]);
     const [activityTab, setActivityTab] = useState<'cambios' | 'notifs'>('cambios');
     const [showActivityModal, setShowActivityModal] = useState(false);
-    const [latestLog, setLatestLog] = useState<any>(null);
-    const prevLatestLogId = useRef<string | null>(null);
-    const latestLogTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
     const [customOrderMap, setCustomOrderMap] = useState<Record<string, string[]>>(() => {
         if (typeof window === 'undefined') return {};
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
     const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null } | null>(null);
-    const [secondBlockMap, setSecondBlockMap] = useState<Record<string, { startTime: any; endTime: any }>>({});
     const [coverageTooltip, setCoverageTooltip] = useState<{
         dateStr: string;
         gaps: { positionName: string; code: string; gapBand?: string; missing: number; detail?: string }[];
@@ -1117,10 +534,10 @@ export default function PlanificacionPage() {
         const y = Number(router.query.year);
         const m = Number(router.query.month);
         if (Number.isFinite(y) && y > 2000 && Number.isFinite(m) && m >= 1 && m <= 12) {
-            setCurrentDate(new Date(y, m - 1, 1));
+            goToPlanningMonth(y, m - 1);
         }
         void router.replace('/admin/planificacion/', undefined, { shallow: true });
-    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month]);
+    }, [planViewReady, clients, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month, goToPlanningMonth]);
     const [grupos, setGrupos] = useState<GrupoObjetivos[]>([]);
     const [showGrupoForm, setShowGrupoForm] = useState(false);
     const [grupoFormMode, setGrupoFormMode] = useState<'new' | 'edit'>('new');
@@ -1130,6 +547,21 @@ export default function PlanificacionPage() {
     const [grupoFormEditId, setGrupoFormEditId] = useState<string | null>(null);
     const [savingGrupo, setSavingGrupo] = useState(false);
     const [grupoUnifiedMode, setGrupoUnifiedMode] = useState(true);
+    const {
+        grupoSlaMap,
+        grupoTotalVendidas,
+        grupoVendidasByObjective,
+    } = usePlanificacionGrupoSla({
+        selectedGrupo,
+        grupoUnifiedMode,
+        selectedClient,
+        currentDate,
+        empresaId,
+        scopeEmpresa,
+        clients,
+        tenantClientIds,
+        slaIdToObjId,
+    });
     const grupoObjColorMap = useMemo<Map<string, string>>(() => {
         if (!selectedGrupo) return new Map();
         return new Map(selectedGrupo.objectiveIds.map((id, i) => [id, GRUPO_COLOR_HEX[i % GRUPO_COLOR_HEX.length]]));
@@ -1138,10 +570,6 @@ export default function PlanificacionPage() {
     const longPressTimer = useRef<any>(null);
     const [empDefaultPos, setEmpDefaultPos] = useState<Record<string, string>>({});
     const [empDefaultShift, setEmpDefaultShift] = useState<Record<string, string>>({});
-    const [grupoSlaMap, setGrupoSlaMap] = useState<Record<string, any[]>>({});
-    const [grupoTotalVendidas, setGrupoTotalVendidas] = useState(0);
-    const [grupoVendidasByObjective, setGrupoVendidasByObjective] = useState<Record<string, number>>({});
-    const dotacionMigratedRef = useRef(false);
     const objectiveSortAppliedRef = useRef<string | null>(null);
     const [empPosPicker, setEmpPosPicker] = useState<{ empId: string; x: number; y: number; maxHeight: number; floating?: boolean } | null>(null);
     const [deployBandPicker, setDeployBandPicker] = useState<'SURPLUS' | 'TRAINING' | null>(null);
@@ -1152,7 +580,6 @@ export default function PlanificacionPage() {
         positionName: string;
         bands: { code: string; name?: string; hours?: number; startTime?: string; endTime?: string }[];
     } | null>(null);
-    const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifPanelTop, setNotifPanelTop] = useState(0);
     const notifBtnRef = useRef<HTMLButtonElement>(null);
@@ -1160,15 +587,11 @@ export default function PlanificacionPage() {
     const coverageDiagnosticBtnRef = useRef<HTMLButtonElement>(null);
     const [diagnosticPanelPos, setDiagnosticPanelPos] = useState<{ x: number; y: number } | null>(null);
     const [coveragePanelPos, setCoveragePanelPos] = useState<{ x: number; y: number } | null>(null);
-    const [hasUnread, setHasUnread] = useState(false);
     
     const [operatorName, setOperatorName] = useState('Cargando...');
     const [operatorEmail, setOperatorEmail] = useState('');
     const [usersMap, setUsersMap] = useState<Record<string, string>>({}); 
 
-    const [positionStructure, setPositionStructure] = useState<any[]>([]);
-    const [activePlanningSlaRow, setActivePlanningSlaRow] = useState<SlaPlanningRow | null>(null);
-    const [slaVendidas, setSlaVendidas] = useState<number>(0);
     const [showDiagnostic, setShowDiagnostic] = useState<boolean>(false);
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
     const [needsRepublishMap, setNeedsRepublishMap] = useState<Record<string, boolean>>({});
@@ -1176,13 +599,28 @@ export default function PlanificacionPage() {
     const [isUnpublishing, setIsUnpublishing] = useState(false);
     const [isRefreshingCrono, setIsRefreshingCrono] = useState(false);
     const [dataRefreshNonce, setDataRefreshNonce] = useState(0);
-    const [publishConfirmModal, setPublishConfirmModal] = useState<{
-        isRepublish: boolean;
-        warnings: string[];
-        superAdminOverride: boolean;
-        objectiveName: string;
-        periodLabel: string;
-    } | null>(null);
+    const {
+        positionStructure,
+        activePlanningSlaRow,
+        slaVendidas,
+        hasActiveSLA,
+        slaPlanningHint,
+        activeSlaPositionAssignments,
+        activeSlaServiceRules,
+        activeSlaServiceRotations,
+    } = usePlanificacionObjectiveSla({
+        selectedClient,
+        selectedObjective,
+        currentDate,
+        empresaId,
+        migracionCompleta,
+        scopeEmpresa,
+        clients,
+        tenantClientIds,
+        slaIdToObjId,
+        dataRefreshNonce,
+    });
+    const [publishConfirmModal, setPublishConfirmModal] = useState<PublishConfirmModalState | null>(null);
     const [publishConfirmPin, setPublishConfirmPin] = useState('');
     const [publishConfirmPinError, setPublishConfirmPinError] = useState('');
     const [publishConfirmPinChecking, setPublishConfirmPinChecking] = useState(false);
@@ -1190,12 +628,6 @@ export default function PlanificacionPage() {
     const [cellEditMode, setCellEditMode] = useState(false);
     // 🛑 SYNC-CORE: Estado activo inicial null para forzar limpieza
     const [activePosition, setActivePosition] = useState<string | null>(null);
-    const [hasActiveSLA, setHasActiveSLA] = useState<boolean>(true);
-    const [slaPlanningHint, setSlaPlanningHint] = useState('');
-    const [activeSlaPositionAssignments, setActiveSlaPositionAssignments] = useState<import('@/services/slaService').PositionAssignment[] | null>(null);
-    const [activeSlaServiceRules, setActiveSlaServiceRules] = useState<import("@/services/slaService").ServiceRule[] | null>(null);
-    const [activeSlaServiceRotations, setActiveSlaServiceRotations] = useState<import('@/services/slaService').ServiceRotation[] | null>(null);
-
     const [showAddModal, setShowAddModal] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
     const [showGuardiaSearch, setShowGuardiaSearch] = useState(false);
@@ -1309,9 +741,38 @@ export default function PlanificacionPage() {
     const [autoGeneratedReady, setAutoGeneratedReady] = useState(false);
     const [autoCycles, setAutoCycles] = useState<string[]>([]);
     const autoSelectedCyclesRef = useRef<string[]>([]);
-    const autoRotAppliedRef = useRef<string>('');
     const [mesRotacionesDesactivadas, setMesRotacionesDesactivadas] = useState<Set<string>>(new Set());
     const [rotMesDropOpen, setRotMesDropOpen] = useState(false);
+
+    const { activateRfzCorrectionFlow } = usePlanificacionPublishState({
+        selectedObjective,
+        currentDate,
+        empresaId,
+        dataRefreshNonce,
+        publishStatusMap,
+        setPublishStatusMap,
+        setMesRotacionesDesactivadas,
+        rfzTodos,
+        canCorrectPlanning,
+        setNeedsRepublishMap,
+        setCorrectionMode,
+    });
+
+    const { resetAutoRotAppliedGuard } = usePlanificacionAutoRotation({
+        shiftsMapLoaded,
+        activeSlaServiceRotations,
+        selectedObjective,
+        hasActiveSLA,
+        currentDate,
+        shiftsMap,
+        selectedGrupo,
+        grupoUnifiedMode,
+        mesRotacionesDesactivadas,
+        positionStructure,
+        activeSlaServiceRules,
+        employees,
+        commitPendingChanges,
+    });
 
     const _saveRotOverrides = useCallback((next: Set<string>, objId: string, yr: number, mo: number, empId: string) => {
         const stateKey = buildPlanificacionEstadoDocId(empId, objId, yr, mo);
@@ -1330,8 +791,8 @@ export default function PlanificacionPage() {
             _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
             return next;
         });
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate, empresaId, _saveRotOverrides]);
+        resetAutoRotAppliedGuard();
+    }, [selectedObjective, currentDate, empresaId, _saveRotOverrides, resetAutoRotAppliedGuard]);
 
     const toggleTodasMesRotaciones = useCallback((desactivar: boolean) => {
         if (!selectedObjective || !activeSlaServiceRotations?.length) return;
@@ -1341,8 +802,8 @@ export default function PlanificacionPage() {
             : new Set<string>();
         setMesRotacionesDesactivadas(next);
         _saveRotOverrides(next, selectedObjective, yr, mo, empresaId);
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate, empresaId, activeSlaServiceRotations, _saveRotOverrides]);
+        resetAutoRotAppliedGuard();
+    }, [selectedObjective, currentDate, empresaId, activeSlaServiceRotations, _saveRotOverrides, resetAutoRotAppliedGuard]);
     const [autoOverwrite, setAutoOverwrite] = useState(false);
     const [useSixPlusOne, setUseSixPlusOne] = useState(false);
     /** true = forzar siempre 6+2 (default). false = dejar que el cerebro elija entre 6+2/6+1/4+2. */
@@ -2220,7 +1681,7 @@ export default function PlanificacionPage() {
         positionStructure.forEach((pos: any) => {
             (pos.shifts || []).forEach((sh: any) => {
                 const code = String(sh.code || '').toUpperCase();
-                if (!code || OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+                if (!code || PLANNING_NON_BILLABLE_CODES.has(code)) return;
                 const n = Number(sh.hours);
                 if (n > 0) { hint[code] = n; return; }
                 if (typeof sh.startTime === 'string' && typeof sh.endTime === 'string') {
@@ -2401,6 +1862,42 @@ export default function PlanificacionPage() {
             }),
         });
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
+    const planningAuxiliarySummary = useMemo(() => {
+        if (!Array.isArray(activePlanningSlaRow?.positions) || activePlanningSlaRow.positions.length === 0) return null;
+        const positions = Array.isArray(activePlanningSlaRow.positions) ? activePlanningSlaRow.positions : [];
+        const y = currentDate.getFullYear();
+        const m = currentDate.getMonth();
+        const start = toYyyyMmDd(activePlanningSlaRow.startDate) || '';
+        const end = toYyyyMmDd(activePlanningSlaRow.endDate) || '';
+        const ex = activePlanningSlaRow.excludedDates as string[] | undefined;
+        let encContract = 0;
+        let encInSla = 0;
+        const hasEnc = positions.some((p: any) => isEncargadoPosition(p));
+        const hasEvt = positions.some((p: any) => isEventosPosition(p));
+        for (const pos of positions) {
+            if (!isEncargadoPosition(pos)) continue;
+            const h = calculatePositionMonthHours(pos, start, end, ex, y, m);
+            encContract += h;
+            if (positionIncludeInSlaTotals(pos)) encInSla += h;
+        }
+        const encPlanned = Math.round((planningMonthHoursBreakdown.byCodeGross['ENC'] || 0) * 10) / 10;
+        const evtFromGrid = Math.round(((planningMonthHoursBreakdown.byCodeGross['EVT'] || 0) + (planningMonthHoursBreakdown.byCodeGross['EV'] || 0)) * 10) / 10;
+        const monthPrefixEvt = `${y}-${String(m + 1).padStart(2, '0')}`;
+        const turaEventosHrs = Object.values(turaMap)
+            .filter((t: any) => t.objectiveId === selectedObjective && String(t.fecha || '').startsWith(monthPrefixEvt))
+            .filter((t: any) => isEventosPosition({ name: t.positionName, coverageType: 'eventos' }))
+            .reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
+        const evtPlanned = Math.round((evtFromGrid + turaEventosHrs) * 10) / 10;
+        return {
+            hasEnc,
+            hasEvt,
+            encContract: Math.round(encContract * 10) / 10,
+            encInSla: Math.round(encInSla * 10) / 10,
+            encPlanned,
+            evtPlanned,
+        };
+    }, [activePlanningSlaRow, currentDate, planningMonthHoursBreakdown, turaMap, selectedObjective]);
 
     /** Facturable por sede (grupo unificado): suma turnos con objectiveId de cada objetivo — debe cerrar con grupoTotalVendidas. */
     const grupoObjectiveBillableHours = useMemo(() => {
@@ -3103,7 +2600,7 @@ export default function PlanificacionPage() {
                     const effectiveObjId = resolveEffectiveShiftObjectiveId(e, shift, key);
                     if (String(effectiveObjId || '') !== String(scopeObj)) return;
                     const sc = String(shift.code || '').toUpperCase();
-                    if (OBJECTIVE_NON_BILLABLE_CODES.has(sc)) return;
+                    if (PLANNING_NON_BILLABLE_CODES.has(sc)) return;
                     const shiftPos = shift.positionName || dominant?.positionName || 'General';
                     if (shiftPos !== evalPosName) return;
                     codeCounts[sc] = (codeCounts[sc] || 0) + 1;
@@ -3270,6 +2767,21 @@ export default function PlanificacionPage() {
 
     /** Slots cerrados y fechas pasadas bloqueadas solo con cronograma publicado (salvo modo corrección). */
     const enforcePlanningClosureRules = isCronogramaPublicado && !correctionMode;
+
+    /** Multiselección / barra masiva: borrador siempre; publicado solo en modo corrección. */
+    const allowPlanningMultiSelect = !isCronogramaPublicado || correctionMode;
+
+    useEffect(() => {
+        if (allowPlanningMultiSelect) return;
+        setSelection((prev) => {
+            if (!prev.start || !prev.end) return prev;
+            if (prev.start.r === prev.end.r && prev.start.c === prev.end.c) return prev;
+            return { start: null, end: null };
+        });
+        setIsDragging(false);
+        setColumnSelectMode(false);
+        setColumnSelectSource(null);
+    }, [allowPlanningMultiSelect]);
 
     const isPlanningDateLocked = useCallback(
         (dateStr: string) => (enforcePlanningClosureRules ? isDateLocked(dateStr) : false),
@@ -3469,7 +2981,7 @@ export default function PlanificacionPage() {
             return shiftsMap[k] || null;
         };
 
-        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
+        const isWorkingCode = (code: string) => !PLANNING_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
 
         const dates: any[] = [];
         const seen = new Set<string>();
@@ -3585,7 +3097,7 @@ export default function PlanificacionPage() {
                 : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
             if (String(effectiveObjId || '') !== String(covObjId)) return;
             const code = String(shift.code || '').toUpperCase();
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+            if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
             const homePos = shift.positionName || dominant?.positionName || 'General';
             const attributed = calcPlanningBillableHoursAttributedToPosition(
                 { ...shift, positionName: homePos },
@@ -3638,7 +3150,7 @@ export default function PlanificacionPage() {
                 : (resolveNativeObjectiveInGrupo(emp) || (emp.preferredObjectiveId === covObjId || slaIdToObjId[emp.preferredObjectiveId] === covObjId ? covObjId : null));
             if (String(effectiveObjId || '') !== String(covObjId)) return;
             const code = String(shift.code || '').toUpperCase();
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
+            if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (shiftPos !== pos.positionName) return;
             codeCounts[code] = (codeCounts[code] || 0) + 1;
@@ -3780,7 +3292,7 @@ export default function PlanificacionPage() {
             const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
             if (String(effectiveObjId || '') !== String(objId)) continue;
             const code = String(shift.code || '').toUpperCase();
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) continue;
+            if (PLANNING_NON_BILLABLE_CODES.has(code)) continue;
             const shiftPos = shift.positionName || dominant?.positionName || 'General';
             if (!codeCountsByPos[shiftPos]) codeCountsByPos[shiftPos] = {};
             codeCountsByPos[shiftPos][code] = (codeCountsByPos[shiftPos][code] || 0) + 1;
@@ -3987,7 +3499,7 @@ export default function PlanificacionPage() {
             if (!shift) return;
             const effectiveObjId = resolveEffectiveShiftObjectiveId(emp, shift, key);
             if (String(effectiveObjId || '') !== String(selectedObjective)) return;
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) return;
+            if (PLANNING_NON_BILLABLE_CODES.has(String(shift.code || '').toUpperCase())) return;
             const posName = shift.positionName || 'General';
             const hours = calcShiftHours(shift);
             if (!coverage[posName]) coverage[posName] = { coveredHours: 0, count: 0 };
@@ -4001,127 +3513,70 @@ export default function PlanificacionPage() {
         empId: string,
         targetDate: Date,
         newHours: number,
-        proposedShift?: { code: string; startTime?: string; endTime?: string; hours?: number }
-    ) => {
-        const emp = employees.find((e: any) => e.id === empId);
-        if (!emp) return null;
-        const dateKey = getDateKey(targetDate);
-        const key = `${empId}_${dateKey}`;
-        if (absencesMap[key]) {
-            return `ALERTA CRÍTICA: El empleado tiene una Ausencia Registrada (${absencesMap[key].type}) para esta fecha.`;
-        }
-        const rule =
-            agreements.find((a: any) => a.name === emp.laborAgreement) ||
-            agreements.find((a: any) => a.name === 'General') || {
-                maxHoursWeekly: planningLimits.weekly,
-                maxHoursMonthly: planningLimits.monthly,
-            };
-        const limitMonthly = parseInt(String((rule as any).maxHoursMonthly), 10) || planningLimits.monthly;
-        const pendingShift = pendingChanges[key];
-        const existingShift = shiftsMap[key];
-        const finalShift = pendingShift ? (pendingShift.isDeleted ? null : pendingShift) : existingShift;
-        if (finalShift && (finalShift.code === 'F' || finalShift.isFranco)) {
-            return `ALERTA CRÍTICA: El empleado ya tiene un FRANCO asignado este día.`;
-        }
-        let monthlyTotal = 0;
-        const daysInCurrentMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
-        for (let d = 1; d <= daysInCurrentMonth; d++) {
-            const checkDate = new Date(targetDate.getFullYear(), targetDate.getMonth(), d);
-            const k = `${empId}_${getDateKey(checkDate)}`;
-            const p = pendingChanges[k];
-            const s = shiftsMap[k];
-            const active = p ? (p.isDeleted ? null : p) : s;
-            if (!active) continue;
-            const activeCode = String(active.code || '').toUpperCase();
-            // RET, francos, licencias y ausencias NO suman horas trabajadas (son hs tácitas / no facturables).
-            if (OBJECTIVE_NON_BILLABLE_CODES.has(activeCode)) continue;
-            monthlyTotal += SHIFT_HOURS_LOOKUP[activeCode] || active.hours || 8;
-        }
-        if (monthlyTotal + newHours > limitMonthly) {
-            return `ALERTA MENSUAL: Límite de ${limitMonthly}hs superado.`;
-        }
+        proposedShift?: { code: string; startTime?: string; endTime?: string; hours?: number },
+    ) => checkPlanificacionLaborRules({
+        empId,
+        targetDate,
+        newHours,
+        proposedShift,
+        employees,
+        absencesMap,
+        agreements,
+        planningLimits,
+        pendingChanges,
+        shiftsMap,
+    });
 
-        const restCfg = getAgreementRestConfig(emp, agreements);
-        if (restCfg && proposedShift && String(proposedShift.code || '').toUpperCase() !== 'F') {
-            const assignStart: Record<string, string> = {
-                M: '07:00', T: '15:00', N: '23:00', D12: '07:00', N12: '19:00',
-            };
-            const codeU = String(proposedShift.code || 'M').toUpperCase();
-            const proposedForRest = {
-                code: codeU,
-                startTime: proposedShift.startTime || assignStart[codeU] || '07:00',
-                endTime: proposedShift.endTime,
-                hours: proposedShift.hours ?? newHours,
-            };
-            const getMergedForRest = (eid: string, ds: string) => {
-                const k2 = `${eid}_${ds}`;
-                const p2 = pendingChanges[k2];
-                const fromPending = p2 && !p2.isDeleted ? p2 : null;
-                if (eid === empId && ds === dateKey) {
-                    return { ...proposedForRest };
-                }
-                return fromPending || shiftsMap[k2] || null;
-            };
-            const restMsg = checkRestBetweenShifts({
-                empId,
-                targetDateStr: dateKey,
-                proposed: proposedForRest,
-                getShift: getMergedForRest,
-                cfg: restCfg,
-            });
-            if (restMsg) return restMsg;
-        }
-
-        return null;
-    };
     
     const findNeighbors = (problemShift: any, dateStr: string) => {
-        const candidates: any[] = [];
-        Object.values(shiftsMap).forEach((s: any) => {
-            if (s.objectiveId === problemShift.objectiveId && getDateKey(s.startTime) === dateStr && s.id !== problemShift.id) {
-                const key = `${s.employeeId}_${dateStr}`;
-                if (!absencesMap[key]) {
-                    candidates.push({ ...s, employeeName: employees.find(e => e.id === s.employeeId)?.name || 'Desconocido' });
-                }
-            }
-        });
-        candidates.sort((a,b) => a.startTime.seconds - b.startTime.seconds);
-        const myStart = problemShift.startTime.seconds;
-        let prev = null; let next = null;
-        for (const cand of candidates) {
-            if (cand.startTime.seconds < myStart) prev = cand;
-            if (cand.startTime.seconds > myStart && !next) next = cand;
-        }
-        setConflictNeighbors({ prev, next });
+        setConflictNeighbors(findPlanificacionConflictNeighbors(problemShift, dateStr, shiftsMap, absencesMap, employees));
     };
 
-    const handleContextChange = (newClient: string, newObjective: string) => { if (Object.keys(pendingChanges).length > 0) { if (!confirm(`⚠️ TIENES CAMBIOS SIN GUARDAR.\n¿Descartar y cambiar de objetivo?`)) return; setPendingChanges({}); setPendingNovedades({}); clearUndoStack(); } setSelectedGrupo(null); setSelectedClient(newClient); setSelectedObjective(newObjective); setSearchTerm(''); setShowGuardiaSearch(false); setPinnedExternalEmpIds(new Set()); setBandFilter(null); setForceShowAll(false); setDotacionPoolSearch(''); setSelection({start: null, end: null}); setComparingSnapshot(null); setOpenDrop(null); setAutoGeneratedReady(false); };
+    const handleContextChange = (newClient: string, newObjective: string) => {
+        applyPlanificacionContextChange({
+            newClient,
+            newObjective,
+            pendingChanges,
+            setPendingChanges,
+            setPendingNovedades,
+            clearUndoStack,
+            setSelectedGrupo,
+            setSelectedClient,
+            setSelectedObjective,
+            setSearchTerm,
+            setShowGuardiaSearch,
+            setPinnedExternalEmpIds,
+            setBandFilter,
+            setForceShowAll,
+            setDotacionPoolSearch,
+            setSelection,
+            setComparingSnapshot,
+            setOpenDrop,
+            setAutoGeneratedReady,
+        });
+    };
 
     const handleGrupoChange = (grupo: GrupoObjetivos | null) => {
-        if (Object.keys(pendingChanges).length > 0) {
-            if (!confirm('⚠️ TIENES CAMBIOS SIN GUARDAR.\n¿Descartar y cambiar de objetivo?')) return;
-            setPendingChanges({});
-            setPendingNovedades({});
-        }
-        setSelectedGrupo(grupo);
-        setGrupoUnifiedMode(true);
-        if (grupo && grupo.objectiveIds.length > 0) {
-            setSelectedClient(grupo.clientId);
-            setSelectedObjective(grupo.objectiveIds[0]);
-        } else {
-            setSelectedClient('');
-            setSelectedObjective('');
-        }
-        setSearchTerm('');
-        setShowGuardiaSearch(false);
-        setPinnedExternalEmpIds(new Set());
-        setBandFilter(null);
-        setForceShowAll(false);
-        setDotacionPoolSearch('');
-        setSelection({ start: null, end: null });
-        setComparingSnapshot(null);
-        setOpenDrop(null);
-        setAutoGeneratedReady(false);
+        applyPlanificacionGrupoChange({
+            grupo,
+            pendingChanges,
+            setPendingChanges,
+            setPendingNovedades,
+            setSelectedGrupo,
+            setGrupoUnifiedMode,
+            setSelectedClient,
+            setSelectedObjective,
+            setSearchTerm,
+            setShowGuardiaSearch,
+            setPinnedExternalEmpIds,
+            setBandFilter,
+            setForceShowAll,
+            setDotacionPoolSearch,
+            setSelection,
+            setComparingSnapshot,
+            setOpenDrop,
+            setAutoGeneratedReady,
+        });
     };
 
     const openGrupoForm = (mode: 'new' | 'edit', grupo?: GrupoObjetivos) => {
@@ -4141,45 +3596,21 @@ export default function PlanificacionPage() {
         setOpenDrop(null);
     };
 
-    const handleSaveGrupo = async () => {
-        if (!grupoFormNombre.trim() || !grupoFormClientId || grupoFormObjectiveIds.length < 2) {
-            toast.error('El grupo necesita un nombre y al menos 2 objetivos.');
-            return;
-        }
-        setSavingGrupo(true);
-        try {
-            const client = clients.find((c: any) => c.id === grupoFormClientId);
-            const clientObjetivos: any[] = client?.objetivos || [];
-            const objectiveNames = grupoFormObjectiveIds.map(oid => {
-                const obj = clientObjetivos.find((o: any) => (o.id || o.name) === oid);
-                return obj?.name || oid;
-            });
-            const payload = {
-                empresaId,
-                nombre: grupoFormNombre.trim(),
-                clientId: grupoFormClientId,
-                clientName: client?.name || '',
-                objectiveIds: grupoFormObjectiveIds,
-                objectiveNames,
-            };
-            if (grupoFormMode === 'edit' && grupoFormEditId) {
-                await gruposService.update(grupoFormEditId, payload);
-                setGrupos(prev => prev.map(g => g.id === grupoFormEditId ? { ...g, ...payload } : g));
-                if (selectedGrupo?.id === grupoFormEditId) setSelectedGrupo({ ...selectedGrupo, ...payload });
-                toast.success('Grupo actualizado.');
-            } else {
-                const newId = await gruposService.add(payload);
-                setGrupos(prev => [...prev, { id: newId, ...payload }]);
-                toast.success('Grupo creado.');
-            }
-            setShowGrupoForm(false);
-        } catch (e) {
-            console.error(e);
-            toast.error('Error al guardar el grupo.');
-        } finally {
-            setSavingGrupo(false);
-        }
-    };
+    const handleSaveGrupo = async () =>
+        savePlanificacionGrupo({
+            grupoFormNombre,
+            grupoFormClientId,
+            grupoFormObjectiveIds,
+            grupoFormMode,
+            grupoFormEditId,
+            empresaId,
+            clients,
+            selectedGrupo,
+            setSavingGrupo,
+            setGrupos,
+            setSelectedGrupo,
+            setShowGrupoForm,
+        });
 
     // En modo grupo unificado: devuelve el objectiveId correcto para el empleado según su objetivo nativo
     const resolveObjectiveForEmp = useCallback((empId: string): string => {
@@ -4192,17 +3623,13 @@ export default function PlanificacionPage() {
         return selectedObjective;
     }, [selectedObjective, selectedGrupo, grupoUnifiedMode, employees, slaIdToObjId]);
 
-    const handleDeleteGrupo = async (grupo: GrupoObjetivos) => {
-        if (!confirm(`¿Eliminar el grupo "${grupo.nombre}"?`)) return;
-        try {
-            await gruposService.delete(grupo.id!);
-            setGrupos(prev => prev.filter(g => g.id !== grupo.id));
-            if (selectedGrupo?.id === grupo.id) handleGrupoChange(null);
-            toast.success('Grupo eliminado.');
-        } catch (e) {
-            toast.error('Error al eliminar el grupo.');
-        }
-    };
+    const handleDeleteGrupo = async (grupo: GrupoObjetivos) =>
+        deletePlanificacionGrupo({
+            grupo,
+            selectedGrupo,
+            setGrupos,
+            handleGrupoChange,
+        });
 
     const navigateToObjectiveFromOverview = useCallback((clientId: string, objectiveId: string, year: number, month: number) => {
         if (Object.keys(pendingChanges).length > 0) {
@@ -4212,7 +3639,7 @@ export default function PlanificacionPage() {
         }
         setSelectedClient(clientId);
         setSelectedObjective(objectiveId);
-        setCurrentDate(new Date(year, month - 1, 1));
+        goToPlanningMonth(year, month - 1);
         setSearchTerm('');
         setShowGuardiaSearch(false);
         setBandFilter(null);
@@ -4222,7 +3649,7 @@ export default function PlanificacionPage() {
         setComparingSnapshot(null);
         setOpenDrop(null);
         setAutoGeneratedReady(false);
-    }, []);
+    }, [goToPlanningMonth]);
     useEffect(() => { if (!openDrop) return; const h = () => setOpenDrop(null); document.addEventListener('click', h); return () => document.removeEventListener('click', h); }, [openDrop]);
 
     // ============================================================================
@@ -4406,522 +3833,11 @@ export default function PlanificacionPage() {
         return () => unsubAuth();
     }, []);
 
-    const tenantClientIds = useMemo(() => new Set(clients.map((c) => c.id)), [clients]);
-
-    // 🛑 V8.60 - SELECCIÓN DE SERVICIO POR FECHA: usa la versión de servicios_sla vigente para el mes visualizado
-    useEffect(() => {
-        if (!selectedClient || !selectedObjective) {
-            setPositionStructure([]);
-            setActivePlanningSlaRow(null);
-            setHasActiveSLA(true);
-            setSlaVendidas(0);
-            setSlaPlanningHint('');
-            return;
-        }
-        const fetchSLA = async () => {
-            try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
-                const allDocs = filterSlasForPlanningTenant(
-                    snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
-                    empresaId,
-                    scopeEmpresa,
-                    tenantClientIds,
-                );
-                const clientDocs = allDocs.filter((d) =>
-                    slaBelongsToPlanningClient(d, selectedClient, clients),
-                );
-                const matching = filterSlasForPlanningContext(
-                    allDocs,
-                    selectedClient,
-                    selectedObjective,
-                    clients,
-                    slaIdToObjId,
-                );
-
-                const viewYear = currentDate.getFullYear();
-                const viewMonth = currentDate.getMonth();
-                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                const srvForStructure = srv ?? fallback;
-                const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
-
-                if (!monthHasSla) {
-                    if (matching.length > 0) {
-                        setSlaPlanningHint(`contratos del objetivo: ${formatSlaRangeHint(matching)}`);
-                    } else if (clientDocs.length > 0) {
-                        setSlaPlanningHint(`${clientDocs.length} contrato(s) del cliente no vinculan a este objetivo — revisá Servicios`);
-                    } else if (allDocs.length > 0) {
-                        setSlaPlanningHint(`${allDocs.length} contrato(s) en Servicios no coinciden con este cliente (revisá clientId tras restore)`);
-                    } else {
-                        setSlaPlanningHint('sin contratos en Servicios para este cliente');
-                    }
-                } else {
-                    setSlaPlanningHint('');
-                }
-
-                const { structure, usedSlaFallback } = buildPlanningPositionStructure(srvForStructure, {
-                    monthHasSla,
-                    hasExactMatch,
-                });
-                if (structure.length === 0) {
-                    console.warn('CRONO: Sin contrato SLA para este mes; estructura mínima de respaldo.');
-                    structure.push({
-                        positionName: 'General',
-                        shifts: DEFAULT_PLANNING_SHIFTS.map((s) => ({ ...s })),
-                        qty: 1,
-                        activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
-                        coverageType: '24hs',
-                    });
-                } else if (usedSlaFallback) {
-                    console.info('CRONO: Contrato SLA vigente sin puestos/turnos configurados; usando M/T/N por defecto.');
-                }
-                setHasActiveSLA(monthHasSla);
-                setPositionStructure(structure);
-                setActivePlanningSlaRow(srvForStructure ?? null);
-                setActiveSlaPositionAssignments(mergeEncargadoIntoAssignments({
-                    positionAssignments: srvForStructure?.positionAssignments,
-                    encargadoEmployeeId: typeof srvForStructure?.encargadoEmployeeId === 'string' ? srvForStructure.encargadoEmployeeId : undefined,
-                    encargadoEmployeeName: typeof srvForStructure?.encargadoEmployeeName === 'string' ? srvForStructure.encargadoEmployeeName : undefined,
-                    positions: srvForStructure?.positions,
-                }) ?? null);
-                setActiveSlaServiceRules(srvForStructure?.serviceRules ?? null);
-                const _loadedRot = srvForStructure?.serviceRotations ?? null;
-                console.log('[CRONO rot] slaId:', srvForStructure?.id, '| serviceRotations:', _loadedRot?.length ?? 'null', _loadedRot?.map((r: any) => ({ id: r.id, mode: r.cycleMode, entries: r.periods?.[0]?.entries?.map((e: any) => ({ eid: e.employeeId, sc: e.shiftCode })) })));
-                setActiveSlaServiceRotations(_loadedRot);
-                setSlaVendidas(
-                    monthHasSla && srvForStructure
-                        ? resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth)
-                        : 0,
-                );
-            } catch (e) {
-                console.error("CRONO SLA ERROR:", e);
-                setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
-                setActivePlanningSlaRow(null);
-                setHasActiveSLA(false);
-                setSlaVendidas(0);
-                setSlaPlanningHint('error al cargar contratos');
-            }
-        };
-        fetchSLA();
-    }, [selectedClient, selectedObjective, currentDate, empresaId, migracionCompleta, scopeEmpresa, clients, tenantClientIds, slaIdToObjId, dataRefreshNonce]);
-
     // Resetear autorización 200h al cambiar de objetivo o mes
     useEffect(() => {
         setAuthorizedOver200Ids(new Set());
         authorizedOver200IdsRef.current = new Set();
     }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
-
-    // Resetear guard de auto-rotación al cambiar objetivo o mes para que vuelva a pre-cargar
-    useEffect(() => {
-        autoRotAppliedRef.current = '';
-    }, [selectedObjective, currentDate.getFullYear(), currentDate.getMonth()]);
-
-    // Auto-aplicar rotación cuando el mes está vacío y hay rotación configurada en el SLA
-    useEffect(() => {
-        if (!shiftsMapLoaded) return;
-        if (!activeSlaServiceRotations?.length) return;
-        if (!selectedObjective) return;
-        if (!hasActiveSLA) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth();
-        const periodKey = `${selectedObjective}_${year}_${month}`;
-        if (autoRotAppliedRef.current === periodKey) return;
-        // Verificar si el mes ya tiene turnos guardados en Firestore para este objetivo (o grupo)
-        const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}-`;
-        const grupoObjIds = (selectedGrupo && grupoUnifiedMode && Array.isArray(selectedGrupo.objectiveIds))
-            ? (selectedGrupo.objectiveIds as string[])
-            : null;
-        const hasAnySaved = Object.entries(shiftsMap).some(([k, v]: [string, any]) => {
-            if (!k.includes(`_${monthPrefix}`) || v?.isDeleted) return false;
-            const objId = v?.objectiveId;
-            if (objId === selectedObjective) return true;
-            if (grupoObjIds && grupoObjIds.includes(objId)) return true;
-            return false;
-        });
-        if (hasAnySaved) {
-            autoRotAppliedRef.current = periodKey;
-            return;
-        }
-        // Filtrar rotaciones desactivadas para este mes
-        const rotacionesActivas = (activeSlaServiceRotations as any[]).filter(r => !mesRotacionesDesactivadas.has(r.id));
-        if (!rotacionesActivas.length) return;
-        autoRotAppliedRef.current = periodKey;
-        // Generar entradas de rotación para todo el mes (respeta shiftsMap vacío)
-        const rotAdditions = applyRotationsForMonth(
-            rotacionesActivas, {}, shiftsMap, year, month, positionStructure,
-        );
-        if (!Object.keys(rotAdditions).length) return;
-        // Si alguna rotación activa tiene cumplirCondicion, también aplicar las reglas del SLA
-        if (activeSlaServiceRules?.length && rotacionesActivas.some((r: any) => r.cumplirCondicion)) {
-            const daysInMonth = new Date(year, month + 1, 0).getDate();
-            for (let d = 1; d <= daysInMonth; d++) {
-                const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                const condChanges = computeServiceRuleChanges(
-                    dateStr, activeSlaServiceRules, rotAdditions, shiftsMap, employees, selectedObjective,
-                );
-                Object.assign(rotAdditions, condChanges);
-            }
-        }
-        commitPendingChanges((prev: Record<string, any>) => {
-            // No sobreescribir si el usuario ya tiene cambios manuales en curso
-            if (Object.values(prev).some((v: any) => v && !v._isAutoRotation && !v._isAutoCondition)) return prev;
-            return { ...prev, ...rotAdditions };
-        });
-        const desactCount = mesRotacionesDesactivadas.size;
-        const totalCount = activeSlaServiceRotations.length;
-        const hint = desactCount > 0 ? ` (${rotacionesActivas.length}/${totalCount} activas)` : '';
-        toast.info(`Rotación pre-cargada${hint} — revisá y guardá cuando estés listo`, { duration: 4000 });
-    }, [activeSlaServiceRotations, mesRotacionesDesactivadas, hasActiveSLA, shiftsMap, shiftsMapLoaded, currentDate, selectedObjective, positionStructure, commitPendingChanges, activeSlaServiceRules, employees, selectedGrupo, grupoUnifiedMode]);
-
-    // Carga SLA de todos los objetivos del grupo activo (para cobertura y modal en vista unificada)
-    useEffect(() => {
-        if (!selectedGrupo || !grupoUnifiedMode || !selectedClient) {
-            setGrupoSlaMap({});
-            setGrupoTotalVendidas(0);
-            setGrupoVendidasByObjective({});
-            return;
-        }
-        const fetchGroupSlas = async () => {
-            try {
-                const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
-                const allDocs = filterSlasForPlanningTenant(
-                    snap.docs.map(d => ({ id: d.id, ...(d.data() as any) })),
-                    empresaId, scopeEmpresa, tenantClientIds,
-                );
-                const viewYear = currentDate.getFullYear();
-                const viewMonth = currentDate.getMonth();
-                const result: Record<string, any[]> = {};
-                const vendidasByObj: Record<string, number> = {};
-                let totalVendidas = 0;
-                for (const objId of selectedGrupo.objectiveIds) {
-                    const matching = filterSlasForPlanningContext(allDocs, selectedClient, objId, clients, slaIdToObjId);
-                    const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                    const srvForStructure = srv ?? fallback;
-                    const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
-                    if (monthHasSla && srvForStructure) {
-                        const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
-                        vendidasByObj[objId] = objVend;
-                        totalVendidas += objVend;
-                    } else {
-                        vendidasByObj[objId] = 0;
-                    }
-                    const { structure } = buildPlanningPositionStructure(srvForStructure, { monthHasSla, hasExactMatch: !!hasExactMatch });
-                    result[objId] = structure.length > 0 ? structure : [{ positionName: 'General', shifts: DEFAULT_PLANNING_SHIFTS.map((s: any) => ({ ...s })), qty: 1, activeDays: ['L','M','X','J','V','S','D'], coverageType: '24hs' }];
-                }
-                setGrupoSlaMap(result);
-                setGrupoTotalVendidas(totalVendidas);
-                setGrupoVendidasByObjective(vendidasByObj);
-            } catch (e) {
-                console.error('GRUPO SLA ERROR:', e);
-                setGrupoSlaMap({});
-                setGrupoTotalVendidas(0);
-                setGrupoVendidasByObjective({});
-            }
-        };
-        fetchGroupSlas();
-    }, [selectedGrupo, grupoUnifiedMode, selectedClient, currentDate, empresaId, scopeEmpresa, clients, tenantClientIds, slaIdToObjId]);
-
-    // LISTENER DE NOVEDADES Y OTROS DATOS
-    useEffect(() => {
-        if (!empresaId) return;
-
-        setIsDataSyncing(true);
-        dataSyncRef.current = { employees: false, clients: false };
-        const checkSynced = () => {
-            if (dataSyncRef.current.employees && dataSyncRef.current.clients) setIsDataSyncing(false);
-        };
-        const syncTimeout = setTimeout(() => setIsDataSyncing(false), 2000);
-
-        getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa)).then(snap => {
-            const m: Record<string, string> = {};
-            snap.docs.forEach(d => {
-                if (!belongsToEmpresaView(d.data(), empresaId, migracionCompleta)) return;
-                if (d.data().objectiveId) m[d.id] = d.data().objectiveId;
-            });
-            setSlaIdToObjId(m);
-        }).catch(() => {});
-
-        const clientsQ = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
-        const empleadosQ = empresaCollectionQuery('empleados', empresaId, scopeEmpresa);
-
-        const unsubC = onSnapshot(clientsQ, snap => {
-            dataSyncRef.current.clients = true;
-            checkSynced();
-            const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
-        }, (e) => console.error('[plan] clients error:', e));
-        const unsubAg = onSnapshot(collection(db, 'convenios_colectivos'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
-        const unsubE = onSnapshot(empleadosQ, snap => {
-            dataSyncRef.current.employees = true;
-            checkSynced();
-            const map = (s: typeof snap) => s.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => {
-                    const data = d.data();
-                    const firstName = String(data.firstName || '').trim();
-                    const lastName = String(data.lastName || '').trim();
-                    const composedName = `${lastName} ${firstName}`.trim() || `${firstName} ${lastName}`.trim();
-                    return {
-                        id: d.id,
-                        name: String(data.name || '').trim() || composedName,
-                        firstName,
-                        lastName,
-                        fileNumber: String(data.fileNumber || data.legajo || '').trim(),
-                        dni: String(data.dni || '').trim(),
-                        preferredObjectiveId: data.preferredObjectiveId,
-                        planificacionDotacion: (data.planificacionDotacion || {}) as PlanificacionDotacionMap,
-                        genero: data.genero || '',
-                        experienciaObjetivos: data.experienciaObjetivos || {},
-                        laborAgreement: data.laborAgreement,
-                        status: data.status || 'activo',
-                        lat: data.lat ?? data.latitude ?? null,
-                        lng: data.lng ?? data.longitude ?? null,
-                        address: data.address || '',
-                        restriccionesObjetivo: data.restriccionesObjetivo || [],
-                        restriccionesCliente: data.restriccionesCliente || [],
-                        conflictosEmpleados: data.conflictosEmpleados || [],
-                        volante: data.volante || [],
-                    };
-                });
-            setEmployees(map(snap));
-        }, (e) => console.error('[plan] empleados error:', e));
-
-        // Actividad Reciente (audit_logs) — acotada por empresa activa del panel.
-        const unsubLogs = onSnapshot(
-            buildAuditLogsRecentQuery(empresaId, scopeEmpresa, { limit: 60 }),
-            (snap) => {
-                const rows = sortAuditLogRows(
-                    snap.docs
-                        .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                        .map((d) => {
-                            const data: any = d.data();
-                            const tsMs = auditLogTimestampMs(data) || Date.now();
-                            return {
-                                id: d.id,
-                                timestamp: tsMs,
-                                label: ACTION_LABELS[data.action] || data.action || 'CAMBIO',
-                                detail: data.details || '',
-                                objectiveName: data.objectiveName || '',
-                                actorUid: data.actorUid || '',
-                                actorEmail: data.actorEmail || '',
-                                actorName: data.actorName || data.actor || '',
-                                actor: data.actorName || data.actorEmail || data.actor || data.actorUid || '',
-                                module: data.module || '',
-                                action: data.action || '',
-                            };
-                        })
-                        .filter((x) => {
-                            const mod = (x.module || '').toString().toUpperCase();
-                            if (mod === 'PLANIFICADOR') return true;
-                            if (mod === 'OPERACIONES' && (x.action === 'Devolución a Planificación' || (x.label || '').includes('Devolución'))) return true;
-                            return false;
-                        }),
-                    20,
-                );
-                setUnifiedLogs(rows);
-                // Mostrar notificación inline si es un log nuevo (no en el mount inicial)
-                const newest = rows[0];
-                if (newest && newest.id !== prevLatestLogId.current) {
-                    if (prevLatestLogId.current !== null) {
-                        // Es realmente un log nuevo (no la carga inicial)
-                        if (latestLogTimer.current) clearTimeout(latestLogTimer.current);
-                        setLatestLog(newest);
-                        latestLogTimer.current = setTimeout(() => setLatestLog(null), 60000);
-                    }
-                    prevLatestLogId.current = newest.id;
-                }
-            },
-            () => setUnifiedLogs([])
-        );
-
-        const unsubNotifs = onSnapshot(
-            scopeEmpresa && empresaId
-                ? query(empresaCollectionQuery('user_notifications', empresaId, scopeEmpresa), limit(80))
-                : query(collection(db, 'user_notifications'), orderBy('createdAt', 'desc'), limit(50)),
-            (snap) => {
-                const rows = snap.docs
-                    .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                    .filter((d) => {
-                        const t = String(d.data()?.target || '').toLowerCase();
-                        return t !== 'admin' && t !== 'ops' && t !== 'operaciones';
-                    })
-                    .map(d => {
-                    const data: any = d.data();
-                    const ts = data.createdAt?.toDate ? data.createdAt.toDate()
-                        : (data.createdAt?.seconds ? new Date(data.createdAt.seconds * 1000) : new Date());
-                    const readTs = data.readAt?.toDate ? data.readAt.toDate()
-                        : (data.readAt?.seconds ? new Date(data.readAt.seconds * 1000) : null);
-                    const ackTs = data.ackedAt?.toDate ? data.ackedAt.toDate()
-                        : (data.ackedAt?.seconds ? new Date(data.ackedAt.seconds * 1000) : null);
-                    return {
-                        id: d.id,
-                        timestamp: ts.getTime(),
-                        employeeId: data.employeeId || '',
-                        title: data.title || '',
-                        body: data.body || '',
-                        type: data.type || '',
-                        read: !!data.read,
-                        readAt: readTs ? readTs.getTime() : null,
-                        requiresAck: data.requiresAck === true,
-                        ackedAt: ackTs ? ackTs.getTime() : null,
-                        ackedByUid: data.ackedByUid || null,
-                    };
-                })
-                    .sort((a, b) => b.timestamp - a.timestamp)
-                    .slice(0, 50);
-                setNotifLogs(rows);
-            },
-            () => setNotifLogs([])
-        );
-
-        const ausenciasQ = empresaCollectionQuery('ausencias', empresaId, scopeEmpresa);
-        const unsubA = onSnapshot(ausenciasQ, snap => {
-            const docs = snap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .map(d => ({ id: d.id, data: d.data() as Record<string, unknown> }));
-            setAbsencesMap(buildAbsencesMapFromDocs(docs, getDateKey));
-        }, (e) => console.error('[plan] ausencias error:', e));
-
-        // novedades: equality + orderBy requires composite index (status ASC, createdAt DESC in firestore.indexes.json)
-        const qNovedades = scopeEmpresa
-            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40))
-            : query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40));
-        const unsubN = onSnapshot(qNovedades, (snap) => {
-            const alerts = snap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .filter(d => !d.data().viewed)  // safety net: excluir ya vistas
-                .filter(d => !d.data().priority || d.data().priority === 'high')
-                .filter(d => d.data().actionTarget !== 'OPERACIONES')
-                .map(d => {
-                    const data = d.data();
-                    const fallbackTitle = data.type === 'REFUERZO_CLIENTE_PENDIENTE'
-                        ? `${data.tipoSolicitud || 'RFZ'} · ${data.positionName || data.objectiveName || 'Refuerzo cliente'}`
-                        : (data.title || data.type || 'Novedad');
-                    return {
-                        id: d.id,
-                        source: 'NOVEDAD',
-                        ...data,
-                        title: data.title || fallbackTitle,
-                        msg: data.description || data.details || data.msg || '',
-                    };
-                });
-            setNotifications(alerts);
-            setHasUnread(alerts.length > 0);
-        }, (e) => console.error('[plan] novedades error:', e));
-        
-        return () => { clearTimeout(syncTimeout); unsubC(); unsubE(); unsubLogs(); unsubNotifs(); unsubA(); unsubAg(); unsubN(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [empresaId, migracionCompleta, scopeEmpresa]);
-
-    // Turnos del mes visible (evita escuchar toda la colección turnos)
-    useEffect(() => {
-        if (!empresaId) {
-            setShiftsMap({});
-            setCellTurnosMap({});
-            setShiftsMapLoaded(false);
-            return;
-        }
-        const viewYear = currentDate.getFullYear();
-        const viewMonth = currentDate.getMonth() + 1;
-        const cacheKey = planningMonthCacheKey(empresaId, viewYear, viewMonth);
-        let prefetchTimer: number | undefined;
-
-        const applyIngested = (ingested: ReturnType<typeof ingestPlanningTurnosSnapshot>) => {
-            setShiftsMap(ingested.shiftsMap);
-            setCellTurnosMap(ingested.cellTurnosMap);
-            setAllShiftIds(ingested.allShiftIds);
-            setTuraMap(ingested.turaMap);
-            setSecondBlockMap(ingested.secondBlockMap);
-            setRfzVacantes(ingested.rfzVacantes);
-            setRfzTodos(ingested.rfzTodos);
-            setShiftsMapLoaded(true);
-        };
-
-        const cached = getCachedPlanningMonth(cacheKey);
-        if (cached) {
-            applyIngested(cached);
-        } else {
-            setShiftsMapLoaded(false);
-            setRfzVacantes([]);
-            setRfzTodos([]);
-        }
-
-        const mergeRfzLists = (prev: any[], extra: any[]) => {
-            if (extra.length === 0) return prev;
-            const byId = new Map(prev.map((r) => [r.id, r]));
-            extra.forEach((r) => byId.set(r.id, r));
-            return Array.from(byId.values());
-        };
-
-        const applyMainSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
-            const ingested = ingestPlanningTurnosSnapshot(
-                snap.docs,
-                empresaId,
-                migracionCompleta,
-                getDateKey,
-            );
-            setCachedPlanningMonth(cacheKey, ingested);
-            applyIngested(ingested);
-            if (!prefetchTimer) {
-                prefetchTimer = window.setTimeout(() => {
-                    adjacentPlanningMonths(viewYear, viewMonth).forEach(({ year, month }) => {
-                        const key = planningMonthCacheKey(empresaId, year, month);
-                        if (getCachedPlanningMonth(key)) return;
-                        getDocs(buildPlanningMonthTurnosQuery({ empresaId, scopeEmpresa, year, month }))
-                            .then((adjSnap) => {
-                                setCachedPlanningMonth(
-                                    key,
-                                    ingestPlanningTurnosSnapshot(adjSnap.docs, empresaId, migracionCompleta, getDateKey),
-                                );
-                            })
-                            .catch(() => {});
-                    });
-                }, 600);
-            }
-        };
-
-        const turnosQ = buildPlanningMonthTurnosQuery({
-            empresaId,
-            scopeEmpresa,
-            year: viewYear,
-            month: viewMonth,
-        });
-        const unsubS = onSnapshot(turnosQ, applyMainSnap, (e) => {
-            console.error('[plan] turnos mes error:', e);
-            toast.error(`Error cargando turnos: ${e.code || e.message}`);
-            setShiftsMapLoaded(true);
-        });
-
-        let unsubRfz = () => {};
-        try {
-            const rfzQ = buildPlanningMonthRfzQuery({
-                empresaId,
-                scopeEmpresa,
-                year: viewYear,
-                month: viewMonth,
-            });
-            unsubRfz = onSnapshot(rfzQ, (snap) => {
-                const ingested = ingestPlanningTurnosSnapshot(
-                    snap.docs,
-                    empresaId,
-                    migracionCompleta,
-                    getDateKey,
-                    { rfzOnly: true },
-                );
-                setRfzTodos((prev) => mergeRfzLists(prev, ingested.rfzTodos));
-                setRfzVacantes((prev) => mergeRfzLists(prev, ingested.rfzVacantes));
-            }, () => {
-                /* sin índice compuesto: RFZ por fecha puede fallar; turnos con startTime igual cubren RFZ */
-            });
-        } catch {
-            /* índice RFZ opcional en emulador */
-        }
-
-        return () => {
-            unsubS();
-            unsubRfz();
-            if (prefetchTimer) window.clearTimeout(prefetchTimer);
-        };
-    }, [empresaId, migracionCompleta, scopeEmpresa, currentDate.getFullYear(), currentDate.getMonth()]);
 
     // Cargar grupos de objetivos
     useEffect(() => {
@@ -4929,140 +3845,16 @@ export default function PlanificacionPage() {
         gruposService.getByEmpresa(empresaId).then(setGrupos);
     }, [empresaId]);
 
-    // Cargar estado de publicación cuando cambia objetivo o mes
-    useEffect(() => {
-        if (!selectedObjective) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1;
-        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
-            .then(row => {
-                // Solo publishedAt marca publicación. Asignar puestos crea el mismo doc sin publicar.
-                if (row && row.data.publishedAt) {
-                    setPublishStatusMap(prev => ({
-                        ...prev,
-                        [lookupKey]: {
-                            publishedAt: row.data.publishedAt,
-                            publishedBy: String(row.data.publishedBy ?? ''),
-                        },
-                    }));
-                } else {
-                    setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-                }
-                const disabled = (row?.data.rotacionesDesactivadasMes as string[] | undefined) ?? [];
-                setMesRotacionesDesactivadas(new Set(disabled));
-            }).catch(() => { setMesRotacionesDesactivadas(new Set()); });
-    }, [selectedObjective, currentDate, empresaId, dataRefreshNonce]);
+    usePlanificacionDotacionOverlay({
+        employees,
+        selectedObjective,
+        currentDate,
+        empresaId,
+        setEmpDefaultPos,
+        setEmpDefaultShift,
+    });
 
-    // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
-    const activateRfzCorrectionFlow = useCallback((opts?: { republishOnly?: boolean }) => {
-        if (!selectedObjective) return;
-        const lookupKey = planificacionPublishLookupKey(
-            selectedObjective,
-            currentDate.getFullYear(),
-            currentDate.getMonth() + 1,
-        );
-        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
-        setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        if (!opts?.republishOnly && canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, publishStatusMap, canCorrectPlanning]);
-
-    useEffect(() => {
-        if (!selectedObjective) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1;
-        const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        if (!isPlanificacionPublished(publishStatusMap[lookupKey])) return;
-        const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-        const draftRfz = rfzTodos.filter(rfz =>
-            rfz.objectiveId === selectedObjective &&
-            String(rfz.fecha || '').startsWith(monthPrefix) &&
-            rfz.draft === true,
-        );
-        if (draftRfz.length === 0) return;
-        const asignadosSinPublicar = draftRfz.some(rfz => rfz.employeeId && rfz.employeeId !== 'VACANTE');
-        if (asignadosSinPublicar) {
-            setNeedsRepublishMap(prev => ({ ...prev, [lookupKey]: true }));
-        }
-        if (canCorrectPlanning) setCorrectionMode(true);
-    }, [selectedObjective, currentDate, rfzTodos, publishStatusMap, canCorrectPlanning]);
-
-    // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
-    // Si el mes actual no tiene datos propios, hereda del mes anterior (una sola vez al abrir el mes).
-    useEffect(() => {
-        const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
-        setEmpDefaultPos(basePos);
-        setEmpDefaultShift(baseShift);
-        if (!selectedObjective) return;
-        const year = currentDate.getFullYear();
-        const month = currentDate.getMonth() + 1;
-        const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-        const applyOverlay = (monthlyPos: Record<string,string>, monthlyShift: Record<string,string>) => {
-            if (Object.keys(monthlyPos).length === 0) return false;
-            const merged = { ...basePos };
-            const mergedS = { ...baseShift };
-            for (const [id, p] of Object.entries(monthlyPos)) merged[`${id}___${selectedObjective}`] = p;
-            for (const [id, s] of Object.entries(monthlyShift)) mergedS[`${id}___${selectedObjective}`] = s;
-            setEmpDefaultPos(merged);
-            setEmpDefaultShift(mergedS);
-            return true;
-        };
-        fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month).then((d) => {
-            if (applyOverlay(
-                (d.defaultPositionByEmp as Record<string, string>) || {},
-                (d.defaultShiftByEmp as Record<string, string>) || {},
-            )) return;
-            // Sin datos propios → intentar heredar del mes anterior
-            const prevMonth = month === 1 ? 12 : month - 1;
-            const prevYear = month === 1 ? year - 1 : year;
-            fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, prevYear, prevMonth).then((prev) => {
-                const prevPos: Record<string,string> = (prev.defaultPositionByEmp as Record<string, string>) || {};
-                const prevSh: Record<string,string> = (prev.defaultShiftByEmp as Record<string, string>) || {};
-                if (applyOverlay(prevPos, prevSh)) {
-                    if (empresaId) {
-                        setDoc(doc(db, 'planificacion_estados', stateKey), {
-                            empresaId,
-                            objectiveId: selectedObjective,
-                            objetivoId: selectedObjective,
-                            year,
-                            month,
-                            año: year,
-                            mes: month,
-                            defaultPositionByEmp: prevPos,
-                            defaultShiftByEmp: prevSh,
-                        }, { merge: true }).catch(() => {});
-                    }
-                }
-            }).catch(() => {});
-        }).catch(() => {});
-    }, [employees, selectedObjective, currentDate, empresaId]);
-
-    useEffect(() => {
-        if (dotacionMigratedRef.current || typeof window === 'undefined' || !employees.length) return;
-        dotacionMigratedRef.current = true;
-        try {
-            const lsPos: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_pos') || '{}');
-            const lsShift: Record<string, string> = JSON.parse(localStorage.getItem('planif_emp_shift') || '{}');
-            const allKeys = new Set([...Object.keys(lsPos), ...Object.keys(lsShift)]);
-            for (const key of allKeys) {
-                const sep = key.indexOf('___');
-                if (sep <= 0) continue;
-                const empId = key.slice(0, sep);
-                const objId = key.slice(sep + 3);
-                const emp = employees.find((e) => e.id === empId);
-                if (!emp) continue;
-                const existing = emp.planificacionDotacion?.[objId]?.positionName;
-                const positionName = lsPos[key];
-                if (existing || !positionName) continue;
-                const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
-                nextDotacion[objId] = {
-                    positionName,
-                    ...(lsShift[key] ? { shiftCode: lsShift[key] } : {}),
-                };
-                updateDoc(doc(db, 'empleados', empId), { planificacionDotacion: nextDotacion }).catch(() => {});
-            }
-        } catch { /* noop */ }
-    }, [employees]);
+    usePlanificacionDotacionMigration({ employees });
 
     // ============================================================================
     // 7. HANDLERS DE USUARIO (NIVEL 6) - DEFINIDOS UNA SOLA VEZ
@@ -5271,37 +4063,18 @@ export default function PlanificacionPage() {
         if (!confirm('¿Quitar todos los puestos asignados de este objetivo?')) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-        const prefix = `___${selectedObjective}`;
-        const newPos = Object.fromEntries(Object.entries(empDefaultPos).filter(([k]) => !k.endsWith(prefix)));
-        const newShift = Object.fromEntries(Object.entries(empDefaultShift).filter(([k]) => !k.endsWith(prefix)));
-        setEmpDefaultPos(newPos);
-        setEmpDefaultShift(newShift);
         try {
-            const batch = writeBatch(db);
-            const affected = employees.filter((e: any) => {
-                const cfg = e.planificacionDotacion?.[selectedObjective];
-                return !!cfg?.positionName || !!cfg?.shiftCode;
+            const result = await clearPlanificacionObjectivePositions({
+                empresaId,
+                selectedObjective,
+                year,
+                month,
+                empDefaultPos,
+                empDefaultShift,
+                employees,
             });
-            for (const emp of affected) {
-                const nextDotacion: PlanificacionDotacionMap = { ...(emp.planificacionDotacion || {}) };
-                delete nextDotacion[selectedObjective];
-                batch.update(doc(db, 'empleados', emp.id), { planificacionDotacion: nextDotacion });
-            }
-            if (empresaId) {
-                batch.set(doc(db, 'planificacion_estados', stateKey), {
-                    empresaId,
-                    objectiveId: selectedObjective,
-                    objetivoId: selectedObjective,
-                    year,
-                    month,
-                    año: year,
-                    mes: month,
-                    defaultPositionByEmp: {},
-                    defaultShiftByEmp: {},
-                }, { merge: true });
-            }
-            await batch.commit();
+            setEmpDefaultPos(result.empDefaultPos);
+            setEmpDefaultShift(result.empDefaultShift);
             toast.success('Puestos quitados');
         } catch {
             toast.error('No se pudo limpiar los puestos');
@@ -5317,73 +4090,48 @@ export default function PlanificacionPage() {
         try {
             const year = currentDate.getFullYear();
             const month = currentDate.getMonth() + 1;
-            const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-            const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-
-            const [estadoRow, turnosSnap] = await Promise.all([
-                fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month),
-                getDocs(query(
-                    collection(db, 'turnos'),
-                    where('objectiveId', '==', selectedObjective),
-                )),
-            ]);
-
-            if (estadoRow && estadoRow.data.publishedAt) {
-                setPublishStatusMap(prev => ({
-                    ...prev,
-                    [lookupKey]: {
-                        publishedAt: estadoRow.data.publishedAt,
-                        publishedBy: String(estadoRow.data.publishedBy ?? ''),
-                    },
-                }));
-            } else {
-                setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-            }
-
-            const mergedEstado = await fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month);
-            const monthlyPos = (mergedEstado.defaultPositionByEmp as Record<string, string>) || {};
-            const monthlyShift = (mergedEstado.defaultShiftByEmp as Record<string, string>) || {};
-            const { pos: basePos, shift: baseShift } = buildDotacionMapsFromEmployees(employees);
-            const mergedPos = { ...basePos };
-            const mergedShift = { ...baseShift };
-            for (const [id, p] of Object.entries(monthlyPos)) mergedPos[`${id}___${selectedObjective}`] = p;
-            for (const [id, s] of Object.entries(monthlyShift)) mergedShift[`${id}___${selectedObjective}`] = s;
-            setEmpDefaultPos(mergedPos);
-            setEmpDefaultShift(mergedShift);
-
+            const refreshed = await loadPlanificacionCronogramaRefresh({
+                empresaId,
+                migracionCompleta,
+                scopeEmpresa,
+                selectedObjective,
+                year,
+                month,
+                employees,
+            });
+            setPublishStatusMap(prev => ({
+                ...prev,
+                [refreshed.lookupKey]: refreshed.publishStatusEntry,
+            }));
+            setEmpDefaultPos(refreshed.empDefaultPos);
+            setEmpDefaultShift(refreshed.empDefaultShift);
             setShiftsMap(prev => {
-                const next = { ...prev };
-                for (const key of Object.keys(next)) {
-                    const s = next[key];
-                    if (!s) continue;
-                    if (String(s.objectiveId || '') !== String(selectedObjective)) continue;
-                    const dateKey = key.includes('_') ? key.slice(key.indexOf('_') + 1) : '';
-                    if (dateKey.startsWith(monthPrefix)) delete next[key];
+                const next = refreshed.mergeShiftsMap(prev);
+                if (empresaId) {
+                    const cacheKey = planningMonthCacheKey(empresaId, year, month);
+                    const cached = getCachedPlanningMonth(cacheKey);
+                    const cellPatch: Record<string, any[]> = { ...(cached?.cellTurnosMap || {}) };
+                    const idsPatch: Record<string, string[]> = { ...(cached?.allShiftIds || {}) };
+                    for (const { key, value } of refreshed.monthEntries) {
+                        cellPatch[key] = [value, ...(cellPatch[key] || []).filter((x) => x?.id !== value.id)];
+                        if (value.id) {
+                            const ids = idsPatch[key] || [];
+                            if (!ids.includes(value.id)) idsPatch[key] = [...ids, value.id];
+                        }
+                    }
+                    setCachedPlanningMonth(cacheKey, {
+                        shiftsMap: next,
+                        cellTurnosMap: cellPatch,
+                        allShiftIds: idsPatch,
+                        turaMap: cached?.turaMap || {},
+                        secondBlockMap: cached?.secondBlockMap || {},
+                        rfzVacantes: cached?.rfzVacantes || [],
+                        rfzTodos: cached?.rfzTodos || [],
+                    });
+                    setCellTurnosMap(cellPatch);
                 }
-                turnosSnap.docs.forEach(d => {
-                    const data = d.data();
-                    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-                    const code = String(data.code || data.type || '').toUpperCase();
-                    if (code === 'RFZ' || code === 'TURA') return;
-                    if (!data.startTime?.seconds) return;
-                    const dateKey = getDateKey(data.startTime);
-                    if (!dateKey.startsWith(monthPrefix)) return;
-                    const empKey = `${data.employeeId}_${dateKey}`;
-                    next[empKey] = {
-                        id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
-                        startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
-                        status: data.status, isPresent: data.isPresent || false, isAbsent: data.isAbsent || false,
-                        isExtended: data.isExtended, isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
-                        isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
-                        swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
-                        positionName: data.positionName,
-                        coveredBy: data.coveredBy,
-                        draft: data.draft,
-                    };
-                });
                 return next;
             });
-
             setDataRefreshNonce(n => n + 1);
             toast.success('Cronograma actualizado');
         } catch (e) {
@@ -5486,73 +4234,26 @@ export default function PlanificacionPage() {
             toast.error('Seleccioná una empresa antes de asignar puestos');
             return;
         }
-        const key = `${empId}___${selectedObjective}`;
         const prevPosMap = { ...empDefaultPos };
         const prevShiftMap = { ...empDefaultShift };
-        const newPosMap = { ...empDefaultPos };
-        if (posName) { newPosMap[key] = posName; } else { delete newPosMap[key]; }
-        setEmpDefaultPos(newPosMap);
-        const newShiftMap = { ...empDefaultShift };
-        if (shiftCode) { newShiftMap[key] = shiftCode.toUpperCase(); } else { delete newShiftMap[key]; }
-        setEmpDefaultShift(newShiftMap);
-        setEmpPosPicker(null);
-
-        const emp = employees.find((e: any) => e.id === empId);
-        const nextDotacion: PlanificacionDotacionMap = { ...(emp?.planificacionDotacion || {}) };
-        if (posName) {
-            nextDotacion[selectedObjective] = {
-                positionName: posName,
-                ...(shiftCode ? { shiftCode: shiftCode.toUpperCase() } : {}),
-            };
-        } else {
-            delete nextDotacion[selectedObjective];
-        }
-
+        const year = currentDate.getFullYear();
+        const month = currentDate.getMonth() + 1;
         try {
-            // 1) Persistencia durable en legajo (sobrevive despublicar / borrar estado mensual)
-            await updateDoc(doc(db, 'empleados', empId), {
-                planificacionDotacion: nextDotacion,
-            });
-
-            // 2) Overlay mensual (best-effort; no bloquea si falla)
-            const year = currentDate.getFullYear();
-            const month = currentDate.getMonth() + 1;
-            const stateKey = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-            const stateRef = doc(db, 'planificacion_estados', stateKey);
-            const posField = `defaultPositionByEmp.${empId}`;
-            const shiftField = `defaultShiftByEmp.${empId}`;
-            const estadoPayload: Record<string, any> = {
-                [posField]: posName ?? deleteField(),
-                [shiftField]: shiftCode ? shiftCode.toUpperCase() : deleteField(),
+            const result = await savePlanificacionEmpPosition({
                 empresaId,
-                objectiveId: selectedObjective,
-                objetivoId: selectedObjective,
+                selectedObjective,
                 year,
                 month,
-                año: year,
-                mes: month,
-            };
-            try {
-                await updateDoc(stateRef, estadoPayload);
-            } catch (e: any) {
-                if (e?.code === 'not-found') {
-                    await setDoc(stateRef, {
-                        empresaId,
-                        objectiveId: selectedObjective,
-                        objetivoId: selectedObjective,
-                        year,
-                        month,
-                        año: year,
-                        mes: month,
-                        defaultPositionByEmp: posName ? { [empId]: posName } : {},
-                        defaultShiftByEmp: shiftCode ? { [empId]: shiftCode.toUpperCase() } : {},
-                    }, { merge: true });
-                } else if (e?.code === 'permission-denied') {
-                    console.warn('[plan] planificacion_estados sin permiso (puesto ya guardado en legajo)', e);
-                } else {
-                    console.warn('[plan] overlay mensual puestos', e);
-                }
-            }
+                empId,
+                posName,
+                shiftCode,
+                empDefaultPos,
+                empDefaultShift,
+                employees,
+            });
+            setEmpDefaultPos(result.empDefaultPos);
+            setEmpDefaultShift(result.empDefaultShift);
+            setEmpPosPicker(null);
         } catch (err: any) {
             setEmpDefaultPos(prevPosMap);
             setEmpDefaultShift(prevShiftMap);
@@ -5618,8 +4319,6 @@ export default function PlanificacionPage() {
         setSelectedCell(null);
         toast.info("Marcado para borrar.", { id: 'plan-cambio', duration: 2000 });
     };
-    const getSafeTime = (input: any) => { if (!input) return [6, 0]; if (typeof input === 'string') return input.split(':').map(Number); if (input.toDate) { const d = input.toDate(); return [d.getHours(), d.getMinutes()]; } if (input.seconds) { const d = new Date(input.seconds * 1000); return [d.getHours(), d.getMinutes()]; } if (input instanceof Date) return [input.getHours(), input.getMinutes()]; return [6, 0]; };
-    
     const verifySupervisorPin = async (pin: string): Promise<{ ok: boolean; name: string }> => {
         if (!/^\d{4}$/.test(pin)) return { ok: false, name: '' };
         const snap = await getDocs(query(collection(db, 'system_users'), where('supervisorPin', '==', pin)));
@@ -5766,472 +4465,32 @@ export default function PlanificacionPage() {
 
             planToastSaving(jobCount);
 
-            void (async () => {
-            let batch = writeBatch(db);
-            let batchOps = 0;
-            const BATCH_LIMIT = 450;
-            const AUDIT_CONSOLIDATE_MIN = 3;
-            const bumpBatchOp = () => { batchOps++; };
-            const flushBatchWhenFull = async () => {
-                if (batchOps < BATCH_LIMIT) return;
-                await batch.commit();
-                batch = writeBatch(db);
-                batchOps = 0;
-            };
-            const flushBatch = async () => {
-                if (batchOps === 0) return;
-                await batch.commit();
-                batch = writeBatch(db);
-                batchOps = 0;
-            };
-            const auth = getAuth();
-            const realActorName = activeActorName || 'Sistema';
-            const pubYear = currentDate.getFullYear();
-            const pubMonth = currentDate.getMonth() + 1;
-            const publishLookupKey = planificacionPublishLookupKey(selectedObjective, pubYear, pubMonth);
-            const isPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-            const logData: { empId: string; date: string; action: string; detail: string }[] = [];
-            const employeesById: Record<string, any> = {};
-            employees.forEach((e: any) => { employeesById[e.id] = e; });
-            // snapshotData ya armado en doSave (grilla completa del mes)
-            const savedPendingChanges = jobPending;
-            const savedPendingNovedades = jobNovedades;
-            const savedRecompositionPackages = jobPackages;
-            const slaShiftByPosCode = new Map<string, any>();
-            for (const pos of positionStructure) {
-                for (const sh of ((pos.shifts || []) as any[])) {
-                    const ck = `${pos.positionName}__${String(sh.code || '').toUpperCase()}`;
-                    if (!slaShiftByPosCode.has(ck)) slaShiftByPosCode.set(ck, sh);
-                }
-            }
-
-            const restorePendingOnFailure = () => {
-                setPendingChanges((prev) => {
-                    const next = { ...prev };
-                    for (const [k, v] of Object.entries(jobPending)) {
-                        if (!(k in next)) next[k] = v;
-                    }
-                    return next;
-                });
-                if (Object.keys(jobNovedades).length > 0) {
-                    setPendingNovedades((prev) => ({ ...jobNovedades, ...prev }));
-                }
-                if (jobPackages.length > 0) {
-                    setPendingRecompositionPackages((prev) => [...jobPackages, ...prev]);
-                }
-            };
-
-            const registerPlanificacionCorreccion = async (
-                empId: string,
-                empName: string,
-                dateStr: string,
-                actionDetail: string,
-                codigoAntes: string,
-                codigoDespues: string,
-            ) => {
-                if (!correctionMode) return;
-                const [y, m, d] = dateStr.split('-').map(Number);
-                const corrFechaTs = Timestamp.fromDate(new Date(y, m - 1, d, 12, 0, 0));
-                const tipoCorr =
-                    codigoAntes && codigoDespues && codigoAntes !== codigoDespues && codigoDespues !== '(eliminado)'
-                        ? 'CORRECCION_CODIGO'
-                        : 'CORRECCION_PLANIFICACION';
-                logData.push({ empId, date: dateStr, action: 'CORRECCION_SUPERADMIN' });
-                batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                    action: 'CORRECCION_SUPERADMIN',
-                    module: 'PLANIFICADOR',
-                    details: `[CORRECCIÓN] ${actionDetail}`,
-                    timestamp: serverTimestamp(),
-                    actorName: realActorName,
-                    actorUid: auth.currentUser?.uid,
-                    employeeId: empId,
-                    employeeName: empName,
-                    fecha: corrFechaTs,
-                }, empresaId));
-                bumpBatchOp();
-                await flushBatchWhenFull();
-                batch.set(doc(collection(db, 'ajustes_horas')), stampEmpresaId({
-                    employeeId: empId,
-                    employeeName: empName,
-                    tipo: tipoCorr,
-                    fecha: corrFechaTs,
-                    motivo: actionDetail,
-                    codigoAntes,
-                    codigoDespues,
-                    objectiveId: selectedObjective,
-                    objectiveName: getObjectiveName(selectedObjective),
-                    origen: 'PLANIFICACION',
-                    creadoPor: auth.currentUser?.uid || '',
-                    creadoPorNombre: realActorName,
-                    creadoEn: serverTimestamp(),
-                }, empresaId));
-                bumpBatchOp();
-                await flushBatchWhenFull();
-            };
-
-            try {
-                for (const [key, change] of Object.entries(jobPending)) {
-                    // key puede ser "empId_YYYY-MM-DD" o "empId_YYYY-MM-DD_B2" para bloques secundarios
-                    const parts = key.split('_');
-                    const empId = parts[0];
-                    const dateStr = parts[1]; // YYYY-MM-DD
-                    const existing = jobShiftsMap[key];
-                    const empObj = employeesById[empId];
-                    const empName = empObj ? empObj.name : 'Desconocido';
-                    let actionType = 'ASIGNACION_MASIVA';
-                    let actionDetail = change.coveredBy
-                        ? `Cobertura ${change.code} — ${empName} cubierto por ${change.coveredBy} el ${dateStr}`
-                        : change.comments?.startsWith('Cubriendo a')
-                            ? `${change.code} — ${change.comments} el ${dateStr}`
-                            : ['V','L','PG','A','E','AA'].includes(change.code)
-                                ? `${change.name || change.code} — ${empName} el ${dateStr}`
-                                : `Asignó ${change.code} a ${empName} el ${dateStr}`;
-
-                    const allExistingIds = jobAllShiftIds[key] ?? (existing?.id ? [existing.id] : []);
-                    const deleteAllExisting = () => {
-                        for (const docId of allExistingIds) {
-                            batch.delete(doc(db, 'turnos', docId));
-                            bumpBatchOp();
-                        }
-                    };
-
-                    if (change.isDeleted) {
-                        actionType = 'ELIMINACION_MASIVA';
-                        actionDetail = `Borró turno de ${empName} el ${dateStr}`;
-                        deleteAllExisting();
-                        await registerPlanificacionCorreccion(
-                            empId,
-                            empName,
-                            dateStr,
-                            actionDetail,
-                            existing?.code || '',
-                            '(eliminado)',
-                        );
-                    } else {
-                        deleteAllExisting();
-                        await flushBatchWhenFull();
-
-                        if (existing) {
-                            if ((existing.code === 'F' || existing.isFranco) && change.code !== 'F') {
-                                if (change.isFrancoTrabajado) { actionType = 'CAMBIO_FRANCO_TURNO'; actionDetail = `Asignó FT (${change.code}) a ${empName} el ${dateStr}`; }
-                                else { actionType = 'CAMBIO_DIAGRAMA'; actionDetail = `Cambio de Diagrama (F x ${change.code}) a ${empName}`; }
-                            } else if (existing.code !== 'F' && change.code === 'F') {
-                                if (change.isFrancoCompensatorio) { actionType = 'CAMBIO_TURNO_FRANCO'; actionDetail = `Asignó FF a ${empName} el ${dateStr}`; }
-                            }
-                        }
-
-                        const [y, m, d] = dateStr.split('-').map(Number);
-                        const tDate = new Date(y, m-1, d);
-                        const safePositionName = change.positionName || 'General';
-                        const [sh, sm] = getSafeTime(change.startTime);
-                        const start = new Date(tDate); start.setHours(sh, sm, 0);
-                        const end = new Date(start);
-
-                        if(change.code === 'F' || change.code === 'FF' || change.code === 'V') end.setHours(23,59,59);
-                        else if (typeof change.endTime === 'string' && /^\d{1,2}:\d{2}(:\d{2})?$/.test(change.endTime)) {
-                            const [eh, em] = change.endTime.split(':').map(Number);
-                            end.setHours(eh, em, 0);
-                            if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
-                        } else {
-                            const slaSh = slaShiftByPosCode.get(`${safePositionName}__${String(change.code || '').toUpperCase()}`);
-                            const slaEnd = typeof slaSh?.endTime === 'string' ? slaSh.endTime : null;
-                            const slaHours = Number(slaSh?.hours) > 0 ? Number(slaSh.hours) : null;
-                            if (slaEnd && /^\d{1,2}:\d{2}(:\d{2})?$/.test(slaEnd)) {
-                                const [eh, em] = slaEnd.split(':').map(Number);
-                                end.setHours(eh, em, 0);
-                                if (end <= start) end.setTime(end.getTime() + 24 * 3600000);
-                            } else if (slaHours) {
-                                end.setTime(start.getTime() + slaHours * 3600000);
-                            } else {
-                                end.setTime(start.getTime() + ((change.hours != null ? change.hours : 8)*3600000));
-                            }
-                        }
-
-                        const safeSwapWith = change.swapWith || null;
-                        const safeSwapDate = change.swapDate || null;
-
-                        const turnoPayload: Record<string, unknown> = {
-                            employeeId: empId,
-                            clientId: selectedClient,
-                            objectiveId: change.objectiveId || resolveObjectiveForEmp(empId),
-                            code: change.isFrancoCompensatorio ? 'FF' : change.code,
-                            type: change.name||change.code,
-                            startTime: Timestamp.fromDate(start),
-                            endTime: Timestamp.fromDate(end),
-                            scheduleDate: dateStr,
-                            isFranco: change.code==='F' || change.isFrancoCompensatorio || change.isFranco === true,
-                            isFrancoTrabajado: change.isFrancoTrabajado || false,
-                            isFrancoCompensatorio: change.isFrancoCompensatorio || false,
-                            swapWith: safeSwapWith,
-                            swapDate: safeSwapDate,
-                            createdAt: serverTimestamp(),
-                            comments: change.comments || change.coverageNote || 'Carga Masiva',
-                            isExtended: change.isExtended || false,
-                            isEarlyStart: change.isEarlyStart || false,
-                            plannedNovedad: change.plannedNovedad || null,
-                            positionName: safePositionName,
-                            coveredBy: change.coveredBy || null,
-                            draft: correctionMode ? false : !isPublished,
-                            actorName: realActorName,
-                            ...deploymentFieldsForFirestore(change),
-                        };
-
-                        if (
-                            change.coveragePackageId
-                            || change.coverageMode
-                            || change.coversBandCode
-                            || change.coversPositionName
-                            || change.coverageSegmentRole
-                            || change.coverageStatus
-                            || change.isExtended
-                            || change.isEarlyStart
-                        ) {
-                            if (change.coveragePackageId) turnoPayload.coveragePackageId = change.coveragePackageId;
-                            if (change.coverageType) turnoPayload.coverageType = change.coverageType;
-                            if (change.coverageSegmentRole) turnoPayload.coverageSegmentRole = change.coverageSegmentRole;
-                            if (change.coverageNote) turnoPayload.coverageNote = change.coverageNote;
-                            if (change.coverageStatus) turnoPayload.coverageStatus = change.coverageStatus;
-                            if (change.coverageMode) turnoPayload.coverageMode = change.coverageMode;
-                            if (change.liberationReason) turnoPayload.liberationReason = change.liberationReason;
-                            if (change.redeployNote) turnoPayload.redeployNote = change.redeployNote;
-                            if (change.coversEmployeeId) turnoPayload.coversEmployeeId = change.coversEmployeeId;
-                            if (change.coversPositionName) turnoPayload.coversPositionName = change.coversPositionName;
-                            if (change.coversBandCode) turnoPayload.coversBandCode = change.coversBandCode;
-                            if (change.segmentFromTime) turnoPayload.segmentFromTime = change.segmentFromTime;
-                            if (change.segmentToTime) turnoPayload.segmentToTime = change.segmentToTime;
-                        }
-                        if (change.isExtended || change.isEarlyStart) {
-                            if (!turnoPayload.segmentFromTime && change.segmentFromTime) {
-                                turnoPayload.segmentFromTime = change.segmentFromTime;
-                            }
-                            if (!turnoPayload.segmentToTime && change.segmentToTime) {
-                                turnoPayload.segmentToTime = change.segmentToTime;
-                            }
-                            if (change.extExtraHours != null && Number.isFinite(Number(change.extExtraHours))) {
-                                turnoPayload.extExtraHours = Number(change.extExtraHours);
-                            }
-                        }
-                        if (change.isRetiroAnticipado) {
-                            turnoPayload.isRetiroAnticipado = true;
-                            if (typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
-                                turnoPayload.adjustedEndTime = change.adjustedEndTime;
-                            }
-                            if (change.originalEndTime) turnoPayload.originalEndTime = change.originalEndTime;
-                        }
-                        if (change.isEarlyStart && typeof change.adjustedStartTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedStartTime)) {
-                            const [ah, am] = change.adjustedStartTime.split(':').map(Number);
-                            const adj = new Date(tDate);
-                            adj.setHours(ah, am, 0, 0);
-                            turnoPayload.adjustedStartTime = Timestamp.fromDate(adj);
-                        }
-                        if (change.isExtended && typeof change.adjustedEndTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedEndTime)) {
-                            turnoPayload.extensionEndTime = change.adjustedEndTime;
-                        }
-                        if (change.extExtraHours != null && Number.isFinite(Number(change.extExtraHours))) {
-                            turnoPayload.extExtraHours = Number(change.extExtraHours);
-                        }
-                        if (change.shiftGroupId) turnoPayload.shiftGroupId = change.shiftGroupId;
-                        if (change.isSecondBlock) turnoPayload.isSecondBlock = true;
-                        if (change.eventoId) {
-                            turnoPayload.eventoId = change.eventoId;
-                            turnoPayload.eventoNombre = change.eventoNombre || null;
-                            turnoPayload.servicioId = change.servicioId || null;
-                            turnoPayload.servicioNombre = change.servicioNombre || null;
-                            // Guardar horas explícitas para que liquidación no dependa de startTime/endTime
-                            if (change.hours != null && Number.isFinite(Number(change.hours)) && Number(change.hours) > 0) {
-                                turnoPayload.hours = Number(change.hours);
-                            }
-                        }
-
-                        batch.set(doc(collection(db, 'turnos')), stampEmpresaId(turnoPayload, empresaId));
-                        bumpBatchOp();
-                        await flushBatchWhenFull();
-
-                        if (correctionMode) {
-                            const codigoNuevo = change.isFrancoCompensatorio ? 'FF' : change.code;
-                            await registerPlanificacionCorreccion(
-                                empId,
-                                empName,
-                                dateStr,
-                                actionDetail,
-                                existing?.code || '',
-                                codigoNuevo,
-                            );
-                        } else {
-                            logData.push({ empId, date: dateStr, action: actionType, detail: actionDetail });
-                        }
-                    }
-                    await flushBatchWhenFull();
-                }
-
-                if (isPublished && !correctionMode && logData.length > 0) {
-                    if (logData.length >= AUDIT_CONSOLIDATE_MIN) {
-                        batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                            action: 'ASIGNACION_MASIVA',
-                            module: 'PLANIFICADOR',
-                            details: `Guardado masivo: ${logData.length} celdas en ${getObjectiveName(selectedObjective)}`,
-                            timestamp: serverTimestamp(),
-                            actorName: realActorName,
-                            actorUid: auth.currentUser?.uid,
-                            objectiveId: selectedObjective,
-                            objectiveName: getObjectiveName(selectedObjective),
-                            clientId: selectedClient || undefined,
-                        }, empresaId));
-                        bumpBatchOp();
-                    } else {
-                        for (const entry of logData) {
-                            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                                action: entry.action,
-                                module: 'PLANIFICADOR',
-                                details: entry.detail,
-                                timestamp: serverTimestamp(),
-                                actorName: realActorName,
-                                actorUid: auth.currentUser?.uid,
-                                objectiveId: selectedObjective,
-                                objectiveName: getObjectiveName(selectedObjective),
-                                clientId: selectedClient || undefined,
-                            }, empresaId));
-                            bumpBatchOp();
-                        }
-                    }
-                    await flushBatchWhenFull();
-                }
-
-                await flushBatch();
-
-                if (empresaId && selectedObjective) {
-                    const touchYear = currentDate.getFullYear();
-                    const touchMonth = currentDate.getMonth() + 1;
-                    void touchPlanificacionEstadoActivity({
-                        empresaId,
-                        objectiveId: selectedObjective,
-                        year: touchYear,
-                        month: touchMonth,
-                        actorName: realActorName,
-                    }).catch((err) => console.warn('[plan] touch lastModified', err));
-                }
-
-                if (isPublished) {
-                    setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: true }));
-                }
-                planToastSaved(jobCount);
-
-                const postSaveTasks: Promise<unknown>[] = [
-                    addDoc(collection(db, 'planificaciones_historial'), {
-                        timestamp: serverTimestamp(),
-                        user: realActorName,
-                        period: `${currentDate.getMonth()+1}-${currentDate.getFullYear()}`,
-                        objectiveId: selectedObjective,
-                        changes: logData,
-                        count: jobCount,
-                        snapshot: JSON.stringify(snapshotData),
-                    }).catch((err) => { console.warn('[plan] historial', err); }),
-                ];
-
-                if (isPublished && empresaId) {
-                    const objName = getObjectiveName(selectedObjective);
-                    const packages = [
-                        ...savedRecompositionPackages,
-                        ...extractPackagesFromPending(savedPendingChanges, employeesById, selectedObjective),
-                    ];
-                    const seenPkg = new Set<string>();
-                    for (const pkg of packages) {
-                        if (seenPkg.has(pkg.id)) continue;
-                        seenPkg.add(pkg.id);
-                        const extName = pkg.extension?.employeeId
-                            ? (employeesById[pkg.extension.employeeId]?.name || pkg.extension.employeeId)
-                            : '';
-                        const adelName = employeesById[pkg.earlyStart.employeeId]?.name || pkg.earlyStart.employeeId;
-                        const targetName = employeesById[pkg.target.employeeId]?.name || pkg.target.employeeId;
-                        postSaveTasks.push(
-                            emitRecompositionNotifications(pkg, {
-                                empresaId,
-                                clientId: selectedClient,
-                                objectiveId: selectedObjective,
-                                objectiveName: objName,
-                                extName,
-                                adelName,
-                                targetName,
-                            }).catch((notifyErr) => {
-                                console.warn('[plan] cobertura notify', notifyErr);
-                            }),
-                        );
-                    }
-                }
-
-                const experienciaPatches = new Map<string, Record<string, unknown>>();
-                for (const [key, change] of Object.entries(savedPendingChanges)) {
-                    if (change.isDeleted) continue;
-                    const code = String(change.code || '').toUpperCase();
-                    if (code !== 'REF' && code !== 'ESC') continue;
-                    const empId = key.split('_')[0];
-                    const empObj = employeesById[empId];
-                    if (!empObj || !selectedObjective) continue;
-                    const prev = (empObj.experienciaObjetivos || {}) as Record<string, unknown>;
-                    const next = patchExperienciaForTurno(
-                        prev as any,
-                        selectedObjective,
-                        { ...change, ...deploymentFieldsForFirestore(change) },
-                        empObj.preferredObjectiveId,
-                    );
-                    experienciaPatches.set(empId, next);
-                }
-                if (experienciaPatches.size > 0) {
-                    postSaveTasks.push(
-                        Promise.all(
-                            [...experienciaPatches.entries()].map(([empId, exp]) =>
-                                updateDoc(doc(db, 'empleados', empId), { experienciaObjetivos: exp }).catch(() => {}),
-                            ),
-                        ),
-                    );
-                }
-
-                const novedades = Object.values(savedPendingNovedades);
-                if (novedades.length > 0) {
-                    postSaveTasks.push((async () => {
-                        let ausBatch = writeBatch(db);
-                        let ausOps = 0;
-                        for (const novedad of novedades) {
-                            ausBatch.set(
-                                doc(collection(db, 'ausencias')),
-                                stampEmpresaId({ ...novedad, createdAt: serverTimestamp() }, empresaId),
-                            );
-                            ausOps++;
-                            if (ausOps >= BATCH_LIMIT) {
-                                await ausBatch.commit();
-                                ausBatch = writeBatch(db);
-                                ausOps = 0;
-                            }
-                        }
-                        if (ausOps > 0) await ausBatch.commit();
-                    })());
-                }
-
-                void Promise.all(postSaveTasks).catch((postErr) => {
-                    console.warn('[plan] post-save', postErr);
-                    toast.warning('Turnos guardados; historial o notificaciones pendientes de sincronizar.');
-                });
-                if (empresaId && selectedObjective) {
-                    const y = currentDate.getFullYear();
-                    const m = currentDate.getMonth() + 1;
-                    const oid = selectedObjective;
-                    void rebuildHoursBalanceForObjectiveMonth({
-                        empresaId,
-                        objectiveId: oid,
-                        year: y,
-                        month: m,
-                        scopeEmpresa,
-                        rebuiltFrom: 'planning',
-                    }).catch((err) => console.warn('[plan] hours_balances', err));
-                }
-            } catch(e) {
-                console.error(e);
-                restorePendingOnFailure();
-                planToastSaveError();
-            } finally {
-                setBackgroundSaveCount((c) => Math.max(0, c - 1));
-            }
-            })();
+            void executePlanificacionSaveJob({
+                jobPending,
+                jobShiftsMap,
+                jobAllShiftIds,
+                jobNovedades,
+                jobPackages,
+                jobCount,
+                snapshotData,
+                empresaId,
+                selectedObjective,
+                selectedClient,
+                currentDate,
+                employees,
+                positionStructure,
+                correctionMode,
+                publishStatusMap,
+                activeActorName,
+                scopeEmpresa,
+                resolveObjectiveForEmp,
+                getObjectiveName,
+                setPendingChanges,
+                setPendingNovedades,
+                setPendingRecompositionPackages,
+                setNeedsRepublishMap,
+                setBackgroundSaveCount,
+            });
         };
 
         if (overCap.length > 0) {
@@ -6248,50 +4507,22 @@ export default function PlanificacionPage() {
         if (!selectedObjective || !canPublishPlanning) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaClosePlanned = objectiveMonthSlaBaseHours;
-        const plannedRounded = Math.round(slaClosePlanned);
-        const slaRounded = Math.round(slaVendidas);
-        const slaHoursMismatch = slaVendidas > 0 && plannedRounded !== slaRounded;
-        const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
-            : 0;
-        const hasCoverageGaps = coverageGapDays > 0;
-
-        if (!isSuperAdmin && slaHoursMismatch) {
-            const delta = slaRounded - plannedRounded;
-            toast.error(
-                delta > 0
-                    ? `No se puede publicar: ${plannedRounded}h planificadas ≠ ${slaRounded}h vendidas (SLA). Faltan ${delta}h.`
-                    : `No se puede publicar: ${plannedRounded}h planificadas superan ${slaRounded}h vendidas (SLA) en ${-delta}h.`,
-                { duration: 9000 },
-            );
+        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const sla = evaluatePublishSlaState(objectiveMonthSlaBaseHours, slaVendidas, objectiveCoverageGapReport);
+        const result = buildPublishConfirmModalState({
+            selectedObjective,
+            year,
+            month,
+            objectiveName,
+            isSuperAdmin,
+            publishStatusMap,
+            sla,
+        });
+        if (result.blocked) {
+            toast.error(result.errorMessage, { duration: result.errorDuration });
             return;
         }
-
-        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const isAlreadyPublished = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-        const warnings: string[] = [];
-        if (isSuperAdmin && slaHoursMismatch) {
-            const delta = slaRounded - plannedRounded;
-            warnings.push(
-                delta > 0
-                    ? `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (faltan ${delta}h).`
-                    : `SLA: ${plannedRounded}h planificadas vs ${slaRounded}h vendidas (excede ${-delta}h).`,
-            );
-        }
-        if (isSuperAdmin && hasCoverageGaps) {
-            warnings.push(`Cobertura: ${coverageGapDays} día(s) con huecos respecto al esquema SLA.`);
-        }
-
-        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
-        setPublishConfirmModal({
-            isRepublish: isAlreadyPublished,
-            warnings,
-            superAdminOverride: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps),
-            objectiveName,
-            periodLabel: `${String(month).padStart(2, '0')}/${year}`,
-        });
+        setPublishConfirmModal(result.modal);
         setPublishConfirmPin('');
         setPublishConfirmPinError('');
     };
@@ -6304,95 +4535,39 @@ export default function PlanificacionPage() {
         }
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
-        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const publishDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-        const totalPlanned = Object.values(empMonthlyHours).reduce((a: number, b: number) => a + (b || 0), 0);
-        const slaClosePlanned = objectiveMonthSlaBaseHours;
-        const slaHoursMismatch = slaVendidas > 0 && Math.round(slaClosePlanned) !== Math.round(slaVendidas);
-        const coverageGapDays = objectiveCoverageGapReport
-            ? objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty
-            : 0;
-        const hasCoverageGaps = coverageGapDays > 0;
+        const { slaHoursMismatch, hasCoverageGaps } = evaluatePublishSlaState(
+            objectiveMonthSlaBaseHours,
+            slaVendidas,
+            objectiveCoverageGapReport,
+        );
+        const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
+        const clientName = clients.find((c: any) => c.id === selectedClient)?.name || selectedClient || '';
         setPublishConfirmModal(null);
         setIsPublishing(true);
         try {
-            const auth = getAuth();
-            const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-            // 1. Registrar publicación (merge: no borrar defaultPositionByEmp / defaultShiftByEmp)
-            await setDoc(doc(db, 'planificacion_estados', publishDocId), {
-                objetivoId: selectedObjective,
-                objectiveId: selectedObjective,
-                año: year,
-                mes: month,
-                year,
-                month,
-                publishedAt: serverTimestamp(),
-                publishedBy: actorName,
-                lastModifiedAt: serverTimestamp(),
-                lastModifiedBy: actorName,
+            const result = await publishPlanificacionMonth({
                 empresaId,
-            }, { merge: true });
-            // 2. Buscar todos los turnos draft del objetivo+mes y actualizarlos a draft:false
-            const firstDay = new Date(year, month - 1, 1);
-            const lastDay = new Date(year, month, 0, 23, 59, 59);
-            const draftsSnap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('draft', '==', true),
-                where('startTime', '>=', Timestamp.fromDate(firstDay)),
-                where('startTime', '<=', Timestamp.fromDate(lastDay))
-            ));
-            const batch = writeBatch(db);
-            draftsSnap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .forEach(d => batch.update(d.ref, { draft: false }));
-            // Refuerzos RFZ en borrador: guardan startTime como string ISO (no Timestamp), por lo que
-            // no entran en la query por rango anterior. Se incluyen por objetivo + código + fecha del mes.
-            let rfzPublished = 0;
-            try {
-                const rfzDraftSnap = await getDocs(query(
-                    collection(db, 'turnos'),
-                    where('objectiveId', '==', selectedObjective),
-                    where('code', '==', 'RFZ'),
-                    where('draft', '==', true),
-                ));
-                const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
-                rfzDraftSnap.docs
-                    .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                    .filter(d => String(d.data().fecha || '').startsWith(monthPrefix))
-                    .forEach(d => { batch.update(d.ref, { draft: false }); rfzPublished++; });
-            } catch (e) {
-                console.warn('[plan] publish RFZ draft sweep error:', e);
-            }
-            await batch.commit();
-            const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
-            const clientName = clients.find((c: any) => c.id === selectedClient)?.name || selectedClient || '';
-            // 3. Registrar en audit_logs
-            await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                action: 'PUBLICACION_CRONOGRAMA',
-                module: 'PLANIFICADOR',
-                details: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)
-                    ? `[OVERRIDE SA] Cronograma publicado — ${objectiveName} · ${String(month).padStart(2, '0')}/${year} · ${draftsSnap.docs.length} turno(s)`
-                    : `Cronograma publicado — ${objectiveName} · ${String(month).padStart(2, '0')}/${year} · ${draftsSnap.docs.length} turno(s) notificado(s)`,
-                timestamp: serverTimestamp(),
-                actorName,
-                actorUid: getAuth().currentUser?.uid || null,
-                objectiveId: selectedObjective,
-                objectiveName,
-                clientId: selectedClient || undefined,
-                clientName: clientName || undefined,
+                migracionCompleta,
+                selectedObjective,
+                selectedClient,
                 year,
                 month,
-            }, empresaId));
-            // 4. Actualizar estado local
-            setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: { publishedAt: new Date(), publishedBy: actorName } }));
-            setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
+                objectiveName,
+                clientName,
+                isSuperAdmin,
+                slaHoursMismatch,
+                hasCoverageGaps,
+            });
+            setPublishStatusMap(prev => ({
+                ...prev,
+                [result.publishLookupKey]: { publishedAt: new Date(), publishedBy: result.actorName },
+            }));
+            setNeedsRepublishMap(prev => ({ ...prev, [result.publishLookupKey]: false }));
             setCorrectionMode(false);
-            const totalPublished = draftsSnap.docs.length + rfzPublished;
             toast.success(
-                rfzPublished > 0
-                    ? `Cronograma publicado — ${totalPublished} turno(s) notificado(s) (incluye ${rfzPublished} refuerzo/s RFZ)`
-                    : `Cronograma publicado — ${totalPublished} turno(s) notificado(s)`,
+                result.rfzPublished > 0
+                    ? `Cronograma publicado — ${result.totalPublished} turno(s) notificado(s) (incluye ${result.rfzPublished} refuerzo/s RFZ)`
+                    : `Cronograma publicado — ${result.totalPublished} turno(s) notificado(s)`,
             );
         } catch (e) {
             console.error(e);
@@ -6407,9 +4582,6 @@ export default function PlanificacionPage() {
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const objectiveName = getObjectiveName(selectedObjective) || selectedObjective;
-        const publishLookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        const primaryDocId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
-        const legacyDocId = buildPlanificacionEstadoDocId('', selectedObjective, year, month);
 
         const confirmed = confirm(
             `[SUPERADMIN]\n\n¿Despublicar el cronograma de ${objectiveName} — ${String(month).padStart(2, '0')}/${year}?\n\n` +
@@ -6419,64 +4591,14 @@ export default function PlanificacionPage() {
 
         setIsUnpublishing(true);
         try {
-            const auth = getAuth();
-            const actorName = auth.currentUser?.displayName || auth.currentUser?.email || 'Sistema';
-            const firstDay = new Date(year, month - 1, 1);
-            const lastDay = new Date(year, month, 0, 23, 59, 59, 999);
-            const shiftSnap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-            ));
-            const batch = writeBatch(db);
-            let restoredDrafts = 0;
-
-            shiftSnap.docs
-                .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .filter(d => {
-                    const data = d.data();
-                    const start = data.startTime?.toDate?.();
-                    if (!start || start < firstDay || start > lastDay) return false;
-                    if (isOperationalOriginShift(data)) return false;
-                    const code = String(data.code || '').toUpperCase();
-                    if (code === 'RFZ' || code === 'TURA') return false;
-                    return data.draft !== true;
-                })
-                .forEach(d => {
-                    batch.update(d.ref, { draft: true });
-                    restoredDrafts++;
-                });
-
-            // Solo quitar flags de publicación — preservar defaultPositionByEmp / defaultShiftByEmp
-            const clearPublish = {
-                publishedAt: deleteField(),
-                publishedBy: deleteField(),
-            };
-            const primaryRef = doc(db, 'planificacion_estados', primaryDocId);
-            const primarySnap = await getDoc(primaryRef);
-            if (primarySnap.exists()) {
-                batch.update(primaryRef, clearPublish);
-            }
-            if (legacyDocId !== primaryDocId) {
-                const legacyRef = doc(db, 'planificacion_estados', legacyDocId);
-                const legacySnap = await getDoc(legacyRef);
-                if (legacySnap.exists()) {
-                    batch.update(legacyRef, clearPublish);
-                }
-            }
-            batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
-                action: 'DESPUBLICACION_CRONOGRAMA',
-                module: 'PLANIFICADOR',
-                details: `Cronograma despublicado — ${objectiveName} · ${month}/${year} · ${restoredDrafts} turno(s) vuelven a borrador (puestos conservados)`,
-                timestamp: serverTimestamp(),
-                actorName,
-                actorUid: auth.currentUser?.uid || null,
-                objectiveId: selectedObjective,
-                objectiveName,
+            const { restoredDrafts, publishLookupKey } = await unpublishPlanificacionMonth({
+                empresaId,
+                migracionCompleta,
+                selectedObjective,
                 year,
                 month,
-            }, empresaId));
-
-            await batch.commit();
+                objectiveName,
+            });
             setPublishStatusMap(prev => ({ ...prev, [publishLookupKey]: null }));
             setNeedsRepublishMap(prev => ({ ...prev, [publishLookupKey]: false }));
             setCorrectionMode(false);
@@ -6489,33 +4611,44 @@ export default function PlanificacionPage() {
         }
     };
 
-    const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => { if (!selectedCell?.currentShift) return; const batch = writeBatch(db); const shiftId = selectedCell.currentShift.id; if (selectedCell.absence) { batch.update(doc(db, 'turnos', shiftId), { status: 'ABSENT', comments: 'Cubierto por ausencia' }); } else { batch.update(doc(db, 'turnos', shiftId), { hasNovedad: false, comments: 'Novedad resuelta' }); } if (type === 'SPLIT') { if (conflictNeighbors?.prev) { batch.update(doc(db, 'turnos', conflictNeighbors.prev.id), { isExtended: true, comments: 'Extensión por cobertura' }); } if (conflictNeighbors?.next) { batch.update(doc(db, 'turnos', conflictNeighbors.next.id), { isEarlyStart: true, comments: 'Adelanto por cobertura' }); } toast.success("Cobertura aplicada: Extensión + Adelanto"); } else { setShowConflictModal(false); setFrancoMode('FT_SELECTION'); return; } await batch.commit(); setShowConflictModal(false); setSelectedCell(null); };
+    const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => {
+        await resolvePlanificacionConflict({
+            type,
+            selectedCell,
+            conflictNeighbors,
+            setShowConflictModal,
+            setFrancoMode,
+            setSelectedCell,
+        });
+    };
     const handleRRHHSubmit = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
-        if (!selectedCell) return;
-        const absenceCodes: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Injustificada': 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG' };
-        const code = absenceCodes[rrhhData.type] || 'AA';
-        const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
-        const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || '';
-        setPendingChanges(prev => ({ ...prev, [key]: { code, name: rrhhData.type, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00' } }));
-        setPendingNovedades(prev => ({ ...prev, [key]: { employeeId: selectedCell.empId, employeeName: empName, startDate: selectedCell.dateStr, endDate: selectedCell.dateStr, type: rrhhData.type, reason: rrhhData.reason, status: 'APPROVED' } }));
-        toast.success("Novedad pendiente — recordá guardar los cambios");
-        setShowRRHHModal(false);
-        setSelectedCell(null);
+        submitPlanificacionRRHHNovedad({
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selectedCell,
+            rrhhData,
+            employees,
+            setPendingChanges,
+            setPendingNovedades,
+            setShowRRHHModal,
+            setSelectedCell,
+        });
     };
     const finalizeVacancyModal = () => {
-        setShowVacancyModal(false);
-        setVacancyData(null);
-        setVacancyReplacementSearch('');
-        setVacancyReplacementOpen(false);
-        setVacancyActiveDates(new Set());
-        setVacancyDayCoverages({});
-        setVacancyFrancoAuthApproved(false);
-        setVacancyEditingDay(null);
-        setVacancyPickerTab('substitute');
-        setVacancySplitExtId('');
-        setVacancySplitAdelId('');
-        setVacancyApplyToAllSelected(true);
+        resetPlanificacionVacancyModal({
+            setShowVacancyModal,
+            setVacancyData,
+            setVacancyReplacementSearch,
+            setVacancyReplacementOpen,
+            setVacancyActiveDates,
+            setVacancyDayCoverages,
+            setVacancyFrancoAuthApproved,
+            setVacancyEditingDay,
+            setVacancyPickerTab,
+            setVacancySplitExtId,
+            setVacancySplitAdelId,
+            setVacancyApplyToAllSelected,
+        });
     };
 
     const handleProcessVacancy = () => {
@@ -6523,145 +4656,47 @@ export default function PlanificacionPage() {
         if (!vacancyData?.startDate) return;
         const activeDays = [...vacancyActiveDates].sort();
         if (activeDays.length === 0) { toast.error('Seleccioná al menos un día a procesar'); return; }
-        const getTypicalShift = (empId: string) => {
-            const yr = currentDate.getFullYear(); const mo = currentDate.getMonth();
-            const days = new Date(yr, mo + 1, 0).getDate();
-            const freq: Record<string, { count: number; shift: any }> = {};
-            for (let d = 1; d <= days; d++) {
-                const k = `${empId}_${yr}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-                const pending = pendingChanges[k];
-                const s = (pending && !pending.isDeleted) ? pending : shiftsMap[k];
-                if (s?.code && !VACANCY_NON_WORK_CODES.has(String(s.code).toUpperCase())) {
-                    if (!freq[s.code]) freq[s.code] = { count: 0, shift: s };
-                    freq[s.code].count++;
-                }
-            }
-            return Object.values(freq).sort((a, b) => b.count - a.count)[0]?.shift || null;
-        };
-        const employeesById: Record<string, any> = {};
-        employees.forEach((e: any) => { if (e.id) employeesById[e.id] = e; });
-        const days = activeDays.map((dateStr) => {
-            const resolved = resolveVacancyDayCoverage(dateStr, vacancyDayCoverages, selectedReplacement);
-            if (resolved.mode === 'substitute') {
-                const emp = employees.find((e: any) => e.id === resolved.employeeId);
-                // Misma resolución que el modal («Cubrir: M») para que el FT herede esa banda
-                const rawTitular = resolveTitularVacancyWorkShift(
-                    vacancyData.employeeId,
-                    dateStr,
-                    shiftsMap,
-                    pendingChanges,
-                    getTypicalShift,
-                    (positionName, code) => slaBlocksForPositionShift(effectivePosStructure, positionName, code),
-                    { absenceBlockStart: vacancyData.startDate },
-                );
-                const prefPos = activePosition || rawTitular?.positionName || undefined;
-                const gapOptions = listVacancyGapBandOptions(effectivePosStructure, prefPos || null);
-                const hist = !rawTitular
-                    ? inferTitularGapBandFromHistory(
-                        vacancyData.employeeId,
-                        vacancyData.startDate,
-                        effectivePosStructure,
-                        prefPos || null,
-                        shiftsMap,
-                        pendingChanges,
-                    )
-                    : null;
-                const inferred = hist
-                    ? buildTitularVacancyFromGapOption(
-                        hist,
-                        'history_inferred',
-                        'Patrón previo al bloque (cronograma)',
-                        undefined,
-                    )
-                    : rawTitular;
-                const effectiveTitular = resolveEffectiveVacancyGapTitular(
-                    inferred,
-                    vacancyGapBandOverride,
-                    gapOptions,
-                    effectivePosStructure,
-                );
-                return {
-                    dateStr,
-                    coverage: {
-                        mode: 'substitute' as const,
-                        employeeId: resolved.employeeId,
-                        employeeName: emp?.name ?? null,
-                        gapBand: effectiveTitular?.code || undefined,
-                        gapPosition: effectiveTitular?.positionName || activePosition || undefined,
-                    },
-                };
-            }
-            if (resolved.mode === 'split') {
-                const extShift = resolveEmployeeShift(resolved.extEmpId, dateStr, shiftsMap, pendingChanges);
-                const adelShift = resolveEmployeeShift(resolved.adelEmpId, dateStr, shiftsMap, pendingChanges);
-                return {
-                    dateStr,
-                    coverage: {
-                        mode: 'split' as const,
-                        extEmpId: resolved.extEmpId,
-                        adelEmpId: resolved.adelEmpId,
-                        gapBand: resolved.gapBand,
-                        gapPosition: resolved.gapPosition,
-                        extHomePosition: extShift?.positionName,
-                        extBaseCode: extShift?.code,
-                        adelBaseCode: adelShift?.code,
-                        extExtraHours: resolved.extExtraHours,
-                        secondExtExtraHours: resolved.secondExtExtraHours,
-                    },
-                };
-            }
-            return { dateStr, coverage: { mode: 'none' as const } };
+        const days = buildVacancyProcessDays({
+            activeDays,
+            vacancyData,
+            vacancyDayCoverages,
+            selectedReplacement,
+            employees,
+            shiftsMap,
+            pendingChanges,
+            effectivePosStructure,
+            activePosition,
+            vacancyGapBandOverride,
+            currentDate,
         });
 
         const runApplyVacancy = (authorizeFranco: boolean) => {
             try {
-                const { changes, count, covered, splitCovered, cleared } = applyVacancyCoverageToChanges(pendingChanges, {
+                const result = applyPlanificacionVacancyCoverage({
+                    pendingChanges,
                     vacancyData,
                     days,
                     selectedObjective,
                     activePosition,
                     shiftsMap,
-                    getTypicalShift,
-                    employeesById,
-                    clientId: selectedClient || undefined,
-                    defaultSplitForBand: (band, gapPosition) => {
-                        const times = defaultSplitForBandAtPosition(
-                            band,
-                            effectivePosStructure,
-                            gapPosition ?? null,
-                        );
-                        return { ext: times.ext, adel: times.adel };
-                    },
-                    positionStructure: effectivePosStructure,
+                    employees,
+                    effectivePosStructure,
+                    selectedClient,
+                    vacancyGapBandOverride,
+                    activeDays,
                     authorizeFrancoTrabajado: authorizeFranco,
-                    fallbackGapBand: (vacancyGapBandOverride ? vacancyGapBandOverride.split('__')[0] : null) || resolveSuggestedGapBandForPosition(activeDays[0] || '', activePosition || '') || undefined,
+                    resolveSuggestedGapBandForPosition,
+                    currentDate,
                 });
-                const vd = vacancyData;
-                const absCode = days.length ? (changes[`${vd.employeeId}_${days[0].dateStr}`]?.code || '—') : '—';
-                setPendingChanges(changes);
+                setPendingChanges(result.changes);
                 finalizeVacancyModal();
-                const clearedMsg = cleared > 0 ? ` Se removieron ${cleared} turno(s) de cobertura anterior.` : '';
-                const totalCovered = covered + splitCovered;
-                if (totalCovered > 0) {
-                    const splitMsg = splitCovered > 0 ? ` (${covered} suplente, ${splitCovered} ext+adel)` : '';
-                    toast.success(`${absCode} en ${count} día(s) — ${totalCovered} con cobertura${splitMsg}.${clearedMsg} Guardá los cambios.`);
-                } else {
-                    toast.success(`${absCode} en ${count} día(s) — sin cobertura asignada.${clearedMsg} Guardá los cambios.`);
-                }
-            } catch (e: any) {
-                const msg = String(e?.message || '');
-                if (msg.includes('FRANCO_COVERAGE')) {
-                    toast.error('Hay guardias en franco sin autorizar — revisá la cobertura o pedí PIN de supervisor.');
-                } else {
-                    toast.error('Error al aplicar cobertura de licencia');
-                }
+                toastVacancyApplyResult(result.absCode, result.count, result.covered, result.splitCovered, result.cleared);
+            } catch (e) {
+                toastVacancyApplyError(e);
             }
         };
 
-        const francoConflicts = collectVacancyFrancoConflicts(
-            { days, shiftsMap, employeesById },
-            pendingChanges,
-        );
+        const francoConflicts = collectPlanificacionVacancyFrancoConflicts(days, shiftsMap, pendingChanges, employees);
         if (francoConflicts.length > 0 && !vacancyFrancoAuthApproved) {
             requestSupervisorFrancoAuth(francoConflicts, () => {
                 setVacancyFrancoAuthApproved(true);
@@ -6672,665 +4707,130 @@ export default function PlanificacionPage() {
         runApplyVacancy(francoConflicts.length > 0 || vacancyFrancoAuthApproved);
     };
     
-    // Bulk: inyecta el puesto dueño del código SLA (no el default "Puesto 1") y respeta cupos de cobertura.
     const applyBulkChange = (shiftConfig: any, opts?: { onlyEmpId?: string }) => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        if (!selection.start || !selection.end) return;
-        const startDay = daysInMonth[Math.min(selection.start.c, selection.end.c)];
-        if (isPlanningDateLocked(getDateKey(startDay))) {
-            const c = String(shiftConfig?.code || '').toUpperCase();
-            if (!['RET', 'ESC', 'F', 'FF', 'FP', 'FT'].includes(c)) {
-                toast.warning('Periodo cerrado — solo podés asignar RET, ESC o Franco en masa.');
-                return;
-            }
-        }
-        const minR = Math.min(selection.start.r, selection.end.r);
-        const maxR = Math.max(selection.start.r, selection.end.r);
-        const minC = Math.min(selection.start.c, selection.end.c);
-        const maxC = Math.max(selection.start.c, selection.end.c);
-
-        const getEmpBulkObjective = (emp: any): string | null => {
-            if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
-            const native = resolveNativeObjectiveInGrupo(emp);
-            if (native) return native;
-            return bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
-        };
-
-        const getStructureForObj = (objId: string) => {
-            if (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length) return grupoSlaMap[objId];
-            return positionStructure;
-        };
-
-        if (shiftConfig !== null && selectedGrupo && grupoUnifiedMode) {
-            for (let r = minR; r <= maxR; r++) {
-                const emp = displayedEmployees[r];
-                if (!emp) continue;
-                if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
-                const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
-                if (!resolveNativeObjectiveInGrupo(emp) && !extFallback) {
-                    toast.error('Seleccioná el objetivo para colaboradores EXT en la barra de asignación.');
-                    return;
-                }
-            }
-        }
-
-        const newChanges = { ...pendingChanges };
-        let count = 0;
-        let francosReplaced = 0;
-        let skippedExcluded = 0;
-        let skippedCoverage = 0;
-        let skippedExt = 0;
-
-        const cyclesForBulk = autoSelectedCyclesRef.current?.length
-            ? autoSelectedCyclesRef.current
-            : autoCycles;
-
-        const buildBulkHelpers = (empStructure: any[], covObjId: string) => {
-            const fallbackPosLocal = activePosition || (empStructure[0]?.positionName) || 'General';
-
-            const ownersForCode = (code: string) => {
-                const upper = String(code || '').toUpperCase();
-                return (empStructure || []).filter((p: any) =>
-                    (p.shifts || []).some((s: any) => String(s.code || '').toUpperCase() === upper),
-                );
-            };
-
-            const resolveAssignPos = (emp: any, code: string, hintPos?: string | null) => {
-                const upper = String(code || '').toUpperCase();
-                if (upper === 'RET') return 'Retén';
-                if (['F', 'FF', 'FP', 'FT'].includes(upper)) return 'General';
-                const empPos = empDefaultPos[`${emp.id}___${covObjId}`] || null;
-                const filterPos = bulkEmpPositionFilter[emp.id] || bulkBarPosition || null;
-                if (upper === 'REF' || upper === 'ESC') {
-                    return hintPos || filterPos || empPos || fallbackPosLocal;
-                }
-                const owners = ownersForCode(upper);
-                if (owners.length === 0) {
-                    return empPos || filterPos || hintPos || fallbackPosLocal;
-                }
-                if (empPos && owners.some((p: any) => p.positionName === empPos)) return empPos;
-                if (filterPos && owners.some((p: any) => p.positionName === filterPos)) return filterPos;
-                if (hintPos && owners.some((p: any) => p.positionName === hintPos)) return hintPos;
-                if (activePosition && owners.some((p: any) => p.positionName === activePosition)) return activePosition;
-                return owners[0].positionName;
-            };
-
-            const shiftDefFor = (posName: string, code: string) => {
-                const upper = String(code || '').toUpperCase();
-                const pos = (empStructure || []).find((p: any) => p.positionName === posName);
-                return (pos?.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === upper) || null;
-            };
-
-            const collectCodeCounts = (dateStr: string, posName: string, changes: Record<string, any>) => {
-                const dominant = (empStructure || []).reduce(
-                    (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-                    empStructure[0] || { qty: 1, positionName: 'General' },
-                );
-                const posShifts = ((empStructure || []).find((p: any) => p.positionName === posName)?.shifts || []) as any[];
-                const codeCounts: Record<string, number> = {};
-                const assigned: { code: string; hours: number }[] = [];
-                displayedEmployees.forEach((e: any) => {
-                    const key = `${e.id}_${dateStr}`;
-                    const absence = absencesMap[key];
-                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const pending = changes[key];
-                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
-                    if (!shift) return;
-                    const explicitObj = pending?.objectiveId ?? shift.objectiveId;
-                    const effectiveObjId = explicitObj
-                        ? String(explicitObj)
-                        : (resolveNativeObjectiveInGrupo(e) || (e.preferredObjectiveId === covObjId || slaIdToObjId[e.preferredObjectiveId] === covObjId ? covObjId : null));
-                    if (String(effectiveObjId || '') !== String(covObjId)) return;
-                    const code = String(shift.code || '').toUpperCase();
-                    if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                    const shiftPos = shift.positionName || dominant?.positionName || 'General';
-                    if (shiftPos !== posName) return;
-                    codeCounts[code] = (codeCounts[code] || 0) + 1;
-                    assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
-                });
-                return { codeCounts, assigned };
-            };
-
-            const isCoverageBlocked = (dateStr: string, posName: string, code: string, hours: number, changes: Record<string, any>) => {
-                const upperEarly = String(code || '').toUpperCase();
-                if (['RET', 'ESC', 'REF', 'RFZ'].includes(upperEarly)) return false;
-                if (!isPlanningWorkShiftCode(code)) return false;
-                const posCfg = (empStructure || []).find((p: any) => p.positionName === posName) || empStructure[0];
-                if (!posCfg) return false;
-                const dayLetter = getDayLetter(dateStr);
-                if (!isPosActiveOnDay(posCfg, dayLetter, dateStr)) return true;
-                if (isPosExcludedOnDate(posCfg, dateStr)) return true;
-                const shiftRow = (posCfg.shifts || []).find((s: any) => String(s.code || '').toUpperCase() === String(code).toUpperCase());
-                if (Array.isArray(shiftRow?.specificDates) && shiftRow.specificDates.length > 0 && !shiftRow.specificDates.includes(dateStr)) return true;
-                if (Array.isArray(shiftRow?.days) && shiftRow.days.length > 0 && !shiftRow.days.includes(dayLetter)) return true;
-
-                const pax = Math.max(1, Number(posCfg.qty) || 1);
-                const { codeCounts, assigned } = collectCodeCounts(dateStr, posName, changes);
-                const units = countPositionClosedUnitsFromShifts(
-                    posCfg,
-                    dayLetter,
-                    codeCounts,
-                    cyclesForBulk,
-                    true,
-                    dateStr,
-                );
-                if (units.required > 0 && units.closed >= units.required) return true;
-
-                const upper = String(code || '').toUpperCase();
-                const shiftCfgBlock = (posCfg.shifts as any[])?.find((s: any) => String(s.code || '').toUpperCase() === upper);
-                const shiftPaxBlock = (shiftCfgBlock?.quantity != null && Number(shiftCfgBlock.quantity) > 0)
-                    ? Math.max(1, Math.floor(Number(shiftCfgBlock.quantity)))
-                    : pax;
-                const paxLeft = (codeCounts[upper] || 0) >= shiftPaxBlock;
-                if (paxLeft) return true;
-
-                if (!is24hCoverageType(posCfg)) return false;
-
-                const bandH = resolveBandHours(upper, { hours }, posCfg.shifts);
-                if (is24hsSinglePaxBandMixBlocked(pax, upper, assigned, bandH)) return true;
-                if (pax > 1) {
-                    const posShifts = posCfg.shifts || [];
-                    const shifts8h = posShifts.filter((s: any) => isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-                    const shifts12h = posShifts.filter((s: any) => !isShortBandHours(resolveBandHours(s.code, s, posShifts)));
-                    const maxSlots = shifts8h.length * pax + shifts12h.length * pax;
-                    if (assigned.length >= maxSlots && maxSlots > 0) return true;
-                }
-                return false;
-            };
-
-            return { resolveAssignPos, shiftDefFor, isCoverageBlocked, empStructure };
-        };
-
-        for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
-            if (!emp) continue;
-            if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
-            for (let c = minC; c <= maxC; c++) {
-                const day = daysInMonth[c];
-                const key = `${emp.id}_${getDateKey(day)}`;
-                const existing = shiftsMap[key];
-                if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig && shiftConfig.code !== 'F') {
-                    francosReplaced++;
-                }
-            }
-        }
-        let markAsFT = false;
-        if (francosReplaced > 0) {
-            if (confirm(`⚠️ Estás sobrescribiendo ${francosReplaced} Francos.\n¿Deseas marcarlos como FT?`)) {
-                markAsFT = true;
-            }
-        }
-
-        const blockedEmps = new Set<string>();
-        const helpersCache = new Map<string, ReturnType<typeof buildBulkHelpers>>();
-
-        for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
-            if (!emp) continue;
-            if (opts?.onlyEmpId && emp.id !== opts.onlyEmpId) continue;
-            const covObjId = getEmpBulkObjective(emp);
-            let rowHelpers: ReturnType<typeof buildBulkHelpers> | null = null;
-            if (shiftConfig !== null) {
-                if (!covObjId) { skippedExt++; continue; }
-                rowHelpers = helpersCache.get(covObjId) || buildBulkHelpers(getStructureForObj(covObjId), covObjId);
-                helpersCache.set(covObjId, rowHelpers);
-            }
-
-            for (let c = minC; c <= maxC; c++) {
-                const day = daysInMonth[c];
-                const dateStr = getDateKey(day);
-                const key = `${emp.id}_${dateStr}`;
-                const existing = shiftsMap[key];
-                const pendingCell = newChanges[key] ?? pendingChanges[key];
-                const effectiveExisting = pendingCell && !pendingCell.isDeleted ? pendingCell : existing;
-                if (isShiftConsolidated(effectiveExisting)) continue;
-                if (shiftConfig === null) {
-                    newChanges[key] = { isDeleted: true };
-                    count++;
-                    continue;
-                }
-
-                const { resolveAssignPos, shiftDefFor, isCoverageBlocked, empStructure } = rowHelpers!;
-                const codeUpper = String(shiftConfig.code || '').toUpperCase();
-                if (
-                    codeUpper === 'RET' &&
-                    effectiveExisting &&
-                    effectiveExisting.objectiveId != null &&
-                    effectiveExisting.objectiveId !== '' &&
-                    covObjId &&
-                    String(effectiveExisting.objectiveId) !== String(covObjId) &&
-                    shiftPlanningCodeUpper(effectiveExisting) !== 'RET'
-                ) {
-                    continue;
-                }
-                const assignPos = resolveAssignPos(emp, codeUpper, shiftConfig.positionName || null);
-                const posCfg = empStructure.find((p: any) => p.positionName === assignPos);
-                if (isPosExcludedOnDate(posCfg, dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
-                    skippedExcluded++;
-                    continue;
-                }
-                if (isPlanningShiftExcludedOnDate(posCfg, dateStr, shiftConfig.code)) {
-                    skippedExcluded++;
-                    continue;
-                }
-                const def = shiftDefFor(assignPos, codeUpper);
-                const hours = resolveBandHours(codeUpper, def || shiftConfig, (posCfg?.shifts || []) as any[]);
-                if (isCoverageBlocked(dateStr, assignPos, codeUpper, hours, newChanges)) {
-                    skippedCoverage++;
-                    continue;
-                }
-                const { blocked, warnings } = checkRestricciones(emp, dateStr, assignPos, shiftConfig.code, covObjId || undefined, empStructure);
-                if (blocked) {
-                    blockedEmps.add(emp.name);
-                    continue;
-                }
-                if (warnings.length > 0) planToastWarnMany(warnings, 8000);
-                if (isBulkCovBlocked(emp.id, assignPos, codeUpper)) { skippedCoverage++; continue; }
-                let cellIsFT = false;
-                if (existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') {
-                    cellIsFT = markAsFT;
-                }
-                newChanges[key] = {
-                    code: (codeUpper === 'REF' || codeUpper === 'ESC')
-                        ? codeUpper
-                        : (def?.code || shiftConfig.code),
-                    name: (codeUpper === 'REF' || codeUpper === 'ESC')
-                        ? (shiftConfig.name || (codeUpper === 'ESC' ? 'Escuela' : 'Refuerzo'))
-                        : (def?.name || shiftConfig.name),
-                    hours: (codeUpper === 'REF' || codeUpper === 'ESC')
-                        ? (Number(shiftConfig.hours) > 0 ? Number(shiftConfig.hours) : hours)
-                        : hours,
-                    startTime: (codeUpper === 'REF' || codeUpper === 'ESC')
-                        ? (shiftConfig.startTime || def?.startTime || '07:00')
-                        : (def?.startTime || shiftConfig.startTime),
-                    endTime: (codeUpper === 'REF' || codeUpper === 'ESC')
-                        ? (shiftConfig.endTime || def?.endTime)
-                        : (def?.endTime || shiftConfig.endTime),
-                    isTemp: true,
-                    oldObjectiveId: effectiveExisting?.objectiveId,
-                    isFrancoTrabajado: cellIsFT,
-                    positionName: assignPos,
-                    objectiveId: covObjId || undefined,
-                    ...(codeUpper === 'REF' || codeUpper === 'ESC'
-                        ? {
-                            deploymentBand: shiftConfig.deploymentBand || codeUpper,
-                            deploymentRole: shiftConfig.deploymentRole || (codeUpper === 'ESC' ? 'TRAINING' : 'SURPLUS'),
-                            surplusIntent: shiftConfig.surplusIntent || (codeUpper === 'ESC' ? 'FORMACION' : 'HORAS'),
-                            countsForCoverage: false,
-                            isRefuerzo: true,
-                            isEscuela: codeUpper === 'ESC',
-                            isReten: false,
-                        }
-                        : {}),
-                };
-                count++;
-            }
-        }
-        if (blockedEmps.size > 0) toast.error(`🚫 Bloqueados (objetivo excluido): ${[...blockedEmps].join(', ')}`, { duration: 10000 });
-        const bulkWarns: string[] = [];
-        if (skippedExt > 0) bulkWarns.push(`${skippedExt} omitida(s): elegí objetivo EXT`);
-        if (skippedExcluded > 0) bulkWarns.push(`${skippedExcluded} omitida(s): puesto excluido SLA`);
-        if (skippedCoverage > 0) bulkWarns.push(`${skippedCoverage} omitida(s): cobertura completa`);
-        planToastWarnMany(bulkWarns);
-        commitPendingChanges(newChanges);
-        if (count > 0) {
-            const codeLabel = shiftConfig ? String(shiftConfig.code || '').toUpperCase() : 'BORRAR';
-            const samplePos = shiftConfig
-                ? (() => {
-                    return shiftConfig.positionName || '';
-                })()
-                : '';
-            planToastBulk(shiftConfig
-                ? `${count} celda(s) · ${codeLabel}${samplePos ? ` → ${samplePos}` : ''}`
-                : `${count} celda(s) marcadas para borrar`);
-        } else if (skippedCoverage > 0 || skippedExcluded > 0 || skippedExt > 0) {
-            planToastBulk('Ninguna celda aplicada');
-        }
+        applyPlanificacionBulkChange({
+            shiftConfig,
+            opts,
+            allowPlanningMultiSelect,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            daysInMonth,
+            isPlanningDateLocked,
+            selectedGrupo,
+            grupoUnifiedMode,
+            selectedObjective,
+            bulkEmpObjectiveOverrides,
+            bulkTargetObjectiveId,
+            grupoSlaMap,
+            positionStructure,
+            pendingChanges,
+            displayedEmployees,
+            shiftsMap,
+            autoSelectedCyclesRef,
+            autoCycles,
+            activePosition,
+            empDefaultPos,
+            bulkEmpPositionFilter,
+            bulkBarPosition,
+            absencesMap,
+            slaIdToObjId,
+            resolveNativeObjectiveInGrupo,
+            checkRestricciones,
+            isBulkCovBlocked,
+            commitPendingChanges,
+        });
     };
 
-    /** Completa la selección forzando un puesto SLA (elige banda por emp / primer turno del puesto). */
     const applyBulkPositionFill = (posName: string) => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        if (!selection.start || !selection.end) return;
-
-        const getEmpBulkObjective = (emp: any): string | null => {
-            if (!selectedGrupo || !grupoUnifiedMode) return selectedObjective;
-            const native = resolveNativeObjectiveInGrupo(emp);
-            if (native) return native;
-            return bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
-        };
-
-        const getStructureForObj = (objId: string) => {
-            if (selectedGrupo && grupoUnifiedMode && grupoSlaMap[objId]?.length) return grupoSlaMap[objId];
-            return positionStructure;
-        };
-
-        const minR = Math.min(selection.start.r, selection.end.r);
-        const maxR = Math.max(selection.start.r, selection.end.r);
-        const minC = Math.min(selection.start.c, selection.end.c);
-        const maxC = Math.max(selection.start.c, selection.end.c);
-        const startDay = daysInMonth[minC];
-        if (isPlanningDateLocked(getDateKey(startDay))) {
-            toast.warning('Periodo cerrado — no se puede completar puestos laborales en masa.');
-            return;
-        }
-
-        if (selectedGrupo && grupoUnifiedMode) {
-            for (let r = minR; r <= maxR; r++) {
-                const emp = displayedEmployees[r];
-                if (!emp) continue;
-                const extFallback = bulkEmpObjectiveOverrides[emp.id] || bulkTargetObjectiveId || selectedGrupo.objectiveIds[0] || null;
-                if (!resolveNativeObjectiveInGrupo(emp) && !extFallback) {
-                    toast.error('Seleccioná el objetivo para colaboradores EXT en la barra de asignación.');
-                    return;
-                }
-            }
-        }
-
-        const hasPosInAnySla = selectedGrupo && grupoUnifiedMode
-            ? selectedGrupo.objectiveIds.some(objId => (grupoSlaMap[objId] || []).some((p: any) => p.positionName === posName))
-            : (positionStructure || []).some((p: any) => p.positionName === posName);
-        if (!hasPosInAnySla) {
-            toast.error(`El puesto "${posName}" no tiene turnos en el SLA`);
-            return;
-        }
-
-        const pickShiftForEmp = (emp: any, posShifts: any[], covObjId: string) => {
-            const pref = String(empDefaultShift[`${emp.id}___${covObjId}`] || '').toUpperCase();
-            if (pref && posShifts.some((s: any) => String(s.code || '').toUpperCase() === pref)) {
-                return posShifts.find((s: any) => String(s.code || '').toUpperCase() === pref);
-            }
-            for (const prefer of ['M', 'T', 'N', 'D12', 'N12', 'MA']) {
-                const hit = posShifts.find((s: any) => String(s.code || '').toUpperCase() === prefer);
-                if (hit) return hit;
-            }
-            return posShifts[0];
-        };
-
-        const byCode = new Map<string, { shift: any }>();
-        for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
-            if (!emp) continue;
-            const covObjId = getEmpBulkObjective(emp);
-            if (!covObjId) continue;
-            const empStructure = getStructureForObj(covObjId);
-            const pos = empStructure.find((p: any) => p.positionName === posName);
-            const posShifts = (pos?.shifts || []) as any[];
-            if (!pos || posShifts.length === 0) continue;
-            const sh = pickShiftForEmp(emp, posShifts, covObjId);
-            if (!sh) continue;
-            const ck = `${String(sh.code || '').toUpperCase()}__${covObjId}`;
-            if (!byCode.has(ck)) byCode.set(ck, { shift: sh });
-        }
-
-        if (byCode.size === 1) {
-            const only = [...byCode.values()][0];
-            applyBulkChange({
-                code: only.shift.code,
-                name: only.shift.name,
-                hours: only.shift.hours,
-                startTime: only.shift.startTime,
-                endTime: only.shift.endTime,
-                positionName: posName,
-            });
-            return;
-        }
-
-        const newChanges = { ...pendingChanges };
-        let count = 0;
-        let skippedCoverage = 0;
-        let skippedExcluded = 0;
-        let skippedNoPos = 0;
-        const cyclesForBulk = autoSelectedCyclesRef.current?.length
-            ? autoSelectedCyclesRef.current
-            : autoCycles;
-
-        for (let r = minR; r <= maxR; r++) {
-            const emp = displayedEmployees[r];
-            if (!emp) continue;
-            const covObjId = getEmpBulkObjective(emp);
-            if (!covObjId) continue;
-            const empStructure = getStructureForObj(covObjId);
-            const pos = empStructure.find((p: any) => p.positionName === posName);
-            const posShifts = (pos?.shifts || []) as any[];
-            if (!pos || posShifts.length === 0) { skippedNoPos++; continue; }
-            const sh = pickShiftForEmp(emp, posShifts, covObjId);
-            if (!sh) continue;
-
-            const dominant = (empStructure || []).reduce(
-                (prev: any, cur: any) => ((prev?.qty ?? 0) > (cur?.qty ?? 0) ? prev : cur),
-                empStructure[0] || { qty: 1, positionName: 'General' },
-            );
-
-            const collectCodeCounts = (dateStr: string, changes: Record<string, any>) => {
-                const codeCounts: Record<string, number> = {};
-                const assigned: { code: string; hours: number }[] = [];
-                displayedEmployees.forEach((e: any) => {
-                    const key = `${e.id}_${dateStr}`;
-                    const absence = absencesMap[key];
-                    if (isEmployeeOnLeave({ shiftCode: changes[key]?.code || shiftsMap[key]?.code, absence })) return;
-                    const pending = changes[key];
-                    const shift = pending ? (pending.isDeleted ? null : pending) : shiftsMap[key];
-                    if (!shift) return;
-                    const explicitObj = pending?.objectiveId ?? shift.objectiveId;
-                    const effectiveObjId = explicitObj
-                        ? String(explicitObj)
-                        : (resolveNativeObjectiveInGrupo(e) || (e.preferredObjectiveId === covObjId || slaIdToObjId[e.preferredObjectiveId] === covObjId ? covObjId : null));
-                    if (String(effectiveObjId || '') !== String(covObjId)) return;
-                    const code = String(shift.code || '').toUpperCase();
-                    if (OBJECTIVE_NON_BILLABLE_CODES.has(code)) return;
-                    const shiftPos = shift.positionName || dominant?.positionName || 'General';
-                    if (shiftPos !== posName) return;
-                    codeCounts[code] = (codeCounts[code] || 0) + 1;
-                    assigned.push({ code, hours: resolveBandHours(code, shift, posShifts) });
-                });
-                return { codeCounts, assigned };
-            };
-
-            const isBlocked = (dateStr: string, code: string, hours: number, changes: Record<string, any>) => {
-                if (!isPlanningWorkShiftCode(code)) return false;
-                const dayLetter = getDayLetter(dateStr);
-                if (!isPosActiveOnDay(pos, dayLetter, dateStr)) return true;
-                if (isPosExcludedOnDate(pos, dateStr)) return true;
-                const pax = Math.max(1, Number(pos.qty) || 1);
-                const { codeCounts, assigned } = collectCodeCounts(dateStr, changes);
-                const units = countPositionClosedUnitsFromShifts(pos, dayLetter, codeCounts, cyclesForBulk, true, dateStr);
-                if (units.required > 0 && units.closed >= units.required) return true;
-                const upper = String(code).toUpperCase();
-                if ((codeCounts[upper] || 0) >= pax) return true;
-                if (!is24hCoverageType(pos)) return false;
-                const bandH = resolveBandHours(upper, { hours }, pos.shifts);
-                if (is24hsSinglePaxBandMixBlocked(pax, upper, assigned, bandH)) return true;
-                return false;
-            };
-
-            for (let c = minC; c <= maxC; c++) {
-                const dateStr = getDateKey(daysInMonth[c]);
-                const key = `${emp.id}_${dateStr}`;
-                const existing = shiftsMap[key];
-                if (isShiftConsolidated(existing)) continue;
-                if (isPosExcludedOnDate(pos, dateStr)) { skippedExcluded++; continue; }
-                const hours = Number(sh.hours) || SHIFT_HOURS_LOOKUP[String(sh.code || '').toUpperCase()] || 8;
-                if (isBlocked(dateStr, String(sh.code || ''), hours, newChanges)) { skippedCoverage++; continue; }
-                const { blocked, warnings } = checkRestricciones(emp, dateStr, posName, sh.code, covObjId, empStructure);
-                if (blocked) continue;
-                if (warnings.length > 0) planToastWarnMany(warnings, 8000);
-                if (isBulkCovBlocked(emp.id, posName, String(sh.code || ''))) { skippedCoverage++; continue; }
-                newChanges[key] = {
-                    code: sh.code,
-                    name: sh.name,
-                    hours,
-                    startTime: sh.startTime,
-                    endTime: sh.endTime,
-                    isTemp: true,
-                    oldObjectiveId: existing?.objectiveId,
-                    positionName: posName,
-                    objectiveId: covObjId,
-                };
-                count++;
-            }
-        }
-        commitPendingChanges(newChanges);
-        planToastWarnMany([
-            skippedNoPos > 0 ? `${skippedNoPos} omitida(s): puesto no existe en SLA` : '',
-            skippedCoverage > 0 ? `${skippedCoverage} omitida(s): cobertura completa` : '',
-            skippedExcluded > 0 ? `${skippedExcluded} omitida(s): día excluido` : '',
-        ]);
-        planToastBulk(count > 0 ? `${count} celda(s) · puesto ${posName}` : 'Ninguna celda aplicada');
+        applyPlanificacionBulkPositionFill({
+            posName,
+            allowPlanningMultiSelect,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            daysInMonth,
+            isPlanningDateLocked,
+            selectedGrupo,
+            grupoUnifiedMode,
+            selectedObjective,
+            bulkEmpObjectiveOverrides,
+            bulkTargetObjectiveId,
+            grupoSlaMap,
+            positionStructure,
+            pendingChanges,
+            displayedEmployees,
+            shiftsMap,
+            empDefaultShift,
+            absencesMap,
+            slaIdToObjId,
+            autoSelectedCyclesRef,
+            autoCycles,
+            resolveNativeObjectiveInGrupo,
+            checkRestricciones,
+            isBulkCovBlocked,
+            commitPendingChanges,
+            applyBulkChange,
+        });
     };
 
-    const checkRestricciones = (emp: any, dateStr: string, positionName?: string | null, shiftCode?: string | null, objectiveIdOverride?: string | null, structureOverride?: any[]): { blocked: boolean; warnings: string[] } => {
-        const warnings: string[] = [];
-        const objId = objectiveIdOverride || selectedObjective;
-        const struct = structureOverride || positionStructure;
-        const currentObjName = getObjectiveName(objId);
-        const posForGenero = positionName || activePosition || selectedCell?.currentShift?.positionName || null;
-        const posCfg = struct.find((p: any) => p.positionName === posForGenero);
-        if (posForGenero && isPosExcludedOnDate(posCfg, dateStr) && (shiftCode == null || isPlanningWorkShiftCode(shiftCode))) {
-            warnings.push(`🚫 Puesto "${posForGenero}" excluido por SLA (${planningPositionExclusionLabel(dateStr)}) — sin servicio ese día`);
-            return { blocked: true, warnings };
-        }
-        const prefGenero = getPreferenciaGeneroFromPositionStructure(struct, posForGenero);
-        const generoCheck = checkGeneroPuesto(emp.genero, prefGenero);
-        if (generoCheck.blocked && generoCheck.message) {
-            const posLabel = posForGenero ? ` (${posForGenero})` : '';
-            warnings.push(`🚫 ${emp.name}${posLabel}: ${generoCheck.message}`);
-        }
-        // Objetivo excluido (match por id o nombre como fallback)
-        const objRestr = (emp.restriccionesObjetivo || []).find((r: any) =>
-            r.objectiveId === objId || r.objectiveName === currentObjName
-        );
-        if (objRestr) warnings.push(`🚫 ${emp.name} está EXCLUIDO de este objetivo${objRestr.reason ? ` (${objRestr.reason})` : ''}`);
-        // Cliente excluido
-        const clientRestr = (emp.restriccionesCliente || []).find((r: any) => r.clientId === selectedClient);
-        if (clientRestr) warnings.push(`🚫 ${emp.name} está EXCLUIDO del cliente completo${clientRestr.reason ? ` (${clientRestr.reason})` : ''}`);
-        // Conflicto con compañero ya asignado ese día
-        const conflictIds = new Set((emp.conflictosEmpleados || []).map((c: any) => c.employeeId));
-        if (conflictIds.size > 0) {
-            displayedEmployees.forEach((other: any) => {
-                if (other.id === emp.id) return;
-                const otherKey = `${other.id}_${dateStr}`;
-                const otherShift = pendingChanges[otherKey] || shiftsMap[otherKey];
-                if (!otherShift || otherShift.isDeleted) return;
-                const otherObjId = resolveEffectiveShiftObjectiveId(other, otherShift, otherKey);
-                if (String(otherObjId || '') !== String(objId)) return;
-                if (conflictIds.has(other.id)) {
-                    const conflict = (emp.conflictosEmpleados || []).find((c: any) => c.employeeId === other.id);
-                    warnings.push(`⚠️ Conflicto con ${other.name}${conflict?.reason ? ` (${conflict.reason})` : ''}`);
-                }
-                // Chequeo recíproco
-                if ((other.conflictosEmpleados || []).some((c: any) => c.employeeId === emp.id)) {
-                    warnings.push(`⚠️ ${other.name} tiene conflicto registrado con ${emp.name}`);
-                }
-            });
-        }
-        return { blocked: !!(objRestr || clientRestr || generoCheck.blocked), warnings };
-    };
+    const checkRestricciones = (
+        emp: any,
+        dateStr: string,
+        positionName?: string | null,
+        shiftCode?: string | null,
+        objectiveIdOverride?: string | null,
+        structureOverride?: any[],
+    ) => evaluatePlanificacionRestricciones({
+        emp,
+        dateStr,
+        positionName,
+        shiftCode,
+        objectiveIdOverride,
+        structureOverride,
+        selectedObjective,
+        positionStructure,
+        getObjectiveName,
+        activePosition,
+        selectedCell,
+        selectedClient,
+        displayedEmployees,
+        pendingChanges,
+        shiftsMap,
+        resolveEffectiveShiftObjectiveId,
+    });
 
-    // Verificar si un empleado tiene restringido un código por positionAssignments del SLA (Cobertura de Dotación)
-    const isBulkCovBlocked = (empId: string, posName: string, code: string): boolean => {
-        if (!activeSlaPositionAssignments?.length) return false;
-        if (!isPlanningWorkShiftCode(code)) return false;
-        const pa = activeSlaPositionAssignments.find((a: any) => a.employeeId === empId);
-        if (!pa?.slots?.length) return false;
-        const slot = pa.slots.find((s: any) => s.positionName === posName);
-        if (!slot) return true;
-        if (slot.shiftCodes.length === 0) return false;
-        return !slot.shiftCodes.map((x: string) => x.toUpperCase()).includes(String(code || '').toUpperCase());
-    };
+    const isBulkCovBlocked = (empId: string, posName: string, code: string): boolean =>
+        isPlanificacionBulkCovBlocked(empId, posName, code, activeSlaPositionAssignments);
 
     const applyToPending = (config: any) => {
-        const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
-        const emp = displayedEmployees.find((e: any) => e.id === selectedCell.empId);
-        if (emp && config && !config.isDeleted) {
-            const assignPos = config.positionName || activePosition || 'General';
-            const { blocked, warnings } = checkRestricciones(emp, selectedCell.dateStr, assignPos, config.code);
-            if (warnings.length > 0) planToastWarnMany(warnings, 8000);
-            if (blocked) return;
-        }
-        const newChanges = { ...pendingChanges };
-        newChanges[key] = {
-            ...config,
-            isTemp: true,
-            _isAutoRotation: undefined,
-            _isAutoCondition: undefined,
-            isFranco: config.code === 'F' || config.code === 'FF' || config.isFranco,
-            swapWith: config.swapWith || null,
-            swapDate: config.swapDate || null,
-            positionName: config.positionName || activePosition || 'General',
-            objectiveId: config.objectiveId || (selectedGrupo && grupoUnifiedMode && cellPlanningObjectiveId) || resolveObjectiveForEmp(selectedCell.empId),
-        };
-        // Aplicar condiciones EXCLUDE/ASSIGN en tiempo real tras cambio manual
-        if (activeSlaServiceRules?.length) {
-            const _ruleAdditions = computeServiceRuleChanges(
-                selectedCell.dateStr, activeSlaServiceRules, newChanges,
-                shiftsMap, dotacionBaseEmployees, selectedObjective,
-                selectedCell.empId,
-            );
-            Object.assign(newChanges, _ruleAdditions);
-        }
-        if (activeSlaServiceRotations?.length) {
-            const _rotAdditions = applyRotationsForMonth(
-                activeSlaServiceRotations, newChanges, shiftsMap,
-                currentDate.getFullYear(), currentDate.getMonth(),
-                positionStructure,
-            );
-            Object.assign(newChanges, _rotAdditions);
-            if (activeSlaServiceRules?.length) {
-                const _rotFByEmp: Record<string, Set<string>> = {};
-                // 1. F recién asignadas por ciclo en esta pasada
-                for (const _rv of Object.values(_rotAdditions)) {
-                    if (_rv && !(_rv as any).isDeleted && ['F','FF','FP','FT'].includes((_rv as any).code)) {
-                        const _re = (_rv as any).empId as string;
-                        const _rd = (_rv as any).dateStr as string;
-                        if (!_rotFByEmp[_re]) _rotFByEmp[_re] = new Set<string>();
-                        _rotFByEmp[_re].add(_rd);
-                    }
-                }
-                // 2. F ya guardadas en Firestore para empleados del ciclo (post-GUARDAR)
-                for (const _rot3 of activeSlaServiceRotations) {
-                    if ((_rot3 as any).cycleMode !== 'cycle_rotation') continue;
-                    const _p3 = (_rot3 as any).periods?.[0];
-                    if (!_p3) continue;
-                    for (const _e3 of ((_p3.entries || []) as any[])) {
-                        if (!_e3.employeeId) continue;
-                        if (_rotFByEmp[_e3.employeeId]?.size) continue;
-                        const _pfx = _e3.employeeId + '_';
-                        for (const _smk of Object.keys(shiftsMap)) {
-                            if (!_smk.startsWith(_pfx)) continue;
-                            const _smv = shiftsMap[_smk];
-                            if (!_smv || _smv.isDeleted) continue;
-                            if (!['F','FF','FP','FT'].includes(String((_smv as any).code || (_smv as any).type || '').toUpperCase())) continue;
-                            if (!_rotFByEmp[_e3.employeeId]) _rotFByEmp[_e3.employeeId] = new Set<string>();
-                            _rotFByEmp[_e3.employeeId].add(_smk.slice(_pfx.length));
-                        }
-                    }
-                }
-                for (const [_re2, _rdates] of Object.entries(_rotFByEmp)) {
-                    for (const _rfd of _rdates) {
-                        if (_rfd === selectedCell?.dateStr && _re2 === selectedCell?.empId) continue;
-                        const _rfc = computeServiceRuleChanges(_rfd, activeSlaServiceRules, newChanges, shiftsMap, dotacionBaseEmployees, selectedObjective, _re2);
-                        Object.assign(newChanges, _rfc);
-                    }
-                }
-            }
-        }
-        commitPendingChanges(newChanges);
-        // Toast de alerta si el nuevo turno rompe el descanso mínimo de 12h
-        const _rc = String(config.code || '').toUpperCase();
-        const _nonWork = new Set(['F','FF','FP','FT','V','L','A','E','PG','AA','RET']);
-        if (!config.isDeleted && !_nonWork.has(_rc)) {
-            const _gs = (eid: string, ds: string) => { const k2 = `${eid}_${ds}`; const p2 = newChanges[k2]; if (p2) return p2.isDeleted ? null : p2; return shiftsMap[k2] || null; };
-            const _v = checkRestBetweenShifts({ empId: selectedCell.empId, targetDateStr: selectedCell.dateStr, proposed: { code: _rc, startTime: config.startTime || undefined, hours: Number(config.hours) || undefined }, getShift: _gs, cfg: { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 } });
-            if (_v) toast.warning(`⚠️ ${_v}`, { duration: 8000 });
-        }
-        setSelectedCell(null);
-        setActivePosition(null);
-        setFrancoMode('NONE');
-        setPendingAssignment(null);
-        setSwapConfig(null);
-        setShowSwapModal(false);
-        planToastChangeApplied();
+        if (!selectedCell) return;
+        applyPlanificacionToPending({
+            config,
+            selectedCell,
+            displayedEmployees,
+            activePosition,
+            pendingChanges,
+            selectedGrupo,
+            grupoUnifiedMode,
+            cellPlanningObjectiveId,
+            resolveObjectiveForEmp,
+            activeSlaServiceRules,
+            activeSlaServiceRotations,
+            shiftsMap,
+            dotacionBaseEmployees,
+            selectedObjective,
+            currentDate,
+            positionStructure,
+            checkRestricciones,
+            commitPendingChanges,
+            setSelectedCell,
+            setActivePosition,
+            setFrancoMode,
+            setPendingAssignment,
+            setSwapConfig,
+            setShowSwapModal,
+        });
     };
 
     const applyRecompositionPackage = (
@@ -7338,27 +4838,16 @@ export default function PlanificacionPage() {
         pkg: RecompositionPackage,
         novedad?: PendingAbsenceNovedad,
     ) => {
-        setPendingChanges(prev => {
-            const next = { ...prev };
-            for (const [k, v] of Object.entries(updates)) {
-                next[k] = { ...v, isTemp: true };
-            }
-            return next;
+        applyPlanificacionRecompositionPackage({
+            updates,
+            pkg,
+            novedad,
+            setPendingChanges,
+            setPendingNovedades,
+            setPendingRecompositionPackages,
+            setSelectedCell,
+            setRecompositionModalOpen,
         });
-        if (novedad) {
-            const key = `${novedad.employeeId}_${novedad.startDate}`;
-            setPendingNovedades(prev => ({ ...prev, [key]: novedad }));
-        }
-        setPendingRecompositionPackages(prev => [...prev.filter(p => p.id !== pkg.id), pkg]);
-        setSelectedCell(null);
-        setRecompositionModalOpen(false);
-        toast.success(
-            novedad?.absenceType === 'RA' || novedad?.type === 'Retiro anticipado'
-                ? 'Retiro anticipado y cobertura aplicados (pendiente de guardar)'
-                : novedad
-                    ? 'Novedad RRHH y cobertura aplicadas (pendiente de guardar)'
-                    : 'Paquete cobertura/liberación aplicado (pendiente de guardar)',
-        );
     };
 
     const handleAssignDeployment = (intent: 'SURPLUS' | 'TRAINING') => {
@@ -7424,6 +4913,10 @@ export default function PlanificacionPage() {
         intent: 'SURPLUS' | 'TRAINING',
         opts?: { onlyEmpId?: string; positionName?: string },
     ) => {
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
+            return;
+        }
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
         if (!selection.start || !selection.end) return;
         const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
@@ -7499,307 +4992,127 @@ export default function PlanificacionPage() {
     };
 
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
-        if (!selectedCell) return; 
-        if (isPlanningDateLocked(selectedCell.dateStr)) {
-            // Días pasados: solo se permiten RET, ESC y francos (F/FF/FP/FT). Turnos bloqueados.
-            const c = String(shiftConfig.code || '').toUpperCase();
-            if (!['RET','ESC','F','FF','FP','FT'].includes(c)) { toast.error("Periodo cerrado — solo podés asignar RET, ESC o Franco."); return; }
-        }
-        if (isShiftConsolidated(selectedCell.currentShift)) { toast.warning("Turno consolidado/fichado: solo lectura."); return; }
-        if (selectedCell.absence) { toast.warning("El empleado tiene una ausencia/vacaciones registrada: no se puede planificar encima."); return; }
-        const posCfg = positionStructure.find((p: any) => p.positionName === positionName);
-        if (isPosExcludedOnDate(posCfg, selectedCell.dateStr) && isPlanningWorkShiftCode(shiftConfig.code)) {
-            toast.error(`Puesto "${positionName}" excluido por SLA (${planningPositionExclusionLabel(selectedCell.dateStr)}). Configurado en Servicios.`, { duration: 9000 });
-            return;
-        }
-        if (isPlanningShiftExcludedOnDate(posCfg, selectedCell.dateStr, shiftConfig.code)) {
-            toast.error(
-                `Turno ${String(shiftConfig.code || '').toUpperCase()} excluido por SLA en "${positionName}" (${planningPositionExclusionLabel(selectedCell.dateStr)}).`,
-                { duration: 9000 },
-            );
-            return;
-        }
-        const existingCode = String(selectedCell.currentShift?.code || selectedCell.currentShift?.type || '').toUpperCase();
-        if (['V', 'L', 'A', 'E', 'AA'].includes(existingCode)) { toast.warning("Novedad RRHH (ausencia/vacaciones/licencia): no se puede planificar encima."); return; }
-        const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
-        const existing = selectedCell.currentShift;
-        const isFT = !correctionMode && francoMode === 'FT_SELECTION';
-        if (isFT && !canAssignFT) {
-            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
-            setFrancoMode('NONE');
-            return;
-        }
-        const newAssignCode = String(shiftConfig.code || '').toUpperCase();
-        if (
-            existing &&
-            existing.objectiveId != null &&
-            existing.objectiveId !== '' &&
-            String(existing.objectiveId) !== String(selectedObjective) &&
-            !existing.isFranco &&
-            !isFT
-        ) {
-            const existingObjCode = shiftPlanningCodeUpper(existing);
-            if (existingObjCode === 'RET') {
-                applyToPending({ ...shiftConfig, positionName, objectiveId: selectedObjective });
-                return;
-            }
-            if (newAssignCode === 'RET') {
-                toast.error(
-                    `Ese día tiene turno en ${getObjectiveName(existing.objectiveId)}. No podés asignar RET en este objetivo sin mover el turno laboral.`,
-                    { duration: 9000 },
-                );
-                return;
-            }
-            const objName = getObjectiveName(existing.objectiveId);
-            if (!confirm(`⚠️ ALERTA DE TRANSFERENCIA\n\nEl empleado ya tiene turno en "${objName}".\n\n¿Desea moverlo a este objetivo?`)) return;
-            applyToPending({ ...shiftConfig, oldObjectiveId: existing.objectiveId, positionName });
-            return;
-        }
-        if (!correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F' && !isFT) { if(!confirm(`⚠️ ATENCIÓN: ESTÁ ELIMINANDO UN FRANCO\n\n¿Seguro que desea eliminar el Franco?`)) return; }
-        if (correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { if(!confirm(`⚠️ MODO CORRECCIÓN: Vas a reemplazar un Franco publicado.\n\n¿Confirmar corrección directa?`)) return; }
-        const [y, m, d] = selectedCell.dateStr.split('-').map(Number); const targetDate = new Date(y, m-1, d); const hours = shiftConfig.hours != null ? shiftConfig.hours : 8;
-        if (shiftConfig.code !== 'F' && !isFT && !correctionMode) {
-            const warning = checkLaborRules(selectedCell.empId, targetDate, hours, {
-                code: shiftConfig.code,
-                startTime: shiftConfig.startTime,
-                endTime: shiftConfig.endTime,
-                hours: shiftConfig.hours,
-            });
-            if (warning) {
-                if (warning.includes('CRÍTICA')) { toast.error(warning); return; }
-                if (warning.startsWith('ALERTA MENSUAL')) {
-                    applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
-                    const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || 'Empleado';
-                    toast.warning(`${empName} supera ${planningLimits.monthly}h. El PIN se pedirá al guardar.`, { duration: 2000 });
-                    return;
-                }
-                setAuthWarningMessage(warning);
-                setPendingAssignment({ shiftConfig, positionName, targetDate });
-                return;
-            }
-        }
-        applyToPending({ ...shiftConfig, positionName, isFrancoTrabajado: isFT, isFrancoCompensatorio: false, isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
+        assignPlanificacionShift({
+            shiftConfig,
+            positionName,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selectedCell,
+            isPlanningDateLocked,
+            positionStructure,
+            correctionMode,
+            francoMode,
+            canAssignFT,
+            setFrancoMode,
+            selectedObjective,
+            getObjectiveName,
+            applyToPending,
+            checkLaborRules,
+            planningLimits,
+            employees,
+            plannedNovedad: modifiers.plannedNovedad,
+            setAuthWarningMessage,
+            setPendingAssignment,
+        });
     };
 
     const confirmPendingAssignment = () => {
-        if (!pendingAssignment) return;
-        if (francoMode === 'FT_SELECTION' && !canAssignFT) {
-            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
-            setFrancoMode('NONE');
-            setPendingAssignment(null);
-            setAuthWarningMessage('');
-            return;
-        }
-        applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
-        setPendingAssignment(null);
-        setAuthWarningMessage('');
+        confirmPlanificacionPendingAssignment({
+            pendingAssignment,
+            francoMode,
+            canAssignFT,
+            plannedNovedad: modifiers.plannedNovedad,
+            applyToPending,
+            setFrancoMode,
+            setPendingAssignment,
+            setAuthWarningMessage,
+        });
     };
 
-    const getShiftFor = (empId: string, dateStr: string) => {
-        const k = `${empId}_${dateStr}`;
-        const pending = pendingChanges[k];
-        if (pending) return pending.isDeleted ? null : pending;
-        return shiftsMap[k] || null;
+    const cancelPendingAssignment = () => {
+        resetPlanificacionPendingAssignment(setPendingAssignment, setAuthWarningMessage);
     };
 
-    const toChangeConfig = (shift: any) => {
-        const code = (shift?.code || shift?.type || '').toString().toUpperCase();
-        const hours = Number(shift?.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
-        const startTime = typeof shift?.startTime === 'string' ? shift.startTime : (SHIFT_RANGES[code]?.split?.('-')?.[0]?.trim?.() || '07:00');
-        return {
-            code: shift?.code || code,
-            name: shift?.name || shift?.type || shift?.code || code,
-            hours,
-            startTime,
-            positionName: shift?.positionName || activePosition || dominantPosition?.positionName || 'General',
-            isFranco: shift?.code === 'F' || shift?.isFranco || false,
-            isFrancoTrabajado: !!shift?.isFrancoTrabajado,
-            isFrancoCompensatorio: !!shift?.isFrancoCompensatorio,
-            plannedNovedad: shift?.plannedNovedad || null,
-            isExtended: !!shift?.isExtended,
-            isEarlyStart: !!shift?.isEarlyStart
-        };
-    };
+    const getShiftFor = (empId: string, dateStr: string) =>
+        getPlanificacionShiftFor(empId, dateStr, pendingChanges, shiftsMap);
 
     const executeSwap = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        if (!selectedCell?.empId || !selectedCell?.dateStr || !selectedSwapTarget) return;
-
-        const emp1 = selectedCell.empId;
-        const date1 = selectedCell.dateStr;
-        const emp2 = selectedSwapTarget;
-        const date2 = selectedSwapDate || date1;
-
-        const inCurrentMonth = (dateStr: string) => {
-            const [y, m] = dateStr.split('-').map(Number);
-            return y === currentDate.getFullYear() && m === (currentDate.getMonth() + 1);
-        };
-        // Regla pedida: ambas situaciones (turno↔turno y franco↔franco) solo dentro del mes visible
-        if (!inCurrentMonth(date1) || !inCurrentMonth(date2)) {
-            toast.error("El intercambio debe realizarse dentro del mes en curso.");
-            return;
-        }
-
-        const shift1 = getShiftFor(emp1, date1);
-        const shift2 = getShiftFor(emp2, date2);
-        if (!shift1 || !shift2) {
-            toast.error('Ambos empleados deben tener turno en ese día');
-            return;
-        }
-        if ([shift1, shift2].some((s: any) => isShiftConsolidated(s))) {
-            toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
-            return;
-        }
-
-        const name1 = employees.find(e => e.id === emp1)?.name || 'Emp1';
-        const name2 = employees.find(e => e.id === emp2)?.name || 'Emp2';
-
-        const newChanges = { ...pendingChanges };
-
-        const isFrancoLike = (s: any) => {
-            const code = String(s?.code || s?.type || '').toUpperCase();
-            return code === 'F' || code === 'FF' || !!s?.isFranco;
-        };
-        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
-
-        // Caso especial pedido: Franco ↔ Franco (intercambio de días de franco dentro del mes)
-        // Para que tenga efecto real, necesitamos los "turnos laborables" cruzados:
-        // - emp2 en date1 (para que emp1 pueda trabajar ese día)
-        // - emp1 en date2 (para que emp2 pueda trabajar ese día)
-        if (isFrancoLike(shift1) && isFrancoLike(shift2)) {
-            if (date2 === date1) {
-                toast.error("Para Franco ↔ Franco seleccioná un día distinto del compañero.");
-                return;
-            }
-            const emp2AtDate1 = getShiftFor(emp2, date1);
-            const emp1AtDate2 = getShiftFor(emp1, date2);
-            if (!emp2AtDate1 || !emp1AtDate2) {
-                toast.error("Para Franco ↔ Franco ambos deben tener turnos asignados en las dos fechas.");
-                return;
-            }
-            if (!isWorkingCode(emp2AtDate1.code) || !isWorkingCode(emp1AtDate2.code)) {
-                toast.error("Para Franco ↔ Franco se requiere que en las fechas cruzadas haya turnos laborables (no licencias/francos).");
-                return;
-            }
-            if ([emp2AtDate1, emp1AtDate2].some((s: any) => isShiftConsolidated(s))) {
-                toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
-                return;
-            }
-
-            // Emp1: deja de estar franco en date1 y toma el turno de Emp2 en date1
-            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(emp2AtDate1), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-            // Emp2: pasa a estar franco en date1 (recibe el franco de Emp1)
-            newChanges[`${emp2}_${date1}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-
-            // Emp2: deja de estar franco en date2 y toma el turno de Emp1 en date2
-            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(emp1AtDate2), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-            // Emp1: pasa a estar franco en date2 (recibe el franco de Emp2)
-            newChanges[`${emp1}_${date2}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-        } else {
-            // Swap estándar (como build 5005): intercambia 2 celdas (emp1/date1 ↔ emp2/date2)
-            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-        }
-        commitPendingChanges(newChanges);
-
-        setShowSwapModal(false);
-        setSwapConfig(null);
-        setCoverageStep(false);
-        setSelectedSwapTarget('');
-        setSelectedSwapDate('');
-        setSwapSearchTerm('');
-        toast.success("Enroque completado");
+        executePlanificacionSwap({
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selectedCell,
+            selectedSwapTarget,
+            selectedSwapDate,
+            currentDate,
+            pendingChanges,
+            shiftsMap,
+            employees,
+            activePosition,
+            dominantPositionName: dominantPosition?.positionName,
+            commitPendingChanges,
+            setShowSwapModal,
+            setSwapConfig,
+            setCoverageStep,
+            setSelectedSwapTarget,
+            setSelectedSwapDate,
+            setSwapSearchTerm,
+        });
     };
 
     const handleSelectDate = (dateStr: string) => { setSelectedSwapDate(dateStr); };
 
     /** Copia la selección actual al portapapeles. Devuelve bounds o null. */
-    const copySelectionToClipboard = useCallback((asCut: boolean) => {
-        if (!selection.start) return null;
-        const minR = Math.min(selection.start.r, selection.end?.r ?? selection.start.r);
-        const maxR = Math.max(selection.start.r, selection.end?.r ?? selection.start.r);
-        const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
-        const maxC = Math.max(selection.start.c, selection.end?.c ?? selection.start.c);
-        const cells: Array<{ relRow: number; relCol: number; shift: any | null }> = [];
-        for (let r = minR; r <= maxR; r++) {
-            for (let c = minC; c <= maxC; c++) {
-                const emp = displayedEmployees[r];
-                if (!emp || c >= daysInMonth.length) continue;
-                const key = `${emp.id}_${getDateKey(daysInMonth[c])}`;
-                const shift = pendingChanges[key]
-                    ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
-                    : (shiftsMap[key] || null);
-                cells.push({ relRow: r - minR, relCol: c - minC, shift });
-            }
-        }
-        setClipboard(cells);
-        setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
-        setClipboardIsCut(asCut);
-        return { minR, maxR, minC, maxC, cells };
-    }, [selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    const copySelectionToClipboard = useCallback((asCut: boolean) => copyPlanificacionSelectionToClipboard({
+        asCut,
+        allowPlanningMultiSelect,
+        selection,
+        displayedEmployees,
+        daysInMonth,
+        pendingChanges,
+        shiftsMap,
+        setClipboard,
+        setClipboardDim,
+        setClipboardIsCut,
+    }), [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
-        if (!clipboard) return;
-        const prev = pendingChangesRef.current;
-        const newChanges = { ...prev };
-        let pasted = 0;
-        clipboard.forEach(({ relRow, relCol, shift }) => {
-            const r = targetRow + relRow;
-            const c = targetCol + relCol;
-            if (r < 0 || r >= displayedEmployees.length || c < 0 || c >= daysInMonth.length) return;
-            const emp = displayedEmployees[r];
-            const dateStr = getDateKey(daysInMonth[c]);
-            if (isPlanningDateLocked(dateStr)) return;
-            const key = `${emp.id}_${dateStr}`;
-            if (!shift) {
-                if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
-            } else {
-                newChanges[key] = {
-                    ...shift,
-                    isTemp: true,
-                    employeeId: emp.id,
-                    objectiveId: (selectedGrupo && grupoUnifiedMode)
-                        ? resolveObjectiveForEmp(emp.id)
-                        : (shift.objectiveId || selectedObjective),
-                };
-                pasted++;
-            }
+        pastePlanificacionClipboardAt({
+            targetRow,
+            targetCol,
+            allowPlanningMultiSelect,
+            clipboard,
+            clipboardIsCut,
+            pendingChanges: pendingChangesRef.current,
+            displayedEmployees,
+            daysInMonth,
+            shiftsMap,
+            isPlanningDateLocked,
+            selectedGrupo,
+            grupoUnifiedMode,
+            selectedObjective,
+            resolveObjectiveForEmp,
+            commitPendingChanges,
+            setClipboardIsCut,
         });
-        commitPendingChanges(newChanges);
-        toast.success(
-            clipboardIsCut
-                ? `${pasted} turno(s) movido(s)`
-                : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
-        );
-        if (clipboardIsCut) setClipboardIsCut(false);
-    }, [clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        const bounds = copySelectionToClipboard(true);
-        if (!bounds) return;
-        const prev = pendingChangesRef.current;
-        const newChanges = { ...prev };
-        let cut = 0;
-        for (let r = bounds.minR; r <= bounds.maxR; r++) {
-            for (let c = bounds.minC; c <= bounds.maxC; c++) {
-                const emp = displayedEmployees[r];
-                if (!emp || c >= daysInMonth.length) continue;
-                const dateStr = getDateKey(daysInMonth[c]);
-                if (isPlanningDateLocked(dateStr)) continue;
-                const key = `${emp.id}_${dateStr}`;
-                const existing = prev[key] ? (prev[key].isDeleted ? null : prev[key]) : (shiftsMap[key] || null);
-                if (isShiftConsolidated(existing)) continue;
-                if (existing || prev[key] || shiftsMap[key]) {
-                    newChanges[key] = { isDeleted: true };
-                    cut++;
-                }
-            }
-        }
-        commitPendingChanges(newChanges);
-        toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
+        cutPlanificacionSelection({
+            allowPlanningMultiSelect,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            displayedEmployees,
+            daysInMonth,
+            pendingChanges: pendingChangesRef.current,
+            shiftsMap,
+            isPlanningDateLocked,
+            setClipboard,
+            setClipboardDim,
+            setClipboardIsCut,
+            commitPendingChanges,
+        });
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, selection, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
@@ -7811,6 +5124,11 @@ export default function PlanificacionPage() {
             if (mod && key === 'z' && !e.shiftKey) {
                 e.preventDefault();
                 undoLastPending();
+                return;
+            }
+            if (!allowPlanningMultiSelect && mod && (key === 'c' || key === 'x' || key === 'v')) {
+                e.preventDefault();
+                toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
                 return;
             }
             if (mod && key === 'c' && selection.start) {
@@ -7838,61 +5156,59 @@ export default function PlanificacionPage() {
         };
         window.addEventListener('keydown', onKey);
         return () => window.removeEventListener('keydown', onKey);
-    }, [selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
+    }, [allowPlanningMultiSelect, selection, clipboard, copySelectionToClipboard, cutSelection, pasteClipboardAt, undoLastPending]);
 
     const handleMouseUp = () => {
-        setIsDragging(false);
-        clearTimeout(longPressTimer.current);
-        if (columnSelectMode) return; // keep selection visible for copy action
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); setSelection({ start: null, end: null }); return; }
-        if (selection.start && selection.end && selection.start.r === selection.end.r && selection.start.c === selection.end.c) {
-            const emp = displayedEmployees[selection.start.r]; 
-            const day = daysInMonth[selection.start.c]; 
-            const dateStr = getDateKey(day); 
-            const key = `${emp.id}_${dateStr}`; 
-            const rfzOnCell = rfzByEmpDate[key];
-            const { s: cellS, p: cellP } = resolveCellShiftDisplay(
-                emp.id, dateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
-            );
-            const absence = absencesMap[key]; 
-            if (selection.start.r === selection.end.r && selection.start.c === selection.end.c) { setSelection({ start: null, end: null }); } 
-            {
-                // Si la celda tiene borrado pendiente, tratar como vacía para permitir reasignar sin guardar
-                const effectiveShift = pendingChanges[key]?.isDeleted
-                    ? null
-                    : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
-                const effObjId = effectiveShift?.objectiveId;
-                if (
-                    effectiveShift &&
-                    selectedObjective &&
-                    !(selectedGrupo && grupoUnifiedMode) &&
-                    isCrossObjectivePlanningReadOnly(effectiveShift, selectedObjective)
-                ) {
-                    toast.message(`Turno en ${getObjectiveName(effObjId)} — solo lectura en este cronograma.`);
-                    return;
-                }
-                const empPreferred = empDefaultPos[`${emp.id}___${selectedObjective}`];
-                const defaultPos = effectiveShift?.positionName || empPreferred || dominantPosition.positionName;
-                setActivePosition(defaultPos);
-                if (isShiftConsolidated(effectiveShift)) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); return; }
-                const isLocked = isPlanningDateLocked(dateStr);
-                const absenceAlreadyHandled = effectiveShift && ['V','L','PG','A','E','AA'].includes(effectiveShift.code || '');
-                if (!isLocked && ((effectiveShift && absence && !absenceAlreadyHandled) || (effectiveShift && effectiveShift.hasNovedad && !absenceAlreadyHandled))) { findNeighbors(effectiveShift, dateStr); setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); if (absence && absence.type) { setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); } else { setShowConflictModal(true); } }
-                else if (!isLocked && absence && !effectiveShift) { setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); setVacancyData({ ...absence, source: 'AUSENCIA', focusDate: dateStr }); setShowVacancyModal(true); }
-                else { if (!isLocked) { setModifiers({ plannedNovedad: effectiveShift?.plannedNovedad || '' }); setFrancoMode('NONE'); }
-                    const pubKey = planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1);
-                    setCellEditMode(correctionMode && isPlanificacionPublished(publishStatusMap[pubKey]));
-                    setSelectedCell({ empId: emp.id, dateStr: dateStr, currentShift: effectiveShift, absence: absence }); }
-            }
-        } 
+        handlePlanificacionMouseUp({
+            columnSelectMode,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            displayedEmployees,
+            daysInMonth,
+            rfzByEmpDate,
+            selectedObjective,
+            selectedGrupo,
+            grupoUnifiedMode,
+            pendingChanges,
+            shiftsMap,
+            cellTurnosMap,
+            absencesMap,
+            empDefaultPos,
+            dominantPositionName: dominantPosition.positionName,
+            currentDate,
+            correctionMode,
+            publishStatusMap,
+            getObjectiveName,
+            isPlanningDateLocked,
+            findNeighbors,
+            setIsDragging,
+            clearLongPressTimer: () => clearTimeout(longPressTimer.current),
+            setSelection,
+            setActivePosition,
+            setSelectedCell,
+            setVacancyData,
+            setShowVacancyModal,
+            setShowConflictModal,
+            setModifiers,
+            setFrancoMode,
+            setCellEditMode,
+        });
     };
     const handleMouseDown = (r: number, c: number) => { if (!selectedObjective || comparingSnapshot || isServiceLocked) return; setIsDragging(true); setSelection({ start: {r, c}, end: {r, c} }); };
-    const handleMouseEnter = (r: number, c: number) => { if (!isDragging) return; setSelection(prev => ({ ...prev, end: {r, c} })); };
+    const handleMouseEnter = (r: number, c: number) => {
+        if (!isDragging || !allowPlanningMultiSelect) return;
+        setSelection(prev => ({ ...prev, end: {r, c} }));
+    };
     const isCellSelected = (r: number, c: number) => selection.start && r >= Math.min(selection.start.r, selection.end!.r) && r <= Math.max(selection.start.r, selection.end!.r) && c >= Math.min(selection.start.c, selection.end!.c) && c <= Math.max(selection.start.c, selection.end!.c);
 
     // ── COLUMN SELECT (long press on day header) ──────────────────────────────
     const handleDayHeaderMouseDown = (dayIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         // Segundo clic en la misma fuente: cancela
         if (columnSelectMode && columnSelectSource === dayIndex) {
             setColumnSelectMode(false); setColumnSelectSource(null); setIsDragging(false);
@@ -7905,7 +5221,7 @@ export default function PlanificacionPage() {
         setSelection({ start: { r: 0, c: dayIndex }, end: { r: displayedEmployees.length - 1, c: dayIndex } });
     };
     const handleDayHeaderMouseEnter = (dayIndex: number) => {
-        if (!columnSelectMode || !isDragging) return;
+        if (!allowPlanningMultiSelect || !columnSelectMode || !isDragging) return;
         setSelection(prev => prev.start ? ({ start: prev.start, end: { r: displayedEmployees.length - 1, c: dayIndex } }) : prev);
     };
     const handleDayHeaderMouseUpOrLeave = () => { clearTimeout(longPressTimer.current); };
@@ -7913,6 +5229,10 @@ export default function PlanificacionPage() {
     // Seleccionar fila completa (click en nombre de empleado)
     const handleRowHeaderClick = (rowIndex: number) => {
         if (!selectedObjective || comparingSnapshot || isServiceLocked || columnSelectMode) return;
+        if (!allowPlanningMultiSelect) {
+            toast.message('Cronograma publicado — activá modo Corregir para selección masiva.');
+            return;
+        }
         setSelection({ start: { r: rowIndex, c: 0 }, end: { r: rowIndex, c: daysInMonth.length - 1 } });
     };
 
@@ -7929,270 +5249,75 @@ export default function PlanificacionPage() {
 
     // Importar mes anterior como plantilla (solo celdas vacías)
     const applyPrevMonthTemplate = async () => {
-        if (!selectedObjective) return;
-        setPrevMonthLoading(true);
-        try {
-            const prevStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
-            const prevEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
-            const snap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('startTime', '>=', Timestamp.fromDate(prevStart)),
-                where('startTime', '<=', Timestamp.fromDate(prevEnd))
-            ));
-            const prevShifts = snap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-            const newChanges = { ...pendingChanges };
-            let applied = 0, skipped = 0;
-            prevShifts.forEach((shift: any) => {
-                const shiftDate = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(shift.startTime?.seconds * 1000);
-                const dayNum = shiftDate.getDate();
-                const targetDay = daysInMonth.find(d => d.getDate() === dayNum);
-                if (!targetDay) return;
-                const targetDateStr = getDateKey(targetDay);
-                if (isPlanningDateLocked(targetDateStr)) return;
-                if (!displayedEmployees.find((e: any) => e.id === shift.employeeId)) return;
-                const key = `${shift.employeeId}_${targetDateStr}`;
-                if (pendingChanges[key] || shiftsMap[key]) { skipped++; return; }
-                const { id: _id, ...rest } = shift;
-                newChanges[key] = { ...rest, isTemp: true, employeeId: shift.employeeId, objectiveId: selectedObjective };
-                applied++;
-            });
-            setPendingChanges(newChanges);
-            toast.success(`Plantilla aplicada: ${applied} turnos importados${skipped > 0 ? `, ${skipped} omitidos (ya tenían turno)` : ''}`);
-        } catch (e) {
-            toast.error('Error al cargar el mes anterior');
-        } finally {
-            setPrevMonthLoading(false);
-        }
-    };
-
-
-    /**
-     * Carga las ausencias que SOLAPAN con el rango [monthStart, monthEnd], no solo
-     * las que ARRANCAN dentro del mes. Esto soluciona el caso de vacaciones / ART
-     * que empezaron antes y siguen vigentes en el mes a planificar.
-     *
-     * - Query: startDate dentro de [monthStart - 2 meses, monthEnd] para evitar
-     *   pedir un índice nuevo sobre endDate y aún así capturar la cola.
-     * - Filtra en cliente por endDate >= monthStart.
-     * - Excluye ausencias rechazadas/canceladas (status).
-     * - Infere el código (V/L/E/A/PG/AA) desde `absenceType`, `code` o `type`.
-     */
-    const loadAbsencesForRange = async (
-        monthStart: Date,
-        monthEnd: Date,
-    ): Promise<Record<string, Map<string, string>>> => {
-        const absSnap = await getDocs(empresaCollectionQuery('ausencias', empresaId, scopeEmpresa));
-        const monthStartStr = toCalendarDateStr(monthStart) || getDateKey(monthStart);
-        const monthEndStr = toCalendarDateStr(monthEnd) || getDateKey(monthEnd);
-        const absences: Record<string, Map<string, string>> = {};
-        absSnap.docs.forEach(d => {
-            const data = d.data() as any;
-            if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-            const empId = data.employeeId;
-            if (!empId) return;
-            if (!isActiveAbsence(data)) return;
-            const startStr = toCalendarDateStr(data.startDate);
-            const endStr = toCalendarDateStr(data.endDate);
-            if (!startStr || !endStr) return;
-            const range = validateAbsenceDateRange(startStr, endStr);
-            if (!range.ok) return;
-            if (range.endDate < monthStartStr || range.startDate > monthEndStr) return;
-            const code = inferAbsenceCode(data);
-            if (!absences[empId]) absences[empId] = new Map();
-            iterateCalendarDateRange(range.startDate, range.endDate).forEach((dateStr) => {
-                if (dateStr < monthStartStr || dateStr > monthEndStr) return;
-                const [y, m, day] = dateStr.split('-').map(Number);
-                absences[empId].set(getDateKey(new Date(y, m - 1, day, 12, 0, 0, 0)), code);
-            });
+        await applyPlanificacionPrevMonthTemplate({
+            selectedObjective,
+            currentDate,
+            pendingChanges,
+            daysInMonth,
+            displayedEmployees,
+            shiftsMap,
+            isPlanningDateLocked,
+            setPendingChanges,
+            setPrevMonthLoading,
         });
-        return absences;
     };
 
-    const RRHH_ABSENCE_GRID = new Set(['V', 'L', 'A', 'E', 'AA', 'PG']);
 
-    /** Licencias/ausencias ya visibles en grilla o pendientes (no solo colección ausencias). */
+    const loadAbsencesForRange = async (monthStart: Date, monthEnd: Date) =>
+        loadPlanificacionAbsencesForRange({
+            monthStart,
+            monthEnd,
+            empresaId,
+            scopeEmpresa,
+            migracionCompleta,
+        });
+
     const mergeAbsencesFromLocalGrid = (
         absences: Record<string, Map<string, string>>,
         empIds: string[],
         monthStart: Date,
         monthEnd: Date,
     ) => {
-        const idSet = new Set(empIds);
-        const mergeCell = (empId: string, dateStr: string, code: string) => {
-            if (!idSet.has(empId)) return;
-            const d = new Date(`${dateStr}T12:00:00`);
-            if (d < monthStart || d > monthEnd) return;
-            if (!absences[empId]) absences[empId] = new Map();
-            if (!absences[empId].has(dateStr)) absences[empId].set(dateStr, code);
-        };
-        const scan = (src: Record<string, any>) => {
-            Object.entries(src).forEach(([key, cell]) => {
-                if (!cell || cell.isDeleted) return;
-                if (cell.objectiveId && cell.objectiveId !== selectedObjective) return;
-                const code = String(cell.code || '').toUpperCase();
-                if (!RRHH_ABSENCE_GRID.has(code)) return;
-                const empId = String(cell.employeeId || key.split('_')[0] || '');
-                const dateStr = String(cell.dateStr || key.slice(empId.length + 1) || '');
-                if (!empId || !dateStr) return;
-                mergeCell(empId, dateStr, code);
-            });
-        };
-        scan(shiftsMap);
-        scan(pendingChanges);
-    };
-
-    const bumpAutoV2Progress = async (pct: number, label: string) => {
-        setAutoV2Progress({ pct, label });
-        await new Promise<void>((r) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => r()));
+        mergePlanificacionAbsencesFromLocalGrid({
+            absences,
+            empIds,
+            monthStart,
+            monthEnd,
+            selectedObjective,
+            shiftsMap,
+            pendingChanges,
         });
     };
 
-    /**
-     * Viabilidad del cronograma (motor COSP) antes de generar.
-     */
-    const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> => {
-        if (!selectedObjective) return { ok: false, cycles: [] };
-        if (!positionStructure.length) { toast.error('No hay puestos/SLA configurados para este objetivo'); return { ok: false, cycles: [] }; }
-        if (!planningDotacionEmployees.length) { toast.error('No hay empleados activos en la dotación (REF/ESC no cuentan)'); return { ok: false, cycles: [] }; }
-
-        setAutoV2Loading(true);
-        setAutoV2Progress({ pct: 4, label: 'Iniciando análisis…' });
-        try {
-            const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
-
-            // Cargar ausencias que SOLAPAN con el mes (vacaciones, ART, licencias en curso)
-            const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-            const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
-            await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
-            const absences = await loadAbsencesForRange(monthStart, monthEnd);
-            mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
-            setAutoAbsencesMap(absences);
-
-            // Días V/L/E que el cerebro maneja automáticamente (modo12DaysAuto)
-            const autoModo12AbsDays = new Set<string>();
-            for (const map of Object.values(absences)) {
-                if (!map) continue;
-                map.forEach((code, ds) => { if (['V','L','E'].includes(String(code).toUpperCase())) autoModo12AbsDays.add(ds); });
-            }
-            // Limpiar contingencia manual que solapa con ausencias auto
-            setAutoContingenciaDias(prev => {
-                const next = new Set([...prev].filter(d => !autoModo12AbsDays.has(d)));
-                return next.size !== prev.size ? next : prev;
-            });
-
-            // Acumular cola CCT del mes anterior (26 → fin) por empleado
-            const empMonthlyInitial: Record<string,number> = {};
-            planningDotacionEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
-            const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
-            const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
-            await bumpAutoV2Progress(32, 'Leyendo cola CCT (26 → fin mes anterior)…');
-            const prevTailSnap  = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('startTime', '>=', Timestamp.fromDate(cyclePreStart)),
-                where('startTime', '<=', Timestamp.fromDate(cyclePreEnd))
-            ));
-            prevTailSnap.docs.forEach(d => {
-                const data = d.data() as any;
-                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
-                const empId = data.employeeId; if (!empId) return;
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
-                const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
-                empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
-            });
-
-            // Viabilidad: NO descontar la grilla actual (shiftsMap / pending).
-            // Eso medía "cuánto cupo queda si no sobreescribo", no "si la dotación puede cumplir el SLA".
-            // El generador clásico sí usa ese descuento para recortes; acá solo cola CCT + ausencias.
-
-            const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
-            const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
-            await bumpAutoV2Progress(52, 'Cerebro Auto: esquema, dotación y Modo 12…');
-            await new Promise<void>((r) => setTimeout(r, 0));
-            const v2Pos = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
-            const autoCronogramRulesFeas = resolveCronogramPlanningRules(v2Pos);
-            const autoScheduleProfileFeas = buildObjectiveScheduleProfile(v2Pos);
-            const autoCycleOverride = autoScheduleProfileFeas.cyclePreference[0] ?? '6+2';
-            const brainInput = {
-                positions: positionStructure,
-                employees: planningDotacionEmployees.map((e:any) => ({
-                    id: e.id,
-                    nombre: e.nombre || e.name,
-                    lat: typeof e.lat === 'number' ? e.lat : null,
-                    lng: typeof e.lng === 'number' ? e.lng : null,
-                    preferredObjectiveId: e.preferredObjectiveId,
-                })),
-                daysInMonth,
-                empMonthlyInitial,
-                absences,
-                slaVendidas,
-                budgetMode: autoV2BudgetMode,
-                objectiveId: selectedObjective,
-                objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
-                objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
-                getDayLetter,
-                getDateKey,
-                contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
-                rotateShiftsOverride: autoRotateForce ?? (autoCronogramRulesFeas.generation.allowGlobalRotateShifts ? undefined : false),
-                ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: autoCycleOverride,
-                headcountByPax: resolveObjectiveScheduleFlags(v2Pos).headcountByPax,
-            };
-            autoPlanningBrainInputRef.current = brainInput;
-            const brain = resolveAutoPlanningBrain(brainInput);
-            autoPlanningBrainRef.current = brain;
-            setAutoPlanningBrainReport(brain);
-
-            if (!brain.contingencyOk) {
-                brain.contingencyMessages.forEach(msg => toast.error(msg, { duration: 9000 }));
-                autoV2ReportRef.current = brain.feasibility;
-                setAutoV2Report(brain.feasibility);
-                return { ok: false, cycles: brain.cycles };
-            }
-
-            autoSelectedCyclesRef.current = brain.cycles;
-            setAutoCycles(brain.cycles);
-
-            await bumpAutoV2Progress(72, 'Leyendo demanda SLA del objetivo…');
-            const preflightDays = daysInMonth.map(day => {
-                const dateStr = getDateKey(day);
-                return { dateStr, dayLetter: getDayLetter(dateStr) };
-            });
-            const preflight = buildObjectiveCoveragePreflight({
-                positions: positionStructure,
-                days: preflightDays,
-                employees: planningDotacionEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
-                absences,
-                slaVendidas,
-                cycles: brain.cycles,
-                objectiveId: selectedObjective,
-                isPosActiveOnDay,
-                apretarCronoDays: brain.modo12DaysEngine,
-            });
-            setAutoV2CoveragePreflight(preflight);
-
-            await bumpAutoV2Progress(100, `Esquema ${brain.pickedCycle} · ${brain.staffing.servicioDiarioModo8}+${brain.staffing.poolFrancos} · viabilidad`);
-            await new Promise<void>((r) => setTimeout(r, 150));
-            autoV2ReportRef.current = brain.feasibility;
-            setAutoV2Report(brain.feasibility);
-            if (brain.pickedCycle === '4+2') {
-                toast.warning('Esquema 4+2 (D12/N12): ningún ciclo M/T/N 8h cerró con la dotación actual.', { duration: 8000 });
-            }
-            brain.warnings.forEach(w => toast.message(w, { duration: 6000 }));
-            // Déficit de horas/dotación = advertencia, NO bloqueo. El motor puede generar igual.
-            // Bloqueo duro = no se encontraron ciclos (brain.cycles vacío).
-            return { ok: brain.cycles.length > 0, cycles: brain.cycles };
-        } catch (e:any) {
-            toast.error('Error al analizar viabilidad');
-            console.error('[autoScheduleCOSP]', e);
-            return { ok: false, cycles: [] };
-        } finally {
-            setAutoV2Loading(false);
-            setAutoV2Progress(null);
-        }
-    };
+    /** Viabilidad del cronograma (motor COSP) antes de generar. */
+    const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> =>
+        generatePlanificacionAutoScheduleV2({
+            selectedObjective,
+            positionStructure,
+            planningDotacionEmployees,
+            currentDate,
+            daysInMonth,
+            clients,
+            slaVendidas,
+            autoV2BudgetMode,
+            autoContingenciaDias,
+            autoRotateForce,
+            autoAjustarCrono,
+            loadAbsencesForRange,
+            mergeAbsencesFromLocalGrid,
+            setAutoV2Loading,
+            setAutoV2Progress,
+            setAutoAbsencesMap,
+            setAutoContingenciaDias,
+            setAutoCycles,
+            setAutoV2CoveragePreflight,
+            setAutoV2Report,
+            setAutoPlanningBrainReport,
+            autoPlanningBrainInputRef,
+            autoPlanningBrainRef,
+            autoSelectedCyclesRef,
+            autoV2ReportRef,
+        });
 
     // Flujo completo: detectar esquema → si ok generar; si no ok, mostrar error
     const runFullGeneration = () => {
@@ -8234,976 +5359,97 @@ export default function PlanificacionPage() {
         newChanges: Record<string, any>,
         force = false,
         partOfGenerate = false,
-    ) => {
-        if (!selectedObjective || (!autoV2RunGemini && !force)) {
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        }
-        if (!force && !shouldRunGeminiOptimizeStep(coverage)) {
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        }
-        setAutoV2GeminiLoading(true);
-        try {
-            if (partOfGenerate) {
-                await bumpAutoV2Progress(92, 'Ajuste fino IA (Gemini)…');
-            } else {
-                setAutoV2Progress({ pct: 8, label: 'Ajuste fino IA (Gemini)…' });
-            }
-            const y = currentDate.getFullYear();
-            const m = currentDate.getMonth();
-            const mes = `${y}-${String(m + 1).padStart(2, '0')}`;
-            const cutoff = autoV2ReportRef.current?.metrics?.cctCutoffDay ?? 25;
-            const prevM = m === 0 ? 12 : m;
-            const prevY = m === 0 ? y - 1 : y;
-            const diasBloqueados = daysInMonth.map((d) => getDateKey(d)).filter((ds) => isDateLocked(ds));
-            const plannerContext = buildPlannerContextFromAutoRun({
-                mes,
-                objetivo: getObjectiveName(selectedObjective),
-                objectiveId: selectedObjective,
+    ) =>
+        runPlanificacionAutoV2PlanningAgentGemini(
+            {
+                selectedObjective,
+                autoV2RunGemini,
+                setAutoV2GeminiLoading,
+                setAutoV2Progress,
+                currentDate,
+                autoV2ReportRef,
+                daysInMonth,
+                getObjectiveName,
                 slaVendidas,
-                ctx: verifyCtx,
-                assignments: finalAssignments,
-                stats,
-                diasBloqueados,
-                cicloCCT: {
-                    cortePrev: `${prevY}-${String(prevM).padStart(2, '0')}-26`,
-                    corteActual: `${y}-${String(m + 1).padStart(2, '0')}-${String(cutoff).padStart(2, '0')}`,
-                    descripcion: `Ciclo CCT: 26/${prevM} → ${cutoff}/${m + 1}; control 200h por ciclo`,
-                },
-            });
-            const result = await runPlanningAgentOptimizeStep({
-                plannerContext,
-                empresaId: empresaId || undefined,
-                baseChanges: newChanges,
-                objectiveId: selectedObjective,
-                assignments: finalAssignments,
-                isDateLocked,
-            });
-            setAutoV2GeminiSummary(result.gemini.resumen || null);
-            let assignments = result.assignments;
-            let changes = result.changes;
-            if (result.gemini.correcciones?.length) {
-                toast.info(`Ajuste fino IA: ${result.applied} corrección(es).`, { duration: 6000 });
-            } else if (result.blocked) {
-                toast.warning(result.gemini.razonBloqueo || 'IA: no puede cerrar el cronograma con la dotación actual.', { duration: 8000 });
-            } else {
-                toast.success('IA: cronograma sin cambios adicionales.', { duration: 4000 });
-            }
-            const coverageAfter = verifyScheduleCoverage(verifyCtx, assignments, stats);
-            return { assignments, changes, coverage: coverageAfter };
-        } catch (e: any) {
-            console.error('[planningAgentGemini]', e);
-            const msg = String(e?.message || e?.code || '');
-            if (/deadline-exceeded|timeout|timed out/i.test(msg)) {
-                toast.error(
-                    'Ajuste fino IA: tiempo agotado (~3 min). Se mantiene el cronograma ya generado. Podés desactivar Gemini y re-generar.',
-                    { duration: 10000 },
-                );
-            } else {
-                toast.error(msg || 'Error en ajuste fino IA');
-            }
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        } finally {
-            setAutoV2GeminiLoading(false);
-            if (!partOfGenerate) {
-                setAutoV2Progress(null);
-            }
-        }
-    };
+                empresaId,
+                setAutoV2GeminiSummary,
+            },
+            finalAssignments,
+            coverage,
+            verifyCtx,
+            stats,
+            newChanges,
+            force,
+            partOfGenerate,
+        );
+
 
     /**
      * Genera asignaciones y las vuelca a pendingChanges (motor COSP).
      */
-    const applyAutoScheduleV2 = async (cyclesOverride?: string[]) => {
-        if (!selectedObjective) return;
-        if (!autoV2ReportRef.current) { toast.error('Calculá viabilidad primero'); return; }
-        const cyclesForGen = cyclesOverride ?? autoSelectedCyclesRef.current ?? autoCycles;
-        if (!cyclesForGen.length) { toast.error('No se detectó esquema de ciclo'); return; }
-        setAutoV2Generating(true);
-        setAutoV2Progress({ pct: 4, label: 'Iniciando generación…' });
-        try {
-            const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
+    const applyAutoScheduleV2 = async (cyclesOverride?: string[]) =>
+        applyPlanificacionAutoScheduleV2({
+            selectedObjective,
+            autoV2ReportRef,
+            autoSelectedCyclesRef,
+            autoCycles,
+            setAutoV2Generating,
+            setAutoV2Progress,
+            currentDate,
+            loadAbsencesForRange,
+            mergeAbsencesFromLocalGrid,
+            planningDotacionEmployees,
+            setAutoAbsencesMap,
+            empresaId,
+            scopeEmpresa,
+            migracionCompleta,
+            setAutoContingenciaDias,
+            daysInMonth,
+            setAutoV2CoveragePreflight,
+            positionStructure,
+            slaVendidas,
+            autoPlanningBrainRef,
+            autoContingenciaDias,
+            displayedEmployees,
+            clients,
+            empDefaultPos,
+            empDefaultShift,
+            activeSlaPositionAssignments,
+            activeSlaServiceRotations,
+            activeSlaServiceRules,
+            employees,
+            autoV2BudgetMode,
+            autoRotateForce,
+            autoAjustarCrono,
+            setAutoPlanningBrainReport,
+            lastGenOpeningRef,
+            slaCodeHoursHint,
+            authorizedOver200IdsRef,
+            planningRules,
+            useSixPlusOne,
+            autoCoverAbsences,
+            setAutoCoverageGaps,
+            autoOverwrite,
+            pendingChanges,
+            shiftsMap,
+            setCapOverflowEmps,
+            setOver200AuthChecked,
+            setOver200AuthPin,
+            setOver200AuthError,
+            setAutoV2TrailDiag,
+            setAutoV2GenStats,
+            setAutoV2Coverage,
+            setAutoV2Suggestions,
+            setAutoV2LastRun,
+            runAutoV2PlanningAgentGemini,
+            setAutoV2RebalanceLog,
+            setAutoV2FormReport,
+            setPendingChanges,
+            setAutoGeneratedReady,
+            setAutoWizardStep,
+            setAutoV2Running: () => {},
+        }, cyclesOverride);
 
-            const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-            const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
-            await bumpAutoV2Progress(10, 'Cargando ausencias y licencias del mes…');
-            const absences = await loadAbsencesForRange(monthStart, monthEnd);
-            mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
-            setAutoAbsencesMap(absences);
-
-            let coverageWisdom: PlanningCoverageWisdom | null = null;
-            if (empresaId && selectedObjective) {
-                await bumpAutoV2Progress(14, `Consultando historial operativo (${DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS} meses)…`);
-                const empNames: Record<string, string> = {};
-                planningDotacionEmployees.forEach((e: any) => {
-                    empNames[e.id] = e.nombre || e.name || e.id;
-                });
-                try {
-                    coverageWisdom = await fetchCoverageWisdomHistory({
-                        empresaId,
-                        objectiveId: selectedObjective,
-                        year: currentDate.getFullYear(),
-                        month: currentDate.getMonth() + 1,
-                        lookbackMonths: DEFAULT_COVERAGE_WISDOM_LOOKBACK_MONTHS,
-                        scopeEmpresa,
-                        migracionCompleta,
-                        employeeNames: empNames,
-                        rosterEmployeeIds: new Set(planningDotacionEmployees.map((e: any) => e.id)),
-                    });
-                    if (coverageWisdom.cellsAnalyzed > 0 || coverageWisdom.events.length > 0) {
-                        toast.info(coverageWisdom.summary, { duration: 6000 });
-                    }
-                } catch (wisdomErr) {
-                    console.warn('[auto] fetchCoverageWisdomHistory', wisdomErr);
-                }
-            }
-
-            const autoModo12AbsDays = new Set<string>();
-            for (const map of Object.values(absences)) {
-                if (!map) continue;
-                map.forEach((code, ds) => { if (['V','L','E'].includes(String(code).toUpperCase())) autoModo12AbsDays.add(ds); });
-            }
-            setAutoContingenciaDias(prev => {
-                const next = new Set([...prev].filter(d => !autoModo12AbsDays.has(d)));
-                return next.size !== prev.size ? next : prev;
-            });
-
-            const preflightDays = daysInMonth.map(day => {
-                const dateStr = getDateKey(day);
-                return { dateStr, dayLetter: getDayLetter(dateStr) };
-            });
-            setAutoV2CoveragePreflight(buildObjectiveCoveragePreflight({
-                positions: positionStructure,
-                days: preflightDays,
-                employees: planningDotacionEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
-                absences,
-                slaVendidas,
-                cycles: cyclesForGen,
-                objectiveId: selectedObjective,
-                isPosActiveOnDay,
-                apretarCronoDays: autoPlanningBrainRef.current?.modo12DaysEngine ?? [...autoContingenciaDias],
-            }));
-
-            const empMonthlyInitial: Record<string,number> = {};
-            displayedEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
-            const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
-            const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
-            await bumpAutoV2Progress(24, 'Leyendo cola CCT (26 → fin mes anterior)…');
-            const prevTailSnap  = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('startTime', '>=', Timestamp.fromDate(cyclePreStart)),
-                where('startTime', '<=', Timestamp.fromDate(cyclePreEnd))
-            ));
-            prevTailSnap.docs.forEach(d => {
-                const data = d.data() as any;
-                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
-                const empId = data.employeeId; if (!empId) return;
-                if (OBJECTIVE_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
-                const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
-                empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
-            });
-
-            // ── Racha del mes anterior: calcula la fase de ciclo correcta para el día 1 ──
-            // Consultamos los últimos 10 días del mes anterior (cubre 6+2 y 4+2).
-            // Sin esto el motor asigna offsets ficticios y genera hasta 9 días seguidos (ej. trabajó
-            // mayo 29-31 y el motor arranca el ciclo desde el día 1 de junio sin saberlo).
-            const prevMonthEndDate = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0); // último día mes anterior
-            const trailLookbackStart = new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), Math.max(1, prevMonthEndDate.getDate() - 9));
-            const prevTrailSnap = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('startTime', '>=', Timestamp.fromDate(trailLookbackStart)),
-                where('startTime', '<=', Timestamp.fromDate(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), prevMonthEndDate.getDate(), 23, 59, 59)))
-            ));
-            const prevTrailByEmp: Record<string, Record<string, string>> = {};
-            const FRANCO_CODES_SET = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG']);
-            prevTrailSnap.docs.forEach(d => {
-                const data = d.data() as any;
-                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
-                if (!data.employeeId || !data.startTime) return;
-                const dt: Date = (data.startTime as Timestamp).toDate();
-                const dateStr = getDateKey(dt);
-                const code = String(data.code || '').toUpperCase();
-                if (!prevTrailByEmp[data.employeeId]) prevTrailByEmp[data.employeeId] = {};
-                prevTrailByEmp[data.employeeId][dateStr] = code;
-            });
-            const prevMonthTrailingWorkDays: Record<string, number> = {};
-            const prevMonthTrailingRestDays: Record<string, number> = {};
-            const prevMonthLastShiftByEmp: Record<string, string> = {};
-            const prevMonthLastWorkBandBeforeRest: Record<string, string> = {};
-            const lastDayStr = getDateKey(prevMonthEndDate);
-            displayedEmployees.forEach((emp: any) => {
-                const empShifts = prevTrailByEmp[emp.id] || {};
-                const lastCode = empShifts[lastDayStr];
-                if (!lastCode) return; // sin datos, el motor usará offset distribuido
-                // RET es día de trabajo en el ciclo CCT — contar como trabajo y buscar banda real
-                if (lastCode === 'RET') {
-                    prevMonthLastShiftByEmp[emp.id] = 'RET';
-                    let workCount = 1;
-                    let foundBand: string | null = null;
-                    let consGap = 0;
-                    for (let d = prevMonthEndDate.getDate() - 1; d >= 1; d--) {
-                        const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
-                        const c = empShifts[ds];
-                        if (!c) {
-                            consGap++;
-                            if (consGap > 1) break;
-                            workCount++;
-                            continue;
-                        }
-                        consGap = 0;
-                        if (FRANCO_CODES_SET.has(c)) break;
-                        if (c !== 'RET' && !foundBand) foundBand = c;
-                        workCount++;
-                    }
-                    prevMonthTrailingWorkDays[emp.id] = workCount;
-                    prevMonthTrailingRestDays[emp.id] = 0;
-                    if (foundBand) prevMonthLastWorkBandBeforeRest[emp.id] = foundBand;
-                    return;
-                }
-                prevMonthLastShiftByEmp[emp.id] = lastCode;
-                if (FRANCO_CODES_SET.has(lastCode)) {
-                    for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
-                        const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
-                        const c = empShifts[ds];
-                        if (!c) break;
-                        if (!FRANCO_CODES_SET.has(c)) {
-                            prevMonthLastWorkBandBeforeRest[emp.id] = c;
-                            break;
-                        }
-                    }
-                }
-                const isFrancoLast = FRANCO_CODES_SET.has(lastCode);
-                let count = 0;
-                let consecutiveMissing = 0;
-                for (let d = prevMonthEndDate.getDate(); d >= 1; d--) {
-                    const ds = getDateKey(new Date(prevMonthEndDate.getFullYear(), prevMonthEndDate.getMonth(), d));
-                    const c = empShifts[ds];
-                    if (!c) {
-                        // Día sin datos: probable RET en otro objetivo — puente de hasta 1 día consecutivo
-                        consecutiveMissing++;
-                        if (consecutiveMissing > 1) break;
-                        count++;
-                        continue;
-                    }
-                    consecutiveMissing = 0;
-                    const isFranco = FRANCO_CODES_SET.has(c);
-                    if (isFrancoLast && isFranco) { count++; }
-                    else if (!isFrancoLast && !isFranco) { count++; }
-                    else break;
-                }
-                if (isFrancoLast) prevMonthTrailingRestDays[emp.id] = count;
-                else prevMonthTrailingWorkDays[emp.id] = count;
-            });
-
-            const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
-            const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
-            const defaultPositionByEmp: Record<string,string> = {};
-            const defaultShiftByEmp: Record<string,string> = {};
-            const plannerGridPositionByEmp: Record<string, string> = {};
-            displayedEmployees.forEach((e:any) => {
-                const pos = empDefaultPos[`${e.id}___${selectedObjective}`];
-                if (pos) {
-                    defaultPositionByEmp[e.id] = pos;
-                    plannerGridPositionByEmp[e.id] = pos;
-                }
-                const shift = empDefaultShift[`${e.id}___${selectedObjective}`];
-                if (shift) defaultShiftByEmp[e.id] = shift;
-            });
-
-            const rosterIdsForSeed = new Set(displayedEmployees.map((e: any) => e.id));
-            const prevMonthCal = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
-            if (empresaId && selectedObjective && rosterIdsForSeed.size > 0) {
-                try {
-                    const prevMonthCells = await fetchPlanningMonthShifts({
-                        empresaId,
-                        objectiveId: selectedObjective,
-                        year: prevMonthCal.getFullYear(),
-                        month: prevMonthCal.getMonth() + 1,
-                        scopeEmpresa,
-                        migracionCompleta,
-                        publishedOnly: true,
-                    });
-                    const prevDom = dominantDotacionFromPlanningCells(
-                        prevMonthCells,
-                        selectedObjective,
-                        rosterIdsForSeed,
-                    );
-                    let posFromPrev = 0;
-                    let bandFromPrev = 0;
-                    for (const [empId, pos] of Object.entries(prevDom.positionByEmp)) {
-                        if (!defaultPositionByEmp[empId]) {
-                            defaultPositionByEmp[empId] = pos;
-                            posFromPrev++;
-                        }
-                    }
-                    for (const [empId, band] of Object.entries(prevDom.shiftByEmp)) {
-                        if (!defaultShiftByEmp[empId]) {
-                            defaultShiftByEmp[empId] = band;
-                            bandFromPrev++;
-                        }
-                    }
-                    if (posFromPrev > 0 || bandFromPrev > 0) {
-                        const prevLabel = `${String(prevMonthCal.getMonth() + 1).padStart(2, '0')}/${prevMonthCal.getFullYear()}`;
-                        toast.info(
-                            `Dotación base desde crono publicado ${prevLabel}: ${posFromPrev} puesto(s), ${bandFromPrev} banda(s).`,
-                            { duration: 7000 },
-                        );
-                    }
-                } catch (seedErr) {
-                    console.warn('[auto] seed dotacion mes anterior', seedErr);
-                }
-            }
-
-            applySlaContractDotacion({
-                positionAssignments: activeSlaPositionAssignments ?? undefined,
-                defaultPositionByEmp,
-                defaultShiftByEmp,
-            });
-            const slaRotationByDate = buildSlaRotationByDate(
-                activeSlaServiceRotations,
-                daysInMonth.map((d) => getDateKey(d)),
-                positionStructure,
-            );
-            const v2PosGen = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
-            const cronogramRules = resolveCronogramPlanningRules(v2PosGen);
-            // Flotantes de empresa: empleados activos sin objetivo asignado.
-            // El motor V3 los usa como refuerzo (Fase 3) cuando quedan slots sin cubrir
-            // tras los regulares y los FLEX del objetivo en curso.
-            const displayedIds = new Set(displayedEmployees.map((e: any) => e.id));
-            const globalRetPool = employees
-                .filter((e: any) =>
-                    e.status !== 'inactivo' &&
-                    !displayedIds.has(e.id) &&
-                    (!e.preferredObjectiveId || e.preferredObjectiveId === '')
-                )
-                .map((e: any) => ({ id: e.id, nombre: e.nombre || e.name }));
-
-            const objectiveScheduleFlags = resolveObjectiveScheduleFlags(positionStructure);
-
-            const genBrain = autoPlanningBrainRef.current ?? resolveAutoPlanningBrain({
-                positions: positionStructure,
-                employees: planningDotacionEmployees.map((e:any) => ({
-                    id: e.id,
-                    nombre: e.nombre || e.name,
-                    lat: typeof e.lat === 'number' ? e.lat : null,
-                    lng: typeof e.lng === 'number' ? e.lng : null,
-                    preferredObjectiveId: e.preferredObjectiveId,
-                })),
-                daysInMonth,
-                empMonthlyInitial,
-                absences,
-                slaVendidas,
-                budgetMode: autoV2BudgetMode,
-                objectiveId: selectedObjective,
-                objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
-                objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
-                getDayLetter,
-                getDateKey,
-                contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
-                rotateShiftsOverride: autoRotateForce ?? (cronogramRules.generation.allowGlobalRotateShifts ? undefined : false),
-                ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: buildObjectiveScheduleProfile(v2PosGen).cyclePreference[0] ?? '6+2',
-                headcountByPax: objectiveScheduleFlags.headcountByPax,
-            });
-            for (const padEmp of genBrain.dotacionPadding?.added ?? []) {
-                empMonthlyInitial[padEmp.id] = 0;
-                if (!absences[padEmp.id]) absences[padEmp.id] = new Map();
-            }
-            autoPlanningBrainRef.current = genBrain;
-            setAutoPlanningBrainReport(genBrain);
-            if (!genBrain.contingencyOk) {
-                toast.error(genBrain.contingencyMessages[0] || 'Contingencia no viable');
-                setAutoV2Generating(false);
-                setAutoV2Progress(null);
-                return;
-            }
-
-            // Si el mes anterior fue generado en esta sesión (no publicado), usar sus slots para continuar el ciclo.
-            const prevMonthGenKey = lastGenOpeningRef.current;
-            const isPrevMonthGen = prevMonthGenKey !== null
-                && prevMonthGenKey.objectiveId === selectedObjective
-                && prevMonthGenKey.year === prevMonthEndDate.getFullYear()
-                && prevMonthGenKey.month === prevMonthEndDate.getMonth();
-
-            const serviceExcludedDates = [...new Set(
-                (positionStructure as any[]).flatMap((p: any) => p.excludedDates || []),
-            )] as string[];
-
-            const baseGenCtx = {
-                positions: positionStructure,
-                employees: (genBrain.effectiveEmployees?.length
-                    ? genBrain.effectiveEmployees
-                    : planningDotacionEmployees.map((e:any) => ({
-                        id: e.id,
-                        nombre: e.nombre || e.name,
-                        lat: typeof e.lat === 'number' ? e.lat : null,
-                        lng: typeof e.lng === 'number' ? e.lng : null,
-                        preferredObjectiveId: e.preferredObjectiveId ?? selectedObjective,
-                    }))),
-                daysInMonth,
-                calendarDaysInMonth: daysInMonth,
-                serviceExcludedDates,
-                empMonthlyInitial,
-                absences,
-                slaVendidas,
-                autoCycles: cyclesForGen,
-                budgetMode: autoV2BudgetMode,
-                objectiveId: selectedObjective,
-                objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
-                objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
-                defaultPositionByEmp,
-                defaultShiftByEmp,
-                getDayLetter,
-                getDateKey,
-                rotateShifts: genBrain.rotateShifts,
-                codeHoursHint: slaCodeHoursHint,
-                ajustarCrono: genBrain.ajustarCrono,
-                modo12Days: genBrain.modo12DaysEngine,
-                contingencyApretarDays: genBrain.contingencyOk ? genBrain.contingencyDaysManual : [],
-                apretarCronoDays: genBrain.modo12DaysEngine,
-                prevMonthTrailingWorkDays,
-                prevMonthTrailingRestDays,
-                prevMonthLastShiftByEmp,
-                prevMonthLastWorkBandBeforeRest,
-                prevMonthOpeningSlotByEmp: isPrevMonthGen ? prevMonthGenKey!.openingSlotByEmp : undefined,
-                prevMonthDaysCount: isPrevMonthGen ? prevMonthGenKey!.daysCount : undefined,
-                globalRetPool,
-                strictSixTwo: genBrain.strictSixTwo,
-                noFlexSchemeEmployees: true,
-                authorizedOver200Ids: authorizedOver200IdsRef.current.size > 0 ? authorizedOver200IdsRef.current : undefined,
-                cctMaxBillableHours: planningRules.cctMaxBillableHours,
-                targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
-                headcountByPax: objectiveScheduleFlags.headcountByPax,
-                schedulePhasedRotativeFirst: objectiveScheduleFlags.schedulePhasedRotativeFirst,
-                preserveRotativeIntegrity: objectiveScheduleFlags.preserveRotativeIntegrity,
-                allowCustom24hsBackup: objectiveScheduleFlags.allowCustom24hsBackup,
-                cronogramRules,
-                coverageWisdom,
-                plannerGridPositionByEmp,
-                positionAssignmentsByEmp: buildPositionAssignmentsByEmp(activeSlaPositionAssignments),
-                serviceRules: activeSlaServiceRules ?? undefined,
-                serviceRotations: activeSlaServiceRotations ?? undefined,
-                ...(slaRotationByDate ? { slaRotationByDate } : {}),
-            } as import('@/lib/planificacion/autoScheduleEngineV2').V2EngineContext;
-
-            const genRoutePreview = resolvePlanningGenerationRoute(baseGenCtx, {
-                strictSixTwo: genBrain.strictSixTwo === true,
-                preferSixPlusOne: useSixPlusOne,
-            });
-            await bumpAutoV2Progress(40, `Generando cronograma (motor v${PLANNING_ENGINE_VERSION} · ${genRoutePreview.labelEs})…`);
-            await new Promise<void>((r) => setTimeout(r, 0));
-
-            let gen: import('@/lib/planificacion/autoScheduleEngineV2').V2GenerateResult;
-            let genCtx: typeof baseGenCtx;
-            try {
-                const runGen = runPlanningGeneration(baseGenCtx, {
-                    strictSixTwo: genBrain.strictSixTwo === true,
-                    preferSixPlusOne: useSixPlusOne,
-                });
-                gen = runGen.generation;
-                genCtx = runGen.genCtx;
-                if (runGen.prepareWarnings.length > 0) {
-                    toast.message(runGen.prepareWarnings.join(' '), { duration: 8000 });
-                }
-            } catch (planErr) {
-                await bumpAutoV2Progress(100, 'Error al generar');
-                toast.error(planErr instanceof Error ? planErr.message : 'Error al generar cronograma', { duration: 12000 });
-                setAutoWizardStep('sla_open');
-                setAutoV2Running(false);
-                return;
-            }
-
-            const useFloaterPipeline = genRoutePreview.postProcessPipeline === 'fixedBandFloater';
-
-            // Guardar slots de apertura para que el siguiente mes pueda continuar el ciclo exactamente.
-            if (gen.stats.openingSlotByEmp) {
-                lastGenOpeningRef.current = {
-                    year: currentDate.getFullYear(),
-                    month: currentDate.getMonth(),
-                    objectiveId: selectedObjective,
-                    openingSlotByEmp: gen.stats.openingSlotByEmp,
-                    daysCount: daysInMonth.length,
-                };
-            }
-            // Diagnóstico de racha: trailing mes anterior + apertura mes generado por colaborador.
-            {
-                const _db = (s: number) => { const n=((s%24)+24)%24; if(n<=5)return'M'; if(n<=7)return'F'; if(n<=13)return'T'; if(n<=15)return'F'; if(n<=21)return'N'; return'F'; };
-                const _dtf = (s: number) => { for(let d=0;d<24;d++){if(_db(s+d)==='F')return d;} return 0; };
-                setAutoV2TrailDiag(displayedEmployees.map((emp: any) => {
-                    const slot = gen.stats.openingSlotByEmp?.[emp.id];
-                    const posName = defaultPositionByEmp[emp.id] ?? '—';
-                    const posData = (positionStructure as any[]).find((p: any) => p.positionName === posName);
-                    return {
-                        id: emp.id,
-                        nombre: (emp.nombre || emp.name || '').slice(0, 24),
-                        puesto: posName,
-                        puestoQty: Math.max(1, Number(posData?.qty) || 1),
-                        lastBand: prevMonthLastShiftByEmp[emp.id] ?? '—',
-                        trailWork: prevMonthTrailingWorkDays[emp.id] ?? 0,
-                        trailRest: prevMonthTrailingRestDays[emp.id] ?? 0,
-                        julioSlot: slot,
-                        julioBand: slot !== undefined ? _db(slot) : undefined,
-                        diasFranco: slot !== undefined ? _dtf(slot) : undefined,
-                    };
-                }));
-            }
-
-            // Análisis de cobertura de ausencias pre-declaradas (V/L/E/A/PG)
-            // Siempre se analiza cuando el pipeline floater está disponible (para detectar francos
-            // naturales incluidos en licencias y candidatos FT). La asignación solo modifica
-            // el schedule si autoCoverAbsences está activo.
-            let finalGenAssignments = gen.assignments;
-            if (useFloaterPipeline && gen.stats.openingSlotByEmp) {
-                await bumpAutoV2Progress(50, 'Analizando cobertura de ausencias…');
-                const covResult = applyAbsenceCoverage(
-                    gen.assignments,
-                    genCtx,
-                    gen.stats.openingSlotByEmp,
-                );
-
-                // Enriquecer gaps con nombres (los ftCandidates ya vienen del motor)
-                const empNameMap: Record<string, string> = {};
-                planningDotacionEmployees.forEach((e: any) => { empNameMap[e.id] = e.nombre || e.name || e.id; });
-
-                const enrichedGaps = covResult.gaps.map(g => ({
-                    ...g,
-                    absentName: empNameMap[g.absentEmpId] || g.absentEmpId,
-                    coveredByName: g.coveredBy ? (empNameMap[g.coveredBy] || g.coveredBy) : undefined,
-                    ftCandidates: g.ftCandidates?.map(c => ({
-                        ...c,
-                        nombre: empNameMap[c.empId] || c.empId,
-                    })),
-                }));
-
-                setAutoCoverageGaps(enrichedGaps);
-
-                if (autoCoverAbsences) {
-                    finalGenAssignments = covResult.assignments;
-                    if (covResult.gaps.length > 0) {
-                        const stCount  = covResult.gaps.filter(g => g.coverageType === 'sin_turno').length;
-                        const retCount = covResult.gaps.filter(g => g.coverageType === 'ret').length;
-                        const escCount = covResult.gaps.filter(g => g.coverageType === 'esc').length;
-                        const msgs: string[] = [];
-                        if (stCount > 0)  msgs.push(`${stCount} ST`);
-                        if (retCount > 0) msgs.push(`${retCount} RET`);
-                        if (escCount > 0) msgs.push(`${escCount} ESC`);
-                        if (covResult.ftRequiredCount > 0) msgs.push(`${covResult.ftRequiredCount} requieren FT manual`);
-                        if (msgs.length > 0) toast.success(`Cobertura automática: ${msgs.join(' · ')}`, { duration: 6000 });
-                    }
-                }
-            } else {
-                setAutoCoverageGaps([]);
-            }
-
-            finalGenAssignments = applyServiceExcludedDays(finalGenAssignments, genCtx);
-
-            await bumpAutoV2Progress(58, 'Verificando cobertura…');
-            // Volcamos a pendingChanges tras verificar; si SLA abierto = vista previa diagnóstica.
-            const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
-            let written = 0;
-            let skipped = 0;
-            for (const a of finalGenAssignments) {
-                const primaryKey = `${a.empId}_${a.dateStr}`;
-                const key = a.isSecondBlock ? `${primaryKey}_B2` : primaryKey;
-                // No se bloquean días pasados en auto-generación: el borrador planifica el mes completo.
-                // isDateLocked aplica solo a edición manual, no al motor automático.
-                // Para bloques secundarios, verificar también si el primario fue omitido.
-                if (!autoOverwrite && (pendingChanges[primaryKey] || shiftsMap[primaryKey])) { skipped++; continue; }
-                newChanges[key] = {
-                    isTemp: true,
-                    employeeId: a.empId,
-                    objectiveId: selectedObjective,
-                    positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
-                    code: a.code,
-                    name: a.name,
-                    hours: a.hours,
-                    startTime: a.startTime,
-                    ...(a.endTime ? { endTime: a.endTime } : {}),
-                    ...(a.isFranco ? { isFranco: true } : {}),
-                    ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
-                    ...(a.isSecondBlock ? { isSecondBlock: true } : {}),
-                };
-                if (!a.isSecondBlock) written++;
-            }
-
-            // Si hay slots que solo podrían cubrirse superando las 200h → guardar para panel de autorización
-            if (gen.capOverflowSlots.length > 0) {
-                const overSlots = gen.capOverflowSlots;
-                const seenIds = new Set<string>();
-                const overEmps: { empId: string; nombre: string }[] = [];
-                for (const s of overSlots) {
-                    if (seenIds.has(s.empId)) continue;
-                    seenIds.add(s.empId);
-                    const emp = displayedEmployees.find((e: any) => e.id === s.empId);
-                    overEmps.push({ empId: s.empId, nombre: emp?.nombre || emp?.name || s.empId });
-                }
-                setCapOverflowEmps(overEmps);
-                // Pre-marcar todos como chequeados
-                const checked: Record<string, boolean> = {};
-                overEmps.forEach(e => { checked[e.empId] = true; });
-                setOver200AuthChecked(checked);
-                setOver200AuthPin('');
-                setOver200AuthError('');
-            }
-            // Guardamos las stats post-generación para el panel "Capacidad CCT" (tras verify si pipeline ciclo)
-            await bumpAutoV2Progress(78, 'Verificando cobertura y reglas (descansos, licencias)…');
-            // ── Verificación de cobertura (slots, descansos, licencias, >200h) ──
-            const verifyCtx = {
-                positions: positionStructure,
-                employees: planningDotacionEmployees.map((e:any) => ({ id: e.id, nombre: e.nombre || e.name })),
-                daysInMonth,
-                empMonthlyInitial,
-                absences,
-                slaVendidas,
-                autoCycles: cyclesForGen,
-                getDayLetter,
-                getDateKey,
-                prevMonthTrailingWorkDays,
-                prevMonthTrailingRestDays,
-                prevMonthLastShiftByEmp,
-                cctMaxBillableHours: planningRules.cctMaxBillableHours,
-                targetAvgHoursPerEmployee: planningRules.targetAvgHoursPerEmployee,
-                objectiveId: selectedObjective,
-                coverageWisdom,
-            } as any;
-            let finalAssignments = gen.assignments;
-            let coverage = strictPipeline?.verification
-                ?? verifyScheduleCoverage(verifyCtx, finalAssignments, gen.stats);
-
-            setAutoV2GenStats({
-                employeeMonthlyHours: gen.stats.employeeMonthlyHours,
-                employeeCycleHours: gen.stats.employeeCycleHours,
-                targetHours: gen.stats.targetHours,
-                totalBillableHours: useFloaterPipeline
-                    ? (coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours)
-                    : gen.stats.totalBillableHours,
-                uncoveredSlots: useFloaterPipeline
-                    ? coverage.coverage.uncoveredSlots
-                    : (gen.stats.uncoveredSlots ?? 0),
-                idleEmployeeIds: gen.stats.idleEmployeeIds,
-                strandedEmployeeIds: gen.stats.strandedEmployeeIds,
-                relocatedEmployeeIds: gen.stats.relocatedEmployeeIds,
-                primaryShiftByEmp: gen.stats.primaryShiftByEmp,
-                positionGroups: gen.stats.positionGroups,
-                employeeRetCount: gen.stats.employeeRetCount,
-                employeeRetHoursPotential: gen.stats.employeeRetHoursPotential,
-                totalRetCount: gen.stats.totalRetCount,
-                totalRetHoursPotential: gen.stats.totalRetHoursPotential,
-                overCoverageRetDays: gen.stats.overCoverageRetDays,
-                maxRetConcurrent: gen.stats.maxRetConcurrent,
-                ajustarCrono: gen.stats.ajustarCrono,
-                apretarCronoDays: gen.stats.apretarCronoDays,
-                uncoveredSlotsByDay: gen.stats.uncoveredSlotsByDay,
-                excessPositionEmployees: gen.stats.excessPositionEmployees,
-                slaDeficitRemaining: useFloaterPipeline
-                    ? Math.max(0, Math.round((slaVendidas - (coverage.hours?.billableHoursGenerated ?? 0)) * 10) / 10)
-                    : gen.stats.slaDeficitRemaining,
-                slaHoursClosed: useFloaterPipeline
-                    ? coverage.coverage.uncoveredSlots <= 0
-                        && (slaVendidas <= 0 || (coverage.hours?.billableHoursGenerated ?? 0) >= slaVendidas - 0.5)
-                    : gen.stats.slaHoursClosed,
-            });
-
-            // ── Auto-reproceso: solo en flujo legacy (demanda + parches). Etapa A+B: verify puro. ──
-            const NON_BILLABLE_FIX = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
-            const countIssues = (r: typeof coverage) =>
-                r.coverage.uncoveredSlots + r.restViolations.length + r.licenseConflicts.length;
-
-            let prevIssues = countIssues(coverage);
-            const MAX_REPRO_PASSES = !useFloaterPipeline && coverage.coverage.uncoveredSlots > 0 ? 5 : 0;
-            for (let pass = 0; pass < MAX_REPRO_PASSES && prevIssues > 0; pass++) {
-                await bumpAutoV2Progress(
-                    Math.min(97, 88 + pass * 2),
-                    `Reprocesando (${pass + 1}/${MAX_REPRO_PASSES})…`,
-                );
-                await new Promise<void>((r) => setTimeout(r, 0));
-
-                const fixResult = fixScheduleIssues(verifyCtx, finalAssignments, gen.stats, coverage, 5);
-                finalAssignments = fixResult.assignments;
-                coverage = fixResult.report;
-
-                for (const a of fixResult.assignments) {
-                    const primaryKey = `${a.empId}_${a.dateStr}`;
-                    const key = a.isSecondBlock ? `${primaryKey}_B2` : primaryKey;
-                    const existing = newChanges[key];
-                    if (existing && !existing.isDeleted
-                        && !NON_BILLABLE_FIX.has(String(existing.code || '').toUpperCase())
-                        && NON_BILLABLE_FIX.has(String(a.code || '').toUpperCase())) continue;
-                    newChanges[key] = {
-                        isTemp: true,
-                        employeeId: a.empId,
-                        objectiveId: selectedObjective,
-                        positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
-                        code: a.code,
-                        name: a.name,
-                        hours: a.hours,
-                        startTime: a.startTime,
-                        ...(a.endTime ? { endTime: a.endTime } : {}),
-                        ...(a.isFranco ? { isFranco: true } : {}),
-                        ...(a.isReten ? { isReten: true } : {}),
-                        ...(a.shiftGroupId ? { shiftGroupId: a.shiftGroupId } : {}),
-                        ...(a.isSecondBlock ? { isSecondBlock: true } : {}),
-                    };
-                }
-                // No volcar a grilla hasta confirmar SLA cerrado (ver más abajo).
-
-                const newIssues = countIssues(coverage);
-                if (newIssues >= prevIssues) break; // sin progreso: detener
-                prevIssues = newIssues;
-            }
-
-            setAutoV2Coverage(coverage);
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, gen.stats));
-            setAutoV2LastRun({ assignments: finalAssignments, stats: gen.stats, ctx: verifyCtx });
-
-            let finalChanges = newChanges;
-            if (!useFloaterPipeline) {
-                const geminiOut = await runAutoV2PlanningAgentGemini(
-                    finalAssignments,
-                    coverage,
-                    verifyCtx,
-                    gen.stats,
-                    newChanges,
-                    false,
-                    true,
-                );
-                finalAssignments = geminiOut.assignments;
-                coverage = geminiOut.coverage;
-                finalChanges = { ...geminiOut.changes };
-            }
-
-            let formReport = verifyScheduleForm(verifyCtx, finalAssignments, gen.stats, {
-                strictSixTwo: genBrain.strictSixTwo,
-                rotateShifts: genBrain.rotateShifts,
-            });
-            setAutoV2RebalanceLog([]);
-
-            const verifiedBillable = coverage.hours?.billableHoursGenerated ?? gen.stats.totalBillableHours;
-            const verifiedUncovered = coverage.coverage.uncoveredSlots;
-            const policyBalanceForClosure = analyzeCoveragePolicyBalance(verifyCtx, finalAssignments, {
-                inferModo12TCoverage: true,
-            });
-            const scheduleClosureGate = evaluateScheduleClosure(coverage, policyBalanceForClosure);
-            const hrsDeficit = slaVendidas > 0
-                ? Math.max(0, Math.round((slaVendidas - verifiedBillable) * 10) / 10)
-                : 0;
-            const slaClosed = scheduleClosureGate.ok;
-
-            let statsAfterForm = gen.stats;
-            const hourFormIssues = formReport.metrics.hoursSpread > 24
-                || formReport.metrics.over192Count > 0
-                || formReport.metrics.over200Count > 0
-                || formReport.metrics.under168Count > 0;
-            if (!useFloaterPipeline && slaClosed && hourFormIssues) {
-                await bumpAutoV2Progress(94, 'Rebalanceando forma (swaps horas)…');
-                await new Promise<void>((r) => setTimeout(r, 0));
-                const reb = rebalanceScheduleForm(verifyCtx, finalAssignments, statsAfterForm, coverage, {
-                    strictSixTwo: genBrain.strictSixTwo,
-                    rotateShifts: genBrain.rotateShifts,
-                });
-                if (reb.improved && reb.swapsApplied > 0) {
-                    finalAssignments = reb.assignments;
-                    coverage = reb.coverageReport;
-                    formReport = reb.formReport;
-                    statsAfterForm = reb.stats;
-                    setAutoV2RebalanceLog(reb.log);
-                    const touched = new Set<string>();
-                    for (const entry of reb.log) {
-                        touched.add(`${entry.fromEmpId}__${entry.dateStr}`);
-                        touched.add(`${entry.toEmpId}__${entry.dateStr}`);
-                    }
-                    for (const touchKey of touched) {
-                        const sep = touchKey.indexOf('__');
-                        const empId = touchKey.slice(0, sep);
-                        const dateStr = touchKey.slice(sep + 2);
-                        const a = finalAssignments.find(x => x.empId === empId && x.dateStr === dateStr);
-                        if (!a) continue;
-                        finalChanges[`${empId}_${dateStr}`] = {
-                            isTemp: true,
-                            employeeId: empId,
-                            objectiveId: selectedObjective,
-                            positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
-                            code: a.code,
-                            name: a.name,
-                            hours: a.hours,
-                            startTime: a.startTime,
-                            ...(a.endTime ? { endTime: a.endTime } : {}),
-                            ...(a.isFranco ? { isFranco: true } : {}),
-                            ...(a.isReten ? { isReten: true } : {}),
-                        };
-                    }
-                    setAutoV2GenStats((prev) => prev ? {
-                        ...prev,
-                        employeeMonthlyHours: reb.stats.employeeMonthlyHours,
-                    } : prev);
-                }
-            }
-            setAutoV2FormReport(formReport);
-
-            const verifiedBillableFinal = coverage.hours?.billableHoursGenerated ?? statsAfterForm.totalBillableHours;
-            const verifiedUncoveredFinal = coverage.coverage.uncoveredSlots;
-
-            let gridBillableHours = 0;
-            displayedEmployees.forEach((emp: any) => {
-                daysInMonth.forEach((day) => {
-                    const key = `${emp.id}_${getDateKey(day)}`;
-                    const pending = finalChanges[key];
-                    const existing = shiftsMap[key];
-                    const activeShift = pending && !pending.isDeleted ? pending : existing;
-                    if (!activeShift || activeShift.isDeleted) return;
-                    if (pending && !pending.isDeleted) {
-                        if (selectedObjective && activeShift.objectiveId != null && activeShift.objectiveId !== ''
-                            && String(activeShift.objectiveId) !== String(selectedObjective)) return;
-                    } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
-                    if (OBJECTIVE_NON_BILLABLE_CODES.has(String(activeShift.code || '').toUpperCase())) return;
-                    gridBillableHours += calcShiftHours(activeShift, slaCodeHoursHint);
-                });
-            });
-
-            setAutoV2GenStats((prev) => prev ? {
-                ...prev,
-                totalBillableHours: verifiedBillableFinal,
-                gridBillableHours,
-                cellsSkippedOverwrite: skipped,
-                uncoveredSlots: verifiedUncoveredFinal,
-                slaDeficitRemaining: hrsDeficit,
-                slaHoursClosed: slaClosed,
-            } : prev);
-            setAutoV2Coverage(coverage);
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(verifyCtx, finalAssignments, statsAfterForm));
-            setAutoV2LastRun({ assignments: finalAssignments, stats: statsAfterForm, ctx: verifyCtx });
-
-            // Vista previa en grilla siempre (aunque el SLA quede abierto) para poder diagnosticar.
-            setPendingChanges(finalChanges);
-            setAutoGeneratedReady(true);
-
-            await bumpAutoV2Progress(100, slaClosed ? 'Listo' : 'SLA sin cerrar — vista previa');
-            await new Promise<void>((r) => setTimeout(r, 180));
-
-            if (empresaId && selectedObjective && positionStructure.length > 0) {
-                const prevMonthCal = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 1);
-                const compareDays = daysInMonth.map((day) => {
-                    const dateStr = getDateKey(day);
-                    return { dateStr, dayLetter: getDayLetter(dateStr) };
-                });
-                try {
-                    const prevPublished = await fetchPlanningMonthShifts({
-                        empresaId,
-                        objectiveId: selectedObjective,
-                        year: prevMonthCal.getFullYear(),
-                        month: prevMonthCal.getMonth() + 1,
-                        scopeEmpresa,
-                        migracionCompleta,
-                        publishedOnly: true,
-                    });
-                    if (prevPublished.length > 0) {
-                        const generatedCells = finalAssignments
-                            .filter((a) => (a.hours ?? 0) > 0 && a.positionName && a.code)
-                            .map((a) => ({
-                                id: `${a.empId}_${a.dateStr}`,
-                                employeeId: a.empId,
-                                objectiveId: selectedObjective,
-                                dateStr: a.dateStr,
-                                code: String(a.code || '').toUpperCase(),
-                                positionName: a.positionName,
-                            }));
-                        const monthCmp = compareObjectiveMonthSchedules(
-                            {
-                                objectiveId: selectedObjective,
-                                positions: positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[],
-                                days: compareDays,
-                                cells: prevPublished,
-                                cycles: cyclesForGen,
-                            },
-                            {
-                                objectiveId: selectedObjective,
-                                positions: positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[],
-                                days: compareDays,
-                                cells: generatedCells,
-                                cycles: cyclesForGen,
-                            },
-                        );
-                        const prevLabel = `${String(prevMonthCal.getMonth() + 1).padStart(2, '0')}/${prevMonthCal.getFullYear()}`;
-                        const gapDays = monthCmp.daysWithGapsInCompareOnly.length;
-                        if (gapDays > 0) {
-                            toast.warning(
-                                `vs crono publicado ${prevLabel}: ${gapDays} día(s) con huecos · referencia ${monthCmp.reference.daysFull} día(s) OK`,
-                                { duration: 11000 },
-                            );
-                        }
-                        if (monthCmp.compare.nomenclatureViolations.length > 0) {
-                            toast.warning(
-                                `${monthCmp.compare.nomenclatureViolations.length} celda(s) con código no habilitado para el puesto (SLA)`,
-                                { duration: 9000 },
-                            );
-                        }
-                        console.info(
-                            '[auto] compare vs mes anterior publicado',
-                            formatCompareObjectiveMonthsReport(monthCmp, {
-                                reference: `Publicado ${prevLabel}`,
-                                compare: 'Generado',
-                            }),
-                        );
-                    }
-                } catch (cmpErr) {
-                    console.warn('[auto] compareObjectiveMonthSchedules', cmpErr);
-                }
-            }
-
-            const gridGap = Math.abs(verifiedBillableFinal - gridBillableHours);
-
-            if (!slaClosed) {
-                const parts: string[] = scheduleClosureGate.messages.length > 0
-                    ? scheduleClosureGate.messages
-                    : [];
-                if (parts.length === 0) {
-                    if (hrsDeficit > 0.5) parts.push(`${Math.round(hrsDeficit)}h faltantes`);
-                    if (verifiedUncovered > 0) parts.push(`${verifiedUncovered} slots sin cubrir`);
-                }
-                toast.warning(
-                    `Vista previa en grilla: SLA abierto (${parts.join(' · ')}). Revisá la grilla detrás del modal; no publiques hasta cerrar.`,
-                    { duration: 12000 },
-                );
-                setAutoWizardStep('sla_open');
-                return;
-            }
-
-            if (written === 0 && skipped > 0) {
-                toast.error(
-                    `No se generó nada: las ${skipped} celdas calculadas ya estaban ocupadas. ` +
-                    `Activá "Sobreescribir" en Personalizar y ejecutá de nuevo.`,
-                    { duration: 8000 }
-                );
-            } else if (written === 0) {
-                toast.error('No se generó el cronograma. Revisá ciclos, ausencias y dotación.', { duration: 6000 });
-            } else if (!autoOverwrite && skipped > 0) {
-                toast.warning(
-                    `Solo se volcaron ${written} celdas; ${skipped} quedaron con datos viejos. ` +
-                    `La grilla muestra ~${Math.round(gridBillableHours)}h, no ${Math.round(verifiedBillableFinal)}h. Activá Sobreescribir.`,
-                    { duration: 10000 },
-                );
-                setAutoWizardStep('done');
-            } else if (gridGap > 16) {
-                toast.warning(
-                    `El cronograma calculó ${Math.round(verifiedBillableFinal)}h pero la grilla refleja ~${Math.round(gridBillableHours)}h. Revisá celdas mezcladas o guardá tras corregir.`,
-                    { duration: 9000 },
-                );
-                setAutoWizardStep('done');
-            } else if (slaVendidas > 0 && hrsDeficit <= 0.5 && verifiedUncoveredFinal <= 0) {
-                toast.success(`Cronograma cerrado: ${Math.round(verifiedBillableFinal)}h = ${slaVendidas}h vendidas.`, { duration: 5000 });
-                setAutoWizardStep('done');
-            } else {
-                setAutoWizardStep('done');
-            }
-        } catch (e:any) {
-            toast.error('Error al generar el cronograma automático');
-            console.error('[applyAutoScheduleCOSP]', e);
-        } finally {
-            setAutoV2Generating(false);
-            setAutoV2Progress(null);
-        }
-    };
 
     /**
      * Reprocesa los errores del reporte de cobertura: swap de descansos rotos
@@ -9469,7 +5715,7 @@ export default function PlanificacionPage() {
     // 🛑 V8.20: RENDERIZADO DUAL (SPLIT SCREEN) - RESTAURADO
     const calculatePlannedHoursForDate = (dateStr: string) => {
         let total = 0;
-        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
+        const isWorkingCode = (code: string) => !PLANNING_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
         displayedEmployees.forEach((emp: any) => {
             const key = `${emp.id}_${dateStr}`;
             const pending = pendingChanges[key];
@@ -9490,7 +5736,7 @@ export default function PlanificacionPage() {
     );
 
     const avgHoursPerEmployee = useMemo(() => {
-        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
+        const isWorkingCode = (code: string) => !PLANNING_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
         const empWithHours = new Set<string>();
         let nativePlannedHours = 0;
         daysInMonth.forEach((day) => {
@@ -9519,7 +5765,7 @@ export default function PlanificacionPage() {
 
     const monthPlannedHoursByPosition = useMemo(() => {
         const map: Record<string, number> = {};
-        const isWorkingCode = (code: string) => !OBJECTIVE_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
+        const isWorkingCode = (code: string) => !PLANNING_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
         daysInMonth.forEach((day) => {
             const dateStr = getDateKey(day);
             displayedEmployees.forEach((emp: any) => {
@@ -9557,6 +5803,12 @@ export default function PlanificacionPage() {
         }
         return filtered;
     }, [positionStructure, daysInMonth]);
+
+    const planningEventosCellsByDay = useMemo(() => {
+        if (!selectedObjective) return {};
+        const monthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
+        return buildPlanningEventosCellsByDay(turaMap, shiftsMap, selectedObjective, monthPrefix);
+    }, [turaMap, shiftsMap, selectedObjective, currentDate]);
 
     const hasSlaExcludedDatesInMonth = Object.keys(excludedPositionsByDate).length > 0;
 
@@ -9603,7 +5855,7 @@ export default function PlanificacionPage() {
         const compareCompact = !!gridOpts?.compactRows;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
-            <thead className="sticky top-0 z-10 bg-slate-100 shadow-md">
+            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
                     <th className="planning-sticky-corner bg-slate-100 p-1.5 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
@@ -9823,11 +6075,9 @@ export default function PlanificacionPage() {
                                                     <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                 );
                                             }
-                                            const empLat = Number(emp.lat ?? emp.latitude ?? 0);
-                                            const empLng = Number(emp.lng ?? emp.longitude ?? 0);
                                             const objLat = Number(selectedObjectiveData?.lat ?? 0);
                                             const objLng = Number(selectedObjectiveData?.lng ?? 0);
-                                            const distKm = (empLat && empLng && objLat && objLng) ? haversineKm(empLat, empLng, objLat, objLng) : null;
+                                            const distKm = employeeKmToObjective(emp, objLat, objLng);
                                             const monthHours = empMonthlyHours[emp.id] || 0;
                                             const cctHours = empCctCurrentHours[emp.id] || 0;
                                             const retDays = empRetDays[emp.id] || 0;
@@ -9875,7 +6125,7 @@ export default function PlanificacionPage() {
                                                             <span title="Distancia al objetivo" className={`shrink-0 flex items-center gap-0.5 text-[8px] ${distKm >= 9 ? 'text-orange-500' : distKm >= 3 ? 'text-amber-400' : 'text-slate-400 dark:text-slate-400'}`}>
                                                                 <MapPin size={7}/>{distKm < 1 ? `${Math.round(distKm * 1000)}m` : `${distKm.toFixed(1)}km`}
                                                             </span>
-                                                        ) : emp.address && !(empLat && empLng) ? (
+                                                        ) : emp.address ? (
                                                             <span title="Sin coordenadas — ir a RRHH y geolocalizar" className="shrink-0 flex items-center gap-0.5 text-[8px] text-amber-400 opacity-60 group-hover:opacity-100">
                                                                 <MapPin size={7}/>?
                                                             </span>
@@ -9917,7 +6167,7 @@ export default function PlanificacionPage() {
                                         const cellDateStr = getDateKey(day);
                                         const key = `${emp.id}_${cellDateStr}`;
                                         const { s, p } = resolveCellShiftDisplay(
-                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap,
+                                            emp.id, cellDateStr, selectedObjective, selectedGrupo, grupoUnifiedMode, pendingChanges, shiftsMap, cellTurnosMap,
                                         );
                                         const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
@@ -9925,14 +6175,15 @@ export default function PlanificacionPage() {
                                         const isCellWeekend = [0, 6].includes(day.getDay());
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
-                                        let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
+                                        let isExtended = s?.isExtended || p?.isExtended || s?.isRetention || p?.isRetention;
+                                        let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
                                         const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
                                         const covNote = p?.coverageNote || s?.coverageNote;
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
                                         let absence = absencesMap[key];
                                         if (absence && ((absence.inferredCode as string) || inferAbsenceCode(absence)) === 'AA' && !isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)])) absence = null as any;
                                         const effectiveCode = p?.code || s?.code;
-                                        const coveredByCell = p?.coveredBy || s?.coveredBy;
+                                        const coveredByCell = p?.coveredBy || s?.coveredBy || s?.coveredByEmployeeName || p?.coveredByEmployeeName;
                                         let hasConflict = shouldShowLeaveConflictSiren({
                                             shiftCode: effectiveCode,
                                             absence,
@@ -9942,7 +6193,18 @@ export default function PlanificacionPage() {
                                         });
                                         let statusIndicator = null;
                                         const _planPublished = isPlanificacionPublished(publishStatusMap[planificacionPublishLookupKey(selectedObjective, currentDate.getFullYear(), currentDate.getMonth() + 1)]);
-                                        if (s && !isSnapshotView) { if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500'; else if (_planPublished && (s.status === 'ABSENT' || s.isAbsent)) statusIndicator = 'bg-rose-500'; }
+                                        if (s && !isSnapshotView) {
+                                            const _codeU = String(s.code || effectiveCode || '').toUpperCase();
+                                            const _passiveStandby = _codeU === 'RET' || _codeU === 'ESC' || _codeU === 'REF' || s.isReten === true;
+                                            // RET/ESC/REF stand-by: no punto verde por COMPLETED/PRESENT fantasma (Demo).
+                                            // Solo turno real (M/T/N/…) o cobertor ya convertido muestra presencia.
+                                            if (!_passiveStandby) {
+                                                if (s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isPresent) statusIndicator = 'bg-emerald-500';
+                                                else if (s.status === 'ABSENT' || s.isAbsent) statusIndicator = 'bg-rose-500';
+                                            } else if (s.status === 'ABSENT' || s.isAbsent) {
+                                                statusIndicator = 'bg-rose-500';
+                                            }
+                                        }
                                         let isSwap = s?.swapWith || p?.swapWith;
                                         const swapPending = !!(
                                             isSwap &&
@@ -10009,6 +6271,16 @@ export default function PlanificacionPage() {
                                         if (isCoverageSplitCell) {
                                             style = `${SHIFT_STYLES['EXTENDED']} z-10`;
                                         }
+                                        const isOpsCovCell = !!(
+                                            !absence
+                                            && !isOtherObjectiveShift
+                                            && content != null
+                                            && !(activeShift?.id && turaMap[activeShift.id])
+                                            && isOpsCoverageShift(activeShift)
+                                        );
+                                        if (isOpsCovCell) {
+                                            style = `${SHIFT_STYLES['OPS_COV']} z-10`;
+                                        }
                                         if (compareChangedKeys?.has(key)) {
                                             style += isSnapshotView
                                                 ? ' ring-2 ring-amber-600 ring-offset-1 z-20'
@@ -10017,8 +6289,12 @@ export default function PlanificacionPage() {
                                         const cellPosName = (p && !p.isDeleted ? p.positionName : s?.positionName) || rfzOnCell?.positionName || null;
                                         const cellCode = (p && !p.isDeleted) ? (isFT ? 'FT' : isFF ? 'FF' : p.code) : s ? (isFT ? 'FT' : isFF ? 'FF' : s.code) : (rfzOnCell ? 'RFZ' : null);
                                         const _cellShift = (p && !p.isDeleted) ? p : s;
-                                        const _cellActualRange = (_cellShift?.startTime && _cellShift?.endTime)
-                                            ? `${formatTime(_cellShift.startTime)} - ${formatTime(_cellShift.endTime)}`
+                                        const _cellCodeForRange = String(cellCode || '').toUpperCase();
+                                        const _cellActualRange = (_cellShift && _cellCodeForRange)
+                                            ? (() => {
+                                                const label = formatShiftScheduleLabel(_cellShift, _cellCodeForRange);
+                                                return label && label !== '—' ? label : null;
+                                            })()
                                             : null;
                                         const _b2 = resolveCellSecondBlock(
                                             key,
@@ -10048,16 +6324,64 @@ export default function PlanificacionPage() {
                                             : (isExtended || covRole === 'EXTENSION')
                                                 ? '\n⏱ Extensión (cobertura)'
                                                 : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint;
+                                        const _opsCovName = activeShift?.coversAbsenceEmployeeName
+                                            || activeShift?.absenceEmployeeName
+                                            || activeShift?.coveredEmployeeName
+                                            || '';
+                                        const _opsCovHint = isOpsCovCell
+                                            ? `\n🟠 Cobertura ops${_opsCovName ? ` — cubre: ${_opsCovName}` : ''}`
+                                            : '';
+                                        const _opsAbsent = !!(s && !absence && (s.status === 'ABSENT' || s.isAbsent));
+                                        const _gridCoveredName = (isLeaveCell || _opsAbsent)
+                                            ? resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode)
+                                            : null;
+                                        const _gridCoveredLabel = _gridCoveredName
+                                            ? String(_gridCoveredName).split(',')[0].trim().split(/\s+/)[0].slice(0, 7)
+                                            : null;
+                                        const _covererLabel = _opsCovName
+                                            ? String(_opsCovName).split(',')[0].trim().split(/\s+/)[0].slice(0, 7)
+                                            : null;
+                                        const _opsAbsentCovered = _opsAbsent ? _gridCoveredName : null;
+                                        const _opsAbsentHint = _opsAbsent
+                                            ? `\n🔴 Ausente operativo${_opsAbsentCovered ? ` · Cubierto por: ${_opsAbsentCovered}` : ' · Sin cobertura nominal'}`
+                                            : '';
+                                        const _segCoverHint = (isEarly || isExtended || isCoverageSplitCell) && _opsCovName
+                                            ? `\n🔗 Cubre a: ${_opsCovName}`
+                                            : ((isEarly || covRole === 'EARLY_START')
+                                                ? '\n⚠ Adelanto ≠ +24h; horario de banda si timestamps 00:00'
+                                                : '');
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _opsCovHint + _opsAbsentHint + _segCoverHint;
                                         const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                                             ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                                             : null;
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                        return <td key={key} onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap, selectedObjective, cellPosName, cellCode); const leaveTrace = buildPlanningCellTrace({ role: 'titular', titularName: emp.name || '', dateStr: cellDateStr, plannedCode: cellCode, plannedSchedule: cellRange, plannedPosition: cellPosName, absenceType: absType, absenceReason: reason, isOpsAbsent: !!(s && (s.isAbsent || s.status === 'ABSENT')), coveredByName: covered, vacancyOpen: !covered }); setShiftTooltip({ label: formatPlanningTraceTooltip(leaveTrace), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{(isLeaveCell || _opsAbsent) ? (
+                                                        <div
+                                                            className={`absolute -bottom-0.5 left-0 right-0 text-[5px] font-black px-0.5 rounded truncate leading-tight ${
+                                                                _gridCoveredLabel
+                                                                    ? 'bg-orange-600 text-white'
+                                                                    : 'bg-rose-700 text-white'
+                                                            }`}
+                                                            title={
+                                                                _gridCoveredName
+                                                                    ? `Ausente → cubierto por ${_gridCoveredName}`
+                                                                    : 'Ausente · sin cobertura nominal'
+                                                            }
+                                                        >
+                                                            {_gridCoveredLabel ? `→${_gridCoveredLabel}` : 'SIN COV'}
+                                                        </div>
+                                                    ) : (_opsCovName || isOpsCovCell || isCoverageSplitCell || isEarly || isExtended) ? (
+                                                        <div
+                                                            className="absolute -bottom-0.5 left-0 right-0 text-[5px] font-black bg-amber-800/90 text-white px-0.5 rounded truncate leading-tight"
+                                                            title={_opsCovName ? `Cubre a: ${_opsCovName}` : (isEarly ? 'Adelanto (cobertura) — no es +24h' : isExtended ? 'Extensión (cobertura)' : 'Cobertura operativa')}
+                                                        >
+                                                            {_covererLabel ? `cubre ${_covererLabel}` : (isEarly ? 'ADEL+' : isExtended ? 'EXT+' : 'COV')}
+                                                        </div>
+                                                    ) : null}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -10089,7 +6413,7 @@ export default function PlanificacionPage() {
                                                 content = snapShift.code;
                                                 style = getDefaultStyle(snapShift.code);
                                             }
-                                            if (snapShift.isExtended || snapShift.isEarlyStart) {
+                                            if (snapShift.isExtended || snapShift.isEarlyStart || snapShift.isRetention) {
                                                 style = SHIFT_STYLES['EXTENDED'];
                                             }
                                         }
@@ -10107,6 +6431,61 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
+                {/* ── Fila Eventos: TURAs imputadas a extras (prefactura) — no cubre SLA ── */}
+                {!isSnapshotView && Object.keys(planningEventosCellsByDay).length > 0 && (
+                    <tr className="hover:bg-violet-50/40 dark:hover:bg-violet-950/20">
+                        <td
+                            className="sticky left-0 z-20 p-2 border-r border-b shadow-[2px_0_4px_-2px_rgba(0,0,0,0.12)] h-8 bg-violet-50 border-violet-200 dark:bg-violet-950/30 dark:border-violet-800"
+                            style={{ width: nameColWidth, minWidth: nameColWidth }}
+                        >
+                            <div className="flex flex-col min-w-0">
+                                <span className="text-[9px] font-black uppercase tracking-wide leading-tight text-violet-800 dark:text-violet-200">
+                                    Eventos
+                                </span>
+                                <span className="text-[8px] font-bold truncate text-violet-600 dark:text-violet-400" title="TURAs imputadas a Eventos — facturan en prefactura, no suman cobertura SLA">
+                                    Extras TURA · prefactura
+                                </span>
+                            </div>
+                        </td>
+                        {daysInMonth.map((day) => {
+                            const dayStr = getDateKey(day);
+                            const cell = planningEventosCellsByDay[dayStr];
+                            const isCellWeekend = [0, 6].includes(day.getDay());
+                            const tooltip = cell ? formatPlanningEventosTooltip(cell) : '';
+                            const hrsLabel = cell
+                                ? (Number.isInteger(cell.totalHours) ? String(cell.totalHours) : cell.totalHours.toFixed(1))
+                                : '';
+                            return (
+                                <td
+                                    key={`eventos_${dayStr}`}
+                                    className={`border-b border-r p-0.5 text-center ${isCellWeekend ? 'bg-rose-50/40 dark:bg-rose-950/20' : ''}`}
+                                    onMouseEnter={(e) => {
+                                        if (!cell) { setShiftTooltip(null); return; }
+                                        setShiftTooltip({
+                                            label: tooltip,
+                                            pos: 'Eventos',
+                                            range: cell.entries.map((en) => `${en.guardName} ${en.range}`).join(' · '),
+                                            x: e.clientX,
+                                            y: e.clientY,
+                                            restHours: null,
+                                        });
+                                    }}
+                                    onMouseLeave={() => setShiftTooltip(null)}
+                                >
+                                    {cell && (
+                                        <div
+                                            className="w-full h-6 rounded flex flex-col items-center justify-center text-[8px] font-black border bg-violet-600 text-white border-violet-700 leading-none"
+                                            title={tooltip}
+                                        >
+                                            <span>EVT</span>
+                                            <span className="text-[7px] font-bold opacity-90">{hrsLabel}h</span>
+                                        </div>
+                                    )}
+                                </td>
+                            );
+                        })}
+                    </tr>
+                )}
                 {/* ── Filas de refuerzo RFZ VACANTE — solo sin guardia asignado (asignados van en fila del empleado) ── */}
                 {!isSnapshotView && rfzTodos.filter(rfz => {
                     if (rfz.objectiveId !== selectedObjective) return false;
@@ -10553,9 +6932,9 @@ export default function PlanificacionPage() {
                             </span>
                             <div className="h-4 w-px bg-amber-200 shrink-0"/>
                             <div className="flex items-center bg-white rounded-lg p-0.5 border border-amber-200 shrink-0">
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-0.5 hover:bg-amber-50 rounded"><ChevronLeft size={14}/></button>
+                                <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-0.5 hover:bg-amber-50 rounded"><ChevronLeft size={14}/></button>
                                 <span className="px-2 font-black text-[10px] w-20 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'short', year:'2-digit'})}</span>
-                                <button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-0.5 hover:bg-amber-50 rounded"><ChevronRight size={14}/></button>
+                                <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-0.5 hover:bg-amber-50 rounded"><ChevronRight size={14}/></button>
                             </div>
                             <div className="h-4 w-px bg-amber-200 shrink-0"/>
                             <Split size={13} className="text-amber-600 shrink-0"/>
@@ -10791,107 +7170,7 @@ export default function PlanificacionPage() {
                                 </div>
                             )}
 
-                            {/* DIAGNÓSTICO DE COBERTURA — qué falta por objetivo/mes */}
-                            {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
-                                const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
-                                const _ok = _rpt.worstDays.length === 0;
-                                return (
-                                <div className="relative hidden md:block">
-                                    <button
-                                        ref={coverageDiagnosticBtnRef}
-                                        onClick={() => {
-                                            if (showCoverageDiagnostic) {
-                                                setShowCoverageDiagnostic(false);
-                                            } else {
-                                                repositionCoveragePanel();
-                                                setShowCoverageDiagnostic(true);
-                                            }
-                                        }}
-                                        className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
-                                            _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
-                                        }`}
-                                    >
-                                        <ShieldCheck size={14} className={_ok ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Diagnóstico Cobertura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                                <span className="text-emerald-600 font-black">{_rpt.daysFull} días OK</span>
-                                                <span className="text-slate-300">|</span>
-                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty} con huecos</span>
-                                            </span>
-                                        </div>
-                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
-                                    </button>
-                                </div>
-                                );
-                            })()}
 
-                            {selectedObjective && (() => {
-                                const publishLookupKey = planificacionPublishLookupKey(
-                                    selectedObjective,
-                                    currentDate.getFullYear(),
-                                    currentDate.getMonth() + 1,
-                                );
-                                const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-                                const needsRepublish = !!needsRepublishMap[publishLookupKey];
-                                return (
-                                    <div className="flex items-center gap-2 no-print">
-                                        <button
-                                            type="button"
-                                            onClick={() => void refreshCronogramaView()}
-                                            disabled={isRefreshingCrono}
-                                            title="Actualizar turnos y puestos sin recargar la página"
-                                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm disabled:opacity-60"
-                                        >
-                                            <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
-                                            {isRefreshingCrono ? '…' : 'ACTUALIZAR'}
-                                        </button>
-                                        {published ? (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-                                                <CheckCircle size={12}/> PUBLICADO
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl">
-                                                <Ghost size={12}/> BORRADOR
-                                            </span>
-                                        )}
-                                        {canPublishPlanning && (!published || needsRepublish) && (
-                                            <button
-                                                onClick={openPublishConfirm}
-                                                disabled={isPublishing}
-                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
-                                                    ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
-                                                    : undefined}
-                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : isSuperAdmin ? 'bg-indigo-600 hover:bg-indigo-700 ring-1 ring-indigo-300/50' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                            >
-                                                {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
-                                                {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
-                                            </button>
-                                        )}
-                                        {published && canCorrectPlanning && (
-                                            <button
-                                                onClick={() => setCorrectionMode(v => !v)}
-                                                title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
-                                            >
-                                                <ShieldAlert size={12}/>
-                                                {correctionMode ? 'CORRECCIÓN ACTIVA' : 'CORREGIR'}
-                                            </button>
-                                        )}
-                                        {published && isSuperAdmin && (
-                                            <button
-                                                onClick={handleUnpublish}
-                                                disabled={isUnpublishing}
-                                                title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
-                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                                            >
-                                                {isUnpublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarX size={12}/>}
-                                                DESPUBLICAR
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })()}
                             {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                 <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
                                     {backgroundSaveCount > 0 && (
@@ -11011,8 +7290,109 @@ export default function PlanificacionPage() {
                                     document.body,
                                 )}
 
+                                {/* DIAGNÓSTICO COBERTURA — compacto, en toolbar derecho */}
+                                {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
+                                    const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
+                                    const _ok = _rpt.worstDays.length === 0;
+                                    return (
+                                        <div className="relative hidden md:block">
+                                            <button
+                                                ref={coverageDiagnosticBtnRef}
+                                                onClick={() => {
+                                                    if (showCoverageDiagnostic) {
+                                                        setShowCoverageDiagnostic(false);
+                                                    } else {
+                                                        repositionCoveragePanel();
+                                                        setShowCoverageDiagnostic(true);
+                                                    }
+                                                }}
+                                                className={`flex px-2.5 py-1.5 border rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm transition-colors ${
+                                                    _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                                                }`}
+                                            >
+                                                <ShieldCheck size={12} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
+                                                <div className="flex flex-col leading-none">
+                                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Cobertura</span>
+                                                    <span className="text-[9px] font-bold text-slate-700 flex items-center gap-1">
+                                                        <span className="text-emerald-600 font-black">{_rpt.daysFull}OK</span>
+                                                        {(_rpt.daysPartial + _rpt.daysEmpty) > 0 && <><span className="text-slate-300">|</span><span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty}✗</span></>}
+                                                    </span>
+                                                </div>
+                                                <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* ACCIONES PUBLICACIÓN — compactas, entre selector y mes */}
+                                {selectedObjective && (() => {
+                                    const publishLookupKey = planificacionPublishLookupKey(
+                                        selectedObjective,
+                                        currentDate.getFullYear(),
+                                        currentDate.getMonth() + 1,
+                                    );
+                                    const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
+                                    const needsRepublish = !!needsRepublishMap[publishLookupKey];
+                                    return (
+                                        <div className="flex items-center gap-1 no-print">
+                                            <button
+                                                type="button"
+                                                onClick={() => void refreshCronogramaView()}
+                                                disabled={isRefreshingCrono}
+                                                title="Actualizar turnos y puestos"
+                                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60"
+                                            >
+                                                <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
+                                            </button>
+                                            {published ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg">
+                                                    <CheckCircle size={10}/> PUB
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg">
+                                                    <Ghost size={10}/> BOR
+                                                </span>
+                                            )}
+                                            {canPublishPlanning && (!published || needsRepublish) && (
+                                                <button
+                                                    onClick={openPublishConfirm}
+                                                    disabled={isPublishing}
+                                                    title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                        ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
+                                                        : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
+                                                    className={`flex items-center gap-1 disabled:opacity-60 text-white px-2 py-1 rounded-lg text-[9px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                >
+                                                    {isPublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarCheck size={10}/>}
+                                                    {published ? 'RE-PUB' : 'PUBLICAR'}
+                                                </button>
+                                            )}
+                                            {published && canCorrectPlanning && (
+                                                <button
+                                                    onClick={() => setCorrectionMode(v => !v)}
+                                                    title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
+                                                >
+                                                    <ShieldAlert size={10}/>
+                                                    {correctionMode ? 'CORR ●' : 'CORR'}
+                                                </button>
+                                            )}
+                                            {published && isSuperAdmin && (
+                                                <button
+                                                    onClick={handleUnpublish}
+                                                    disabled={isUnpublishing}
+                                                    title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
+                                                    className="p-1.5 rounded-lg border bg-white text-slate-500 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                                                >
+                                                    {isUnpublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarX size={10}/>}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+                                <div className="w-px h-5 bg-slate-200 shrink-0"/>
+
                                 {/* < MES > — siempre visible */}
-                                <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()-1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className="px-3 font-black text-xs w-24 text-center capitalize">{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { setCurrentDate(new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 1)); setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
+                                <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className={`px-3 font-black text-xs w-24 text-center capitalize ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
 
                                 <button
                                     onClick={applyPrevMonthTemplate}
@@ -11518,7 +7898,7 @@ export default function PlanificacionPage() {
                 </div>
 
                 {/* BARRA FLOTANTE */}
-                {!comparingSnapshot && !isServiceLocked && (
+                {!comparingSnapshot && !isServiceLocked && allowPlanningMultiSelect && (
                     (clipboard !== null) ||
                     (selection.start !== null && (selection.start.r !== selection.end?.r || selection.start.c !== selection.end?.c))
                 ) && (
@@ -12092,8 +8472,20 @@ export default function PlanificacionPage() {
                         )}
                         {effectiveSlaVendidas > 0 && statsHoursView === 'total' && (
                             <div className={`${metricBox} min-w-[2.5rem] ${slaMismatch ? 'border-teal-200/90' : ''}`}>
-                                <p className={metricLabel}>Vendidas</p>
+                                <p className={metricLabel}>SLA vend.</p>
                                 <p className={`${metricValue} text-teal-800 dark:text-teal-300`}>{effectiveSlaVendidas}</p>
+                            </div>
+                        )}
+                        {planningAuxiliarySummary?.hasEnc && (
+                            <div className={`${metricBox} min-w-[2.75rem]`} title={`Encargado: ${planningAuxiliarySummary.encPlanned}h planificadas · techo ${planningAuxiliarySummary.encContract}h${planningAuxiliarySummary.encInSla > 0 ? ` (${planningAuxiliarySummary.encInSla}h en SLA vendido)` : ' (fuera de SLA vendido)'}`}>
+                                <p className={`${metricLabel} text-amber-700`}>ENC</p>
+                                <p className={`${metricValue} text-amber-800`}>{planningAuxiliarySummary.encPlanned}<span className="text-[8px] text-slate-500">/{planningAuxiliarySummary.encContract}</span></p>
+                            </div>
+                        )}
+                        {(planningAuxiliarySummary?.hasEvt || (planningAuxiliarySummary?.evtPlanned ?? 0) > 0) && (
+                            <div className={`${metricBox} min-w-[2.5rem]`} title="Eventos / extras TURA — prefactura, fuera de SLA cobertura">
+                                <p className={`${metricLabel} text-violet-700`}>EVT</p>
+                                <p className={`${metricValue} text-violet-800`}>{planningAuxiliarySummary?.evtPlanned ?? 0}</p>
                             </div>
                         )}
                         {hoursMode === 'mes' && selectedObjective && (
@@ -12137,7 +8529,7 @@ export default function PlanificacionPage() {
                             <span className="font-black uppercase bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded shrink-0">{latestLog.label}</span>
                             <span className="text-slate-600 dark:text-slate-300 truncate flex-1">{latestLog.detail}</span>
                             <button
-                                onClick={(e) => { e.stopPropagation(); setLatestLog(null); if (latestLogTimer.current) clearTimeout(latestLogTimer.current); }}
+                                onClick={(e) => { e.stopPropagation(); clearLatestLogNotification(); }}
                                 className="shrink-0 text-slate-400 hover:text-slate-600 p-0.5 rounded hover:bg-slate-200"
                                 title="Cerrar"
                             >
@@ -12280,6 +8672,7 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'bg-violet-100 text-violet-700',
                                                 CONVOCATORIA_EVENTO: 'bg-yellow-100 text-yellow-800',
                                                 EVENTO_CONFIRMADO: 'bg-emerald-100 text-emerald-800',
+                                                EVENTO_DESAFECTADO: 'bg-rose-100 text-rose-800',
                                             };
                                             const typeLabel: Record<string, string> = {
                                                 TURNO_NUEVO: 'Nuevo turno',
@@ -12289,8 +8682,9 @@ export default function PlanificacionPage() {
                                                 CRONOGRAMA_PUBLICADO: 'Cronograma',
                                                 CONVOCATORIA_EVENTO: 'Convocatoria',
                                                 EVENTO_CONFIRMADO: 'Evento OK',
+                                                EVENTO_DESAFECTADO: 'Desafectado',
                                             };
-                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO'].includes(n.type)) && !n.ackedAt;
+                                            const pendingAck = !!(n.requiresAck || ['CRONOGRAMA_PUBLICADO','TURNO_NUEVO','TURNO_MODIFICADO','TURNO_ELIMINADO','FRANCO_ASIGNADO','CONVOCATORIA_EVENTO','EVENTO_CONFIRMADO','EVENTO_DESAFECTADO'].includes(n.type)) && !n.ackedAt;
                                             return (
                                                 <div key={n.id} className={`p-3 border rounded-2xl shadow-sm transition-colors ${
                                                     pendingAck ? 'bg-amber-50 border-amber-200' : n.ackedAt ? 'bg-emerald-50/40 border-emerald-100' : n.read ? 'bg-white' : 'bg-indigo-50 border-indigo-200'
@@ -12393,31 +8787,201 @@ export default function PlanificacionPage() {
                                 const resolveCoverageForAbsence = () => {
                                     const empName = employees.find(e => e.id === selectedCell.empId)?.name || '';
                                     const dateStr = selectedCell.dateStr;
+                                    const titularLastName = empName.split(',')[0]?.trim().toLowerCase() || empName.toLowerCase();
+
+                                    // 1. Recolectar todos los turnos del día que no sean del titular
+                                    const candidates: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                            if (Array.isArray(arr)) {
+                                                for (const item of arr) {
+                                                    if (item && !item.isDeleted && !candidates.some(c => c.id === item.id)) {
+                                                        candidates.push(item);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
                                     const allSources = { ...shiftsMap, ...pendingChanges };
                                     for (const [k, raw] of Object.entries(allSources)) {
                                         if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
                                         const s = raw as any;
-                                        if (s?.isDeleted) continue;
-                                        if (s?.comments?.includes(`Cubriendo a ${empName}`)) {
-                                            const covEmpId = k.replace(`_${dateStr}`, '');
-                                            const covEmp = employees.find((e: any) => e.id === covEmpId);
+                                        if (s && !s.isDeleted && !candidates.some(c => c.id === s.id)) {
+                                            candidates.push(s);
+                                        }
+                                    }
+
+                                    const isVacancyCandidate = (c: any) => {
+                                        if (!c) return true;
+                                        if (c.employeeId === 'VACANTE' || c.isUnassigned === true) return true;
+                                        const o = String(c.origin || '').toUpperCase();
+                                        if (o.startsWith('VACANTE_') || o === 'SLA_VIRTUAL') return true;
+                                        if (String(c.employeeName || '').toUpperCase() === 'VACANTE') return true;
+                                        return false;
+                                    };
+
+                                    // 2. Nombre explícito desde Ops / plan (prioridad: no confundir con doc VACANTE)
+                                    const coveredByRaw = shift?.coveredBy
+                                        || shift?.coveredByEmployeeName
+                                        || pending?.coveredBy
+                                        || pending?.coveredByEmployeeName
+                                        || absence?.coveredBy
+                                        || absence?.coveredByEmployeeName;
+
+                                    if (coveredByRaw) {
+                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
+                                        if (nameOnly && nameOnly.toUpperCase() !== 'VACANTE') {
+                                            const matchedCandidate = candidates.find(c => {
+                                                if (isVacancyCandidate(c)) return false;
+                                                const cName = String(c.employeeName || employees.find(e => e.id === c.employeeId)?.name || '').toLowerCase();
+                                                return cName.includes(nameOnly.toLowerCase()) || nameOnly.toLowerCase().includes(cName);
+                                            });
+                                            if (matchedCandidate) {
+                                                return {
+                                                    employeeName: matchedCandidate.employeeName || nameOnly,
+                                                    code: String(matchedCandidate.code || '').toUpperCase(),
+                                                    shift: matchedCandidate,
+                                                    objectiveName: matchedCandidate.objectiveName || (matchedCandidate.objectiveId ? getObjectiveName(matchedCandidate.objectiveId) : serviceName),
+                                                };
+                                            }
+                                            return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
+                                        }
+                                    }
+
+                                    // 3. Buscar turno de cobertura específico para este titular/ausencia
+                                    //    (nunca docs VACANTE — esos son el hueco, no el cubridor)
+                                    const ledgerEventId = String(shift?.coverageEventId || pending?.coverageEventId || absence?.coverageEventId || '').trim();
+                                    for (const s of candidates) {
+                                        if (isVacancyCandidate(s)) continue;
+
+                                        if (ledgerEventId && String(s.coverageEventId || '') === ledgerEventId) {
+                                            const covEmp = employees.find((e: any) => e.id === s.employeeId);
+                                            const covName = covEmp?.name || s.employeeName || '—';
+                                            if (String(covName).toUpperCase() === 'VACANTE') continue;
+                                            return {
+                                                employeeName: covName,
+                                                code: String(s.code || '').toUpperCase(),
+                                                shift: s,
+                                                objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
+                                            };
+                                        }
+
+                                        const coversName = String(s.coversAbsenceEmployeeName || s.absenceEmployeeName || s.coveredEmployeeName || '').toLowerCase();
+                                        const coversEmpId = String(s.coversEmployeeId || '');
+                                        const absShiftId = String(s.absenceShiftId || '');
+                                        const causedShiftId = String(s.causedByShiftId || s.coverageSourceId || '');
+                                        const comments = String(s.comments || '').toLowerCase();
+
+                                        const matchesName = coversName && (coversName.includes(titularLastName) || empName.toLowerCase().includes(coversName));
+                                        const matchesId = coversEmpId && coversEmpId === selectedCell.empId;
+                                        const matchesShift = (absShiftId && (absShiftId === shift?.id || absShiftId === absence?.shiftId || absShiftId === absence?.id))
+                                            || (causedShiftId && (causedShiftId === shift?.id || causedShiftId === absence?.shiftId));
+                                        const matchesComments = comments.includes(`cubriendo a ${empName.toLowerCase()}`)
+                                            || comments.includes(`cubre a ${empName.toLowerCase()}`)
+                                            || (titularLastName.length > 2 && comments.includes(`cubre ${titularLastName}`))
+                                            || (titularLastName.length > 2 && comments.includes(`cubre: ${titularLastName}`));
+
+                                        if (matchesName || matchesId || matchesShift || matchesComments) {
+                                            const covEmp = employees.find((e: any) => e.id === s.employeeId);
+                                            const covName = covEmp?.name || s.employeeName || '—';
+                                            if (String(covName).toUpperCase() === 'VACANTE') continue;
                                             const covCode = String(s.code || '').toUpperCase();
                                             return {
-                                                employeeName: covEmp?.name || '—',
+                                                employeeName: covName,
                                                 code: covCode,
                                                 shift: s,
                                                 objectiveName: s.objectiveName || (s.objectiveId ? getObjectiveName(s.objectiveId) : serviceName),
                                             };
                                         }
                                     }
-                                    const coveredByRaw = shift?.coveredBy || pending?.coveredBy;
-                                    if (coveredByRaw) {
-                                        const nameOnly = String(coveredByRaw).replace(/\s*\([^)]*\)\s*$/, '').trim();
-                                        return { employeeName: nameOnly, code: '', shift: null, objectiveName: serviceName };
+
+                                    // 4. Si la ausencia está en este objetivo y existe una cobertura operativa en el mismo puesto/objetivo/banda
+                                    const targetObj = String(shift?.objectiveId || absence?.objectiveId || selectedObjective || '');
+                                    const reasonStr = String(absence?.reason || '');
+                                    const reasonPosMatch = reasonStr.match(/\(([^)]+)\)/);
+                                    const extractedPos = reasonPosMatch ? reasonPosMatch[1].trim() : '';
+                                    const targetPos = String(shift?.positionName || absence?.positionName || extractedPos || coveredPosition || '');
+
+                                    let targetCode = String(shift?.code || absence?.shiftCode || '').toUpperCase();
+                                    if (!targetCode && reasonStr) {
+                                        if (reasonStr.includes('04:00') || reasonStr.includes('16:00') || reasonStr.includes('Turno T') || reasonStr.includes('turno T')) targetCode = 'T';
+                                        else if (reasonStr.includes('06:00') || reasonStr.includes('08:00') || reasonStr.includes('Turno M') || reasonStr.includes('turno M')) targetCode = 'M';
+                                        else if (reasonStr.includes('22:00') || reasonStr.includes('12:00') || reasonStr.includes('Turno N') || reasonStr.includes('turno N')) targetCode = 'N';
+                                        else if (reasonStr.includes('D12')) targetCode = 'D12';
+                                        else if (reasonStr.includes('N12')) targetCode = 'N12';
                                     }
+
+                                    if (targetObj) {
+                                        const matchingOpsCovers = candidates.filter(c =>
+                                            !isVacancyCandidate(c) &&
+                                            isOpsCoverageShift(c) &&
+                                            shiftMatchesObjective(c, targetObj)
+                                        );
+
+                                        // Prioridad 1: Coincide puesto y código/banda
+                                        const exactMatch = matchingOpsCovers.find(c => {
+                                            const codeMatch = !targetCode || String(c.code || '').toUpperCase() === targetCode;
+                                            const posMatch = !targetPos || targetPos === 'General' || String(c.positionName || '').toLowerCase() === targetPos.toLowerCase();
+                                            return codeMatch && posMatch;
+                                        });
+                                        if (exactMatch) {
+                                            const covEmp = employees.find((e: any) => e.id === exactMatch.employeeId);
+                                            return {
+                                                employeeName: covEmp?.name || exactMatch.employeeName || '—',
+                                                code: String(exactMatch.code || targetCode || '').toUpperCase(),
+                                                shift: exactMatch,
+                                                objectiveName: exactMatch.objectiveName || (exactMatch.objectiveId ? getObjectiveName(exactMatch.objectiveId) : serviceName),
+                                            };
+                                        }
+
+                                        // Prioridad 2: Coincide puesto
+                                        if (targetPos && targetPos !== 'General') {
+                                            const posMatches = matchingOpsCovers.filter(c => String(c.positionName || '').toLowerCase() === targetPos.toLowerCase());
+                                            if (posMatches.length === 1) {
+                                                const single = posMatches[0];
+                                                const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                                return {
+                                                    employeeName: covEmp?.name || single.employeeName || '—',
+                                                    code: String(single.code || targetCode || '').toUpperCase(),
+                                                    shift: single,
+                                                    objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                                };
+                                            }
+                                        }
+
+                                        // Prioridad 3: Coincide código/banda
+                                        if (targetCode) {
+                                            const codeMatches = matchingOpsCovers.filter(c => String(c.code || '').toUpperCase() === targetCode);
+                                            if (codeMatches.length === 1) {
+                                                const single = codeMatches[0];
+                                                const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                                return {
+                                                    employeeName: covEmp?.name || single.employeeName || '—',
+                                                    code: String(single.code || targetCode || '').toUpperCase(),
+                                                    shift: single,
+                                                    objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                                };
+                                            }
+                                        }
+
+                                        // Prioridad 4: Cobertura operativa única en el objetivo ese día
+                                        if (matchingOpsCovers.length === 1) {
+                                            const single = matchingOpsCovers[0];
+                                            const covEmp = employees.find((e: any) => e.id === single.employeeId);
+                                            return {
+                                                employeeName: covEmp?.name || single.employeeName || '—',
+                                                code: String(single.code || targetCode || '').toUpperCase(),
+                                                shift: single,
+                                                objectiveName: single.objectiveName || (single.objectiveId ? getObjectiveName(single.objectiveId) : serviceName),
+                                            };
+                                        }
+                                    }
+
                                     return null;
                                 };
-                                const coverageInfo = (absence || isRRHHCode) ? resolveCoverageForAbsence() : null;
+                                const isOpsAbsent = !!(shift?.isAbsent || shift?.status === 'ABSENT');
+                                const coverageInfo = (absence || isRRHHCode || isOpsAbsent) ? resolveCoverageForAbsence() : null;
                                 const ABSENCE_FRANCO_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA']);
                                 const isWorkCode = (c: string) => !!c && !ABSENCE_FRANCO_CODES.has(c.toUpperCase());
                                 const resolveOriginalWorkShift = () => {
@@ -12477,9 +9041,37 @@ export default function PlanificacionPage() {
                                             position: shift.positionName || coveredPosition,
                                         };
                                     }
+                                    // Fallback: buscar desde los datos de la ausencia (shiftCode o parsing de motivo)
+                                    const absShiftCode = String(absence?.shiftCode || '').toUpperCase();
+                                    let inferredCode = isWorkCode(absShiftCode) ? absShiftCode : '';
+                                    let scheduleText = '';
+                                    if (!inferredCode && absence?.reason) {
+                                        const r = String(absence.reason);
+                                        const matchSchedule = r.match(/(\d{1,2}:\d{2}\s*(?:[ap]\.?\s*m\.?)?)\s*-\s*(\d{1,2}:\d{2}\s*(?:[ap]\.?\s*m\.?)?)/i);
+                                        if (matchSchedule) {
+                                            scheduleText = `${matchSchedule[1]} - ${matchSchedule[2]}`;
+                                        }
+                                        if (r.includes('04:00') || r.includes('16:00') || r.includes('Turno T') || r.includes('turno T')) inferredCode = 'T';
+                                        else if (r.includes('06:00') || r.includes('08:00') || r.includes('Turno M') || r.includes('turno M')) inferredCode = 'M';
+                                        else if (r.includes('22:00') || r.includes('12:00') || r.includes('Turno N') || r.includes('turno N')) inferredCode = 'N';
+                                        else if (r.includes('D12')) inferredCode = 'D12';
+                                        else if (r.includes('N12')) inferredCode = 'N12';
+                                    }
+                                    if (inferredCode) {
+                                        const posName = absence?.positionName || coveredPosition;
+                                        const h = SHIFT_HOURS_LOOKUP[inferredCode] || 8;
+                                        return {
+                                            code: inferredCode,
+                                            label: LEGEND_DESCRIPTIONS[inferredCode] || `Turno ${inferredCode}`,
+                                            schedule: scheduleText || VACANCY_BAND_SCHEDULE[inferredCode] || formatShiftScheduleLabel({ code: inferredCode, positionName: posName }, inferredCode),
+                                            hours: h,
+                                            service: absence?.objectiveName || serviceName,
+                                            position: posName,
+                                        };
+                                    }
                                     return null;
                                 };
-                                const originalWorkShift = (absence || isRRHHCode) ? resolveOriginalWorkShift() : null;
+                                const originalWorkShift = (absence || isRRHHCode || isOpsAbsent) ? resolveOriginalWorkShift() : null;
                                 const absenceTypeLabel = absence?.type || shift?.name || LEGEND_DESCRIPTIONS[code] || code || '—';
                                 const ABSENCE_STATUS_ES: Record<string, string> = {
                                     APPROVED: 'Aprobada', PENDING: 'Pendiente', REJECTED: 'Rechazada',
@@ -12496,38 +9088,208 @@ export default function PlanificacionPage() {
                                     : (ABSENCE_STATUS_ES[absenceRawStatus?.toUpperCase?.()] || absenceRawStatus || '');
                                 const coveringEmployee = coverageInfo
                                     ? (coverageInfo.code ? `${coverageInfo.employeeName} (${coverageInfo.code})` : coverageInfo.employeeName)
-                                    : (shift?.coveredBy || pending?.coveredBy || null);
+                                    : (shift?.coveredBy || shift?.coveredByEmployeeName || pending?.coveredBy || pending?.coveredByEmployeeName || null);
                                 const hasSwap = !!(shift?.swapWith || shift?.swapDate);
                                 const isSwapPersisted = hasSwap && !pending && !!shift?.id;
+                                const coversAbsenceName = String(
+                                    shift?.coversAbsenceEmployeeName || shift?.absenceEmployeeName || shift?.coveredEmployeeName || '',
+                                ).trim();
+
+                                const resolveWhoThisShiftCovers = (): string | null => {
+                                    if (coversAbsenceName) return coversAbsenceName;
+                                    const dateStr = selectedCell.dateStr;
+                                    const covererLast = employeeName.split(',')[0]?.trim().toLowerCase() || '';
+                                    const sources: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                            if (Array.isArray(arr)) sources.push(...arr);
+                                        }
+                                    }
+                                    for (const [k, raw] of Object.entries({ ...shiftsMap, ...pendingChanges })) {
+                                        if (!k.endsWith(`_${dateStr}`) || k.startsWith(`${selectedCell.empId}_`)) continue;
+                                        sources.push(raw as any);
+                                    }
+                                    for (const t of sources) {
+                                        if (!t || t.isDeleted) continue;
+                                        if (t.employeeId === 'VACANTE' || t.isUnassigned) continue;
+                                        const byId = String(t.coveredByEmployeeId || t.coveredBy || '');
+                                        const byName = String(t.coveredByEmployeeName || t.coveredBy || '').toLowerCase();
+                                        if (byId && byId === selectedCell.empId) {
+                                            return t.employeeName || employees.find((e: any) => e.id === t.employeeId)?.name || null;
+                                        }
+                                        if (covererLast.length > 2 && byName.includes(covererLast)) {
+                                            return t.employeeName || employees.find((e: any) => e.id === t.employeeId)?.name || null;
+                                        }
+                                    }
+                                    const note = String(shift?.coverageNote || shift?.comments || '');
+                                    const m = note.match(/cubre(?:ndo)?\s+a[:\s]+([^|.\n]+)/i);
+                                    if (m) return m[1].trim();
+                                    return null;
+                                };
+
+                                const inferredCoversName = resolveWhoThisShiftCovers();
+                                const isCoverageSegmentCell = !!(
+                                    shift?.isEarlyStart
+                                    || shift?.isExtended
+                                    || shift?.isRetention
+                                    || shift?.coverageSegmentRole
+                                    || shift?.coveragePackageId
+                                    || isOpsCoverageShift(shift)
+                                );
                                 const showRrhhPanel = !!(absence || isRRHHCode);
+                                const isCovererCell = !!(inferredCoversName || (isCoverageSegmentCell && !isOpsAbsent && !showRrhhPanel));
+                                const showTraceNarrative = !!(showRrhhPanel || isOpsAbsent || isCovererCell || isCoverageSegmentCell);
                                 const isReadOnly = isConsolidated || isSwapPersisted;
 
-                                const plannedStart =
-                                    (typeof shift?.startTime === 'string') ? shift.startTime
-                                    : (shift?.startTime ? formatTime(shift.startTime) : '--:--');
-                                const plannedEnd =
-                                    (typeof shift?.endTime === 'string') ? shift.endTime
-                                    : (shift?.endTime ? formatTime(shift.endTime) : '--:--');
-                                const realStart = shift?.realStartTime ? formatTime(shift.realStartTime) : (shift?.checkInTime ? formatTime(shift.checkInTime) : '--:--');
-                                const realEnd = shift?.realEndTime ? formatTime(shift.realEndTime) : (shift?.checkOutTime ? formatTime(shift.checkOutTime) : '--:--');
+                                const findLinkedVacancyOpen = (): boolean => {
+                                    const dateStr = selectedCell.dateStr;
+                                    const titularShiftId = String(shift?.id || '');
+                                    const sources: any[] = [];
+                                    if (cellTurnosMap) {
+                                        for (const [k, arr] of Object.entries(cellTurnosMap)) {
+                                            if (!k.endsWith(`_${dateStr}`)) continue;
+                                            if (Array.isArray(arr)) sources.push(...arr);
+                                        }
+                                    }
+                                    for (const [k, raw] of Object.entries({ ...shiftsMap, ...pendingChanges })) {
+                                        if (!k.endsWith(`_${dateStr}`)) continue;
+                                        sources.push(raw);
+                                    }
+                                    return sources.some((c: any) => {
+                                        if (!c || c.isDeleted) return false;
+                                        const origin = String(c.origin || '').toUpperCase();
+                                        const isVac =
+                                            c.employeeId === 'VACANTE'
+                                            || c.isUnassigned === true
+                                            || origin.startsWith('VACANTE_')
+                                            || String(c.employeeName || '').toUpperCase() === 'VACANTE';
+                                        if (!isVac) return false;
+                                        const caused = String(c.causedByShiftId || c.absenceShiftId || c.coverageSourceId || '');
+                                        if (titularShiftId && caused === titularShiftId) return true;
+                                        const absEmp = String(c.coversAbsenceEmployeeName || c.absenceEmployeeName || c.causedByEmployeeId || '');
+                                        if (selectedCell.empId && String(c.causedByEmployeeId || '') === selectedCell.empId) return true;
+                                        const titularLast = employeeName.split(',')[0]?.trim().toLowerCase() || '';
+                                        if (titularLast.length > 2 && absEmp.toLowerCase().includes(titularLast)) return true;
+                                        return false;
+                                    });
+                                };
+
+                                const vacancyStillOpen = (absence || isOpsAbsent) ? findLinkedVacancyOpen() : false;
+
+                                const coverHowLabel = (() => {
+                                    const covShift = coverageInfo?.shift || (isCoverageSegmentCell ? shift : null);
+                                    if (!covShift && !isCoverageSegmentCell) return shift?.coverageType ? String(shift.coverageType) : null;
+                                    const src = covShift || shift;
+                                    if (src.isFrancoTrabajado || String(src.code || '').toUpperCase() === 'FT') return 'Franco trabajado (FT)';
+                                    if (src.isExtended || src.coverageRole === 'EXTENSION' || src.coverageSegmentRole === 'EXTENSION') return 'Extensión de jornada';
+                                    if (src.isEarlyStart || src.coverageRole === 'EARLY_START' || src.coverageSegmentRole === 'EARLY_START') return 'Adelanto (cobertura)';
+                                    const ct = String(src.coverageType || '').toUpperCase();
+                                    if (ct === 'CROSS_POSITION' || ct === 'OTRO_PUESTO') return 'Otro puesto (mismo objetivo)';
+                                    if (ct === 'CROSS_OBJECTIVE' || ct === 'TRASLADO' || ct === 'CROSS_OBJ') return 'Traslado (otro objetivo ≤10 km)';
+                                    const o = String(src.origin || '').toUpperCase();
+                                    if (o === 'RETEN' || src.isRetention) return 'Retención (RET)';
+                                    if (o === 'OPERATIONS_COVERAGE') return 'Cobertura Ops';
+                                    if (src.resolvedBy === 'OPERACIONES') return 'Resuelto en Ops';
+                                    return o ? o.replace(/_/g, ' ') : (shift?.coverageType ? String(shift.coverageType) : null);
+                                })();
+
+                                const traceRole: 'titular' | 'coverer' | 'normal' = (isCovererCell || isCoverageSegmentCell) && !isOpsAbsent && !showRrhhPanel
+                                    ? 'coverer'
+                                    : (showRrhhPanel || isOpsAbsent ? 'titular' : 'normal');
+
+                                const planningTraceSteps = showTraceNarrative
+                                    ? buildPlanningCellTrace({
+                                        role: traceRole,
+                                        titularName: employeeName,
+                                        dateStr: selectedCell.dateStr,
+                                        plannedCode: originalWorkShift?.code || (NON_ABSENCE_CODES.has(code) ? code : null) || coverageInfo?.code || null,
+                                        plannedSchedule: originalWorkShift?.schedule
+                                            || (shift ? formatShiftScheduleLabel(shift, code) : null),
+                                        plannedPosition: originalWorkShift?.position || coveredPosition,
+                                        plannedService: originalWorkShift?.service || serviceName,
+                                        absenceType: absence?.type || (isRRHHCode ? (LEGEND_DESCRIPTIONS[code] || code) : null) || (isOpsAbsent ? 'Ausencia operativa' : null),
+                                        absenceReason: absence?.reason || shift?.comments || null,
+                                        isOpsAbsent,
+                                        isPresent: (() => {
+                                            const cu = String(shift?.code || code || '').toUpperCase();
+                                            const passive = cu === 'RET' || cu === 'ESC' || cu === 'REF' || shift?.isReten === true;
+                                            if (passive) return false;
+                                            return !!(shift?.isPresent || shift?.status === 'PRESENT' || shift?.status === 'COMPLETED');
+                                        })(),
+                                        operacionallyCovered: !!(shift?.operacionallyCovered || coveringEmployee),
+                                        coveredByName: coverageInfo?.employeeName || (coveringEmployee ? String(coveringEmployee).replace(/\s*\([^)]*\)\s*$/, '').trim() : null),
+                                        coveredByCode: coverageInfo?.code || null,
+                                        coveredByHow: coverHowLabel,
+                                        vacancyOpen: vacancyStillOpen,
+                                        covererName: employeeName,
+                                        coversAbsenceName: inferredCoversName || coversAbsenceName || null,
+                                        covererCode: code || null,
+                                        covererOrigin: coverHowLabel || shift?.origin || shift?.coverageType || null,
+                                    })
+                                    : [];
+
+                                const TraceChainPanel = planningTraceSteps.length > 0 ? (
+                                    <div className="rounded-xl border-2 border-indigo-200 bg-white overflow-hidden shadow-sm">
+                                        <div className="px-4 py-2.5 bg-indigo-50 border-b border-indigo-200 flex items-center justify-between gap-2">
+                                            <span className="text-[10px] font-black uppercase tracking-wide text-indigo-900">Cadena · qué pasó</span>
+                                            <span className="text-[9px] font-bold text-indigo-600/80 uppercase">Trazabilidad</span>
+                                        </div>
+                                        <ol className="p-3 space-y-2">
+                                            {planningTraceSteps.map((step, i) => (
+                                                <li key={step.key} className={`rounded-lg border px-3 py-2 ${PLANNING_TRACE_TONE[step.tone]}`}>
+                                                    <p className="text-[10px] font-black uppercase tracking-wide opacity-80">{step.title}</p>
+                                                    <p className="text-xs font-semibold mt-0.5 leading-snug">{step.detail}</p>
+                                                    {i < planningTraceSteps.length - 1 && (
+                                                        <p className="text-[9px] font-black text-slate-400 mt-1">↓</p>
+                                                    )}
+                                                </li>
+                                            ))}
+                                        </ol>
+                                    </div>
+                                ) : null;
+
+                                const displayClock = resolveShiftDisplayClockParts(shift, code);
+                                const plannedStart = displayClock.start;
+                                const plannedEnd = displayClock.end;
+                                const rawRealStart = shift?.realStartTime ? formatTime(shift.realStartTime) : (shift?.checkInTime ? formatTime(shift.checkInTime) : '--:--');
+                                const rawRealEnd = shift?.realEndTime ? formatTime(shift.realEndTime) : (shift?.checkOutTime ? formatTime(shift.checkOutTime) : '--:--');
+                                const isPlaceholderClock = (t: string) => {
+                                    const raw = String(t || '').trim().toLowerCase().replace(/\s+/g, ' ').replace(/\./g, '');
+                                    return /^(0?0:00|12:00\s*a\s*m|--:--)$/.test(raw);
+                                };
+                                const realStart = (displayClock.usedBandFallback && isPlaceholderClock(rawRealStart)) ? '--:--' : rawRealStart;
+                                const realEnd = (displayClock.usedBandFallback && isPlaceholderClock(rawRealEnd)) ? '--:--' : rawRealEnd;
                                 const rawStatus = (shift?.status || '').toString().toUpperCase();
                                 const STATUS_LABELS: Record<string, string> = { PRESENT: 'Presente', COMPLETED: 'Completado', ABSENT: 'Ausente', LATE: 'Tarde', INTERRUPTED: 'Interrumpido', PENDING: 'Pendiente' };
                                 const status = STATUS_LABELS[rawStatus] || rawStatus || '-';
                                 const storedHours = Number(shift?.hours);
-                                const calcHoursFromTs = (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string')
-                                    ? Math.max(0, (formatTime(shift.endTime) !== '--:--' ? (shift.endTime.toDate ? shift.endTime.toDate().getTime() : new Date(shift.endTime.seconds * 1000).getTime()) - (shift.startTime.toDate ? shift.startTime.toDate().getTime() : new Date(shift.startTime.seconds * 1000).getTime()) : 0)) / 3600000
-                                    : 0;
-                                const hours = storedHours || calcHoursFromTs || (code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0);
+                                let calcHoursFromTs = 0;
+                                if (shift?.startTime && shift?.endTime && typeof shift.startTime !== 'string') {
+                                    const startMs = shift.startTime.toDate ? shift.startTime.toDate().getTime() : new Date(shift.startTime.seconds * 1000).getTime();
+                                    const endMs = shift.endTime.toDate ? shift.endTime.toDate().getTime() : new Date(shift.endTime.seconds * 1000).getTime();
+                                    let durH = (endMs - startMs) / 3600000;
+                                    if (Math.abs(durH) < 1 / 60) durH = 0;
+                                    else if (durH < 0) durH += 24;
+                                    calcHoursFromTs = Math.max(0, durH);
+                                }
+                                // Si timestamps dan 24h pero el código es banda CCT corta, preferir lookup (caso 00:00→00:00 wrap).
+                                const bandLookup = code ? (SHIFT_HOURS_LOOKUP[code] || 0) : 0;
+                                const hours = (storedHours > 0 && storedHours <= 16)
+                                    ? storedHours
+                                    : (calcHoursFromTs >= 0.5 && calcHoursFromTs <= 16)
+                                        ? calcHoursFromTs
+                                        : (bandLookup || storedHours || calcHoursFromTs || 0);
                                 const showRealTimes = isConsolidated;
 
-                                if (isReadOnly || showRrhhPanel) {
+                                if (isReadOnly || showTraceNarrative) {
                                     return (
                                         <>
                                             <div className="flex justify-between items-start mb-4">
                                                 <div className="min-w-0">
                                                     <h3 className="font-black text-lg text-slate-800 truncate">{employeeName}</h3>
                                                     <p className="text-xs text-slate-500 font-bold uppercase">{selectedCell.dateStr}</p>
-                                                    <div className="mt-2 flex items-center gap-2">
+                                                    <div className="mt-2 flex items-center gap-2 flex-wrap">
                                                         {isConsolidated && (
                                                             <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-emerald-50 text-emerald-700 border-emerald-200">
                                                                 Consolidado
@@ -12548,12 +9310,24 @@ export default function PlanificacionPage() {
                                                                 RRHH
                                                             </span>
                                                         )}
+                                                        {isOpsAbsent && !absence && !isRRHHCode && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-rose-50 text-rose-800 border-rose-200">
+                                                                Ausente Ops
+                                                            </span>
+                                                        )}
+                                                        {isCovererCell && !isOpsAbsent && (
+                                                            <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border bg-indigo-50 text-indigo-800 border-indigo-200">
+                                                                Cubre a otro
+                                                            </span>
+                                                        )}
                                                     </div>
                                                 </div>
                                                 <button onClick={() => setSelectedCell(null)} className="p-2 hover:bg-slate-100 rounded-xl"><X size={18}/></button>
                                             </div>
 
                                             <div className="space-y-3">
+                                                {TraceChainPanel}
+
                                                 {(absence || isRRHHCode) ? (
                                                     <div className="rounded-xl border-2 border-amber-200 bg-white overflow-hidden shadow-sm">
                                                         <div className="px-4 py-3 bg-amber-50 border-b border-amber-200 flex items-center justify-between gap-2">
@@ -12683,7 +9457,7 @@ export default function PlanificacionPage() {
                                                 <div className="p-3 rounded-xl border bg-slate-50">
                                                     <div className="text-[10px] font-black uppercase text-slate-400 mb-2">Planificado (Planificador)</div>
                                                     <div className="grid grid-cols-2 gap-2 text-xs">
-                                                        <div className="font-bold text-slate-600">Cubrió</div>
+                                                        <div className="font-bold text-slate-600">Turno</div>
                                                         <div className="text-slate-800 font-bold">
                                                             <span className="font-mono">{code || '-'}</span>
                                                             <span className="mx-2 text-slate-300">|</span>
@@ -12692,7 +9466,14 @@ export default function PlanificacionPage() {
                                                         <div className="font-bold text-slate-600">Servicio</div>
                                                         <div className="text-slate-800">{serviceName || '-'}</div>
                                                         <div className="font-bold text-slate-600">Horario</div>
-                                                        <div className="font-mono text-slate-800">{plannedStart} - {plannedEnd}</div>
+                                                        <div className="font-mono text-slate-800">
+                                                            {plannedStart} - {plannedEnd}
+                                                            {displayClock.usedBandFallback && (
+                                                                <span className="block text-[9px] font-bold text-amber-700 mt-0.5 normal-case">
+                                                                    Banda CCT (timestamps 00:00=00:00 inválidos — no es 24h)
+                                                                </span>
+                                                            )}
+                                                        </div>
                                                         <div className="font-bold text-slate-600">Horas</div>
                                                         <div className="font-mono text-slate-800">{hours ? `${hours}h` : '-'}</div>
                                                     </div>
@@ -13243,6 +10024,22 @@ export default function PlanificacionPage() {
                                                             const srvsDia = serviciosParaFecha(eventos, selectedCell.dateStr, true);
                                                             if (srvsDia.length === 0) return null;
                                                             const isPickerOpen = eventoPickerKey === cellKey;
+                                                            const countAssignedForService = (servicioId: string) => {
+                                                                return displayedEmployees.reduce((acc: number, emp: any) => {
+                                                                    const shift = resolveCellShiftAtObjective(
+                                                                        emp.id,
+                                                                        selectedCell.dateStr,
+                                                                        selectedObjective,
+                                                                        pendingChanges,
+                                                                        shiftsMap,
+                                                                    );
+                                                                    if (!shift || shift.isDeleted) return acc;
+                                                                    const code = String(shift.code || shift.type || '').toUpperCase();
+                                                                    if (code !== 'EV') return acc;
+                                                                    if (String(shift.servicioId || '') !== String(servicioId)) return acc;
+                                                                    return acc + 1;
+                                                                }, 0);
+                                                            };
                                                             const assignServicio = async ({ evento, servicio }: { evento: Evento; servicio: ServicioEvento }) => {
                                                                 if (isServiceLocked) return;
                                                                 const guardHours = servicio.tipoTurno === '3x8' ? 8
@@ -13250,48 +10047,55 @@ export default function PlanificacionPage() {
                                                                     : calcHorasEvento(servicio.horaInicio, servicio.horaFin);
                                                                 const emp = (displayedEmployees as any[]).find((e: any) => e.id === selectedCell.empId);
                                                                 const empNombre = emp?.name || selectedCell.empId;
-                                                                try {
-                                                                    const uid = getAuth().currentUser?.uid || '';
-                                                                    const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
-                                                                        empresaId,
-                                                                        eventoId: evento.id,
-                                                                        eventoNombre: evento.nombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        status: 'aprobada',
-                                                                        tipo: 'admin_asigna',
-                                                                        convocadoPor: uid,
-                                                                        respondidoPor: uid,
-                                                                        respondidoAt: serverTimestamp(),
-                                                                        creadoAt: serverTimestamp(),
-                                                                    });
-                                                                    await assignGuardToEvent({
-                                                                        empresaId,
-                                                                        empleadoId: selectedCell.empId,
-                                                                        empleadoNombre: empNombre,
-                                                                        empleadoObjectiveId: emp?.preferredObjectiveId || emp?.objectiveId,
-                                                                        empleadoObjectiveName: emp?.preferredObjectiveName || emp?.objectiveName,
-                                                                        eventoId: evento.id!,
-                                                                        eventoNombre: evento.nombre,
-                                                                        clienteId: evento.clienteId,
-                                                                        clienteNombre: evento.clienteNombre,
-                                                                        servicioId: servicio.id,
-                                                                        servicioNombre: servicio.nombre,
-                                                                        servicioFecha: servicio.fecha,
-                                                                        horaInicio: servicio.horaInicio,
-                                                                        horaFin: servicio.horaFin,
-                                                                        horas: guardHours,
-                                                                        solicitudId: solicitudRef.id,
-                                                                        respondidoPor: uid,
-                                                                    });
-                                                                } catch (e) {
-                                                                    console.error('Error asignando guardia a evento:', e);
+                                                                const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
+                                                                const current = pendingChanges[key]?.isDeleted
+                                                                    ? null
+                                                                    : (pendingChanges[key] || selectedCell.currentShift);
+                                                                const currentCode = String(current?.code || current?.type || '').toUpperCase();
+                                                                const alreadySameService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id)
+                                                                    && String(current?.eventoId || '') === String(evento.id || '');
+                                                                if (alreadySameService) {
+                                                                    toast.info('Ese guardia ya está asignado a este servicio en borrador');
+                                                                    setEventoPickerKey(null);
+                                                                    return;
                                                                 }
+                                                                const assigned = countAssignedForService(servicio.id);
+                                                                const replacingThisService = currentCode === 'EV'
+                                                                    && String(current?.servicioId || '') === String(servicio.id);
+                                                                const effectiveAssigned = replacingThisService ? Math.max(0, assigned - 1) : assigned;
+                                                                if (servicio.cupo > 0 && effectiveAssigned >= servicio.cupo) {
+                                                                    toast.error(`Cupo completo para ${servicio.nombre} (${effectiveAssigned}/${servicio.cupo})`);
+                                                                    return;
+                                                                }
+                                                                const coveredPosition = activePosition || current?.positionName || 'General';
+                                                                applyToPending({
+                                                                    code: 'EV',
+                                                                    name: 'Evento',
+                                                                    hours: guardHours,
+                                                                    startTime: servicio.horaInicio || '08:00',
+                                                                    endTime: servicio.horaFin || '16:00',
+                                                                    positionName: coveredPosition,
+                                                                    eventoId: evento.id,
+                                                                    eventoNombre: evento.nombre,
+                                                                    servicioId: servicio.id,
+                                                                    servicioNombre: servicio.nombre,
+                                                                    comments: `Evento: ${evento.nombre} · ${servicio.nombre}`,
+                                                                    isFrancoTrabajado: false,
+                                                                    isFrancoCompensatorio: false,
+                                                                    isExtended: false,
+                                                                    isEarlyStart: false,
+                                                                });
                                                                 setEventoPickerKey(null);
                                                             };
+                                                            const buttonLabel = (() => {
+                                                                if (srvsDia.length !== 1) return `${srvsDia.length} servicios`;
+                                                                const one = srvsDia[0];
+                                                                const assigned = countAssignedForService(one.servicio.id);
+                                                                const left = one.servicio.cupo > 0 ? Math.max(0, one.servicio.cupo - assigned) : null;
+                                                                const base = `${one.evento.nombre} · ${one.servicio.nombre}`;
+                                                                return left == null ? base : `${base} (${assigned}/${one.servicio.cupo})`;
+                                                            })();
                                                             return (
                                                                 <div className="col-span-3">
                                                                     <button
@@ -13309,12 +10113,14 @@ export default function PlanificacionPage() {
                                                                     >
                                                                         <span>EV</span>
                                                                         <span className="text-[9px] font-bold truncate max-w-[120px]">
-                                                                            {srvsDia.length === 1 ? srvsDia[0].servicio.nombre : `${srvsDia.length} servicios`}
+                                                                            {buttonLabel}
                                                                         </span>
                                                                     </button>
                                                                     {isPickerOpen && srvsDia.length > 1 && (
                                                                         <div className="mt-1 flex flex-col gap-1 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-300 dark:border-yellow-700 rounded-lg p-2 max-h-48 overflow-y-auto">
                                                                             {srvsDia.map(({ evento, servicio }) => {
+                                                                                const assigned = countAssignedForService(servicio.id);
+                                                                                const cupoLleno = servicio.cupo > 0 && assigned >= servicio.cupo;
                                                                                 const horarioBadge = servicio.tipoTurno === '3x8'
                                                                                     ? '3×8h'
                                                                                     : servicio.tipoTurno === '2x12'
@@ -13323,8 +10129,11 @@ export default function PlanificacionPage() {
                                                                                 return (
                                                                                     <button
                                                                                         key={servicio.id}
+                                                                                        disabled={cupoLleno}
                                                                                         onClick={() => { void assignServicio({ evento, servicio }); }}
-                                                                                        className="text-left px-2 py-2 rounded text-xs font-bold text-yellow-900 hover:bg-yellow-200 border-b border-yellow-100 last:border-0"
+                                                                                        className={`text-left px-2 py-2 rounded text-xs font-bold border-b border-yellow-100 last:border-0 ${
+                                                                                            cupoLleno ? 'text-slate-400 bg-slate-100 cursor-not-allowed' : 'text-yellow-900 hover:bg-yellow-200'
+                                                                                        }`}
                                                                                     >
                                                                                         <div className="flex items-center justify-between gap-2">
                                                                                             <span className="font-black truncate">{servicio.nombre}</span>
@@ -13332,7 +10141,8 @@ export default function PlanificacionPage() {
                                                                                         </div>
                                                                                         <div className="flex items-center gap-1.5 mt-0.5 font-normal text-[10px] opacity-70">
                                                                                             <span className="px-1 py-0.5 bg-yellow-300 rounded text-[9px] font-bold">{horarioBadge}</span>
-                                                                                            {servicio.cupo > 0 && <span>{servicio.cupo} pax</span>}
+                                                                                            {servicio.cupo > 0 && <span>{assigned}/{servicio.cupo} pax</span>}
+                                                                                            {cupoLleno && <span className="text-rose-500 font-bold">Cupo completo</span>}
                                                                                         </div>
                                                                                     </button>
                                                                                 );
@@ -13392,7 +10202,7 @@ export default function PlanificacionPage() {
                     </div>
                 )}
 
-                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button type="button" onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button type="button" onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Aplicar</button></div></div></div></div>, document.body)}
+                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button type="button" onClick={cancelPendingAssignment} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button type="button" onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Aplicar</button></div></div></div></div>, document.body)}
                 {publishConfirmModal && typeof document !== 'undefined' && createPortal(
                     <div
                         className="fixed inset-0 z-[9200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
@@ -14021,7 +10831,8 @@ export default function PlanificacionPage() {
                     const sinTurnoCandidatos = candidatos.filter(e => e.dayRole === 'FREE' && matchesSearch(e)).sort(sortKm);
                     const vacancySplitListCtx = {
                         positionStructure: effectivePosStructure as import('@/lib/planificacion/vacancySplitBands').VacancyPositionSla[],
-                        preferSamePosition: true,
+                        // Ext+Adel: banda vecina de cualquier puesto del objetivo (cubre con coversPositionName).
+                        preferSamePosition: false,
                     };
                     const splitTitularShift = (() => {
                         if (splitReferenceDate) {
@@ -14618,7 +11429,7 @@ export default function PlanificacionPage() {
                                                         1.er tramo — extensión ({splitExtSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Solo banda {splitPlan?.extBand || 'anterior'} (turno que termina cuando empieza el hueco). El titular ausente no aparece.
+                                                        Banda {splitPlan?.extBand || 'anterior'} del objetivo (cualquier puesto; primero el del hueco). El titular ausente no aparece.
                                                     </p>
                                                     <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
                                                         {splitWorkerPoolExt.length === 0 ? (
@@ -14642,7 +11453,7 @@ export default function PlanificacionPage() {
                                                         2.º tramo — adelanto ({splitSecondSegmentLabel})
                                                     </label>
                                                     <p className="text-[9px] text-slate-400 font-bold mb-1.5">
-                                                        Solo banda {splitPlan?.adelBand || 'posterior'} (turno que empieza cuando termina el hueco).
+                                                        Banda {splitPlan?.adelBand || 'posterior'} del objetivo (cualquier puesto; primero el del hueco).
                                                     </p>
                                                     <div className="space-y-1 max-h-36 overflow-y-auto custom-scrollbar rounded-xl border border-slate-100 p-1">
                                                         {splitWorkerPoolAdel.length === 0 ? (
@@ -14907,6 +11718,29 @@ export default function PlanificacionPage() {
                                     const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
                                     return (
                                         <>
+                                            {planningAuxiliarySummary && (planningAuxiliarySummary.hasEnc || planningAuxiliarySummary.hasEvt) && (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                                                    {planningAuxiliarySummary.hasEnc && (
+                                                        <div className="rounded-xl border border-amber-200 p-3 bg-amber-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-amber-700">Encargado (ENC)</p>
+                                                            <p className="text-lg font-black text-amber-900">{planningAuxiliarySummary.encPlanned}h <span className="text-sm font-bold text-slate-500">plan</span></p>
+                                                            <p className="text-[10px] text-slate-600">Techo mes: {planningAuxiliarySummary.encContract}h · {planningAuxiliarySummary.encInSla > 0 ? `${planningAuxiliarySummary.encInSla}h en SLA vendido` : 'fuera de SLA vendido'}</p>
+                                                        </div>
+                                                    )}
+                                                    {(planningAuxiliarySummary.hasEvt || planningAuxiliarySummary.evtPlanned > 0) && (
+                                                        <div className="rounded-xl border border-violet-200 p-3 bg-violet-50/50">
+                                                            <p className="text-[9px] font-black uppercase text-violet-700">Eventos (EVT)</p>
+                                                            <p className="text-lg font-black text-violet-900">{planningAuxiliarySummary.evtPlanned}h</p>
+                                                            <p className="text-[10px] text-slate-600">Prefactura / extras — no cierra SLA cobertura</p>
+                                                        </div>
+                                                    )}
+                                                    <div className="rounded-xl border border-slate-200 p-3 bg-slate-50/80">
+                                                        <p className="text-[9px] font-black uppercase text-slate-500">SLA cobertura</p>
+                                                        <p className="text-lg font-black text-teal-800">{vend || '—'}h vend.</p>
+                                                        <p className="text-[10px] text-slate-600">Base plan {b.baseSla}h · facturable {b.gross}h</p>
+                                                    </div>
+                                                </div>
+                                            )}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                                 <div className="rounded-xl border border-slate-200 p-3 bg-white dark:bg-slate-800">
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Col. legajo (CRM)</p>
@@ -15381,7 +12215,7 @@ export default function PlanificacionPage() {
                         onClose={() => setShowCronogramasOverview(false)}
                         year={currentDate.getFullYear()}
                         month={currentDate.getMonth() + 1}
-                        onMonthChange={(y, m) => setCurrentDate(new Date(y, m - 1, 1))}
+                        onMonthChange={(y, m) => { if (goToPlanningMonth(y, m - 1)) setAutoGeneratedReady(false); }}
                         empresaId={empresaId || ''}
                         migracionCompleta={migracionCompleta}
                         scopeEmpresa={scopeEmpresa}
@@ -17171,6 +14005,22 @@ export default function PlanificacionPage() {
                                                         employeeName: emp.name,
                                                         ...(cat.franco ? { isFrancoTrabajado: true, coveredFromFranco: true } : {}),
                                                     });
+                                                    const solId = String(rfzAsignando.solicitudRefuerzoId || '').trim();
+                                                    if (solId) {
+                                                        try {
+                                                            const solSnap = await getDoc(doc(db, 'solicitudes_refuerzo', solId));
+                                                            if (solSnap.exists()) {
+                                                                const solData = solSnap.data();
+                                                                const prevIds = Array.isArray(solData.empleadoIds) ? solData.empleadoIds : [];
+                                                                const prevNames = Array.isArray(solData.empleadoNames) ? solData.empleadoNames : [];
+                                                                await solicitudRefuerzoService.update(solId, {
+                                                                    estado: 'ASIGNADA',
+                                                                    empleadoIds: prevIds.includes(emp.id) ? prevIds : [...prevIds, emp.id],
+                                                                    empleadoNames: prevIds.includes(emp.id) ? prevNames : [...prevNames, emp.name],
+                                                                });
+                                                            }
+                                                        } catch { /* turno asignado; sync solicitud best-effort */ }
+                                                    }
                                                     activateRfzCorrectionFlow();
                                                     setRfzAsignando(null);
                                                     const lookupKey = planificacionPublishLookupKey(

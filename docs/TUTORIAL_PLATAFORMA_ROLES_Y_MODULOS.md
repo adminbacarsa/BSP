@@ -52,6 +52,8 @@ Módulos configurables:
 - `ANALYSIS` (Análisis Operativo)
 - `CONFIG` (Configuración Global)
 
+> Actualización de producto: el acceso de indicadores ejecutivos fue retirado de la plataforma.
+
 ### Roles típicos recomendados
 
 - **SuperAdmin**
@@ -124,7 +126,7 @@ Objetivo: definir SLA operativo y reglas de cobertura por objetivo.
 
 - Versionar en vez de sobrescribir reglas críticas.
 - Validar puestos y turnos antes de publicar.
-- Revisar KPIs mensuales del módulo.
+- Revisar indicadores mensuales del módulo (cobertura, horas y estado SLA).
 
 ## 3.4 RRHH (`/admin/rrhh`)
 
