@@ -329,10 +329,8 @@ import { isShiftEligibleForExtension } from '@/lib/planificacion/shiftExtensionA
 import PlanningCronogramasOverviewModal from '@/components/planificacion/PlanningCronogramasOverviewModal';
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
-import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
-import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
-import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
+import { type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
 import AjustarCronoOperativoModal from '@/components/admin/planificacion/AjustarCronoOperativoModal';
 import EquilibrarCronoModal from '@/components/admin/planificacion/EquilibrarCronoModal';
 import { usePlanningRules } from '@/hooks/usePlanningRules';
