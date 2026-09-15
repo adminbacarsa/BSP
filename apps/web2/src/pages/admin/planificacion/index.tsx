@@ -31,6 +31,8 @@ import { collection, onSnapshot, addDoc, deleteDoc, doc, query, orderBy, limit, 
 import {
     ASSIGN_SEARCH_LIMIT,
     DOTACION_NEARBY_KM_DEFAULT,
+    DOTACION_NEARBY_KM_MIN,
+    DOTACION_NEARBY_KM_MAX,
     DOTACION_NEARBY_ROW_CAP,
     DOTACION_NEARBY_SCAN_CAP,
     NEARBY_KM_STORAGE_KEY,
