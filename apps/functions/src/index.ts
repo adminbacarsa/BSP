@@ -109,6 +109,18 @@ const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manag
 /** Alineado con web2 `ALL_EMPRESAS_VALUE` en systemUser.ts */
 const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
+const ONBOARDING_TRACKS = new Set(['OPERATIONS', 'PLANNING']);
+
+function normalizeOnboardingTrack(raw: unknown): 'OPERATIONS' | 'PLANNING' {
+  return String(raw ?? '').trim().toUpperCase() === 'PLANNING' ? 'PLANNING' : 'OPERATIONS';
+}
+
+function normalizeOnboardingStatus(raw: unknown): 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' {
+  const status = String(raw ?? '').trim().toUpperCase();
+  if (status === 'IN_PROGRESS') return 'IN_PROGRESS';
+  if (status === 'COMPLETED') return 'COMPLETED';
+  return 'NOT_STARTED';
+}
 
 
 // =========================================================
@@ -1435,8 +1447,9 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack } = data;
   const roleNorm = normalizeBackupRole(role);
+  const onboardingTrack = normalizeOnboardingTrack(rawOnboardingTrack);
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
     !roleIsSuper &&
@@ -1480,6 +1493,16 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       role: roleNorm,
       empresaId: targetEmpresaId,
       ...(allEmpresas ? { allEmpresas: true } : {}),
+      onboardingGuide: {
+        required: true,
+        track: onboardingTrack,
+        status: 'NOT_STARTED',
+        progressPct: 0,
+        currentStepId: null,
+        startedAt: null,
+        completedAt: null,
+        lastEventAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
@@ -1519,6 +1542,99 @@ export const syncSystemUserClaims = functions.https.onCall(async (data, context)
   }
   await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
   return { ok: true, uid: targetUid, role };
+});
+
+/** Guarda progreso/completitud de onboarding obligatorio de guía interactiva para usuario admin. */
+export const updateOnboardingGuideProgress = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo usuarios de panel pueden registrar onboarding.');
+  }
+
+  const payload = (data || {}) as {
+    action?: string;
+    stepId?: string;
+    progressPct?: number;
+    track?: string;
+    checklist?: unknown[];
+  };
+  const action = String(payload.action ?? 'PROGRESS').trim().toUpperCase();
+  const requestedTrack = String(payload.track ?? '').trim().toUpperCase();
+  const track = ONBOARDING_TRACKS.has(requestedTrack)
+    ? (requestedTrack as 'OPERATIONS' | 'PLANNING')
+    : normalizeOnboardingTrack(payload.track);
+  const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
+  const progressRaw = Number(payload.progressPct ?? 0);
+  const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const userRef = admin.firestore().collection('system_users').doc(context.auth.uid);
+  const userSnap = await userRef.get();
+
+  if (!userSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Perfil de usuario no encontrado.');
+  }
+
+  const currentGuide = userSnap.data()?.onboardingGuide || {};
+  const currentStatus = normalizeOnboardingStatus(currentGuide.status);
+  const patch: Record<string, unknown> = {
+    'onboardingGuide.required': true,
+    'onboardingGuide.track': track,
+    'onboardingGuide.lastEventAt': now,
+  };
+
+  if (action === 'RESET') {
+    patch['onboardingGuide.status'] = 'NOT_STARTED';
+    patch['onboardingGuide.progressPct'] = 0;
+    patch['onboardingGuide.currentStepId'] = null;
+    patch['onboardingGuide.startedAt'] = null;
+    patch['onboardingGuide.completedAt'] = null;
+    patch['onboardingGuide.completedChecklist'] = [];
+  } else if (action === 'PROGRESS') {
+    patch['onboardingGuide.currentStepId'] = stepId;
+    patch['onboardingGuide.progressPct'] = progressPct;
+    if (currentStatus !== 'COMPLETED') {
+      patch['onboardingGuide.status'] = progressPct > 0 || stepId ? 'IN_PROGRESS' : 'NOT_STARTED';
+      if (!currentGuide?.startedAt && (progressPct > 0 || stepId)) {
+        patch['onboardingGuide.startedAt'] = now;
+      }
+    }
+  } else if (action === 'COMPLETE') {
+    const checklist = Array.isArray(payload.checklist)
+      ? payload.checklist.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : [];
+    if (!checklist.length) {
+      throw new functions.https.HttpsError('invalid-argument', 'Checklist obligatorio para completar onboarding.');
+    }
+    patch['onboardingGuide.status'] = 'COMPLETED';
+    patch['onboardingGuide.progressPct'] = 100;
+    patch['onboardingGuide.currentStepId'] = stepId || 'cierre';
+    patch['onboardingGuide.completedAt'] = now;
+    patch['onboardingGuide.completedChecklist'] = checklist.slice(0, 32);
+    if (!currentGuide?.startedAt) {
+      patch['onboardingGuide.startedAt'] = now;
+    }
+  } else {
+    throw new functions.https.HttpsError('invalid-argument', `Acción de onboarding inválida: ${action}`);
+  }
+
+  await userRef.set(patch, { merge: true });
+  return {
+    ok: true,
+    onboardingGuide: {
+      required: true,
+      track,
+      status: action === 'RESET'
+        ? 'NOT_STARTED'
+        : action === 'COMPLETE'
+          ? 'COMPLETED'
+          : (currentStatus === 'COMPLETED' ? 'COMPLETED' : (progressPct > 0 || stepId ? 'IN_PROGRESS' : 'NOT_STARTED')),
+      progressPct: action === 'COMPLETE' ? 100 : action === 'RESET' ? 0 : progressPct,
+      currentStepId: action === 'RESET' ? null : (stepId || (action === 'COMPLETE' ? 'cierre' : null)),
+    },
+  };
 });
 
 /** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */

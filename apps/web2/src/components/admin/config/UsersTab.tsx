@@ -8,6 +8,7 @@ import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
+import { ONBOARDING_TRACK_LABEL, normalizeOnboardingTrack, type OnboardingTrack } from '@/lib/onboardingGuide';
 import {
     ALL_EMPRESAS_VALUE,
     isAllEmpresasUser,
@@ -29,7 +30,19 @@ export default function UsersTab() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [editMode, setEditMode]         = useState(false);
 
-    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false, objetivosAsignados: [] as string[] };
+    const initialForm = {
+        id: '',
+        firstName: '',
+        lastName: '',
+        email: '',
+        password: '',
+        role: '',
+        empresaId: '',
+        supervisorPin: '',
+        showPin: false,
+        objetivosAsignados: [] as string[],
+        onboardingTrack: 'OPERATIONS' as OnboardingTrack,
+    };
     const [formData, setFormData] = useState(initialForm);
 
     const empresasDropdown = isSuperAdmin
@@ -99,6 +112,7 @@ export default function UsersTab() {
             supervisorPin: user.supervisorPin || '',
             showPin: false,
             objetivosAsignados: user.objetivosAsignados || [],
+            onboardingTrack: normalizeOnboardingTrack(user?.onboardingGuide?.track),
         });
         setIsModalOpen(true);
     };
@@ -135,6 +149,9 @@ export default function UsersTab() {
                 );
 
                 if (editMode) {
+                    const existingGuide = (users.find(u => u.id === formData.id) as any)?.onboardingGuide || {};
+                    const trackChanged =
+                        normalizeOnboardingTrack(formData.onboardingTrack) !== normalizeOnboardingTrack(existingGuide?.track);
                     const patch: Record<string, unknown> = {
                         firstName:           formData.firstName,
                         lastName:            formData.lastName,
@@ -142,7 +159,15 @@ export default function UsersTab() {
                         empresaId:           efectivaEmpresaId,
                         supervisorPin:       formData.supervisorPin || null,
                         objetivosAsignados:  formData.objetivosAsignados,
+                        'onboardingGuide.required': true,
+                        'onboardingGuide.track': formData.onboardingTrack,
                     };
+                    if (trackChanged) {
+                        patch['onboardingGuide.status'] = 'NOT_STARTED';
+                        patch['onboardingGuide.progressPct'] = 0;
+                        patch['onboardingGuide.currentStepId'] = null;
+                        patch['onboardingGuide.completedAt'] = null;
+                    }
                     if (allEmpresas) patch.allEmpresas = true;
                     else patch.allEmpresas = deleteField();
 
@@ -161,6 +186,7 @@ export default function UsersTab() {
                         empresaId:     efectivaEmpresaId,
                         allEmpresas,
                         supervisorPin: formData.supervisorPin || null,
+                        onboardingTrack: formData.onboardingTrack,
                     });
                     resolve('Usuario creado y acceso concedido');
                 }
@@ -364,6 +390,23 @@ export default function UsersTab() {
                                         ))
                                     }
                                 </select>
+                            </div>
+
+                            <div>
+                                <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">
+                                    Recorrido onboarding
+                                </label>
+                                <select
+                                    className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-700 dark:text-white outline-none"
+                                    value={formData.onboardingTrack}
+                                    onChange={e => setFormData({ ...formData, onboardingTrack: normalizeOnboardingTrack(e.target.value) })}
+                                >
+                                    <option value="OPERATIONS">{ONBOARDING_TRACK_LABEL.OPERATIONS}</option>
+                                    <option value="PLANNING">{ONBOARDING_TRACK_LABEL.PLANNING}</option>
+                                </select>
+                                <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                                    Guía obligatoria al primer ingreso del usuario.
+                                </p>
                             </div>
 
                             {formRoleIsSuperAdmin ? (
