@@ -1,8 +1,23 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import Link from 'next/link';
+import { useRouter } from 'next/router';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
+import { functions } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { toast } from 'sonner';
+import {
+  ONBOARDING_TRACK_LABEL,
+  ONBOARDING_TRACKS,
+  filterTracksByCanReadModule,
+  formatOnboardingTracksLabel,
+  normalizeOnboardingGuideState,
+  normalizeOnboardingTrack,
+  normalizeOnboardingTracks,
+  onboardingTracksProgress,
+  type OnboardingTrack,
+} from '@/lib/onboardingGuide';
 import {
   ArrowLeft,
   ArrowRight,
@@ -20,6 +35,40 @@ import {
 } from 'lucide-react';
 
 const STORAGE_KEY = 'cosp_guia_paso';
+const STORAGE_CHECK_PREFIX = 'cosp_guia_check';
+
+const TRACK_CHECKLIST: Record<OnboardingTrack, { id: string; label: string }[]> = {
+  OPERATIONS: [
+    { id: 'ops-turnos', label: 'Puedo identificar turnos PLAN / ACTIVOS / AUSENTES en Centro Control.' },
+    { id: 'ops-ausencia', label: 'Sé registrar una ausencia y disparar cobertura de vacante.' },
+    { id: 'ops-relevo', label: 'Sé registrar ingreso/relevo y salida del guardia.' },
+    { id: 'ops-novedad', label: 'Sé cargar una novedad operativa para trazabilidad.' },
+  ],
+  PLANNING: [
+    { id: 'plan-contexto', label: 'Sé seleccionar cliente, objetivo y período en Planificación.' },
+    { id: 'plan-asignacion', label: 'Sé asignar/desasignar turnos y validar vacantes.' },
+    { id: 'plan-publicacion', label: 'Sé revisar consistencia con SLA antes de publicar grilla.' },
+    { id: 'plan-cambios', label: 'Sé registrar ajustes y entender su impacto en Operaciones/Reportes.' },
+  ],
+  CRM: [
+    { id: 'crm-cliente', label: 'Sé crear/editar un cliente y revisar que no haya duplicados.' },
+    { id: 'crm-objetivo', label: 'Sé cargar sedes/objetivos con datos mínimos (nombre y ubicación).' },
+    { id: 'crm-contacto', label: 'Sé completar contacto comercial/operativo del cliente.' },
+    { id: 'crm-relacion', label: 'Entiendo cómo el cliente/objetivo alimenta Servicios y Planificación.' },
+  ],
+  SERVICES: [
+    { id: 'srv-sla', label: 'Sé crear o revisar un servicio SLA vinculado a un objetivo.' },
+    { id: 'srv-puestos', label: 'Sé definir puestos/cobertura y turnos permitidos del servicio.' },
+    { id: 'srv-vigencia', label: 'Sé controlar vigencia/estado del servicio contratado.' },
+    { id: 'srv-impacto', label: 'Entiendo el impacto del SLA en la grilla de Planificación.' },
+  ],
+  RRHH: [
+    { id: 'rrhh-alta', label: 'Sé dar de alta un colaborador o importar nómina básica.' },
+    { id: 'rrhh-legajo', label: 'Sé revisar legajo activo, categoría y datos críticos.' },
+    { id: 'rrhh-ausencia', label: 'Sé registrar una ausencia/licencia desde RRHH.' },
+    { id: 'rrhh-impacto', label: 'Entiendo cómo RRHH impacta cobertura en Operaciones/Planificación.' },
+  ],
+};
 
 type Step = {
   id: string;
@@ -29,12 +78,49 @@ type Step = {
   /** Ruta interna para el botón “Abrir módulo” */
   href?: string;
   /** Permiso mínimo para habilitar el botón (ver AuthContext / roles) */
-  moduleKey?: 'CLIENTS' | 'PLANNING' | 'DASHBOARD' | 'REPORTS' | 'RRHH';
+  moduleKey?: 'CLIENTS' | 'PLANNING' | 'DASHBOARD' | 'REPORTS' | 'RRHH' | 'SERVICES' | 'OPERATIONS';
 };
 
 export default function GuiaInteractivaPage() {
-  const { canReadModule, loading } = useAuth();
+  const router = useRouter();
+  const { canReadModule, loading, onboardingGuide, setOnboardingGuide } = useAuth();
   const [step, setStep] = useState(0);
+  const [track, setTrack] = useState<OnboardingTrack>('OPERATIONS');
+  const [checkedItems, setCheckedItems] = useState<string[]>([]);
+  const [savingComplete, setSavingComplete] = useState(false);
+
+  const syncProgressFn = useMemo(
+    () => httpsCallable(functions, 'updateOnboardingGuideProgress'),
+    []
+  );
+
+  const requiredTracks = useMemo<OnboardingTrack[]>(() => {
+    if (onboardingGuide?.required) {
+      const assigned = normalizeOnboardingTracks(onboardingGuide.tracks, onboardingGuide.track);
+      return filterTracksByCanReadModule(assigned, canReadModule);
+    }
+    return filterTracksByCanReadModule([...ONBOARDING_TRACKS], canReadModule);
+  }, [onboardingGuide, canReadModule]);
+
+  const tracksProgress = useMemo(
+    () => onboardingTracksProgress(onboardingGuide),
+    [onboardingGuide],
+  );
+
+  const resolvedTrack = useMemo<OnboardingTrack>(() => {
+    if (onboardingGuide?.track && requiredTracks.includes(normalizeOnboardingTrack(onboardingGuide.track))) {
+      return normalizeOnboardingTrack(onboardingGuide.track);
+    }
+    return requiredTracks[0] || 'OPERATIONS';
+  }, [onboardingGuide?.track, requiredTracks]);
+
+  const checklist = useMemo(() => TRACK_CHECKLIST[track] || [], [track]);
+  const checklistDone = checklist.length > 0 && checklist.every((item) => checkedItems.includes(item.id));
+  const trackAlreadyDone = (onboardingGuide?.completedTracks || []).includes(track);
+
+  useEffect(() => {
+    setTrack(resolvedTrack);
+  }, [resolvedTrack]);
 
   useEffect(() => {
     try {
@@ -55,6 +141,29 @@ export default function GuiaInteractivaPage() {
       /* ignore */
     }
   }, [step]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(`${STORAGE_CHECK_PREFIX}:${track}`);
+      if (!raw) {
+        setCheckedItems([]);
+        return;
+      }
+      const parsed = JSON.parse(raw);
+      const values = Array.isArray(parsed) ? parsed.map((x) => String(x)) : [];
+      setCheckedItems(values);
+    } catch {
+      setCheckedItems([]);
+    }
+  }, [track]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(`${STORAGE_CHECK_PREFIX}:${track}`, JSON.stringify(checkedItems));
+    } catch {
+      /* ignore */
+    }
+  }, [track, checkedItems]);
 
   const steps: Step[] = useMemo(
     () => [
@@ -242,7 +351,7 @@ export default function GuiaInteractivaPage() {
           </div>
         ),
         href: '/admin/servicios',
-        moduleKey: 'CLIENTS',
+        moduleKey: 'SERVICES',
       },
       {
         id: 'empleados-alta',
@@ -473,7 +582,7 @@ export default function GuiaInteractivaPage() {
           </div>
         ),
         href: '/admin/operaciones',
-        moduleKey: 'DASHBOARD',
+        moduleKey: 'OPERATIONS',
       },
       {
         id: 'reportes',
@@ -580,20 +689,99 @@ export default function GuiaInteractivaPage() {
   const total = steps.length;
   const current = steps[step];
 
+  useEffect(() => {
+    const remoteStep = onboardingGuide?.currentStepId;
+    if (!remoteStep) return;
+    const idx = steps.findIndex((s) => s.id === remoteStep);
+    if (idx < 0) return;
+    setStep((prev) => (prev > 0 ? prev : idx));
+  }, [onboardingGuide?.currentStepId, steps]);
+
   const canOpenStep = (s: Step): boolean => {
     if (!s.href) return false;
-    if (s.id === 'operaciones') return canReadModule('DASHBOARD') || canReadModule('PLANNING');
+    if (s.id === 'operaciones') return canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING');
     if (s.id === 'empleados-alta') return canReadModule('RRHH') || canReadModule('PLANNING');
     if (s.moduleKey && canReadModule(s.moduleKey)) return true;
     return false;
   };
 
+  useEffect(() => {
+    if (loading) return;
+    const currentStepId = steps[step]?.id ?? null;
+    const progressPct = total > 0 ? Math.round(((step + 1) / total) * 100) : 0;
+    const timer = window.setTimeout(() => {
+      syncProgressFn({
+        action: 'PROGRESS',
+        stepId: currentStepId,
+        progressPct,
+        track,
+      })
+        .then((res: any) => {
+          const next = normalizeOnboardingGuideState(res?.data?.onboardingGuide);
+          if (next) setOnboardingGuide(next);
+        })
+        .catch(() => {
+          /* sin bloqueo: no rompemos la guía si falla el registro */
+        });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [loading, step, total, track, steps, syncProgressFn, setOnboardingGuide]);
+
   const resetGuia = () => {
     setStep(0);
+    setCheckedItems([]);
     try {
       localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(`${STORAGE_CHECK_PREFIX}:${track}`);
     } catch {
       /* ignore */
+    }
+    syncProgressFn({ action: 'RESET', track })
+      .then((res: any) => {
+        const next = normalizeOnboardingGuideState(res?.data?.onboardingGuide);
+        if (next) setOnboardingGuide(next);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  };
+
+  const toggleChecklist = (id: string) => {
+    setCheckedItems((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  };
+
+  const completeGuide = async () => {
+    if (!checklistDone || savingComplete) return;
+    setSavingComplete(true);
+    try {
+      const currentStepId = steps[step]?.id ?? 'cierre';
+      const res: any = await syncProgressFn({
+        action: 'COMPLETE',
+        stepId: currentStepId,
+        progressPct: 100,
+        track,
+        checklist: checkedItems,
+      });
+      const next = normalizeOnboardingGuideState(res?.data?.onboardingGuide);
+      if (next) setOnboardingGuide(next);
+      const pending = (next?.tracks || requiredTracks).filter(
+        (t) => !(next?.completedTracks || []).includes(t),
+      );
+      if (pending.length) {
+        const nextTrack = pending[0];
+        setTrack(nextTrack);
+        setStep(0);
+        toast.success(
+          `Recorrido ${ONBOARDING_TRACK_LABEL[track]} listo. Sigue con ${ONBOARDING_TRACK_LABEL[nextTrack]}.`,
+        );
+      } else {
+        toast.success('Guía completada. Ya podés usar la plataforma.');
+        router.replace('/admin/dashboard');
+      }
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo guardar la finalización de la guía.');
+    } finally {
+      setSavingComplete(false);
     }
   };
 
@@ -623,6 +811,31 @@ export default function GuiaInteractivaPage() {
             <p className="text-slate-500 dark:text-slate-400 text-sm font-medium mt-1">
               Primeros pasos — del cliente al reporte
             </p>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
+                Guía obligatoria
+              </span>
+              {onboardingGuide?.required && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
+                  {tracksProgress.done}/{tracksProgress.total} · {formatOnboardingTracksLabel(requiredTracks)}
+                </span>
+              )}
+              {(requiredTracks as OnboardingTrack[]).map((trackOpt) => (
+                <button
+                  key={trackOpt}
+                  type="button"
+                  disabled={requiredTracks.length <= 1 && track !== trackOpt}
+                  onClick={() => setTrack(trackOpt)}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-black transition-colors border ${
+                    track === trackOpt
+                      ? 'bg-indigo-600 text-white border-indigo-700'
+                      : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700'
+                  } disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  {ONBOARDING_TRACK_LABEL[trackOpt]}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -663,7 +876,42 @@ export default function GuiaInteractivaPage() {
               {current.subtitle && <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{current.subtitle}</p>}
             </div>
           </div>
-          <div className="p-6 md:p-8 text-base leading-relaxed">{current.body}</div>
+          <div className="p-6 md:p-8 text-base leading-relaxed space-y-6">
+            {current.body}
+            {current.id === 'cierre' && (
+              <div className="rounded-2xl border border-indigo-200 dark:border-indigo-800 bg-indigo-50/60 dark:bg-indigo-900/20 p-4 space-y-3">
+                <h3 className="text-sm font-black uppercase tracking-wider text-indigo-700 dark:text-indigo-300">
+                  Checklist mínimo ({ONBOARDING_TRACK_LABEL[track]})
+                </h3>
+                <div className="space-y-2">
+                  {checklist.map((item) => {
+                    const checked = checkedItems.includes(item.id);
+                    return (
+                      <label
+                        key={item.id}
+                        className={`flex items-start gap-3 p-2 rounded-xl border transition-colors cursor-pointer ${
+                          checked
+                            ? 'bg-emerald-50 border-emerald-200 dark:bg-emerald-900/20 dark:border-emerald-800'
+                            : 'bg-white border-slate-200 dark:bg-slate-800 dark:border-slate-700'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-1 h-4 w-4 accent-indigo-600"
+                          checked={checked}
+                          onChange={() => toggleChecklist(item.id)}
+                        />
+                        <span className="text-sm text-slate-700 dark:text-slate-200 font-medium">{item.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Debés completar este checklist para habilitar el uso de la plataforma.
+                </p>
+              </div>
+            )}
+          </div>
           <div className="px-6 md:px-8 pb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div className="flex flex-wrap gap-2">
               {current.href && (
@@ -700,6 +948,16 @@ export default function GuiaInteractivaPage() {
               >
                 Siguiente <ArrowRight size={18} />
               </button>
+              {step >= total - 1 && (
+                <button
+                  type="button"
+                  onClick={completeGuide}
+                  disabled={!checklistDone || savingComplete}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {savingComplete ? 'Guardando…' : (trackAlreadyDone ? 'Recorrido ya completado' : ((tracksProgress.done + (checklistDone ? 1 : 0)) >= requiredTracks.length ? 'Finalizar y habilitar' : `Completar ${ONBOARDING_TRACK_LABEL[track]}`))}
+                </button>
+              )}
             </div>
           </div>
         </div>

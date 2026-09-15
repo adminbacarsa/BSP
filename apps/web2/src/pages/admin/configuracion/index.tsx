@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
-import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone } from 'lucide-react';
+import { Settings, Users, Shield, Database, Building2, HardDrive, Bot, Activity, Scale, Smartphone, BookOpen } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import UsersTab from '@/components/admin/config/UsersTab';
 import RolesTab from '@/components/admin/config/RolesTab';
@@ -12,11 +12,12 @@ import AssistantLogTab from '@/components/admin/config/AssistantLogTab';
 import PlatformHealthTab from '@/components/admin/config/PlatformHealthTab';
 import PlanningRulesTab from '@/components/admin/config/PlanningRulesTab';
 import MobileAppTab from '@/components/admin/config/MobileAppTab';
+import OnboardingTab from '@/components/admin/config/OnboardingTab';
 import { useAuth } from '@/context/AuthContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
-    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
+    const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'ONBOARDING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule, isSuperAdmin } = useAuth();
 
@@ -58,6 +59,7 @@ export default function ConfigPage() {
                             { id: 'GENERAL',   label: 'Sistema',          icon: Database },
                             ...(isSuperAdmin ? [{ id: 'MOBILE' as const, label: 'App móvil', icon: Smartphone }] : []),
                             { id: 'PLANNING',  label: 'Planificación',    icon: Scale },
+                            { id: 'ONBOARDING', label: 'Onboarding',      icon: BookOpen },
                             { id: 'USERS',     label: 'Usuarios Admin',   icon: Users },
                             { id: 'ROLES',     label: 'Roles y Permisos', icon: Shield },
                             { id: 'EMPRESAS',  label: 'Empresas',         icon: Building2 },
@@ -72,6 +74,7 @@ export default function ConfigPage() {
                         {activeTab === 'GENERAL'   && <GeneralTab />}
                         {activeTab === 'MOBILE'    && <MobileAppTab />}
                         {activeTab === 'PLANNING' && <PlanningRulesTab />}
+                        {activeTab === 'ONBOARDING' && <OnboardingTab />}
                         {activeTab === 'USERS'     && <UsersTab />}
                         {activeTab === 'ROLES'     && <RolesTab />}
                         {activeTab === 'EMPRESAS'  && <EmpresasTab />}

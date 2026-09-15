@@ -19,6 +19,7 @@ import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtil
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { PLAN_SIDEBAR_VACANTE_TYPES } from '@/lib/planificacion/planificacionInbox';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
+import { needsMandatoryOnboarding } from '@/lib/onboardingGuide';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -308,7 +309,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
-  const { canReadModule, user, isSuperAdmin, rolePermissions } = useAuth();
+  const { canReadModule, user, isSuperAdmin, rolePermissions, loading, onboardingGuide } = useAuth();
   const showAutoLabNav = canReadModule('PLANNING') && canAccessAutoLab(isSuperAdmin, rolePermissions);
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
@@ -358,6 +359,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const canViewServices = canReadModule('SERVICES') || canReadModule('CLIENTS');
   const canViewOps = canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING');
   const canViewRrhh = canReadModule('RRHH');
+  const mustCompleteOnboarding = needsMandatoryOnboarding(onboardingGuide);
+
+  useEffect(() => {
+    if (loading || !user) return;
+    if (!router.pathname.startsWith('/admin')) return;
+    if (!mustCompleteOnboarding) return;
+    if (router.pathname.startsWith('/admin/guia')) return;
+    router.replace('/admin/guia?required=1');
+  }, [loading, user, router, mustCompleteOnboarding]);
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision || !user?.uid) return;
@@ -725,6 +735,13 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
+          <Link href="/admin/guia" prefetch={false} title="Guía"
+            className={getLinkHoverClass('/admin/guia')}
+            style={getLinkStyle('/admin/guia')}>
+            <BookOpen size={18} className="shrink-0" />
+            {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
+          </Link>
+
           {canReadModule('RRHH') && (
             <Link href="/admin/rrhh" prefetch={false} title="RRHH"
               className={`${getLinkHoverClass('/admin/rrhh')} relative`}
@@ -782,12 +799,6 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                 style={getLinkStyle('/admin/configuracion')}>
                 <Settings size={18} className="shrink-0" />
                 {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Configuración</span>}
-              </Link>
-              <Link href="/admin/guia" prefetch={false} title="Guía"
-                className={getLinkHoverClass('/admin/guia')}
-                style={getLinkStyle('/admin/guia')}>
-                <BookOpen size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
               </Link>
             </>
           )}

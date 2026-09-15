@@ -6,6 +6,7 @@ const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 import { doc, getDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { useRouter } from 'next/router';
+import { normalizeOnboardingGuideState, type OnboardingGuideState } from '@/lib/onboardingGuide';
 
 import { isSuperAdminRole, normalizeRoleId as roleDocId } from '@/lib/roles';
 
@@ -43,6 +44,8 @@ interface AuthContextType {
   canReadModule: (moduleKey: string) => boolean;
   /** ID de la empresa a la que pertenece el usuario. Default: 'bacarsa' */
   empresaId: string;
+  onboardingGuide: OnboardingGuideState | null;
+  setOnboardingGuide: (next: OnboardingGuideState | null) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
@@ -57,6 +60,8 @@ const AuthContext = createContext<AuthContextType>({
   allEmpresas: false,
   canReadModule: () => false,
   empresaId: 'bacarsa',
+  onboardingGuide: null,
+  setOnboardingGuide: () => {},
 });
 export const useAuth = () => useContext(AuthContext);
 
@@ -69,6 +74,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [rolePermissions, setRolePermissions] = useState<Record<string, string[]>>({});
   const [empresaId, setEmpresaId] = useState<string>('bacarsa');
   const [allEmpresas, setAllEmpresas] = useState(false);
+  const [onboardingGuide, setOnboardingGuide] = useState<OnboardingGuideState | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -92,6 +98,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setUserRole(role);
             setAssignedClientId(data.assignedClientId || null);
             setAllEmpresas(multiEmpresa);
+            setOnboardingGuide(normalizeOnboardingGuideState(data.onboardingGuide));
             const isSuper = isSuperAdminRoleId(role) || isSuperAdminRoleId(tokenRole);
             setEmpresaId(isSuper || multiEmpresa
               ? (data.empresaId || '')
@@ -133,6 +140,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setUserRole(tokenRole);
             setAssignedClientId(null);
             setAllEmpresas(false);
+            setOnboardingGuide(null);
             const isSuper = isSuperAdminRoleId(tokenRole);
             setEmpresaId('bacarsa');
             if (isSuper) {
@@ -158,6 +166,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } catch (e) {
           console.error("Error cargando system_users:", e);
           setRolePermissions({});
+          setOnboardingGuide(null);
           try {
             const token = await u.getIdTokenResult(true);
             const fallbackClaim = String(token.claims.role ?? '').trim() || null;
@@ -178,6 +187,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setRolePermissions({});
         setEmpresaId('bacarsa');
         setAllEmpresas(false);
+        setOnboardingGuide(null);
       }
       setLoading(false);
     });
@@ -219,6 +229,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         allEmpresas,
         canReadModule,
         empresaId,
+        onboardingGuide,
+        setOnboardingGuide,
       }}
     >
       {children}

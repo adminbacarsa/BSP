@@ -35,6 +35,7 @@ const MODULE_SUGGESTIONS: Record<string, string[]> = {
   ANALYSIS:    ['¿Cuál es la cobertura real vs SLA este mes?', '¿Cuánto ausentismo hubo en los últimos 3 meses?'],
   DASHBOARD:   ['¿Cómo estamos hoy operativamente?', '¿Cuántos guardias están activos ahora?'],
   CONFIG:      ['¿Qué roles hay configurados?', '¿Cuántos usuarios tiene la empresa?'],
+  GUIDE:       ['¿Cómo completo la guía obligatoria?', '¿Qué checklist tengo que marcar?', '¿Dónde veo quién terminó el onboarding?'],
 };
 
 function buildGreeting(moduleKey: string | null, moduleName: string): string {

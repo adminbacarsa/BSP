@@ -109,6 +109,121 @@ const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manag
 /** Alineado con web2 `ALL_EMPRESAS_VALUE` en systemUser.ts */
 const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
+const ONBOARDING_TRACK_VALUES = ['OPERATIONS', 'PLANNING', 'CRM', 'SERVICES', 'RRHH'] as const;
+type OnboardingTrackValue = (typeof ONBOARDING_TRACK_VALUES)[number];
+const ONBOARDING_TRACKS = new Set<string>(ONBOARDING_TRACK_VALUES);
+
+/** Módulos del panel que habilitan cada recorrido (alineado con web2 onboardingGuide.ts). */
+const ONBOARDING_TRACK_MODULES: Record<OnboardingTrackValue, string[]> = {
+  OPERATIONS: ['OPERATIONS', 'DASHBOARD'],
+  PLANNING: ['PLANNING'],
+  CRM: ['CLIENTS'],
+  SERVICES: ['SERVICES'],
+  RRHH: ['RRHH'],
+};
+
+function normalizeOnboardingTrack(raw: unknown): OnboardingTrackValue {
+  const value = String(raw ?? '').trim().toUpperCase();
+  if (ONBOARDING_TRACKS.has(value)) return value as OnboardingTrackValue;
+  if (value === 'CLIENTS' || value === 'CLIENTES') return 'CRM';
+  if (value === 'SERVICIOS' || value === 'SLA') return 'SERVICES';
+  if (value === 'PERSONAL' || value === 'HR') return 'RRHH';
+  if (value === 'PLANIFICACION' || value === 'PLAN') return 'PLANNING';
+  if (value === 'OPERACIONES' || value === 'OPS') return 'OPERATIONS';
+  return 'OPERATIONS';
+}
+
+function normalizeOnboardingTracks(raw: unknown, fallbackTrack?: unknown): OnboardingTrackValue[] {
+  const fromArray = Array.isArray(raw) ? raw.map((x) => normalizeOnboardingTrack(x)) : [];
+  const unique: OnboardingTrackValue[] = [];
+  for (const t of fromArray) {
+    if (!unique.includes(t)) unique.push(t);
+  }
+  if (unique.length) return unique;
+  return [normalizeOnboardingTrack(fallbackTrack)];
+}
+
+function roleHasModuleRead(
+  permissions: Record<string, string[]> | null | undefined,
+  moduleKey: string,
+): boolean {
+  const actions = permissions?.[moduleKey];
+  return Array.isArray(actions) && actions.includes('read');
+}
+
+function tracksAvailableForRolePermissions(
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrackValue[] {
+  if (isSuperAdmin) return [...ONBOARDING_TRACK_VALUES];
+  const available = ONBOARDING_TRACK_VALUES.filter((track) => {
+    const modules = ONBOARDING_TRACK_MODULES[track] || [];
+    return modules.some((m) => roleHasModuleRead(permissions, m));
+  });
+  return available.length ? available : ['OPERATIONS'];
+}
+
+function filterTracksByRolePermissions(
+  tracks: OnboardingTrackValue[],
+  permissions: Record<string, string[]> | null | undefined,
+  isSuperAdmin = false,
+): OnboardingTrackValue[] {
+  const allowed = tracksAvailableForRolePermissions(permissions, isSuperAdmin);
+  const filtered = tracks.filter((t) => allowed.includes(t));
+  return filtered.length ? filtered : allowed.slice(0, 1);
+}
+
+async function loadRolePermissionsForOnboarding(
+  roleId: unknown,
+): Promise<{ permissions: Record<string, string[]> | null; isSuperAdmin: boolean }> {
+  if (isSuperAdminBackupRole(roleId)) {
+    return { permissions: null, isSuperAdmin: true };
+  }
+  const id = String(roleId ?? '').trim();
+  if (!id) return { permissions: null, isSuperAdmin: false };
+  try {
+    const snap = await admin.firestore().collection('roles').doc(id).get();
+    if (!snap.exists) return { permissions: null, isSuperAdmin: false };
+    const raw = snap.data()?.permissions;
+    if (!raw || typeof raw !== 'object') return { permissions: null, isSuperAdmin: false };
+    const permissions: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+      if (Array.isArray(value)) {
+        permissions[key] = value.map((x) => String(x));
+      }
+    }
+    return { permissions, isSuperAdmin: false };
+  } catch {
+    return { permissions: null, isSuperAdmin: false };
+  }
+}
+
+async function resolveOnboardingTracksForRole(
+  roleId: unknown,
+  rawTracks: unknown,
+  fallbackTrack?: unknown,
+): Promise<OnboardingTrackValue[]> {
+  const requested = normalizeOnboardingTracks(rawTracks, fallbackTrack);
+  const { permissions, isSuperAdmin } = await loadRolePermissionsForOnboarding(roleId);
+  return filterTracksByRolePermissions(requested, permissions, isSuperAdmin);
+}
+
+function normalizeOnboardingStatus(raw: unknown): 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' {
+  const status = String(raw ?? '').trim().toUpperCase();
+  if (status === 'IN_PROGRESS') return 'IN_PROGRESS';
+  if (status === 'COMPLETED') return 'COMPLETED';
+  return 'NOT_STARTED';
+}
+
+function normalizeCompletedTracks(raw: unknown, allowed: OnboardingTrackValue[]): OnboardingTrackValue[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OnboardingTrackValue[] = [];
+  for (const item of raw) {
+    const t = normalizeOnboardingTrack(item);
+    if (allowed.includes(t) && !out.includes(t)) out.push(t);
+  }
+  return out;
+}
 
 
 // =========================================================
@@ -1435,8 +1550,10 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack, onboardingTracks: rawOnboardingTracks } = data;
   const roleNorm = normalizeBackupRole(role);
+  const onboardingTracks = await resolveOnboardingTracksForRole(roleNorm, rawOnboardingTracks, rawOnboardingTrack);
+  const onboardingTrack = onboardingTracks[0];
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
     !roleIsSuper &&
@@ -1480,6 +1597,18 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       role: roleNorm,
       empresaId: targetEmpresaId,
       ...(allEmpresas ? { allEmpresas: true } : {}),
+      onboardingGuide: {
+        required: true,
+        track: onboardingTrack,
+        tracks: onboardingTracks,
+        completedTracks: [],
+        status: 'NOT_STARTED',
+        progressPct: 0,
+        currentStepId: null,
+        startedAt: null,
+        completedAt: null,
+        lastEventAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });
@@ -1519,6 +1648,266 @@ export const syncSystemUserClaims = functions.https.onCall(async (data, context)
   }
   await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
   return { ok: true, uid: targetUid, role };
+});
+
+/** Guarda progreso/completitud de onboarding obligatorio de guía interactiva para usuario admin. */
+export const updateOnboardingGuideProgress = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo usuarios de panel pueden registrar onboarding.');
+  }
+
+  const payload = (data || {}) as {
+    action?: string;
+    stepId?: string;
+    progressPct?: number;
+    track?: string;
+    tracks?: unknown[];
+    checklist?: unknown[];
+  };
+  const action = String(payload.action ?? 'PROGRESS').trim().toUpperCase();
+  const now = admin.firestore.FieldValue.serverTimestamp();
+  const userRef = admin.firestore().collection('system_users').doc(context.auth.uid);
+  const userSnap = await userRef.get();
+
+  if (!userSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Perfil de usuario no encontrado.');
+  }
+
+  const userData = userSnap.data() || {};
+  const currentGuide = userData.onboardingGuide || {};
+  const storedTracks = normalizeOnboardingTracks(currentGuide.tracks, currentGuide.track || payload.track);
+  const roleMeta = await loadRolePermissionsForOnboarding(userData.role);
+  const requiredTracks = filterTracksByRolePermissions(
+    storedTracks,
+    roleMeta.permissions,
+    roleMeta.isSuperAdmin,
+  );
+  const requestedTrack = normalizeOnboardingTrack(payload.track ?? requiredTracks[0]);
+  const track = requiredTracks.includes(requestedTrack) ? requestedTrack : requiredTracks[0];
+  const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
+  const progressRaw = Number(payload.progressPct ?? 0);
+  const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
+  const currentStatus = normalizeOnboardingStatus(currentGuide.status);
+  let completedTracks = normalizeCompletedTracks(currentGuide.completedTracks, requiredTracks);
+
+  const patch: Record<string, unknown> = {
+    'onboardingGuide.required': true,
+    'onboardingGuide.track': track,
+    'onboardingGuide.tracks': requiredTracks,
+    'onboardingGuide.lastEventAt': now,
+  };
+
+  let resultStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' = currentStatus;
+  let resultProgress = progressPct;
+  let resultStepId: string | null = stepId;
+
+  if (action === 'RESET') {
+    completedTracks = [];
+    patch['onboardingGuide.status'] = 'NOT_STARTED';
+    patch['onboardingGuide.progressPct'] = 0;
+    patch['onboardingGuide.currentStepId'] = null;
+    patch['onboardingGuide.startedAt'] = null;
+    patch['onboardingGuide.completedAt'] = null;
+    patch['onboardingGuide.completedChecklist'] = [];
+    patch['onboardingGuide.completedTracks'] = [];
+    resultStatus = 'NOT_STARTED';
+    resultProgress = 0;
+    resultStepId = null;
+  } else if (action === 'PROGRESS') {
+    patch['onboardingGuide.currentStepId'] = stepId;
+    // progreso parcial = tracks completados + avance del activo
+    const base = requiredTracks.length
+      ? Math.round((completedTracks.length / requiredTracks.length) * 100)
+      : 0;
+    const blended = Math.max(base, Math.min(99, progressPct));
+    patch['onboardingGuide.progressPct'] = currentStatus === 'COMPLETED' ? 100 : blended;
+    resultProgress = currentStatus === 'COMPLETED' ? 100 : blended;
+    if (currentStatus !== 'COMPLETED') {
+      patch['onboardingGuide.status'] = blended > 0 || stepId || completedTracks.length ? 'IN_PROGRESS' : 'NOT_STARTED';
+      resultStatus = patch['onboardingGuide.status'] as 'NOT_STARTED' | 'IN_PROGRESS';
+      if (!currentGuide?.startedAt && (blended > 0 || stepId || completedTracks.length)) {
+        patch['onboardingGuide.startedAt'] = now;
+      }
+    } else {
+      resultStatus = 'COMPLETED';
+    }
+  } else if (action === 'COMPLETE') {
+    const checklist = Array.isArray(payload.checklist)
+      ? payload.checklist.map((x) => String(x ?? '').trim()).filter(Boolean)
+      : [];
+    if (!checklist.length) {
+      throw new functions.https.HttpsError('invalid-argument', 'Checklist obligatorio para completar onboarding.');
+    }
+    if (!completedTracks.includes(track)) completedTracks = [...completedTracks, track];
+    const allDone = requiredTracks.every((t) => completedTracks.includes(t));
+    patch['onboardingGuide.completedTracks'] = completedTracks;
+    patch[`onboardingGuide.checklistByTrack.${track}`] = checklist.slice(0, 32);
+    patch['onboardingGuide.completedChecklist'] = checklist.slice(0, 32);
+    patch['onboardingGuide.currentStepId'] = stepId || 'cierre';
+    resultStepId = stepId || 'cierre';
+    if (!currentGuide?.startedAt) patch['onboardingGuide.startedAt'] = now;
+
+    if (allDone) {
+      patch['onboardingGuide.status'] = 'COMPLETED';
+      patch['onboardingGuide.progressPct'] = 100;
+      patch['onboardingGuide.completedAt'] = now;
+      resultStatus = 'COMPLETED';
+      resultProgress = 100;
+    } else {
+      const pct = Math.round((completedTracks.length / Math.max(1, requiredTracks.length)) * 100);
+      patch['onboardingGuide.status'] = 'IN_PROGRESS';
+      patch['onboardingGuide.progressPct'] = Math.min(99, Math.max(1, pct));
+      resultStatus = 'IN_PROGRESS';
+      resultProgress = Math.min(99, Math.max(1, pct));
+    }
+  } else {
+    throw new functions.https.HttpsError('invalid-argument', `Acción de onboarding inválida: ${action}`);
+  }
+
+  await userRef.set(patch, { merge: true });
+  return {
+    ok: true,
+    onboardingGuide: {
+      required: true,
+      track,
+      tracks: requiredTracks,
+      completedTracks,
+      status: resultStatus,
+      progressPct: resultProgress,
+      currentStepId: resultStepId,
+    },
+  };
+});
+
+/**
+ * Admin/SuperAdmin asigna o libera onboarding obligatorio a un usuario existente
+ * (usuarios legacy sin required=true). Soporta uno o varios recorridos.
+ */
+export const assignOnboardingGuide = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser || !isAdminBackupRole(caller.sysRole || context.auth.token?.role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden asignar onboarding.');
+  }
+
+  const payload = (data || {}) as {
+    uid?: string;
+    required?: boolean;
+    track?: string;
+    tracks?: unknown[];
+    resetProgress?: boolean;
+  };
+  const targetUid = String(payload.uid ?? '').trim();
+  if (!targetUid) {
+    throw new functions.https.HttpsError('invalid-argument', 'Falta uid del usuario.');
+  }
+
+  const db = admin.firestore();
+  const targetRef = db.collection('system_users').doc(targetUid);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
+  }
+
+  const targetData = targetSnap.data() || {};
+  const targetEmpresa = String(targetData.empresaId ?? '').trim();
+  const targetAllEmpresas = targetData.allEmpresas === true;
+  if (!caller.isSuper) {
+    if (targetAllEmpresas || isSuperAdminBackupRole(targetData.role)) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'No podés modificar onboarding de SuperAdmin o multi-empresa.',
+      );
+    }
+    if (caller.profileEmpresa && targetEmpresa && targetEmpresa !== caller.profileEmpresa) {
+      throw new functions.https.HttpsError('permission-denied', 'Usuario de otra empresa.');
+    }
+  }
+
+  const required = payload.required !== false;
+  const tracks = await resolveOnboardingTracksForRole(
+    targetData.role,
+    payload.tracks,
+    payload.track,
+  );
+  const track = tracks[0];
+  const resetProgress = payload.resetProgress !== false;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  if (!required) {
+    await targetRef.set(
+      {
+        onboardingGuide: {
+          required: false,
+          track,
+          tracks,
+          completedTracks: tracks,
+          status: 'COMPLETED',
+          progressPct: 100,
+          currentStepId: null,
+          lastEventAt: now,
+        },
+      },
+      { merge: true },
+    );
+    return {
+      ok: true,
+      onboardingGuide: {
+        required: false,
+        track,
+        tracks,
+        completedTracks: tracks,
+        status: 'COMPLETED',
+        progressPct: 100,
+        currentStepId: null,
+      },
+    };
+  }
+
+  const currentGuide = targetData.onboardingGuide || {};
+  const patch: Record<string, unknown> = {
+    'onboardingGuide.required': true,
+    'onboardingGuide.track': track,
+    'onboardingGuide.tracks': tracks,
+    'onboardingGuide.lastEventAt': now,
+  };
+  if (resetProgress || currentGuide.required !== true) {
+    patch['onboardingGuide.status'] = 'NOT_STARTED';
+    patch['onboardingGuide.progressPct'] = 0;
+    patch['onboardingGuide.currentStepId'] = null;
+    patch['onboardingGuide.startedAt'] = null;
+    patch['onboardingGuide.completedAt'] = null;
+    patch['onboardingGuide.completedChecklist'] = [];
+    patch['onboardingGuide.completedTracks'] = [];
+  }
+
+  await targetRef.set(patch, { merge: true });
+  return {
+    ok: true,
+    onboardingGuide: {
+      required: true,
+      track,
+      tracks,
+      completedTracks: resetProgress || currentGuide.required !== true
+        ? []
+        : normalizeCompletedTracks(currentGuide.completedTracks, tracks),
+      status: resetProgress || currentGuide.required !== true
+        ? 'NOT_STARTED'
+        : normalizeOnboardingStatus(currentGuide.status),
+      progressPct: resetProgress || currentGuide.required !== true
+        ? 0
+        : Number(currentGuide.progressPct ?? 0),
+      currentStepId: resetProgress || currentGuide.required !== true
+        ? null
+        : (currentGuide.currentStepId ?? null),
+    },
+  };
 });
 
 /** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */
