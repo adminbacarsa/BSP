@@ -7087,14 +7087,6 @@ export default function PlanificacionPage() {
                                             <div className="flex flex-col leading-none">
                                                 <span className="text-[8px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Estructura</span>
                                                 <span className="text-[9px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
-                                                    {objectiveCronogramRules && (
-                                                        <>
-                                                            <span className="text-indigo-600 font-black" title={objectiveCronogramRules.playbook.join('\n')}>
-                                                                {objectiveCronogramRules.cronogramTypeLabel}
-                                                            </span>
-                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                        </>
-                                                    )}
                                                     {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
                                                         ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
                                                         : positionStructure.length}P
