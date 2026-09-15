@@ -923,7 +923,18 @@ async function executeAgentActionHandler(
   throw new functions.https.HttpsError('internal', 'Acción no implementada.');
 }
 
-export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
+export const executeAgentAction =
+  process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions
+        .runWith({ timeoutSeconds: 180, memory: '1GB' })
+        .https.onCall(executeAgentActionHandler)
+    : functions
+        .runWith({
+          secrets: ['GEMINI_API_KEY'],
+          timeoutSeconds: 180,
+          memory: '1GB',
+        })
+        .https.onCall(executeAgentActionHandler);
 
 // =========================================================
 // MODO DEMO CONTINUO — cron cada 5 min alineado al reloj AR (:00/:05/…).

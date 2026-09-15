@@ -4716,7 +4716,7 @@ async function ejecutarProponerPlanificarObjetivoMes(
   const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   const mesNombre = MESES[(month - 1)] ?? String(month);
 
-  const label = `Generar planificación CCT 6+2 para ${objetivoNombre || objetivoId} — ${mesNombre} ${year} (borradores para revisar)`;
+  const label = `Generar planificación (CCT 6+2 + ajuste fino IA) para ${objetivoNombre || objetivoId} — ${mesNombre} ${year} (borradores para revisar)`;
   return {
     accion_propuesta: {
       type: 'planificar_objetivo_mes',

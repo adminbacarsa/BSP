@@ -576,7 +576,7 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
   {
     name: 'proponer_planificar_objetivo_mes',
     description:
-      'Genera automáticamente el cronograma mensual de un objetivo aplicando CCT 422/05 (ciclo 6+2). Usá para «planificá Obrador para octubre», «generá la planificación de Casino en septiembre», «automatizá el crono de X». Los turnos se crean como borrador (draft:true) para revisión antes de publicar. Requiere permiso PLANNING:create.',
+      'Genera el cronograma mensual de un objetivo: motor CCT 6+2 + ajuste fino Gemini (mismo pipeline IA que el wizard Automatizar). Usá para «planificá Obrador para octubre», «generá la planificación de Casino», «automatizá el crono de X». Crea borradores (draft:true) para revisar. Requiere PLANNING:create y confirmación del usuario.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {

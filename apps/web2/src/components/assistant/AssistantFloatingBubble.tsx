@@ -370,7 +370,10 @@ export function AssistantFloatingBubble(): React.ReactNode {
   const executeAction = useCallback(async (action: PendingAction) => {
     setBusy(true);
     try {
-      const call = httpsCallable(functions, 'executeAgentAction', { timeout: 30000 });
+      const isPlan = action.type === 'planificar_objetivo_mes';
+      const call = httpsCallable(functions, 'executeAgentAction', {
+        timeout: isPlan ? 210000 : 60000,
+      });
       const res = await call({ action: action.type, payload: action.payload, empresaId: empresaCtxId || '' });
       const data = res.data as { ok: boolean; message?: string };
       setMsgs((prev) => [...prev, { role: 'assistant', content: data?.message || '✓ Acción ejecutada correctamente.' }]);
