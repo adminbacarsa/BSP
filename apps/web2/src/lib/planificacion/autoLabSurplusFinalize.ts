@@ -2,9 +2,9 @@
  * Post-proceso Auto Lab: pool de excedentes en RET/F, sin D12/N12 salvo sustitución quirúrgica.
  */
 
-import type { V2Assignment, V2EngineContext, V2GenerateStats } from './autoScheduleEngineV2';
+import type { V2Assignment, V2EngineContext, V2GenerateStats, V2PositionDef } from './autoScheduleEngineV2';
 import { pickRepresentativeCycle, positionIsActiveOn, is24hsRotationPosition } from './autoScheduleEngineV2';
-import { isCustomCoverTitular } from './customCoverCycle';
+import { employeeAssignedToCustomCover, isCustomCoverTitular } from './customCoverCycle';
 import type { SurplusAbsentSubstitutionAction } from './surplusAbsentSubstitution';
 import { isExternalRetEmpId } from './externalRetCoverage';
 import { expectedBandForEmployee, isWorkBandCode } from './absenceFrancoUtils';

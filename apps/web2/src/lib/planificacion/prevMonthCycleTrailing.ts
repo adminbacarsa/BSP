@@ -51,7 +51,7 @@ export function computePrevMonthCycleTrailing(params: {
     const lastDayStr = getDateKey(params.prevMonthEndDate);
 
     for (const empId of params.employeeIds) {
-        const empShifts = prevTrailByEmp[empId] || {};
+        const empShifts = params.prevTrailByEmp[empId] || {};
         const lastCode = empShifts[lastDayStr];
         if (!lastCode) continue;
 
