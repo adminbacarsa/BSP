@@ -16,6 +16,7 @@ import {
   buildReassignPassiveToVacancyFields,
   vacancyCoverageLabel,
 } from '@/lib/operaciones/shiftContinuity';
+import { buildFrancoTrabajadoCoverageFields } from '@/lib/operaciones/francoTrabajadoCoverage';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -785,11 +786,14 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: 'Intercambio de turno', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName} intercambio · ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
       } else if (step.key === 'FT') {
         batch.update(doc(db, 'turnos', candidateShiftId), {
-          isFranco: false, isFrancoTrabajado: true, code: 'FT', type: 'EXTRA_FRANCO',
+          ...buildFrancoTrabajadoCoverageFields(absenceShift),
           startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
           endTime: Timestamp.fromDate(absenceEnd),
+          plannedStartTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          plannedEndTime: Timestamp.fromDate(absenceEnd),
           francoTrabajadoAt: serverTimestamp(),
-          francoObjectiveId: absenceShift.objectiveId, francoObjectiveName: absenceShift.objectiveName,
+          resolvedBy: 'OPERACIONES',
+          vacancyLabel: vacLabel,
         });
         markCovered('FRANCO', candidateShiftId);
         await batch.commit();

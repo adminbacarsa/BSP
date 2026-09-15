@@ -694,13 +694,14 @@ export default function EmpresasTab() {
                   {modoDemoActivo && <span className="text-[10px] font-bold bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full uppercase tracking-wide animate-pulse">Activo</span>}
                   {modoDemoActivo && (
                     <span className="text-[10px] font-mono bg-violet-50 text-violet-700 px-2 py-0.5 rounded-full">
-                      cron 5 min
+                      cron :00/:05 AR
                     </span>
                   )}
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
                   Demo = generador de eventos (presente / ausente / tarde) + respuestas a convocatorias.
-                  Cierres y coberturas los hace el mismo pipeline que Auto. En producción: Demo OFF → Auto.
+                  El cron corre cada 5 min alineado al reloj Argentina (10:00, 10:05…), así los turnos en punto quedan ACTIVO.
+                  Cierres y coberturas = mismo pipeline que Auto. En producción: Demo OFF → Auto.
                 </p>
               </div>
             </div>

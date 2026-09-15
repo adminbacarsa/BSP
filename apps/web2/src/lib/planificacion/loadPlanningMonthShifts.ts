@@ -16,7 +16,7 @@ export function planningMonthBounds(year: number, month: number): { firstDay: Da
     return { firstDay, lastDay };
 }
 
-/** Listener/getDocs: solo turnos del mes (no toda la colección). */
+/** Listener/getDocs: turnos del mes (+ margen 1 día por desfase TZ AR). */
 export function buildPlanningMonthTurnosQuery(params: {
     empresaId: string;
     scopeEmpresa?: boolean;
@@ -25,8 +25,14 @@ export function buildPlanningMonthTurnosQuery(params: {
 }): Query {
     const { empresaId, scopeEmpresa = true, year, month } = params;
     const { firstDay, lastDay } = planningMonthBounds(year, month);
-    const startTs = Timestamp.fromDate(firstDay);
-    const endTs = Timestamp.fromDate(lastDay);
+    const startPad = new Date(firstDay);
+    startPad.setDate(startPad.getDate() - 1);
+    startPad.setHours(0, 0, 0, 0);
+    const endPad = new Date(lastDay);
+    endPad.setDate(endPad.getDate() + 1);
+    endPad.setHours(23, 59, 59, 999);
+    const startTs = Timestamp.fromDate(startPad);
+    const endTs = Timestamp.fromDate(endPad);
     const col = collection(db, 'turnos');
     const id = String(empresaId ?? '').trim();
     if (scopeEmpresa && id && id.toLowerCase() !== 'bacarsa') {

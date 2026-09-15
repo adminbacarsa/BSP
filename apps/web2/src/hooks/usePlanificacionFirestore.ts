@@ -32,7 +32,7 @@ import {
     planningMonthCacheKey,
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
-import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
+import { ingestPlanningTurnosSnapshot, isRetainedOpsCoverageShift } from '@/lib/planificacion/planningTurnosIngest';
 import { getDateKey } from '@/lib/planificacion/utils';
 import type { PlanificacionDotacionMap } from '@/lib/planificacion/planificacionDotacionUtils';
 
@@ -42,6 +42,29 @@ export type PlanificacionFirestoreParams = {
     scopeEmpresa: boolean;
     currentDate: Date;
 };
+
+function mergeRetainOpsCoverages(
+    ingested: ReturnType<typeof ingestPlanningTurnosSnapshot>,
+    prevShifts: Record<string, any>,
+    monthPrefix: string,
+): ReturnType<typeof ingestPlanningTurnosSnapshot> {
+    const shiftsMap = { ...ingested.shiftsMap };
+    const cellTurnosMap = { ...ingested.cellTurnosMap };
+    const allShiftIds = { ...ingested.allShiftIds };
+    for (const [key, s] of Object.entries(prevShifts)) {
+        if (!s || shiftsMap[key]) continue;
+        if (!isRetainedOpsCoverageShift(s)) continue;
+        const dateKey = key.includes('_') ? key.slice(key.indexOf('_') + 1) : '';
+        if (!dateKey.startsWith(monthPrefix)) continue;
+        shiftsMap[key] = s;
+        if (!cellTurnosMap[key]) cellTurnosMap[key] = [s];
+        if (s.id) {
+            if (!allShiftIds[key]) allShiftIds[key] = [];
+            if (!allShiftIds[key].includes(s.id)) allShiftIds[key].push(s.id);
+        }
+    }
+    return { ...ingested, shiftsMap, cellTurnosMap, allShiftIds };
+}
 
 export function usePlanificacionFirestore({
     empresaId,
@@ -317,14 +340,33 @@ export function usePlanificacionFirestore({
         };
 
         const applyMainSnap = (snap: import('firebase/firestore').QuerySnapshot) => {
-            const ingested = ingestPlanningTurnosSnapshot(
+            // Evitar cachear el 1.er snapshot vacío fromCache (mismo problema que Análisis).
+            if (snap.metadata.fromCache && snap.empty) {
+                const existing = getCachedPlanningMonth(cacheKey);
+                if (existing) {
+                    applyIngested(existing);
+                    return;
+                }
+            }
+            const monthPrefix = `${viewYear}-${String(viewMonth).padStart(2, '0')}`;
+            const ingestedRaw = ingestPlanningTurnosSnapshot(
                 snap.docs,
                 empresaId,
                 migracionCompleta,
                 getDateKey,
             );
-            setCachedPlanningMonth(cacheKey, ingested);
-            applyIngested(ingested);
+            setShiftsMap((prev) => {
+                const ingested = mergeRetainOpsCoverages(ingestedRaw, prev, monthPrefix);
+                setCachedPlanningMonth(cacheKey, ingested);
+                setCellTurnosMap(ingested.cellTurnosMap);
+                setAllShiftIds(ingested.allShiftIds);
+                setTuraMap((tPrev) => ({ ...tPrev, ...ingested.turaMap }));
+                setSecondBlockMap(ingested.secondBlockMap);
+                setRfzVacantes(ingested.rfzVacantes);
+                setRfzTodos(ingested.rfzTodos);
+                setShiftsMapLoaded(true);
+                return ingested.shiftsMap;
+            });
             if (!prefetchTimer) {
                 prefetchTimer = window.setTimeout(() => {
                     adjacentPlanningMonths(viewYear, viewMonth).forEach(({ year, month }) => {
@@ -419,6 +461,7 @@ export function usePlanificacionFirestore({
         shiftsMap,
         setShiftsMap,
         cellTurnosMap,
+        setCellTurnosMap,
         shiftsMapLoaded,
         turaMap,
         rfzVacantes,

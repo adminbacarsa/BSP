@@ -103,6 +103,38 @@ export function isRestFrancoShift(shift: any): boolean {
  */
 export const OPS_PLAN_LOOKAHEAD_MS = 16 * 60 * 60 * 1000;
 
+/** Objetivo donde “opera” el turno (FT/cobertura puede diferir del objectiveId del franco origen). */
+export function opsShiftCoverageObjectiveId(s: {
+    objectiveId?: unknown;
+    francoObjectiveId?: unknown;
+    coverageRedirectedTo?: unknown;
+    isFrancoTrabajado?: unknown;
+} | null | undefined): string {
+    if (!s) return '';
+    const franco = String(s.francoObjectiveId || '').trim();
+    if (s.isFrancoTrabajado && franco) return franco;
+    const redirected = String(s.coverageRedirectedTo || '').trim();
+    if (redirected) return redirected;
+    return String(s.objectiveId || '').trim();
+}
+
+export function shiftBelongsToOpsObjective(
+    s: {
+        objectiveId?: unknown;
+        francoObjectiveId?: unknown;
+        coverageRedirectedTo?: unknown;
+        isFrancoTrabajado?: unknown;
+    } | null | undefined,
+    objectiveId: string,
+): boolean {
+    const oid = String(objectiveId || '').trim();
+    if (!s || !oid) return false;
+    if (String(s.objectiveId || '').trim() === oid) return true;
+    if (String(s.francoObjectiveId || '').trim() === oid) return true;
+    if (String(s.coverageRedirectedTo || '').trim() === oid) return true;
+    return false;
+}
+
 export function isOpsShiftHoy(s: any, now: Date = new Date()): boolean {
     if (!s) return false;
     const effectiveNow = now instanceof Date ? now : new Date();
@@ -692,9 +724,17 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
             const shiftCodeUpper = String(shift.code || shift.type || '').toUpperCase();
             const isFranco = isRestFrancoShift({ ...shift, code: shiftCodeUpper });
-            const rawPos = (shift.positionName || '').trim();
-            if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco) return null;
-            const displayPos = isFranco && (rawPos === 'General' || !rawPos) ? 'Franco' : rawPos;
+            const rawPos = (shift.positionName || shift.coversPositionName || '').trim();
+            const isOpsCoverageRow = shift.isFrancoTrabajado === true
+                || String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+                || String(shift.resolvedBy || '').toUpperCase() === 'MODO_DEMO'
+                || String(shift.resolvedBy || '').toUpperCase() === 'OPERACIONES'
+                || String(shift.resolvedBy || '').toUpperCase() === 'AUTO';
+            // No dropear FT/cobertura Ops aunque el puesto venga vacío/General (bug típico del FT front viejo).
+            if ((!rawPos || rawPos === 'Sin Puesto' || rawPos === 'General') && !isFranco && !isOpsCoverageRow) return null;
+            const displayPos = isFranco && (rawPos === 'General' || !rawPos)
+                ? 'Franco'
+                : (rawPos || shift.coversPositionName || 'Cobertura');
 
             // Solo mostrar turnos de objetivos con planificación publicada.
             // Excepción: turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL/EVENTO) siempre visibles

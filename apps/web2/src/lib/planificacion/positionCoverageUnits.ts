@@ -17,7 +17,10 @@ export type PlanningShiftSlice = {
     code?: string;
     positionName?: string;
     objectiveId?: string;
+    francoObjectiveId?: string;
+    coverageRedirectedTo?: string;
     isDeleted?: boolean;
+    isFrancoTrabajado?: boolean;
     coveragePackageId?: string;
     coverageSegmentRole?: string;
     /** FULL_BAND = una persona cubre toda la banda faltante; SPLIT = ext+adel o aporte parcial. */
@@ -36,12 +39,15 @@ type ShiftRow = PlanningShiftSlice & { employeeId: string };
 
 /** True si el turno pertenece al objetivo. Pending sin objectiveId → se asume del activo (vista individual). */
 function shiftBelongsToObjective(
-    shift: { objectiveId?: string },
+    shift: { objectiveId?: string; francoObjectiveId?: string; coverageRedirectedTo?: string },
     selectedObjective: string,
     isPending?: boolean,
 ): boolean {
-    if (shift.objectiveId) return String(shift.objectiveId) === String(selectedObjective);
-    return !!isPending;
+    if (shift.objectiveId && String(shift.objectiveId) === String(selectedObjective)) return true;
+    if (shift.francoObjectiveId && String(shift.francoObjectiveId) === String(selectedObjective)) return true;
+    if (shift.coverageRedirectedTo && String(shift.coverageRedirectedTo) === String(selectedObjective)) return true;
+    if (!shift.objectiveId && !shift.francoObjectiveId && !shift.coverageRedirectedTo) return !!isPending;
+    return false;
 }
 
 export function normalizePlanningPositionName(name: unknown): string {
@@ -696,7 +702,12 @@ export function buildCodeCountsByPositionForDay(
         code?: string;
         positionName?: string;
         objectiveId?: string;
+        francoObjectiveId?: string;
+        coverageRedirectedTo?: string;
         isDeleted?: boolean;
+        isFrancoTrabajado?: boolean;
+        coversBandCode?: string;
+        coversPositionName?: string;
     } | null | undefined,
     options: {
         selectedObjective: string;
@@ -718,9 +729,13 @@ export function buildCodeCountsByPositionForDay(
         const raw = resolveShift(emp.id, dateStr);
         if (!raw || raw.isDeleted) return;
         if (!shiftBelongsToObjective(raw, options.selectedObjective, options.isPendingChange(emp.id, dateStr))) return;
-        const code = String(raw.code || '').toUpperCase();
+        let code = String(raw.code || '').toUpperCase();
+        // FT operativo: la UI muestra FT pero la banda cubierta es coversBandCode / código del hueco.
+        if ((code === 'FT' || raw.isFrancoTrabajado) && raw.coversBandCode) {
+            code = String(raw.coversBandCode).toUpperCase();
+        }
         if (PLANNING_NON_BILLABLE_CODES.has(code)) return;
-        const shiftPos = raw.positionName || options.dominantPositionName || 'General';
+        const shiftPos = raw.coversPositionName || raw.positionName || options.dominantPositionName || 'General';
         if (!byPos[shiftPos]) byPos[shiftPos] = {};
         byPos[shiftPos][code] = (byPos[shiftPos][code] || 0) + 1;
     });

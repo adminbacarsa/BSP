@@ -16,7 +16,7 @@ import {
 import { toast } from 'sonner';
 import { logOpsBackgroundWarn, logOpsError, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
 import { registrarBitacoraOps, registrarBitacoraOpsBg } from '@/lib/operaciones/registrarBitacoraOps';
-import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel, shiftBelongsToOpsObjective, opsShiftCoverageObjectiveId } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
@@ -54,6 +54,7 @@ import {
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { revertOpsAbsence, createOpsAbsenceDoc } from '@/lib/operaciones/revertOpsAbsence';
 import { markOpsSinCobertura } from '@/lib/operaciones/markOpsSinCobertura';
+import { buildFrancoTrabajadoCoverageFields } from '@/lib/operaciones/francoTrabajadoCoverage';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
@@ -1156,15 +1157,13 @@ const CoverageModalContent = ({ isOpen, onClose, absenceShift, logic, opsCaps }:
                 : Timestamp.fromDate(toDate(absenceEnd));
             const batch = writeBatch(db);
             batch.update(doc(db, 'turnos', s.id), {
-                isFranco: false,
-                isFrancoTrabajado: true,
-                code: 'FT',
-                type: 'EXTRA_FRANCO',
+                ...buildFrancoTrabajadoCoverageFields(absenceShift),
                 startTime: vacancyStart,
                 endTime: vacancyEnd,
+                plannedStartTime: vacancyStart,
+                plannedEndTime: vacancyEnd,
                 francoTrabajadoAt: serverTimestamp(),
-                francoObjectiveId: absenceShift.objectiveId,
-                francoObjectiveName: absenceShift.objectiveName,
+                resolvedBy: 'OPERACIONES',
                 comments: `Franco Trabajado (Convocado) — cubre ${absenceShift.objectiveName || 'vacante'}`,
             });
             batch.set(doc(collection(db, 'user_notifications')), stampEmpresaId({ userId: s.employeeId, type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', read: false, body: `Se te convoca a trabajar tu franco en ${absenceShift.objectiveName}.`, objectiveId: absenceShift.objectiveId, shiftId: s.id, createdAt: serverTimestamp() }, tenantId(s)));
@@ -4715,11 +4714,11 @@ export default function OperacionesPage() {
         hoy.forEach((s: any) => {
             if (isEventShift(s)) return;
             if (s.isFranco) return;
-            const key = s.objectiveId || 'unknown';
+            const key = opsShiftCoverageObjectiveId(s) || 'unknown';
             if (!map.has(key)) {
                 map.set(key, {
                     objectiveId: key,
-                    name:    s.objectiveName  || '—',
+                    name:    s.francoObjectiveName || s.objectiveName  || '—',
                     client:  s.clientName     || '',
                     clientId: s.clientId      || '',
                     lat: s.lat, lng: s.lng,
@@ -5493,7 +5492,7 @@ export default function OperacionesPage() {
                                 // OBJ expandido: filtra por tab activo (mismo comportamiento que stats/objectivesWithAlerts)
                                 const now2 = new Date();
                                 const objShifts = logic.processedData.filter((s: any) => {
-                                    if (s.objectiveId !== obj.objectiveId) return false;
+                                    if (!shiftBelongsToOpsObjective(s, obj.objectiveId)) return false;
                                     if (isEventShift(s)) return false;
                                     if (!isOpsShiftHoy(s, now2)) return false;
                                     return matchesViewTabForShift(s);

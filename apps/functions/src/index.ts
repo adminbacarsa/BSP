@@ -811,7 +811,7 @@ async function executeAgentActionHandler(
 export const executeAgentAction = functions.https.onCall(executeAgentActionHandler);
 
 // =========================================================
-// MODO DEMO CONTINUO — cron cada 5 min (empresas modoDemoEnabled).
+// MODO DEMO CONTINUO — cron cada 5 min alineado al reloj AR (:00/:05/…).
 // Laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas
 // (ficticias, selladas con modoDemoAt) y dispara el MISMO pipeline que Auto
 // (onTurnoAbsenciaDetectada → cascada CCT → convocatorias → ledger).
@@ -920,36 +920,70 @@ async function runModoDemoForEmpresa(
   // (mismo circuito que Auto ya fichado; arregla lab donde solo quedó «cubre X» en el ausente)
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isPresent || t.isCompleted || t.isAbsent || t.isFranco) continue;
+    if (t.isCompleted || t.isAbsent) continue;
     if (isVacant(t) || isPassiveStandby(t)) continue;
+    // Franco planificado puro no; FT / cobertura sí
+    if (t.isFranco === true && !t.isFrancoTrabajado) continue;
     const resolved = String(t.resolvedBy || '').toUpperCase();
     const origin = String(t.origin || '').toUpperCase();
     const isDemoCover =
       resolved === 'MODO_DEMO'
+      || resolved === 'AUTO'
+      || resolved === 'OPERACIONES'
       || !!t.modoDemoAt
-      || (origin === 'OPERATIONS_COVERAGE' && (!!t.coverageEventId || !!t.coversAbsenceEmployeeName || !!t.absenceShiftId || !!t.coveredShiftId || !!t.isFrancoTrabajado));
+      || !!t.isFrancoTrabajado
+      || (origin === 'OPERATIONS_COVERAGE' && (
+        !!t.coverageEventId
+        || !!t.coversAbsenceEmployeeName
+        || !!t.absenceShiftId
+        || !!t.coveredShiftId
+        || !!t.coversEmployeeId
+        || !!t.coverageConvocatoriaId
+      ));
     if (!isDemoCover) continue;
     const startMs = (t.adjustedStartTime?.seconds ?? t.startTime?.seconds ?? 0) * 1000;
+    const endMs = (t.endTime?.seconds ?? 0) * 1000;
     // No adelantar ACTIVO de turnos que aún no deberían haber empezado
     if (startMs > now.getTime() + 15 * 60 * 1000) continue;
+    // Si el turno ya cerró hace >2h, no reabrir ACTIVO
+    if (endMs && endMs < now.getTime() - 2 * 3600 * 1000) continue;
     const startTs = t.adjustedStartTime || t.startTime || nowTs;
-    batch.update(doc.ref, {
-      isPresent: true,
-      status: 'PRESENT',
-      presentAt: startTs,
-      realStartTime: startTs,
-      autoPresencia: true,
-      demoSimulated: true,
-      modoDemoAt: nowTs,
-      demoCovererHealAt: nowTs,
-    });
+    const gapOid = String(t.francoObjectiveId || t.coverageRedirectedTo || '').trim();
+    const curOid = String(t.objectiveId || '').trim();
+    const posHeal = String(t.positionName || t.coversPositionName || '').trim();
+    const patch: Record<string, unknown> = {};
+    if (!t.isPresent) {
+      patch.isPresent = true;
+      patch.status = 'PRESENT';
+      patch.presentAt = startTs;
+      patch.realStartTime = startTs;
+      patch.autoPresencia = true;
+      patch.demoSimulated = true;
+      patch.modoDemoAt = nowTs;
+      patch.demoCovererHealAt = nowTs;
+    }
+    // FT viejo: francoObjectiveId = hueco pero objectiveId quedó en el franco origen → Ops no lo lista
+    if (gapOid && gapOid !== curOid) {
+      patch.objectiveId = gapOid;
+      if (t.francoObjectiveName) patch.objectiveName = t.francoObjectiveName;
+      patch.origin = origin || 'OPERATIONS_COVERAGE';
+      patch.demoObjectiveHealAt = nowTs;
+    }
+    if ((!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') && t.coversPositionName) {
+      patch.positionName = t.coversPositionName;
+    } else if (!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') {
+      patch.positionName = 'Cobertura';
+    }
+    if (Object.keys(patch).length === 0) continue;
+    batch.update(doc.ref, patch);
     batchOps += 1;
-    presencias++;
+    if (patch.isPresent) presencias++;
   }
 
   // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
+  // Ventanas amplias: el cron cae en :00/:05/... AR; si un tick se atrasa,
+  // igual marcamos presencia mientras el turno esté vigente (hasta endTime).
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
-  const WINDOW_AFTER_MS = 5 * 60 * 1000;
   const LATE_DELAY_MS = 12 * 60 * 1000;
   type ShiftCat = 'puntual' | 'late' | 'absent';
   const shiftCategory = (empId: string): ShiftCat => {
@@ -973,8 +1007,11 @@ async function runModoDemoForEmpresa(
     if (cat === 'absent') continue;
 
     if (cat === 'late') {
+      // Tarde: desde 5 min después del inicio hasta el fin del turno (no solo 15 min)
       if (startMs > now.getTime() + 10 * 60 * 1000) continue;
-      if (startMs < now.getTime() - 15 * 60 * 1000) continue;
+      if (startMs > now.getTime() - 5 * 60 * 1000) continue; // aún no "tarde"
+      const endMsLate = (t.endTime?.seconds ?? 0) * 1000;
+      if (endMsLate && endMsLate < now.getTime()) continue;
       const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
       batch.update(doc.ref, {
         isPresent: true,
@@ -1012,13 +1049,11 @@ async function runModoDemoForEmpresa(
       const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
       const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
       const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
-      if (isEarlyShift) {
-        if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
-        if (shiftEndMs && shiftEndMs < now.getTime()) continue;
-      } else {
-        if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
-        if (actualStartMs < now.getTime() - WINDOW_AFTER_MS) continue;
-      }
+      // Puntual: desde 15 min antes del inicio hasta el fin del turno.
+      // Antes solo 5 min después del start → si el cron no caía en punto, nunca ACTIVO.
+      if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS) continue;
+      if (shiftEndMs && shiftEndMs < now.getTime()) continue;
+      if (!shiftEndMs && actualStartMs < now.getTime() - 8 * 3600 * 1000) continue;
       batch.update(doc.ref, {
         isPresent: true,
         status: 'PRESENT',
@@ -1125,9 +1160,15 @@ async function runModoDemoForEmpresa(
   return { presencias, ausenciasDemo, convRespuestas };
 }
 
+// =========================================================
+// MODO DEMO CONTINUO — cron cada 5 min ALINEADO al reloj AR
+// ( :00 :05 :10 … ). Así turnos que arrancan en punto (10/11/12/13/14…)
+// caen dentro del mismo tick y no se pierden por deriva de "every 5 minutes".
+// =========================================================
 export const modoDemoCron = functions
   .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
-  .pubsub.schedule('every 5 minutes')
+  .pubsub.schedule('*/5 * * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
   .onRun(async () => {
     const db = admin.firestore();
     const empSnap = await db.collection('empresas').where('modoDemoEnabled', '==', true).get();
