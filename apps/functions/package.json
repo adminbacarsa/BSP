@@ -15,7 +15,6 @@
   },
   "main": "lib/index.js",
   "dependencies": {
-    "@cosp/domain": "file:./shared-domain",
     "@afipsdk/afip.js": "^1.2.3",
     "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^10.0.0",
