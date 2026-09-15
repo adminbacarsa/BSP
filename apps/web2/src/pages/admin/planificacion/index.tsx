@@ -3845,6 +3845,8 @@ export default function PlanificacionPage() {
     // 🛑 V8.20: Handler Restaurado
     const handleNotificationClick = async (notif: any) => {
         setShowNotifications(false);
+        // Campanita = ya hubo un cambio en el cronograma publicado: entrar es para corregir.
+        if (canCorrectPlanning) setCorrectionMode(true);
         // Vacante RFZ sintética (derivada de turnos): abrir directamente el modal de asignación.
         if (typeof notif?.id === 'string' && notif.id.startsWith('rfzvac_') && notif.__rfz) {
             if (notif.clientId) setSelectedClient(notif.clientId);
