@@ -180,6 +180,7 @@ import {
     pastePlanificacionClipboardAt,
 } from '@/lib/planificacion/planificacionClipboard';
 import { findPlanificacionConflictNeighbors } from '@/lib/planificacion/findPlanificacionConflictNeighbors';
+import { resolvePlanificacionConflict } from '@/lib/planificacion/resolvePlanificacionConflict';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -4576,7 +4577,16 @@ export default function PlanificacionPage() {
         }
     };
 
-    const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => { if (!selectedCell?.currentShift) return; const batch = writeBatch(db); const shiftId = selectedCell.currentShift.id; if (selectedCell.absence) { batch.update(doc(db, 'turnos', shiftId), { status: 'ABSENT', comments: 'Cubierto por ausencia' }); } else { batch.update(doc(db, 'turnos', shiftId), { hasNovedad: false, comments: 'Novedad resuelta' }); } if (type === 'SPLIT') { if (conflictNeighbors?.prev) { batch.update(doc(db, 'turnos', conflictNeighbors.prev.id), { isExtended: true, comments: 'Extensión por cobertura' }); } if (conflictNeighbors?.next) { batch.update(doc(db, 'turnos', conflictNeighbors.next.id), { isEarlyStart: true, comments: 'Adelanto por cobertura' }); } toast.success("Cobertura aplicada: Extensión + Adelanto"); } else { setShowConflictModal(false); setFrancoMode('FT_SELECTION'); return; } await batch.commit(); setShowConflictModal(false); setSelectedCell(null); };
+    const resolveConflict = async (type: 'SPLIT' | 'FULL_COVERAGE') => {
+        await resolvePlanificacionConflict({
+            type,
+            selectedCell,
+            conflictNeighbors,
+            setShowConflictModal,
+            setFrancoMode,
+            setSelectedCell,
+        });
+    };
     const handleRRHHSubmit = () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
         if (!selectedCell) return;
