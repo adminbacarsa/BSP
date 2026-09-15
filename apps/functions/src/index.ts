@@ -1637,6 +1637,117 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
   };
 });
 
+/**
+ * Admin/SuperAdmin asigna o libera onboarding obligatorio a un usuario existente
+ * (usuarios legacy sin required=true).
+ */
+export const assignOnboardingGuide = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
+  if (!caller.isPanelUser || !isAdminBackupRole(caller.sysRole || context.auth.token?.role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden asignar onboarding.');
+  }
+
+  const payload = (data || {}) as {
+    uid?: string;
+    required?: boolean;
+    track?: string;
+    resetProgress?: boolean;
+  };
+  const targetUid = String(payload.uid ?? '').trim();
+  if (!targetUid) {
+    throw new functions.https.HttpsError('invalid-argument', 'Falta uid del usuario.');
+  }
+
+  const db = admin.firestore();
+  const targetRef = db.collection('system_users').doc(targetUid);
+  const targetSnap = await targetRef.get();
+  if (!targetSnap.exists) {
+    throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
+  }
+
+  const targetData = targetSnap.data() || {};
+  const targetEmpresa = String(targetData.empresaId ?? '').trim();
+  const targetAllEmpresas = targetData.allEmpresas === true;
+  if (!caller.isSuper) {
+    if (targetAllEmpresas || isSuperAdminBackupRole(targetData.role)) {
+      throw new functions.https.HttpsError(
+        'permission-denied',
+        'No podés modificar onboarding de SuperAdmin o multi-empresa.',
+      );
+    }
+    if (caller.profileEmpresa && targetEmpresa && targetEmpresa !== caller.profileEmpresa) {
+      throw new functions.https.HttpsError('permission-denied', 'Usuario de otra empresa.');
+    }
+  }
+
+  const required = payload.required !== false;
+  const track = normalizeOnboardingTrack(payload.track);
+  const resetProgress = payload.resetProgress !== false;
+  const now = admin.firestore.FieldValue.serverTimestamp();
+
+  if (!required) {
+    await targetRef.set(
+      {
+        onboardingGuide: {
+          required: false,
+          track,
+          status: 'COMPLETED',
+          progressPct: 100,
+          currentStepId: null,
+          lastEventAt: now,
+        },
+      },
+      { merge: true },
+    );
+    return {
+      ok: true,
+      onboardingGuide: {
+        required: false,
+        track,
+        status: 'COMPLETED',
+        progressPct: 100,
+        currentStepId: null,
+      },
+    };
+  }
+
+  const currentGuide = targetData.onboardingGuide || {};
+  const patch: Record<string, unknown> = {
+    'onboardingGuide.required': true,
+    'onboardingGuide.track': track,
+    'onboardingGuide.lastEventAt': now,
+  };
+  if (resetProgress || currentGuide.required !== true) {
+    patch['onboardingGuide.status'] = 'NOT_STARTED';
+    patch['onboardingGuide.progressPct'] = 0;
+    patch['onboardingGuide.currentStepId'] = null;
+    patch['onboardingGuide.startedAt'] = null;
+    patch['onboardingGuide.completedAt'] = null;
+    patch['onboardingGuide.completedChecklist'] = [];
+  }
+
+  await targetRef.set(patch, { merge: true });
+  return {
+    ok: true,
+    onboardingGuide: {
+      required: true,
+      track,
+      status: resetProgress || currentGuide.required !== true
+        ? 'NOT_STARTED'
+        : normalizeOnboardingStatus(currentGuide.status),
+      progressPct: resetProgress || currentGuide.required !== true
+        ? 0
+        : Number(currentGuide.progressPct ?? 0),
+      currentStepId: resetProgress || currentGuide.required !== true
+        ? null
+        : (currentGuide.currentStepId ?? null),
+    },
+  };
+});
+
 /** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */
 function normalizeSystemRole(role: unknown): string {
   return String(role ?? "").trim().toUpperCase().replace(/\s+/g, "_");

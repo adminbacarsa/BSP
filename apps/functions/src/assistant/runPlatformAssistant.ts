@@ -6,7 +6,12 @@ import {
   GoogleGenerativeAIFetchError,
   GoogleGenerativeAIResponseError,
 } from '@google/generative-ai';
-import { COSP_PLATFORM_KNOWLEDGE, ADMIN_MODULE_ROUTE_HINTS, operationalGuideForModuleKey } from './cospKnowledge';
+import {
+  COSP_PLATFORM_KNOWLEDGE,
+  ADMIN_MODULE_ROUTE_HINTS,
+  ONBOARDING_GUIDE_KNOWLEDGE,
+  operationalGuideForModuleKey,
+} from './cospKnowledge';
 import {
   assistantToolsEnabledForContext,
   buildEmpresaMetricsSnapshotForPrompt,
@@ -19,6 +24,7 @@ import {
   shouldPrefetchMetricsSnapshot,
   shouldPrefetchOperationsMetricsInSnapshot,
   tryDeterministicDataReply,
+  tryDeterministicOnboardingGuideReply,
   looksLikeFalseEmptyTurnosReply,
 } from './assistantDeterministicRouter';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
@@ -253,6 +259,8 @@ function buildSystemPrompt(
     ASSISTANT_RESPONSE_STYLE,
     '',
     COSP_PLATFORM_KNOWLEDGE,
+    '',
+    ONBOARDING_GUIDE_KNOWLEDGE,
     guide ? `\n${guide}` : '',
     '',
     `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
@@ -383,6 +391,13 @@ export async function runPlatformAssistant(
   };
 
   const toolsEnabled = assistantToolsEnabledForContext(toolCtx);
+
+  try {
+    const onboardingDirect = tryDeterministicOnboardingGuideReply(lastUser, moduleKey);
+    if (onboardingDirect?.trim()) return { reply: onboardingDirect.trim() };
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicOnboardingGuideReply', e);
+  }
 
   if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
     try {

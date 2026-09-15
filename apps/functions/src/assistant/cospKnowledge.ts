@@ -9,6 +9,7 @@ ADMIN — módulos típicos (menú lateral; al hablar con el usuario usá estos 
 - Clientes y objetivos (CRM): clientes con objetivos embebidos.
 - Servicios y SLA: contratos SLA, puestos; herramientas de esquema de turnos.
 - Reportes, Análisis operativo, Configuración: exportes y métricas; usuarios y roles por módulo (permisos read/create/update/delete). isSuperAdmin bypasea todo.
+- Guía interactiva / Onboarding obligatorio (menú **Guía** y Configuración → **Onboarding**): todo usuario admin nuevo debe completar la guía de su recorrido (Operaciones o Planificación) antes de usar el resto del panel. El progreso se guarda en system_users.onboardingGuide.
 
 Portal empleado (vista guardia): turnos propios, presencia según políticas GPS/portal, solicitud de ausencias.
 
@@ -33,6 +34,7 @@ export const ADMIN_MODULE_ROUTE_HINTS: Record<string, string> = {
   REPORTS: 'Reportes — horas y exportes.',
   ANALYSIS: 'Análisis operativo — métricas agregadas.',
   CONFIG: 'Configuración — empresa, usuarios y permisos.',
+  GUIDE: 'Guía interactiva / onboarding obligatorio — primeros pasos y checklist de habilitación.',
 };
 
 export const KNOWN_ADMIN_MODULE_KEYS = Object.keys(ADMIN_MODULE_ROUTE_HINTS);
@@ -107,6 +109,52 @@ const CLIENT_PORTAL_OPS = `
 Portal cliente: consultas y datos limitados según ese diseño — sin información de otros contratos/clientes.
 `.trim();
 
+const GUIDE_OPS = `
+Guía interactiva (onboarding obligatorio) en COSP:
+
+**Dónde está**
+- Menú lateral → **Guía** (\`/admin/guia\`).
+- Seguimiento admin: **Configuración → Onboarding** (quién completó / en curso / no iniciado).
+
+**Regla de negocio**
+- Todo usuario admin **nuevo** nace con onboarding obligatorio (\`system_users.onboardingGuide.required = true\`).
+- Mientras el estado no sea **COMPLETED**, el panel redirige a la guía y bloquea el resto de módulos.
+- Recorridos: **OPERATIONS** (Operaciones) o **PLANNING** (Planificación). Se elige al crear el usuario.
+
+**Pasos de la guía (orden recomendado)**
+1. Bienvenida / cómo usar la guía.
+2. CRM — crear cliente.
+3. Objetivos/sedes del cliente.
+4. Servicios y cobertura (SLA).
+5. Alta de empleados (Personal).
+6. RRHH (nómina, import CSV, bajas).
+7. Planificación de turnos.
+8. Centro de operaciones (día a día).
+9. Reportes (cierre / liquidación de horas).
+10. Cierre + **checklist mínimo del recorrido** (obligatorio para habilitar).
+
+**Checklist Operaciones (para marcar COMPLETED)**
+- Identificar turnos PLAN / ACTIVOS / AUSENTES en Centro Control.
+- Registrar ausencia y disparar cobertura de vacante.
+- Registrar ingreso/relevo y salida.
+- Cargar novedad operativa.
+
+**Checklist Planificación (para marcar COMPLETED)**
+- Seleccionar cliente, objetivo y período.
+- Asignar/desasignar turnos y validar vacantes.
+- Revisar consistencia con SLA antes de publicar.
+- Registrar ajustes y entender impacto en Operaciones/Reportes.
+
+**Cómo completar y habilitarse**
+1. Abrí **Guía**.
+2. Recorré los pasos (botón Abrir módulo cuando tengas permiso).
+3. En el paso final, marcá el checklist de tu recorrido.
+4. Tocá **Finalizar y habilitar**.
+5. Quedás desbloqueado para usar el panel.
+
+Si preguntan “¿quién completó la guía?”: orientar a **Configuración → Onboarding**. No inventes estados de usuarios sin dato de Firestore.
+`.trim();
+
 /** Texto español corto por clave inferida en cliente. */
 const MODULE_OPS: Record<string, string> = {
   PLANNING: PLANNING_OPS,
@@ -119,11 +167,18 @@ const MODULE_OPS: Record<string, string> = {
   ANALYSIS:
     'Análisis operativo: métricas y vistas agregadas; probá período/objetivos visibles cuando no cuadren totales.',
   CONFIG: CONFIG_OPS,
+  GUIDE: GUIDE_OPS,
   DASHBOARD:
     'Dashboard: atajo a KPIs/atención rápida; la guía puntual viene del módulo al que lleve cada tarjeta o menú lateral.',
   EMPLOYEE_PORTAL: EMPLOYEE_PORTAL_OPS,
   CLIENT_PORTAL: CLIENT_PORTAL_OPS,
 };
+
+/** Bloque siempre disponible en el system prompt (además del moduleKey GUIDE). */
+export const ONBOARDING_GUIDE_KNOWLEDGE = `
+ONBOARDING / GUÍA INTERACTIVA (fuente de verdad):
+${GUIDE_OPS}
+`.trim();
 
 export function operationalGuideForModuleKey(moduleKey: string | null | undefined): string {
   const k = typeof moduleKey === 'string' ? moduleKey.trim() : '';

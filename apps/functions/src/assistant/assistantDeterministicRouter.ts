@@ -2306,6 +2306,59 @@ function tryDeterministicPlanificacionHowToReply(t: string): string | null {
   ).slice(0, 7500);
 }
 
+function matchOnboardingGuideIntent(t: string): boolean {
+  if (/\b(onboarding|guia interactiva|gu[ií]a obligatoria)\b/.test(t)) return true;
+  if (/\b(completar|finalizar|habilitar|checklist)\b/.test(t) && /\b(guia|gu[ií]a|onboarding)\b/.test(t)) {
+    return true;
+  }
+  if (/\b(quien|qui[eé]n)\b/.test(t) && /\b(completo|completó|termino|terminó)\b/.test(t) && /\b(guia|gu[ií]a|onboarding)\b/.test(t)) {
+    return true;
+  }
+  if (/\b(bloqueado|no puedo entrar|me manda a la guia|me manda a la gu[ií]a)\b/.test(t)) return true;
+  return false;
+}
+
+/** FAQ de guía/onboarding sin Firestore (UI). Exportada para usarla aunque no haya tools. */
+export function tryDeterministicOnboardingGuideReply(
+  lastUser: string,
+  moduleKey?: string | null,
+): string | null {
+  const raw = lastUser.trim();
+  if (!raw) return null;
+  const t = normText(raw);
+  const mk = typeof moduleKey === 'string' ? moduleKey.trim() : '';
+  if (!matchOnboardingGuideIntent(t) && mk !== 'GUIDE') return null;
+
+  if (/\b(quien|qui[eé]n)\b/.test(t) && /\b(completo|completó|termino|terminó|progreso|seguimiento)\b/.test(t)) {
+    return (
+      '**Seguimiento de onboarding**\n\n' +
+      '1. Menú lateral → **Configuración**.\n\n' +
+      '2. Solapa **Onboarding**.\n\n' +
+      'Ahí ves quién tiene la guía requerida, el recorrido (Operaciones / Planificación), el estado y el % de progreso.\n\n' +
+      'Desde esa misma solapa un admin puede **exigir la guía** a usuarios existentes.'
+    ).slice(0, 7500);
+  }
+
+  if (/\b(checklist|operaciones|planificacion|planificación)\b/.test(t) && /\b(marcar|completar|finalizar)\b/.test(t)) {
+    return (
+      '**Checklist para habilitarte**\n\n' +
+      'En el **último paso** de la **Guía** marcá el checklist de tu recorrido:\n\n' +
+      '**Operaciones:** identificar PLAN/ACTIVOS/AUSENTES, registrar ausencia/vacante, ingreso-relevo-salida y novedad.\n\n' +
+      '**Planificación:** cliente/objetivo/período, asignar turnos y vacantes, revisar SLA y entender impacto en Operaciones/Reportes.\n\n' +
+      'Después tocá **Finalizar y habilitar**. Sin checklist no se completa el onboarding.'
+    ).slice(0, 7500);
+  }
+
+  const guide = operationalGuideForModuleKey('GUIDE');
+  const body = guide
+    ? guide.replace(/^GUÍA OPERATIVA[^\n]*\n/, '').trim()
+    : 'La guía obligatoria está en el menú **Guía**. Completá los pasos y el checklist final para habilitar el panel.';
+  return (
+    `**Guía interactiva / onboarding**\n\n${body.slice(0, 2200)}\n\n` +
+    `Si estás bloqueado, quedate en **Guía**, marcá el checklist y tocá **Finalizar y habilitar**.`
+  ).slice(0, 7500);
+}
+
 function tryDeterministicPlanningUiReply(moduleKey: string | null): string | null {
   if (!moduleKey || (moduleKey !== 'PLANNING' && moduleKey !== 'PLANNING_AI')) return null;
   const guide = operationalGuideForModuleKey('PLANNING');
@@ -2579,6 +2632,8 @@ export async function tryDeterministicDataReply(
   if (planAutomate) return planAutomate;
   const planHowTo = tryDeterministicPlanificacionHowToReply(t);
   if (planHowTo?.trim()) return planHowTo.trim();
+  const onboardingGuide = tryDeterministicOnboardingGuideReply(raw, mk);
+  if (onboardingGuide?.trim()) return onboardingGuide.trim();
 
   try {
     const crm = await tryDeterministicCrmReply(t, toolCtx, recent);

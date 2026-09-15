@@ -11,6 +11,7 @@ const ADMIN_PREFIXES: [string, string][] = [
   ['/admin/rrhh', 'RRHH'],
   ['/admin/planificacion', 'PLANNING'],
   ['/admin/operaciones', 'OPERATIONS'],
+  ['/admin/guia', 'GUIDE'],
   ['/admin/dashboard', 'DASHBOARD'],
   ['/admin', 'DASHBOARD'],
 ];
@@ -38,6 +39,7 @@ const MODULE_TITLE_ES: Record<string, string> = {
   REPORTS: 'Reportes',
   ANALYSIS: 'Análisis',
   CONFIG: 'Configuración',
+  GUIDE: 'Guía interactiva',
   EMPLOYEE_PORTAL: 'Portal empleado',
   CLIENT_PORTAL: 'Portal cliente',
 };
