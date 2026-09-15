@@ -2,7 +2,16 @@
 
 export const HOURS_BALANCE_COLLECTION = 'hours_balances';
 
-export type HoursBalanceSource = 'planning' | 'sla' | 'crm-bootstrap' | 'manual';
+export type HoursBalanceSource =
+  | 'planning'
+  | 'sla'
+  | 'analisis'
+  /** Legacy: CRM ya no escribe; filas antiguas pueden conservar este valor. */
+  | 'crm-bootstrap'
+  | 'crm-live-plan'
+  | 'manual';
+
+export type HoursBalanceWriteChannel = 'planning' | 'sla_patch' | 'analisis_refresh';
 
 export type HoursBalanceRow = {
   empresaId: string;
@@ -32,6 +41,11 @@ export type HoursBalanceRow = {
   /** SLA − real. Positivo = faltante de ejecución. */
   saldoReal: number;
   rebuiltFrom: HoursBalanceSource;
+  /** Canal de la última escritura (desde `commitHoursBalanceExtract`). */
+  writeChannel?: HoursBalanceWriteChannel;
+  /** ISO-8601 de la última recomputación persistida. */
+  computedAtIso?: string;
+  writtenBy?: string;
 };
 
 export function hoursBalancePeriodKey(year: number, month: number): string {

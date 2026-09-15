@@ -1,6 +1,5 @@
 import { getAuth } from 'firebase/auth';
 import {
-    addDoc,
     collection,
     doc,
     getDocs,
@@ -103,9 +102,7 @@ export async function publishPlanificacionMonth({
     } catch (e) {
         console.warn('[plan] publish RFZ draft sweep error:', e);
     }
-    await batch.commit();
-
-    await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+    batch.set(doc(collection(db, 'audit_logs')), stampEmpresaId({
         action: 'PUBLICACION_CRONOGRAMA',
         module: 'PLANIFICADOR',
         details: isSuperAdmin && (slaHoursMismatch || hasCoverageGaps)
@@ -121,6 +118,7 @@ export async function publishPlanificacionMonth({
         year,
         month,
     }, empresaId));
+    await batch.commit();
 
     const totalPublished = draftsSnap.docs.length + rfzPublished;
 

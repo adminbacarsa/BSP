@@ -28,6 +28,8 @@ export declare const runAjustarCrono: functions.HttpsFunction & functions.Runnab
 export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
+export declare const updateOnboardingGuideProgress: functions.HttpsFunction & functions.Runnable<any>;
+export declare const assignOnboardingGuide: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;

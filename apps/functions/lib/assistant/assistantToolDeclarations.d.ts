@@ -726,5 +726,5 @@ export declare const ASSISTANT_FUNCTION_DECLARATIONS: ({
         required: any[];
     };
 })[];
-export declare const ASSISTANT_TOOL_ROUNDS_MAX = 4;
+export declare const ASSISTANT_TOOL_ROUNDS_MAX = 6;
 export declare function getFilteredDeclarations(readableModuleKeys: string[]): typeof ASSISTANT_FUNCTION_DECLARATIONS;

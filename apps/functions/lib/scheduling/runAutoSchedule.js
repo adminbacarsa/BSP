@@ -20,16 +20,29 @@ function dateKey(d) {
     const day = String(d.getDate()).padStart(2, '0');
     return `${y}-${m}-${day}`;
 }
+function slaStatusUsable(row) {
+    const s = String(row.status ?? '').trim().toLowerCase();
+    if (!s)
+        return true;
+    if (s === 'active' || s === 'activo' || s === 'activa')
+        return true;
+    if (s === 'inactive' || s === 'inactivo' || s === 'expired' || s === 'vencido')
+        return false;
+    return true;
+}
 async function loadPositionsFromSla(objectiveId) {
     const snap = await db()
         .collection('servicios_sla')
         .where('objectiveId', '==', objectiveId)
-        .where('status', '==', 'active')
-        .limit(1)
+        .limit(20)
         .get();
     if (snap.empty)
-        throw new functions.https.HttpsError('not-found', `No hay SLA activo para el objetivo ${objectiveId}`);
-    const sla = snap.docs[0].data();
+        throw new functions.https.HttpsError('not-found', `No hay SLA para el objetivo ${objectiveId}`);
+    const candidates = snap.docs
+        .map((d) => ({ id: d.id, data: d.data() }))
+        .filter((x) => slaStatusUsable(x.data));
+    const pick = candidates[0] ?? { id: snap.docs[0].id, data: snap.docs[0].data() };
+    const sla = pick.data;
     const rawPositions = sla.positions || [];
     const slaVendidas = Number(sla.totalMonthlyHours || 0);
     const codeHoursHint = {};
@@ -56,17 +69,27 @@ async function loadEmployees(empresaId, objectiveId) {
     const snap = await db()
         .collection('empleados')
         .where('empresaId', '==', empresaId)
-        .where('activo', '==', true)
+        .limit(900)
         .get();
     return snap.docs
-        .filter(doc => {
+        .filter((doc) => {
         const d = doc.data();
-        return !d.preferredObjectiveId || d.preferredObjectiveId === objectiveId;
+        const st = String(d.status ?? '').trim().toUpperCase();
+        if (st === 'INACTIVE' || st === 'INACTIVO')
+            return false;
+        if (d.activo === false)
+            return false;
+        const pref = String(d.preferredObjectiveId ?? '').trim();
+        return !pref || pref === objectiveId;
     })
-        .map(doc => ({
-        id: doc.id,
-        nombre: doc.data().nombre || doc.data().name || doc.id,
-    }));
+        .map((doc) => {
+        const d = doc.data();
+        const nombre = String(d.nombre ?? '').trim() ||
+            String(d.name ?? '').trim() ||
+            [d.lastName, d.firstName].filter(Boolean).join(', ').trim() ||
+            doc.id;
+        return { id: doc.id, nombre };
+    });
 }
 async function loadAbsences(objectiveId, empresaId, year, month) {
     const monthStart = `${year}-${String(month).padStart(2, '0')}-01`;
@@ -189,6 +212,10 @@ async function runAutoScheduleCore(data) {
     const result = (0, autoScheduleEngine_1.generateSchedule)(ctx);
     const coverage = (0, autoScheduleEngine_1.verifyCoverage)(ctx, result.assignments);
     const staffingNeeds = buildStaffingNeeds(positions, result.stats.positionGroups);
+    const absencesSerial = {};
+    Object.entries(absences).forEach(([empId, set]) => {
+        absencesSerial[empId] = [...set];
+    });
     return {
         ok: coverage.uncoveredSlots === 0 && coverage.slaHoursClosed,
         assignments: result.assignments,
@@ -202,6 +229,13 @@ async function runAutoScheduleCore(data) {
             employeeCount: employees.length,
             positionCount: positions.length,
             generatedAt: new Date().toISOString(),
+        },
+        plannerSeed: {
+            positions,
+            employees,
+            days: daysInMonth.map(dateKey),
+            slaVendidas,
+            absences: absencesSerial,
         },
     };
 }

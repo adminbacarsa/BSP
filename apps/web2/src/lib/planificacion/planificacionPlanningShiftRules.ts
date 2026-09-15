@@ -1,8 +1,12 @@
 import type { GrupoObjetivos } from '@/services/gruposService';
 import { isOperationalOriginShift as isCanonicalOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
-/** Turnos generados desde operaciones / reten — no son el crono planificado del objetivo. */
-export function isOperationalOriginShift(data: any): boolean {
+/**
+ * Overlay de la grilla de planificación: operativo canónico + relevo, salvo
+ * celdas ya cubiertas o con titular ausente (esas siguen mostrando el crono).
+ * No reutilizar este nombre para visibilidad Ops / horas / publicación.
+ */
+export function isPlanningGridOperationalShift(data: any): boolean {
     if (!data) return false;
     if (data?.operacionallyCovered === true || data?.coveredBy || data?.coveredByEmployeeName || data?.isAbsent === true) return false;
     return isCanonicalOperationalOriginShift(data) || data?.isRelief === true;
@@ -50,7 +54,7 @@ export function isPlanificacionPublished(
 export function turnoCuentaParaCronoPlanificado(data: any, objectiveId: string | undefined | null): boolean {
     if (!data || !objectiveId) return false;
     if (String(data.objectiveId || '') !== String(objectiveId)) return false;
-    if (isOperationalOriginShift(data)) return false;
+    if (isPlanningGridOperationalShift(data)) return false;
     return true;
 }
 
@@ -82,7 +86,7 @@ export function isCrossObjectivePlanningReadOnly(
     selectedObjective: string | null | undefined,
 ): boolean {
     if (!shift || !selectedObjective) return false;
-    if (isOperationalOriginShift(shift)) return true;
+    if (isPlanningGridOperationalShift(shift)) return true;
     if (shiftMatchesObjective(shift, selectedObjective)) return false;
     const obj = shift.objectiveId;
     if (obj == null || obj === '') return false;
@@ -99,7 +103,7 @@ export function pickCrossObjectiveSavedShift(
     selectedObjective: string | undefined | null,
 ): any | null {
     if (!rawS || !selectedObjective) return null;
-    if (isOperationalOriginShift(rawS)) return null;
+    if (isPlanningGridOperationalShift(rawS)) return null;
     if (shiftMatchesObjective(rawS, selectedObjective)) return null;
     const obj = rawS.objectiveId;
     if (obj == null || obj === '') return null;
@@ -192,7 +196,7 @@ export function resolveCellShiftDisplay(
             return { s: rawS ?? null, p: rawP };
         }
         if (objId && selectedGrupo.objectiveIds.includes(objId)) {
-            if (!isOperationalOriginShift(active) || isOpsCoverageShift(active)) {
+            if (!isPlanningGridOperationalShift(active) || isOpsCoverageShift(active)) {
                 return { s: rawS, p: null };
             }
         }
@@ -221,7 +225,7 @@ export function resolveCellShiftDisplay(
         const pObj = rawP.objectiveId;
         if (
             pObj != null && pObj !== '' && String(pObj) !== String(selectedObjective) &&
-            !isOperationalOriginShift(rawP)
+            !isPlanningGridOperationalShift(rawP)
         ) {
             return { s: rawP, p: null };
         }

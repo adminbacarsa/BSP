@@ -116,4 +116,25 @@ export type EmpresaMetricsSnapshotOptions = {
     includeOperationsDay?: boolean;
 };
 export declare function buildEmpresaMetricsSnapshotForPrompt(ctx: AssistantToolContext, options?: EmpresaMetricsSnapshotOptions): Promise<string>;
+export declare function ejecutarMapaServiciosObjetivosEmpresa(ctx: AssistantToolContext, args: {
+    fecha_referencia?: string;
+    texto_cliente?: string;
+    limite?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarDondeTrabajaEmpleado(ctx: AssistantToolContext, args: {
+    id_firestore_empleado?: string;
+    texto_empleado?: string;
+    fecha_referencia?: string;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarMapaDotacionPreferidaEmpresa(ctx: AssistantToolContext, args: {
+    texto_objetivo?: string;
+    limite_por_objetivo?: number;
+}): Promise<Record<string, unknown>>;
+export declare function ejecutarEstadoCoberturaObjetivoMes(ctx: AssistantToolContext, args: {
+    texto_objetivo?: string;
+    id_objetivo?: string;
+    fecha_referencia?: string;
+    mes?: number;
+    anio?: number;
+}): Promise<Record<string, unknown>>;
 export declare function dispatchAssistantToolCall(ctx: AssistantToolContext, name: string, rawArgs: unknown): Promise<Record<string, unknown>>;

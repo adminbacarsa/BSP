@@ -23,14 +23,24 @@ export function isShiftAbsent(t: any): boolean {
   return t.isAbsent === true || st === 'ABSENT';
 }
 
-/** Presencia real: flags de fichada o par de timestamps de ingreso/egreso. Ausente no cuenta. */
+/** Presencia real: flags de fichada, presentAt consolidado, o par ingreso/egreso.
+ *  Turno en curso (solo presentAt/check-in, sin cierre ni fin de banda) no cuenta como realizado del mes. */
 export function isShiftFichado(t: any): boolean {
   if (!t || isShiftAbsent(t)) return false;
   const st = String(t.status || '').toUpperCase();
   if (t.isPresent === true || t.isCompleted === true || st === 'PRESENT' || st === 'COMPLETED') return true;
   const rs = toDateSafe(t.realStartTime) || toDateSafe(t.checkInTime);
   const re = toDateSafe(t.realEndTime) || toDateSafe(t.checkOutTime);
-  return !!(rs && re && re.getTime() > rs.getTime());
+  if (rs && re && re.getTime() > rs.getTime()) return true;
+
+  const presentAt = toDateSafe(t.presentAt);
+  if (!presentAt) return false;
+  // presentAt + egreso / completado
+  if (re || t.isCompleted === true || st === 'COMPLETED') return true;
+  // presentAt y la banda planificada ya terminó → cuenta como realizado
+  const plannedEnd = toDateSafe(t.endTime) || toDateSafe(t.plannedEndTime);
+  if (plannedEnd && plannedEnd.getTime() < Date.now()) return true;
+  return false;
 }
 
 export function fichadaAnchorDate(t: any): Date | null {

@@ -17,10 +17,13 @@ export {
 } from './buildHoursBalance';
 export { applyLiveSlaHoursToBalanceRows } from './overlayLiveSla';
 export {
-  persistHoursBalances,
+  commitHoursBalanceExtract,
   fetchHoursBalances,
   peekHoursBalances,
   rebuildHoursBalanceForObjectiveMonth,
   patchSlaHoursOnBalances,
+  refreshHoursBalancesFromTurnos,
   persistHoursBalancesFromTurnos,
 } from './hoursBalanceStore';
+export type { HoursBalanceWriteMeta } from './hoursBalanceWriter';
+export { stampHoursBalanceRowsForWrite } from './hoursBalanceWriter';

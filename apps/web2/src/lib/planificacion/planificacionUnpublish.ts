@@ -17,7 +17,7 @@ import {
     planificacionPublishLookupKey,
     stampEmpresaId,
 } from '@/lib/multiempresa';
-import { isOperationalOriginShift } from '@/lib/planificacion/planificacionPlanningShiftRules';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 export type UnpublishPlanificacionParams = {
     empresaId: string | null | undefined;

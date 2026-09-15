@@ -120,7 +120,6 @@ import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/servi
 import { callableErrorText } from '@/lib/callableError';
 import {
   fetchHoursBalances,
-  persistHoursBalancesFromTurnos,
   sumBalancesByClient,
   balancesCoverObjectives,
   overlayLiveSlaOnBalanceRows,
@@ -953,15 +952,6 @@ export default function CRMPage() {
           const now = new Date();
           setMetricsUpdatedAt(now);
           metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
-          if (empresaId && slaRows.length && allTurnos.length) {
-            void persistHoursBalancesFromTurnos({
-              empresaId,
-              services: slaRows as any,
-              turnos: allTurnos,
-              months: bucketsEarly.map((b) => ({ year: b.start.getFullYear(), month: b.start.getMonth() + 1 })),
-              rebuiltFrom: 'crm-live-plan',
-            }).catch((err) => console.warn('[crm] hours_balances live-plan', err));
-          }
           setDoc(snapRef, {
             empresaId,
             computedAt: serverTimestamp(),
@@ -1180,15 +1170,6 @@ export default function CRMPage() {
       const now = new Date();
       setMetricsUpdatedAt(now);
       metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
-      if (empresaId && slaRows.length && allTurnos.length) {
-        void persistHoursBalancesFromTurnos({
-          empresaId,
-          services: slaRows as any,
-          turnos: allTurnos,
-          months: buckets.map((b) => ({ year: b.start.getFullYear(), month: b.start.getMonth() + 1 })),
-          rebuiltFrom: 'crm-bootstrap',
-        }).catch((err) => console.warn('[crm] hours_balances bootstrap', err));
-      }
       setDoc(snapRef, {
         empresaId,
         computedAt: serverTimestamp(),

@@ -1,4 +1,5 @@
 import * as functions from 'firebase-functions/v1';
+import { type EnginePositionDef, type EngineEmployeeDef } from './autoScheduleEngine';
 export interface RunAutoScheduleInput {
     objectiveId: string;
     year: number;
@@ -62,6 +63,13 @@ export interface RunAutoScheduleOutput {
         employeeCount: number;
         positionCount: number;
         generatedAt: string;
+    };
+    plannerSeed?: {
+        positions: EnginePositionDef[];
+        employees: EngineEmployeeDef[];
+        days: string[];
+        slaVendidas: number;
+        absences: Record<string, string[]>;
     };
 }
 export declare function runAutoScheduleCore(data: RunAutoScheduleInput): Promise<RunAutoScheduleOutput>;

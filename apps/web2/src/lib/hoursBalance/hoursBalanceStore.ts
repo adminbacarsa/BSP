@@ -27,6 +27,10 @@ import {
   hoursBalancePeriodKey,
   round1,
 } from './types';
+import {
+  stampHoursBalanceRowsForWrite,
+  type HoursBalanceWriteMeta,
+} from './hoursBalanceWriter';
 
 const BATCH_LIMIT = 400;
 const hoursBalanceMemory = new Map<string, HoursBalanceRow>();
@@ -64,6 +68,16 @@ function rowToFirestore(row: HoursBalanceRow) {
   );
 }
 
+/** Única puerta de persistencia con metadatos de canal. */
+export async function commitHoursBalanceExtract(
+  rows: HoursBalanceRow[],
+  meta: HoursBalanceWriteMeta,
+): Promise<number> {
+  if (rows.length === 0) return 0;
+  return persistHoursBalances(stampHoursBalanceRowsForWrite(rows, meta));
+}
+
+/** Uso interno: no exportar desde `@/lib/hoursBalance` salvo tests. */
 export async function persistHoursBalances(rows: HoursBalanceRow[]): Promise<number> {
   if (rows.length === 0) return 0;
   let batch = writeBatch(db);
@@ -218,7 +232,7 @@ export async function rebuildHoursBalanceForObjectiveMonth(opts: {
   });
   const row = rows.find((r) => r.objectiveId === oid) || null;
   if (row) {
-    await persistHoursBalances([row]);
+    await commitHoursBalanceExtract([row], { channel: 'planning' });
     return row;
   }
   const empty: HoursBalanceRow = {
@@ -244,7 +258,7 @@ export async function rebuildHoursBalanceForObjectiveMonth(opts: {
     saldoReal: 0,
     rebuiltFrom,
   };
-  await persistHoursBalances([empty]);
+  await commitHoursBalanceExtract([empty], { channel: 'planning' });
   return empty;
 }
 
@@ -330,16 +344,16 @@ export async function patchSlaHoursOnBalances(opts: {
       rebuiltFrom: 'sla' as const,
     };
   });
-  await persistHoursBalances(merged);
+  await commitHoursBalanceExtract(merged, { channel: 'sla_patch' });
   return merged.length;
 }
 
-export async function persistHoursBalancesFromTurnos(opts: {
+/** Refresh batch desde turnos (solo Análisis / tooling; no CRM). */
+export async function refreshHoursBalancesFromTurnos(opts: {
   empresaId: string;
   services: SlaPlanningRow[];
   turnos: any[];
   months: Array<{ year: number; month: number }>;
-  rebuiltFrom?: HoursBalanceSource;
 }): Promise<number> {
   const all: HoursBalanceRow[] = [];
   for (const { year, month } of opts.months) {
@@ -356,8 +370,24 @@ export async function persistHoursBalancesFromTurnos(opts: {
       month,
       services: opts.services,
       turnos: monthTurnos,
-      rebuiltFrom: opts.rebuiltFrom || 'crm-bootstrap',
+      rebuiltFrom: 'analisis',
     }));
   }
-  return persistHoursBalances(all);
+  return commitHoursBalanceExtract(all, { channel: 'analisis_refresh' });
+}
+
+/** @deprecated Usar `refreshHoursBalancesFromTurnos`. CRM ya no debe escribir extractos. */
+export async function persistHoursBalancesFromTurnos(opts: {
+  empresaId: string;
+  services: SlaPlanningRow[];
+  turnos: any[];
+  months: Array<{ year: number; month: number }>;
+  rebuiltFrom?: HoursBalanceSource;
+}): Promise<number> {
+  return refreshHoursBalancesFromTurnos({
+    empresaId: opts.empresaId,
+    services: opts.services,
+    turnos: opts.turnos,
+    months: opts.months,
+  });
 }

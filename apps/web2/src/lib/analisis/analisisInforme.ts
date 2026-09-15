@@ -91,6 +91,8 @@ export function buildInformeAnalitico(opts: {
   demandaTotals: DemandaObjectiveRow;
   ausenciasStats: AusenciasStats | null;
   turnos: any[];
+  /** Fallback cuando la malla aún no cargó: suma de hours_balances.realHours. */
+  extractRealHours?: number | null;
   bolsa?: {
     inicial: number;
     techo: number;
@@ -103,9 +105,10 @@ export function buildInformeAnalitico(opts: {
 }): InformeAnalitico {
   const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
   const hsVendidas = r1(d.slaHours);
+  /** Plan comprometido (publicado). Ext/adel van aparte en hsExtras50. */
   const hsPlanBase = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
-  const hsPlanificadas = coveragePlannedBillableHours(d.planHours, d.extHours, d.adelHours);
+  const hsPlanificadas = hsPlanBase;
   const hsFT100 = r1(d.ftHours);
   const hsOps = r1(d.opsHours);
   const hsVacante = r1(d.vacantHours);
@@ -128,6 +131,13 @@ export function buildInformeAnalitico(opts: {
       hsPendientesFichada += hs;
     }
   });
+
+  // Sin malla en memoria: no mentir con 0 si el extracto ya tiene reales.
+  const extractReal = opts.extractRealHours;
+  if (turnos.length === 0 && extractReal != null && Number.isFinite(extractReal) && extractReal > 0) {
+    hsRealizadas = extractReal;
+    hsNormales = extractReal;
+  }
 
   hsRealizadas = r1(hsRealizadas);
   hsPendientesFichada = r1(hsPendientesFichada);

@@ -12,7 +12,7 @@
  * para que reinicios del trigger no generen duplicados.
  */
 import * as functions from 'firebase-functions/v1';
-import * as admin from 'firebase-admin';
+import { isOperationalOriginShift } from '../shared/operationalShift';
 
 const OPS_ABSENCE_TYPES = new Set(['AA', 'MANUAL_OPS', 'AUTO_T30']);
 

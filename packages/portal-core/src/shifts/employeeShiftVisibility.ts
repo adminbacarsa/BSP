@@ -23,6 +23,7 @@ export function isOperationalPortalShift(shift: EmployeeShiftVisibilityInput): b
   if (
     origin === 'RETEN' ||
     origin === 'OPERATIONS_COVERAGE' ||
+    origin === 'SLA_VIRTUAL' ||
     origin === 'CLIENT_REQUEST' ||
     origin === 'EVENTO'
   ) {

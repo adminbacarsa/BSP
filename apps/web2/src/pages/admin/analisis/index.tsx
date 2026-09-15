@@ -76,7 +76,7 @@ import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proforma
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
-import { persistHoursBalancesFromTurnos } from '@/lib/hoursBalance';
+import { refreshHoursBalancesFromTurnos } from '@/lib/hoursBalance';
 import { useLazyRecharts } from '@/hooks/useLazyRecharts';
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
@@ -1080,12 +1080,11 @@ export default function AnalisisPage() {
         y += 1;
       }
     }
-    void persistHoursBalancesFromTurnos({
+    void refreshHoursBalancesFromTurnos({
       empresaId,
       services: vigenteServices,
       turnos: allTurnos,
       months,
-      rebuiltFrom: 'crm-bootstrap',
     }).catch((err) => console.warn('[analisis] hours_balances', err));
   }, [mallaReady, turnosLive.length, empresaId, vigenteServices, allTurnos, periodKey, periodRange.start, periodRange.end]);
   const finClientBars = useMemo(

@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import {
-    collection, doc, setDoc, deleteDoc, onSnapshot, addDoc, getDoc,
+    collection, doc, setDoc, deleteDoc, onSnapshot, getDoc,
     query, where, serverTimestamp,
 } from 'firebase/firestore';
 import { app, db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
+import { writeCriticalAuditLog } from '@/lib/audit/criticalAuditLog';
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -177,29 +178,21 @@ async function writeLiquidacionAudit(opts: {
     fileNumber?: string | null;
     details: string;
 }): Promise<void> {
-    try {
-        await addDoc(
-            collection(db, 'audit_logs'),
-            stampEmpresaId(
-                {
-                    timestamp: serverTimestamp(),
-                    actorUid: opts.actorUid,
-                    actorName: opts.actorName,
-                    action: opts.action,
-                    module: 'REPORTES',
-                    details: opts.details,
-                    employeeId: opts.employeeId,
-                    employeeName: opts.employeeName,
-                    cycleId: opts.cycleId,
-                    hoursMode: opts.hoursMode,
-                    fileNumber: opts.fileNumber || '',
-                },
-                opts.empresaId,
-            ),
-        );
-    } catch (e) {
-        console.warn('[liquidaciones] no se pudo escribir auditoría', e);
-    }
+    await writeCriticalAuditLog({
+        empresaId: opts.empresaId,
+        action: opts.action,
+        module: 'REPORTES',
+        details: opts.details,
+        actorUid: opts.actorUid,
+        actorName: opts.actorName,
+        extra: {
+            employeeId: opts.employeeId,
+            employeeName: opts.employeeName,
+            cycleId: opts.cycleId,
+            hoursMode: opts.hoursMode,
+            fileNumber: opts.fileNumber || '',
+        },
+    });
 }
 
 export function useLiquidaciones(opts: UseLiquidacionesOptions): UseLiquidacionesResult {

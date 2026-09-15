@@ -471,8 +471,57 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
         required: [],
     },
 }, {
+    name: 'mapa_servicios_objetivos_empresa',
+    description: 'Catálogo de servicios SLA activos del mes: Cliente → Objetivo, puestos, cantidad de vigiladores del contrato, bandas y horas vendidas. Usá para «qué servicios hay», «listame todos los SLA», «qué objetivos tienen contrato», «mapa de la plataforma», «con qué clientes trabajamos en servicios». Opcional filtro por cliente.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            fecha_referencia: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD en el mes a mapear (default hoy cliente).' },
+            texto_cliente: { type: generative_ai_1.SchemaType.STRING, description: 'Opcional: filtrar por nombre de cliente (ej. CASISA).' },
+            limite: { type: generative_ai_1.SchemaType.NUMBER, description: 'Máximo de filas (default 80, máx 120).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'donde_trabaja_empleado',
+    description: 'Dónde está asignado un colaborador: objetivo preferido del legajo + objetivos donde tuvo horas planificadas en el mes. Usá para «dónde trabaja X», «en qué objetivo está Romero», «a qué sede pertenece», «en qué puestos planificaron a X este mes».',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            texto_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre/apellido del colaborador.' },
+            id_firestore_empleado: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del legajo si ya lo tenés.' },
+            fecha_referencia: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD del mes a analizar (default hoy).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'mapa_dotacion_preferida_empresa',
+    description: 'Mapa de dotación preferida: qué empleados tienen cada objetivo como preferredObjective. Usá para «quiénes trabajan en Obrador», «dotación por objetivo», «quién está asignado a Casino», «plantilla por sede».',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Opcional: filtrar un objetivo/sede.' },
+            limite_por_objetivo: { type: generative_ai_1.SchemaType.NUMBER, description: 'Muestra de nombres por objetivo (default 12).' },
+        },
+        required: [],
+    },
+}, {
+    name: 'estado_cobertura_objetivo_mes',
+    description: 'Estado de planificación de un objetivo en el mes: horas SLA vendidas vs planificadas, % cobertura, si la grilla está publicada y cuántos legajos tienen ese objetivo preferido. Usá antes de planificar o para «cómo está la cobertura de X en octubre». Si faltan horas, sugerí proponer_planificar_objetivo_mes.',
+    parameters: {
+        type: generative_ai_1.SchemaType.OBJECT,
+        properties: {
+            texto_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'Nombre del objetivo/sede.' },
+            id_objetivo: { type: generative_ai_1.SchemaType.STRING, description: 'ID Firestore del objetivo.' },
+            fecha_referencia: { type: generative_ai_1.SchemaType.STRING, description: 'YYYY-MM-DD en el mes.' },
+            mes: { type: generative_ai_1.SchemaType.NUMBER, description: 'Mes 1-12 (alternativa a fecha_referencia).' },
+            anio: { type: generative_ai_1.SchemaType.NUMBER, description: 'Año (con mes).' },
+        },
+        required: [],
+    },
+}, {
     name: 'proponer_planificar_objetivo_mes',
-    description: 'Genera automáticamente el cronograma mensual de un objetivo aplicando CCT 422/05 (ciclo 6+2). Usá para «planificá Obrador para octubre», «generá la planificación de Casino en septiembre», «automatizá el crono de X». Los turnos se crean como borrador (draft:true) para revisión antes de publicar. Requiere permiso PLANNING:create.',
+    description: 'Genera el cronograma mensual de un objetivo: motor CCT 6+2 + ajuste fino Gemini (mismo pipeline IA que el wizard Automatizar). Usá para «planificá Obrador para octubre», «generá la planificación de Casino», «automatizá el crono de X». Crea borradores (draft:true) para revisar. Requiere PLANNING:create y confirmación del usuario.',
     parameters: {
         type: generative_ai_1.SchemaType.OBJECT,
         properties: {
@@ -509,7 +558,7 @@ exports.ASSISTANT_FUNCTION_DECLARATIONS.push({
         required: [],
     },
 });
-exports.ASSISTANT_TOOL_ROUNDS_MAX = 4;
+exports.ASSISTANT_TOOL_ROUNDS_MAX = 6;
 const WRITE_TOOL_MODULE_REQUIREMENTS = {
     proponer_extender_jornada: 'OPERATIONS',
     proponer_cubrir_ausencia: 'OPERATIONS',

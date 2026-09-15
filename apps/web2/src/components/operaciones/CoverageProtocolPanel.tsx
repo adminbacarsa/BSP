@@ -23,6 +23,7 @@ import {
   coverageHaversineKm,
   isWithinCrossObjRadiusKm,
 } from '@/lib/operaciones/coveragePositionRules';
+import { CriticalAuditError, writeCriticalAuditLog } from '@/lib/audit/criticalAuditLog';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -883,11 +884,34 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
       }
 
       if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+      const auth = getAuth();
+      await writeCriticalAuditLog({
+        empresaId: tid,
+        action: 'COBERTURA_CONFIRMADA',
+        module: 'OPERACIONES',
+        details: `[${step.key}] ${empName} · ${absenceShift.objectiveName || ''} · ${coverageEventId}`,
+        actorUid: auth.currentUser?.uid || null,
+        actorName: auth.currentUser?.displayName || auth.currentUser?.email || 'Operador',
+        extra: {
+          objectiveId: absenceShift.objectiveId,
+          objectiveName: absenceShift.objectiveName,
+          employeeId: empId,
+          employeeName: empName,
+          shiftId: candidateShiftId || absenceShift.id || null,
+          coverageEventId,
+          protocolStep: step.key,
+        },
+      });
       toast.success('Cobertura confirmada');
       onAudit?.('COBERTURA_CONFIRMADA', `[${step.key}] ${empName}`);
       upd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
       setTimeout(() => onClose(), 1500);
-    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+    } catch (e: unknown) {
+      const msg = e instanceof CriticalAuditError
+        ? 'Cobertura aplicada pero falló la auditoría. Informá a sistemas antes de cerrar el turno.'
+        : (e instanceof Error ? e.message : String(e));
+      toast.error('Error: ' + msg);
+    }
     finally { setLoading(null); }
   };
 

@@ -7,10 +7,13 @@
 
 import {
   calcPlanificadorShiftHours,
+  calcPlanningSlaReconciliationHours,
   isOperationalOriginShift,
   isPlanificadorPlannedHoursShift,
+  isPublishedPlanificadorPlannedHoursShift,
   shiftCoverageExtensionExtraHours,
 } from '@/lib/planificacion/planningScheduledHours';
+import { coalescePlannedTurnosForCell } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   deploymentStatKind,
   isDeploymentOrPoolShift,
@@ -25,6 +28,7 @@ import {
   buildObjectiveClientIndex,
   resolveObjectiveClientForId,
 } from '@/lib/crm/objectiveIdentity';
+import { buildSlaCodeHoursHintByObjectiveId } from '@/lib/crm/plannedHours';
 import { slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { isProformaVacancyShift } from '@/lib/crm/proformaVacancy';
@@ -445,9 +449,12 @@ export function finGuardNovOtros(g: FinGuardRow): number {
   return r1(Math.max(0, (g.hsNovedad || 0) - known));
 }
 
-/** Horas que se suman al plan: novedades + EV + FT + extra/ops + F/RET/REF. */
+/**
+ * Horas que se suman al plan_pub (ya incluye FT 1×).
+ * Novedades + EV + ext/ops + F/RET/REF — sin FT (evitar doble-cuenta).
+ */
 export function finSumadasHours(row: {
-  hsFt: number;
+  hsFt?: number;
   hsExtra: number;
   hsOps: number;
   hsFranco?: number;
@@ -458,23 +465,24 @@ export function finSumadasHours(row: {
   hsNovedad?: number;
 }): number {
   const nov = row.novedades?.total ?? row.hsNovedad ?? 0;
-  return r1(nov + (row.hsEv || 0) + row.hsFt + row.hsExtra + row.hsOps + finIdleHours({
+  return r1(nov + (row.hsEv || 0) + row.hsExtra + row.hsOps + finIdleHours({
     hsFranco: row.hsFranco || 0,
     hsRet: row.hsRet || 0,
     hsDespliegue: row.hsDespliegue || 0,
   }));
 }
 
+/** Consumo = plan_pub (+ novedades en modo plan) + ext/ops/EV/idle. FT ya va en hsPlan. */
 export function finConsumoHours(row: FinObjectiveBase, mode: FinHoursMode): number {
   const malla = finMallaHours(row, mode);
   const novedad = mode === 'real' ? row.novedades.total : 0;
-  return r1(malla + row.hsFt + row.hsExtra + row.hsOps + novedad + finIdleHours(row) + (row.hsEv || 0));
+  return r1(malla + row.hsExtra + row.hsOps + novedad + finIdleHours(row) + (row.hsEv || 0));
 }
 
 export function finGuardConsumo(g: FinGuardRow, mode: FinHoursMode): number {
   const malla = mode === 'real' ? g.hsReal : r1(g.hsPlan + g.hsNovedad);
   const novedad = mode === 'real' ? g.hsNovedad : 0;
-  return r1(malla + g.hsFt + g.hsExtra + g.hsOps + novedad + finIdleHours(g) + (g.hsEv || 0));
+  return r1(malla + g.hsExtra + g.hsOps + novedad + finIdleHours(g) + (g.hsEv || 0));
 }
 
 function decorate(base: FinObjectiveBase, mode: FinHoursMode): FinViewRow {
