@@ -9,6 +9,7 @@ const ALERT_TYPES = [
     'RETENCION_DETECTADA',
     'VACANTE_AUTO_REPORTADA',
     'VACANTE_NO_CUBIERTA',
+    'VACANTE_A_PLANIFICACION',
     'AUSENCIA_CORTO_PLAZO',
     'AVISO_AUSENCIA_ANTICIPADA',
 ];
@@ -18,6 +19,7 @@ const TYPE_LABELS = {
     RETENCION_DETECTADA: '⏰ Guardia en Recargo',
     VACANTE_AUTO_REPORTADA: '🔴 Vacante Reportada',
     VACANTE_NO_CUBIERTA: '🔴 Vacante Devuelta',
+    VACANTE_A_PLANIFICACION: '📋 Vacante → Planificación',
     AUSENCIA_CORTO_PLAZO: '🚨 Ausencia Urgente — menos de 4hs',
     AVISO_AUSENCIA_ANTICIPADA: '⚠️ Aviso Anticipado de Ausencia',
 };

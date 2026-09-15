@@ -35,6 +35,12 @@ import {
   isWithinCrossObjRadiusKm,
   normCoveragePositionName,
 } from './coveragePositionRules';
+import {
+  closeSiblingNoPlanningVacancies,
+  isNoPlanningVacancyOrigin,
+  resolveSlotRequiredQuantity,
+  slotAlreadyHasCoverer,
+} from './slotCoverageGuard';
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -1109,6 +1115,40 @@ async function resolverCobertura(
     }
   }
 
+  // Slot saturado vs quantity: no meter otro cubridor si already >= required
+  const vacRec = vacantData as Record<string, unknown>;
+  if (isNoPlanningVacancyOrigin(vacRec) || String(vacRec.origin || '') === 'SLA_VIRTUAL') {
+    const startTs = conv.startTime
+      || ((vacRec.startTime instanceof Timestamp) ? vacRec.startTime as Timestamp : null);
+    const requiredQty = resolveSlotRequiredQuantity(vacRec);
+    const slotCheck = await slotAlreadyHasCoverer(db, {
+      objectiveId: String(conv.objectiveId || vacRec.objectiveId || ''),
+      positionName: String(vacRec.positionName || conv.positionName || ''),
+      startTime: startTs,
+      endTime: (conv.endTime || (vacRec.endTime as Timestamp | undefined) || null) as Timestamp | null,
+      empresaId: String(conv.empresaId || vacRec.empresaId || '') || null,
+      excludeShiftIds: [conv.shiftId],
+      requiredQuantity: requiredQty,
+    });
+    if (slotCheck.saturated) {
+      if (vacantSnap.exists) {
+        await vacantSnap.ref.update({
+          status: 'COVERED',
+          isUnassigned: false,
+          coveredByEmployeeName: slotCheck.covererNames[0] || null,
+          slotSaturatedClosedAt: FieldValue.serverTimestamp(),
+          resolvedBy: conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : (conv.createdBy === 'AUTO' ? 'AUTO' : 'OPERACIONES'),
+        });
+      }
+      await db.collection('convocatorias_cobertura').doc(conv.id).set({
+        status: 'CANCELLED',
+        cancelledAt: FieldValue.serverTimestamp(),
+        cancelReason: 'SLOT_YA_SATURADO',
+      }, { merge: true });
+      return 'ALREADY_COVERED';
+    }
+  }
+
   // EXT duplicado / ADV duplicado
   if (conv.type === 'EXTEND' && (vacantData as any).coverageDualExtBy) {
     await db.collection('convocatorias_cobertura').doc(conv.id).set({
@@ -1545,6 +1585,27 @@ async function resolverCobertura(
   }, coverageEventId);
 
   await batch.commit();
+
+  // Huecos SIN PLANIFICAR: cerrar docs VACANTE hermanos del mismo slot (evita N cubridores)
+  if (isNoPlanningVacancyOrigin(vacantData as any) || String((vacantData as any).origin || '') === 'SLA_VIRTUAL') {
+    try {
+      await closeSiblingNoPlanningVacancies(db, {
+        coveredVacancyId: conv.shiftId,
+        objectiveId: String(conv.objectiveId || (vacantData as any).objectiveId || ''),
+        positionName: String((vacantData as any).positionName || conv.positionName || ''),
+        startTime: conv.startTime || ((vacantData as any).startTime as Timestamp | undefined) || null,
+        empresaId: String(conv.empresaId || (vacantData as any).empresaId || '') || null,
+        covererEmployeeId: conv.candidateEmployeeId,
+        covererEmployeeName: conv.candidateEmployeeName,
+        coverageEventId,
+        resolvedBy,
+        requiredQuantity: resolveSlotRequiredQuantity(vacantData as any),
+      });
+    } catch (e) {
+      console.warn('[resolverCobertura] closeSiblingNoPlanningVacancies', (e as Error)?.message);
+    }
+  }
+
   return 'OK';
 }
 
@@ -1853,6 +1914,32 @@ export async function iniciarCascadaCobertura(
 ): Promise<void> {
   const vacantSnap = await db.collection('turnos').doc(shift.id).get();
   if (vacantSnap.exists && isShiftAlreadyCovered(vacantSnap.data() as any)) return;
+
+  // No arrancar cascada si el slot ya tiene cubridor (hermanas / carrera Demo)
+  const vacData = vacantSnap.exists ? vacantSnap.data() as Record<string, unknown> : {};
+  if (isNoPlanningVacancyOrigin(vacData) || String(vacData.origin || '') === 'SLA_VIRTUAL') {
+    const slotCheck = await slotAlreadyHasCoverer(db, {
+      objectiveId: String(shift.objectiveId || ''),
+      positionName: String(shift.positionName || vacData.positionName || ''),
+      startTime: shift.startTime,
+      endTime: shift.endTime || null,
+      empresaId: shift.empresaId || null,
+      excludeShiftIds: [shift.id],
+      requiredQuantity: resolveSlotRequiredQuantity(vacData),
+    });
+    if (slotCheck.saturated) {
+      if (vacantSnap.exists) {
+        await vacantSnap.ref.update({
+          status: 'COVERED',
+          isUnassigned: false,
+          coveredByEmployeeName: slotCheck.covererNames[0] || null,
+          slotSaturatedClosedAt: FieldValue.serverTimestamp(),
+          resolvedBy: createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : createdBy,
+        });
+      }
+      return;
+    }
+  }
 
   // Solo PENDING bloquea reinicio; ESCALATED solo no impide nueva cascada si quedó colgada
   const existing = await db.collection('convocatorias_cobertura')

@@ -23,7 +23,7 @@ import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
-import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, waitForPendingWrites, onSnapshot } from 'firebase/firestore';
+import { doc, updateDoc, serverTimestamp, addDoc, collection, setDoc, Timestamp, writeBatch, query, where, orderBy, limit, getDocs, getDoc, waitForPendingWrites, onSnapshot } from 'firebase/firestore';
 import { getFunctions, httpsCallable } from 'firebase/functions';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WAComposeModal, type WAComposeContext } from '@/components/common/WAComposeModal';
@@ -3475,6 +3475,22 @@ export default function OperacionesPage() {
             const origin = String(s.vacancyOrigin || s.origin || '').toUpperCase();
             const isNoPlan = origin.includes('NO_PLANNING') || origin.includes('SIN_PLANIFICAR') || origin === 'SLA_VIRTUAL';
             if (!isNoPlan) return false;
+            // No abrir protocolo si el puesto ya alcanzó su quantity SLA
+            const objId = String(s.objectiveId || '');
+            const pos = String(s.positionName || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^puesto\s+/, '');
+            const startMs = s.shiftDateObj instanceof Date ? s.shiftDateObj.getTime() : 0;
+            const requiredQty = Math.max(1, Number(s.requiredQuantity) || Number(s.quantity) || 1);
+            const coveredCount = (logic.processedData || []).filter((c: any) => {
+                if (c.id === s.id) return false;
+                if (!c.employeeId || c.employeeId === 'VACANTE' || c.isUnassigned || c.isAbsent || c.isFranco) return false;
+                if (String(c.objectiveId || '') !== objId) return false;
+                const cPos = String(c.positionName || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^puesto\s+/, '');
+                const covPos = String(c.coversPositionName || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/^puesto\s+/, '');
+                if (pos && cPos !== pos && covPos !== pos) return false;
+                const cStart = c.shiftDateObj instanceof Date ? c.shiftDateObj.getTime() : 0;
+                return Math.abs(cStart - startMs) < 2 * 60 * 1000;
+            }).length;
+            if (coveredCount >= requiredQty) return false;
             const start = s.shiftDateObj instanceof Date ? s.shiftDateObj : (s.shiftDateObj?.seconds ? new Date(s.shiftDateObj.seconds * 1000) : null);
             if (!start) return false;
             const minutesUntil = (start.getTime() - now.getTime()) / 60000;
@@ -3606,25 +3622,34 @@ export default function OperacionesPage() {
                      (s.positionName || '').toLowerCase() === (novedad.positionName || '').toLowerCase())
                 );
                 if (vacShift) {
-                    // Materializar si virtual y abrir cobertura
+                    // Materializar si virtual — id estable (evita N docs del mismo hueco)
                     if (vacShift.isVirtual || !novedad.shiftId) {
-                        const newRef = doc(collection(db, 'turnos'));
-                        await setDoc(newRef, stampEmpresaId({
-                            clientId: vacShift.clientId, clientName: vacShift.clientName,
-                            objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName,
-                            positionName: vacShift.positionName,
-                            employeeId: 'VACANTE', employeeName: 'VACANTE',
-                            code: vacShift.code || vacShift.vacancyBand || 'T',
-                            startTime: Timestamp.fromDate(vacShift.shiftDateObj),
-                            endTime: Timestamp.fromDate(vacShift.endDateObj),
-                            status: 'UNCOVERED',
-                            isUnassigned: true,
-                            isReportedToPlanning: false,
-                            vacancyOrigin: vacShift.vacancyOrigin || 'NO_PLANNING',
-                            origin: 'SLA_VIRTUAL',
-                            createdAt: serverTimestamp(),
-                        }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
-                        setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
+                        const safeId = String(vacShift.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+                        const newRef = safeId
+                            ? doc(db, 'turnos', `autodev_${safeId}`)
+                            : doc(collection(db, 'turnos'));
+                        const existingMat = await getDoc(newRef);
+                        if (!existingMat.exists()) {
+                            await setDoc(newRef, stampEmpresaId({
+                                clientId: vacShift.clientId, clientName: vacShift.clientName,
+                                objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName,
+                                positionName: vacShift.positionName,
+                                employeeId: 'VACANTE', employeeName: 'VACANTE',
+                                code: vacShift.code || vacShift.vacancyBand || 'T',
+                                startTime: Timestamp.fromDate(vacShift.shiftDateObj),
+                                endTime: Timestamp.fromDate(vacShift.endDateObj),
+                                status: 'UNCOVERED',
+                                isUnassigned: true,
+                                isReportedToPlanning: false,
+                                vacancyOrigin: vacShift.vacancyOrigin || 'NO_PLANNING',
+                                origin: 'SLA_VIRTUAL',
+                                virtualVacancyId: vacShift.id,
+                                requiredQuantity: Number(vacShift.requiredQuantity) > 0 ? Number(vacShift.requiredQuantity) : 1,
+                                slotIndex: typeof vacShift.slotIndex === 'number' ? vacShift.slotIndex : null,
+                                createdAt: serverTimestamp(),
+                            }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
+                        }
+                        setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id, isVirtual: false } });
                     } else {
                         setCoverageData({ isOpen: true, shift: vacShift });
                     }

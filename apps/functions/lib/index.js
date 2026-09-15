@@ -3070,8 +3070,19 @@ exports.gestionarVacantes = functions
         if (!startMs)
             continue;
         const minutesUntil = (startMs - nowMs) / 60000;
-        if (minutesUntil < 0 && !shift.vacanteProtocoloAt) {
-            await docSnap.ref.update({ vacanteProtocoloAt: now, vacanteEscalada: true });
+        const vacOrigin = String(shift.vacancyOrigin || shift.origin || '').toUpperCase();
+        const isNoPlanningGap = vacOrigin.includes('NO_PLANNING') || vacOrigin.includes('SIN_PLANIFICAR') || vacOrigin === 'SLA_VIRTUAL';
+        if ((minutesUntil < 0 || minutesUntil <= 60) && !shift.vacanteCascadaAt) {
+            const patch = {
+                vacanteProtocoloAt: shift.vacanteProtocoloAt || now,
+                vacanteCascadaAt: now,
+                vacanteEscalada: true,
+            };
+            if (shift.isReportedToPlanning === true && isNoPlanningGap) {
+                patch.isReportedToPlanning = false;
+                patch.status = 'UNCOVERED';
+            }
+            await docSnap.ref.update(patch);
             {
                 const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
                 const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
@@ -3086,8 +3097,11 @@ exports.gestionarVacantes = functions
                         clientId: shift.clientId || null,
                         empresaId: shiftEmpresaId(shift) || null,
                         positionName: shift.positionName || '',
-                        description: `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`,
+                        description: minutesUntil < 0
+                            ? `⚠️ PROTOCOLO: Vacante ACTIVA en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cobertura. Turno ya iniciado hace ${Math.round(Math.abs(minutesUntil))} min.`
+                            : `⚠️ PROTOCOLO URGENTE: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio (cascada).`,
                         minutesUntilStart: Math.round(minutesUntil),
+                        alertWindow: 'T1H',
                         createdAt: now,
                         source: 'SYSTEM_SCHEDULER',
                     });
@@ -3099,7 +3113,7 @@ exports.gestionarVacantes = functions
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Protocolo activado (turno ya iniciado): vacante sin cubrir en ${shift.objectiveName || ''} — ${Math.round(Math.abs(minutesUntil))} min activo`,
+                details: `Cascada T-1h/activo: vacante sin cubrir en ${shift.objectiveName || ''} — ${Math.round(minutesUntil)} min`,
                 timestamp: now,
             });
             sentToProtocol++;
@@ -3111,12 +3125,13 @@ exports.gestionarVacantes = functions
                 clientId: String(shift.clientId || ''),
                 clientName: String(shift.clientName || ''),
                 code: String(shift.code || ''),
+                positionName: String(shift.positionName || ''),
                 startTime: shift.startTime,
                 endTime: shift.endTime,
             }, 'AUTO');
             continue;
         }
-        if (minutesUntil <= 60 && !shift.vacanteProtocoloAt) {
+        if (minutesUntil <= 120 && !shift.vacanteProtocoloAt) {
             await docSnap.ref.update({
                 vacanteProtocoloAt: now,
                 vacanteEscalada: true,
@@ -3135,40 +3150,29 @@ exports.gestionarVacantes = functions
                         clientId: shift.clientId || null,
                         empresaId: shiftEmpresaId(shift) || null,
                         positionName: shift.positionName || '',
-                        description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio. Requiere acción inmediata de Operaciones.`,
+                        description: `⚠️ PROTOCOLO: Vacante en ${shift.objectiveName || ''} (${shift.positionName || ''}) sin cubrir a ${Math.round(minutesUntil)} min del inicio (alerta T-2h). Planificación o CUBRIR en Ops.`,
                         minutesUntilStart: Math.round(minutesUntil),
+                        alertWindow: 'T2H',
                         createdAt: now,
                         source: 'SYSTEM_SCHEDULER',
                     });
                 }
             }
             await db.collection('audit_logs').add({
-                action: 'VACANTE_PROTOCOLO_AUTO',
+                action: 'VACANTE_ALERTA_T2H',
                 actorName: 'Sistema (Scheduler)',
                 actorUid: 'SYSTEM',
                 module: 'OPERACIONES',
                 shiftId: docSnap.id,
-                details: `Protocolo activado: vacante sin cubrir en ${shift.objectiveName || ''} — ${Math.round(minutesUntil)} min para el inicio`,
+                details: `Alerta T-2h: vacante sin cubrir en ${shift.objectiveName || ''} — ${Math.round(minutesUntil)} min`,
                 timestamp: now,
             });
             sentToProtocol++;
-            await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
-                id: docSnap.id,
-                empresaId: shiftEmpresaId(shift) || 'bacarsa',
-                objectiveId: String(shift.objectiveId || ''),
-                objectiveName: String(shift.objectiveName || ''),
-                clientId: String(shift.clientId || ''),
-                clientName: String(shift.clientName || ''),
-                code: String(shift.code || ''),
-                startTime: shift.startTime,
-                endTime: shift.endTime,
-            }, 'AUTO');
+            continue;
         }
-        else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {
+        if (minutesUntil > 120 && !shift.vacanteReportadaAt) {
             await docSnap.ref.update({
-                isReportedToPlanning: true,
                 vacanteReportadaAt: now,
-                reportedBy: 'SYSTEM_SCHEDULER',
             });
             const existsPlan = await db.collection('novedades')
                 .where('shiftId', '==', docSnap.id)
@@ -3177,26 +3181,30 @@ exports.gestionarVacantes = functions
             if (existsPlan.empty) {
                 await db.collection('novedades').add({
                     type: 'VACANTE_A_PLANIFICACION',
-                    status: 'PENDIENTE',
+                    title: 'Vacante sin planificar → Planificación',
+                    status: 'pending',
+                    priority: 'high',
+                    actionTarget: 'PLANIFICACION',
+                    viewed: false,
                     shiftId: docSnap.id,
                     objectiveId: shift.objectiveId || null,
                     objectiveName: shift.objectiveName || '',
                     clientId: shift.clientId || null,
                     empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
-                    description: `Vacante devuelta a Planificación: ${shift.objectiveName || ''} (${shift.positionName || ''}) inicia en ${Math.round(minutesUntil)} min. Asignar empleado urgente.`,
+                    description: `Vacante sin planificar: ${shift.objectiveName || ''} (${shift.positionName || ''}) inicia en ${Math.round(minutesUntil)} min. Asignar empleado.`,
                     minutesUntilStart: Math.round(minutesUntil),
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
             }
             await db.collection('audit_logs').add({
-                action: 'VACANTE_DEVUELTA_PLANIFICACION_AUTO',
+                action: 'VACANTE_AVISO_PLANIFICACION',
                 actorName: 'Sistema (Scheduler)',
                 actorUid: 'SYSTEM',
                 module: 'PLANIFICACION',
                 shiftId: docSnap.id,
-                details: `Vacante auto-devuelta: ${shift.objectiveName || ''} — ${Math.round(minutesUntil)} min para el inicio`,
+                details: `Aviso temprano a Planificación: ${shift.objectiveName || ''} — ${Math.round(minutesUntil)} min`,
                 timestamp: now,
             });
             sentToPlanning++;

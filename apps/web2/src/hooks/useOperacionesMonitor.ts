@@ -9,6 +9,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { logOpsBackgroundWarn, logOpsListenerWarn } from '@/lib/operaciones/logOpsError';
+import { countPositionClosedUnitsFromShifts } from '@/lib/planificacion/positionCoverageUnits';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -1101,6 +1102,38 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence)
                             ? 'ABSENCE'
                             : 'NO_PLANNING';
+
+                    const requiredCount = Math.max(1, Number(pos.quantity) || Number(pos.qty) || 1);
+
+                    // Misma lógica que el pie 6/6 de Planificación: si el día ya cerró el
+                    // esquema del puesto (M+T+N × qty), no inventar SIN PLANIFICAR.
+                    const codeCounts: Record<string, number> = {};
+                    for (const s of posShifts) {
+                        const c = String(s.code || s.type || '').toUpperCase();
+                        if (!c || c === 'VACANTE') continue;
+                        codeCounts[c] = (codeCounts[c] || 0) + 1;
+                    }
+                    const posShiftsForUnits = (Array.isArray(pos.shifts) && pos.shifts.length > 0)
+                        ? pos.shifts
+                        : allowedShifts;
+                    const dayUnits = countPositionClosedUnitsFromShifts(
+                        {
+                            positionName: pos.name,
+                            qty: requiredCount,
+                            coverageType: pos.coverageType || (posShiftsForUnits.length ? undefined : 'custom'),
+                            shifts: posShiftsForUnits,
+                            activeDays: pos.activeDays,
+                        },
+                        dayCode,
+                        codeCounts,
+                        undefined,
+                        true,
+                    );
+                    const dayFullyCovered = dayUnits.required > 0 && dayUnits.closed >= dayUnits.required;
+                    if (dayFullyCovered && slotVacancyOrigin === 'NO_PLANNING') {
+                        return; // puesto completo en malla → sin vacantes fantasma
+                    }
+
                     relevantDefinitions.forEach((slot: any) => {
                         // Respetar dias habilitados del turno (ej: RONDIN solo L-V)
                         if (slot.days && Array.isArray(slot.days) && slot.days.length > 0) {
@@ -1112,20 +1145,29 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                         if (start && end) {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
 
-                            // Contar guardias que aportan cobertura real al slot (solape significativo)
-                            const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
-                            // Capacidad requerida según SLA (quantity del puesto)
-                            const requiredCount = pos.quantity || 1;
-                            // Si hay suficientes presentes/planificados aportando al slot → 0 vacantes
+                            const slotCode = String(slot.code || '').toUpperCase();
+                            // Solape horario O match por código de banda (evita falso hueco si
+                            // el SLA declara 14–22 y la malla tiene T 16–00).
+                            const coveredByTime = posShifts.filter((s: any) =>
+                                shiftCoversVacancySlot(s, start, end, pos.name)
+                            ).length;
+                            const coveredByCode = slotCode
+                                ? posShifts.filter((s: any) => {
+                                    const c = String(s.code || s.type || '').toUpperCase();
+                                    return c === slotCode;
+                                }).length
+                                : 0;
+                            const coveredCount = Math.max(coveredByTime, coveredByCode);
                             const missing = Math.max(0, requiredCount - coveredCount);
 
-                            // Generar una tarjeta de vacante por cada puesto faltante
                             for (let i = 0; i < missing; i++) {
                                 virtualVacancies.push({
                                     id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     vacancyOrigin: slotVacancyOrigin,
                                     vacancyBand: (slot.name || slot.code).toUpperCase(),
+                                    requiredQuantity: requiredCount,
+                                    slotIndex: i,
                                     clientName: objInfo.clientName, clientId: objInfo.clientId,
                                     objectiveName: objInfo.name, objectiveId: sla.objectiveId,
                                     positionName: pos.name,
@@ -1137,7 +1179,7 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                             }
                         }
                     });
-                } 
+                }
                 // SOLO si no hay definiciones de turnos, usamos Gaps (Fallback para objetivos legacy)
                 // ⚠️  Discriminamos según tipo de turno:
                 //   - 24h (3×8h o 2×12h): findTimeGaps sobre la jornada completa
@@ -1516,6 +1558,8 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                                 vacancyOrigin: v.vacancyOrigin || 'NO_PLANNING',
                                 origin: 'SLA_VIRTUAL',
                                 virtualVacancyId: v.id,
+                                requiredQuantity: Number(v.requiredQuantity) > 0 ? Number(v.requiredQuantity) : 1,
+                                slotIndex: typeof v.slotIndex === 'number' ? v.slotIndex : null,
                                 createdAt: serverTimestamp(),
                                 reportedBy: 'SYSTEM_AUTO',
                             }, shiftEmpresaId));

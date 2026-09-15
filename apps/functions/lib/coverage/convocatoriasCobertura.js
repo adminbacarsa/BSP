@@ -13,6 +13,7 @@ const coverageLedger_1 = require("./coverageLedger");
 const coverage_auth_util_1 = require("./coverage-auth.util");
 const shiftContinuity_1 = require("./shiftContinuity");
 const coveragePositionRules_1 = require("./coveragePositionRules");
+const slotCoverageGuard_1 = require("./slotCoverageGuard");
 function haversineKm(lat1, lng1, lat2, lng2) {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -931,6 +932,38 @@ async function resolverCobertura(db, conv) {
             return 'ALREADY_COVERED';
         }
     }
+    const vacRec = vacantData;
+    if ((0, slotCoverageGuard_1.isNoPlanningVacancyOrigin)(vacRec) || String(vacRec.origin || '') === 'SLA_VIRTUAL') {
+        const startTs = conv.startTime
+            || ((vacRec.startTime instanceof firestore_1.Timestamp) ? vacRec.startTime : null);
+        const requiredQty = (0, slotCoverageGuard_1.resolveSlotRequiredQuantity)(vacRec);
+        const slotCheck = await (0, slotCoverageGuard_1.slotAlreadyHasCoverer)(db, {
+            objectiveId: String(conv.objectiveId || vacRec.objectiveId || ''),
+            positionName: String(vacRec.positionName || conv.positionName || ''),
+            startTime: startTs,
+            endTime: (conv.endTime || vacRec.endTime || null),
+            empresaId: String(conv.empresaId || vacRec.empresaId || '') || null,
+            excludeShiftIds: [conv.shiftId],
+            requiredQuantity: requiredQty,
+        });
+        if (slotCheck.saturated) {
+            if (vacantSnap.exists) {
+                await vacantSnap.ref.update({
+                    status: 'COVERED',
+                    isUnassigned: false,
+                    coveredByEmployeeName: slotCheck.covererNames[0] || null,
+                    slotSaturatedClosedAt: firestore_1.FieldValue.serverTimestamp(),
+                    resolvedBy: conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : (conv.createdBy === 'AUTO' ? 'AUTO' : 'OPERACIONES'),
+                });
+            }
+            await db.collection('convocatorias_cobertura').doc(conv.id).set({
+                status: 'CANCELLED',
+                cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+                cancelReason: 'SLOT_YA_SATURADO',
+            }, { merge: true });
+            return 'ALREADY_COVERED';
+        }
+    }
     if (conv.type === 'EXTEND' && vacantData.coverageDualExtBy) {
         await db.collection('convocatorias_cobertura').doc(conv.id).set({
             status: 'CANCELLED',
@@ -1350,6 +1383,25 @@ async function resolverCobertura(db, conv) {
         markVacancyCovered: true,
     }, coverageEventId);
     await batch.commit();
+    if ((0, slotCoverageGuard_1.isNoPlanningVacancyOrigin)(vacantData) || String(vacantData.origin || '') === 'SLA_VIRTUAL') {
+        try {
+            await (0, slotCoverageGuard_1.closeSiblingNoPlanningVacancies)(db, {
+                coveredVacancyId: conv.shiftId,
+                objectiveId: String(conv.objectiveId || vacantData.objectiveId || ''),
+                positionName: String(vacantData.positionName || conv.positionName || ''),
+                startTime: conv.startTime || vacantData.startTime || null,
+                empresaId: String(conv.empresaId || vacantData.empresaId || '') || null,
+                covererEmployeeId: conv.candidateEmployeeId,
+                covererEmployeeName: conv.candidateEmployeeName,
+                coverageEventId,
+                resolvedBy,
+                requiredQuantity: (0, slotCoverageGuard_1.resolveSlotRequiredQuantity)(vacantData),
+            });
+        }
+        catch (e) {
+            console.warn('[resolverCobertura] closeSiblingNoPlanningVacancies', e?.message);
+        }
+    }
     return 'OK';
 }
 exports.crearConvocatoriaCobertura = functions
@@ -1572,6 +1624,30 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
     const vacantSnap = await db.collection('turnos').doc(shift.id).get();
     if (vacantSnap.exists && isShiftAlreadyCovered(vacantSnap.data()))
         return;
+    const vacData = vacantSnap.exists ? vacantSnap.data() : {};
+    if ((0, slotCoverageGuard_1.isNoPlanningVacancyOrigin)(vacData) || String(vacData.origin || '') === 'SLA_VIRTUAL') {
+        const slotCheck = await (0, slotCoverageGuard_1.slotAlreadyHasCoverer)(db, {
+            objectiveId: String(shift.objectiveId || ''),
+            positionName: String(shift.positionName || vacData.positionName || ''),
+            startTime: shift.startTime,
+            endTime: shift.endTime || null,
+            empresaId: shift.empresaId || null,
+            excludeShiftIds: [shift.id],
+            requiredQuantity: (0, slotCoverageGuard_1.resolveSlotRequiredQuantity)(vacData),
+        });
+        if (slotCheck.saturated) {
+            if (vacantSnap.exists) {
+                await vacantSnap.ref.update({
+                    status: 'COVERED',
+                    isUnassigned: false,
+                    coveredByEmployeeName: slotCheck.covererNames[0] || null,
+                    slotSaturatedClosedAt: firestore_1.FieldValue.serverTimestamp(),
+                    resolvedBy: createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : createdBy,
+                });
+            }
+            return;
+        }
+    }
     const existing = await db.collection('convocatorias_cobertura')
         .where('shiftId', '==', shift.id)
         .where('status', '==', 'PENDING')

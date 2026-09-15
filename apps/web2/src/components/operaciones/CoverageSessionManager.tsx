@@ -35,6 +35,14 @@ import {
   coverageHaversineKm,
   isWithinCrossObjRadiusKm,
 } from '@/lib/operaciones/coveragePositionRules';
+import {
+  closeSiblingNoPlanningVacanciesClient,
+  countSlotCoverersInProcessedData,
+  isNoPlanningVacancyOriginClient,
+  markVacancyCoveredIfSlotSaturated,
+  resolveSlotRequiredQuantityClient,
+  slotSaturatedInProcessedData,
+} from '@/lib/operaciones/slotCoverageGuard';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -800,6 +808,22 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         || (absenceShift.employeeName && !absenceShift.employeeName.startsWith('VACANTE') ? absenceShift.employeeName : '')
         || '';
       const titularIdForCover = titular.titularEmployeeId;
+
+      // Evitar 2º/3º cubridor sobre el mismo hueco SIN PLANIFICAR
+      const vacMeta = {
+        vacancyOrigin: absenceShift.vacancyOrigin,
+        origin: absenceShift.origin,
+      } as Record<string, unknown>;
+      if (isNoPlanningVacancyOriginClient(vacMeta) || String(absenceShift.origin || '') === 'SLA_VIRTUAL') {
+        if (slotSaturatedInProcessedData(logic.processedData || [], absenceShift)) {
+          if (vacancyId) await markVacancyCoveredIfSlotSaturated(vacancyId);
+          toast.info(`Puesto ya completo (${resolveSlotRequiredQuantityClient({ requiredQuantity: absenceShift.requiredQuantity, quantity: absenceShift.quantity })} pax) — no se asigna otro`);
+          onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
+          setTimeout(onClose, 1200);
+          return;
+        }
+      }
+
       const coverageEventId = newCoverageEventId();
       const vacLabel = vacancyCoverageLabel({
         titularName: titularNameForCover,
@@ -1030,6 +1054,26 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: 'Franco trabajado', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName} FT · ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
       }
       toast.success('Cobertura confirmada');
+      // Cerrar vacantes hermanas del mismo slot (SIN PLANIFICAR)
+      if (vacancyId && (isNoPlanningVacancyOriginClient(vacMeta) || String(absenceShift.origin || '') === 'SLA_VIRTUAL')) {
+        try {
+          await closeSiblingNoPlanningVacanciesClient({
+            coveredVacancyId: vacancyId,
+            objectiveId: String(absenceShift.objectiveId || ''),
+            positionName: absenceShift.positionName,
+            startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+            empresaId: tid,
+            covererEmployeeId: empId,
+            covererEmployeeName: empName,
+            coverageEventId,
+            requiredQuantity: resolveSlotRequiredQuantityClient({
+              requiredQuantity: absenceShift.requiredQuantity,
+              quantity: absenceShift.quantity,
+            }),
+            coveredAfterAssign: countSlotCoverersInProcessedData(logic.processedData || [], absenceShift) + 1,
+          });
+        } catch { /* ignore */ }
+      }
       onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
       setTimeout(onClose, 2000);
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
