@@ -37,7 +37,6 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/cotizador'))       return 'Cotizador';
   if (pathname.startsWith('/admin/analisis'))        return 'Análisis';
   if (pathname.startsWith('/admin/supervision'))     return 'Supervisión';
-  if (pathname.startsWith('/admin/kpis'))            return 'KPIs';
   return null;
 }
 
@@ -671,20 +670,12 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           )}
 
           {canReadModule('ANALYSIS') && (
-            <>
             <Link href="/admin/analisis" prefetch={false} title="Análisis"
               className={getLinkHoverClass('/admin/analisis')}
               style={getLinkStyle('/admin/analisis')}>
               <TrendingUp size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Análisis</span>}
             </Link>
-            <Link href="/admin/kpis" prefetch={false} title="KPIs Ejecutivo"
-              className={getLinkHoverClass('/admin/kpis')}
-              style={getLinkStyle('/admin/kpis')}>
-              <BarChart3 size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">KPIs</span>}
-            </Link>
-            </>
           )}
 
           {canReadModule('RRHH') && (
