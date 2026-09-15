@@ -170,6 +170,10 @@ import {
     resetPlanificacionPendingAssignment,
 } from '@/lib/planificacion/confirmPlanificacionPendingAssignment';
 import { applyPlanificacionRecompositionPackage } from '@/lib/planificacion/applyPlanificacionRecompositionPackage';
+import {
+    executePlanificacionSwap,
+    getPlanificacionShiftFor,
+} from '@/lib/planificacion/executePlanificacionSwap';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -4993,120 +4997,30 @@ export default function PlanificacionPage() {
         resetPlanificacionPendingAssignment(setPendingAssignment, setAuthWarningMessage);
     };
 
-    const getShiftFor = (empId: string, dateStr: string) => {
-        const k = `${empId}_${dateStr}`;
-        const pending = pendingChanges[k];
-        if (pending) return pending.isDeleted ? null : pending;
-        return shiftsMap[k] || null;
-    };
-
-    const toChangeConfig = (shift: any) => {
-        const code = (shift?.code || shift?.type || '').toString().toUpperCase();
-        const hours = Number(shift?.hours) || SHIFT_HOURS_LOOKUP[code] || 8;
-        const startTime = typeof shift?.startTime === 'string' ? shift.startTime : (SHIFT_RANGES[code]?.split?.('-')?.[0]?.trim?.() || '07:00');
-        return {
-            code: shift?.code || code,
-            name: shift?.name || shift?.type || shift?.code || code,
-            hours,
-            startTime,
-            positionName: shift?.positionName || activePosition || dominantPosition?.positionName || 'General',
-            isFranco: shift?.code === 'F' || shift?.isFranco || false,
-            isFrancoTrabajado: !!shift?.isFrancoTrabajado,
-            isFrancoCompensatorio: !!shift?.isFrancoCompensatorio,
-            plannedNovedad: shift?.plannedNovedad || null,
-            isExtended: !!shift?.isExtended,
-            isEarlyStart: !!shift?.isEarlyStart
-        };
-    };
+    const getShiftFor = (empId: string, dateStr: string) =>
+        getPlanificacionShiftFor(empId, dateStr, pendingChanges, shiftsMap);
 
     const executeSwap = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        if (!selectedCell?.empId || !selectedCell?.dateStr || !selectedSwapTarget) return;
-
-        const emp1 = selectedCell.empId;
-        const date1 = selectedCell.dateStr;
-        const emp2 = selectedSwapTarget;
-        const date2 = selectedSwapDate || date1;
-
-        const inCurrentMonth = (dateStr: string) => {
-            const [y, m] = dateStr.split('-').map(Number);
-            return y === currentDate.getFullYear() && m === (currentDate.getMonth() + 1);
-        };
-        // Regla pedida: ambas situaciones (turno↔turno y franco↔franco) solo dentro del mes visible
-        if (!inCurrentMonth(date1) || !inCurrentMonth(date2)) {
-            toast.error("El intercambio debe realizarse dentro del mes en curso.");
-            return;
-        }
-
-        const shift1 = getShiftFor(emp1, date1);
-        const shift2 = getShiftFor(emp2, date2);
-        if (!shift1 || !shift2) {
-            toast.error('Ambos empleados deben tener turno en ese día');
-            return;
-        }
-        if ([shift1, shift2].some((s: any) => isShiftConsolidated(s))) {
-            toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
-            return;
-        }
-
-        const name1 = employees.find(e => e.id === emp1)?.name || 'Emp1';
-        const name2 = employees.find(e => e.id === emp2)?.name || 'Emp2';
-
-        const newChanges = { ...pendingChanges };
-
-        const isFrancoLike = (s: any) => {
-            const code = String(s?.code || s?.type || '').toUpperCase();
-            return code === 'F' || code === 'FF' || !!s?.isFranco;
-        };
-        const isWorkingCode = (code: string) => !PLANNING_NON_BILLABLE_CODES.has(String(code || '').toUpperCase());
-
-        // Caso especial pedido: Franco ↔ Franco (intercambio de días de franco dentro del mes)
-        // Para que tenga efecto real, necesitamos los "turnos laborables" cruzados:
-        // - emp2 en date1 (para que emp1 pueda trabajar ese día)
-        // - emp1 en date2 (para que emp2 pueda trabajar ese día)
-        if (isFrancoLike(shift1) && isFrancoLike(shift2)) {
-            if (date2 === date1) {
-                toast.error("Para Franco ↔ Franco seleccioná un día distinto del compañero.");
-                return;
-            }
-            const emp2AtDate1 = getShiftFor(emp2, date1);
-            const emp1AtDate2 = getShiftFor(emp1, date2);
-            if (!emp2AtDate1 || !emp1AtDate2) {
-                toast.error("Para Franco ↔ Franco ambos deben tener turnos asignados en las dos fechas.");
-                return;
-            }
-            if (!isWorkingCode(emp2AtDate1.code) || !isWorkingCode(emp1AtDate2.code)) {
-                toast.error("Para Franco ↔ Franco se requiere que en las fechas cruzadas haya turnos laborables (no licencias/francos).");
-                return;
-            }
-            if ([emp2AtDate1, emp1AtDate2].some((s: any) => isShiftConsolidated(s))) {
-                toast.error("No se puede intercambiar: hay celdas consolidadas/fichadas.");
-                return;
-            }
-
-            // Emp1: deja de estar franco en date1 y toma el turno de Emp2 en date1
-            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(emp2AtDate1), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-            // Emp2: pasa a estar franco en date1 (recibe el franco de Emp1)
-            newChanges[`${emp2}_${date1}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-
-            // Emp2: deja de estar franco en date2 y toma el turno de Emp1 en date2
-            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(emp1AtDate2), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-            // Emp1: pasa a estar franco en date2 (recibe el franco de Emp2)
-            newChanges[`${emp1}_${date2}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-        } else {
-            // Swap estándar (como build 5005): intercambia 2 celdas (emp1/date1 ↔ emp2/date2)
-            newChanges[`${emp1}_${date1}`] = { ...toChangeConfig(shift2), isTemp: true, isSwap: true, swapWith: name2, swapDate: date2 };
-            newChanges[`${emp2}_${date2}`] = { ...toChangeConfig(shift1), isTemp: true, isSwap: true, swapWith: name1, swapDate: date1 };
-        }
-        commitPendingChanges(newChanges);
-
-        setShowSwapModal(false);
-        setSwapConfig(null);
-        setCoverageStep(false);
-        setSelectedSwapTarget('');
-        setSelectedSwapDate('');
-        setSwapSearchTerm('');
-        toast.success("Enroque completado");
+        executePlanificacionSwap({
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selectedCell,
+            selectedSwapTarget,
+            selectedSwapDate,
+            currentDate,
+            pendingChanges,
+            shiftsMap,
+            employees,
+            activePosition,
+            dominantPositionName: dominantPosition?.positionName,
+            commitPendingChanges,
+            setShowSwapModal,
+            setSwapConfig,
+            setCoverageStep,
+            setSelectedSwapTarget,
+            setSelectedSwapDate,
+            setSwapSearchTerm,
+        });
     };
 
     const handleSelectDate = (dateStr: string) => { setSelectedSwapDate(dateStr); };
