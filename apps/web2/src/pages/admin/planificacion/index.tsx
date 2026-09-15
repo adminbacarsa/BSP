@@ -408,7 +408,6 @@ export default function PlanificacionPage() {
     const [sortBy, setSortBy] = useState<'name' | 'activity' | 'client' | 'band' | 'position'>('activity');
     const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc');
     const [sortDropOpen, setSortDropOpen] = useState(false);
-    const [bandDropOpen, setBandDropOpen] = useState(false);
     const [toolbarCollapsed, setToolbarCollapsed] = useState(false);
     const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
@@ -626,7 +625,6 @@ export default function PlanificacionPage() {
     const [bulkBarPosition, setBulkBarPosition] = useState<string | null>(null);
     /** Filtro de puesto por guardia en panel bulk (solo paleta de turnos; no persiste asignación). */
     const [bulkEmpPositionFilter, setBulkEmpPositionFilter] = useState<Record<string, string>>({});
-    const [bandFilter, setBandFilter] = useState<string | null>(null);
     const [addSearchTerm, setAddSearchTerm] = useState('');
     const deferredSearchTerm = useDeferredValue(searchTerm);
     const deferredAddSearchTerm = useDeferredValue(addSearchTerm);
@@ -1300,10 +1298,7 @@ export default function PlanificacionPage() {
     }, [forceShowAll, dotacionPoolReady, selectedObjective, selectedObjectiveData, employees, dotacionBaseEmployees, nearbyKmRadius, deferredDotacionPoolSearch, dotacionPoolType, daysInMonth, pendingChanges, shiftsMap]);
 
     const displayedEmployees = useMemo(() => {
-        let list = dotacionBaseEmployees;
-        if (bandFilter) {
-            list = list.filter(e => employeeMonthStats[e.id]?.dominantBand === bandFilter);
-        }
+        const list = dotacionBaseEmployees;
         const orderKey = selectedObjective || '__all__';
         const customOrder = customOrderMap[orderKey];
         let sorted: any[];
@@ -1351,7 +1346,7 @@ export default function PlanificacionPage() {
         if (!forceShowAll || dotacionPoolCandidates.length === 0) return sorted;
         const ids = new Set(sorted.map((e: any) => e.id));
         return [...sorted, ...dotacionPoolCandidates.filter((e: any) => !ids.has(e.id))];
-    }, [dotacionBaseEmployees, bandFilter, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
+    }, [dotacionBaseEmployees, employeeMonthStats, sortBy, sortDir, selectedObjective, customOrderMap, empDefaultPos, clients, forceShowAll, dotacionPoolCandidates]);
 
     /** Guardias activos en dotación (excluye REF/ESC asignados como rol — no entran al auto ni al conteo). */
     const planningDotacionEmployees = useMemo(
@@ -3530,7 +3525,6 @@ export default function PlanificacionPage() {
             setSearchTerm,
             setShowGuardiaSearch,
             setPinnedExternalEmpIds,
-            setBandFilter,
             setForceShowAll,
             setDotacionPoolSearch,
             setSelection,
@@ -3553,7 +3547,6 @@ export default function PlanificacionPage() {
             setSearchTerm,
             setShowGuardiaSearch,
             setPinnedExternalEmpIds,
-            setBandFilter,
             setForceShowAll,
             setDotacionPoolSearch,
             setSelection,
@@ -3626,7 +3619,6 @@ export default function PlanificacionPage() {
         goToPlanningMonth(year, month - 1);
         setSearchTerm('');
         setShowGuardiaSearch(false);
-        setBandFilter(null);
         setForceShowAll(false);
         setDotacionPoolSearch('');
         setSelection({ start: null, end: null });
@@ -6761,7 +6753,7 @@ export default function PlanificacionPage() {
             </div>
             <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'fixed inset-0 z-[1100] bg-white dark:bg-slate-900 overflow-hidden p-1 space-y-1' : comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-y-1.5 gap-x-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                         <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="text-[10px] font-black text-slate-700 truncate max-w-[220px]" title={`${selectedClientLabel} · ${selectedObjectiveLabel}`}>
@@ -6806,7 +6798,7 @@ export default function PlanificacionPage() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+                            <div className="grow shrink basis-[320px] min-w-0 flex items-center gap-1.5 flex-wrap">
                             <div className="flex items-center gap-1.5 no-print">
                                 {selectedGrupo ? (
                                     /* MODO GRUPO: etiqueta del grupo + tabs por objetivo */
@@ -6982,7 +6974,7 @@ export default function PlanificacionPage() {
                             )}
                             </div>
 
-                            <div className="flex-shrink-0 flex items-center gap-2 no-print">
+                            <div className="flex flex-wrap items-center justify-end gap-2 min-w-0 ml-auto no-print">
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
@@ -7321,10 +7313,7 @@ export default function PlanificacionPage() {
                                                         <>
                                                             <button
                                                                 type="button"
-                                                                onClick={() => {
-                                                                    setBandDropOpen(false);
-                                                                    setSortDropOpen(p => !p);
-                                                                }}
+                                                                onClick={() => setSortDropOpen(p => !p)}
                                                                 className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-l-xl transition-colors border border-transparent hover:border-indigo-200 flex items-center gap-1"
                                                                 title={`Orden: ${activeSort.label}`}
                                                             >
@@ -7361,45 +7350,6 @@ export default function PlanificacionPage() {
                                                 })()}
                                             </div>
                                             <button onClick={() => startFilterTransition(() => setSortDir(prev => prev === 'asc' ? 'desc' : 'asc'))} className="p-2 bg-slate-100 hover:bg-indigo-50 hover:text-indigo-600 rounded-r-xl transition-colors border border-transparent hover:border-indigo-200" title={sortDir === 'asc' ? "Ascendente" : "Descendente"}>{sortDir === 'asc' ? <ChevronUp size={18}/> : <ChevronDown size={18}/>}</button>
-                                        </div>
-
-                                        {/* BAND FILTER */}
-                                        <div className="relative" title="Ver el cronograma por banda">
-                                            {(() => {
-                                                const BAND_COLORS: Record<string, string> = {
-                                                    M: 'text-blue-700 border-blue-400 bg-blue-50',
-                                                    T: 'text-orange-600 border-orange-400 bg-orange-50',
-                                                    N: 'text-indigo-700 border-indigo-500 bg-indigo-50',
-                                                    D12: 'text-cyan-700 border-cyan-400 bg-cyan-50',
-                                                    N12: 'text-purple-700 border-purple-500 bg-purple-50',
-                                                    RET: 'text-amber-700 border-amber-500 bg-amber-50',
-                                                };
-                                                const activeCls = bandFilter ? BAND_COLORS[bandFilter] : 'text-slate-600 border-slate-300 bg-slate-100';
-                                                return (<>
-                                                    <button
-                                                        onClick={() => { setSortDropOpen(false); setBandDropOpen(p => !p); }}
-                                                        className={`px-2 py-1 rounded-lg text-[9px] font-black uppercase border transition-colors flex items-center gap-1 ${activeCls}`}
-                                                    >
-                                                        {bandFilter ?? 'ALL'}
-                                                        <ChevronDown size={10}/>
-                                                    </button>
-                                                    {bandDropOpen && (
-                                                        <div className="absolute top-full right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg z-50 py-1 min-w-[72px]">
-                                                            {[null,'M','T','N','D12','N12','RET'].map(b => {
-                                                                const label = b ?? 'ALL';
-                                                                const active = bandFilter === b;
-                                                                const textCls = b ? BAND_COLORS[b].split(' ')[0] : 'text-slate-600';
-                                                                return (
-                                                                    <button key={label}
-                                                                        onClick={() => { startFilterTransition(() => setBandFilter(b)); setBandDropOpen(false); }}
-                                                                        className={`w-full px-3 py-1.5 text-left text-[10px] font-black uppercase hover:bg-slate-50 transition-colors ${active ? textCls : 'text-slate-400'}`}
-                                                                    >{label}</button>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    )}
-                                                </>);
-                                            })()}
                                         </div>
 
                                         {customOrderMap[selectedObjective || '__all__'] && (
