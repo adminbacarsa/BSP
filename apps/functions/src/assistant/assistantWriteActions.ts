@@ -311,73 +311,35 @@ export async function ejecutarPlanificarObjetivoMes(
   empresaId: string,
   payload: AgentActionPayload,
 ): Promise<{ ok: boolean; message: string }> {
-  const { objetivoId, clientId, year, month, objetivoNombre } = payload as {
+  const { objetivoId, year, month, objetivoNombre } = payload as {
     objetivoId: string;
-    clientId?: string;
     year: number;
     month: number;
     objetivoNombre?: string;
   };
   if (!objetivoId || !year || !month) throw new Error('Payload incompleto para planificar_objetivo_mes.');
 
-  const { runAutoScheduleCore } = await import('../scheduling/runAutoSchedule');
-  const result = await runAutoScheduleCore({ objectiveId: objetivoId, year, month, empresaId });
-  if (!result.ok && result.error) throw new Error(result.error);
-
-  const db = admin.firestore();
-  const agentAt = Timestamp.now();
-  const BATCH_SIZE = 400;
-
-  function arHhmm(dateStr: string, timeStr: string): Date {
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const [h, min] = timeStr.split(':').map(Number);
-    return new Date(Date.UTC(y, m - 1, d, h + 3, min, 0, 0));
-  }
-
-  let written = 0;
-  let currentBatch = db.batch();
-  let batchOps = 0;
-  const commits: Promise<FirebaseFirestore.WriteResult[]>[] = [];
-
-  for (const a of result.assignments) {
-    if (batchOps >= BATCH_SIZE) {
-      commits.push(currentBatch.commit());
-      currentBatch = db.batch();
-      batchOps = 0;
-    }
-    const startUtc = arHhmm(a.dateStr, a.startTime);
-    let endUtc = a.endTime ? arHhmm(a.dateStr, a.endTime) : new Date(startUtc.getTime() + a.hours * 3600000);
-    if (endUtc <= startUtc) endUtc = new Date(endUtc.getTime() + 86400000);
-
-    currentBatch.set(db.collection('turnos').doc(), {
-      employeeId: a.empId,
-      objectiveId: objetivoId,
-      clientId: clientId ?? '',
-      empresaId,
-      code: a.code,
-      startTime: Timestamp.fromDate(startUtc),
-      endTime: Timestamp.fromDate(endUtc),
-      isFranco: a.isFranco ?? false,
-      isPresent: false,
-      isAbsent: false,
-      isCompleted: false,
-      draft: true,
-      createdByAgent: true,
-      createdByAgentAt: agentAt,
-    });
-    batchOps++;
-    written++;
-  }
-  if (batchOps > 0) commits.push(currentBatch.commit());
-  await Promise.all(commits);
+  const { runPlanningAutomationCycle } = await import('../automation/operationalAutomation');
+  const result = await runPlanningAutomationCycle({
+    empresaId,
+    objectiveId: objetivoId,
+    year,
+    month,
+    applyGemini: true,
+    overwriteAutoDrafts: true,
+    dryRun: false,
+  });
 
   const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
   const mesNombre = MESES[(month - 1)] ?? String(month);
   const sitio = objetivoNombre ?? objetivoId;
-  const pct = Math.round((result.coverage?.coverageRatio ?? 0) * 100);
+  const pct = Math.round((result.coverageRatio ?? 0) * 100);
+  const geminiTxt = result.geminiApplied
+    ? `\n- Ajuste IA: **${result.geminiCorrectionsApplied}** corrección(es) aplicadas`
+    : '\n- Ajuste IA: no aplicado (bloqueo o configuración)';
 
   return {
     ok: true,
-    message: `✓ Planificación generada en borrador para **${sitio}** — ${mesNombre} ${year}.\n- **${written}** turnos creados · Cobertura: **${pct}%** SLA\n- **${result.meta.employeeCount}** empleados · **${result.meta.positionCount}** puestos\n\nRevisá en **Planificación** y publicá cuando estés listo.`,
+    message: `✓ Planificación automática generada en borrador para **${sitio}** — ${mesNombre} ${year}.\n- **${result.assignmentsPersisted}** turnos creados · Cobertura: **${pct}%** SLA${geminiTxt}\n- Run: \`${result.runId}\`\n\nRevisá en **Planificación** y publicá cuando estés listo.`,
   };
 }

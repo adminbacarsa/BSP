@@ -10,6 +10,7 @@ import {
 } from './assistantEmpresaScope';
 import { aggregateLiquidacionEmpresaPeriodo } from './assistantLiquidacionAggregate';
 import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
+import { buildOperationalClosureChecklist } from '../automation/operationalAutomation';
 import type { AssistantPersona } from './resolveAssistantUser';
 import {
   planificacionEstadoLookupDocIds,
@@ -3847,6 +3848,18 @@ async function dispatchAssistantToolCallInner(
     raw = await ejecutarToggleModoDemo(ctx, true);
   } else if (name === 'desactivar_modo_demo') {
     raw = await ejecutarToggleModoDemo(ctx, false);
+  } else if (name === 'resumen_alertas_operativas_ia') {
+    raw = await ejecutarResumenAlertasOperativasIa(ctx, {
+      fecha: args.fecha != null ? String(args.fecha) : undefined,
+      solo_pendientes: args.solo_pendientes !== false,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'checklist_cierre_operativo_mes') {
+    raw = await ejecutarChecklistCierreOperativoMes(ctx, {
+      anio: args.anio != null ? Number(args.anio) : undefined,
+      mes: args.mes != null ? Number(args.mes) : undefined,
+      persistir_snapshot: args.persistir_snapshot !== false,
+    });
   } else {
     raw = { error: 'herramienta_desconocida', name };
   }
@@ -4669,5 +4682,99 @@ async function ejecutarToggleModoDemo(
     mensaje: activar
       ? '✓ Modo Demo **activado**. El sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos.'
       : '✓ Modo Demo **desactivado**. Los turnos ya no se procesarán automáticamente.',
+  };
+}
+
+async function ejecutarResumenAlertasOperativasIa(
+  ctx: AssistantToolContext,
+  args: { fecha?: string; solo_pendientes?: boolean; limite?: number },
+): Promise<Record<string, unknown>> {
+  if (ctx.persona !== 'SYSTEM') return { error: 'sin_permiso_alertas_ia' };
+  if (!ctx.empresaId.trim()) return { error: 'sin_empresa' };
+  if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'REPORTS'].includes(k))) {
+    return { error: 'sin_permiso_alertas_ia' };
+  }
+
+  const fecha = String(args.fecha || ctx.referenceDateYsMmDd).slice(0, 10);
+  const soloPendientes = args.solo_pendientes !== false;
+  const limite = Math.max(10, Math.min(120, Number(args.limite ?? 40)));
+  const db = admin.firestore();
+
+  const startTs = Timestamp.fromDate(startOfDayAr(fecha));
+  const endTs = Timestamp.fromDate(endOfDayAr(fecha));
+
+  let q = db
+    .collection('novedades')
+    .where('empresaId', '==', ctx.empresaId)
+    .where('origin', '==', 'AUTOMATION_P0')
+    .where('createdAt', '>=', startTs)
+    .where('createdAt', '<', endTs)
+    .limit(limite);
+
+  if (soloPendientes) {
+    q = q.where('status', '==', 'pending') as any;
+  }
+
+  const snap = await q.get();
+  const byType: Record<string, number> = {};
+  const muestra = snap.docs.map((doc) => {
+    const data = doc.data() as any;
+    const type = String(data.type || 'ALERTA_IA');
+    byType[type] = (byType[type] ?? 0) + 1;
+    return {
+      tipo: type,
+      severidad: String(data.severity || 'medium'),
+      descripcion: String(data.description || data.title || '').slice(0, 180),
+      objectiveName: String(data.objectiveName || ''),
+      employeeName: String(data.employeeName || ''),
+      estado: String(data.status || 'pending'),
+    };
+  });
+
+  return {
+    fecha,
+    total_alertas: snap.size,
+    total_por_tipo: byType,
+    muestra_alertas: muestra.slice(0, 30),
+    criterio_estado: soloPendientes ? 'pending' : 'todos',
+    nota: 'Estas alertas se generan por escaneo automático de marcaciones y anomalías operativas.',
+  };
+}
+
+async function ejecutarChecklistCierreOperativoMes(
+  ctx: AssistantToolContext,
+  args: { anio?: number; mes?: number; persistir_snapshot?: boolean },
+): Promise<Record<string, unknown>> {
+  if (ctx.persona !== 'SYSTEM') return { error: 'sin_permiso_checklist_cierre' };
+  if (!ctx.empresaId.trim()) return { error: 'sin_empresa' };
+  if (!ctx.readableModuleKeys.some((k) => ['REPORTS', 'ANALYSIS', 'CONFIG', 'OPERATIONS'].includes(k))) {
+    return { error: 'sin_permiso_checklist_cierre' };
+  }
+
+  let year = Number(args.anio ?? 0);
+  let month = Number(args.mes ?? 0);
+  if (!year || !month) {
+    const p = parseYmd(ctx.referenceDateYsMmDd);
+    year = p.y;
+    month = p.m;
+  }
+  if (month < 1 || month > 12) return { error: 'mes_invalido', mes: month };
+  const result = await buildOperationalClosureChecklist({
+    empresaId: ctx.empresaId,
+    year,
+    month,
+    persistSnapshot: args.persistir_snapshot !== false,
+  });
+
+  return {
+    periodo: result.period,
+    checks: result.checks,
+    totales: result.totals,
+    horas: result.horas,
+    prefactura: result.prefactura,
+    recomendaciones: result.recomendaciones,
+    mensaje_cierre: result.checks.listoParaCierre
+      ? `Checklist ${result.period}: listo para cierre operativo.`
+      : `Checklist ${result.period}: hay pendientes antes del cierre.`,
   };
 }

@@ -71,6 +71,14 @@ import {
   writeAssistantInteractionLog,
 } from './assistant/assistantInteractionLog';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from './assistant/planningGeminiServer';
+import {
+  buildOperationalClosureChecklist,
+  runPlanningAutomationCycle,
+  scanOperationalAlertsForEmpresa,
+  type ClosureChecklistResult,
+  type OperationalAlertScanResult,
+  type PlanningAutomationResult,
+} from './automation/operationalAutomation';
 import { runAutoScheduleHandler } from './scheduling/runAutoSchedule';
 import { runAjustarCronoHandler } from './scheduling/runAjustarCrono';
 import { runEquilibrarCronoHandler } from './scheduling/runEquilibrarCrono';
@@ -1301,6 +1309,40 @@ export const modoDemoCron = functions
   });
 
 // =========================================================
+// ALERTAS OPERATIVAS IA (P0) — escaneo preventivo
+// Genera novedades ante marcaciones tardías, turnos vencidos,
+// solapamientos y ausencias sin cobertura.
+// =========================================================
+export const operationalAlertsCron = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .pubsub.schedule('*/15 * * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+      const empresaId = empresaDoc.id;
+      if (empresaDoc.data()?.active === false) continue;
+      if (empresaDoc.data()?.centroControlEnabled === false) continue;
+      try {
+        const out = await scanOperationalAlertsForEmpresa({
+          empresaId,
+          lookbackHours: 24,
+          lookaheadHours: 8,
+          toleranceMinutes: 25,
+        });
+        if (out.alertsCreated > 0) {
+          console.log(
+            `[operationalAlertsCron] ${empresaId}: shifts=${out.evaluatedShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated}`,
+          );
+        }
+      } catch (e: any) {
+        console.warn(`[operationalAlertsCron] ${empresaId}:`, String(e?.message ?? e));
+      }
+    }
+  });
+
+// =========================================================
 // TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
 // Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
 // En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
@@ -1521,6 +1563,186 @@ export const optimizePlanningGemini =
     : functions
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
+
+async function assertModuleReadAccess(
+  uid: string,
+  tokenRole: string | undefined,
+  expectedModule: string,
+): Promise<{ empresaId: string; isSuperAdmin: boolean }> {
+  const { resolveAssistantUser } = await import('./assistant/resolveAssistantUser');
+  const profile = await resolveAssistantUser(uid, { tokenRole });
+  if (!profile) {
+    throw new functions.https.HttpsError('permission-denied', 'Usuario no reconocido.');
+  }
+  if (!profile.isSuperAdmin && !profile.readableModuleKeys.includes(expectedModule)) {
+    throw new functions.https.HttpsError(
+      'permission-denied',
+      `Tu rol no tiene permiso de lectura sobre ${expectedModule}.`,
+    );
+  }
+  return { empresaId: profile.empresaId || '', isSuperAdmin: profile.isSuperAdmin };
+}
+
+async function runPlanningAutomationP0Handler(
+  data: {
+    empresaId?: string;
+    objectiveId?: string;
+    year?: number;
+    month?: number;
+    applyGemini?: boolean;
+    overwriteAutoDrafts?: boolean;
+    dryRun?: boolean;
+  },
+  context: functions.https.CallableContext,
+): Promise<PlanningAutomationResult> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+  await assertModuleReadAccess(context.auth.uid, tokenRole, 'PLANNING');
+
+  const empresaId = String(data?.empresaId ?? '').trim();
+  const objectiveId = String(data?.objectiveId ?? '').trim();
+  const year = Number(data?.year ?? 0);
+  const month = Number(data?.month ?? 0);
+  if (!empresaId || !objectiveId || !year || !month) {
+    throw new functions.https.HttpsError(
+      'invalid-argument',
+      'empresaId, objectiveId, year y month son obligatorios.',
+    );
+  }
+
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar automatización de planificación.',
+  );
+
+  try {
+    return await runPlanningAutomationCycle({
+      empresaId,
+      objectiveId,
+      year,
+      month,
+      applyGemini: data?.applyGemini !== false,
+      overwriteAutoDrafts: data?.overwriteAutoDrafts !== false,
+      dryRun: data?.dryRun === true,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? 'Error de automatización de planificación');
+    throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+  }
+}
+
+export const runPlanningAutomationP0 =
+  process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions
+        .runWith({ timeoutSeconds: 180, memory: '512MB' })
+        .https.onCall(runPlanningAutomationP0Handler)
+    : functions
+        .runWith({ timeoutSeconds: 180, memory: '512MB', secrets: ['GEMINI_API_KEY'] })
+        .https.onCall(runPlanningAutomationP0Handler);
+
+async function runOperationalAlertsScanHandler(
+  data: {
+    empresaId?: string;
+    lookbackHours?: number;
+    lookaheadHours?: number;
+    toleranceMinutes?: number;
+  },
+  context: functions.https.CallableContext,
+): Promise<OperationalAlertScanResult> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+  await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+
+  const empresaId = String(data?.empresaId ?? '').trim();
+  if (!empresaId) {
+    throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+  }
+
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar el escaneo operativo.',
+  );
+
+  try {
+    const empresaSnap = await admin.firestore().collection('empresas').doc(empresaId).get();
+    if (empresaSnap.exists && empresaSnap.data()?.centroControlEnabled === false) {
+      return {
+        ok: true,
+        empresaId,
+        evaluatedShifts: 0,
+        anomaliesDetected: 0,
+        alertsCreated: 0,
+        byType: {},
+        generatedAt: new Date().toISOString(),
+      };
+    }
+    return await scanOperationalAlertsForEmpresa({
+      empresaId,
+      lookbackHours: data?.lookbackHours,
+      lookaheadHours: data?.lookaheadHours,
+      toleranceMinutes: data?.toleranceMinutes,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? 'Error en escaneo operativo');
+    throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+  }
+}
+
+export const runOperationalAlertsScan = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(runOperationalAlertsScanHandler);
+
+async function runOperationalClosureChecklistHandler(
+  data: {
+    empresaId?: string;
+    year?: number;
+    month?: number;
+    persistSnapshot?: boolean;
+  },
+  context: functions.https.CallableContext,
+): Promise<ClosureChecklistResult> {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+  }
+  const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+  await assertModuleReadAccess(context.auth.uid, tokenRole, 'REPORTS');
+
+  const empresaId = String(data?.empresaId ?? '').trim();
+  const year = Number(data?.year ?? 0);
+  const month = Number(data?.month ?? 0);
+  if (!empresaId || !year || !month) {
+    throw new functions.https.HttpsError('invalid-argument', 'empresaId, year y month son obligatorios.');
+  }
+  await assertPanelTenantCallable(
+    context,
+    empresaId,
+    undefined,
+    'No tenés permiso para ejecutar checklist de cierre.',
+  );
+  try {
+    return await buildOperationalClosureChecklist({
+      empresaId,
+      year,
+      month,
+      persistSnapshot: data?.persistSnapshot !== false,
+    });
+  } catch (e: any) {
+    const msg = String(e?.message ?? e ?? 'Error en checklist de cierre');
+    throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+  }
+}
+
+export const runOperationalClosureChecklist = functions
+  .runWith({ timeoutSeconds: 120, memory: '256MB' })
+  .https.onCall(runOperationalClosureChecklistHandler);
 
 // --- VPLAN (experimental, paralelo — ver docs/VPLAN.md; handler bloquea fuera de emulador) ---
 export { vplanRun } from './vplan';
