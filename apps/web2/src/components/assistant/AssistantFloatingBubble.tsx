@@ -41,7 +41,7 @@ const MODULE_SUGGESTIONS: Record<string, string[]> = {
 function buildGreeting(moduleKey: string | null, moduleName: string): string {
   const suggestions = MODULE_SUGGESTIONS[moduleKey || ''] ?? MODULE_SUGGESTIONS['DASHBOARD']!;
   const lines = suggestions.map((s) => `· ${s}`).join('\n');
-  return `¡Hola! Soy **VIGI**, tu asistente COSP.\nEstás en **${moduleName}**. Algunas cosas que podés consultarme:\n\n${lines}\n\nEscribí o hablá lo que necesitás.`;
+  return `¡Hola! Soy **VIGI**, tu asistente COSP.\nEstás en **${moduleName}**. Tocá una opción o escribí lo que necesitás:\n\n${lines}`;
 }
 
 function parseActionProposal(text: string): { cleanText: string; action: PendingAction | null } {
@@ -127,6 +127,55 @@ function loadFabPos(): FabPos {
   return { bottom: 20, right: 20 };
 }
 
+/** Detecta viñetas de menú (· / - **opción**) para chips clicables. No convierte pasos numerados. */
+function parseQuickReplyLabel(line: string): string | null {
+  const t = line.trim();
+  if (!t) return null;
+  // Saludo / menú con punto medio
+  let m = t.match(/^[·]\s+(.+)$/);
+  if (m) {
+    const label = m[1].replace(/\*\*/g, '').trim();
+    if (label.length >= 3 && label.length <= 110) return label;
+  }
+  // - **Opción**  |  - **Opción** — detalle
+  m = t.match(/^[-*•]\s+\*\*([^*]+)\*\*(?:\s*[—–:\-].*)?$/);
+  if (m) {
+    const label = m[1].trim();
+    if (label.length >= 3 && label.length <= 110) return label;
+  }
+  // - Opción corta sin negrita (menú), evita frases largas con punto
+  m = t.match(/^[-*•]\s+([^*\n]{3,90})$/);
+  if (m) {
+    const label = m[1].trim();
+    if (label.length <= 90 && !/[.!?]$/.test(label) && label.split(/\s+/).length <= 12) {
+      return label;
+    }
+  }
+  return null;
+}
+
+function splitAssistantQuickReplies(content: string): { prose: string; replies: string[] } {
+  const lines = content.replace(/\r\n/g, '\n').split('\n');
+  const replies: string[] = [];
+  const proseLines: string[] = [];
+  const seen = new Set<string>();
+  for (const line of lines) {
+    const label = parseQuickReplyLabel(line);
+    if (label) {
+      const key = label.toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        replies.push(label);
+      }
+      continue;
+    }
+    proseLines.push(line);
+  }
+  // Si quedó un menú de una sola viñeta aislada y no hay contexto de "por ejemplo", igual sirve.
+  const prose = proseLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  return { prose, replies };
+}
+
 /** Parte el texto en bloques legibles: doble salto, ítems numerados o viñetas en líneas aparte. */
 function expandAssistantParagraphBlocks(text: string): string[] {
   const normalized = text.replace(/\r\n/g, '\n').trim();
@@ -158,20 +207,56 @@ function expandAssistantParagraphBlocks(text: string): string[] {
   return out;
 }
 
-/** `**negrita**` y saltos de línea / párrafos para respuestas del asistente. */
-function formatAssistantMessage(content: string): React.ReactNode {
-  const blocks = expandAssistantParagraphBlocks(content);
-  if (blocks.length === 0) return null;
-  return blocks.map((para, pi) => (
-    <p key={pi} className="mb-2.5 last:mb-0 whitespace-pre-wrap leading-relaxed">
-      {para.split('\n').map((line, li) => (
-        <React.Fragment key={li}>
-          {li > 0 ? <br /> : null}
-          {formatAssistantLineWithBold(line)}
-        </React.Fragment>
+/** `**negrita**` y saltos de línea / párrafos; opciones de menú como chips clicables. */
+function formatAssistantMessage(
+  content: string,
+  opts?: {
+    onQuickReply?: (text: string) => void;
+    brandColor?: string;
+    disabled?: boolean;
+  },
+): React.ReactNode {
+  const { prose, replies } = splitAssistantQuickReplies(content);
+  const blocks = expandAssistantParagraphBlocks(prose);
+  const onQuickReply = opts?.onQuickReply;
+  const brandColor = opts?.brandColor || '#6366f1';
+  const disabled = opts?.disabled === true || !onQuickReply;
+
+  return (
+    <div className="space-y-2">
+      {blocks.map((para, pi) => (
+        <p key={pi} className="mb-0 whitespace-pre-wrap leading-relaxed">
+          {para.split('\n').map((line, li) => (
+            <React.Fragment key={li}>
+              {li > 0 ? <br /> : null}
+              {formatAssistantLineWithBold(line)}
+            </React.Fragment>
+          ))}
+        </p>
       ))}
-    </p>
-  ));
+      {replies.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-1">
+          {replies.map((reply) => (
+            <button
+              key={reply}
+              type="button"
+              disabled={disabled}
+              onClick={() => onQuickReply?.(reply)}
+              className="max-w-full rounded-xl border px-2.5 py-1.5 text-left text-[12px] font-bold leading-snug shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700"
+              style={{
+                borderColor: `${brandColor}55`,
+                color: brandColor,
+                backgroundColor: `${brandColor}12`,
+              }}
+              title={`Enviar: ${reply}`}
+            >
+              {reply}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function formatAssistantLineWithBold(line: string): React.ReactNode {
@@ -336,8 +421,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
     await executeAction(action);
   }, [pendingAction, executeAction]);
 
-  const send = useCallback(async () => {
-    const text = input.trim();
+  const sendText = useCallback(async (rawText: string) => {
+    const text = rawText.trim();
     if (!text || !user || busy) return;
     setInput('');
     setPendingAction(null);
@@ -403,7 +488,13 @@ export function AssistantFloatingBubble(): React.ReactNode {
     } finally {
       setBusy(false);
     }
-  }, [busy, empresa, empresaCtxId, executeAction, fullPath, input, isSuperAdmin, msgs, pathname, user]);
+  }, [busy, empresa, empresaCtxId, executeAction, fullPath, isSuperAdmin, msgs, pathname, user]);
+
+  const send = useCallback(async () => {
+    const text = input.trim();
+    if (!text) return;
+    await sendText(text);
+  }, [input, sendText]);
 
   const endFabDrag = useCallback((e: React.PointerEvent, el: HTMLButtonElement) => {
       const d = dragRef.current;
@@ -559,7 +650,13 @@ export function AssistantFloatingBubble(): React.ReactNode {
                   }`}
                   style={m.role === 'user' ? { backgroundColor: brandColor } : undefined}
                 >
-                  {m.role === 'assistant' ? formatAssistantMessage(m.content) : m.content}
+                  {m.role === 'assistant'
+                    ? formatAssistantMessage(m.content, {
+                        onQuickReply: (text) => void sendText(text),
+                        brandColor,
+                        disabled: busy || !greetingDone,
+                      })
+                    : m.content}
                 </div>
               </div>
             ))}
