@@ -119,7 +119,7 @@ const OperacionesMapGoogle = ({
     }
     map.fitBounds(
       bounds,
-      tacticalHud ? { top: 96, right: 56, bottom: 88, left: 24 } : 48,
+      tacticalHud ? { top: 128, right: 56, bottom: 88, left: 24 } : 48,
     );
   }, [markers, tacticalHud]);
 
@@ -227,7 +227,7 @@ const OperacionesMapGoogle = ({
         provider="google"
         markerCount={markers.length}
         onFit={fitMapToMarkers}
-        legendClassName={tacticalHud ? 'top-20 left-3' : 'top-4 left-4'}
+        legendClassName={tacticalHud ? 'top-28 left-3' : 'top-4 left-4'}
       />
     </div>
   );

@@ -104,7 +104,7 @@ const OperacionesMapLeaflet = ({
         }
         ${MAP_OBJECTIVE_LABEL_CSS}
       `}</style>
-      <div className={`absolute left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-xl bg-slate-900/90 text-slate-200 text-[10px] font-semibold shadow-lg border border-slate-700/50 max-w-lg text-center pointer-events-auto ${tacticalHud ? 'top-20' : 'top-3'}`}>
+      <div className={`absolute left-1/2 -translate-x-1/2 z-[500] px-3 py-1.5 rounded-xl bg-slate-900/90 text-slate-200 text-[10px] font-semibold shadow-lg border border-slate-700/50 max-w-lg text-center pointer-events-auto ${tacticalHud ? 'top-28' : 'top-3'}`}>
         Modo OpenStreetMap — cargá la key en{' '}
         <a href="/admin/configuracion" className="text-indigo-300 underline font-bold pointer-events-auto">
           Configuración → Empresas → Google Maps
@@ -140,7 +140,7 @@ const OperacionesMapLeaflet = ({
         provider="osm"
         markerCount={markers.length}
         onFit={() => fitRef.current?.()}
-        legendClassName={tacticalHud ? 'top-20 left-3' : 'top-4 left-4'}
+        legendClassName={tacticalHud ? 'top-28 left-3' : 'top-4 left-4'}
       />
     </div>
   );

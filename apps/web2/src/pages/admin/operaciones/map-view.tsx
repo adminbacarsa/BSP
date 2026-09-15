@@ -1472,44 +1472,44 @@ export default function TacticalMapView() {
             <Head><title>COSP TACTICAL V1.0</title></Head>
             <style>{POPUP_STYLES}</style>
             
-            <div className="absolute top-0 left-0 right-0 z-[1000] px-3 py-2 pointer-events-none">
-                <div className="flex flex-wrap items-center gap-2 justify-between">
-                <div className="bg-white/95 backdrop-blur shadow-lg rounded-xl px-2 py-1.5 flex items-center gap-2 border border-slate-200 pointer-events-auto min-h-0">
-                    <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200"><Radio className="text-rose-600 animate-pulse shrink-0" size={16} /><div className="leading-none"><h1 className="font-black text-slate-800 text-[11px]">COSP</h1><span className="text-[8px] text-slate-500 font-bold">TACTICAL</span></div></div>
-                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200"><Filter size={12} className="text-slate-400"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-36 cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
-                    <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200 w-52"><Search size={12} className="text-slate-400"/><input className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-full placeholder:text-slate-400" placeholder="Buscar objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
-                </div>
-                <div className="flex items-center gap-2 pointer-events-auto">
-                    {/* Mini chip cobertura */}
-                    {(() => {
-                        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-                        const cubiertos = logic.stats.activos + logic.stats.retenidos;
-                        const huecos = logic.stats.vacantes;
-                        const debieronIniciar = cubiertos + huecos;
-                        const pct = total === 0 ? null : (debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 100);
-                        if (pct === null) return null;
-                        const isCrisis = pct < 50;
-                        const isWarn = pct >= 50 && pct < 80;
-                        const chipBg = isCrisis ? 'bg-rose-600' : isWarn ? 'bg-amber-500' : 'bg-emerald-600';
-                        return (
-                            <div className={`${chipBg} text-white rounded-2xl px-3 py-2 flex items-center gap-2 shadow-2xl backdrop-blur`}>
-                                <span className="text-sm font-black">{pct}%</span>
-                                <div className="text-[10px] font-bold leading-tight">
-                                    <div>{cubiertos} activos</div>
-                                    {(logic.stats.vacantes + logic.stats.ausentes) > 0 && <div className="opacity-80">{logic.stats.vacantes}vac · {logic.stats.ausentes}aus</div>}
+            <div className="absolute top-0 left-0 right-0 z-[1000] px-3 pt-2 pb-1 pointer-events-none">
+                <div className="flex flex-col gap-1.5">
+                    <div className="flex items-center gap-2 justify-between min-w-0">
+                        <div className="bg-white/95 backdrop-blur shadow-lg rounded-xl px-2 py-1.5 flex items-center gap-2 border border-slate-200 pointer-events-auto min-h-0 min-w-0 flex-1 max-w-full overflow-hidden">
+                            <div className="flex items-center gap-1.5 pr-2 border-r border-slate-200 shrink-0"><Radio className="text-rose-600 animate-pulse shrink-0" size={16} /><div className="leading-none"><h1 className="font-black text-slate-800 text-[11px]">COSP</h1><span className="text-[8px] text-slate-500 font-bold">TACTICAL</span></div></div>
+                            <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200 shrink-0"><Filter size={12} className="text-slate-400"/><select value={logic.selectedClientId} onChange={(e) => logic.setSelectedClientId(e.target.value)} className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-36 max-w-[30vw] cursor-pointer"><option value="">TODOS LOS CLIENTES</option>{logic.uniqueClients.map((c:any) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
+                            <div className="flex items-center gap-1.5 bg-slate-100 px-1.5 py-1 rounded-lg border border-slate-200 flex-1 min-w-[8rem] max-w-xs"><Search size={12} className="text-slate-400 shrink-0"/><input className="bg-transparent text-[10px] font-bold text-slate-700 outline-none w-full min-w-0 placeholder:text-slate-400" placeholder="Buscar objetivo..." value={logic.filterText} onChange={e => logic.setFilterText(e.target.value)}/></div>
+                        </div>
+                        {(() => {
+                            const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+                            const cubiertos = logic.stats.activos + logic.stats.retenidos;
+                            const huecos = logic.stats.vacantes;
+                            const debieronIniciar = cubiertos + huecos;
+                            const pct = total === 0 ? null : (debieronIniciar > 0 ? Math.round((cubiertos / debieronIniciar) * 100) : 100);
+                            if (pct === null) return null;
+                            const isCrisis = pct < 50;
+                            const isWarn = pct >= 50 && pct < 80;
+                            const chipBg = isCrisis ? 'bg-rose-600' : isWarn ? 'bg-amber-500' : 'bg-emerald-600';
+                            return (
+                                <div className={`${chipBg} text-white rounded-2xl px-3 py-2 flex items-center gap-2 shadow-2xl backdrop-blur pointer-events-auto shrink-0`}>
+                                    <span className="text-sm font-black">{pct}%</span>
+                                    <div className="text-[10px] font-bold leading-tight">
+                                        <div>{cubiertos} activos</div>
+                                        {(logic.stats.vacantes + logic.stats.ausentes) > 0 && <div className="opacity-80">{logic.stats.vacantes}vac · {logic.stats.ausentes}aus</div>}
+                                    </div>
+                                    {logic.stats.plan > 0 && <div className="text-[9px] opacity-70">+{logic.stats.plan} plan</div>}
                                 </div>
-                                {logic.stats.plan > 0 && <div className="text-[9px] opacity-70">+{logic.stats.plan} plan</div>}
-                            </div>
-                        );
-                    })()}
-                    <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 border border-slate-200">
-                        <button onClick={() => logic.setViewTab('TODOS')} className={`px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
+                            );
+                        })()}
+                    </div>
+                    <div className="bg-white/95 backdrop-blur shadow-2xl rounded-2xl p-1.5 flex gap-1 border border-slate-200 pointer-events-auto w-full max-w-full overflow-x-auto overflow-y-hidden scrollbar-thin">
+                        <button onClick={() => logic.setViewTab('TODOS')} className={`shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all ${logic.viewTab === 'TODOS' ? 'bg-slate-800 text-white shadow-md' : 'hover:bg-slate-100 text-slate-500'}`}>MAPA GENERAL</button>
                         {tabs.map(t => {
                             const isUrgent = (t.id === 'VACANTES' || t.id === 'AUSENTES' || t.id === 'PRIORIDAD' || t.id === 'NO_LLEGO') && t.count > 0;
                             const isActive = logic.viewTab === t.id;
                             return (
                                 <button key={t.id} onClick={() => logic.setViewTab(t.id as any)}
-                                    className={`relative px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all
+                                    className={`relative shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all
                                         ${isActive
                                             ? (isUrgent ? 'bg-rose-600 text-white shadow-md' : 'bg-white shadow-md ring-1 ring-slate-200 ' + t.color)
                                             : (isUrgent ? 'bg-rose-50 text-rose-600 hover:bg-rose-100' : 'hover:bg-slate-100 text-slate-400')}`}>
@@ -1519,9 +1519,8 @@ export default function TacticalMapView() {
                                 </button>
                             );
                         })}
-                        <button onClick={() => setShowHelp(true)} className="px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
+                        <button onClick={() => setShowHelp(true)} className="shrink-0 px-3 py-2 rounded-xl text-[10px] font-black uppercase transition-all bg-slate-900 text-white hover:bg-slate-800">Ayuda</button>
                     </div>
-                </div>
                 </div>
             </div>
 
