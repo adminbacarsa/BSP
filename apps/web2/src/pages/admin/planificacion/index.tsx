@@ -83,7 +83,7 @@ import {
 import {
     OTHER_OBJECTIVE_CELL_STYLE,
     isCrossObjectivePlanningReadOnly,
-    isOperationalOriginShift,
+    isPlanningGridOperationalShift,
     isOpsCoverageShift,
     isPlanificacionPublished,
     isShiftAtOtherObjective,
@@ -93,6 +93,7 @@ import {
     shiftPlanningCodeUpper,
     turnoCuentaParaCronoPlanificado,
 } from '@/lib/planificacion/planificacionPlanningShiftRules';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 import {
     LEAVE_CELL_CODES,
     resolveTitularCoverageName,
@@ -1960,7 +1961,7 @@ export default function PlanificacionPage() {
                 if (_grupoObjIdsRet) {
                     const ao = String(activeShift.objectiveId || '');
                     if (!ao || !_grupoObjIdsRet.includes(ao)) return;
-                    if (isOperationalOriginShift(activeShift)) return;
+                    if (isPlanningGridOperationalShift(activeShift)) return;
                 } else if (!turnoCuentaParaCronoPlanificado(activeShift, selectedObjective)) return;
                 if (String(activeShift.code || '').toUpperCase() === 'RET') count++;
             });
