@@ -1946,7 +1946,7 @@ function useOperacionesMonitorDerived(
         const vm = now.getMonth() + 1;
         const isVisible = (s: any) => {
             if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+            return isOperationalOriginShift(s) || s.isVirtual === true;
         };
         let list = processedData.filter(isVisible);
         if (selectedClientId) list = list.filter((s: any) => s.clientId === selectedClientId);
@@ -1977,7 +1977,7 @@ function useOperacionesMonitorDerived(
         const sm = now.getMonth() + 1;
         const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
             if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
+            return isOperationalOriginShift(s) || s.isVirtual === true;
         });
         return {
             prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,

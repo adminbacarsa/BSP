@@ -55,6 +55,7 @@ import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContig
 import { revertOpsAbsence, createOpsAbsenceDoc } from '@/lib/operaciones/revertOpsAbsence';
 import { markOpsSinCobertura } from '@/lib/operaciones/markOpsSinCobertura';
 import { buildFrancoTrabajadoCoverageFields } from '@/lib/operaciones/francoTrabajadoCoverage';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
@@ -4892,10 +4893,7 @@ export default function OperacionesPage() {
                 if (logic.publishStatusMap[pubKey]) return true;
                 // Mostrar aunque no haya planificación publicada si tiene turnos de origen operativo
                 return (o.shifts || []).some((s: any) =>
-                    s.origin === 'RETEN' ||
-                    s.origin === 'SLA_VIRTUAL' ||
-                    s.isReten === true ||
-                    s.resolvedBy === 'OPERACIONES' ||
+                    isOperationalOriginShift(s) ||
                     s.isVirtual === true
                 );
             })

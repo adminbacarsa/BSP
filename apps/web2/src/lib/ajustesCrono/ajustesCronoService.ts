@@ -10,6 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 import type {
     AjusteCronoInput,
     BandaAjuste,
@@ -168,18 +169,6 @@ export type TurnoDiaRow = {
     resolvedBy?: string;
 };
 
-function isOperationalTurno(data: {
-    origin?: string;
-    isReten?: boolean;
-    resolvedBy?: string;
-}): boolean {
-    return data.origin === 'RETEN'
-        || data.origin === 'OPERATIONS_COVERAGE'
-        || data.origin === 'SLA_VIRTUAL'
-        || !!data.isReten
-        || data.resolvedBy === 'OPERACIONES';
-}
-
 function isWorkBandCode(code: string): boolean {
     return WORK_8.has(code) || WORK_12.has(code) || code === 'RET';
 }
@@ -194,7 +183,7 @@ function filterTurnosParaAjuste(
     return rows.filter(t => {
         if (!t.employeeId) return false;
         if (!includeDraft && t.draft) return false;
-        if (isOperationalTurno(t)) return false;
+        if (isOperationalOriginShift(t)) return false;
         if (workBandsOnly && !isWorkBandCode(t.code)) return false;
         return true;
     });

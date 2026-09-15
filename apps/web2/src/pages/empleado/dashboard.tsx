@@ -16,6 +16,7 @@ import { useToast } from '@/context/ToastContext';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 type Shift = {
   id: string;
@@ -940,10 +941,7 @@ export default function EmployeeDashboard() {
   const blueShiftNotEnded = !blueEnd || blueEnd.getTime() > now.getTime();
   const isCoverageShift = !!(
     blueShift && (
-      blueShift.origin === 'OPERATIONS_COVERAGE' ||
-      blueShift.origin === 'RETEN' ||
-      blueShift.origin === 'SLA_VIRTUAL' ||
-      blueShift.resolvedBy === 'OPERACIONES' ||
+      isOperationalOriginShift(blueShift) ||
       blueShift.coverageType ||
       blueShift.absenceShiftId ||
       (blueShift as any).isCoverage ||
@@ -1370,7 +1368,7 @@ export default function EmployeeDashboard() {
     }
 
     const now = new Date();
-    const isCov = shift.origin === 'OPERATIONS_COVERAGE' || shift.origin === 'RETEN' || !!shift.coverageType || shift.resolvedBy === 'OPERACIONES';
+    const isCov = isOperationalOriginShift(shift) || !!shift.coverageType;
     const maxEarlyMinutes = isCov ? 30 : 15;
     const diffMinutes = (start.getTime() - now.getTime()) / 60000;
     if (diffMinutes > maxEarlyMinutes) {

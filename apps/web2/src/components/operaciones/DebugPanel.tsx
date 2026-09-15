@@ -10,6 +10,7 @@
 
 import React, { useMemo, useState } from 'react';
 import { X, ChevronDown, ChevronRight, AlertTriangle, CheckCircle2, Clock, UserX } from 'lucide-react';
+import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
 
 interface DebugPanelProps {
     processedData: any[];
@@ -273,7 +274,7 @@ export const DebugPanel: React.FC<DebugPanelProps> = ({
                                                 const noPos = !rawPos2 || rawPos2 === 'Sin Puesto' || rawPos2 === 'General';
                                                 const noPubKey = `${s.objectiveId}_${s.shiftDateObj?.getFullYear?.() ?? 0}_${(s.shiftDateObj?.getMonth?.() ?? -1) + 1}`;
                                                 const notPublished = !publishStatusMap[noPubKey];
-                                                const isOpOrigin = s.origin === 'RETEN' || s.origin === 'OPERATIONS_COVERAGE' || s.origin === 'SLA_VIRTUAL' || !!s.isReten;
+                                                const isOpOrigin = isOperationalOriginShift(s);
                                                 const isProcessed = s.isPresent || s.status === 'PRESENT' || s.status === 'COMPLETED' || s.isReportedToPlanning || s.isReported || s.isAbsent;
                                                 let reason = '?';
                                                 if (noPos) reason = `positionName vacío/inválido: "${rawPos2}"`;
