@@ -12,6 +12,7 @@ const eligibilityFilter_1 = require("./eligibilityFilter");
 const coverageLedger_1 = require("./coverageLedger");
 const coverage_auth_util_1 = require("./coverage-auth.util");
 const shiftContinuity_1 = require("./shiftContinuity");
+const coveragePositionRules_1 = require("./coveragePositionRules");
 function haversineKm(lat1, lng1, lat2, lng2) {
     const R = 6371;
     const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -26,6 +27,51 @@ function empCoords(emp) {
     if (!Number.isFinite(lat) || !Number.isFinite(lng))
         return null;
     return { lat, lng };
+}
+const objectiveCoordsCache = new Map();
+async function resolveObjectiveCoords(db, objectiveId, clientId) {
+    const oid = String(objectiveId || '').trim();
+    if (!oid)
+        return null;
+    if (objectiveCoordsCache.has(oid))
+        return objectiveCoordsCache.get(oid);
+    const tryObj = (o) => {
+        const lat = Number(o?.lat ?? o?.location?.lat ?? o?.geo?.lat);
+        const lng = Number(o?.lng ?? o?.location?.lng ?? o?.geo?.lng);
+        if (!Number.isFinite(lat) || !Number.isFinite(lng))
+            return null;
+        return { lat, lng };
+    };
+    if (clientId) {
+        try {
+            const clientSnap = await db.collection('clients').doc(String(clientId)).get();
+            if (clientSnap.exists) {
+                const objs = clientSnap.data()?.objetivos || [];
+                const hit = objs.find((o) => String(o.id || o.objectiveId || '') === oid);
+                const coords = tryObj(hit);
+                if (coords) {
+                    objectiveCoordsCache.set(oid, coords);
+                    return coords;
+                }
+            }
+        }
+        catch { }
+    }
+    try {
+        const clients = await db.collection('clients').limit(80).get();
+        for (const c of clients.docs) {
+            const objs = c.data()?.objetivos || [];
+            const hit = objs.find((o) => String(o.id || o.objectiveId || '') === oid);
+            const coords = tryObj(hit);
+            if (coords) {
+                objectiveCoordsCache.set(oid, coords);
+                return coords;
+            }
+        }
+    }
+    catch { }
+    objectiveCoordsCache.set(oid, null);
+    return null;
 }
 function knowledgeScore(emp, objectiveId) {
     if (emp.preferredObjectiveId === objectiveId)
@@ -43,6 +89,7 @@ const TYPE_LABEL = {
     VOLANTE: 'Cobertura volante',
     SIN_TURNO_CON_EXP: 'Cobertura disponible',
     CROSS_POS: 'Otro puesto (mismo objetivo)',
+    CROSS_OBJ: 'Traslado (otro objetivo ≤10 km)',
     EXTEND: 'Extensión de jornada',
     ADVANCE: 'Adelanto de turno',
     INTERCAMBIO: 'Intercambio de banda',
@@ -369,8 +416,9 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             .where('empresaId', '==', conv.empresaId)
             .where('isPresent', '==', true)
             .where('isCompleted', '==', false)
-            .limit(30)
+            .limit(40)
             .get();
+        const activeDocs = active.docs.map((d) => ({ id: d.id, data: () => d.data() }));
         for (const d of active.docs) {
             if (out.length >= limit)
                 break;
@@ -386,6 +434,12 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             const code = String(t.code || '').toUpperCase();
             if (!workCodes.has(code))
                 continue;
+            if (!(0, coveragePositionRules_1.canSparePresentFromDocs)(activeDocs, {
+                objectiveId: String(t.objectiveId || ''),
+                positionName: String(t.positionName || ''),
+                startTime: t.startTime,
+            }))
+                continue;
             const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
             if (!empSnapOne.exists)
                 continue;
@@ -397,6 +451,72 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
                 uid: uid || undefined,
                 convocatoriaType: 'CROSS_POS',
                 sourceShiftId: d.id,
+            });
+        }
+        return out;
+    }
+    if (type === 'CROSS_OBJ') {
+        const workCodes = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1']);
+        const gapCoords = await resolveObjectiveCoords(db, conv.objectiveId, conv.clientId);
+        if (!gapCoords)
+            return out;
+        const active = await db.collection('turnos')
+            .where('empresaId', '==', conv.empresaId)
+            .where('isPresent', '==', true)
+            .where('isCompleted', '==', false)
+            .limit(80)
+            .get();
+        const activeDocs = active.docs.map((d) => ({ id: d.id, data: () => d.data() }));
+        const scored = [];
+        for (const d of active.docs) {
+            const t = d.data();
+            if (d.id === conv.shiftId)
+                continue;
+            if (!t.employeeId || t.employeeId === 'VACANTE' || alreadyConvocadoIds.has(t.employeeId))
+                continue;
+            if (t.isAbsent || t.isFranco || t.isUnassigned)
+                continue;
+            if (String(t.objectiveId || '') === String(conv.objectiveId || ''))
+                continue;
+            const code = String(t.code || '').toUpperCase();
+            if (!workCodes.has(code))
+                continue;
+            if (!(0, coveragePositionRules_1.canSparePresentFromDocs)(activeDocs, {
+                objectiveId: String(t.objectiveId || ''),
+                positionName: String(t.positionName || ''),
+                startTime: t.startTime,
+            }))
+                continue;
+            const srcCoords = await resolveObjectiveCoords(db, String(t.objectiveId || ''), t.clientId);
+            const km = srcCoords
+                ? (0, coveragePositionRules_1.coverageHaversineKm)(gapCoords.lat, gapCoords.lng, srcCoords.lat, srcCoords.lng)
+                : Infinity;
+            if (!(0, coveragePositionRules_1.isWithinCrossObjRadiusKm)(km, coveragePositionRules_1.CROSS_OBJ_MAX_KM))
+                continue;
+            const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
+            if (!empSnapOne.exists)
+                continue;
+            const emp = empSnapOne.data();
+            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, t.employeeId, emp);
+            const score = knowledgeScore(emp, conv.objectiveId) * 100 - km;
+            scored.push({
+                id: t.employeeId,
+                name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+                uid: uid || undefined,
+                convocatoriaType: 'CROSS_OBJ',
+                sourceShiftId: d.id,
+                score,
+                km,
+            });
+        }
+        scored.sort((a, b) => b.score - a.score);
+        for (const c of scored.slice(0, limit)) {
+            out.push({
+                id: c.id,
+                name: c.name,
+                uid: c.uid,
+                convocatoriaType: 'CROSS_OBJ',
+                sourceShiftId: c.sourceShiftId,
             });
         }
         return out;
@@ -484,6 +604,8 @@ async function findCandidatesForStep(db, conv, step) {
         return findCandidatesForConvType(db, conv, 'ESC', eligibilityFilter_1.BROADCAST_LIMIT);
     if (step === 'CROSS_POS')
         return findCandidatesForConvType(db, conv, 'CROSS_POS', eligibilityFilter_1.BROADCAST_LIMIT);
+    if (step === 'CROSS_OBJ')
+        return findCandidatesForConvType(db, conv, 'CROSS_OBJ', eligibilityFilter_1.BROADCAST_LIMIT);
     if (step === 'INTERCAMBIO')
         return findCandidatesForConvType(db, conv, 'INTERCAMBIO', eligibilityFilter_1.BROADCAST_LIMIT);
     if (step === 'FT')
@@ -1018,7 +1140,7 @@ async function resolverCobertura(db, conv) {
         });
         await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
     }
-    else if (conv.type === 'CROSS_POS') {
+    else if (conv.type === 'CROSS_POS' || conv.type === 'CROSS_OBJ') {
         const sourceId = conv.sourceShiftId;
         const vacLabel = (0, shiftContinuity_1.vacancyCoverageLabel)({
             titularName: titular.titularEmployeeName,
@@ -1053,11 +1175,15 @@ async function resolverCobertura(db, conv) {
                 causedByShiftId: sourceId,
                 causedByEmployeeId: conv.candidateEmployeeId,
                 causedByEmployeeName: conv.candidateEmployeeName,
-                vacancyLabel: `Vacante por redirección · ${prevPos || 'puesto'} → ${vacantData.positionName || 'hueco'}`,
+                vacancyLabel: conv.type === 'CROSS_OBJ'
+                    ? `Vacante por traslado · ${src.objectiveName || 'origen'} (${prevPos || 'puesto'}) → ${conv.objectiveName || 'destino'}`
+                    : `Vacante por redirección · ${prevPos || 'puesto'} → ${vacantData.positionName || 'hueco'}`,
                 coverageEventId,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
                 reportedBy: resolvedBy,
             });
+            const covType = conv.type === 'CROSS_OBJ' ? 'CROSS_OBJECTIVE' : 'CROSS_POSITION';
+            const keepPresence = conv.type !== 'CROSS_OBJ' && wasPresent;
             batch.update(db.collection('turnos').doc(sourceId), {
                 ...(0, shiftContinuity_1.buildReassignPassiveToVacancyFields)({
                     objectiveId: conv.objectiveId,
@@ -1069,7 +1195,7 @@ async function resolverCobertura(db, conv) {
                     startTime: conv.startTime || vacantData.startTime,
                     endTime: conv.endTime || vacantData.endTime,
                 }, {
-                    coverageType: 'CROSS_POSITION',
+                    coverageType: covType,
                     resolvedBy,
                     previousCode: prevCode,
                     previousPositionName: prevPos || null,
@@ -1078,22 +1204,22 @@ async function resolverCobertura(db, conv) {
                 ...(resolvedBy === 'MODO_DEMO'
                     ? demoCovererPresenceFields(resolvedBy, gapPresentAt)
                     : {
-                        isPresent: wasPresent,
-                        status: wasPresent ? 'PRESENT' : 'PENDING',
+                        isPresent: keepPresence,
+                        status: keepPresence ? 'PRESENT' : 'PENDING',
                     }),
                 vacatedShiftId: freedRef.id,
                 vacancyLabel: vacLabel,
                 ...(0, coverageLedger_1.covererLedgerFields)({
                     ...ledgerBase,
                     vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
-                    coverageType: 'CROSS_POSITION',
+                    coverageType: covType,
                 }),
             });
             (0, coverageLedger_1.applyCoverageLedgerToBatch)(batch, db, {
                 ...ledgerBase,
                 vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
                 covererShiftId: sourceId,
-                coverageType: 'CROSS_POSITION',
+                coverageType: covType,
                 markVacancyCovered: true,
                 vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
             });

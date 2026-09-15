@@ -16,6 +16,7 @@ exports.CASCADE_ORDER = [
     'CROSS_POS',
     'EXT_DUAL',
     'INTERCAMBIO',
+    'CROSS_OBJ',
     'FT',
 ];
 exports.RET_RADIUS_KM_PRIMARY = 15;
@@ -30,6 +31,8 @@ function toCascadeStep(type) {
         return 'ESC';
     if (type === 'CROSS_POS')
         return 'CROSS_POS';
+    if (type === 'CROSS_OBJ')
+        return 'CROSS_OBJ';
     if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL')
         return 'EXT_DUAL';
     if (type === 'INTERCAMBIO')
