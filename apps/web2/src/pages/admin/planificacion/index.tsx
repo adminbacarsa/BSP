@@ -181,6 +181,7 @@ import {
 } from '@/lib/planificacion/planificacionClipboard';
 import { findPlanificacionConflictNeighbors } from '@/lib/planificacion/findPlanificacionConflictNeighbors';
 import { resolvePlanificacionConflict } from '@/lib/planificacion/resolvePlanificacionConflict';
+import { submitPlanificacionRRHHNovedad } from '@/lib/planificacion/submitPlanificacionRRHHNovedad';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -422,6 +423,7 @@ export default function PlanificacionPage() {
         shiftsMap,
         setShiftsMap,
         cellTurnosMap,
+        setCellTurnosMap,
         shiftsMapLoaded,
         turaMap,
         rfzVacantes,
@@ -4086,6 +4088,7 @@ export default function PlanificacionPage() {
             const refreshed = await loadPlanificacionCronogramaRefresh({
                 empresaId,
                 migracionCompleta,
+                scopeEmpresa,
                 selectedObjective,
                 year,
                 month,
@@ -4097,7 +4100,33 @@ export default function PlanificacionPage() {
             }));
             setEmpDefaultPos(refreshed.empDefaultPos);
             setEmpDefaultShift(refreshed.empDefaultShift);
-            setShiftsMap(refreshed.mergeShiftsMap);
+            setShiftsMap(prev => {
+                const next = refreshed.mergeShiftsMap(prev);
+                if (empresaId) {
+                    const cacheKey = planningMonthCacheKey(empresaId, year, month);
+                    const cached = getCachedPlanningMonth(cacheKey);
+                    const cellPatch: Record<string, any[]> = { ...(cached?.cellTurnosMap || {}) };
+                    const idsPatch: Record<string, string[]> = { ...(cached?.allShiftIds || {}) };
+                    for (const { key, value } of refreshed.monthEntries) {
+                        cellPatch[key] = [value, ...(cellPatch[key] || []).filter((x) => x?.id !== value.id)];
+                        if (value.id) {
+                            const ids = idsPatch[key] || [];
+                            if (!ids.includes(value.id)) idsPatch[key] = [...ids, value.id];
+                        }
+                    }
+                    setCachedPlanningMonth(cacheKey, {
+                        shiftsMap: next,
+                        cellTurnosMap: cellPatch,
+                        allShiftIds: idsPatch,
+                        turaMap: cached?.turaMap || {},
+                        secondBlockMap: cached?.secondBlockMap || {},
+                        rfzVacantes: cached?.rfzVacantes || [],
+                        rfzTodos: cached?.rfzTodos || [],
+                    });
+                    setCellTurnosMap(cellPatch);
+                }
+                return next;
+            });
             setDataRefreshNonce(n => n + 1);
             toast.success('Cronograma actualizado');
         } catch (e) {
@@ -4588,17 +4617,17 @@ export default function PlanificacionPage() {
         });
     };
     const handleRRHHSubmit = () => {
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
-        if (!selectedCell) return;
-        const absenceCodes: Record<string, string> = { 'Vacaciones': 'V', 'Enfermedad': 'E', 'ART': 'A', 'Injustificada': 'AA', 'Licencia Esp.': 'L', 'PG Permiso Gremial': 'PG' };
-        const code = absenceCodes[rrhhData.type] || 'AA';
-        const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
-        const empName = employees.find((e: any) => e.id === selectedCell.empId)?.name || '';
-        setPendingChanges(prev => ({ ...prev, [key]: { code, name: rrhhData.type, isTemp: true, isNovedad: true, hours: 0, startTime: '00:00' } }));
-        setPendingNovedades(prev => ({ ...prev, [key]: { employeeId: selectedCell.empId, employeeName: empName, startDate: selectedCell.dateStr, endDate: selectedCell.dateStr, type: rrhhData.type, reason: rrhhData.reason, status: 'APPROVED' } }));
-        toast.success("Novedad pendiente — recordá guardar los cambios");
-        setShowRRHHModal(false);
-        setSelectedCell(null);
+        submitPlanificacionRRHHNovedad({
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selectedCell,
+            rrhhData,
+            employees,
+            setPendingChanges,
+            setPendingNovedades,
+            setShowRRHHModal,
+            setSelectedCell,
+        });
     };
     const finalizeVacancyModal = () => {
         setShowVacancyModal(false);
