@@ -145,13 +145,11 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             .where('isCompleted', '==', false)
             .limit(20)
             .get();
+        const samePos = [];
+        const otherPos = [];
         for (const d of active.docs) {
-            if (out.length >= limit)
-                break;
             const t = d.data();
             if (d.id === conv.shiftId)
-                continue;
-            if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos)
                 continue;
             const code = String(t.code || '').toUpperCase();
             if (code !== 'M' && code !== 'T' && code !== 'N')
@@ -162,13 +160,20 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             const emp = empSnap.data();
             if (!(0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'EXTEND').eligible)
                 continue;
-            out.push({
+            const row = {
                 id: t.employeeId,
                 name: t.employeeName || '',
                 uid: emp.uid,
                 convocatoriaType: 'EXTEND',
                 extendShiftId: d.id,
-            });
+            };
+            const isSame = vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos;
+            (isSame ? samePos : otherPos).push(row);
+        }
+        for (const c of [...samePos, ...otherPos]) {
+            if (out.length >= limit)
+                break;
+            out.push(c);
         }
         return out;
     }
@@ -185,15 +190,13 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             .orderBy('startTime')
             .limit(20)
             .get();
+        const samePos = [];
+        const otherPos = [];
         for (const d of next.docs) {
-            if (out.length >= limit)
-                break;
             const t = d.data();
             if (!t.employeeId || t.employeeId === 'VACANTE' || d.id === conv.shiftId)
                 continue;
             if (t.isPresent || t.isAbsent || t.isUnassigned || t.isFranco)
-                continue;
-            if (vacPos && String(t.positionName || '').trim().toLowerCase() !== vacPos)
                 continue;
             const empSnap = await db.collection('empleados').doc(t.employeeId).get();
             if (!empSnap.exists)
@@ -201,13 +204,20 @@ async function findCandidatesForConvType(db, conv, type, limit = eligibilityFilt
             const emp = empSnap.data();
             if (!(0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'ADVANCE').eligible)
                 continue;
-            out.push({
+            const row = {
                 id: t.employeeId,
                 name: t.employeeName || '',
                 uid: emp.uid,
                 convocatoriaType: 'ADVANCE',
                 advanceShiftId: d.id,
-            });
+            };
+            const isSame = vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos;
+            (isSame ? samePos : otherPos).push(row);
+        }
+        for (const c of [...samePos, ...otherPos]) {
+            if (out.length >= limit)
+                break;
+            out.push(c);
         }
         return out;
     }
@@ -744,6 +754,20 @@ function isShiftAlreadyCovered(data) {
         return true;
     return false;
 }
+function demoCovererPresenceFields(resolvedBy, presentAt) {
+    if (resolvedBy !== 'MODO_DEMO')
+        return {};
+    const at = presentAt || firestore_1.Timestamp.now();
+    return {
+        isPresent: true,
+        status: 'PRESENT',
+        presentAt: at,
+        realStartTime: at,
+        autoPresencia: true,
+        demoSimulated: true,
+        modoDemoAt: firestore_1.FieldValue.serverTimestamp(),
+    };
+}
 async function claimConvocatoriaAccept(db, convocatoriaId, respondedBy) {
     const ref = db.collection('convocatorias_cobertura').doc(convocatoriaId);
     try {
@@ -820,8 +844,16 @@ async function resolverCobertura(db, conv) {
         covererExtra: { coverageConvocatoriaId: conv.id, assignedByConvocatoria: conv.id },
     };
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
+    const gapPresentAt = conv.startTime instanceof firestore_1.Timestamp
+        ? conv.startTime
+        : (vacantData.startTime instanceof firestore_1.Timestamp ? vacantData.startTime : null);
     if (conv.type === 'EXTEND' && conv.extendShiftId) {
         const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
+        const extendSnap = await shiftRef.get();
+        const extendData = extendSnap.data() || {};
+        const vacPos = String(vacantData.positionName || conv.positionName || '').trim();
+        const srcPos = String(extendData.positionName || '').trim();
+        const crossPos = !!(vacPos && srcPos && vacPos.toLowerCase() !== srcPos.toLowerCase());
         const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
         batch.update(shiftRef, {
             code: newCode,
@@ -830,6 +862,13 @@ async function resolverCobertura(db, conv) {
             extendedBy: 'CONVOCATORIA',
             extendedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
+            ...(crossPos
+                ? {
+                    coversPositionName: vacPos,
+                    coverageSegmentRole: 'EXTENSION',
+                }
+                : {}),
+            ...demoCovererPresenceFields(resolvedBy, extendData.presentAt || extendData.realStartTime || gapPresentAt),
             ...(0, coverageLedger_1.covererLedgerFields)({
                 ...ledgerBase,
                 vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -870,6 +909,9 @@ async function resolverCobertura(db, conv) {
         const nextRef = db.collection('turnos').doc(conv.advanceShiftId);
         const nextSnap = await nextRef.get();
         const nextData = nextSnap.data() || {};
+        const vacPosAdv = String(vacantData.positionName || conv.positionName || '').trim();
+        const srcPosAdv = String(nextData.positionName || '').trim();
+        const crossPosAdv = !!(vacPosAdv && srcPosAdv && vacPosAdv.toLowerCase() !== srcPosAdv.toLowerCase());
         const plannedStart = nextData.plannedStartTime || nextData.startTime || null;
         batch.update(nextRef, {
             adjustedStartTime: conv.startTime,
@@ -880,7 +922,13 @@ async function resolverCobertura(db, conv) {
             startTime: conv.startTime,
             plannedStartTime: plannedStart,
             resolvedBy,
-            ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+            ...(crossPosAdv
+                ? {
+                    coversPositionName: vacPosAdv,
+                    coverageSegmentRole: 'EARLY_START',
+                }
+                : {}),
+            ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
             ...(0, coverageLedger_1.covererLedgerFields)({
                 ...ledgerBase,
                 vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -952,7 +1000,7 @@ async function resolverCobertura(db, conv) {
                     coverageEventId,
                 }),
                 vacancyLabel: vacLabel,
-                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+                ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
                 ...(0, coverageLedger_1.covererLedgerFields)({
                     ...ledgerBase,
                     vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1027,11 +1075,14 @@ async function resolverCobertura(db, conv) {
                     previousPositionName: prevPos || null,
                     coverageEventId,
                 }),
-                isPresent: wasPresent,
-                status: wasPresent ? 'PRESENT' : 'PENDING',
+                ...(resolvedBy === 'MODO_DEMO'
+                    ? demoCovererPresenceFields(resolvedBy, gapPresentAt)
+                    : {
+                        isPresent: wasPresent,
+                        status: wasPresent ? 'PRESENT' : 'PENDING',
+                    }),
                 vacatedShiftId: freedRef.id,
                 vacancyLabel: vacLabel,
-                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
                 ...(0, coverageLedger_1.covererLedgerFields)({
                     ...ledgerBase,
                     vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1058,13 +1109,23 @@ async function resolverCobertura(db, conv) {
                 objectiveName: conv.objectiveName,
             });
             batch.update(ftRef, {
-                code: 'FT',
+                code: String(conv.shiftCode || vacantData.code || 'M').toUpperCase(),
                 isFranco: false,
                 isFrancoTrabajado: true,
                 startTime: conv.startTime,
                 endTime: conv.endTime || null,
                 plannedStartTime: conv.startTime,
                 plannedEndTime: conv.endTime || null,
+                objectiveId: conv.objectiveId,
+                objectiveName: conv.objectiveName || null,
+                clientId: conv.clientId || null,
+                clientName: conv.clientName || null,
+                positionName: vacantData.positionName || conv.positionName || null,
+                coversPositionName: vacantData.positionName || conv.positionName || null,
+                coversBandCode: String(conv.shiftCode || vacantData.code || 'M').toUpperCase(),
+                coverageStatus: 'COVERED',
+                coverageMode: 'FRANCO_TRABAJADO',
+                origin: 'OPERATIONS_COVERAGE',
                 resolvedBy,
                 coveredShiftId: conv.shiftId,
                 vacancyLabel: vacLabel,
@@ -1072,7 +1133,8 @@ async function resolverCobertura(db, conv) {
                 francoTrabajadoAt: firestore_1.FieldValue.serverTimestamp(),
                 francoObjectiveId: conv.objectiveId,
                 francoObjectiveName: conv.objectiveName || null,
-                ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+                empresaId: conv.empresaId || vacantData.empresaId || null,
+                ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
                 ...(0, coverageLedger_1.covererLedgerFields)({
                     ...ledgerBase,
                     vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1092,6 +1154,7 @@ async function resolverCobertura(db, conv) {
     }
     else {
         const newRef = db.collection('turnos').doc();
+        const demoPresence = demoCovererPresenceFields(resolvedBy, gapPresentAt);
         batch.set(newRef, {
             empresaId: conv.empresaId,
             employeeId: conv.candidateEmployeeId,
@@ -1100,15 +1163,22 @@ async function resolverCobertura(db, conv) {
             clientName: conv.clientName || null,
             objectiveId: conv.objectiveId,
             objectiveName: conv.objectiveName || '',
+            positionName: vacantData.positionName || conv.positionName || null,
             code: String(conv.shiftCode || 'M'),
             startTime: conv.startTime,
             endTime: conv.endTime || null,
-            status: 'PENDING',
+            plannedStartTime: conv.startTime,
+            plannedEndTime: conv.endTime || null,
+            status: demoPresence.status || 'PENDING',
             origin: 'OPERATIONS_COVERAGE',
             resolvedBy,
             coverageType: conv.type,
+            coversBandCode: String(conv.shiftCode || 'M').toUpperCase(),
+            coversPositionName: vacantData.positionName || conv.positionName || null,
+            coverageStatus: 'COVERED',
             assignedAt: firestore_1.FieldValue.serverTimestamp(),
             createdAt: firestore_1.FieldValue.serverTimestamp(),
+            ...demoPresence,
             ...(0, coverageLedger_1.covererLedgerFields)({
                 ...ledgerBase,
                 vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1146,6 +1216,13 @@ async function resolverCobertura(db, conv) {
         resolved: false,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
+    await (0, coverageLedger_1.closeAbsenceSiblingVacanciesInBatch)(batch, db, {
+        ...ledgerBase,
+        vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
+        titularShiftId: titular.titularShiftId || conv.shiftId,
+        coverageType: conv.type,
+        markVacancyCovered: true,
+    }, coverageEventId);
     await batch.commit();
     return 'OK';
 }

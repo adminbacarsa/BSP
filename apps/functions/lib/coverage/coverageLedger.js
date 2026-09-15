@@ -5,6 +5,7 @@ exports.resolveTitularFromAbsenceOrVacancy = resolveTitularFromAbsenceOrVacancy;
 exports.covererLedgerFields = covererLedgerFields;
 exports.coveredPartyLedgerFields = coveredPartyLedgerFields;
 exports.applyCoverageLedgerToBatch = applyCoverageLedgerToBatch;
+exports.closeAbsenceSiblingVacanciesInBatch = closeAbsenceSiblingVacanciesInBatch;
 const firestore_1 = require("firebase-admin/firestore");
 const crypto_1 = require("crypto");
 const isVirtualShiftId = (id) => {
@@ -102,5 +103,35 @@ function applyCoverageLedgerToBatch(batch, db, input) {
         batch.update(db.collection('turnos').doc(input.covererShiftId), covererLedgerFields(payload));
     }
     return coverageEventId;
+}
+async function closeAbsenceSiblingVacanciesInBatch(batch, db, input, coverageEventId) {
+    const causeIds = new Set();
+    if (input.titularShiftId && !isVirtualShiftId(input.titularShiftId)) {
+        causeIds.add(String(input.titularShiftId));
+    }
+    if (input.vacancyShiftId && !isVirtualShiftId(input.vacancyShiftId)) {
+        causeIds.add(String(input.vacancyShiftId));
+    }
+    if (causeIds.size === 0)
+        return 0;
+    let closed = 0;
+    const payload = { ...input, coverageEventId };
+    for (const causeId of causeIds) {
+        const snap = await db.collection('turnos')
+            .where('causedByShiftId', '==', causeId)
+            .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+            .limit(5)
+            .get();
+        for (const d of snap.docs) {
+            if (d.id === input.vacancyShiftId)
+                continue;
+            const st = String(d.data()?.status || '').toUpperCase();
+            if (st === 'COVERED' || st === 'CANCELLED')
+                continue;
+            batch.update(d.ref, coveredPartyLedgerFields(payload, 'vacancy'));
+            closed += 1;
+        }
+    }
+    return closed;
 }
 //# sourceMappingURL=coverageLedger.js.map

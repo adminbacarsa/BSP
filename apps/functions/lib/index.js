@@ -722,8 +722,71 @@ async function runModoDemoForEmpresa(db, empresaId) {
             batchOps += 1;
         }
     }
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isCompleted || t.isAbsent)
+            continue;
+        if (isVacant(t) || isPassiveStandby(t))
+            continue;
+        if (t.isFranco === true && !t.isFrancoTrabajado)
+            continue;
+        const resolved = String(t.resolvedBy || '').toUpperCase();
+        const origin = String(t.origin || '').toUpperCase();
+        const isDemoCover = resolved === 'MODO_DEMO'
+            || resolved === 'AUTO'
+            || resolved === 'OPERACIONES'
+            || !!t.modoDemoAt
+            || !!t.isFrancoTrabajado
+            || (origin === 'OPERATIONS_COVERAGE' && (!!t.coverageEventId
+                || !!t.coversAbsenceEmployeeName
+                || !!t.absenceShiftId
+                || !!t.coveredShiftId
+                || !!t.coversEmployeeId
+                || !!t.coverageConvocatoriaId));
+        if (!isDemoCover)
+            continue;
+        const startMs = (t.adjustedStartTime?.seconds ?? t.startTime?.seconds ?? 0) * 1000;
+        const endMs = (t.endTime?.seconds ?? 0) * 1000;
+        if (startMs > now.getTime() + 15 * 60 * 1000)
+            continue;
+        if (endMs && endMs < now.getTime() - 2 * 3600 * 1000)
+            continue;
+        const startTs = t.adjustedStartTime || t.startTime || nowTs;
+        const gapOid = String(t.francoObjectiveId || t.coverageRedirectedTo || '').trim();
+        const curOid = String(t.objectiveId || '').trim();
+        const posHeal = String(t.positionName || t.coversPositionName || '').trim();
+        const patch = {};
+        if (!t.isPresent) {
+            patch.isPresent = true;
+            patch.status = 'PRESENT';
+            patch.presentAt = startTs;
+            patch.realStartTime = startTs;
+            patch.autoPresencia = true;
+            patch.demoSimulated = true;
+            patch.modoDemoAt = nowTs;
+            patch.demoCovererHealAt = nowTs;
+        }
+        if (gapOid && gapOid !== curOid) {
+            patch.objectiveId = gapOid;
+            if (t.francoObjectiveName)
+                patch.objectiveName = t.francoObjectiveName;
+            patch.origin = origin || 'OPERATIONS_COVERAGE';
+            patch.demoObjectiveHealAt = nowTs;
+        }
+        if ((!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') && t.coversPositionName) {
+            patch.positionName = t.coversPositionName;
+        }
+        else if (!posHeal || posHeal === 'General' || posHeal === 'Sin Puesto') {
+            patch.positionName = 'Cobertura';
+        }
+        if (Object.keys(patch).length === 0)
+            continue;
+        batch.update(doc.ref, patch);
+        batchOps += 1;
+        if (patch.isPresent)
+            presencias++;
+    }
     const WINDOW_BEFORE_MS = 15 * 60 * 1000;
-    const WINDOW_AFTER_MS = 5 * 60 * 1000;
     const LATE_DELAY_MS = 12 * 60 * 1000;
     const shiftCategory = (empId) => {
         let h = 0;
@@ -751,7 +814,10 @@ async function runModoDemoForEmpresa(db, empresaId) {
         if (cat === 'late') {
             if (startMs > now.getTime() + 10 * 60 * 1000)
                 continue;
-            if (startMs < now.getTime() - 15 * 60 * 1000)
+            if (startMs > now.getTime() - 5 * 60 * 1000)
+                continue;
+            const endMsLate = (t.endTime?.seconds ?? 0) * 1000;
+            if (endMsLate && endMsLate < now.getTime())
                 continue;
             const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
             batch.update(doc.ref, {
@@ -790,18 +856,12 @@ async function runModoDemoForEmpresa(db, empresaId) {
             const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
             const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
             const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
-            if (isEarlyShift) {
-                if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS)
-                    continue;
-                if (shiftEndMs && shiftEndMs < now.getTime())
-                    continue;
-            }
-            else {
-                if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS)
-                    continue;
-                if (actualStartMs < now.getTime() - WINDOW_AFTER_MS)
-                    continue;
-            }
+            if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS)
+                continue;
+            if (shiftEndMs && shiftEndMs < now.getTime())
+                continue;
+            if (!shiftEndMs && actualStartMs < now.getTime() - 8 * 3600 * 1000)
+                continue;
             batch.update(doc.ref, {
                 isPresent: true,
                 status: 'PRESENT',
@@ -902,7 +962,8 @@ async function runModoDemoForEmpresa(db, empresaId) {
 }
 exports.modoDemoCron = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
-    .pubsub.schedule('every 5 minutes')
+    .pubsub.schedule('*/5 * * * *')
+    .timeZone('America/Argentina/Buenos_Aires')
     .onRun(async () => {
     const db = admin.firestore();
     const empSnap = await db.collection('empresas').where('modoDemoEnabled', '==', true).get();

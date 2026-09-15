@@ -3,6 +3,33 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onGuardAbsenceDetected = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const OPS_ABSENCE_TYPES = new Set(['AA', 'MANUAL_OPS', 'AUTO_T30']);
+function isOperationalAbsence(after) {
+    if (after.absenceDetectedBy === 'SYSTEM_SCHEDULER')
+        return true;
+    if (after.absenceConfirmedBy === 'OPERACIONES')
+        return true;
+    if (after.isReportedToPlanning === true)
+        return true;
+    const absType = String(after.absenceType || '').toUpperCase();
+    if (OPS_ABSENCE_TYPES.has(absType))
+        return true;
+    if (after.status === 'ABSENT' && after.absenceDetectedAt)
+        return true;
+    return false;
+}
+function isRrhhPlannedAbsence(after) {
+    if (String(after.type || '').toUpperCase() === 'NOVEDAD')
+        return true;
+    if (after.absenceId)
+        return true;
+    if (after.hasNovedad === true)
+        return true;
+    const absType = String(after.absenceType || '').toLowerCase();
+    if (/vacacion|licencia|enfermedad|gremial|art\b|permiso/.test(absType))
+        return true;
+    return false;
+}
 exports.onGuardAbsenceDetected = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB' })
     .firestore.document('turnos/{turnoId}')
@@ -16,9 +43,14 @@ exports.onGuardAbsenceDetected = functions
     if (after.vacancyCreatedForAbsence === true)
         return;
     const skipOrigins = new Set(['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL',
-        'VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA']);
+        'VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA',
+        'INTERRUPTION']);
     if (skipOrigins.has(String(after.origin || '')))
         return;
+    if (isRrhhPlannedAbsence(after) && !isOperationalAbsence(after)) {
+        console.log(`[onGuardAbsenceDetected] skip RRHH planificado turno ${context.params.turnoId} (absenceId=${after.absenceId || '-'})`);
+        return;
+    }
     const empresaId = typeof after.empresaId === 'string' ? after.empresaId : null;
     if (!empresaId)
         return;
@@ -55,6 +87,7 @@ exports.onGuardAbsenceDetected = functions
         causedByShiftId: turnoId,
         causedByEmployeeId: after.employeeId || null,
         causedByEmployeeName: after.employeeName || '',
+        absenceId: after.absenceId || null,
         actionTarget,
         empresaId,
         draft: false,

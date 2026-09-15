@@ -33,3 +33,4 @@ export declare function coveredPartyLedgerFields(input: CoverageLedgerInput & {
     coverageEventId: string;
 }, kind: 'vacancy' | 'titular'): Record<string, unknown>;
 export declare function applyCoverageLedgerToBatch(batch: WriteBatch, db: admin.firestore.Firestore, input: CoverageLedgerInput): string;
+export declare function closeAbsenceSiblingVacanciesInBatch(batch: WriteBatch, db: admin.firestore.Firestore, input: CoverageLedgerInput, coverageEventId: string): Promise<number>;

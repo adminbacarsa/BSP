@@ -77,8 +77,8 @@ const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; ti
   { key: 'SIN_TURNO',  label: 'Sin turno',       icon: '1', mandatory: true,  timeoutSec: 60,  desc: 'Empleados disponibles hoy sin turno asignado' },
   { key: 'RET_PASIVO', label: 'Ret. Pasiva',      icon: '2', mandatory: true,  timeoutSec: 180, desc: 'RET obligado: se convierte al turno real del hueco' },
   { key: 'ESC',        label: 'ESC / REF',        icon: '3', mandatory: true,  timeoutSec: 60,  desc: 'Comodín no facturable → se reasigna al turno real' },
-  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120, desc: 'Presente en otro puesto del mismo objetivo → redirección al hueco (libera su puesto)' },
-  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '5', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'EXT+ADV solo mismo puesto: extender actual + adelantar próximo' },
+  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120, desc: 'Presente en otro puesto → mueve toda la jornada al hueco y libera el suyo (no es mitad EXT/ADV)' },
+  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '5', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'EXT+ADV: bandas vecinas del mismo objetivo, cualquier puesto (prioriza el del hueco)' },
   { key: 'INTERCAMBIO', label: 'Intercambio',     icon: '6', mandatory: false, timeoutSec: 120, desc: 'Permuta banda con quien tiene turno posterior' },
   { key: 'FT',         label: 'Franco Trabajado', icon: '7', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco disponibles hoy' },
 ];
