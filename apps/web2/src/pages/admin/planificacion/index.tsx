@@ -6947,58 +6947,6 @@ export default function PlanificacionPage() {
                                 </div>
                             )}
 
-                            {/* DIAGNÓSTICO DE ESTRUCTURA — expandible */}
-                            {selectedObjective && !isServiceLocked && (
-                                <div className="relative hidden md:block">
-                                    <button
-                                        ref={diagnosticBtnRef}
-                                        onClick={() => {
-                                            if (showDiagnostic) {
-                                                setShowDiagnostic(false);
-                                            } else {
-                                                repositionDiagnosticPanel();
-                                                setShowDiagnostic(true);
-                                            }
-                                        }}
-                                        className="flex px-3 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-2 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
-                                    >
-                                        <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Diagnóstico de Estructura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 flex-wrap">
-                                                {objectiveCronogramRules && (
-                                                    <>
-                                                        <span
-                                                            className="text-indigo-600 font-black"
-                                                            title={objectiveCronogramRules.playbook.join('\n')}
-                                                        >
-                                                            {objectiveCronogramRules.cronogramTypeLabel}
-                                                        </span>
-                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                    </>
-                                                )}
-                                                {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
-                                                    : positionStructure.length} Puestos
-                                                <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
-                                                    : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)} Pax</span>
-                                                {genderRestrictedPositionsCount > 0 && (
-                                                    <>
-                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                        <span className="text-pink-600 font-black" title="Puestos con preferencia de género (M/F) definida en Servicios/SLA">
-                                                            {genderRestrictedPositionsCount} c/ género
-                                                        </span>
-                                                    </>
-                                                )}
-                                                {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h vend.</span></>}
-                                            </span>
-                                        </div>
-                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
-                                    </button>
-                                </div>
-                            )}
 
 
                             {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
@@ -7118,6 +7066,49 @@ export default function PlanificacionPage() {
                                         </div>
                                     </>,
                                     document.body,
+                                )}
+
+                                {/* DIAGNÓSTICO ESTRUCTURA — compacto, en toolbar derecho */}
+                                {selectedObjective && !isServiceLocked && (
+                                    <div className="relative hidden md:block">
+                                        <button
+                                            ref={diagnosticBtnRef}
+                                            onClick={() => {
+                                                if (showDiagnostic) {
+                                                    setShowDiagnostic(false);
+                                                } else {
+                                                    repositionDiagnosticPanel();
+                                                    setShowDiagnostic(true);
+                                                }
+                                            }}
+                                            className="flex px-2.5 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
+                                        >
+                                            <Activity size={12} className="text-emerald-500 animate-pulse shrink-0"/>
+                                            <div className="flex flex-col leading-none">
+                                                <span className="text-[8px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Estructura</span>
+                                                <span className="text-[9px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1">
+                                                    {objectiveCronogramRules && (
+                                                        <>
+                                                            <span className="text-indigo-600 font-black" title={objectiveCronogramRules.playbook.join('\n')}>
+                                                                {objectiveCronogramRules.cronogramTypeLabel}
+                                                            </span>
+                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                        </>
+                                                    )}
+                                                    {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
+                                                        : positionStructure.length}P
+                                                    <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                    <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
+                                                        : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)}Pax</span>
+                                                    {genderRestrictedPositionsCount > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-pink-600 font-black">{genderRestrictedPositionsCount}G</span></>}
+                                                    {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h</span></>}
+                                                </span>
+                                            </div>
+                                            <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
+                                        </button>
+                                    </div>
                                 )}
 
                                 {/* DIAGNÓSTICO COBERTURA — compacto, en toolbar derecho */}
