@@ -56,7 +56,9 @@ export function usePlanificacionDotacionOverlay({
                 const prevSh: Record<string, string> = (prev.defaultShiftByEmp as Record<string, string>) || {};
                 if (applyOverlay(prevPos, prevSh)) {
                     if (empresaId) {
-                        setDoc(doc(db, 'planificacion_estados', stateKey), {
+                        // No crear tenant "vacío" de publicación: si el mes ya estaba
+                        // publicado en legacy (u otro path), conservar publishedAt.
+                        const payload: Record<string, unknown> = {
                             empresaId,
                             objectiveId: selectedObjective,
                             objetivoId: selectedObjective,
@@ -66,7 +68,12 @@ export function usePlanificacionDotacionOverlay({
                             mes: month,
                             defaultPositionByEmp: prevPos,
                             defaultShiftByEmp: prevSh,
-                        }, { merge: true }).catch(() => {});
+                        };
+                        if (d.publishedAt != null && d.publishedAt !== '') {
+                            payload.publishedAt = d.publishedAt;
+                            if (d.publishedBy != null) payload.publishedBy = d.publishedBy;
+                        }
+                        setDoc(doc(db, 'planificacion_estados', stateKey), payload, { merge: true }).catch(() => {});
                     }
                 }
             }).catch(() => {});

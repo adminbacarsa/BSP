@@ -109,6 +109,7 @@ import {
     dedupeClientsById,
     stampEmpresaId,
     buildPlanificacionEstadoDocId,
+    fetchPlanificacionEstadoDoc,
     planificacionPublishLookupKey,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
@@ -758,10 +759,26 @@ export default function PlanificacionPage() {
 
     const _saveRotOverrides = useCallback((next: Set<string>, objId: string, yr: number, mo: number, empId: string) => {
         const stateKey = buildPlanificacionEstadoDocId(empId, objId, yr, mo);
-        setDoc(doc(db, 'planificacion_estados', stateKey),
-            { rotacionesDesactivadasMes: Array.from(next), empresaId: empId },
-            { merge: true },
-        ).catch(e => console.warn('[planif] rot-overrides save', e));
+        const payload: Record<string, unknown> = {
+            rotacionesDesactivadasMes: Array.from(next),
+            empresaId: empId,
+            objectiveId: objId,
+            objetivoId: objId,
+            year: yr,
+            month: mo,
+            año: yr,
+            mes: mo,
+        };
+        // Evitar crear tenant sin publishedAt que tape publicación legacy.
+        fetchPlanificacionEstadoDoc(empId, objId, yr, mo)
+            .then((row) => {
+                if (row?.data.publishedAt != null && row.data.publishedAt !== '') {
+                    payload.publishedAt = row.data.publishedAt;
+                    if (row.data.publishedBy != null) payload.publishedBy = row.data.publishedBy;
+                }
+                return setDoc(doc(db, 'planificacion_estados', stateKey), payload, { merge: true });
+            })
+            .catch(e => console.warn('[planif] rot-overrides save', e));
     }, []);
 
     const toggleMesRotacion = useCallback((rotId: string) => {

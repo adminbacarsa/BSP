@@ -1009,6 +1009,33 @@ export function parsePlanificacionEstadoDocId(docId: string): {
   };
 }
 
+/** publishedAt efectivo: tenant gana si lo tiene; si el tenant existe sin publicar
+ *  pero el legacy sí tiene publishedAt, se hereda (escrituras laterales de puestos/actividad
+ *  crean el doc tenant sin copiar la publicación). Despublicar limpia ambos docs. */
+function resolvePlanificacionPublishedFields(params: {
+  primaryPublishedAt: unknown;
+  primaryPublishedBy: unknown;
+  legacyPublishedAt: unknown;
+  legacyPublishedBy: unknown;
+}): { publishedAt?: unknown; publishedBy?: unknown; inheritedFromLegacy: boolean } {
+  const { primaryPublishedAt, primaryPublishedBy, legacyPublishedAt, legacyPublishedBy } = params;
+  if (primaryPublishedAt != null && primaryPublishedAt !== '') {
+    return {
+      publishedAt: primaryPublishedAt,
+      publishedBy: primaryPublishedBy,
+      inheritedFromLegacy: false,
+    };
+  }
+  if (legacyPublishedAt != null && legacyPublishedAt !== '') {
+    return {
+      publishedAt: legacyPublishedAt,
+      publishedBy: legacyPublishedBy,
+      inheritedFromLegacy: true,
+    };
+  }
+  return { inheritedFromLegacy: false };
+}
+
 /** Resuelve doc id tenant-aware; prueba formato nuevo y legacy `${objectiveId}_${year}_${month}`. */
 export async function fetchPlanificacionEstadoDoc(
   empresaId: string,
@@ -1017,22 +1044,49 @@ export async function fetchPlanificacionEstadoDoc(
   month: number,
 ): Promise<{ id: string; data: Record<string, unknown> } | null> {
   const primaryId = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
-  const primary = await getDoc(doc(db, 'planificacion_estados', primaryId));
-  if (primary.exists()) {
-    return { id: primary.id, data: primary.data() as Record<string, unknown> };
-  }
   const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
-  if (legacyId === primaryId) return null;
-  const legacy = await getDoc(doc(db, 'planificacion_estados', legacyId));
-  if (legacy.exists()) {
-    return { id: legacy.id, data: legacy.data() as Record<string, unknown> };
+  const primaryRef = doc(db, 'planificacion_estados', primaryId);
+  const primary = await getDoc(primaryRef);
+
+  let legacyData: Record<string, unknown> | null = null;
+  if (legacyId !== primaryId) {
+    const legacy = await getDoc(doc(db, 'planificacion_estados', legacyId));
+    if (legacy.exists()) {
+      legacyData = legacy.data() as Record<string, unknown>;
+    }
+  }
+
+  if (primary.exists()) {
+    const data = { ...(primary.data() as Record<string, unknown>) };
+    const resolved = resolvePlanificacionPublishedFields({
+      primaryPublishedAt: data.publishedAt,
+      primaryPublishedBy: data.publishedBy,
+      legacyPublishedAt: legacyData?.publishedAt,
+      legacyPublishedBy: legacyData?.publishedBy,
+    });
+    if (resolved.publishedAt != null) {
+      data.publishedAt = resolved.publishedAt;
+      if (resolved.publishedBy != null) data.publishedBy = resolved.publishedBy;
+      // Sana el doc tenant para que Ops / refreshes no vuelvan a ver BOR por sombra.
+      if (resolved.inheritedFromLegacy) {
+        setDoc(primaryRef, {
+          publishedAt: resolved.publishedAt,
+          ...(resolved.publishedBy != null ? { publishedBy: resolved.publishedBy } : {}),
+        }, { merge: true }).catch(() => {});
+      }
+    }
+    return { id: primary.id, data };
+  }
+
+  if (legacyData) {
+    return { id: legacyId, data: legacyData };
   }
   return null;
 }
 
 /** Fusiona tenant + legacy: puestos/bandas de ambos docs; trailing del primero que lo tenga.
- *  publishedAt: si existe doc tenant, manda ese (aunque no tenga publishedAt = borrador).
- *  No heredar publishedAt legacy si el doc tenant ya existe sin publicar. */
+ *  publishedAt: tenant gana si lo tiene; si no, se hereda del legacy (no dejar que un
+ *  doc tenant de puestos/actividad tape una publicación vigente). */
 export async function fetchMergedPlanificacionEstadoData(
   empresaId: string,
   objectiveId: string,
@@ -1045,7 +1099,6 @@ export async function fetchMergedPlanificacionEstadoData(
 
   let merged: Record<string, unknown> = {};
   let trailingFrom: Record<string, unknown> | null = null;
-  let primaryExists = false;
   let primaryPublishedAt: unknown = undefined;
   let primaryPublishedBy: unknown = undefined;
   let legacyPublishedAt: unknown = undefined;
@@ -1057,7 +1110,6 @@ export async function fetchMergedPlanificacionEstadoData(
     const d = snap.data() as Record<string, unknown>;
     const isPrimary = id === primaryId;
     if (isPrimary) {
-      primaryExists = true;
       primaryPublishedAt = d.publishedAt;
       primaryPublishedBy = d.publishedBy;
     } else {
@@ -1080,14 +1132,15 @@ export async function fetchMergedPlanificacionEstadoData(
     }
   }
 
-  if (primaryExists) {
-    if (primaryPublishedAt != null && primaryPublishedAt !== '') {
-      merged.publishedAt = primaryPublishedAt;
-      merged.publishedBy = primaryPublishedBy;
-    }
-  } else if (legacyPublishedAt != null && legacyPublishedAt !== '') {
-    merged.publishedAt = legacyPublishedAt;
-    merged.publishedBy = legacyPublishedBy;
+  const resolved = resolvePlanificacionPublishedFields({
+    primaryPublishedAt,
+    primaryPublishedBy,
+    legacyPublishedAt,
+    legacyPublishedBy,
+  });
+  if (resolved.publishedAt != null) {
+    merged.publishedAt = resolved.publishedAt;
+    if (resolved.publishedBy != null) merged.publishedBy = resolved.publishedBy;
   }
 
   if (trailingFrom) {

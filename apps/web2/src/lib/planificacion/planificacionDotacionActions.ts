@@ -1,6 +1,7 @@
 import {
     deleteField,
     doc,
+    getDoc,
     setDoc,
     updateDoc,
     writeBatch,
@@ -136,7 +137,7 @@ export async function savePlanificacionEmpPosition({
         await updateDoc(stateRef, estadoPayload);
     } catch (e: any) {
         if (e?.code === 'not-found') {
-            await setDoc(stateRef, {
+            const createPayload: Record<string, unknown> = {
                 empresaId,
                 objectiveId: selectedObjective,
                 objetivoId: selectedObjective,
@@ -146,7 +147,23 @@ export async function savePlanificacionEmpPosition({
                 mes: month,
                 defaultPositionByEmp: posName ? { [empId]: posName } : {},
                 defaultShiftByEmp: shiftCode ? { [empId]: shiftCode.toUpperCase() } : {},
-            }, { merge: true });
+            };
+            try {
+                const legacyId = buildPlanificacionEstadoDocId('', selectedObjective, year, month);
+                if (legacyId !== stateKey) {
+                    const legacySnap = await getDoc(doc(db, 'planificacion_estados', legacyId));
+                    if (legacySnap.exists()) {
+                        const ld = legacySnap.data() as Record<string, unknown>;
+                        if (ld.publishedAt != null && ld.publishedAt !== '') {
+                            createPayload.publishedAt = ld.publishedAt;
+                            if (ld.publishedBy != null) createPayload.publishedBy = ld.publishedBy;
+                        }
+                    }
+                }
+            } catch {
+                // best-effort
+            }
+            await setDoc(stateRef, createPayload, { merge: true });
         } else if (e?.code === 'permission-denied') {
             console.warn('[plan] planificacion_estados sin permiso (puesto ya guardado en legajo)', e);
         } else {

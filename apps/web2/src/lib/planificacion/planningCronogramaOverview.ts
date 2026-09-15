@@ -1,4 +1,4 @@
-import { collection, doc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
@@ -128,7 +128,8 @@ export async function touchPlanificacionEstadoActivity(params: {
   const { empresaId, objectiveId, year, month, actorName } = params;
   if (!empresaId?.trim() || !objectiveId?.trim() || !actorName?.trim()) return;
   const stateKey = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
-  await setDoc(doc(db, 'planificacion_estados', stateKey), {
+  const primaryRef = doc(db, 'planificacion_estados', stateKey);
+  const payload: Record<string, unknown> = {
     empresaId,
     objectiveId,
     objetivoId: objectiveId,
@@ -138,7 +139,30 @@ export async function touchPlanificacionEstadoActivity(params: {
     mes: month,
     lastModifiedAt: serverTimestamp(),
     lastModifiedBy: actorName,
-  }, { merge: true });
+  };
+  // Si el doc tenant aún no tiene publishedAt, no tapar una publicación legacy.
+  try {
+    const primary = await getDoc(primaryRef);
+    const primaryPublished = primary.exists()
+      ? (primary.data() as Record<string, unknown>).publishedAt
+      : undefined;
+    if (primaryPublished == null || primaryPublished === '') {
+      const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
+      if (legacyId !== stateKey) {
+        const legacy = await getDoc(doc(db, 'planificacion_estados', legacyId));
+        if (legacy.exists()) {
+          const ld = legacy.data() as Record<string, unknown>;
+          if (ld.publishedAt != null && ld.publishedAt !== '') {
+            payload.publishedAt = ld.publishedAt;
+            if (ld.publishedBy != null) payload.publishedBy = ld.publishedBy;
+          }
+        }
+      }
+    }
+  } catch {
+    // best-effort; el touch de actividad no debe fallar por esto
+  }
+  await setDoc(primaryRef, payload, { merge: true });
 }
 
 /** SuperAdmin: panorama de cronogramas por objetivo en un mes (cualquier estado). */
