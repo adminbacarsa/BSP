@@ -193,6 +193,10 @@ import {
     applyPlanificacionContextChange,
     applyPlanificacionGrupoChange,
 } from '@/lib/planificacion/planificacionContextNavigation';
+import {
+    bumpPlanificacionAutoV2Progress,
+    generatePlanificacionAutoScheduleV2,
+} from '@/lib/planificacion/generatePlanificacionAutoScheduleV2';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -5314,156 +5318,38 @@ export default function PlanificacionPage() {
     };
 
     const bumpAutoV2Progress = async (pct: number, label: string) => {
-        setAutoV2Progress({ pct, label });
-        await new Promise<void>((r) => {
-            requestAnimationFrame(() => requestAnimationFrame(() => r()));
+        await bumpPlanificacionAutoV2Progress(setAutoV2Progress, pct, label);
+    };
+
+    /** Viabilidad del cronograma (motor COSP) antes de generar. */
+    const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> =>
+        generatePlanificacionAutoScheduleV2({
+            selectedObjective,
+            positionStructure,
+            planningDotacionEmployees,
+            currentDate,
+            daysInMonth,
+            clients,
+            slaVendidas,
+            autoV2BudgetMode,
+            autoContingenciaDias,
+            autoRotateForce,
+            autoAjustarCrono,
+            loadAbsencesForRange,
+            mergeAbsencesFromLocalGrid,
+            setAutoV2Loading,
+            setAutoV2Progress,
+            setAutoAbsencesMap,
+            setAutoContingenciaDias,
+            setAutoCycles,
+            setAutoV2CoveragePreflight,
+            setAutoV2Report,
+            setAutoPlanningBrainReport,
+            autoPlanningBrainInputRef,
+            autoPlanningBrainRef,
+            autoSelectedCyclesRef,
+            autoV2ReportRef,
         });
-    };
-
-    /**
-     * Viabilidad del cronograma (motor COSP) antes de generar.
-     */
-    const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> => {
-        if (!selectedObjective) return { ok: false, cycles: [] };
-        if (!positionStructure.length) { toast.error('No hay puestos/SLA configurados para este objetivo'); return { ok: false, cycles: [] }; }
-        if (!planningDotacionEmployees.length) { toast.error('No hay empleados activos en la dotación (REF/ESC no cuentan)'); return { ok: false, cycles: [] }; }
-
-        setAutoV2Loading(true);
-        setAutoV2Progress({ pct: 4, label: 'Iniciando análisis…' });
-        try {
-            const SHIFT_HRS_LOCAL: Record<string,number> = { M:8, T:8, N:8, D12:12, N12:12 };
-
-            // Cargar ausencias que SOLAPAN con el mes (vacaciones, ART, licencias en curso)
-            const monthStart = new Date(currentDate.getFullYear(), currentDate.getMonth(), 1);
-            const monthEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth()+1, 0, 23, 59, 59);
-            await bumpAutoV2Progress(12, 'Cargando ausencias y licencias del mes…');
-            const absences = await loadAbsencesForRange(monthStart, monthEnd);
-            mergeAbsencesFromLocalGrid(absences, planningDotacionEmployees.map((e: any) => e.id), monthStart, monthEnd);
-            setAutoAbsencesMap(absences);
-
-            // Días V/L/E que el cerebro maneja automáticamente (modo12DaysAuto)
-            const autoModo12AbsDays = new Set<string>();
-            for (const map of Object.values(absences)) {
-                if (!map) continue;
-                map.forEach((code, ds) => { if (['V','L','E'].includes(String(code).toUpperCase())) autoModo12AbsDays.add(ds); });
-            }
-            // Limpiar contingencia manual que solapa con ausencias auto
-            setAutoContingenciaDias(prev => {
-                const next = new Set([...prev].filter(d => !autoModo12AbsDays.has(d)));
-                return next.size !== prev.size ? next : prev;
-            });
-
-            // Acumular cola CCT del mes anterior (26 → fin) por empleado
-            const empMonthlyInitial: Record<string,number> = {};
-            planningDotacionEmployees.forEach((emp: any) => { empMonthlyInitial[emp.id] = 0; });
-            const cyclePreStart = new Date(currentDate.getFullYear(), currentDate.getMonth() - 1, 26);
-            const cyclePreEnd   = new Date(currentDate.getFullYear(), currentDate.getMonth(), 0, 23, 59, 59);
-            await bumpAutoV2Progress(32, 'Leyendo cola CCT (26 → fin mes anterior)…');
-            const prevTailSnap  = await getDocs(query(
-                collection(db, 'turnos'),
-                where('objectiveId', '==', selectedObjective),
-                where('startTime', '>=', Timestamp.fromDate(cyclePreStart)),
-                where('startTime', '<=', Timestamp.fromDate(cyclePreEnd))
-            ));
-            prevTailSnap.docs.forEach(d => {
-                const data = d.data() as any;
-                if (!turnoCuentaParaCronoPlanificado(data, selectedObjective)) return;
-                const empId = data.employeeId; if (!empId) return;
-                if (PLANNING_NON_BILLABLE_CODES.has(String(data.code||'').toUpperCase())) return;
-                const h = Number(data.hours) || SHIFT_HRS_LOCAL[String(data.code||'').toUpperCase()] || 8;
-                empMonthlyInitial[empId] = (empMonthlyInitial[empId] || 0) + h;
-            });
-
-            // Viabilidad: NO descontar la grilla actual (shiftsMap / pending).
-            // Eso medía "cuánto cupo queda si no sobreescribo", no "si la dotación puede cumplir el SLA".
-            // El generador clásico sí usa ese descuento para recortes; acá solo cola CCT + ausencias.
-
-            const client = clients.find((c:any) => c.objetivos?.some((o:any) => (o.id || o.name) === selectedObjective));
-            const objMeta: any = client?.objetivos?.find((o:any) => (o.id || o.name) === selectedObjective);
-            await bumpAutoV2Progress(52, 'Cerebro Auto: esquema, dotación y Modo 12…');
-            await new Promise<void>((r) => setTimeout(r, 0));
-            const v2Pos = positionStructure as import('@/lib/planificacion/autoScheduleEngineV2').V2PositionDef[];
-            const autoCronogramRulesFeas = resolveCronogramPlanningRules(v2Pos);
-            const autoScheduleProfileFeas = buildObjectiveScheduleProfile(v2Pos);
-            const autoCycleOverride = autoScheduleProfileFeas.cyclePreference[0] ?? '6+2';
-            const brainInput = {
-                positions: positionStructure,
-                employees: planningDotacionEmployees.map((e:any) => ({
-                    id: e.id,
-                    nombre: e.nombre || e.name,
-                    lat: typeof e.lat === 'number' ? e.lat : null,
-                    lng: typeof e.lng === 'number' ? e.lng : null,
-                    preferredObjectiveId: e.preferredObjectiveId,
-                })),
-                daysInMonth,
-                empMonthlyInitial,
-                absences,
-                slaVendidas,
-                budgetMode: autoV2BudgetMode,
-                objectiveId: selectedObjective,
-                objectiveLat: typeof objMeta?.lat === 'number' ? objMeta.lat : null,
-                objectiveLng: typeof objMeta?.lng === 'number' ? objMeta.lng : null,
-                getDayLetter,
-                getDateKey,
-                contingencyDaysManual: [...autoContingenciaDias].filter(d => !autoModo12AbsDays.has(d)),
-                rotateShiftsOverride: autoRotateForce ?? (autoCronogramRulesFeas.generation.allowGlobalRotateShifts ? undefined : false),
-                ajustarCronoOverride: autoAjustarCrono,
-                cycleOverride: autoCycleOverride,
-                headcountByPax: resolveObjectiveScheduleFlags(v2Pos).headcountByPax,
-            };
-            autoPlanningBrainInputRef.current = brainInput;
-            const brain = resolveAutoPlanningBrain(brainInput);
-            autoPlanningBrainRef.current = brain;
-            setAutoPlanningBrainReport(brain);
-
-            if (!brain.contingencyOk) {
-                brain.contingencyMessages.forEach(msg => toast.error(msg, { duration: 9000 }));
-                autoV2ReportRef.current = brain.feasibility;
-                setAutoV2Report(brain.feasibility);
-                return { ok: false, cycles: brain.cycles };
-            }
-
-            autoSelectedCyclesRef.current = brain.cycles;
-            setAutoCycles(brain.cycles);
-
-            await bumpAutoV2Progress(72, 'Leyendo demanda SLA del objetivo…');
-            const preflightDays = daysInMonth.map(day => {
-                const dateStr = getDateKey(day);
-                return { dateStr, dayLetter: getDayLetter(dateStr) };
-            });
-            const preflight = buildObjectiveCoveragePreflight({
-                positions: positionStructure,
-                days: preflightDays,
-                employees: planningDotacionEmployees.map((e: any) => ({ id: e.id, nombre: e.nombre, name: e.name })),
-                absences,
-                slaVendidas,
-                cycles: brain.cycles,
-                objectiveId: selectedObjective,
-                isPosActiveOnDay,
-                apretarCronoDays: brain.modo12DaysEngine,
-            });
-            setAutoV2CoveragePreflight(preflight);
-
-            await bumpAutoV2Progress(100, `Esquema ${brain.pickedCycle} · ${brain.staffing.servicioDiarioModo8}+${brain.staffing.poolFrancos} · viabilidad`);
-            await new Promise<void>((r) => setTimeout(r, 150));
-            autoV2ReportRef.current = brain.feasibility;
-            setAutoV2Report(brain.feasibility);
-            if (brain.pickedCycle === '4+2') {
-                toast.warning('Esquema 4+2 (D12/N12): ningún ciclo M/T/N 8h cerró con la dotación actual.', { duration: 8000 });
-            }
-            brain.warnings.forEach(w => toast.message(w, { duration: 6000 }));
-            // Déficit de horas/dotación = advertencia, NO bloqueo. El motor puede generar igual.
-            // Bloqueo duro = no se encontraron ciclos (brain.cycles vacío).
-            return { ok: brain.cycles.length > 0, cycles: brain.cycles };
-        } catch (e:any) {
-            toast.error('Error al analizar viabilidad');
-            console.error('[autoScheduleCOSP]', e);
-            return { ok: false, cycles: [] };
-        } finally {
-            setAutoV2Loading(false);
-            setAutoV2Progress(null);
-        }
-    };
 
     // Flujo completo: detectar esquema → si ok generar; si no ok, mostrar error
     const runFullGeneration = () => {
