@@ -3,6 +3,8 @@ import { httpsCallable } from 'firebase/functions';
 import { collection, getDocs, limit, query, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { functions, db, onSnapshotFresh } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { useVplanLabObjectives } from '@/hooks/useVplanLabObjectives';
 import {
   Activity, CheckCircle, XCircle, AlertCircle, Loader2,
   Database, Zap, Mail, HardDrive, Bell, Bot, Clock, Server,
@@ -22,6 +24,53 @@ interface CheckResult {
   group: string;
   icon: React.ElementType;
 }
+
+type PlanningAutomationUiResult = {
+  ok: boolean;
+  runId: string;
+  assignmentsGenerated: number;
+  assignmentsPersisted: number;
+  coverageRatio: number;
+  geminiApplied: boolean;
+  geminiCorrectionsApplied: number;
+  notes?: string[];
+  dryRun: boolean;
+};
+
+type OperationalAlertsUiResult = {
+  ok: boolean;
+  evaluatedShifts: number;
+  anomaliesDetected: number;
+  alertsCreated: number;
+  byType: Record<string, number>;
+};
+
+type ClosureChecklistUiResult = {
+  ok: boolean;
+  period: string;
+  checks: {
+    marcacionesOk: boolean;
+    cierresOk: boolean;
+    ausenciasOk: boolean;
+    coberturaOk: boolean;
+    listoParaCierre: boolean;
+  };
+  totals: {
+    turnos: number;
+    marcacionesPendientes: number;
+    turnosAbiertosFueraHorario: number;
+    ausenciasSinResolver: number;
+    inconsistenciasEstado: number;
+  };
+  horas: {
+    slaVendidas: number;
+    planificadasCobertura: number;
+    ejecutadasFichadas: number;
+    gapSlaVsPlan: number;
+    gapPlanVsEjecutado: number;
+  };
+  recomendaciones: string[];
+};
 
 const STATUS_ICON: Record<CheckStatus, React.ElementType> = {
   idle: AlertCircle,
@@ -275,13 +324,39 @@ function CredentialVault({ isSuperAdmin }: { isSuperAdmin: boolean }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export default function PlatformHealthTab() {
-  const { user, isSuperAdmin } = useAuth();
+  const { user, isSuperAdmin, canReadModule } = useAuth();
+  const { empresaId, empresa } = useEmpresa();
+  const { objectives, loading: loadingObjectives } = useVplanLabObjectives(empresaId);
   const [checks, setChecks] = useState<CheckResult[]>(INITIAL_CHECKS);
   const [running, setRunning] = useState(false);
   const [lastRun, setLastRun] = useState<string | null>(null);
   const [overallOk, setOverallOk] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
   const [rawReport, setRawReport] = useState<object | null>(null);
+  const now = new Date();
+  const [planYear, setPlanYear] = useState(now.getFullYear());
+  const [planMonth, setPlanMonth] = useState(now.getMonth() + 1);
+  const [selectedObjectiveId, setSelectedObjectiveId] = useState('');
+  const [planningBusy, setPlanningBusy] = useState(false);
+  const [planDryRun, setPlanDryRun] = useState(true);
+  const [planUseGemini, setPlanUseGemini] = useState(true);
+  const [planningResult, setPlanningResult] = useState<PlanningAutomationUiResult | null>(null);
+  const [alertsBusy, setAlertsBusy] = useState(false);
+  const [alertsResult, setAlertsResult] = useState<OperationalAlertsUiResult | null>(null);
+  const [closureBusy, setClosureBusy] = useState(false);
+  const [closureResult, setClosureResult] = useState<ClosureChecklistUiResult | null>(null);
+  const [automationError, setAutomationError] = useState<string | null>(null);
+
+  const canOperatePlanning = isSuperAdmin || canReadModule('PLANNING');
+  const canOperateOps = isSuperAdmin || canReadModule('OPERATIONS');
+  const canOperateReports = isSuperAdmin || canReadModule('REPORTS');
+  const currentEmpresaId = String(empresaId || '').trim();
+
+  useEffect(() => {
+    if (selectedObjectiveId) return;
+    if (!objectives.length) return;
+    setSelectedObjectiveId(objectives[0].objectiveId);
+  }, [objectives, selectedObjectiveId]);
 
   function updateCheck(label: string, patch: Partial<CheckResult>) {
     setChecks(prev => prev.map(c => c.label === label ? { ...c, ...patch } : c));
@@ -475,6 +550,91 @@ export default function PlatformHealthTab() {
   const errCount = checks.filter(c => c.status === 'error').length;
   const warnCount = checks.filter(c => c.status === 'warn').length;
 
+  async function runPlanningAutomation() {
+    if (!currentEmpresaId || !selectedObjectiveId) return;
+    setPlanningBusy(true);
+    setAutomationError(null);
+    try {
+      const fn = httpsCallable<
+        {
+          empresaId: string;
+          objectiveId: string;
+          year: number;
+          month: number;
+          applyGemini: boolean;
+          overwriteAutoDrafts: boolean;
+          dryRun: boolean;
+        },
+        PlanningAutomationUiResult
+      >(functions, 'runPlanningAutomationP0', { timeout: 210000 });
+      const { data } = await fn({
+        empresaId: currentEmpresaId,
+        objectiveId: selectedObjectiveId,
+        year: planYear,
+        month: planMonth,
+        applyGemini: planUseGemini,
+        overwriteAutoDrafts: true,
+        dryRun: planDryRun,
+      });
+      setPlanningResult(data);
+    } catch (e: any) {
+      setAutomationError(e?.message || 'No se pudo ejecutar la planificación automática.');
+    } finally {
+      setPlanningBusy(false);
+    }
+  }
+
+  async function runOperationalScanNow() {
+    if (!currentEmpresaId) return;
+    setAlertsBusy(true);
+    setAutomationError(null);
+    try {
+      const fn = httpsCallable<
+        {
+          empresaId: string;
+          lookbackHours: number;
+          lookaheadHours: number;
+          toleranceMinutes: number;
+        },
+        OperationalAlertsUiResult
+      >(functions, 'runOperationalAlertsScan', { timeout: 120000 });
+      const { data } = await fn({
+        empresaId: currentEmpresaId,
+        lookbackHours: 24,
+        lookaheadHours: 8,
+        toleranceMinutes: 25,
+      });
+      setAlertsResult(data);
+    } catch (e: any) {
+      setAutomationError(e?.message || 'No se pudo ejecutar el escaneo operativo.');
+    } finally {
+      setAlertsBusy(false);
+    }
+  }
+
+  async function runClosureChecklistNow() {
+    if (!currentEmpresaId) return;
+    setClosureBusy(true);
+    setAutomationError(null);
+    try {
+      const fn = httpsCallable<
+        { empresaId: string; year: number; month: number; persistSnapshot: boolean },
+        ClosureChecklistUiResult
+      >(functions, 'runOperationalClosureChecklist', { timeout: 120000 });
+      const { data } = await fn({
+        empresaId: currentEmpresaId,
+        year: planYear,
+        month: planMonth,
+        persistSnapshot: true,
+      });
+      setClosureResult(data);
+    } catch (e: any) {
+      setAutomationError(e?.message || 'No se pudo generar el checklist de cierre.');
+    } finally {
+      setClosureBusy(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -569,6 +729,153 @@ export default function PlatformHealthTab() {
           Presioná <span className="text-indigo-400 font-bold">Ejecutar diagnóstico</span> para verificar el estado de todos los servicios.
         </div>
       )}
+
+      <div className="rounded-2xl border border-indigo-700/50 bg-slate-900 p-5 shadow-sm space-y-4">
+        <div>
+          <h3 className="text-base font-black text-white">Automatización operativa (P0)</h3>
+          <p className="text-xs text-slate-400 mt-1">
+            Ejecutá controles automáticos de planificación, alertas de anomalías y checklist de cierre sin salir del panel.
+          </p>
+        </div>
+
+        {!currentEmpresaId && (
+          <div className="rounded-xl border border-amber-700/50 bg-amber-950/30 p-3 text-xs text-amber-200">
+            No hay empresa activa en sesión. Seleccioná una empresa para ejecutar automatizaciones.
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">Período operativo</p>
+            <div className="grid grid-cols-2 gap-2">
+              <input
+                type="number"
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                value={planYear}
+                onChange={(e) => setPlanYear(Number(e.target.value))}
+              />
+              <input
+                type="number"
+                min={1}
+                max={12}
+                className="rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white"
+                value={planMonth}
+                onChange={(e) => setPlanMonth(Number(e.target.value))}
+              />
+            </div>
+            <p className="text-[10px] text-slate-500 mt-2">
+              Empresa: <span className="font-bold text-slate-300">{empresa?.name || currentEmpresaId || '—'}</span>
+            </p>
+          </div>
+
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-2">Planificación automática</p>
+            <select
+              className="w-full rounded-lg border border-slate-700 bg-slate-900 px-2 py-1.5 text-xs text-white"
+              value={selectedObjectiveId}
+              onChange={(e) => setSelectedObjectiveId(e.target.value)}
+              disabled={loadingObjectives || !currentEmpresaId}
+            >
+              <option value="">Seleccionar objetivo...</option>
+              {objectives.map((o) => (
+                <option key={`${o.clientId}_${o.objectiveId}`} value={o.objectiveId}>
+                  {o.clientName} → {o.objectiveName}
+                </option>
+              ))}
+            </select>
+            <div className="mt-2 space-y-1 text-[11px] text-slate-300">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={planDryRun} onChange={(e) => setPlanDryRun(e.target.checked)} />
+                Simulación (no escribe turnos)
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={planUseGemini} onChange={(e) => setPlanUseGemini(e.target.checked)} />
+                Ajuste fino IA (Gemini)
+              </label>
+            </div>
+            <button
+              type="button"
+              onClick={runPlanningAutomation}
+              disabled={!canOperatePlanning || !currentEmpresaId || !selectedObjectiveId || planningBusy}
+              className="mt-3 w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-bold text-white hover:bg-indigo-500 disabled:opacity-50"
+            >
+              {planningBusy ? 'Ejecutando…' : 'Ejecutar planificación P0'}
+            </button>
+          </div>
+
+          <div className="rounded-xl border border-slate-700 bg-slate-950/60 p-3 space-y-2">
+            <p className="text-[11px] font-black uppercase tracking-widest text-slate-400">Control y cierre</p>
+            <button
+              type="button"
+              onClick={runOperationalScanNow}
+              disabled={!canOperateOps || !currentEmpresaId || alertsBusy}
+              className="w-full rounded-lg bg-emerald-700 px-3 py-2 text-xs font-bold text-white hover:bg-emerald-600 disabled:opacity-50"
+            >
+              {alertsBusy ? 'Escaneando alertas…' : 'Escanear alertas operativas'}
+            </button>
+            <button
+              type="button"
+              onClick={runClosureChecklistNow}
+              disabled={!canOperateReports || !currentEmpresaId || closureBusy}
+              className="w-full rounded-lg bg-slate-700 px-3 py-2 text-xs font-bold text-white hover:bg-slate-600 disabled:opacity-50"
+            >
+              {closureBusy ? 'Generando checklist…' : 'Generar checklist cierre'}
+            </button>
+          </div>
+        </div>
+
+        {automationError && (
+          <div className="rounded-xl border border-rose-700/50 bg-rose-950/30 p-3 text-xs text-rose-200">
+            {automationError}
+          </div>
+        )}
+
+        {(planningResult || alertsResult || closureResult) && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Resultado planificación</p>
+              {planningResult ? (
+                <div className="text-xs text-slate-200 space-y-1">
+                  <p>Run: <span className="font-mono text-indigo-300">{planningResult.runId}</span></p>
+                  <p>Cobertura: <span className="font-bold">{Math.round((planningResult.coverageRatio || 0) * 100)}%</span></p>
+                  <p>Turnos: {planningResult.assignmentsGenerated} gen / {planningResult.assignmentsPersisted} persistidos</p>
+                  <p>Gemini: {planningResult.geminiApplied ? `sí (${planningResult.geminiCorrectionsApplied})` : 'no'}</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Resultado alertas IA</p>
+              {alertsResult ? (
+                <div className="text-xs text-slate-200 space-y-1">
+                  <p>Turnos evaluados: <span className="font-bold">{alertsResult.evaluatedShifts}</span></p>
+                  <p>Anomalías: <span className="font-bold">{alertsResult.anomaliesDetected}</span></p>
+                  <p>Alertas creadas: <span className="font-bold text-emerald-300">{alertsResult.alertsCreated}</span></p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>
+              )}
+            </div>
+
+            <div className="rounded-xl border border-slate-700 bg-slate-950/50 p-3">
+              <p className="text-[11px] font-black uppercase tracking-widest text-slate-400 mb-1">Checklist de cierre</p>
+              {closureResult ? (
+                <div className="text-xs text-slate-200 space-y-1">
+                  <p>Período: <span className="font-bold">{closureResult.period}</span></p>
+                  <p>Listo para cierre: <span className={closureResult.checks.listoParaCierre ? 'text-emerald-300 font-bold' : 'text-amber-300 font-bold'}>{closureResult.checks.listoParaCierre ? 'Sí' : 'No'}</span></p>
+                  <p>Pendientes marcación: {closureResult.totals.marcacionesPendientes}</p>
+                  <p>Ausencias sin resolver: {closureResult.totals.ausenciasSinResolver}</p>
+                  <p>Gap SLA vs Plan: {closureResult.horas.gapSlaVsPlan} hs</p>
+                </div>
+              ) : (
+                <p className="text-xs text-slate-500">Sin ejecución en esta sesión.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Bóveda de credenciales — solo SuperAdmin */}
       <CredentialVault isSuperAdmin={isSuperAdmin} />
