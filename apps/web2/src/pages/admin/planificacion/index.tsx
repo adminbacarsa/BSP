@@ -324,6 +324,7 @@ import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageMo
 import PlanningCoverageVerificationModal from '@/components/planificacion/PlanningCoverageVerificationModal';
 import PlanningCctCapacityModal from '@/components/planificacion/PlanningCctCapacityModal';
 import PlanningHoursBreakdownModal from '@/components/planificacion/PlanningHoursBreakdownModal';
+import PlanningGroupFormModal from '@/components/planificacion/PlanningGroupFormModal';
 import { PlanningAutoScheduleModal } from '@/components/planificacion/PlanningAutoScheduleModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/components/planificacion/PlanningSlaGapCloseModal';
@@ -12157,84 +12158,26 @@ export default function PlanificacionPage() {
             />
         {/* MODAL: Crear / Editar grupo de objetivos */}
         {showGrupoForm && (
-            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 backdrop-blur-sm" onClick={() => setShowGrupoForm(false)}>
-                <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
-                    <div className="p-5 border-b bg-slate-50 flex justify-between items-center">
-                        <h3 className="font-black text-base flex items-center gap-2 text-violet-700">
-                            <Layers size={16}/>{grupoFormMode === 'new' ? 'Nuevo grupo de objetivos' : 'Editar grupo'}
-                        </h3>
-                        <button onClick={() => setShowGrupoForm(false)} className="text-slate-400 hover:text-slate-600"><X size={18}/></button>
-                    </div>
-                    <div className="p-5 space-y-4 overflow-y-auto">
-                        <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">Nombre del grupo</label>
-                            <input
-                                type="text"
-                                value={grupoFormNombre}
-                                onChange={e => setGrupoFormNombre(e.target.value)}
-                                placeholder="Ej: Banco Nación — Sucursales Norte"
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                            />
-                        </div>
-                        <div>
-                            <label className="block text-xs font-bold text-slate-600 mb-1">Cliente</label>
-                            <select
-                                value={grupoFormClientId}
-                                onChange={e => { setGrupoFormClientId(e.target.value); setGrupoFormObjectiveIds([]); }}
-                                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-violet-400"
-                            >
-                                <option value="">— Selecionar cliente —</option>
-                                {[...clients].sort((a: any, b: any) => a.name.localeCompare(b.name)).map((c: any) => (
-                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                ))}
-                            </select>
-                        </div>
-                        {grupoFormClientId && (
-                            <div>
-                                <label className="block text-xs font-bold text-slate-600 mb-2">
-                                    Objetivos del grupo <span className="text-slate-400 font-normal">(mínimo 2)</span>
-                                </label>
-                                <div className="space-y-1.5 max-h-52 overflow-y-auto pr-1">
-                                    {((clients.find((c: any) => c.id === grupoFormClientId)?.objetivos || []) as any[])
-                                        .sort((a: any, b: any) => a.name.localeCompare(b.name))
-                                        .map((o: any) => {
-                                            const oId = o.id || o.name;
-                                            const checked = grupoFormObjectiveIds.includes(oId);
-                                            return (
-                                                <label key={oId} className={`flex items-center gap-2.5 px-3 py-2 rounded-lg cursor-pointer transition-colors ${checked ? 'bg-violet-50 border border-violet-200' : 'bg-slate-50 border border-transparent hover:bg-slate-100'}`}>
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={checked}
-                                                        onChange={() => setGrupoFormObjectiveIds(prev =>
-                                                            prev.includes(oId) ? prev.filter(x => x !== oId) : [...prev, oId]
-                                                        )}
-                                                        className="accent-violet-600"
-                                                    />
-                                                    <span className="text-sm font-medium text-slate-700">{o.name}</span>
-                                                </label>
-                                            );
-                                        })
-                                    }
-                                </div>
-                                {grupoFormObjectiveIds.length > 0 && (
-                                    <p className="mt-1.5 text-[11px] text-violet-600 font-semibold">{grupoFormObjectiveIds.length} objetivo{grupoFormObjectiveIds.length !== 1 ? 's' : ''} seleccionado{grupoFormObjectiveIds.length !== 1 ? 's' : ''}</p>
-                                )}
-                            </div>
-                        )}
-                    </div>
-                    <div className="p-4 border-t bg-slate-50 flex justify-end gap-2">
-                        <button onClick={() => setShowGrupoForm(false)} className="px-4 py-2 rounded-lg text-sm font-bold text-slate-600 hover:bg-slate-100 transition-colors">Cancelar</button>
-                        <button
-                            onClick={handleSaveGrupo}
-                            disabled={savingGrupo || !grupoFormNombre.trim() || !grupoFormClientId || grupoFormObjectiveIds.length < 2}
-                            className="px-5 py-2 rounded-lg text-sm font-black bg-violet-600 text-white hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
-                        >
-                            {savingGrupo ? <Loader2 size={13} className="animate-spin"/> : <Save size={13}/>}
-                            {grupoFormMode === 'new' ? 'Crear grupo' : 'Guardar cambios'}
-                        </button>
-                    </div>
-                </div>
-            </div>
+            <PlanningGroupFormModal
+                mode={grupoFormMode}
+                name={grupoFormNombre}
+                clientId={grupoFormClientId}
+                objectiveIds={grupoFormObjectiveIds}
+                clients={clients}
+                saving={savingGrupo}
+                onClose={() => setShowGrupoForm(false)}
+                onNameChange={setGrupoFormNombre}
+                onClientChange={(clientId) => {
+                    setGrupoFormClientId(clientId);
+                    setGrupoFormObjectiveIds([]);
+                }}
+                onToggleObjective={(objectiveId) => setGrupoFormObjectiveIds((previous) =>
+                    previous.includes(objectiveId)
+                        ? previous.filter((id) => id !== objectiveId)
+                        : [...previous, objectiveId]
+                )}
+                onSave={handleSaveGrupo}
+            />
         )}
         {/* MODAL CREAR EVENTO */}
         {showEventoCreateModal && (
