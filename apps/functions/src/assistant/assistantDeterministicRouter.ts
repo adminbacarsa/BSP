@@ -24,6 +24,10 @@ import {
   formatListadoAusentesLicenciasParaChat,
   canQueryClientsCrm,
   type AssistantToolContext,
+  ejecutarMapaServiciosObjetivosEmpresa,
+  ejecutarDondeTrabajaEmpleado,
+  ejecutarMapaDotacionPreferidaEmpresa,
+  ejecutarEstadoCoberturaObjetivoMes,
 } from './assistantDataTools';
 
 export type AssistantRecentMessage = { role: 'user' | 'assistant'; content: string };
@@ -2290,6 +2294,162 @@ export function tryDeterministicModuleHelpMenuReply(
   return buildModuleHelpMenuReply(moduleKey);
 }
 
+
+function matchMapaServiciosIntent(t: string): boolean {
+  // `t` ya normalizado (sin tildes).
+  if (/\b(donde\s+trabaja|dotacion|cobertura|planificar|automatizar)\b/.test(t)) return false;
+  return (
+    (/\b(servicios?|sla|contratos?)\b/.test(t) && /\b(lista|listar|mapa|todos|catalogo|cuales|que)\b/.test(t)) ||
+    /\b(mapa\s+de\s+(la\s+)?plataforma|todos\s+los\s+objetivos\s+con\s+(sla|contrato)|que\s+servicios\s+hay)\b/.test(t)
+  );
+}
+
+function matchDondeTrabajaIntent(t: string): { ok: boolean; nombre?: string } {
+  const m1 = t.match(/\b(?:donde\s+trabaja|en\s+que\s+objetivo\s+esta|a\s+que\s+sede\s+pertenece|en\s+que\s+sede\s+esta)\s+(.+)$/i);
+  if (m1) {
+    const nombre = m1[1].replace(/\?+$/, '').trim();
+    if (nombre.length >= 2) return { ok: true, nombre };
+  }
+  if (/\b(donde\s+trabaja|objetivo\s+preferido|sede\s+asignada)\b/.test(t)) {
+    // "dónde trabaja Romero" already caught; bare phrase without name → ask
+    return { ok: true };
+  }
+  return { ok: false };
+}
+
+function matchDotacionPreferidaIntent(t: string): { ok: boolean; objetivo?: string } {
+  const m1 = t.match(/\b(?:quienes\s+(?:trabajan|estan)\s+en|dotacion\s+(?:de|en|preferida\s+de)|asignados?\s+a)\s+(.+)$/i);
+  if (m1) {
+    const objetivo = m1[1].replace(/\?+$/, '').trim();
+    if (objetivo.length >= 2) return { ok: true, objetivo };
+  }
+  if (/\b(dotacion\s+preferida|mapa\s+de\s+dotacion|plantilla\s+por\s+(objetivo|sede))\b/.test(t)) {
+    return { ok: true };
+  }
+  return { ok: false };
+}
+
+function matchEstadoCoberturaIntent(t: string): { ok: boolean; objetivo?: string } {
+  if (!/\b(cobertura|estado\s+de\s+plan|como\s+esta\s+la\s+plan|horas\s+vendidas\s+vs|sla\s+vs\s+plan)\b/.test(t)) {
+    return { ok: false };
+  }
+  const m1 = t.match(/\b(?:cobertura|plan(?:ificacion)?|estado)\s+(?:de|del|de la)?\s*(.+?)(?:\s+este\s+mes|\s+en\s+\w+)?$/i);
+  let objetivo: string | undefined;
+  if (m1) {
+    objetivo = m1[1]
+      .replace(/\b(cobertura|planificacion|plan|estado|objetivo|sla)\b/gi, '')
+      .replace(/\?+$/, '')
+      .trim();
+    if (objetivo.length < 2) objetivo = undefined;
+  }
+  return { ok: true, objetivo };
+}
+
+async function tryDeterministicPlatformIntelReply(
+  t: string,
+  toolCtx: AssistantToolContext,
+  raw: string,
+): Promise<string | null> {
+  if (matchMapaServiciosIntent(t)) {
+    const r = await ejecutarMapaServiciosObjetivosEmpresa(toolCtx, {});
+    if (String(r.error ?? '').trim()) return null;
+    const servicios = (r.servicios ?? []) as Array<Record<string, unknown>>;
+    const lines = servicios.slice(0, 40).map((s) => {
+      const hs = s.horas_vendidas_mes != null ? ` · ${s.horas_vendidas_mes} hs SLA` : '';
+      const put = s.cantidad_vigiladores_contrato != null ? ` · ${s.cantidad_vigiladores_contrato} vig.` : '';
+      return `- **${s.cliente}** → **${s.objetivo}**${put}${hs}`;
+    });
+    return (
+      `**Servicios y objetivos activos (${r.mes_yyyy_mm})** — ${r.total_servicios_activos_mes} contratos` +
+      (r.truncado ? ' (muestra parcial)' : '') +
+      `:\n\n${lines.join('\n')}\n\n` +
+      `Tocá una opción o pedime el estado de cobertura / planificar uno.\n\n` +
+      `- **Estado de cobertura de un objetivo**\n` +
+      `- **Planificar un objetivo este mes**\n` +
+      `- **¿Dónde trabaja un guardia?**`
+    ).slice(0, 7500);
+  }
+
+  const donde = matchDondeTrabajaIntent(t);
+  if (donde.ok) {
+    if (!donde.nombre) {
+      return 'Decime el **nombre y apellido** del colaborador y te digo su objetivo preferido y dónde concentró horas este mes.';
+    }
+    const r = await ejecutarDondeTrabajaEmpleado(toolCtx, { texto_empleado: donde.nombre });
+    if (String(r.error ?? '').trim() === 'empleado_no_encontrado') {
+      return `No encontré un legajo que coincida con «${donde.nombre}». Probá con apellido o legajo.`;
+    }
+    if (String(r.error ?? '').trim()) return null;
+    const emp = r.empleado as Record<string, unknown>;
+    const pref = r.objetivo_preferido_legajo as Record<string, unknown>;
+    const mes = (r.objetivos_con_turnos_en_el_mes ?? []) as Array<Record<string, unknown>>;
+    const prefLine =
+      pref?.objetivo
+        ? `Objetivo preferido del legajo: **${pref.cliente ? pref.cliente + ' · ' : ''}${pref.objetivo}**.`
+        : 'Sin objetivo preferido cargado en el legajo.';
+    const mesLines = mes.slice(0, 8).map(
+      (o) => `- **${o.cliente ? o.cliente + ' · ' : ''}${o.objetivo}** — ${o.horas_planificadas} hs (${o.turnos} turnos)`,
+    );
+    return (
+      `**${emp.nombre}**\n\n${prefLine}\n\n` +
+      (mesLines.length
+        ? `En **${r.mes_yyyy_mm}** concentró horas en:\n\n${mesLines.join('\n')}`
+        : `En **${r.mes_yyyy_mm}** no tiene horas de cobertura planificadas en la grilla.`)
+    ).slice(0, 7500);
+  }
+
+  const dot = matchDotacionPreferidaIntent(t);
+  if (dot.ok) {
+    const r = await ejecutarMapaDotacionPreferidaEmpresa(toolCtx, {
+      texto_objetivo: dot.objetivo,
+    });
+    if (String(r.error ?? '').trim()) return null;
+    const objetivos = (r.objetivos ?? []) as Array<Record<string, unknown>>;
+    if (!objetivos.length) {
+      return dot.objetivo
+        ? `No hay legajos con objetivo preferido que coincida con «${dot.objetivo}».`
+        : 'No hay dotación preferida cargada en los legajos activos.';
+    }
+    const blocks = objetivos.slice(0, 15).map((o) => {
+      const names = ((o.muestra_empleados ?? []) as Array<{ nombre?: string }>)
+        .map((e) => e.nombre)
+        .filter(Boolean)
+        .slice(0, 8)
+        .join(', ');
+      return (
+        `**${o.cliente ? o.cliente + ' · ' : ''}${o.objetivo}** — ${o.cantidad_empleados_preferidos} guardias` +
+        (names ? `\n${names}` : '')
+      );
+    });
+    return (
+      `**Dotación preferida** (${r.empleados_activos_considerados} activos` +
+      (r.sin_objetivo_preferido ? `, ${r.sin_objetivo_preferido} sin preferido` : '') +
+      `):\n\n${blocks.join('\n\n')}`
+    ).slice(0, 7500);
+  }
+
+  const cob = matchEstadoCoberturaIntent(t);
+  if (cob.ok && cob.objetivo) {
+    const r = await ejecutarEstadoCoberturaObjetivoMes(toolCtx, { texto_objetivo: cob.objetivo });
+    if (String(r.error ?? '').trim()) return null;
+    const obj = r.objetivo as Record<string, unknown>;
+    const tot = (r.totales ?? {}) as Record<string, unknown>;
+    const planif = (r.planificacion ?? {}) as Record<string, unknown>;
+    return (
+      `**Cobertura ${obj.cliente ? obj.cliente + ' · ' : ''}${obj.nombre}** (${r.mes_yyyy_mm || planif.mes_yyyy_mm})\n\n` +
+      `- SLA vendidas: **${tot.horas_vendidas_sla_mes ?? '—'} hs**\n` +
+      `- Planificadas: **${tot.horas_ya_planificadas_turnos_mes ?? '—'} hs**\n` +
+      `- Pendientes: **${tot.horas_pendientes_a_planificar ?? '—'} hs**\n` +
+      `- Cobertura: **${r.cobertura_pct_plan_vs_sla ?? '—'}%**\n` +
+      `- Grilla publicada: **${planif.publicada ? 'sí' : 'no'}**\n` +
+      `- Legajos con este objetivo preferido: **${r.empleados_con_objetivo_preferido ?? 0}**\n\n` +
+      `${r.recomendacion || ''}`
+    ).slice(0, 7500);
+  }
+
+  return null;
+}
+
 function tryDeterministicPlanningAutomateReply(t: string): string | null {
   if (!matchPlanningAutomateIntent(t)) return null;
   return (
@@ -2617,6 +2777,13 @@ export async function tryDeterministicDataReply(
   const mk = typeof moduleKey === 'string' && moduleKey.trim() ? moduleKey.trim() : null;
   const helpMenu = tryDeterministicModuleHelpMenuReply(raw, mk);
   if (helpMenu?.trim()) return helpMenu.trim();
+
+  try {
+    const intel = await tryDeterministicPlatformIntelReply(t, toolCtx, raw);
+    if (intel?.trim()) return intel.trim();
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicPlatformIntelReply', e);
+  }
 
 
   try {

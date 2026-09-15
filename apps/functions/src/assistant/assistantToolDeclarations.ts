@@ -515,6 +515,64 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
       required: [],
     },
   } as any,
+
+  {
+    name: 'mapa_servicios_objetivos_empresa',
+    description:
+      'Catálogo de servicios SLA activos del mes: Cliente → Objetivo, puestos, cantidad de vigiladores del contrato, bandas y horas vendidas. Usá para «qué servicios hay», «listame todos los SLA», «qué objetivos tienen contrato», «mapa de la plataforma», «con qué clientes trabajamos en servicios». Opcional filtro por cliente.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha_referencia: { type: SchemaType.STRING, description: 'YYYY-MM-DD en el mes a mapear (default hoy cliente).' },
+        texto_cliente: { type: SchemaType.STRING, description: 'Opcional: filtrar por nombre de cliente (ej. CASISA).' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas (default 80, máx 120).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'donde_trabaja_empleado',
+    description:
+      'Dónde está asignado un colaborador: objetivo preferido del legajo + objetivos donde tuvo horas planificadas en el mes. Usá para «dónde trabaja X», «en qué objetivo está Romero», «a qué sede pertenece», «en qué puestos planificaron a X este mes».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto_empleado: { type: SchemaType.STRING, description: 'Nombre/apellido del colaborador.' },
+        id_firestore_empleado: { type: SchemaType.STRING, description: 'ID Firestore del legajo si ya lo tenés.' },
+        fecha_referencia: { type: SchemaType.STRING, description: 'YYYY-MM-DD del mes a analizar (default hoy).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'mapa_dotacion_preferida_empresa',
+    description:
+      'Mapa de dotación preferida: qué empleados tienen cada objetivo como preferredObjective. Usá para «quiénes trabajan en Obrador», «dotación por objetivo», «quién está asignado a Casino», «plantilla por sede».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto_objetivo: { type: SchemaType.STRING, description: 'Opcional: filtrar un objetivo/sede.' },
+        limite_por_objetivo: { type: SchemaType.NUMBER, description: 'Muestra de nombres por objetivo (default 12).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'estado_cobertura_objetivo_mes',
+    description:
+      'Estado de planificación de un objetivo en el mes: horas SLA vendidas vs planificadas, % cobertura, si la grilla está publicada y cuántos legajos tienen ese objetivo preferido. Usá antes de planificar o para «cómo está la cobertura de X en octubre». Si faltan horas, sugerí proponer_planificar_objetivo_mes.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo/sede.' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID Firestore del objetivo.' },
+        fecha_referencia: { type: SchemaType.STRING, description: 'YYYY-MM-DD en el mes.' },
+        mes: { type: SchemaType.NUMBER, description: 'Mes 1-12 (alternativa a fecha_referencia).' },
+        anio: { type: SchemaType.NUMBER, description: 'Año (con mes).' },
+      },
+      required: [],
+    },
+  } as any,
   {
     name: 'proponer_planificar_objetivo_mes',
     description:
@@ -562,7 +620,7 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
   } as any,
 );
 
-export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
+export const ASSISTANT_TOOL_ROUNDS_MAX = 6;
 
 const WRITE_TOOL_MODULE_REQUIREMENTS: Record<string, string> = {
   proponer_extender_jornada: 'OPERATIONS',

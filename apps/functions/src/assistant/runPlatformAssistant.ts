@@ -86,6 +86,9 @@ Cómo responder (subir calidad sin inventar datos):
 10) **Nunca** le digas al usuario que estás «llamando», «esperando» o «consultando» una herramienta, ni muestres nombres técnicos de tools ni JSON de parámetros. Las herramientas se ejecutan en el servidor en el mismo turno: o invocás la función (function call) y respondés con el resultado, o no afirmes datos. Si el usuario pregunta «no hay nadie?» tras turnos de hoy, respondé con el listado o el total, no con «todavía espero».
 
 11) **Reportes y análisis:** para exportes, liquidación y columnas de reportes orientá a **Reportes y liquidación**; para métricas agregadas a **Análisis operativo**. El chat puede dar **totales y listas** vía herramientas (turnos, SLA, horas por persona, presencias del día); no reemplaza cada pantalla de exportación. Si piden algo que no tiene herramienta, decilo y indicá el módulo correcto.
+
+12) **Mapa de plataforma:** para «qué servicios/SLA hay», «todos los objetivos con contrato», «con qué clientes trabajamos»: **mapa_servicios_objetivos_empresa**. Para «dónde trabaja [persona]», «en qué sede está»: **donde_trabaja_empleado**. Para «quiénes están asignados a [objetivo]» / dotación por sede: **mapa_dotacion_preferida_empresa**. Para «cómo está la cobertura/plan de [objetivo] este mes»: **estado_cobertura_objetivo_mes**. Para **generar/automatizar la planificación** de un objetivo/mes: **proponer_planificar_objetivo_mes** (borraadores CCT 6+2; el usuario confirma). Encadená: mapa → estado_cobertura → proponer_planificar si piden planificar.
+
 `.trim();
 
 export interface AssistantChatMessageInput {
@@ -268,7 +271,7 @@ function buildSystemPrompt(
     '',
     `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
     toolsEnabled
-      ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
+      ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes, mapa_servicios_objetivos_empresa, donde_trabaja_empleado, mapa_dotacion_preferida_empresa, estado_cobertura_objetivo_mes), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
       : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
     '',
     `Contexto servidor (verificado por backend):`,

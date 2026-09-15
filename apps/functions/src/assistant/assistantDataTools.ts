@@ -3605,6 +3605,433 @@ function sanitizeGeminiStruct(value: unknown, depth = 0): unknown {
   return out;
 }
 
+
+function monthBoundsFromRefFecha(fechaYsMmDd: string): { desde: string; hasta: string; yyyyMm: string; year: number; month: number } {
+  parseYmd(fechaYsMmDd);
+  const [y, m] = fechaYsMmDd.split('-').map((x) => Number(x));
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const mm = String(m).padStart(2, '0');
+  return {
+    desde: `${y}-${mm}-01`,
+    hasta: `${y}-${mm}-${String(last).padStart(2, '0')}`,
+    yyyyMm: `${y}-${mm}`,
+    year: y,
+    month: m,
+  };
+}
+
+function empNombreLegible(data: Record<string, unknown>): string {
+  const ln = String(data.lastName ?? '').trim();
+  const fn = String(data.firstName ?? '').trim();
+  const name = String(data.name ?? data.nombre ?? '').trim();
+  return [ln, fn].filter(Boolean).join(', ') || name || [fn, ln].filter(Boolean).join(' ') || '(sin nombre)';
+}
+
+function summarizeSlaPositions(positions: unknown[]): { puestos: number; cantidad_vigiladores: number; bandas: string[] } {
+  let qty = 0;
+  const bandas = new Set<string>();
+  for (const raw of positions) {
+    if (!raw || typeof raw !== 'object') continue;
+    const p = raw as Record<string, unknown>;
+    const q = Number(p.quantity ?? p.qty ?? 1);
+    qty += Number.isFinite(q) && q > 0 ? q : 1;
+    const allowed = Array.isArray(p.allowedShiftTypes)
+      ? p.allowedShiftTypes
+      : Array.isArray(p.turnos)
+        ? p.turnos
+        : [];
+    for (const b of allowed) bandas.add(String(b ?? '').trim().toUpperCase());
+  }
+  return {
+    puestos: positions.length,
+    cantidad_vigiladores: qty,
+    bandas: [...bandas].filter(Boolean).slice(0, 12),
+  };
+}
+
+/**
+ * Mapa operativo de servicios SLA + objetivos de la empresa (catálogo para planificar).
+ */
+export async function ejecutarMapaServiciosObjetivosEmpresa(
+  ctx: AssistantToolContext,
+  args: { fecha_referencia?: string; texto_cliente?: string; limite?: number },
+): Promise<Record<string, unknown>> {
+  if (!canQueryServiciosSlaResumen(ctx)) {
+    return { error: 'sin_permiso_servicios_o_planificacion_requiere_MODULES_READ' };
+  }
+  const fecha = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+  const filtroCliente = String(args.texto_cliente ?? '').trim();
+  let limite = Math.floor(Number(args.limite ?? 80));
+  if (!Number.isFinite(limite) || limite < 10) limite = 80;
+  limite = Math.min(120, limite);
+
+  const db = admin.firestore();
+  const allSla = await loadServiciosSlaDocsEmpresa(db, ctx.empresaId, ctx.scopeEmpresa);
+  const objMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined, ctx.scopeEmpresa);
+  const rows: Array<Record<string, unknown>> = [];
+
+  for (const { id, row } of allSla) {
+    const desde = slaCampoFechaYmD(row.startDate ?? row.desde ?? row.inicioContrato ?? '');
+    const hasta = slaCampoFechaYmD(row.endDate ?? row.hasta ?? row.finContrato ?? '');
+    if (!desde || !hasta) continue;
+    if (!servicioSlaSolapaMesReferencia(desde, hasta, fecha)) continue;
+    if (!slaStatusOperativoComoPantallaServicios(row) && String(row.status ?? '').toUpperCase() === 'INACTIVE') continue;
+
+    const cliente = String(row.clientName ?? '').trim();
+    if (filtroCliente && !clientHaystackMatchesNeedle(filtroCliente, cliente)) continue;
+
+    const oid = String(row.objectiveId ?? '').trim();
+    const meta = oid ? objMap.get(oid) : undefined;
+    const positions = Array.isArray(row.positions) ? (row.positions as unknown[]) : [];
+    const posSum = summarizeSlaPositions(positions);
+    let horasVendidas = 0;
+    try {
+      horasVendidas = slaHorasVendidasMesCalendario(positions, desde, hasta, fecha).horas_vendidas_mes;
+    } catch {
+      horasVendidas = 0;
+    }
+
+    rows.push({
+      cliente: (meta?.clientName || cliente).slice(0, 100),
+      objetivo: (meta?.name || String(row.objectiveName ?? oid)).slice(0, 100),
+      id_objetivo: oid || null,
+      id_servicio_corto: id.slice(0, 14),
+      vigencia_desde: desde,
+      vigencia_hasta: hasta,
+      estado: String(row.status ?? '').slice(0, 24),
+      puestos: posSum.puestos,
+      cantidad_vigiladores_contrato: posSum.cantidad_vigiladores,
+      bandas: posSum.bandas,
+      horas_vendidas_mes: Math.round(horasVendidas * 10) / 10,
+      coverage_type: String(row.coverageType ?? '').slice(0, 24) || null,
+    });
+  }
+
+  rows.sort((a, b) =>
+    `${a.cliente} ${a.objetivo}`.localeCompare(`${b.cliente} ${b.objetivo}`, 'es'),
+  );
+  const muestra = rows.slice(0, limite);
+  const porCliente = new Map<string, number>();
+  for (const r of rows) {
+    const c = String(r.cliente ?? '—');
+    porCliente.set(c, (porCliente.get(c) ?? 0) + 1);
+  }
+
+  return {
+    fecha_referencia: fecha,
+    mes_yyyy_mm: fecha.slice(0, 7),
+    total_servicios_activos_mes: rows.length,
+    total_clientes_con_servicio: porCliente.size,
+    resumen_por_cliente: [...porCliente.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 40)
+      .map(([cliente, servicios]) => ({ cliente, servicios })),
+    servicios: muestra,
+    truncado: rows.length > muestra.length,
+    nota_tras_herramienta:
+      'Listá servicios como Cliente → Objetivo (puestos / hs vendidas del mes). Para planificar uno usá proponer_planificar_objetivo_mes o estado_cobertura_objetivo_mes. No inventes contratos fuera de esta lista.',
+  };
+}
+
+/**
+ * Dónde trabaja un colaborador: objetivo preferido (legajo) + objetivos con horas planificadas en el mes.
+ */
+export async function ejecutarDondeTrabajaEmpleado(
+  ctx: AssistantToolContext,
+  args: {
+    id_firestore_empleado?: string;
+    texto_empleado?: string;
+    fecha_referencia?: string;
+  },
+): Promise<Record<string, unknown>> {
+  if (!canUseEmployeeSearch(ctx) && ctx.persona !== 'EMPLOYEE') {
+    return { error: 'sin_permiso_para_buscar_personal' };
+  }
+  if (!canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_para_consultar_turnos' };
+  }
+
+  const fecha = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+  const bounds = monthBoundsFromRefFecha(fecha);
+
+  let empId = String(args.id_firestore_empleado ?? '').trim();
+  if (ctx.persona === 'EMPLOYEE') {
+    if (!ctx.selfEmployeeFirestoreId) return { error: 'portal_empleado_sin_legajo_vinculado' };
+    empId = ctx.selfEmployeeFirestoreId;
+  } else if (!empId) {
+    const texto = String(args.texto_empleado ?? '').trim();
+    if (texto.length < 2) return { error: 'falta_empleado_o_texto' };
+    const found = await resolverEmpleadoPorTexto(ctx, texto);
+    if (!found) return { error: 'empleado_no_encontrado', texto };
+    empId = found.id;
+  }
+
+  const db = admin.firestore();
+  const dataRaw = await assertEmployeeInEmpresa(db, empId, ctx.empresaId, ctx.scopeEmpresa);
+  if (!dataRaw) return { error: 'empleado_inexistente_o_fuera_de_empresa' };
+  const data = dataRaw as Record<string, unknown>;
+  const nombre = empNombreLegible(data);
+  const preferredObjectiveId = String(data.preferredObjectiveId ?? '').trim() || null;
+  const preferredObjectiveName = String(data.preferredObjectiveName ?? data.objectiveName ?? '').trim() || null;
+  const preferredClientId = String(data.preferredClientId ?? '').trim() || null;
+  const preferredClientName = String(data.preferredClientName ?? data.clientName ?? '').trim() || null;
+
+  const objMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined, ctx.scopeEmpresa);
+  const prefMeta = preferredObjectiveId ? objMap.get(preferredObjectiveId) : undefined;
+
+  let start: Timestamp;
+  let end: Timestamp;
+  try {
+    ({ start, end } = arRangeTimestamps(bounds.desde, bounds.hasta));
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+
+  const qTurnos = await queryTurnosEmpleadoEnRango(db, empId, start, end, 400);
+  const porObj = new Map<string, { horas: number; turnos: number; nombre: string; cliente: string }>();
+  for (const docSnap of qTurnos.docs) {
+    const row = docSnap.data() as Record<string, unknown>;
+    const hp = plannedCoverageHoursFromShiftRow(row);
+    if (hp <= 0) continue;
+    const oid = String(row.objectiveId ?? '').trim() || 'SIN_OBJETIVO';
+    const meta = objMap.get(oid);
+    const cur = porObj.get(oid) ?? {
+      horas: 0,
+      turnos: 0,
+      nombre: meta?.name || String(row.objectiveName ?? oid),
+      cliente: meta?.clientName || String(row.clientName ?? ''),
+    };
+    cur.horas += hp;
+    cur.turnos += 1;
+    porObj.set(oid, cur);
+  }
+
+  const objetivos_mes = [...porObj.entries()]
+    .map(([id_objetivo, v]) => ({
+      id_objetivo: id_objetivo === 'SIN_OBJETIVO' ? null : id_objetivo,
+      objetivo: v.nombre.slice(0, 100),
+      cliente: v.cliente.slice(0, 100),
+      horas_planificadas: Math.round(v.horas * 10) / 10,
+      turnos: v.turnos,
+      es_preferido: preferredObjectiveId != null && id_objetivo === preferredObjectiveId,
+    }))
+    .sort((a, b) => b.horas_planificadas - a.horas_planificadas)
+    .slice(0, 20);
+
+  const principal = objetivos_mes[0] ?? null;
+
+  return {
+    empleado: {
+      id_firestore: empId,
+      nombre,
+      legajo: String(data.fileNumber ?? data.legajo ?? '').trim() || null,
+      status: String(data.status ?? '').slice(0, 24) || null,
+    },
+    mes_yyyy_mm: bounds.yyyyMm,
+    objetivo_preferido_legajo: {
+      id_objetivo: preferredObjectiveId,
+      objetivo: (prefMeta?.name || preferredObjectiveName || null)?.toString().slice(0, 100) ?? null,
+      cliente: (prefMeta?.clientName || preferredClientName || null)?.toString().slice(0, 100) ?? null,
+      id_cliente: preferredClientId,
+    },
+    objetivos_con_turnos_en_el_mes: objetivos_mes,
+    objetivo_principal_del_mes: principal
+      ? { objetivo: principal.objetivo, cliente: principal.cliente, horas_planificadas: principal.horas_planificadas }
+      : null,
+    nota_tras_herramienta:
+      'Respondé primero el objetivo preferido del legajo y, si hay turnos, dónde concentró horas en el mes. No muestres IDs Firestore al usuario.',
+  };
+}
+
+/**
+ * Dotación preferida: quién está asignado (preferredObjective) a cada objetivo + muestra.
+ */
+export async function ejecutarMapaDotacionPreferidaEmpresa(
+  ctx: AssistantToolContext,
+  args: { texto_objetivo?: string; limite_por_objetivo?: number },
+): Promise<Record<string, unknown>> {
+  if (!canQueryEmpleadosPlantillaResumen(ctx)) {
+    return { error: 'sin_permiso_rrhh_o_planificacion' };
+  }
+  const db = admin.firestore();
+  const empDocs = await queryEmpleadosDocsScoped(db, ctx.empresaId, ctx.scopeEmpresa, 900);
+  const objMap = await objectivesMapForEmpresa(db, ctx.empresaId, undefined, ctx.scopeEmpresa);
+  const filtroObj = String(args.texto_objetivo ?? '').trim();
+  let limPorObj = Math.floor(Number(args.limite_por_objetivo ?? 12));
+  if (!Number.isFinite(limPorObj) || limPorObj < 3) limPorObj = 12;
+  limPorObj = Math.min(40, limPorObj);
+
+  type Bucket = {
+    id_objetivo: string;
+    objetivo: string;
+    cliente: string;
+    empleados: Array<{ nombre: string; legajo: string | null; id_firestore_corto: string }>;
+    total: number;
+  };
+  const byObj = new Map<string, Bucket>();
+  let sinPreferido = 0;
+  let activos = 0;
+
+  for (const d of empDocs) {
+    const data = d.data() as Record<string, unknown>;
+    const st = String(data.status ?? 'ACTIVE').toUpperCase();
+    if (st === 'INACTIVE' || st === 'INACTIVO') continue;
+    activos += 1;
+    const oid = String(data.preferredObjectiveId ?? '').trim();
+    if (!oid) {
+      sinPreferido += 1;
+      continue;
+    }
+    const meta = objMap.get(oid);
+    const objetivo = meta?.name || String(data.preferredObjectiveName ?? data.objectiveName ?? oid);
+    const cliente = meta?.clientName || String(data.preferredClientName ?? data.clientName ?? '');
+    if (filtroObj && !objectiveHaystackMatchesNeedle(filtroObj, objetivo, cliente)) continue;
+
+    const bucket =
+      byObj.get(oid) ??
+      ({
+        id_objetivo: oid,
+        objetivo: String(objetivo).slice(0, 100),
+        cliente: String(cliente).slice(0, 100),
+        empleados: [],
+        total: 0,
+      } as Bucket);
+    bucket.total += 1;
+    if (bucket.empleados.length < limPorObj) {
+      bucket.empleados.push({
+        nombre: empNombreLegible(data),
+        legajo: String(data.fileNumber ?? data.legajo ?? '').trim() || null,
+        id_firestore_corto: d.id.slice(0, 12),
+      });
+    }
+    byObj.set(oid, bucket);
+  }
+
+  const objetivos = [...byObj.values()].sort((a, b) => b.total - a.total || a.objetivo.localeCompare(b.objetivo, 'es'));
+
+  return {
+    empleados_activos_considerados: activos,
+    sin_objetivo_preferido: sinPreferido,
+    total_objetivos_con_dotacion: objetivos.length,
+    objetivos: objetivos.slice(0, 60).map((o) => ({
+      objetivo: o.objetivo,
+      cliente: o.cliente,
+      id_objetivo: o.id_objetivo,
+      cantidad_empleados_preferidos: o.total,
+      muestra_empleados: o.empleados.map((e) => ({ nombre: e.nombre, legajo: e.legajo })),
+    })),
+    truncado: objetivos.length > 60,
+    nota_tras_herramienta:
+      'Esta es la asignación preferida del legajo (preferredObjective), no necesariamente los turnos del mes. Para turnos reales usá donde_trabaja_empleado o listado_turnos_operativos_dia. No muestres IDs al usuario.',
+  };
+}
+
+/**
+ * Estado de cobertura/planificación de un objetivo en el mes (SLA vs plan + publicación).
+ */
+export async function ejecutarEstadoCoberturaObjetivoMes(
+  ctx: AssistantToolContext,
+  args: {
+    texto_objetivo?: string;
+    id_objetivo?: string;
+    fecha_referencia?: string;
+    mes?: number;
+    anio?: number;
+  },
+): Promise<Record<string, unknown>> {
+  if (!canQueryServiciosSlaResumen(ctx) || !canQueryShifts(ctx)) {
+    return { error: 'sin_permiso_planificacion_o_servicios' };
+  }
+
+  let fecha = String(args.fecha_referencia ?? ctx.referenceDateYsMmDd).trim();
+  if (args.mes && args.anio) {
+    const mm = String(args.mes).padStart(2, '0');
+    fecha = `${args.anio}-${mm}-15`;
+  }
+  try {
+    parseYmd(fecha);
+  } catch (e: any) {
+    return { error: e?.message ?? 'fecha_invalida' };
+  }
+  const bounds = monthBoundsFromRefFecha(fecha);
+
+  const resumen = await ejecutarResumenHorasObjetivoSlaPeriodo(ctx, {
+    id_objetivo: args.id_objetivo,
+    texto_objetivo: args.texto_objetivo,
+    fecha_referencia: fecha,
+  });
+  if (String(resumen.error ?? '').trim()) return resumen;
+
+  const objetivo = resumen.objetivo as { id_objetivo?: string; nombre?: string; cliente?: string } | undefined;
+  const oid = String(objetivo?.id_objetivo ?? args.id_objetivo ?? '').trim();
+
+  const db = admin.firestore();
+  let publicado = false;
+  let estadoKey: string | null = null;
+  if (oid) {
+    const keys = planificacionEstadoLookupDocIds(ctx.empresaId, oid, bounds.year, bounds.month);
+    for (const key of keys) {
+      const snap = await db.collection('planificacion_estados').doc(key).get();
+      if (snap.exists) {
+        estadoKey = key;
+        const st = snap.data() as Record<string, unknown>;
+        publicado = st.published === true || String(st.status ?? '').toUpperCase() === 'PUBLISHED';
+        break;
+      }
+    }
+  }
+
+  const tot = (resumen.totales && typeof resumen.totales === 'object'
+    ? (resumen.totales as Record<string, unknown>)
+    : resumen) as Record<string, unknown>;
+  const vendidas = Number(tot.horas_vendidas_sla_mes ?? 0);
+  const plan = Number(tot.horas_ya_planificadas_turnos_mes ?? 0);
+  const pendiente = Number(tot.horas_pendientes_a_planificar ?? Math.max(0, vendidas - plan));
+  const coberturaPct = vendidas > 0 ? Math.round((plan / vendidas) * 1000) / 10 : null;
+
+  // Dotación preferida en ese objetivo
+  let preferidos = 0;
+  if (oid) {
+    const empDocs = await queryEmpleadosDocsScoped(db, ctx.empresaId, ctx.scopeEmpresa, 900);
+    for (const d of empDocs) {
+      const data = d.data() as Record<string, unknown>;
+      const st = String(data.status ?? 'ACTIVE').toUpperCase();
+      if (st === 'INACTIVE' || st === 'INACTIVO') continue;
+      if (String(data.preferredObjectiveId ?? '').trim() === oid) preferidos += 1;
+    }
+  }
+
+  return {
+    ...resumen,
+    planificacion: {
+      mes_yyyy_mm: bounds.yyyyMm,
+      publicada: publicado,
+      doc_estado: estadoKey,
+    },
+    cobertura_pct_plan_vs_sla: coberturaPct,
+    empleados_con_objetivo_preferido: preferidos,
+    recomendacion:
+      pendiente > 0
+        ? 'Hay horas SLA pendientes de planificar. Podés usar proponer_planificar_objetivo_mes para generar borradores CCT 6+2.'
+        : publicado
+          ? 'Cobertura planificada al día o con exceso; la grilla está publicada.'
+          : 'Horas planificadas cubren el SLA o más; revisá publicación en Planificación y Turnos.',
+    nota_tras_herramienta:
+      'Resumí Cliente/Objetivo, hs vendidas vs planificadas, % cobertura, si está publicada y cuántos legajos tienen ese objetivo preferido. Si el usuario pide generar el mes, llamá proponer_planificar_objetivo_mes.',
+  };
+}
+
+
 export async function dispatchAssistantToolCall(
   ctx: AssistantToolContext,
   name: string,
@@ -3817,6 +4244,31 @@ async function dispatchAssistantToolCallInner(
       fecha: args.fecha != null ? String(args.fecha) : undefined,
       texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
       id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+    });
+  } else if (name === 'mapa_servicios_objetivos_empresa') {
+    raw = await ejecutarMapaServiciosObjetivosEmpresa(ctx, {
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+      texto_cliente: args.texto_cliente != null ? String(args.texto_cliente) : undefined,
+      limite: args.limite != null ? Number(args.limite) : undefined,
+    });
+  } else if (name === 'donde_trabaja_empleado') {
+    raw = await ejecutarDondeTrabajaEmpleado(ctx, {
+      id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+      texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+    });
+  } else if (name === 'mapa_dotacion_preferida_empresa') {
+    raw = await ejecutarMapaDotacionPreferidaEmpresa(ctx, {
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      limite_por_objetivo: args.limite_por_objetivo != null ? Number(args.limite_por_objetivo) : undefined,
+    });
+  } else if (name === 'estado_cobertura_objetivo_mes') {
+    raw = await ejecutarEstadoCoberturaObjetivoMes(ctx, {
+      texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+      id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+      fecha_referencia: args.fecha_referencia != null ? String(args.fecha_referencia) : undefined,
+      mes: args.mes != null ? Number(args.mes) : undefined,
+      anio: args.anio != null ? Number(args.anio) : undefined,
     });
   } else if (name === 'proponer_planificar_objetivo_mes') {
     raw = await ejecutarProponerPlanificarObjetivoMes(ctx, {

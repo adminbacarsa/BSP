@@ -31,10 +31,10 @@ const ACTION_MARKER_RE = /<!--COSP_ACTION:([\s\S]*?)-->/;
 
 const MODULE_SUGGESTIONS: Record<string, string[]> = {
   OPERATIONS:  ['¿Cuántos guardias activos hay ahora?', 'Marcá presente a [nombre]', '¿Hay vacantes sin cubrir hoy?'],
-  PLANNING:    ['¿Cuántas horas planificadas tiene [guardia] este mes?', '¿Qué puestos tienen vacantes en [objetivo]?', 'Automatizá la planificación de [objetivo]'],
-  RRHH:        ['¿Cuántas ausencias tiene [guardia] este mes?', '¿Qué guardias están de vacaciones?', 'Registrá una ausencia para [guardia]'],
+  PLANNING:    ['Listar servicios y objetivos con SLA', '¿Dónde trabaja [guardia]?', 'Estado de cobertura de [objetivo]', 'Planificar [objetivo] este mes'],
+  RRHH:        ['¿Dónde trabaja [guardia]?', 'Dotación preferida por objetivo', '¿Qué guardias están de vacaciones?'],
   CLIENTS:     ['¿Cuántos clientes activos hay?', '¿Qué objetivos tiene el cliente [nombre]?'],
-  SERVICES:    ['¿Cuántos SLA vigentes hay?', '¿Cuáles son las horas contratadas de [cliente]?'],
+  SERVICES:    ['Listar todos los servicios y objetivos', 'Estado de cobertura de [objetivo]', '¿Cuántos SLA vigentes hay?'],
   REPORTS:     ['¿Cuántas horas realizó [guardia] en julio?', 'Mostrá el resumen de cobertura del mes'],
   ANALYSIS:    ['¿Cuál es la cobertura real vs SLA este mes?', '¿Cuánto ausentismo hubo en los últimos 3 meses?'],
   DASHBOARD:   ['¿Cómo estamos hoy operativamente?', '¿Cuántos guardias están activos ahora?'],
