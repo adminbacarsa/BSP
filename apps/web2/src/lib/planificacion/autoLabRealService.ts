@@ -36,7 +36,7 @@ import {
     validatePlannerDotacionAgainstSla,
     dotacionValidationSummaryEs,
 } from './plannerDotacionValidator';
-import type { PlanningCoverageWisdom } from './planningCoverageWisdom';
+import type { PlanningAbsenceRecord, PlanningCoverageWisdom } from './planningCoverageWisdom';
 import { applySlaContractDotacion, assessSlaContractReadiness, buildPositionAssignmentsByEmp } from './slaContractPlanning';
 import { mergeEncargadoIntoAssignments } from '@/lib/servicios/encargadoPosition';
 import { cronogramSlaRuleWarnings, resolveCronogramPlanningRules } from './cronogramPlanningRules';

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CoverageVerificationReport } from '@/lib/planificacion/coverageVerification';
+import type { CoverageGap } from '@/lib/planificacion/coverageEngine';
 import type { AbsenceSplitAction } from '@/lib/planificacion/absenceSplitCoverage';
 import type { AbsenceCoveragePlan } from '@/lib/planificacion/absenceCoveragePlanner';
 import { ABSENCE_COVERAGE_STRATEGY_LABELS } from '@/lib/planificacion/absenceCoveragePlanner';

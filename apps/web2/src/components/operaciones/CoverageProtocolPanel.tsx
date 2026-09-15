@@ -861,6 +861,12 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: 'Intercambio de turno', status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName} intercambio · ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES', protocolStep: step.key }, tid));
       } else if (step.key === 'FT') {
+        const vacLabel = vacancyCoverageLabel({
+          titularName: titularNameForCover,
+          shiftCode: absenceShift.code,
+          positionName: absenceShift.positionName,
+          objectiveName: absenceShift.objectiveName,
+        });
         batch.update(doc(db, 'turnos', candidateShiftId), {
           ...buildFrancoTrabajadoCoverageFields(absenceShift),
           startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
@@ -1370,7 +1376,6 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
 
   // ─── Layout principal ─────────────────────────────────────────────────────
 
-  const candidates = candidatesForStep();
   const isConfirmed = session.status === 'CONFIRMED';
   const isFailed = session.status === 'FAILED';
 
