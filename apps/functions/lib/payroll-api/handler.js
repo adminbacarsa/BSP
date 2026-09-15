@@ -30,10 +30,17 @@ const matchRoute = (req, method, pattern) => {
 async function handleListCycles(req, res) {
     const count = Math.min(36, Math.max(1, Number(req.query?.count) || 12));
     const cycles = (0, cycle_1.listRecentCycles)(count);
-    const lockSnap = await admin.firestore().collection('payroll_cycles_locks').get();
+    const empresaId = req.integration.empresaId;
+    const lockSnap = await admin.firestore()
+        .collection('payroll_cycles_locks')
+        .where('empresaId', '==', empresaId)
+        .get();
     const lockedMap = new Map();
-    lockSnap.forEach((d) => lockedMap.set(d.id, d.data()));
-    const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(req.integration.empresaId);
+    lockSnap.forEach((d) => {
+        const data = d.data();
+        lockedMap.set(String(data.cycleId || ''), data);
+    });
+    const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
     json(res, 200, {
         hoursMode,
         cycles: cycles.map((c) => {
@@ -110,7 +117,8 @@ async function handleCloseCycle(req, res, cycleId) {
         });
     }
     const db = admin.firestore();
-    const lockRef = db.collection('payroll_cycles_locks').doc(cycle.cycleId);
+    const empresaId = req.integration.empresaId;
+    const lockRef = db.collection('payroll_cycles_locks').doc((0, lockedSnapshot_1.payrollCycleLockId)(empresaId, cycle.cycleId));
     const existing = await lockRef.get();
     if (existing.exists) {
         return json(res, 409, {
@@ -122,7 +130,6 @@ async function handleCloseCycle(req, res, cycleId) {
             },
         });
     }
-    const empresaId = req.integration.empresaId;
     const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
     const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({
         cycle,

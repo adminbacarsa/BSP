@@ -30,7 +30,7 @@ type Response = any;
 import { listRecentCycles, parseCycleId, toTs } from './cycle';
 import { buildLiquidacionSnapshot, LiquidacionSnapshot } from './calc';
 import { resolveEmpresaHoursMode } from './settings';
-import { readLockedLiquidacionSnapshot } from './lockedSnapshot';
+import { payrollCycleLockId, readLockedLiquidacionSnapshot } from './lockedSnapshot';
 
 const applyCors = (req: Request, res: Response): boolean => {
     res.set('Access-Control-Allow-Origin', '*');
@@ -57,10 +57,17 @@ const matchRoute = (req: Request, method: string, pattern: RegExp): RegExpExecAr
 async function handleListCycles(req: AuthedRequest, res: Response) {
     const count = Math.min(36, Math.max(1, Number(req.query?.count) || 12));
     const cycles = listRecentCycles(count);
-    const lockSnap = await admin.firestore().collection('payroll_cycles_locks').get();
+    const empresaId = req.integration!.empresaId;
+    const lockSnap = await admin.firestore()
+        .collection('payroll_cycles_locks')
+        .where('empresaId', '==', empresaId)
+        .get();
     const lockedMap = new Map<string, any>();
-    lockSnap.forEach((d) => lockedMap.set(d.id, d.data()));
-    const hoursMode = await resolveEmpresaHoursMode(req.integration!.empresaId);
+    lockSnap.forEach((d) => {
+        const data = d.data();
+        lockedMap.set(String(data.cycleId || ''), data);
+    });
+    const hoursMode = await resolveEmpresaHoursMode(empresaId);
     json(res, 200, {
         hoursMode,
         cycles: cycles.map((c) => {
@@ -140,7 +147,8 @@ async function handleCloseCycle(req: AuthedRequest, res: Response, cycleId: stri
     }
 
     const db = admin.firestore();
-    const lockRef = db.collection('payroll_cycles_locks').doc(cycle.cycleId);
+    const empresaId = req.integration!.empresaId;
+    const lockRef = db.collection('payroll_cycles_locks').doc(payrollCycleLockId(empresaId, cycle.cycleId));
     const existing = await lockRef.get();
     if (existing.exists) {
         return json(res, 409, {
@@ -154,7 +162,6 @@ async function handleCloseCycle(req: AuthedRequest, res: Response, cycleId: stri
     }
 
     // Generamos el snapshot que vamos a archivar (idempotencia + auditoría).
-    const empresaId = req.integration!.empresaId;
     const hoursMode = await resolveEmpresaHoursMode(empresaId);
     const snapshot = await buildLiquidacionSnapshot({
         cycle,

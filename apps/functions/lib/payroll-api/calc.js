@@ -5,6 +5,7 @@ const admin = require("firebase-admin");
 const cycle_1 = require("./cycle");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
 const operationalShift_1 = require("../shared/operationalShift");
+const lockedSnapshot_1 = require("./lockedSnapshot");
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const SHIFT_HOURS_FALLBACK = {
@@ -172,7 +173,9 @@ async function buildLiquidacionSnapshot(params) {
         .collection('ausencias')
         .where('startDate', '<=', cycle.cycleEndStr)
         .get();
-    const lockDoc = await db.collection('payroll_cycles_locks').doc(cycle.cycleId).get();
+    const lockDoc = await db.collection('payroll_cycles_locks')
+        .doc((0, lockedSnapshot_1.payrollCycleLockId)(empresaId, cycle.cycleId))
+        .get();
     const lockedAtRaw = lockDoc.exists ? lockDoc.data()?.lockedAt : null;
     const lockedAt = lockedAtRaw ? tsToDate(lockedAtRaw)?.toISOString() ?? null : null;
     const acc = new Map();

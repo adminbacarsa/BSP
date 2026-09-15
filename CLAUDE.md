@@ -160,7 +160,7 @@ Fuente canónica: `apps/functions/shared-domain/operationalShift.js`, consumida 
 - La automatización de Operaciones debe converger hacia escritores server-side idempotentes. Mientras exista materialización legacy desde cliente, toda creación automática debe llevar clave determinística o protección transaccional.
 - Auditoría de cierre, liquidación y cobertura es crítica: no debe ignorarse silenciosamente. Cache, telemetría y sincronizaciones derivadas sí pueden continuar con alerta no bloqueante.
 - Acortar la vigencia de un SLA no elimina turnos, ausencias ni novedades existentes. Si algún turno afectado tiene `payrollLockedAt`/`payrollCycleId`, el cambio se bloquea.
-- Un ciclo cerrado se lee desde `payroll_cycles_locks/{cycleId}.snapshot`; no se recalcula sobre datos vivos. Turnos y ausencias sellados por payroll no admiten update/delete desde clientes Firestore.
+- Un ciclo cerrado se lee desde `payroll_cycles_locks/{empresaId}_{cycleId}.snapshot`; no se recalcula sobre datos vivos. Turnos y ausencias sellados por payroll no admiten update/delete desde clientes Firestore.
 
 ---
 

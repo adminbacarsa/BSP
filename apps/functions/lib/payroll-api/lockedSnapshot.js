@@ -1,7 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.payrollCycleLockId = payrollCycleLockId;
 exports.readLockedLiquidacionSnapshot = readLockedLiquidacionSnapshot;
 const admin = require("firebase-admin");
+function payrollCycleLockId(empresaId, cycleId) {
+    return `${encodeURIComponent(String(empresaId || '').trim())}_${cycleId}`;
+}
 function timestampIso(value) {
     if (!value)
         return null;
@@ -13,7 +17,8 @@ function timestampIso(value) {
     return null;
 }
 async function readLockedLiquidacionSnapshot(params) {
-    const lock = await admin.firestore().collection('payroll_cycles_locks').doc(params.cycleId).get();
+    const lockId = payrollCycleLockId(params.empresaId, params.cycleId);
+    const lock = await admin.firestore().collection('payroll_cycles_locks').doc(lockId).get();
     if (!lock.exists)
         return { locked: false };
     const data = lock.data() || {};

@@ -27,6 +27,7 @@ import {
     tenantEmpresaIdsMatch,
 } from '../assistant/assistantEmpresaScope';
 import { isOperationalOriginShift } from '../shared/operationalShift';
+import { payrollCycleLockId } from './lockedSnapshot';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 /** Códigos que no aportan jornada laboral “normal” (FT se trata aparte). */
@@ -288,7 +289,9 @@ export async function buildLiquidacionSnapshot(
         .where('startDate', '<=', cycle.cycleEndStr)
         .get();
 
-    const lockDoc = await db.collection('payroll_cycles_locks').doc(cycle.cycleId).get();
+    const lockDoc = await db.collection('payroll_cycles_locks')
+        .doc(payrollCycleLockId(empresaId, cycle.cycleId))
+        .get();
     const lockedAtRaw = lockDoc.exists ? lockDoc.data()?.lockedAt : null;
     const lockedAt = lockedAtRaw ? tsToDate(lockedAtRaw)?.toISOString() ?? null : null;
 

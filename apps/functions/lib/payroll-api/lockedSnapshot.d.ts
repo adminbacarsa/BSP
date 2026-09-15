@@ -5,6 +5,7 @@ export type LockedSnapshotLookup = {
     locked: true;
     snapshot: LiquidacionSnapshot;
 };
+export declare function payrollCycleLockId(empresaId: string, cycleId: string): string;
 export declare function readLockedLiquidacionSnapshot(params: {
     cycleId: string;
     empresaId: string;

@@ -5,6 +5,10 @@ export type LockedSnapshotLookup =
     | { locked: false }
     | { locked: true; snapshot: LiquidacionSnapshot };
 
+export function payrollCycleLockId(empresaId: string, cycleId: string): string {
+    return `${encodeURIComponent(String(empresaId || '').trim())}_${cycleId}`;
+}
+
 function timestampIso(value: unknown): string | null {
     if (!value) return null;
     if (value instanceof admin.firestore.Timestamp) return value.toDate().toISOString();
@@ -21,7 +25,8 @@ export async function readLockedLiquidacionSnapshot(params: {
     pageSize?: number;
     clientIdFilter?: string;
 }): Promise<LockedSnapshotLookup> {
-    const lock = await admin.firestore().collection('payroll_cycles_locks').doc(params.cycleId).get();
+    const lockId = payrollCycleLockId(params.empresaId, params.cycleId);
+    const lock = await admin.firestore().collection('payroll_cycles_locks').doc(lockId).get();
     if (!lock.exists) return { locked: false };
 
     const data = lock.data() || {};
