@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, Clock
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -28,7 +28,6 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/vplan'))           return 'VPLAN Lab';
   if (pathname.startsWith('/admin/crm'))             return 'CRM';
   if (pathname.startsWith('/admin/servicios'))       return 'Servicios';
-  if (pathname.startsWith('/admin/reportes/marcaciones')) return 'Marcaciones';
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';
   if (pathname.startsWith('/admin/rrhh'))            return 'RRHH';
   if (pathname.startsWith('/admin/guia'))            return 'Guía';
@@ -480,13 +479,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     try { await signOut(auth); window.location.href = '/login'; } catch (e) { console.error(e); }
   };
 
-  const isActive = (path: string) => {
-    if (path === '/admin/reportes') {
-      return router.pathname.startsWith('/admin/reportes')
-        && !router.pathname.startsWith('/admin/reportes/marcaciones');
-    }
-    return router.pathname.startsWith(path);
-  };
+  const isActive = (path: string) => router.pathname.startsWith(path);
 
   const _linkJustify = !sidebarOpen ? 'justify-center' : '';
   const linkBase = 'flex items-center gap-3 px-3 py-3 rounded-xl transition-all text-sm font-medium ' + _linkJustify;
@@ -669,20 +662,12 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           )}
 
           {canReadModule('REPORTS') && (
-            <>
-              <Link href="/admin/reportes" prefetch={false} title="Reportes"
-                className={getLinkHoverClass('/admin/reportes')}
-                style={getLinkStyle('/admin/reportes')}>
-                <BarChart3 size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Reportes</span>}
-              </Link>
-              <Link href="/admin/reportes/marcaciones" prefetch={false} title="Marcaciones CC — mapeo e importación"
-                className={getLinkHoverClass('/admin/reportes/marcaciones')}
-                style={getLinkStyle('/admin/reportes/marcaciones')}>
-                <Clock size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Marcaciones CC</span>}
-              </Link>
-            </>
+            <Link href="/admin/reportes" prefetch={false} title="Reportes"
+              className={getLinkHoverClass('/admin/reportes')}
+              style={getLinkStyle('/admin/reportes')}>
+              <BarChart3 size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Reportes</span>}
+            </Link>
           )}
 
           {canReadModule('ANALYSIS') && (
