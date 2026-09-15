@@ -8,7 +8,7 @@ import { SupervisorPinInput } from '@/components/ui';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { isSuperAdminRole } from '@/lib/roles';
-import { ONBOARDING_TRACK_LABEL, normalizeOnboardingTrack, type OnboardingTrack } from '@/lib/onboardingGuide';
+import { ONBOARDING_TRACK_LABEL, ONBOARDING_TRACKS, normalizeOnboardingTrack, normalizeOnboardingTracks, type OnboardingTrack } from '@/lib/onboardingGuide';
 import {
     ALL_EMPRESAS_VALUE,
     isAllEmpresasUser,
@@ -41,7 +41,7 @@ export default function UsersTab() {
         supervisorPin: '',
         showPin: false,
         objetivosAsignados: [] as string[],
-        onboardingTrack: 'OPERATIONS' as OnboardingTrack,
+        onboardingTracks: ['OPERATIONS'] as OnboardingTrack[],
     };
     const [formData, setFormData] = useState(initialForm);
 
@@ -112,7 +112,7 @@ export default function UsersTab() {
             supervisorPin: user.supervisorPin || '',
             showPin: false,
             objetivosAsignados: user.objetivosAsignados || [],
-            onboardingTrack: normalizeOnboardingTrack(user?.onboardingGuide?.track),
+            onboardingTracks: normalizeOnboardingTracks(user?.onboardingGuide?.tracks, user?.onboardingGuide?.track),
         });
         setIsModalOpen(true);
     };
@@ -150,8 +150,10 @@ export default function UsersTab() {
 
                 if (editMode) {
                     const existingGuide = (users.find(u => u.id === formData.id) as any)?.onboardingGuide || {};
-                    const trackChanged =
-                        normalizeOnboardingTrack(formData.onboardingTrack) !== normalizeOnboardingTrack(existingGuide?.track);
+                    const nextTracks = normalizeOnboardingTracks(formData.onboardingTracks, formData.onboardingTracks?.[0]);
+                    const prevTracks = normalizeOnboardingTracks(existingGuide?.tracks, existingGuide?.track);
+                    const tracksChanged =
+                        nextTracks.join('|') !== prevTracks.join('|');
                     const patch: Record<string, unknown> = {
                         firstName:           formData.firstName,
                         lastName:            formData.lastName,
@@ -160,13 +162,15 @@ export default function UsersTab() {
                         supervisorPin:       formData.supervisorPin || null,
                         objetivosAsignados:  formData.objetivosAsignados,
                         'onboardingGuide.required': true,
-                        'onboardingGuide.track': formData.onboardingTrack,
+                        'onboardingGuide.track': nextTracks[0],
+                        'onboardingGuide.tracks': nextTracks,
                     };
-                    if (trackChanged) {
+                    if (tracksChanged) {
                         patch['onboardingGuide.status'] = 'NOT_STARTED';
                         patch['onboardingGuide.progressPct'] = 0;
                         patch['onboardingGuide.currentStepId'] = null;
                         patch['onboardingGuide.completedAt'] = null;
+                        patch['onboardingGuide.completedTracks'] = [];
                     }
                     if (allEmpresas) patch.allEmpresas = true;
                     else patch.allEmpresas = deleteField();
@@ -186,7 +190,8 @@ export default function UsersTab() {
                         empresaId:     efectivaEmpresaId,
                         allEmpresas,
                         supervisorPin: formData.supervisorPin || null,
-                        onboardingTrack: formData.onboardingTrack,
+                        onboardingTrack: formData.onboardingTracks[0],
+                        onboardingTracks: formData.onboardingTracks,
                     });
                     resolve('Usuario creado y acceso concedido');
                 }
@@ -394,18 +399,40 @@ export default function UsersTab() {
 
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 dark:text-slate-400 ml-1 mb-1 block">
-                                    Recorrido onboarding
+                                    Recorridos onboarding
                                 </label>
-                                <select
-                                    className="w-full p-4 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 focus:border-indigo-500 rounded-xl font-bold text-slate-700 dark:text-white outline-none"
-                                    value={formData.onboardingTrack}
-                                    onChange={e => setFormData({ ...formData, onboardingTrack: normalizeOnboardingTrack(e.target.value) })}
-                                >
-                                    <option value="OPERATIONS">{ONBOARDING_TRACK_LABEL.OPERATIONS}</option>
-                                    <option value="PLANNING">{ONBOARDING_TRACK_LABEL.PLANNING}</option>
-                                </select>
+                                <div className="flex flex-wrap gap-2 p-3 bg-slate-50 dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl">
+                                    {ONBOARDING_TRACKS.map((track) => {
+                                        const active = formData.onboardingTracks.includes(track);
+                                        return (
+                                            <button
+                                                key={track}
+                                                type="button"
+                                                onClick={() => {
+                                                    setFormData((prev) => {
+                                                        const exists = prev.onboardingTracks.includes(track);
+                                                        const next = exists
+                                                            ? prev.onboardingTracks.filter((t) => t !== track)
+                                                            : [...prev.onboardingTracks, track];
+                                                        return {
+                                                            ...prev,
+                                                            onboardingTracks: next.length ? next : prev.onboardingTracks,
+                                                        };
+                                                    });
+                                                }}
+                                                className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${
+                                                    active
+                                                        ? 'bg-indigo-600 text-white border-indigo-700'
+                                                        : 'bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                                                }`}
+                                            >
+                                                {ONBOARDING_TRACK_LABEL[track]}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
                                 <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400 font-medium">
-                                    Guía obligatoria al primer ingreso del usuario.
+                                    Podés exigir uno o varios recorridos (ej. Operaciones + Planificación). Obligatorios al primer ingreso.
                                 </p>
                             </div>
 

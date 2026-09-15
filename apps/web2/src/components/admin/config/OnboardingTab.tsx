@@ -11,8 +11,9 @@ import { isAllEmpresasUser } from '@/lib/systemUser';
 import {
   ONBOARDING_STATUS_LABEL,
   ONBOARDING_TRACK_LABEL,
+  ONBOARDING_TRACKS,
+  formatOnboardingTracksLabel,
   normalizeOnboardingGuideState,
-  normalizeOnboardingTrack,
   type OnboardingGuideState,
   type OnboardingTrack,
 } from '@/lib/onboardingGuide';
@@ -61,10 +62,22 @@ export default function OnboardingTab() {
   const [rows, setRows] = useState<SystemUserRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [busyUid, setBusyUid] = useState<string | null>(null);
-  const [defaultTrack, setDefaultTrack] = useState<OnboardingTrack>('OPERATIONS');
+  const [selectedTracks, setSelectedTracks] = useState<OnboardingTrack[]>(['OPERATIONS']);
 
   const getEmpresaName = (id?: string) =>
     empresas.find((e) => e.id === id)?.name || id || 'Sin asignar';
+
+  const toggleTrack = (track: OnboardingTrack) => {
+    setSelectedTracks((prev) => {
+      if (prev.includes(track)) {
+        const next = prev.filter((t) => t !== track);
+        return next.length ? next : prev;
+      }
+      return [...prev, track];
+    });
+  };
+
+  const selectAllTracks = () => setSelectedTracks([...ONBOARDING_TRACKS]);
 
   const loadRows = async () => {
     setLoading(true);
@@ -99,7 +112,6 @@ export default function OnboardingTab() {
     let required = 0;
     let completed = 0;
     let inProgress = 0;
-    let notStarted = 0;
     let notRequired = 0;
     rows.forEach((u) => {
       if (u.onboardingGuide?.required !== true) {
@@ -109,22 +121,31 @@ export default function OnboardingTab() {
       required += 1;
       if (u.onboardingGuide.status === 'COMPLETED') completed += 1;
       else if (u.onboardingGuide.status === 'IN_PROGRESS') inProgress += 1;
-      else notStarted += 1;
     });
-    return { required, completed, inProgress, notStarted, notRequired, total: rows.length };
+    return { required, completed, inProgress, notRequired, total: rows.length };
   }, [rows]);
 
-  const assignGuide = async (uid: string, required: boolean, track?: OnboardingTrack) => {
+  const assignGuide = async (uid: string, required: boolean, tracks?: OnboardingTrack[]) => {
+    const effectiveTracks = tracks?.length ? tracks : selectedTracks;
+    if (required && !effectiveTracks.length) {
+      toast.error('Elegí al menos un recorrido');
+      return;
+    }
     setBusyUid(uid);
     try {
       const fn = httpsCallable(functions, 'assignOnboardingGuide');
       await fn({
         uid,
         required,
-        track: track || defaultTrack,
+        tracks: effectiveTracks,
+        track: effectiveTracks[0],
         resetProgress: required,
       });
-      toast.success(required ? 'Guía obligatoria asignada' : 'Onboarding liberado');
+      toast.success(
+        required
+          ? `Guía obligatoria: ${formatOnboardingTracksLabel(effectiveTracks)}`
+          : 'Onboarding liberado',
+      );
       await loadRows();
     } catch (e: any) {
       toast.error(e?.message || 'No se pudo actualizar el onboarding');
@@ -147,28 +168,63 @@ export default function OnboardingTab() {
             </p>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <label className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
-            Recorrido al exigir
-            <select
-              value={defaultTrack}
-              onChange={(e) => setDefaultTrack(normalizeOnboardingTrack(e.target.value))}
-              className="rounded-xl border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-bold"
+        <button
+          type="button"
+          onClick={loadRows}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-60"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          Actualizar
+        </button>
+      </div>
+
+      <div className="bg-white dark:bg-slate-800 p-5 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs font-black uppercase text-slate-600 dark:text-slate-300">Recorridos al exigir</p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={selectAllTracks}
+              className="px-3 py-1.5 rounded-xl text-[11px] font-black border border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
             >
-              <option value="OPERATIONS">{ONBOARDING_TRACK_LABEL.OPERATIONS}</option>
-              <option value="PLANNING">{ONBOARDING_TRACK_LABEL.PLANNING}</option>
-            </select>
-          </label>
-          <button
-            type="button"
-            onClick={loadRows}
-            disabled={loading}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 font-bold text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-60"
-          >
-            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-            Actualizar
-          </button>
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelectedTracks(['OPERATIONS'])}
+              className="px-3 py-1.5 rounded-xl text-[11px] font-black border border-slate-200 text-slate-600 hover:bg-slate-50"
+            >
+              Solo Operaciones
+            </button>
+          </div>
         </div>
+        <div className="flex flex-wrap gap-2">
+          {ONBOARDING_TRACKS.map((track) => {
+            const active = selectedTracks.includes(track);
+            return (
+              <button
+                key={track}
+                type="button"
+                onClick={() => toggleTrack(track)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-black border transition-colors ${
+                  active
+                    ? 'bg-indigo-600 text-white border-indigo-700'
+                    : 'bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-600'
+                }`}
+              >
+                {ONBOARDING_TRACK_LABEL[track]}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-[11px] text-slate-500 font-medium">
+          Selección actual:{' '}
+          <span className="font-black text-slate-700 dark:text-slate-200">
+            {formatOnboardingTracksLabel(selectedTracks)}
+          </span>
+          . Podés exigir Operaciones + Planificación, CRM + RRHH, o cualquier combinación.
+        </p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -195,13 +251,13 @@ export default function OnboardingTab() {
       </div>
 
       <div className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-x-auto">
-        <table className="w-full text-left text-sm min-w-[1040px]">
+        <table className="w-full text-left text-sm min-w-[1100px]">
           <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
             <tr>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Usuario</th>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Rol</th>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Empresa</th>
-              <th className="p-4 text-[11px] uppercase font-black text-slate-600">Recorrido</th>
+              <th className="p-4 text-[11px] uppercase font-black text-slate-600">Recorridos</th>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Estado</th>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Progreso</th>
               <th className="p-4 text-[11px] uppercase font-black text-slate-600">Completado</th>
@@ -212,7 +268,8 @@ export default function OnboardingTab() {
             {rows.map((u) => {
               const guide = u.onboardingGuide;
               const status = guide?.status || 'NOT_STARTED';
-              const track = guide?.track || defaultTrack;
+              const tracks = guide?.tracks?.length ? guide.tracks : guide?.track ? [guide.track] : selectedTracks;
+              const completedTracks = guide?.completedTracks ?? [];
               const progressPct = guide?.required ? guide.progressPct : 0;
               const isBusy = busyUid === u.id;
               return (
@@ -229,19 +286,31 @@ export default function OnboardingTab() {
                   </td>
                   <td className="p-4">
                     {guide?.required ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                        <Users size={12} />
-                        {ONBOARDING_TRACK_LABEL[track]}
-                      </span>
+                      <div className="flex flex-wrap gap-1 max-w-[280px]">
+                        {tracks.map((t) => {
+                          const done = completedTracks.includes(t);
+                          return (
+                            <span
+                              key={t}
+                              className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black border ${
+                                done
+                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                                  : 'bg-indigo-50 text-indigo-700 border-indigo-200'
+                              }`}
+                            >
+                              <Users size={10} />
+                              {ONBOARDING_TRACK_LABEL[t]}
+                            </span>
+                          );
+                        })}
+                      </div>
                     ) : (
                       <span className="text-xs text-slate-400 font-medium">No requerido</span>
                     )}
                   </td>
                   <td className="p-4">
                     {guide?.required ? (
-                      <span
-                        className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-bold ${statusBadgeClass(status)}`}
-                      >
+                      <span className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-bold ${statusBadgeClass(status)}`}>
                         {status === 'COMPLETED' ? <CheckCircle2 size={12} /> : <Clock3 size={12} />}
                         {ONBOARDING_STATUS_LABEL[status]}
                       </span>
@@ -258,7 +327,9 @@ export default function OnboardingTab() {
                             style={{ width: `${Math.max(0, Math.min(100, progressPct))}%` }}
                           />
                         </div>
-                        <p className="mt-1 text-[11px] font-bold text-slate-500">{progressPct}%</p>
+                        <p className="mt-1 text-[11px] font-bold text-slate-500">
+                          {progressPct}% · {completedTracks.length}/{tracks.length} recorridos
+                        </p>
                       </div>
                     ) : (
                       <span className="text-xs text-slate-400 font-medium">—</span>
@@ -273,7 +344,7 @@ export default function OnboardingTab() {
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => assignGuide(u.id, true, defaultTrack)}
+                          onClick={() => assignGuide(u.id, true, selectedTracks)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl bg-indigo-600 text-white text-[11px] font-black hover:bg-indigo-700 disabled:opacity-60"
                         >
                           <UserPlus size={12} />
@@ -283,7 +354,7 @@ export default function OnboardingTab() {
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => assignGuide(u.id, false, track)}
+                          onClick={() => assignGuide(u.id, false, tracks)}
                           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-200 text-[11px] font-black hover:bg-slate-50 dark:hover:bg-slate-700 disabled:opacity-60"
                         >
                           <UserMinus size={12} />

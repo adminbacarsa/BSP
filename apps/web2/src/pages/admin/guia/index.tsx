@@ -9,8 +9,12 @@ import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
 import {
   ONBOARDING_TRACK_LABEL,
+  ONBOARDING_TRACKS,
+  formatOnboardingTracksLabel,
   normalizeOnboardingGuideState,
   normalizeOnboardingTrack,
+  normalizeOnboardingTracks,
+  onboardingTracksProgress,
   type OnboardingTrack,
 } from '@/lib/onboardingGuide';
 import {
@@ -45,6 +49,24 @@ const TRACK_CHECKLIST: Record<OnboardingTrack, { id: string; label: string }[]> 
     { id: 'plan-publicacion', label: 'Sé revisar consistencia con SLA antes de publicar grilla.' },
     { id: 'plan-cambios', label: 'Sé registrar ajustes y entender su impacto en Operaciones/Reportes.' },
   ],
+  CRM: [
+    { id: 'crm-cliente', label: 'Sé crear/editar un cliente y revisar que no haya duplicados.' },
+    { id: 'crm-objetivo', label: 'Sé cargar sedes/objetivos con datos mínimos (nombre y ubicación).' },
+    { id: 'crm-contacto', label: 'Sé completar contacto comercial/operativo del cliente.' },
+    { id: 'crm-relacion', label: 'Entiendo cómo el cliente/objetivo alimenta Servicios y Planificación.' },
+  ],
+  SERVICES: [
+    { id: 'srv-sla', label: 'Sé crear o revisar un servicio SLA vinculado a un objetivo.' },
+    { id: 'srv-puestos', label: 'Sé definir puestos/cobertura y turnos permitidos del servicio.' },
+    { id: 'srv-vigencia', label: 'Sé controlar vigencia/estado del servicio contratado.' },
+    { id: 'srv-impacto', label: 'Entiendo el impacto del SLA en la grilla de Planificación.' },
+  ],
+  RRHH: [
+    { id: 'rrhh-alta', label: 'Sé dar de alta un colaborador o importar nómina básica.' },
+    { id: 'rrhh-legajo', label: 'Sé revisar legajo activo, categoría y datos críticos.' },
+    { id: 'rrhh-ausencia', label: 'Sé registrar una ausencia/licencia desde RRHH.' },
+    { id: 'rrhh-impacto', label: 'Entiendo cómo RRHH impacta cobertura en Operaciones/Planificación.' },
+  ],
 };
 
 type Step = {
@@ -71,15 +93,34 @@ export default function GuiaInteractivaPage() {
     []
   );
 
-  const canSwitchTrack = canReadModule('PLANNING') && canReadModule('OPERATIONS');
-  const resolvedTrack = useMemo<OnboardingTrack>(() => {
-    if (onboardingGuide?.track) return normalizeOnboardingTrack(onboardingGuide.track);
-    if (canReadModule('PLANNING') && !canReadModule('OPERATIONS')) return 'PLANNING';
-    return 'OPERATIONS';
-  }, [onboardingGuide?.track, canReadModule]);
+  const requiredTracks = useMemo<OnboardingTrack[]>(() => {
+    if (onboardingGuide?.required) {
+      return normalizeOnboardingTracks(onboardingGuide.tracks, onboardingGuide.track);
+    }
+    const opts: OnboardingTrack[] = [];
+    if (canReadModule('OPERATIONS') || canReadModule('DASHBOARD')) opts.push('OPERATIONS');
+    if (canReadModule('PLANNING')) opts.push('PLANNING');
+    if (canReadModule('CLIENTS')) opts.push('CRM');
+    if (canReadModule('SERVICES')) opts.push('SERVICES');
+    if (canReadModule('RRHH')) opts.push('RRHH');
+    return opts.length ? opts : ['OPERATIONS'];
+  }, [onboardingGuide, canReadModule]);
 
-  const checklist = useMemo(() => TRACK_CHECKLIST[track], [track]);
+  const tracksProgress = useMemo(
+    () => onboardingTracksProgress(onboardingGuide),
+    [onboardingGuide],
+  );
+
+  const resolvedTrack = useMemo<OnboardingTrack>(() => {
+    if (onboardingGuide?.track && requiredTracks.includes(normalizeOnboardingTrack(onboardingGuide.track))) {
+      return normalizeOnboardingTrack(onboardingGuide.track);
+    }
+    return requiredTracks[0] || 'OPERATIONS';
+  }, [onboardingGuide?.track, requiredTracks]);
+
+  const checklist = useMemo(() => TRACK_CHECKLIST[track] || [], [track]);
   const checklistDone = checklist.length > 0 && checklist.every((item) => checkedItems.includes(item.id));
+  const trackAlreadyDone = (onboardingGuide?.completedTracks || []).includes(track);
 
   useEffect(() => {
     setTrack(resolvedTrack);
@@ -727,8 +768,20 @@ export default function GuiaInteractivaPage() {
       });
       const next = normalizeOnboardingGuideState(res?.data?.onboardingGuide);
       if (next) setOnboardingGuide(next);
-      toast.success('Guía completada. Ya podés usar la plataforma.');
-      router.replace('/admin/dashboard');
+      const pending = (next?.tracks || requiredTracks).filter(
+        (t) => !(next?.completedTracks || []).includes(t),
+      );
+      if (pending.length) {
+        const nextTrack = pending[0];
+        setTrack(nextTrack);
+        setStep(0);
+        toast.success(
+          `Recorrido ${ONBOARDING_TRACK_LABEL[track]} listo. Sigue con ${ONBOARDING_TRACK_LABEL[nextTrack]}.`,
+        );
+      } else {
+        toast.success('Guía completada. Ya podés usar la plataforma.');
+        router.replace('/admin/dashboard');
+      }
     } catch (error: any) {
       toast.error(error?.message || 'No se pudo guardar la finalización de la guía.');
     } finally {
@@ -766,11 +819,16 @@ export default function GuiaInteractivaPage() {
               <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-rose-50 text-rose-700 border border-rose-200 text-[11px] font-bold">
                 Guía obligatoria
               </span>
-              {(['OPERATIONS', 'PLANNING'] as OnboardingTrack[]).map((trackOpt) => (
+              {onboardingGuide?.required && (
+                <span className="inline-flex items-center px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-200 text-[11px] font-bold">
+                  {tracksProgress.done}/{tracksProgress.total} · {formatOnboardingTracksLabel(requiredTracks)}
+                </span>
+              )}
+              {(requiredTracks as OnboardingTrack[]).map((trackOpt) => (
                 <button
                   key={trackOpt}
                   type="button"
-                  disabled={!canSwitchTrack && track !== trackOpt}
+                  disabled={requiredTracks.length <= 1 && track !== trackOpt}
                   onClick={() => setTrack(trackOpt)}
                   className={`px-3 py-1.5 rounded-xl text-xs font-black transition-colors border ${
                     track === trackOpt
@@ -901,7 +959,7 @@ export default function GuiaInteractivaPage() {
                   disabled={!checklistDone || savingComplete}
                   className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white font-bold text-sm hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {savingComplete ? 'Guardando…' : 'Finalizar y habilitar'}
+                  {savingComplete ? 'Guardando…' : (trackAlreadyDone ? 'Recorrido ya completado' : ((tracksProgress.done + (checklistDone ? 1 : 0)) >= requiredTracks.length ? 'Finalizar y habilitar' : `Completar ${ONBOARDING_TRACK_LABEL[track]}`))}
                 </button>
               )}
             </div>

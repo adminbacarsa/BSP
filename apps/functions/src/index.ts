@@ -109,10 +109,29 @@ const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manag
 /** Alineado con web2 `ALL_EMPRESAS_VALUE` en systemUser.ts */
 const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
-const ONBOARDING_TRACKS = new Set(['OPERATIONS', 'PLANNING']);
+const ONBOARDING_TRACK_VALUES = ['OPERATIONS', 'PLANNING', 'CRM', 'SERVICES', 'RRHH'] as const;
+type OnboardingTrackValue = (typeof ONBOARDING_TRACK_VALUES)[number];
+const ONBOARDING_TRACKS = new Set<string>(ONBOARDING_TRACK_VALUES);
 
-function normalizeOnboardingTrack(raw: unknown): 'OPERATIONS' | 'PLANNING' {
-  return String(raw ?? '').trim().toUpperCase() === 'PLANNING' ? 'PLANNING' : 'OPERATIONS';
+function normalizeOnboardingTrack(raw: unknown): OnboardingTrackValue {
+  const value = String(raw ?? '').trim().toUpperCase();
+  if (ONBOARDING_TRACKS.has(value)) return value as OnboardingTrackValue;
+  if (value === 'CLIENTS' || value === 'CLIENTES') return 'CRM';
+  if (value === 'SERVICIOS' || value === 'SLA') return 'SERVICES';
+  if (value === 'PERSONAL' || value === 'HR') return 'RRHH';
+  if (value === 'PLANIFICACION' || value === 'PLAN') return 'PLANNING';
+  if (value === 'OPERACIONES' || value === 'OPS') return 'OPERATIONS';
+  return 'OPERATIONS';
+}
+
+function normalizeOnboardingTracks(raw: unknown, fallbackTrack?: unknown): OnboardingTrackValue[] {
+  const fromArray = Array.isArray(raw) ? raw.map((x) => normalizeOnboardingTrack(x)) : [];
+  const unique: OnboardingTrackValue[] = [];
+  for (const t of fromArray) {
+    if (!unique.includes(t)) unique.push(t);
+  }
+  if (unique.length) return unique;
+  return [normalizeOnboardingTrack(fallbackTrack)];
 }
 
 function normalizeOnboardingStatus(raw: unknown): 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' {
@@ -120,6 +139,16 @@ function normalizeOnboardingStatus(raw: unknown): 'NOT_STARTED' | 'IN_PROGRESS' 
   if (status === 'IN_PROGRESS') return 'IN_PROGRESS';
   if (status === 'COMPLETED') return 'COMPLETED';
   return 'NOT_STARTED';
+}
+
+function normalizeCompletedTracks(raw: unknown, allowed: OnboardingTrackValue[]): OnboardingTrackValue[] {
+  if (!Array.isArray(raw)) return [];
+  const out: OnboardingTrackValue[] = [];
+  for (const item of raw) {
+    const t = normalizeOnboardingTrack(item);
+    if (allowed.includes(t) && !out.includes(t)) out.push(t);
+  }
+  return out;
 }
 
 
@@ -1447,9 +1476,10 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack } = data;
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack, onboardingTracks: rawOnboardingTracks } = data;
   const roleNorm = normalizeBackupRole(role);
-  const onboardingTrack = normalizeOnboardingTrack(rawOnboardingTrack);
+  const onboardingTracks = normalizeOnboardingTracks(rawOnboardingTracks, rawOnboardingTrack);
+  const onboardingTrack = onboardingTracks[0];
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
     !roleIsSuper &&
@@ -1496,6 +1526,8 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       onboardingGuide: {
         required: true,
         track: onboardingTrack,
+        tracks: onboardingTracks,
+        completedTracks: [],
         status: 'NOT_STARTED',
         progressPct: 0,
         currentStepId: null,
@@ -1559,16 +1591,10 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
     stepId?: string;
     progressPct?: number;
     track?: string;
+    tracks?: unknown[];
     checklist?: unknown[];
   };
   const action = String(payload.action ?? 'PROGRESS').trim().toUpperCase();
-  const requestedTrack = String(payload.track ?? '').trim().toUpperCase();
-  const track = ONBOARDING_TRACKS.has(requestedTrack)
-    ? (requestedTrack as 'OPERATIONS' | 'PLANNING')
-    : normalizeOnboardingTrack(payload.track);
-  const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
-  const progressRaw = Number(payload.progressPct ?? 0);
-  const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
   const now = admin.firestore.FieldValue.serverTimestamp();
   const userRef = admin.firestore().collection('system_users').doc(context.auth.uid);
   const userSnap = await userRef.get();
@@ -1578,28 +1604,54 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
   }
 
   const currentGuide = userSnap.data()?.onboardingGuide || {};
+  const requiredTracks = normalizeOnboardingTracks(currentGuide.tracks, currentGuide.track || payload.track);
+  const track = normalizeOnboardingTrack(payload.track ?? requiredTracks[0]);
+  const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
+  const progressRaw = Number(payload.progressPct ?? 0);
+  const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
   const currentStatus = normalizeOnboardingStatus(currentGuide.status);
+  let completedTracks = normalizeCompletedTracks(currentGuide.completedTracks, requiredTracks);
+
   const patch: Record<string, unknown> = {
     'onboardingGuide.required': true,
     'onboardingGuide.track': track,
+    'onboardingGuide.tracks': requiredTracks,
     'onboardingGuide.lastEventAt': now,
   };
 
+  let resultStatus: 'NOT_STARTED' | 'IN_PROGRESS' | 'COMPLETED' = currentStatus;
+  let resultProgress = progressPct;
+  let resultStepId: string | null = stepId;
+
   if (action === 'RESET') {
+    completedTracks = [];
     patch['onboardingGuide.status'] = 'NOT_STARTED';
     patch['onboardingGuide.progressPct'] = 0;
     patch['onboardingGuide.currentStepId'] = null;
     patch['onboardingGuide.startedAt'] = null;
     patch['onboardingGuide.completedAt'] = null;
     patch['onboardingGuide.completedChecklist'] = [];
+    patch['onboardingGuide.completedTracks'] = [];
+    resultStatus = 'NOT_STARTED';
+    resultProgress = 0;
+    resultStepId = null;
   } else if (action === 'PROGRESS') {
     patch['onboardingGuide.currentStepId'] = stepId;
-    patch['onboardingGuide.progressPct'] = progressPct;
+    // progreso parcial = tracks completados + avance del activo
+    const base = requiredTracks.length
+      ? Math.round((completedTracks.length / requiredTracks.length) * 100)
+      : 0;
+    const blended = Math.max(base, Math.min(99, progressPct));
+    patch['onboardingGuide.progressPct'] = currentStatus === 'COMPLETED' ? 100 : blended;
+    resultProgress = currentStatus === 'COMPLETED' ? 100 : blended;
     if (currentStatus !== 'COMPLETED') {
-      patch['onboardingGuide.status'] = progressPct > 0 || stepId ? 'IN_PROGRESS' : 'NOT_STARTED';
-      if (!currentGuide?.startedAt && (progressPct > 0 || stepId)) {
+      patch['onboardingGuide.status'] = blended > 0 || stepId || completedTracks.length ? 'IN_PROGRESS' : 'NOT_STARTED';
+      resultStatus = patch['onboardingGuide.status'] as 'NOT_STARTED' | 'IN_PROGRESS';
+      if (!currentGuide?.startedAt && (blended > 0 || stepId || completedTracks.length)) {
         patch['onboardingGuide.startedAt'] = now;
       }
+    } else {
+      resultStatus = 'COMPLETED';
     }
   } else if (action === 'COMPLETE') {
     const checklist = Array.isArray(payload.checklist)
@@ -1608,13 +1660,27 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
     if (!checklist.length) {
       throw new functions.https.HttpsError('invalid-argument', 'Checklist obligatorio para completar onboarding.');
     }
-    patch['onboardingGuide.status'] = 'COMPLETED';
-    patch['onboardingGuide.progressPct'] = 100;
-    patch['onboardingGuide.currentStepId'] = stepId || 'cierre';
-    patch['onboardingGuide.completedAt'] = now;
+    if (!completedTracks.includes(track)) completedTracks = [...completedTracks, track];
+    const allDone = requiredTracks.every((t) => completedTracks.includes(t));
+    patch['onboardingGuide.completedTracks'] = completedTracks;
+    patch[`onboardingGuide.checklistByTrack.${track}`] = checklist.slice(0, 32);
     patch['onboardingGuide.completedChecklist'] = checklist.slice(0, 32);
-    if (!currentGuide?.startedAt) {
-      patch['onboardingGuide.startedAt'] = now;
+    patch['onboardingGuide.currentStepId'] = stepId || 'cierre';
+    resultStepId = stepId || 'cierre';
+    if (!currentGuide?.startedAt) patch['onboardingGuide.startedAt'] = now;
+
+    if (allDone) {
+      patch['onboardingGuide.status'] = 'COMPLETED';
+      patch['onboardingGuide.progressPct'] = 100;
+      patch['onboardingGuide.completedAt'] = now;
+      resultStatus = 'COMPLETED';
+      resultProgress = 100;
+    } else {
+      const pct = Math.round((completedTracks.length / Math.max(1, requiredTracks.length)) * 100);
+      patch['onboardingGuide.status'] = 'IN_PROGRESS';
+      patch['onboardingGuide.progressPct'] = Math.min(99, Math.max(1, pct));
+      resultStatus = 'IN_PROGRESS';
+      resultProgress = Math.min(99, Math.max(1, pct));
     }
   } else {
     throw new functions.https.HttpsError('invalid-argument', `Acción de onboarding inválida: ${action}`);
@@ -1626,20 +1692,18 @@ export const updateOnboardingGuideProgress = functions.https.onCall(async (data,
     onboardingGuide: {
       required: true,
       track,
-      status: action === 'RESET'
-        ? 'NOT_STARTED'
-        : action === 'COMPLETE'
-          ? 'COMPLETED'
-          : (currentStatus === 'COMPLETED' ? 'COMPLETED' : (progressPct > 0 || stepId ? 'IN_PROGRESS' : 'NOT_STARTED')),
-      progressPct: action === 'COMPLETE' ? 100 : action === 'RESET' ? 0 : progressPct,
-      currentStepId: action === 'RESET' ? null : (stepId || (action === 'COMPLETE' ? 'cierre' : null)),
+      tracks: requiredTracks,
+      completedTracks,
+      status: resultStatus,
+      progressPct: resultProgress,
+      currentStepId: resultStepId,
     },
   };
 });
 
 /**
  * Admin/SuperAdmin asigna o libera onboarding obligatorio a un usuario existente
- * (usuarios legacy sin required=true).
+ * (usuarios legacy sin required=true). Soporta uno o varios recorridos.
  */
 export const assignOnboardingGuide = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
@@ -1654,6 +1718,7 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
     uid?: string;
     required?: boolean;
     track?: string;
+    tracks?: unknown[];
     resetProgress?: boolean;
   };
   const targetUid = String(payload.uid ?? '').trim();
@@ -1684,7 +1749,8 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
   }
 
   const required = payload.required !== false;
-  const track = normalizeOnboardingTrack(payload.track);
+  const tracks = normalizeOnboardingTracks(payload.tracks, payload.track);
+  const track = tracks[0];
   const resetProgress = payload.resetProgress !== false;
   const now = admin.firestore.FieldValue.serverTimestamp();
 
@@ -1694,6 +1760,8 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
         onboardingGuide: {
           required: false,
           track,
+          tracks,
+          completedTracks: tracks,
           status: 'COMPLETED',
           progressPct: 100,
           currentStepId: null,
@@ -1707,6 +1775,8 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
       onboardingGuide: {
         required: false,
         track,
+        tracks,
+        completedTracks: tracks,
         status: 'COMPLETED',
         progressPct: 100,
         currentStepId: null,
@@ -1718,6 +1788,7 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
   const patch: Record<string, unknown> = {
     'onboardingGuide.required': true,
     'onboardingGuide.track': track,
+    'onboardingGuide.tracks': tracks,
     'onboardingGuide.lastEventAt': now,
   };
   if (resetProgress || currentGuide.required !== true) {
@@ -1727,6 +1798,7 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
     patch['onboardingGuide.startedAt'] = null;
     patch['onboardingGuide.completedAt'] = null;
     patch['onboardingGuide.completedChecklist'] = [];
+    patch['onboardingGuide.completedTracks'] = [];
   }
 
   await targetRef.set(patch, { merge: true });
@@ -1735,6 +1807,10 @@ export const assignOnboardingGuide = functions.https.onCall(async (data, context
     onboardingGuide: {
       required: true,
       track,
+      tracks,
+      completedTracks: resetProgress || currentGuide.required !== true
+        ? []
+        : normalizeCompletedTracks(currentGuide.completedTracks, tracks),
       status: resetProgress || currentGuide.required !== true
         ? 'NOT_STARTED'
         : normalizeOnboardingStatus(currentGuide.status),

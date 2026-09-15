@@ -9,7 +9,7 @@ ADMIN — módulos típicos (menú lateral; al hablar con el usuario usá estos 
 - Clientes y objetivos (CRM): clientes con objetivos embebidos.
 - Servicios y SLA: contratos SLA, puestos; herramientas de esquema de turnos.
 - Reportes, Análisis operativo, Configuración: exportes y métricas; usuarios y roles por módulo (permisos read/create/update/delete). isSuperAdmin bypasea todo.
-- Guía interactiva / Onboarding obligatorio (menú **Guía** y Configuración → **Onboarding**): todo usuario admin nuevo debe completar la guía de su recorrido (Operaciones o Planificación) antes de usar el resto del panel. El progreso se guarda en system_users.onboardingGuide.
+- Guía interactiva / Onboarding obligatorio (menú **Guía** y Configuración → **Onboarding**): todo usuario admin nuevo debe completar la guía de su(s) recorrido(s) (Operaciones, Planificación, CRM, Servicios, RRHH; uno o varios) antes de usar el resto del panel. El progreso se guarda en system_users.onboardingGuide.
 
 Portal empleado (vista guardia): turnos propios, presencia según políticas GPS/portal, solicitud de ausencias.
 
@@ -119,7 +119,7 @@ Guía interactiva (onboarding obligatorio) en COSP:
 **Regla de negocio**
 - Todo usuario admin **nuevo** nace con onboarding obligatorio (\`system_users.onboardingGuide.required = true\`).
 - Mientras el estado no sea **COMPLETED**, el panel redirige a la guía y bloquea el resto de módulos.
-- Recorridos: **OPERATIONS** (Operaciones) o **PLANNING** (Planificación). Se elige al crear el usuario.
+- Recorridos posibles: **OPERATIONS**, **PLANNING**, **CRM**, **SERVICES**, **RRHH**. Se puede exigir **uno o varios a la vez** (ej. Operaciones + Planificación, CRM + RRHH, o todos).
 
 **Pasos de la guía (orden recomendado)**
 1. Bienvenida / cómo usar la guía.
@@ -133,7 +133,7 @@ Guía interactiva (onboarding obligatorio) en COSP:
 9. Reportes (cierre / liquidación de horas).
 10. Cierre + **checklist mínimo del recorrido** (obligatorio para habilitar).
 
-**Checklist Operaciones (para marcar COMPLETED)**
+**Checklist por recorrido (hay que completar todos los exigidos)**
 - Identificar turnos PLAN / ACTIVOS / AUSENTES en Centro Control.
 - Registrar ausencia y disparar cobertura de vacante.
 - Registrar ingreso/relevo y salida.
