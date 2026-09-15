@@ -70,18 +70,20 @@ export const MODULE_HELP_MENUS: Record<string, { intro: string; options: string[
   PLANNING: {
     intro: 'En **Planificación y Turnos** puedo ayudarte. Tocá una opción:',
     options: [
-      'Publicar un cronograma',
-      'Automatizar un cronograma',
-      'Consultar turnos planificados',
+      'Listar servicios y objetivos con SLA',
+      'Estado de cobertura de un objetivo',
+      'Planificar un objetivo este mes',
+      '¿Dónde trabaja un guardia?',
       'Ver empleados sin turnos asignados',
     ],
   },
   PLANNING_AI: {
     intro: 'En **Planificación y Turnos** puedo ayudarte. Tocá una opción:',
     options: [
-      'Publicar un cronograma',
-      'Automatizar un cronograma',
-      'Consultar turnos planificados',
+      'Listar servicios y objetivos con SLA',
+      'Estado de cobertura de un objetivo',
+      'Planificar un objetivo este mes',
+      '¿Dónde trabaja un guardia?',
       'Ver empleados sin turnos asignados',
     ],
   },
@@ -97,8 +99,9 @@ export const MODULE_HELP_MENUS: Record<string, { intro: string; options: string[
   RRHH: {
     intro: 'En **RRHH** puedo ayudarte. Tocá una opción:',
     options: [
+      '¿Dónde trabaja un guardia?',
+      'Dotación preferida por objetivo',
       '¿Qué guardias están de vacaciones?',
-      '¿Cuántas ausencias hay este mes?',
       'Buscar un colaborador por nombre',
     ],
   },
@@ -113,8 +116,10 @@ export const MODULE_HELP_MENUS: Record<string, { intro: string; options: string[
   SERVICES: {
     intro: 'En **Servicios y SLA** puedo ayudarte. Tocá una opción:',
     options: [
+      'Listar todos los servicios y objetivos',
       '¿Cuántos SLA vigentes hay?',
       'Horas vendidas vs planificadas de un objetivo',
+      'Estado de cobertura de un objetivo',
     ],
   },
   REPORTS: {
