@@ -174,6 +174,11 @@ import {
     executePlanificacionSwap,
     getPlanificacionShiftFor,
 } from '@/lib/planificacion/executePlanificacionSwap';
+import {
+    copyPlanificacionSelectionToClipboard,
+    cutPlanificacionSelection,
+    pastePlanificacionClipboardAt,
+} from '@/lib/planificacion/planificacionClipboard';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -5026,100 +5031,57 @@ export default function PlanificacionPage() {
     const handleSelectDate = (dateStr: string) => { setSelectedSwapDate(dateStr); };
 
     /** Copia la selección actual al portapapeles. Devuelve bounds o null. */
-    const copySelectionToClipboard = useCallback((asCut: boolean) => {
-        if (!allowPlanningMultiSelect) return null;
-        if (!selection.start) return null;
-        const minR = Math.min(selection.start.r, selection.end?.r ?? selection.start.r);
-        const maxR = Math.max(selection.start.r, selection.end?.r ?? selection.start.r);
-        const minC = Math.min(selection.start.c, selection.end?.c ?? selection.start.c);
-        const maxC = Math.max(selection.start.c, selection.end?.c ?? selection.start.c);
-        const cells: Array<{ relRow: number; relCol: number; shift: any | null }> = [];
-        for (let r = minR; r <= maxR; r++) {
-            for (let c = minC; c <= maxC; c++) {
-                const emp = displayedEmployees[r];
-                if (!emp || c >= daysInMonth.length) continue;
-                const key = `${emp.id}_${getDateKey(daysInMonth[c])}`;
-                const shift = pendingChanges[key]
-                    ? (pendingChanges[key].isDeleted ? null : pendingChanges[key])
-                    : (shiftsMap[key] || null);
-                cells.push({ relRow: r - minR, relCol: c - minC, shift });
-            }
-        }
-        setClipboard(cells);
-        setClipboardDim({ rows: maxR - minR + 1, cols: maxC - minC + 1 });
-        setClipboardIsCut(asCut);
-        return { minR, maxR, minC, maxC, cells };
-    }, [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    const copySelectionToClipboard = useCallback((asCut: boolean) => copyPlanificacionSelectionToClipboard({
+        asCut,
+        allowPlanningMultiSelect,
+        selection,
+        displayedEmployees,
+        daysInMonth,
+        pendingChanges,
+        shiftsMap,
+        setClipboard,
+        setClipboardDim,
+        setClipboardIsCut,
+    }), [allowPlanningMultiSelect, selection, displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
 
     const pasteClipboardAt = useCallback((targetRow: number, targetCol: number) => {
-        if (!allowPlanningMultiSelect) {
-            toast.message('Cronograma publicado — activá modo Corregir para pegar en masa.');
-            return;
-        }
-        if (!clipboard) return;
-        const prev = pendingChangesRef.current;
-        const newChanges = { ...prev };
-        let pasted = 0;
-        clipboard.forEach(({ relRow, relCol, shift }) => {
-            const r = targetRow + relRow;
-            const c = targetCol + relCol;
-            if (r < 0 || r >= displayedEmployees.length || c < 0 || c >= daysInMonth.length) return;
-            const emp = displayedEmployees[r];
-            const dateStr = getDateKey(daysInMonth[c]);
-            if (isPlanningDateLocked(dateStr)) return;
-            const key = `${emp.id}_${dateStr}`;
-            if (!shift) {
-                if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
-            } else {
-                newChanges[key] = {
-                    ...shift,
-                    isTemp: true,
-                    employeeId: emp.id,
-                    objectiveId: (selectedGrupo && grupoUnifiedMode)
-                        ? resolveObjectiveForEmp(emp.id)
-                        : (shift.objectiveId || selectedObjective),
-                };
-                pasted++;
-            }
+        pastePlanificacionClipboardAt({
+            targetRow,
+            targetCol,
+            allowPlanningMultiSelect,
+            clipboard,
+            clipboardIsCut,
+            pendingChanges: pendingChangesRef.current,
+            displayedEmployees,
+            daysInMonth,
+            shiftsMap,
+            isPlanningDateLocked,
+            selectedGrupo,
+            grupoUnifiedMode,
+            selectedObjective,
+            resolveObjectiveForEmp,
+            commitPendingChanges,
+            setClipboardIsCut,
         });
-        commitPendingChanges(newChanges);
-        toast.success(
-            clipboardIsCut
-                ? `${pasted} turno(s) movido(s)`
-                : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
-        );
-        if (clipboardIsCut) setClipboardIsCut(false);
     }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
-        if (!allowPlanningMultiSelect) {
-            toast.message('Cronograma publicado — activá modo Corregir para edición masiva.');
-            return;
-        }
-        if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; }
-        const bounds = copySelectionToClipboard(true);
-        if (!bounds) return;
-        const prev = pendingChangesRef.current;
-        const newChanges = { ...prev };
-        let cut = 0;
-        for (let r = bounds.minR; r <= bounds.maxR; r++) {
-            for (let c = bounds.minC; c <= bounds.maxC; c++) {
-                const emp = displayedEmployees[r];
-                if (!emp || c >= daysInMonth.length) continue;
-                const dateStr = getDateKey(daysInMonth[c]);
-                if (isPlanningDateLocked(dateStr)) continue;
-                const key = `${emp.id}_${dateStr}`;
-                const existing = prev[key] ? (prev[key].isDeleted ? null : prev[key]) : (shiftsMap[key] || null);
-                if (isShiftConsolidated(existing)) continue;
-                if (existing || prev[key] || shiftsMap[key]) {
-                    newChanges[key] = { isDeleted: true };
-                    cut++;
-                }
-            }
-        }
-        commitPendingChanges(newChanges);
-        toast.success(`${cut} celda(s) cortada(s) — Ctrl+V para pegar`);
-    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, copySelectionToClipboard, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
+        cutPlanificacionSelection({
+            allowPlanningMultiSelect,
+            isServiceLocked,
+            activeServiceStatusMsg: activeServiceStatus.msg,
+            selection,
+            displayedEmployees,
+            daysInMonth,
+            pendingChanges: pendingChangesRef.current,
+            shiftsMap,
+            isPlanningDateLocked,
+            setClipboard,
+            setClipboardDim,
+            setClipboardIsCut,
+            commitPendingChanges,
+        });
+    }, [allowPlanningMultiSelect, isServiceLocked, activeServiceStatus.msg, selection, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, isPlanningDateLocked]);
 
     // Atajos: Ctrl+C copiar, Ctrl+X cortar, Ctrl+V pegar, Ctrl+Z deshacer
     useEffect(() => {
