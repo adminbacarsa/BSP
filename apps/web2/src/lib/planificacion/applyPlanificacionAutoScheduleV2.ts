@@ -40,6 +40,9 @@ import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
 } from '@/lib/planificacion/compareObjectiveMonthSchedules';
+import type { ApplyPlanificacionAutoScheduleV2GeminiFn } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
+
+export type { ApplyPlanificacionAutoScheduleV2GeminiFn } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
 
 export type LastGenOpeningSnapshot = {
     year: number;
@@ -94,20 +97,6 @@ export type AutoV2LastRun = {
     stats: V2GenerateStats;
     ctx: V2EngineContext;
 };
-
-export type ApplyPlanificacionAutoScheduleV2GeminiFn = (
-    finalAssignments: V2Assignment[],
-    coverage: CoverageVerificationReport,
-    verifyCtx: V2EngineContext,
-    stats: V2GenerateStats,
-    newChanges: Record<string, any>,
-    force: boolean,
-    partOfGenerate: boolean,
-) => Promise<{
-    assignments: V2Assignment[];
-    changes: Record<string, any>;
-    coverage: CoverageVerificationReport;
-}>;
 
 export type ApplyPlanificacionAutoScheduleV2Params = {
     selectedObjective: string;

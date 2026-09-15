@@ -194,10 +194,10 @@ import {
     applyPlanificacionGrupoChange,
 } from '@/lib/planificacion/planificacionContextNavigation';
 import {
-    bumpPlanificacionAutoV2Progress,
     generatePlanificacionAutoScheduleV2,
 } from '@/lib/planificacion/generatePlanificacionAutoScheduleV2';
 import { applyPlanificacionAutoScheduleV2 } from '@/lib/planificacion/applyPlanificacionAutoScheduleV2';
+import { runPlanificacionAutoV2PlanningAgentGemini } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -322,11 +322,6 @@ import PlanningCronogramasOverviewModal from '@/components/planificacion/Plannin
 import type { PendingAbsenceNovedad, RecompositionPackage } from '@/lib/planificacion/planningRecomposition.types';
 import { canUseSixPlusOne } from '@/lib/planificacion/sixPlusOneEngine';
 import { fixScheduleIssues } from '@/lib/planificacion/coverageFixer';
-import {
-    buildPlannerContextFromAutoRun,
-    runPlanningAgentOptimizeStep,
-    shouldRunGeminiOptimizeStep,
-} from '@/lib/planificacion/planningAgentPipeline';
 import { buildScheduleOptimizationSuggestions } from '@/lib/planificacion/scheduleOptimizationSuggestions';
 import { verifyScheduleForm } from '@/lib/planificacion/scheduleFormValidator';
 import { rebalanceScheduleForm, type FormRebalanceLogEntry } from '@/lib/planificacion/scheduleFormRebalancer';
@@ -5318,10 +5313,6 @@ export default function PlanificacionPage() {
         });
     };
 
-    const bumpAutoV2Progress = async (pct: number, label: string) => {
-        await bumpPlanificacionAutoV2Progress(setAutoV2Progress, pct, label);
-    };
-
     /** Viabilidad del cronograma (motor COSP) antes de generar. */
     const generateAutoScheduleV2 = async (): Promise<{ ok: boolean; cycles: string[] }> =>
         generatePlanificacionAutoScheduleV2({
@@ -5392,81 +5383,30 @@ export default function PlanificacionPage() {
         newChanges: Record<string, any>,
         force = false,
         partOfGenerate = false,
-    ) => {
-        if (!selectedObjective || (!autoV2RunGemini && !force)) {
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        }
-        if (!force && !shouldRunGeminiOptimizeStep(coverage)) {
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        }
-        setAutoV2GeminiLoading(true);
-        try {
-            if (partOfGenerate) {
-                await bumpAutoV2Progress(92, 'Ajuste fino IA (Gemini)…');
-            } else {
-                setAutoV2Progress({ pct: 8, label: 'Ajuste fino IA (Gemini)…' });
-            }
-            const y = currentDate.getFullYear();
-            const m = currentDate.getMonth();
-            const mes = `${y}-${String(m + 1).padStart(2, '0')}`;
-            const cutoff = autoV2ReportRef.current?.metrics?.cctCutoffDay ?? 25;
-            const prevM = m === 0 ? 12 : m;
-            const prevY = m === 0 ? y - 1 : y;
-            const diasBloqueados = daysInMonth.map((d) => getDateKey(d)).filter((ds) => isDateLocked(ds));
-            const plannerContext = buildPlannerContextFromAutoRun({
-                mes,
-                objetivo: getObjectiveName(selectedObjective),
-                objectiveId: selectedObjective,
+    ) =>
+        runPlanificacionAutoV2PlanningAgentGemini(
+            {
+                selectedObjective,
+                autoV2RunGemini,
+                setAutoV2GeminiLoading,
+                setAutoV2Progress,
+                currentDate,
+                autoV2ReportRef,
+                daysInMonth,
+                getObjectiveName,
                 slaVendidas,
-                ctx: verifyCtx,
-                assignments: finalAssignments,
-                stats,
-                diasBloqueados,
-                cicloCCT: {
-                    cortePrev: `${prevY}-${String(prevM).padStart(2, '0')}-26`,
-                    corteActual: `${y}-${String(m + 1).padStart(2, '0')}-${String(cutoff).padStart(2, '0')}`,
-                    descripcion: `Ciclo CCT: 26/${prevM} → ${cutoff}/${m + 1}; control 200h por ciclo`,
-                },
-            });
-            const result = await runPlanningAgentOptimizeStep({
-                plannerContext,
-                empresaId: empresaId || undefined,
-                baseChanges: newChanges,
-                objectiveId: selectedObjective,
-                assignments: finalAssignments,
-                isDateLocked,
-            });
-            setAutoV2GeminiSummary(result.gemini.resumen || null);
-            let assignments = result.assignments;
-            let changes = result.changes;
-            if (result.gemini.correcciones?.length) {
-                toast.info(`Ajuste fino IA: ${result.applied} corrección(es).`, { duration: 6000 });
-            } else if (result.blocked) {
-                toast.warning(result.gemini.razonBloqueo || 'IA: no puede cerrar el cronograma con la dotación actual.', { duration: 8000 });
-            } else {
-                toast.success('IA: cronograma sin cambios adicionales.', { duration: 4000 });
-            }
-            const coverageAfter = verifyScheduleCoverage(verifyCtx, assignments, stats);
-            return { assignments, changes, coverage: coverageAfter };
-        } catch (e: any) {
-            console.error('[planningAgentGemini]', e);
-            const msg = String(e?.message || e?.code || '');
-            if (/deadline-exceeded|timeout|timed out/i.test(msg)) {
-                toast.error(
-                    'Ajuste fino IA: tiempo agotado (~3 min). Se mantiene el cronograma ya generado. Podés desactivar Gemini y re-generar.',
-                    { duration: 10000 },
-                );
-            } else {
-                toast.error(msg || 'Error en ajuste fino IA');
-            }
-            return { assignments: finalAssignments, changes: newChanges, coverage };
-        } finally {
-            setAutoV2GeminiLoading(false);
-            if (!partOfGenerate) {
-                setAutoV2Progress(null);
-            }
-        }
-    };
+                empresaId,
+                setAutoV2GeminiSummary,
+            },
+            finalAssignments,
+            coverage,
+            verifyCtx,
+            stats,
+            newChanges,
+            force,
+            partOfGenerate,
+        );
+
 
     /**
      * Genera asignaciones y las vuelca a pendingChanges (motor COSP).
