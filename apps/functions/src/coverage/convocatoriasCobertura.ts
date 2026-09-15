@@ -28,6 +28,13 @@ import {
   buildReassignPassiveToVacancyFields,
   vacancyCoverageLabel,
 } from './shiftContinuity';
+import {
+  CROSS_OBJ_MAX_KM,
+  canSparePresentFromDocs,
+  coverageHaversineKm,
+  isWithinCrossObjRadiusKm,
+  normCoveragePositionName,
+} from './coveragePositionRules';
 
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
@@ -44,6 +51,56 @@ function empCoords(emp: Record<string, any>): { lat: number; lng: number } | nul
   const lng = Number(emp.lng ?? emp.location?.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   return { lat, lng };
+}
+
+const objectiveCoordsCache = new Map<string, { lat: number; lng: number } | null>();
+
+async function resolveObjectiveCoords(
+  db: admin.firestore.Firestore,
+  objectiveId: string,
+  clientId?: string | null,
+): Promise<{ lat: number; lng: number } | null> {
+  const oid = String(objectiveId || '').trim();
+  if (!oid) return null;
+  if (objectiveCoordsCache.has(oid)) return objectiveCoordsCache.get(oid)!;
+
+  const tryObj = (o: any): { lat: number; lng: number } | null => {
+    const lat = Number(o?.lat ?? o?.location?.lat ?? o?.geo?.lat);
+    const lng = Number(o?.lng ?? o?.location?.lng ?? o?.geo?.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng };
+  };
+
+  if (clientId) {
+    try {
+      const clientSnap = await db.collection('clients').doc(String(clientId)).get();
+      if (clientSnap.exists) {
+        const objs = clientSnap.data()?.objetivos || [];
+        const hit = (objs as any[]).find((o) => String(o.id || o.objectiveId || '') === oid);
+        const coords = tryObj(hit);
+        if (coords) {
+          objectiveCoordsCache.set(oid, coords);
+          return coords;
+        }
+      }
+    } catch { /* fall through */ }
+  }
+
+  try {
+    const clients = await db.collection('clients').limit(80).get();
+    for (const c of clients.docs) {
+      const objs = c.data()?.objetivos || [];
+      const hit = (objs as any[]).find((o) => String(o.id || o.objectiveId || '') === oid);
+      const coords = tryObj(hit);
+      if (coords) {
+        objectiveCoordsCache.set(oid, coords);
+        return coords;
+      }
+    }
+  } catch { /* ignore */ }
+
+  objectiveCoordsCache.set(oid, null);
+  return null;
 }
 
 function knowledgeScore(emp: Record<string, any>, objectiveId: string): number {
@@ -107,6 +164,7 @@ const TYPE_LABEL: Record<string, string> = {
   VOLANTE: 'Cobertura volante',
   SIN_TURNO_CON_EXP: 'Cobertura disponible',
   CROSS_POS: 'Otro puesto (mismo objetivo)',
+  CROSS_OBJ: 'Traslado (otro objetivo ≤10 km)',
   EXTEND: 'Extensión de jornada',
   ADVANCE: 'Adelanto de turno',
   INTERCAMBIO: 'Intercambio de banda',
@@ -474,6 +532,7 @@ async function findCandidatesForConvType(
   }
 
   // Presente en otro puesto del mismo objetivo → redirección (no EXT).
+  // Solo si el puesto origen tiene ≥2 presentes (al sacar 1 queda ≥1).
   if (type === 'CROSS_POS') {
     const vacPos = String(conv.positionName || '').trim().toLowerCase();
     const workCodes = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1', 'RET', 'ESC', 'REF']);
@@ -482,8 +541,9 @@ async function findCandidatesForConvType(
       .where('empresaId', '==', conv.empresaId)
       .where('isPresent', '==', true)
       .where('isCompleted', '==', false)
-      .limit(30)
+      .limit(40)
       .get();
+    const activeDocs = active.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, any> }));
     for (const d of active.docs) {
       if (out.length >= limit) break;
       const t = d.data();
@@ -493,6 +553,11 @@ async function findCandidatesForConvType(
       if (vacPos && String(t.positionName || '').trim().toLowerCase() === vacPos) continue;
       const code = String(t.code || '').toUpperCase();
       if (!workCodes.has(code)) continue;
+      if (!canSparePresentFromDocs(activeDocs, {
+        objectiveId: String(t.objectiveId || ''),
+        positionName: String(t.positionName || ''),
+        startTime: t.startTime,
+      })) continue;
       const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnapOne.exists) continue;
       const emp = empSnapOne.data()!;
@@ -503,6 +568,65 @@ async function findCandidatesForConvType(
         uid: uid || undefined,
         convocatoriaType: 'CROSS_POS',
         sourceShiftId: d.id,
+      });
+    }
+    return out;
+  }
+
+  // Presente en OTRO objetivo ≤10 km, con sobrante de pax en su puesto → traslado.
+  if (type === 'CROSS_OBJ') {
+    const workCodes = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1']);
+    const gapCoords = await resolveObjectiveCoords(db, conv.objectiveId, conv.clientId);
+    if (!gapCoords) return out;
+    const active = await db.collection('turnos')
+      .where('empresaId', '==', conv.empresaId)
+      .where('isPresent', '==', true)
+      .where('isCompleted', '==', false)
+      .limit(80)
+      .get();
+    const activeDocs = active.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, any> }));
+    const scored: Array<CandidateResult & { score: number; km: number }> = [];
+    for (const d of active.docs) {
+      const t = d.data();
+      if (d.id === conv.shiftId) continue;
+      if (!t.employeeId || t.employeeId === 'VACANTE' || alreadyConvocadoIds.has(t.employeeId)) continue;
+      if (t.isAbsent || t.isFranco || t.isUnassigned) continue;
+      if (String(t.objectiveId || '') === String(conv.objectiveId || '')) continue;
+      const code = String(t.code || '').toUpperCase();
+      if (!workCodes.has(code)) continue;
+      if (!canSparePresentFromDocs(activeDocs, {
+        objectiveId: String(t.objectiveId || ''),
+        positionName: String(t.positionName || ''),
+        startTime: t.startTime,
+      })) continue;
+      const srcCoords = await resolveObjectiveCoords(db, String(t.objectiveId || ''), t.clientId);
+      const km = srcCoords
+        ? coverageHaversineKm(gapCoords.lat, gapCoords.lng, srcCoords.lat, srcCoords.lng)
+        : Infinity;
+      if (!isWithinCrossObjRadiusKm(km, CROSS_OBJ_MAX_KM)) continue;
+      const empSnapOne = await db.collection('empleados').doc(t.employeeId).get();
+      if (!empSnapOne.exists) continue;
+      const emp = empSnapOne.data()!;
+      const uid = await findEmployeeUid(db, t.employeeId, emp);
+      const score = knowledgeScore(emp, conv.objectiveId) * 100 - km;
+      scored.push({
+        id: t.employeeId,
+        name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+        uid: uid || undefined,
+        convocatoriaType: 'CROSS_OBJ',
+        sourceShiftId: d.id,
+        score,
+        km,
+      });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    for (const c of scored.slice(0, limit)) {
+      out.push({
+        id: c.id,
+        name: c.name,
+        uid: c.uid,
+        convocatoriaType: 'CROSS_OBJ',
+        sourceShiftId: c.sourceShiftId,
       });
     }
     return out;
@@ -589,6 +713,7 @@ async function findCandidatesForStep(
   if (step === 'RET') return findCandidatesForConvType(db, conv, 'RET', BROADCAST_LIMIT);
   if (step === 'ESC') return findCandidatesForConvType(db, conv, 'ESC', BROADCAST_LIMIT);
   if (step === 'CROSS_POS') return findCandidatesForConvType(db, conv, 'CROSS_POS', BROADCAST_LIMIT);
+  if (step === 'CROSS_OBJ') return findCandidatesForConvType(db, conv, 'CROSS_OBJ', BROADCAST_LIMIT);
   if (step === 'INTERCAMBIO') return findCandidatesForConvType(db, conv, 'INTERCAMBIO', BROADCAST_LIMIT);
   if (step === 'FT') return findCandidatesForConvType(db, conv, 'FT', BROADCAST_LIMIT);
   return [];
@@ -1201,7 +1326,7 @@ async function resolverCobertura(
       vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
     });
     await cancelSiblingConvocatorias(batch, db, conv.shiftId, conv.id);
-  } else if (conv.type === 'CROSS_POS') {
+  } else if (conv.type === 'CROSS_POS' || conv.type === 'CROSS_OBJ') {
     const sourceId = conv.sourceShiftId;
     const vacLabel = vacancyCoverageLabel({
       titularName: titular.titularEmployeeName,
@@ -1236,11 +1361,15 @@ async function resolverCobertura(
         causedByShiftId: sourceId,
         causedByEmployeeId: conv.candidateEmployeeId,
         causedByEmployeeName: conv.candidateEmployeeName,
-        vacancyLabel: `Vacante por redirección · ${prevPos || 'puesto'} → ${(vacantData as any).positionName || 'hueco'}`,
+        vacancyLabel: conv.type === 'CROSS_OBJ'
+          ? `Vacante por traslado · ${src.objectiveName || 'origen'} (${prevPos || 'puesto'}) → ${conv.objectiveName || 'destino'}`
+          : `Vacante por redirección · ${prevPos || 'puesto'} → ${(vacantData as any).positionName || 'hueco'}`,
         coverageEventId,
         createdAt: FieldValue.serverTimestamp(),
         reportedBy: resolvedBy,
       });
+      const covType = conv.type === 'CROSS_OBJ' ? 'CROSS_OBJECTIVE' : 'CROSS_POSITION';
+      const keepPresence = conv.type !== 'CROSS_OBJ' && wasPresent;
       batch.update(db.collection('turnos').doc(sourceId), {
         ...buildReassignPassiveToVacancyFields(
           {
@@ -1254,33 +1383,34 @@ async function resolverCobertura(
             endTime: conv.endTime || (vacantData as any).endTime,
           },
           {
-            coverageType: 'CROSS_POSITION',
+            coverageType: covType,
             resolvedBy,
             previousCode: prevCode,
             previousPositionName: prevPos || null,
             coverageEventId,
           },
         ),
-        // Demo: siempre presente en el hueco. Auto: conserva presencia si ya fichó en el puesto origen.
+        // Demo: siempre presente en el hueco. Auto CROSS_POS: conserva presencia mismo predio.
+        // CROSS_OBJ: otro sitio → pendiente de fichar (salvo Demo que simula llegada).
         ...(resolvedBy === 'MODO_DEMO'
           ? demoCovererPresenceFields(resolvedBy, gapPresentAt)
           : {
-            isPresent: wasPresent,
-            status: wasPresent ? 'PRESENT' : 'PENDING',
+            isPresent: keepPresence,
+            status: keepPresence ? 'PRESENT' : 'PENDING',
           }),
         vacatedShiftId: freedRef.id,
         vacancyLabel: vacLabel,
         ...covererLedgerFields({
           ...ledgerBase,
           vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
-          coverageType: 'CROSS_POSITION',
+          coverageType: covType,
         }),
       });
       applyCoverageLedgerToBatch(batch, db, {
         ...ledgerBase,
         vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
         covererShiftId: sourceId,
-        coverageType: 'CROSS_POSITION',
+        coverageType: covType,
         markVacancyCovered: true,
         vacancyExtra: { ...ledgerBase.vacancyExtra, vacancyLabel: vacLabel, coveredByEmployeeName: conv.candidateEmployeeName },
       });

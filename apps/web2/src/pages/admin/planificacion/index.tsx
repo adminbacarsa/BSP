@@ -202,6 +202,10 @@ import {
 } from '@/lib/planificacion/generatePlanificacionAutoScheduleV2';
 import { applyPlanificacionAutoScheduleV2 } from '@/lib/planificacion/applyPlanificacionAutoScheduleV2';
 import { runPlanificacionAutoV2PlanningAgentGemini } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
+import {
+    rebalancePlanificacionAutoForm,
+    reprocessPlanificacionAutoIssues,
+} from '@/lib/planificacion/planificacionAutoV2PostProcess';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -5457,86 +5461,22 @@ export default function PlanificacionPage() {
      * resuelve conflictos con licencias. No vuelve a correr el motor entero —
      * sólo opera sobre las celdas que ya generó.
      */
-    const reprocessAutoIssues = async () => {
-        if (!autoV2LastRun || !autoV2Coverage) {
-            toast.error('No hay una generación reciente para reprocesar.');
-            return;
-        }
-        setAutoV2Fixing(true);
-        try {
-            const result = fixScheduleIssues(
-                autoV2LastRun.ctx,
-                autoV2LastRun.assignments,
-                autoV2LastRun.stats,
-                autoV2Coverage,
-                5,
-            );
-
-            // Volcamos las nuevas asignaciones a pendingChanges
-            const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
-            const NON_BILLABLE = new Set(['RET', 'F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'PG', 'AA']);
-            let written = 0;
-            for (const a of result.assignments) {
-                const key = `${a.empId}_${a.dateStr}`;
-                // No pisar un turno facturable autorizado (ej. overflow 200h) con un RET/F del fixer.
-                const existing = pendingChanges[key];
-                if (existing && !existing.isDeleted && !NON_BILLABLE.has(String(existing.code || '').toUpperCase())
-                    && NON_BILLABLE.has(String(a.code || '').toUpperCase())) continue;
-                newChanges[key] = {
-                    isTemp: true,
-                    employeeId: a.empId,
-                    objectiveId: selectedObjective,
-                    positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
-                    code: a.code,
-                    name: a.name,
-                    hours: a.hours,
-                    startTime: a.startTime,
-                    ...(a.endTime ? { endTime: a.endTime } : {}),
-                    ...(a.isFranco ? { isFranco: true } : {}),
-                    ...(a.isReten ? { isReten: true } : {}),
-                };
-                written++;
-            }
-            setPendingChanges(newChanges);
-            setAutoV2Coverage(result.report);
-            setAutoV2Suggestions(
-                buildScheduleOptimizationSuggestions(autoV2LastRun.ctx, result.assignments, autoV2LastRun.stats),
-            );
-            setAutoV2LastRun({ ...autoV2LastRun, assignments: result.assignments });
-            setAutoV2FormReport(verifyScheduleForm(
-                autoV2LastRun.ctx,
-                result.assignments,
-                autoV2LastRun.stats,
-                {
-                    strictSixTwo: autoPlanningBrainRef.current?.strictSixTwo,
-                    rotateShifts: autoPlanningBrainRef.current?.rotateShifts,
-                },
-            ));
-
-            const s = result.summary;
-            const baseMsg = `Reproceso en ${result.iterations} iteración(es). Descansos: -${s.restViolationsFixed}, licencias: -${s.licenseConflictsFixed}, slots: -${s.uncoveredFixed}.`;
-            if (result.converged) {
-                toast.success(`✓ Cobertura OK. ${baseMsg}`, { duration: 7000 });
-            } else if (s.restViolationsFixed + s.licenseConflictsFixed + s.uncoveredFixed === 0) {
-                toast.warning(
-                    `Sin progreso: ${result.report.restViolations.length} descansos, ${result.report.licenseConflicts.length} licencias y ${s.uncoveredRemaining} slots siguen sin resolverse. Revisalos a mano.`,
-                    { duration: 8000 },
-                );
-            } else {
-                toast.warning(
-                    `${baseMsg} Quedan ${result.report.restViolations.length} descansos, ${result.report.licenseConflicts.length} licencias y ${s.uncoveredRemaining} slots.`,
-                    { duration: 8000 },
-                );
-            }
-            console.info('[reprocessAutoIssues] log:', result.log);
-            void written;
-        } catch (e: any) {
-            console.error('[reprocessAutoIssues]', e);
-            toast.error('Error al reprocesar los errores.');
-        } finally {
-            setAutoV2Fixing(false);
-        }
-    };
+    const reprocessAutoIssues = async () =>
+        reprocessPlanificacionAutoIssues({
+            autoV2LastRun,
+            autoV2Coverage,
+            autoOverwrite,
+            pendingChanges,
+            selectedObjective,
+            positionStructure,
+            autoPlanningBrainRef,
+            setAutoV2Fixing,
+            setPendingChanges,
+            setAutoV2Coverage,
+            setAutoV2Suggestions,
+            setAutoV2LastRun,
+            setAutoV2FormReport,
+        });
 
     /**
      * Actualiza las métricas de cobertura/SLA cuando se asignan N slots manualmente.
@@ -5570,82 +5510,24 @@ export default function PlanificacionPage() {
     };
 
     /** Rebalanceo manual de forma: swaps trabajo↔F/RET entre guardias (sin F→turno unilateral). */
-    const rebalanceAutoForm = async () => {
-        if (!autoV2LastRun || !autoV2Coverage || !selectedObjective) {
-            toast.error('No hay una generación reciente para rebalancear.');
-            return;
-        }
-        if (autoV2Coverage.coverage.uncoveredSlots > 0) {
-            toast.error('Cerrá la cobertura antes de rebalancear forma.');
-            return;
-        }
-        setAutoV2Rebalancing(true);
-        try {
-            const reb = rebalanceScheduleForm(
-                autoV2LastRun.ctx,
-                autoV2LastRun.assignments,
-                autoV2LastRun.stats,
-                autoV2Coverage,
-                {
-                    strictSixTwo: autoPlanningBrainRef.current?.strictSixTwo,
-                    rotateShifts: autoPlanningBrainRef.current?.rotateShifts,
-                },
-            );
-            if (!reb.improved || reb.swapsApplied === 0) {
-                toast.info('No se encontraron swaps que mejoren el balance horario sin romper cobertura.');
-                return;
-            }
-
-            const newChanges: Record<string, any> = autoOverwrite ? {} : { ...pendingChanges };
-            const touched = new Set<string>();
-            for (const entry of reb.log) {
-                touched.add(`${entry.fromEmpId}__${entry.dateStr}`);
-                touched.add(`${entry.toEmpId}__${entry.dateStr}`);
-            }
-            for (const touchKey of touched) {
-                const sep = touchKey.indexOf('__');
-                const empId = touchKey.slice(0, sep);
-                const dateStr = touchKey.slice(sep + 2);
-                const a = reb.assignments.find(x => x.empId === empId && x.dateStr === dateStr);
-                if (!a) continue;
-                newChanges[`${empId}_${dateStr}`] = {
-                    isTemp: true,
-                    employeeId: empId,
-                    objectiveId: selectedObjective,
-                    positionName: a.positionName || (positionStructure[0]?.positionName ?? 'General'),
-                    code: a.code,
-                    name: a.name,
-                    hours: a.hours,
-                    startTime: a.startTime,
-                    ...(a.endTime ? { endTime: a.endTime } : {}),
-                    ...(a.isFranco ? { isFranco: true } : {}),
-                    ...(a.isReten ? { isReten: true } : {}),
-                };
-            }
-
-            setPendingChanges(newChanges);
-            setAutoV2Coverage(reb.coverageReport);
-            setAutoV2FormReport(reb.formReport);
-            setAutoV2RebalanceLog(reb.log);
-            setAutoV2LastRun({ ...autoV2LastRun, assignments: reb.assignments, stats: reb.stats });
-            setAutoV2Suggestions(buildScheduleOptimizationSuggestions(autoV2LastRun.ctx, reb.assignments, reb.stats));
-            setAutoV2GenStats((prev) => prev ? {
-                ...prev,
-                employeeMonthlyHours: reb.stats.employeeMonthlyHours,
-            } : prev);
-
-            toast.success(
-                `Rebalanceo: ${reb.swapsApplied} swap(s). Δ ${reb.formReport.metrics.hoursSpread}h · prom ${reb.formReport.metrics.avgBillableHours}h`,
-                { duration: 7000 },
-            );
-            console.info('[rebalanceAutoForm] log:', reb.log);
-        } catch (e: any) {
-            console.error('[rebalanceAutoForm]', e);
-            toast.error('Error al rebalancear forma.');
-        } finally {
-            setAutoV2Rebalancing(false);
-        }
-    };
+    const rebalanceAutoForm = async () =>
+        rebalancePlanificacionAutoForm({
+            autoV2LastRun,
+            autoV2Coverage,
+            selectedObjective,
+            autoOverwrite,
+            pendingChanges,
+            positionStructure,
+            autoPlanningBrainRef,
+            setAutoV2Rebalancing,
+            setPendingChanges,
+            setAutoV2Coverage,
+            setAutoV2FormReport,
+            setAutoV2RebalanceLog,
+            setAutoV2LastRun,
+            setAutoV2Suggestions,
+            setAutoV2GenStats,
+        });
 
     /** Debug: trae el doc de servicios_sla vigente para el mes en pantalla y lo muestra crudo. */
     const fetchSlaDebug = async () => {

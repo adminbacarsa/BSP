@@ -13,6 +13,7 @@ export type CandidateType =
   | 'RET'
   | 'ESC' // ESC / REF redirigibles
   | 'CROSS_POS'
+  | 'CROSS_OBJ'
   | 'EXTEND'
   | 'ADVANCE'
   | 'INTERCAMBIO'
@@ -22,8 +23,17 @@ export type CandidateType =
  * Escalera CCT = protocolo manual (CoverageSessionManager.STEPS).
  * Auto y manual comparten este orden; auto notifica en paralelo y gana el 1º que acepta.
  * RET es forzado (asignación directa, sin esperar aceptación).
+ * CROSS_POS = mismo obj, ≥2 pax en origen. CROSS_OBJ = otro obj ≤10 km + ≥2 pax origen.
  */
-export type CascadeStepType = 'SIN_TURNO' | 'RET' | 'ESC' | 'CROSS_POS' | 'EXT_DUAL' | 'INTERCAMBIO' | 'FT';
+export type CascadeStepType =
+  | 'SIN_TURNO'
+  | 'RET'
+  | 'ESC'
+  | 'CROSS_POS'
+  | 'EXT_DUAL'
+  | 'INTERCAMBIO'
+  | 'CROSS_OBJ'
+  | 'FT';
 
 export const CASCADE_ORDER: CascadeStepType[] = [
   'SIN_TURNO',
@@ -32,6 +42,7 @@ export const CASCADE_ORDER: CascadeStepType[] = [
   'CROSS_POS',
   'EXT_DUAL',
   'INTERCAMBIO',
+  'CROSS_OBJ',
   'FT',
 ];
 
@@ -64,6 +75,7 @@ export function toCascadeStep(type: string): CascadeStepType | null {
   if (type === 'RET') return 'RET';
   if (type === 'ESC') return 'ESC';
   if (type === 'CROSS_POS') return 'CROSS_POS';
+  if (type === 'CROSS_OBJ') return 'CROSS_OBJ';
   if (type === 'EXTEND' || type === 'ADVANCE' || type === 'EXT_DUAL') return 'EXT_DUAL';
   if (type === 'INTERCAMBIO') return 'INTERCAMBIO';
   if (type === 'FT') return 'FT';

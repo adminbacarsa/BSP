@@ -29,10 +29,16 @@ import {
   buildReassignPassiveToVacancyFields,
   vacancyCoverageLabel,
 } from '@/lib/operaciones/shiftContinuity';
+import {
+  CROSS_OBJ_MAX_KM,
+  canSparePresentFromPosition,
+  coverageHaversineKm,
+  isWithinCrossObjRadiusKm,
+} from '@/lib/operaciones/coveragePositionRules';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'OTRO_PUESTO' | 'RETENCION' | 'INTERCAMBIO' | 'FT';
+export type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'OTRO_PUESTO' | 'RETENCION' | 'INTERCAMBIO' | 'TRASLADO' | 'FT';
 
 export interface PendingSlot { notifId: string; empId: string; sec: number; candShiftId?: string; }
 
@@ -77,10 +83,11 @@ const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; ti
   { key: 'SIN_TURNO',  label: 'Sin turno',       icon: '1', mandatory: true,  timeoutSec: 60,  desc: 'Empleados disponibles hoy sin turno asignado' },
   { key: 'RET_PASIVO', label: 'Ret. Pasiva',      icon: '2', mandatory: true,  timeoutSec: 180, desc: 'RET obligado: se convierte al turno real del hueco' },
   { key: 'ESC',        label: 'ESC / REF',        icon: '3', mandatory: true,  timeoutSec: 60,  desc: 'Comodín no facturable → se reasigna al turno real' },
-  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120, desc: 'Presente en otro puesto → mueve toda la jornada al hueco y libera el suyo (no es mitad EXT/ADV)' },
+  { key: 'OTRO_PUESTO', label: 'Otro puesto',    icon: '4', mandatory: true,  timeoutSec: 120, desc: 'Mismo objetivo, ≥2 presentes en origen → mueve jornada al hueco y libera su puesto (no es EXT/ADV)' },
   { key: 'RETENCION',  label: 'Ext. 12h',         icon: '5', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'EXT+ADV: bandas vecinas del mismo objetivo, cualquier puesto (prioriza el del hueco)' },
   { key: 'INTERCAMBIO', label: 'Intercambio',     icon: '6', mandatory: false, timeoutSec: 120, desc: 'Permuta banda con quien tiene turno posterior' },
-  { key: 'FT',         label: 'Franco Trabajado', icon: '7', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco disponibles hoy' },
+  { key: 'TRASLADO',   label: 'Traslado',         icon: '7', mandatory: false, timeoutSec: 120, desc: `Otro objetivo ≤${CROSS_OBJ_MAX_KM} km + ≥2 presentes en origen → redirección completa` },
+  { key: 'FT',         label: 'Franco Trabajado', icon: '8', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco disponibles hoy' },
 ];
 
 const WORK_CODES_CROSS = new Set(['M', 'T', 'N', 'D12', 'N12', 'M1', 'T1', 'N1']);
@@ -346,13 +353,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       .map((sh: any) => sh.employeeId)
   );
 
-  // ── Coordenadas del objetivo ausente ─────────────────────────────────────────
-  const objCoords = React.useMemo(() => {
-    let lat = absenceShift.lat;
-    let lng = absenceShift.lng;
-    if ((lat == null || lng == null) && logic.clients) {
+  const resolveObjCoords = React.useCallback((objectiveId: string | null | undefined, fallback?: { lat?: number; lng?: number }) => {
+    let lat = fallback?.lat;
+    let lng = fallback?.lng;
+    if ((lat == null || lng == null) && objectiveId && logic.clients) {
       for (const cl of (logic.clients || [])) {
-        const obj = (cl.objetivos || []).find((o: any) => o.id === absenceShift.objectiveId);
+        const obj = (cl.objetivos || []).find((o: any) => o.id === objectiveId);
         if (obj && (obj.lat != null || obj.location?.lat != null)) {
           lat = obj.lat ?? obj.location?.lat;
           lng = obj.lng ?? obj.location?.lng;
@@ -360,11 +366,21 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         }
       }
     }
-    return {
-      lat: Number(lat) || -31.4201,
-      lng: Number(lng) || -64.1888,
-    };
-  }, [absenceShift, logic.clients]);
+    if (lat == null || lng == null) return null;
+    const nLat = Number(lat);
+    const nLng = Number(lng);
+    if (!Number.isFinite(nLat) || !Number.isFinite(nLng)) return null;
+    return { lat: nLat, lng: nLng };
+  }, [logic.clients]);
+
+  // ── Coordenadas del objetivo ausente ─────────────────────────────────────────
+  const objCoords = React.useMemo(() => {
+    const resolved = resolveObjCoords(absenceShift.objectiveId, {
+      lat: absenceShift.lat,
+      lng: absenceShift.lng,
+    });
+    return resolved || { lat: -31.4201, lng: -64.1888 };
+  }, [absenceShift, resolveObjCoords]);
 
   const getDistanceToObjective = (emp: any, cand?: any): number => {
     const lat = emp?.lat ?? cand?.lat ?? emp?.location?.lat;
@@ -488,7 +504,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           });
       case 'OTRO_PUESTO': {
         const gapPos = normPos(absenceShift.positionName);
-        return (logic.processedData || [])
+        const allShifts = logic.processedData || [];
+        return allShifts
           .filter((sh: any) => {
             if (!sh.isPresent || sh.isCompleted || sh.isAbsent || sh.isFranco || sh.isUnassigned) return false;
             if (sh.objectiveId !== absenceShift.objectiveId) return false;
@@ -498,6 +515,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             const code = String(sh.code || '').toUpperCase();
             if (!WORK_CODES_CROSS.has(code) && code !== 'RET' && code !== 'ESC' && code !== 'REF') return false;
             if (String(sh.id || '').startsWith('V124_') || String(sh.id || '').startsWith('SLA_GAP')) return false;
+            if (!canSparePresentFromPosition(allShifts, sh)) return false;
             return true;
           })
           .map((sh: any) => {
@@ -512,6 +530,43 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               experience: exp,
               hasAffinity: exp.hasExp,
               crossFromPosition: sh.positionName || '—',
+            };
+          });
+      }
+      case 'TRASLADO': {
+        const allShifts = logic.processedData || [];
+        const gapOid = String(absenceShift.objectiveId || '');
+        return allShifts
+          .filter((sh: any) => {
+            if (!sh.isPresent || sh.isCompleted || sh.isAbsent || sh.isFranco || sh.isUnassigned) return false;
+            if (!sh.objectiveId || String(sh.objectiveId) === gapOid) return false;
+            if (sh.employeeId === absenceShift.employeeId) return false;
+            if (crossSessionBusy.has(sh.employeeId)) return false;
+            const code = String(sh.code || '').toUpperCase();
+            if (!WORK_CODES_CROSS.has(code)) return false;
+            if (String(sh.id || '').startsWith('V124_') || String(sh.id || '').startsWith('SLA_GAP')) return false;
+            if (!canSparePresentFromPosition(allShifts, sh)) return false;
+            const src = resolveObjCoords(sh.objectiveId, { lat: sh.lat, lng: sh.lng });
+            if (!src) return false;
+            const km = coverageHaversineKm(objCoords.lat, objCoords.lng, src.lat, src.lng);
+            return isWithinCrossObjRadiusKm(km, CROSS_OBJ_MAX_KM);
+          })
+          .map((sh: any) => {
+            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+            const src = resolveObjCoords(sh.objectiveId, { lat: sh.lat, lng: sh.lng });
+            const km = src
+              ? coverageHaversineKm(objCoords.lat, objCoords.lng, src.lat, src.lng)
+              : Infinity;
+            const exp = getCandidateExperience(emp, sh);
+            return {
+              ...sh,
+              fullName: sh.employeeName || emp?.fullName || (emp ? `${emp.firstName || ''} ${emp.lastName || ''}`.trim() : '') || emp?.name || '',
+              phone: sh.phone || emp?.phone || emp?.celular || '',
+              distance: km,
+              experience: exp,
+              hasAffinity: exp.hasExp,
+              crossFromPosition: sh.positionName || '—',
+              crossFromObjective: sh.objectiveName || 'otro objetivo',
             };
           });
       }
@@ -713,6 +768,16 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           && !String(sh.id).startsWith('V124_')
           && !String(sh.id).startsWith('SLA_GAP')
         );
+      } else if (step.key === 'TRASLADO') {
+        candidateShift = (logic.processedData || []).find((sh: any) =>
+          sh.employeeId === empId
+          && sh.isPresent
+          && sh.objectiveId
+          && sh.objectiveId !== absenceShift.objectiveId
+          && sh.id !== empId
+          && !String(sh.id).startsWith('V124_')
+          && !String(sh.id).startsWith('SLA_GAP')
+        );
       } else if (step.key === 'FT') {
         candidateShift = (logic.processedData || []).find((sh: any) => sh.employeeId === empId && sh.isFranco && !sh.isFrancoTrabajado && sh.id !== empId && !String(sh.id).startsWith('V124_') && !String(sh.id).startsWith('SLA_GAP'));
       }
@@ -832,11 +897,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         markCovered(covType, candidateShiftId);
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_RESUELTA', title: `Cobertura ${step.label}`, status: 'pending', employeeId: empId, employeeName: empName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: candidateShiftId, coverageEventId, description: `${empName}: ${prevCode} → turno real. ${vacLabel}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
-      } else if (step.key === 'OTRO_PUESTO') {
+      } else if (step.key === 'OTRO_PUESTO' || step.key === 'TRASLADO') {
         const prevCode = String(candidateShift?.code || 'M').toUpperCase();
         const prevPos = String(candidateShift?.positionName || '').trim();
         const wasPresent = !!candidateShift?.isPresent;
-        // Liberar el puesto origen: vacante referenciada (mismo objetivo, puesto X)
+        const covType = step.key === 'TRASLADO' ? 'CROSS_OBJECTIVE' : 'CROSS_POSITION';
+        const srcObjName = candidateShift?.objectiveName || 'origen';
+        // Liberar el puesto origen: vacante referenciada
         const freedRef = doc(collection(db, 'turnos'));
         batch.set(freedRef, stampEmpresaId({
           employeeId: 'VACANTE',
@@ -859,7 +926,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           causedByShiftId: candidateShiftId,
           causedByEmployeeId: empId,
           causedByEmployeeName: empName,
-          vacancyLabel: `Vacante por redirección de ${empName} · ${prevPos || 'puesto'} → ${absenceShift.positionName || 'hueco'}`,
+          vacancyLabel: step.key === 'TRASLADO'
+            ? `Vacante por traslado · ${srcObjName} (${prevPos || 'puesto'}) → ${absenceShift.objectiveName || 'destino'}`
+            : `Vacante por redirección de ${empName} · ${prevPos || 'puesto'} → ${absenceShift.positionName || 'hueco'}`,
           coverageEventId,
           createdAt: serverTimestamp(),
           reportedBy: 'OPERACIONES',
@@ -875,15 +944,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
             endTime: Timestamp.fromDate(absenceEnd),
           }, {
-            coverageType: 'CROSS_POSITION',
+            coverageType: covType,
             resolvedBy: 'OPERACIONES',
             previousCode: prevCode,
             previousPositionName: prevPos || null,
             coverageEventId,
           }),
-          // Ya estaba presente en el objetivo: sigue presente en el puesto destino (mismo predio).
-          isPresent: wasPresent,
-          status: wasPresent ? 'PRESENT' : 'PENDING',
+          // Mismo predio (otro puesto): conserva presencia. Traslado: pendiente de fichar en destino.
+          isPresent: step.key === 'TRASLADO' ? false : wasPresent,
+          status: step.key === 'TRASLADO' ? 'PENDING' : (wasPresent ? 'PRESENT' : 'PENDING'),
           coverageRedirectedTo: absenceShift.objectiveId,
           coverageRedirectedAt: serverTimestamp(),
           reassignedFromPassiveAt: serverTimestamp(),
@@ -897,14 +966,14 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             titularEmployeeName: titularNameForCover,
             vacancyShiftId: vacancyId,
             titularShiftId: titular.titularShiftId,
-            coverageType: 'CROSS_POSITION',
+            coverageType: covType,
           }),
         });
-        markCovered('CROSS_POSITION', candidateShiftId);
+        markCovered(covType, candidateShiftId);
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({
           type: 'COBERTURA_RESUELTA',
-          title: 'Cobertura otro puesto',
+          title: step.key === 'TRASLADO' ? 'Cobertura por traslado' : 'Cobertura otro puesto',
           status: 'pending',
           employeeId: empId,
           employeeName: empName,
@@ -912,7 +981,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           objectiveName: absenceShift.objectiveName,
           shiftId: candidateShiftId,
           coverageEventId,
-          description: `${empName}: ${prevPos || prevCode} → ${absenceShift.positionName || ''} (${absenceShift.code || ''}). Liberó su puesto. ${vacLabel}`,
+          description: step.key === 'TRASLADO'
+            ? `${empName}: ${srcObjName}/${prevPos || prevCode} → ${absenceShift.objectiveName || ''} (${absenceShift.positionName || ''}). Liberó origen. ${vacLabel}`
+            : `${empName}: ${prevPos || prevCode} → ${absenceShift.positionName || ''} (${absenceShift.code || ''}). Liberó su puesto. ${vacLabel}`,
           createdAt: serverTimestamp(),
           reportedBy: 'OPERACIONES',
         }, tid));
@@ -1598,6 +1669,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                                 {c.crossFromPosition && (
                                   <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200 shrink-0" title="Puesto actual → se redirige al hueco">
                                     desde {c.crossFromPosition}
+                                  </span>
+                                )}
+                                {c.crossFromObjective && (
+                                  <span className="text-[9px] font-black px-1.5 py-0.5 rounded-full bg-violet-50 text-violet-700 border border-violet-200 shrink-0" title={`Objetivo origen (≤${CROSS_OBJ_MAX_KM} km)`}>
+                                    {c.crossFromObjective}
                                   </span>
                                 )}
                                 {hasExp ? (
