@@ -165,6 +165,10 @@ import {
 import { assignPlanificacionShift } from '@/lib/planificacion/assignPlanificacionShift';
 import { applyPlanificacionToPending } from '@/lib/planificacion/applyPlanificacionToPending';
 import { checkPlanificacionLaborRules } from '@/lib/planificacion/checkPlanificacionLaborRules';
+import {
+    confirmPlanificacionPendingAssignment,
+    resetPlanificacionPendingAssignment,
+} from '@/lib/planificacion/confirmPlanificacionPendingAssignment';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -4983,17 +4987,20 @@ export default function PlanificacionPage() {
     };
 
     const confirmPendingAssignment = () => {
-        if (!pendingAssignment) return;
-        if (francoMode === 'FT_SELECTION' && !canAssignFT) {
-            toast.error('Sin permiso para asignar Franco Trabajado (FT). Activá «Franco FT» en el rol de Planificación.');
-            setFrancoMode('NONE');
-            setPendingAssignment(null);
-            setAuthWarningMessage('');
-            return;
-        }
-        applyToPending({ ...pendingAssignment.shiftConfig, positionName: pendingAssignment.positionName, isFrancoTrabajado: francoMode === 'FT_SELECTION', isExtended: false, isEarlyStart: false, plannedNovedad: modifiers.plannedNovedad });
-        setPendingAssignment(null);
-        setAuthWarningMessage('');
+        confirmPlanificacionPendingAssignment({
+            pendingAssignment,
+            francoMode,
+            canAssignFT,
+            plannedNovedad: modifiers.plannedNovedad,
+            applyToPending,
+            setFrancoMode,
+            setPendingAssignment,
+            setAuthWarningMessage,
+        });
+    };
+
+    const cancelPendingAssignment = () => {
+        resetPlanificacionPendingAssignment(setPendingAssignment, setAuthWarningMessage);
     };
 
     const getShiftFor = (empId: string, dateStr: string) => {
@@ -11377,7 +11384,7 @@ export default function PlanificacionPage() {
                     </div>
                 )}
 
-                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button type="button" onClick={() => { setPendingAssignment(null); setAuthWarningMessage(''); }} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button type="button" onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Aplicar</button></div></div></div></div>, document.body)}
+                {pendingAssignment && createPortal(<div className="fixed inset-0 z-[11000] bg-amber-900/40 backdrop-blur-sm flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-xl p-6 shadow-2xl border-2 border-amber-400 animate-in zoom-in-95"><div className="flex flex-col items-center text-center space-y-4"><div className="p-4 bg-amber-100 rounded-full text-amber-600"><AlertTriangle size={32} /></div><div><h3 className="font-black text-lg text-amber-800 uppercase">Advertencia Laboral</h3><p className="text-xs text-slate-600 mt-2 font-medium">{authWarningMessage}</p></div><div className="w-full pt-4 border-t flex gap-3"><button type="button" onClick={cancelPendingAssignment} className="flex-1 py-3 text-slate-500 font-bold text-xs rounded-xl hover:bg-slate-100">Cancelar</button><button type="button" onClick={confirmPendingAssignment} className="flex-1 py-3 bg-amber-500 text-white font-black text-xs rounded-xl hover:bg-amber-600 shadow-md">Aplicar</button></div></div></div></div>, document.body)}
                 {publishConfirmModal && typeof document !== 'undefined' && createPortal(
                     <div
                         className="fixed inset-0 z-[9200] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
