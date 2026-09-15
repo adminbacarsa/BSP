@@ -194,6 +194,10 @@ import {
     applyPlanificacionGrupoChange,
 } from '@/lib/planificacion/planificacionContextNavigation';
 import {
+    deletePlanificacionGrupo,
+    savePlanificacionGrupo,
+} from '@/lib/planificacion/planificacionGrupoCrud';
+import {
     generatePlanificacionAutoScheduleV2,
 } from '@/lib/planificacion/generatePlanificacionAutoScheduleV2';
 import { applyPlanificacionAutoScheduleV2 } from '@/lib/planificacion/applyPlanificacionAutoScheduleV2';
@@ -3592,45 +3596,21 @@ export default function PlanificacionPage() {
         setOpenDrop(null);
     };
 
-    const handleSaveGrupo = async () => {
-        if (!grupoFormNombre.trim() || !grupoFormClientId || grupoFormObjectiveIds.length < 2) {
-            toast.error('El grupo necesita un nombre y al menos 2 objetivos.');
-            return;
-        }
-        setSavingGrupo(true);
-        try {
-            const client = clients.find((c: any) => c.id === grupoFormClientId);
-            const clientObjetivos: any[] = client?.objetivos || [];
-            const objectiveNames = grupoFormObjectiveIds.map(oid => {
-                const obj = clientObjetivos.find((o: any) => (o.id || o.name) === oid);
-                return obj?.name || oid;
-            });
-            const payload = {
-                empresaId,
-                nombre: grupoFormNombre.trim(),
-                clientId: grupoFormClientId,
-                clientName: client?.name || '',
-                objectiveIds: grupoFormObjectiveIds,
-                objectiveNames,
-            };
-            if (grupoFormMode === 'edit' && grupoFormEditId) {
-                await gruposService.update(grupoFormEditId, payload);
-                setGrupos(prev => prev.map(g => g.id === grupoFormEditId ? { ...g, ...payload } : g));
-                if (selectedGrupo?.id === grupoFormEditId) setSelectedGrupo({ ...selectedGrupo, ...payload });
-                toast.success('Grupo actualizado.');
-            } else {
-                const newId = await gruposService.add(payload);
-                setGrupos(prev => [...prev, { id: newId, ...payload }]);
-                toast.success('Grupo creado.');
-            }
-            setShowGrupoForm(false);
-        } catch (e) {
-            console.error(e);
-            toast.error('Error al guardar el grupo.');
-        } finally {
-            setSavingGrupo(false);
-        }
-    };
+    const handleSaveGrupo = async () =>
+        savePlanificacionGrupo({
+            grupoFormNombre,
+            grupoFormClientId,
+            grupoFormObjectiveIds,
+            grupoFormMode,
+            grupoFormEditId,
+            empresaId,
+            clients,
+            selectedGrupo,
+            setSavingGrupo,
+            setGrupos,
+            setSelectedGrupo,
+            setShowGrupoForm,
+        });
 
     // En modo grupo unificado: devuelve el objectiveId correcto para el empleado según su objetivo nativo
     const resolveObjectiveForEmp = useCallback((empId: string): string => {
@@ -3643,17 +3623,13 @@ export default function PlanificacionPage() {
         return selectedObjective;
     }, [selectedObjective, selectedGrupo, grupoUnifiedMode, employees, slaIdToObjId]);
 
-    const handleDeleteGrupo = async (grupo: GrupoObjetivos) => {
-        if (!confirm(`¿Eliminar el grupo "${grupo.nombre}"?`)) return;
-        try {
-            await gruposService.delete(grupo.id!);
-            setGrupos(prev => prev.filter(g => g.id !== grupo.id));
-            if (selectedGrupo?.id === grupo.id) handleGrupoChange(null);
-            toast.success('Grupo eliminado.');
-        } catch (e) {
-            toast.error('Error al eliminar el grupo.');
-        }
-    };
+    const handleDeleteGrupo = async (grupo: GrupoObjetivos) =>
+        deletePlanificacionGrupo({
+            grupo,
+            selectedGrupo,
+            setGrupos,
+            handleGrupoChange,
+        });
 
     const navigateToObjectiveFromOverview = useCallback((clientId: string, objectiveId: string, year: number, month: number) => {
         if (Object.keys(pendingChanges).length > 0) {
