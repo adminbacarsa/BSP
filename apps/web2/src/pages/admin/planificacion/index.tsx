@@ -322,6 +322,7 @@ import { canUseFixedBandFloater } from '@/lib/planificacion/fixedBandFloaterSche
 import { applyAbsenceCoverage } from '@/lib/planificacion/coverageEngine';
 import PlanningCoverageModal from '@/components/planificacion/PlanningCoverageModal';
 import PlanningCoverageVerificationModal from '@/components/planificacion/PlanningCoverageVerificationModal';
+import PlanningCctCapacityModal from '@/components/planificacion/PlanningCctCapacityModal';
 import { PlanningAutoScheduleModal } from '@/components/planificacion/PlanningAutoScheduleModal';
 import PlanningRecompositionModal from '@/components/planificacion/PlanningRecompositionModal';
 import PlanningSlaGapCloseModal, { type SlaGapCloseModalData } from '@/components/planificacion/PlanningSlaGapCloseModal';
@@ -11708,152 +11709,14 @@ export default function PlanificacionPage() {
                 , document.body)}
 
                 {/* ── MODAL CAPACIDAD CCT POR EMPLEADO ── */}
-                {showCapacityModal && autoV2GenStats && createPortal(
-                    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => setShowCapacityModal(false)}>
-                        <div className="bg-white p-6 rounded-xl shadow-2xl w-[860px] max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-                            <h3 className="font-black text-lg mb-1 flex items-center gap-2">
-                                <span className="text-indigo-600">Cap. CCT</span>
-                                <span className="text-slate-700">Capacidad por empleado — ciclo CCT</span>
-                            </h3>
-                            {(() => {
-                                const fmt = (d: Date) => {
-                                    const dd = String(d.getDate()).padStart(2,'0');
-                                    const mes = ['ene','feb','mar','abr','may','jun','jul','ago','sep','oct','nov','dic'][d.getMonth()];
-                                    return `${dd}-${mes}-${d.getFullYear()}`;
-                                };
-                                const yr = currentDate.getFullYear();
-                                const mo = currentDate.getMonth();
-                                const lastDay = new Date(yr, mo + 1, 0).getDate();
-                                const startCurr = new Date(yr, mo - 1, 26);
-                                const endCurr = new Date(yr, mo, 25);
-                                const startNext = new Date(yr, mo, 26);
-                                const endNext = new Date(yr, mo + 1, 25);
-                                const monthName = currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' });
-                                return (
-                                    <>
-                                        <p className="text-xs text-slate-600 font-medium mb-1">
-                                            Cronograma visualizado: <b className="text-indigo-700">{monthName}</b> (días 1..{lastDay}).
-                                        </p>
-                                        <div className="grid grid-cols-2 gap-2 mb-3">
-                                            <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-2 text-[11px]">
-                                                <div className="font-black text-indigo-800">Ciclo CCT actual (Current)</div>
-                                                <div className="text-slate-700"><b>{fmt(startCurr)}</b> → <b>{fmt(endCurr)}</b></div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Cola del mes anterior (días 26..fin) + días 1..25 de este mes.</div>
-                                            </div>
-                                            <div className="bg-amber-50 border border-amber-200 rounded-lg p-2 text-[11px]">
-                                                <div className="font-black text-amber-800">Ciclo CCT siguiente (Next)</div>
-                                                <div className="text-slate-700"><b>{fmt(startNext)}</b> → <b>{fmt(endNext)}</b></div>
-                                                <div className="text-[10px] text-slate-500 mt-0.5">Días 26..fin de este mes pertenecen al próximo ciclo.</div>
-                                            </div>
-                                        </div>
-                                        <p className="text-xs text-slate-500 font-medium mb-4">
-                                            Tope CCT 422/05: <b>{planningLimits.monthly}h por ciclo</b>. La tabla refleja la <b>última automatización</b> de este objetivo: si corregiste datos o filtros, volvé a <b>generar</b> para actualizarla.
-                                            La cola del ciclo (26..mes anterior) solo suma turnos <b>de este objetivo</b> y <b>no operativos</b> (reten / cobertura ops. / SLA virtual), para no mezclar con otros cronogramas. Los borradores sí se cuentan (siguen siendo crono planificado).
-                                        </p>
-                                    </>
-                                );
-                            })()}
-                            <div className="overflow-x-auto rounded-xl border border-slate-200">
-                                <table className="w-full text-[11px] bg-white">
-                                    <thead className="bg-slate-50 text-slate-700">
-                                        <tr>
-                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Empleado</th>
-                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Puesto</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Hs. Mes</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">CCT Current</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">CCT Next</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Curr.</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide">Buffer Next</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide" title="Cantidad de RETs (retenido stand-by) que tiene asignados el empleado en el mes. Cada RET = potencial 8h de cobertura para otros objetivos.">RET</th>
-                                            <th className="text-right px-3 py-2 font-black uppercase tracking-wide" title="Horas RET potenciales = cantidad de RETs × 8h. NO suman a horas trabajadas, son horas de stand-by disponibles para activar como cobertura.">Hs RET</th>
-                                            <th className="text-left px-3 py-2 font-black uppercase tracking-wide">Estado</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {(() => {
-                                            const empMap: Record<string, any> = {};
-                                            displayedEmployees.forEach((e:any) => { empMap[e.id] = e; });
-                                            const idleSet = new Set(autoV2GenStats.idleEmployeeIds || []);
-                                            const posByEmp: Record<string, string> = {};
-                                            Object.entries(autoV2GenStats.positionGroups || {}).forEach(([pos, ids]) => {
-                                                (ids as string[]).forEach(id => { posByEmp[id] = pos; });
-                                            });
-                                            const rows = displayedEmployees.map((emp:any) => {
-                                                const monthH = autoV2GenStats.employeeMonthlyHours[emp.id] || 0;
-                                                const curr = autoV2GenStats.employeeCycleHours.current[emp.id] || 0;
-                                                const next = autoV2GenStats.employeeCycleHours.next[emp.id] || 0;
-                                                const bufCurr = Math.max(0, 200 - curr);
-                                                const bufNext = Math.max(0, 200 - next);
-                                                const retCount = (autoV2GenStats.employeeRetCount || {})[emp.id] || 0;
-                                                const retHours = (autoV2GenStats.employeeRetHoursPotential || {})[emp.id] || 0;
-                                                const pos = posByEmp[emp.id] || (idleSet.has(emp.id) ? '—' : 'Sin puesto');
-                                                const isIdle = idleSet.has(emp.id);
-                                                const isCapped = curr >= planningLimits.monthly || next >= planningLimits.monthly;
-                                                const isHigh = curr >= 192 || next >= 192;
-                                                const status = isIdle ? 'Capacidad ociosa' :
-                                                    isCapped ? `CAP ${planningLimits.monthly}h alcanzado` :
-                                                    isHigh ? 'Cerca del cap (≥192h)' :
-                                                    bufCurr + bufNext >= 40 ? 'Disponible para más' :
-                                                    'Carga normal';
-                                                const statusColor = isIdle ? 'text-slate-400' :
-                                                    isCapped ? 'text-rose-600' :
-                                                    isHigh ? 'text-amber-600' :
-                                                    bufCurr + bufNext >= 40 ? 'text-emerald-600' :
-                                                    'text-slate-600';
-                                                return { emp, monthH, curr, next, bufCurr, bufNext, retCount, retHours, pos, status, statusColor };
-                                            });
-                                            // Ordenar: capped primero, después por buffer descendente
-                                            rows.sort((a, b) => {
-                                                const aCap = a.curr >= planningLimits.monthly || a.next >= planningLimits.monthly ? 0 : 1;
-                                                const bCap = b.curr >= planningLimits.monthly || b.next >= planningLimits.monthly ? 0 : 1;
-                                                if (aCap !== bCap) return aCap - bCap;
-                                                return (b.bufCurr + b.bufNext) - (a.bufCurr + a.bufNext);
-                                            });
-                                            return rows.map((r) => (
-                                                <tr key={r.emp.id} className="border-t border-slate-100 hover:bg-slate-50">
-                                                    <td className="px-3 py-2 font-bold text-slate-700">{r.emp.name || r.emp.nombre}</td>
-                                                    <td className="px-3 py-2 text-slate-500">{r.pos}</td>
-                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.monthH)}h</td>
-                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.curr)} / 200</td>
-                                                    <td className="px-3 py-2 text-right font-mono text-slate-700">{Math.round(r.next)} / 200</td>
-                                                    <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufCurr)}h</td>
-                                                    <td className="px-3 py-2 text-right font-mono text-emerald-700">{Math.round(r.bufNext)}h</td>
-                                                    <td className={`px-3 py-2 text-right font-mono ${r.retCount > 0 ? 'text-violet-700 font-bold' : 'text-slate-400'}`} title={r.retCount > 0 ? `${r.retCount} RET(s) en stand-by` : 'Sin RETs'}>{r.retCount}</td>
-                                                    <td className={`px-3 py-2 text-right font-mono ${r.retHours > 0 ? 'text-violet-700' : 'text-slate-400'}`} title={r.retHours > 0 ? `Hasta ${r.retHours}h potenciales activables como cobertura` : ''}>{r.retHours}h</td>
-                                                    <td className={`px-3 py-2 font-bold ${r.statusColor}`}>{r.status}</td>
-                                                </tr>
-                                            ));
-                                        })()}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div className="mt-4 grid grid-cols-2 gap-3 text-[11px]">
-                                <div className="bg-slate-50 rounded-lg p-3">
-                                    <div className="font-black text-slate-700 mb-1">Cómo leer la tabla</div>
-                                    <ul className="text-slate-600 space-y-1 list-disc list-inside">
-                                        <li><b>CCT Current</b>: horas ya consumidas en el ciclo CCT del mes actual (incluye cola del mes anterior).</li>
-                                        <li><b>CCT Next</b>: horas asignadas al ciclo siguiente (días 26..fin de este mes).</li>
-                                        <li><b>Buffer</b>: horas libres hasta llegar a 200h en cada ciclo.</li>
-                                        <li><b>RET / Hs RET</b>: cantidad de días en stand-by (retenido) y horas potenciales (RET × 8h). NO suman a horas trabajadas — son capacidad disponible para cubrir ausencias en otros objetivos.</li>
-                                    </ul>
-                                </div>
-                                <div className="bg-slate-50 rounded-lg p-3">
-                                    <div className="font-black text-slate-700 mb-1">Estado</div>
-                                    <ul className="text-slate-600 space-y-1 list-disc list-inside">
-                                        <li><span className="text-rose-600 font-bold">CAP 200h</span>: no se le pueden agregar más turnos en ese ciclo.</li>
-                                        <li><span className="text-amber-600 font-bold">≥192h</span>: cerca del cap, no apto para horas extras en otros objetivos.</li>
-                                        <li><span className="text-emerald-600 font-bold">Disponible</span>: tiene buffer ≥40h para otros objetivos o emergencias.</li>
-                                    </ul>
-                                </div>
-                            </div>
-                            <div className="flex justify-end mt-4">
-                                <button onClick={() => setShowCapacityModal(false)} className="px-5 py-2 rounded-xl text-sm font-black text-white bg-indigo-600 hover:bg-indigo-700 transition-colors">
-                                    Cerrar
-                                </button>
-                            </div>
-                        </div>
-                    </div>,
-                    document.body
+                {showCapacityModal && autoV2GenStats && (
+                    <PlanningCctCapacityModal
+                        stats={autoV2GenStats}
+                        displayedEmployees={displayedEmployees}
+                        currentDate={currentDate}
+                        monthlyLimit={planningLimits.monthly}
+                        onClose={() => setShowCapacityModal(false)}
+                    />
                 )}
 
                 {/* ── Modal cobertura de ausencias (planificación) ── */}
