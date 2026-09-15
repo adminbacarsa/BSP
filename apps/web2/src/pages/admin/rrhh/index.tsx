@@ -37,6 +37,7 @@ import { SearchableSelect } from '@/components/ui/SearchableSelect';
 import { countExperienciaObjetivos } from '@/lib/planificacion/experienciaObjetivos';
 import { normalizeArgPhone } from '@/lib/whatsapp';
 import { inferAbsenceCode, RRHH_ABSENCE_LABEL_TO_CODE, validateAbsenceDateRange, toCalendarDateStr, absenceNeedsMedicalVerification, absenceReplicatesToPlanning, absenceOverlapsYearMonth, yearMonthsSpannedByAbsence } from '@/lib/planificacion/absenceCodes';
+import { buildAusenciaPlanificacionNovedad, shouldNotifyPlanificacionAusencia } from '@/lib/planificacion/planificacionInbox';
 import { normalizeGeneroImport } from '@/lib/planificacion/genderPreference';
 import {
   NOVEDAD_TYPE_LABELS_FALLBACK,
@@ -1298,18 +1299,17 @@ export default function EmployeesPage() {
     }
     if (absenceReplicatesToPlanning(dataToSave)) {
       await replicarAusenciaEnPlanificador(savedId, { ...dataToSave, id: savedId });
-      if (dataToSave.status === 'Autorizada' || dataToSave.status === 'Justificada') {
+      if (shouldNotifyPlanificacionAusencia(dataToSave.status)) {
         await addDoc(collection(db, 'novedades'), stampEmpresaId({
-          source: 'AUSENCIA',
-          type: dataToSave.type,
-          status: 'pending',
-          employeeId: dataToSave.employeeId,
-          employeeName: dataToSave.employeeName,
-          startDate: dataToSave.startDate,
-          endDate: dataToSave.endDate,
-          ausenciaId: savedId,
-          description: `${dataToSave.type} de ${dataToSave.employeeName} — ${dataToSave.startDate} al ${dataToSave.endDate}`,
-          reportedBy: nombreReal,
+          ...buildAusenciaPlanificacionNovedad({
+            type: dataToSave.type,
+            employeeId: dataToSave.employeeId,
+            employeeName: dataToSave.employeeName,
+            startDate: dataToSave.startDate,
+            endDate: dataToSave.endDate,
+            ausenciaId: savedId,
+            reportedBy: nombreReal,
+          }),
           createdAt: serverTimestamp(),
         }, empresaId));
       }
@@ -1359,6 +1359,8 @@ export default function EmployeesPage() {
     if (!verifyModal) return;
     setVerifyLoading(true);
     try {
+      const u = getAuth().currentUser;
+      const reportedBy = u?.displayName || u?.email || 'RRHH';
       const dataToUpdate: Absence = {
         ...verifyModal.absence,
         status: outcome,
@@ -1368,6 +1370,20 @@ export default function EmployeesPage() {
       const { id: _omitId, ...updatePayload } = dataToUpdate;
       await absenceService.update(verifyModal.absenceId, updatePayload, { empresaId, migracionCompleta });
       await replicarAusenciaEnPlanificador(verifyModal.absenceId, dataToUpdate);
+      if (shouldNotifyPlanificacionAusencia(dataToUpdate.status)) {
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          ...buildAusenciaPlanificacionNovedad({
+            type: dataToUpdate.type,
+            employeeId: dataToUpdate.employeeId,
+            employeeName: dataToUpdate.employeeName,
+            startDate: dataToUpdate.startDate,
+            endDate: dataToUpdate.endDate,
+            ausenciaId: verifyModal.absenceId,
+            reportedBy,
+          }),
+          createdAt: serverTimestamp(),
+        }, empresaId));
+      }
       await registrarAuditoria(
         'VERIFY_ABSENCE',
         `${outcome === 'Justificada' ? 'Justificó' : 'Marcó injustificada'} ${verifyModal.absence.type} — ${verifyModal.absence.employeeName}`,
@@ -1391,9 +1407,23 @@ export default function EmployeesPage() {
       if (snap.empty) { setAuthPinError('PIN incorrecto'); setAuthPinLoading(false); return; }
       const sup = snap.docs[0].data();
       const supervisorName = `${sup.firstName} ${sup.lastName}`;
+      const u = getAuth().currentUser;
+      const reportedBy = u?.displayName || u?.email || supervisorName || 'RRHH';
       const dataToUpdate = { ...authPinModal.absence, status: 'Autorizada' };
       await absenceService.update(authPinModal.absenceId, dataToUpdate as Partial<Absence>, { empresaId, migracionCompleta });
       await replicarAusenciaEnPlanificador(authPinModal.absenceId, dataToUpdate as Absence);
+      await addDoc(collection(db, 'novedades'), stampEmpresaId({
+        ...buildAusenciaPlanificacionNovedad({
+          type: dataToUpdate.type,
+          employeeId: dataToUpdate.employeeId,
+          employeeName: dataToUpdate.employeeName,
+          startDate: dataToUpdate.startDate,
+          endDate: dataToUpdate.endDate,
+          ausenciaId: authPinModal.absenceId,
+          reportedBy,
+        }),
+        createdAt: serverTimestamp(),
+      }, empresaId));
       await registrarAuditoria('AUTHORIZE_ABSENCE', `Autorizó ${authPinModal.absence.type} — ${authPinModal.absence.employeeName} (supervisor: ${supervisorName})`);
       addToast(`Novedad autorizada por ${supervisorName}`, 'success');
       setAuthPinModal(null); setAuthPinValue('');

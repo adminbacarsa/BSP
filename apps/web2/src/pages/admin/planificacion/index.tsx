@@ -3896,9 +3896,28 @@ export default function PlanificacionPage() {
         // Vacante generada porque un guardia fue asignado a un evento
         const isVacantePorEvento = notif.type === 'VACANTE_POR_EVENTO';
 
-        // Ausencias que requieren gestión de cobertura
-        const isVacancyAbsence = !isRefuerzoCliente && !isVacantePorEvento && notif.type &&
-            (notif.type === 'Vacaciones' || notif.type.includes('Licencia') || notif.type === 'PG Permiso Gremial');
+        // Ausencias RRHH (vacaciones, licencias, enfermedad, ART, PG, etc.) → cobertura en plan
+        const isVacancyAbsence = !isRefuerzoCliente && !isVacantePorEvento && (
+            notif.source === 'AUSENCIA' ||
+            (notif.type && (
+                notif.type === 'Vacaciones' ||
+                String(notif.type).includes('Licencia') ||
+                notif.type === 'PG Permiso Gremial' ||
+                notif.type === 'Enfermedad' ||
+                notif.type === 'ART' ||
+                notif.type === 'Injustificada' ||
+                notif.type === 'Sin Goce de Sueldo' ||
+                notif.type === 'Suspensión' ||
+                notif.type === 'Matrimonio' ||
+                notif.type === 'Maternidad' ||
+                notif.type === 'Nacimiento / Paternidad' ||
+                notif.type === 'Fallecimiento Familiar' ||
+                notif.type === 'Examen / Estudio' ||
+                notif.type === 'Mudanza' ||
+                notif.type === 'Donación de Sangre' ||
+                notif.type === 'MAVIC'
+            ))
+        );
 
         const rawFechaRefuerzo = (isRefuerzoCliente || isVacantePorEvento) ? (notif.fecha || notif.date) : null;
 

@@ -660,7 +660,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         !!t.isSinCobertura;
     const isPassiveStandby = (t) => {
         const c = String(t.code || '').toUpperCase();
-        return c === 'RET' || c === 'ESC' || c === 'REF' || t.isReten === true;
+        return c === 'RET' || t.isReten === true;
     };
     const skipBase = (t) => t.draft === true || t.isFranco === true || t.isVirtual || isPassiveStandby(t);
     for (const doc of snap.docs) {
@@ -1066,7 +1066,7 @@ exports.autoPresenciaYCierre = functions
         if (t.isAbsent || t.isVirtual)
             continue;
         const codeU = String(t.code || '').toUpperCase();
-        if (codeU === 'RET' || codeU === 'ESC' || codeU === 'REF' || t.isReten === true)
+        if (codeU === 'RET' || t.isReten === true)
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
         const endMs = (t.endTime?.seconds ?? 0) * 1000;
@@ -2582,7 +2582,7 @@ exports.autoCompletarTurnos = functions
     return null;
 });
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
-const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET', 'ESC', 'REF']);
+const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP', 'RET']);
 function shiftEmpresaId(shift) {
     return String(shift.empresaId ?? '').trim();
 }

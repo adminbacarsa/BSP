@@ -3462,16 +3462,24 @@ export default function OperacionesPage() {
         }
     }, [logic.processedData, opsCaps.isDemo, opsCaps.isAuto]);
 
-    // En MODO DEMO: auto-abrir protocolo (minimizable) para vacantes vivas de hoy
+    // En MODO DEMO: auto-abrir protocolo para vacantes vivas de hoy
+    // - Por ausencia: siempre
+    // - SIN PLANIFICAR: desde T-2h (misma ventana de alerta Ops)
     const demoVacTriggeredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         if (!opsCaps.isDemo || coverageSessions.length > 0) return;
         const now = new Date();
-        const openVac = logic.processedData.find((s: any) =>
-            isOpsShiftHoy(s, now)
-            && isActionableOpsVacancy(s, now)
-            && (s.origin === 'VACANTE_POR_AUSENCIA' || !!s.causedByShiftId || s.isAbsent)
-        );
+        const openVac = logic.processedData.find((s: any) => {
+            if (!isOpsShiftHoy(s, now) || !isActionableOpsVacancy(s, now)) return false;
+            if (s.origin === 'VACANTE_POR_AUSENCIA' || !!s.causedByShiftId || s.isAbsent) return true;
+            const origin = String(s.vacancyOrigin || s.origin || '').toUpperCase();
+            const isNoPlan = origin.includes('NO_PLANNING') || origin.includes('SIN_PLANIFICAR') || origin === 'SLA_VIRTUAL';
+            if (!isNoPlan) return false;
+            const start = s.shiftDateObj instanceof Date ? s.shiftDateObj : (s.shiftDateObj?.seconds ? new Date(s.shiftDateObj.seconds * 1000) : null);
+            if (!start) return false;
+            const minutesUntil = (start.getTime() - now.getTime()) / 60000;
+            return minutesUntil <= 120;
+        });
         if (openVac && !demoVacTriggeredRef.current.has(openVac.id)) {
             demoVacTriggeredRef.current.add(openVac.id);
             openCoverageProtocol(openVac);
@@ -3606,10 +3614,15 @@ export default function OperacionesPage() {
                             objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName,
                             positionName: vacShift.positionName,
                             employeeId: 'VACANTE', employeeName: 'VACANTE',
+                            code: vacShift.code || vacShift.vacancyBand || 'T',
                             startTime: Timestamp.fromDate(vacShift.shiftDateObj),
                             endTime: Timestamp.fromDate(vacShift.endDateObj),
-                            status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
-                            origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
+                            status: 'UNCOVERED',
+                            isUnassigned: true,
+                            isReportedToPlanning: false,
+                            vacancyOrigin: vacShift.vacancyOrigin || 'NO_PLANNING',
+                            origin: 'SLA_VIRTUAL',
+                            createdAt: serverTimestamp(),
                         }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
                         setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
                     } else {
@@ -4634,15 +4647,24 @@ export default function OperacionesPage() {
                 await updateDoc(doc(db, 'turnos', targetId), { status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true });
             }
             await addDoc(collection(db, 'novedades'), stampEmpresaId({
-                type: 'VACANTE_NO_CUBIERTA', title: 'Vacante Sin Cubrir',
+                type: 'VACANTE_A_PLANIFICACION',
+                title: 'Vacante sin cubrir → Planificación',
                 status: 'pending',
-                clientId: shift.clientId, objectiveId: shift.objectiveId, shiftId: targetId,
+                priority: 'high',
+                actionTarget: 'PLANIFICACION',
+                clientId: shift.clientId || null,
+                clientName: shift.clientName || '',
+                objectiveId: shift.objectiveId || null,
                 objectiveName: shift.objectiveName || '',
                 positionName: shift.positionName || '',
-                description: `Sin cubrir: ${shift.positionName || '—'} en ${shift.objectiveName}${shift.shiftDateObj ? ' · ' + formatTimeRange(shift.shiftDateObj, shift.endDateObj) : ''}`,
-                createdAt: serverTimestamp(), reportedBy: 'OPERACIONES'
+                shiftId: targetId,
+                code: shift.code || shift.vacancyBand || null,
+                description: `Ops devolvió vacante: ${shift.positionName || '—'} en ${shift.objectiveName || '—'}${shift.shiftDateObj ? ' · ' + formatTimeRange(shift.shiftDateObj, shift.endDateObj) : ''}. Asigná guardia en el cronograma.`,
+                createdAt: serverTimestamp(),
+                reportedBy: 'OPERACIONES',
+                viewed: false,
             }, String(shift.empresaId || empresaId || '').trim()));
-            toast.success('Reporte enviado correctamente');
+            toast.success('Reporte enviado a Planificación');
         } catch (e: any) {
             logOpsError('handleReportPlanning', e, {
                 userMessage: 'Error al reportar: ' + (e?.message || e?.code || String(e)),

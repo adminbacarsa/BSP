@@ -33,6 +33,7 @@ import {
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
 import { ingestPlanningTurnosSnapshot, isRetainedOpsCoverageShift } from '@/lib/planificacion/planningTurnosIngest';
+import { isPlanificacionInboxNovedad } from '@/lib/planificacion/planificacionInbox';
 import { getDateKey } from '@/lib/planificacion/utils';
 import type { PlanificacionDotacionMap } from '@/lib/planificacion/planificacionDotacionUtils';
 
@@ -260,23 +261,27 @@ export function usePlanificacionFirestore({
         }, (e) => console.error('[plan] ausencias error:', e));
 
         const qNovedades = scopeEmpresa
-            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40))
-            : query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(40));
+            ? query(collection(db, 'novedades'), where('empresaId', '==', empresaId), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(80))
+            : query(collection(db, 'novedades'), where('status', '==', 'pending'), orderBy('createdAt', 'desc'), limit(80));
         const unsubN = onSnapshot(qNovedades, (snap) => {
             const alerts = snap.docs
                 .filter(d => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
-                .filter(d => !d.data().viewed)
-                .filter(d => !d.data().priority || d.data().priority === 'high')
-                .filter(d => d.data().actionTarget !== 'OPERACIONES')
+                .filter(d => isPlanificacionInboxNovedad(d.data() as Record<string, unknown>))
                 .map(d => {
                     const data = d.data();
+                    const isAusencia = data.source === 'AUSENCIA';
+                    const isVacante = data.type === 'VACANTE_A_PLANIFICACION' || data.type === 'VACANTE_NO_CUBIERTA';
                     const fallbackTitle = data.type === 'REFUERZO_CLIENTE_PENDIENTE'
                         ? `${data.tipoSolicitud || 'RFZ'} · ${data.positionName || data.objectiveName || 'Refuerzo cliente'}`
-                        : (data.title || data.type || 'Novedad');
+                        : isVacante
+                            ? (data.title || 'Vacante → Planificación')
+                            : isAusencia
+                                ? (data.title || `${data.type || 'Novedad'} → Planificación`)
+                                : (data.title || data.type || 'Novedad');
                     return {
                         id: d.id,
-                        source: 'NOVEDAD',
                         ...data,
+                        source: data.source || 'NOVEDAD',
                         title: data.title || fallbackTitle,
                         msg: data.description || data.details || data.msg || '',
                     };

@@ -1485,52 +1485,58 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
             if (!startMs) continue;
             const minutesUntil = (startMs - nowMs) / 60000;
 
-            // ── PASO 1: auto-envío a planificación ──────────────────────────
-            // Se dispara para TODAS las vacantes del día apenas son detectadas,
-            // sin importar si el turno ya empezó. El dedup de Firestore evita duplicados.
-            // Esto garantiza que planificación sea notificada aunque el operador abra
-            // la app tarde o no haya estado abierta durante la ventana 1-4h.
-            // Vacantes por AUSENCIA NO se auto-devuelven a planificacion:
-            // ya habia un empleado planificado que fue ausente, planificacion ya lo sabe.
-            // Auto-devolverlas genera estado DEVUELTA incorrecto en el mapa.
+            // ── PASO 1: avisar a Planificación apenas se detecta el hueco ────
+            // Materializa vacante real ACCIONABLE (no DEVUELTA): Ops sigue pudiendo CUBRIR.
+            // Planificación recibe novedad PENDIENTE. No esperar T-3h.
+            // Ausencias: no auto-materializar (Plan ya sabe; Ops maneja cobertura).
             const autoKey = `${v.id}_VACANTE_A_PLANIFICACION`;
             if (v.vacancyOrigin !== 'ABSENCE' && !alertedVacancyIds.current.has(autoKey)) {
                 alertedVacancyIds.current.add(autoKey);
                 getDocs(query(collection(db, 'novedades'), where('virtualVacancyId', '==', v.id), where('type', '==', 'VACANTE_A_PLANIFICACION'), limit(1)))
                     .then(async snap => {
-                        if (!snap.empty) return; // ya fue procesada antes
+                        if (!snap.empty) return;
                         const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
-                        // ID determinístico: si dos PCs corren simultáneamente, setDoc con el mismo ID
-                        // es idempotente — el segundo setDoc sobreescribe con los mismos datos,
-                        // evitando duplicados en Firestore.
                         const safeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
                         const newRef = doc(db, 'turnos', `autodev_${safeId}`);
-                        await setDoc(newRef, stampEmpresaId({
-                            clientId: v.clientId, clientName: v.clientName,
-                            objectiveId: v.objectiveId, objectiveName: v.objectiveName,
-                            positionName: v.positionName,
-                            employeeId: 'VACANTE', employeeName: 'VACANTE',
-                            startTime: Timestamp.fromDate(v.shiftDateObj),
-                            endTime: Timestamp.fromDate(v.endDateObj),
-                            status: 'REPORTED_TO_PLANNING', isReported: true,
-                            isReportedToPlanning: true, reportedBy: 'SYSTEM_AUTO',
-                            reportedAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
-                            createdAt: serverTimestamp(),
-                        }, shiftEmpresaId));
+                        const existingVac = await getDoc(newRef);
+                        if (!existingVac.exists()) {
+                            await setDoc(newRef, stampEmpresaId({
+                                clientId: v.clientId, clientName: v.clientName,
+                                objectiveId: v.objectiveId, objectiveName: v.objectiveName,
+                                positionName: v.positionName,
+                                employeeId: 'VACANTE', employeeName: 'VACANTE',
+                                code: v.code || v.vacancyBand || 'T',
+                                startTime: Timestamp.fromDate(v.shiftDateObj),
+                                endTime: Timestamp.fromDate(v.endDateObj),
+                                plannedStartTime: Timestamp.fromDate(v.shiftDateObj),
+                                plannedEndTime: Timestamp.fromDate(v.endDateObj),
+                                status: 'UNCOVERED',
+                                isUnassigned: true,
+                                isReportedToPlanning: false,
+                                vacancyOrigin: v.vacancyOrigin || 'NO_PLANNING',
+                                origin: 'SLA_VIRTUAL',
+                                virtualVacancyId: v.id,
+                                createdAt: serverTimestamp(),
+                                reportedBy: 'SYSTEM_AUTO',
+                            }, shiftEmpresaId));
+                        }
                         const cuando = minutesUntil > 0
                             ? `Faltan ${Math.round(minutesUntil)} min.`
                             : `Turno inició hace ${Math.round(Math.abs(minutesUntil))} min (sin cobertura).`;
-                        // Novedad con ID determinístico para el mismo motivo
                         const novedadRef = doc(db, 'novedades', `autodev_nov_${safeId}`);
                         await setDoc(novedadRef, stampEmpresaId({
-                            type: 'VACANTE_A_PLANIFICACION', status: 'ATENDIDA',
+                            type: 'VACANTE_A_PLANIFICACION', status: 'pending',
+                            priority: 'high',
+                            actionTarget: 'PLANIFICACION',
                             autoProcessed: true,
                             virtualVacancyId: v.id, shiftId: newRef.id,
                             objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
                             clientId: v.clientId || null, positionName: v.positionName || '',
-                            description: `[AUTO] Vacante sin cubrir devuelta a Planificación: ${v.positionName} en ${v.objectiveName}. ${cuando}`,
+                            title: 'Hueco sin planificar',
+                            description: `[AUTO] Hueco sin planificar: ${v.positionName} en ${v.objectiveName}. ${cuando} Asignar en Planificación o cubrir en Ops.`,
                             minutesUntilStart: Math.round(minutesUntil),
                             createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
+                            viewed: false,
                         }, shiftEmpresaId));
                     })
                     .catch(e => logOpsBackgroundWarn('autoAlertVacante:plan', e));
@@ -1575,40 +1581,42 @@ export function useOperacionesMonitorCore({ enabled = true }: { enabled?: boolea
                 continue; // no generar alerta PROTOCOLO para vacantes ya vencidas
             }
 
-            // ── PASO 2: alerta PROTOCOLO para el operador (solo ≤60 min) ────
-            // Solo cuando el turno ya inició o está por iniciar (minutesUntil <= 0 = ya empezó).
-            // Se crea UNA SOLA alerta con ID determinístico. Después de T+120 se auto-cierra.
-            if (minutesUntil > 60) continue;
+            // ── PASO 2: alerta PROTOCOLO Ops (T-2h o ya iniciado) ────────────
+            // Escalera: Planificación temprana → Ops alerta T-2h → cascada T-1h (cron).
+            // Cambio de última hora (<2h al detectar) cae acá de inmediato.
+            if (minutesUntil > 120) continue;
             const protKey = `${v.id}_VACANTE_PROTOCOLO_COBERTURA`;
             if (alertedVacancyIds.current.has(protKey)) continue;
-            alertedVacancyIds.current.add(protKey); // marcar para no re-procesar en esta sesión
+            alertedVacancyIds.current.add(protKey);
 
             const protSafeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
             const protRef = doc(db, 'novedades', `autodev_prot_${protSafeId}`);
-            const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
+            const shiftEmpresaIdProt = String(v.empresaId || empresaId || '').trim();
 
-            // Verificar si ya existe y fue ATENDIDA — no recrear (fix: setDoc con merge:true overwriteaba status)
             getDoc(protRef).then(snap => {
                 if (snap.exists() && (snap.data()?.status === 'ATENDIDA' || snap.data()?.status === 'atendida')) {
-                    return; // ya fue atendida, no sobreescribir
+                    return;
                 }
                 const desc = minutesUntil <= 0
                     ? `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cobertura. Turno inició hace ${Math.round(Math.abs(minutesUntil))} min. Requiere CUBRIR inmediato.`
-                    : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min. Cubrir manualmente.`;
+                    : minutesUntil <= 60
+                        ? `⚠️ PROTOCOLO URGENTE: Puesto ${v.positionName} en ${v.objectiveName} sin cubrir. Faltan ${Math.round(minutesUntil)} min (ventana cascada).`
+                        : `⚠️ PROTOCOLO: Puesto ${v.positionName} en ${v.objectiveName} sin planificar/cubrir. Faltan ${Math.round(minutesUntil)} min (alerta T-2h).`;
                 const shiftStart = v.shiftDateObj instanceof Date ? Timestamp.fromDate(v.shiftDateObj) : null;
                 setDoc(protRef, stampEmpresaId({
                     type: 'VACANTE_PROTOCOLO_COBERTURA', status: 'PENDIENTE',
                     virtualVacancyId: v.id,
+                    shiftId: `autodev_${protSafeId}`,
                     objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
                     clientId: v.clientId || null, positionName: v.positionName || '',
                     ...(shiftStart ? { shiftStart } : {}),
                     description: desc,
                     minutesUntilStart: Math.round(minutesUntil),
+                    alertWindow: minutesUntil <= 60 ? 'T1H' : 'T2H',
                     createdAt: serverTimestamp(), source: 'SYSTEM_SCHEDULER',
-                }, shiftEmpresaId), { merge: false })
+                }, shiftEmpresaIdProt), { merge: false })
                     .catch(e => logOpsBackgroundWarn('autoAlertVacante:prot', e));
             }).catch(() => {
-                // Si falla getDoc, no crear para evitar recrear novedades atendidas
                 alertedVacancyIds.current.delete(protKey);
             });
         }

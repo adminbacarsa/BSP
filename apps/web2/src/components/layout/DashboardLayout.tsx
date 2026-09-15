@@ -17,6 +17,7 @@ import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import { PLAN_SIDEBAR_VACANTE_TYPES } from '@/lib/planificacion/planificacionInbox';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
 
 /** Título del header según el módulo (ruta) actual */
@@ -316,6 +317,10 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
   const [rfzPlanifIds, setRfzPlanifIds] = useState<string[]>([]);
+  const [planVacanteCount, setPlanVacanteCount] = useState(0);
+  const [planVacanteIds, setPlanVacanteIds] = useState<string[]>([]);
+  const [planAusenciaCount, setPlanAusenciaCount] = useState(0);
+  const [planAusenciaIds, setPlanAusenciaIds] = useState<string[]>([]);
   const [rfzEstructuralCount, setRfzEstructuralCount] = useState(0);
   const [rfzEstructuralIds, setRfzEstructuralIds] = useState<string[]>([]);
   const [opsTaskCount, setOpsTaskCount] = useState(0);
@@ -398,6 +403,46 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       setRfzPlanifCount(snap.size);
       setRfzPlanifIds(snap.docs.map(d => d.id));
     }, () => {});
+    return unsub;
+  }, [empresaId, canViewPlanning]);
+
+  // Vacantes devueltas / huecos sin planificar → globito Planificación
+  useEffect(() => {
+    if (!empresaId || !canViewPlanning) return;
+    const q = query(
+      collection(db, 'novedades'),
+      where('empresaId', '==', empresaId),
+      where('type', 'in', [...PLAN_SIDEBAR_VACANTE_TYPES]),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshotFresh(q, snap => {
+      const docs = snap.docs.filter(d => !d.data().viewed);
+      setPlanVacanteCount(docs.length);
+      setPlanVacanteIds(docs.map(d => d.id));
+    }, () => {
+      setPlanVacanteCount(0);
+      setPlanVacanteIds([]);
+    });
+    return unsub;
+  }, [empresaId, canViewPlanning]);
+
+  // Vacaciones / licencias / novedades RRHH → globito Planificación
+  useEffect(() => {
+    if (!empresaId || !canViewPlanning) return;
+    const q = query(
+      collection(db, 'novedades'),
+      where('empresaId', '==', empresaId),
+      where('source', '==', 'AUSENCIA'),
+      where('status', '==', 'pending'),
+    );
+    const unsub = onSnapshotFresh(q, snap => {
+      const docs = snap.docs.filter(d => !d.data().viewed && d.data().actionTarget !== 'OPERACIONES');
+      setPlanAusenciaCount(docs.length);
+      setPlanAusenciaIds(docs.map(d => d.id));
+    }, () => {
+      setPlanAusenciaCount(0);
+      setPlanAusenciaIds([]);
+    });
     return unsub;
   }, [empresaId, canViewPlanning]);
 
@@ -595,13 +640,13 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               style={getLinkStyle('/admin/planificacion')}>
               <Calendar size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
-              {(rfzPlanifCount + rfzEstructuralCount) > 0 && (
+              {(rfzPlanifCount + rfzEstructuralCount + planVacanteCount + planAusenciaCount) > 0 && (
                 <button
                   type="button"
-                  title="Marcar notificaciones RFZ como leídas"
+                  title="Marcar alertas de planificación como leídas"
                   onClick={async e => {
                     e.preventDefault(); e.stopPropagation();
-                    const ids = [...rfzPlanifIds, ...rfzEstructuralIds];
+                    const ids = [...rfzPlanifIds, ...rfzEstructuralIds, ...planVacanteIds, ...planAusenciaIds];
                     if (!ids.length) return;
                     const batch = writeBatch(db);
                     ids.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
@@ -609,7 +654,9 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                   }}
                   className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-red-500 hover:bg-red-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
                 >
-                  {(rfzPlanifCount + rfzEstructuralCount) > 99 ? '99+' : (rfzPlanifCount + rfzEstructuralCount)}
+                  {(rfzPlanifCount + rfzEstructuralCount + planVacanteCount + planAusenciaCount) > 99
+                    ? '99+'
+                    : (rfzPlanifCount + rfzEstructuralCount + planVacanteCount + planAusenciaCount)}
                 </button>
               )}
             </Link>

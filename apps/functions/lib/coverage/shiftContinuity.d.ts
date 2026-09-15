@@ -28,6 +28,7 @@ export declare function vacancyCoverageLabel(params: {
     timeRange?: string | null;
 }): string;
 export declare function isPassiveStandbyCode(code: unknown): boolean;
+export declare function isCoverageRedirectableCode(code: unknown): boolean;
 export declare function hasCoverageLedgerWithoutRealCode(shift: Record<string, any>): boolean;
 export declare function buildReassignPassiveToVacancyFields(vacancy: Record<string, any>, opts: {
     coverageType: string;

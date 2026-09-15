@@ -5,6 +5,7 @@ exports.employeeHasPosteriorShift = employeeHasPosteriorShift;
 exports.decideShiftCloseOrRetain = decideShiftCloseOrRetain;
 exports.vacancyCoverageLabel = vacancyCoverageLabel;
 exports.isPassiveStandbyCode = isPassiveStandbyCode;
+exports.isCoverageRedirectableCode = isCoverageRedirectableCode;
 exports.hasCoverageLedgerWithoutRealCode = hasCoverageLedgerWithoutRealCode;
 exports.buildReassignPassiveToVacancyFields = buildReassignPassiveToVacancyFields;
 exports.toTimestampMs = toTimestampMs;
@@ -72,11 +73,14 @@ function vacancyCoverageLabel(params) {
     ].filter(Boolean).join(' · ');
 }
 function isPassiveStandbyCode(code) {
+    return String(code || '').toUpperCase() === 'RET';
+}
+function isCoverageRedirectableCode(code) {
     const c = String(code || '').toUpperCase();
     return c === 'RET' || c === 'ESC' || c === 'REF';
 }
 function hasCoverageLedgerWithoutRealCode(shift) {
-    if (!isPassiveStandbyCode(shift?.code))
+    if (!isCoverageRedirectableCode(shift?.code))
         return false;
     if (String(shift?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE')
         return true;
