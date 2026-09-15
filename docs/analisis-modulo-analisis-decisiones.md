@@ -106,6 +106,8 @@ Evidencia: `extractReady`, `demandaFromHoursBalances`, `financieraFromHoursBalan
 
 ## 2. Opinión senior (qué está bien, qué falta, riesgos)
 
+> Definición confirmada con Mauro (follow-up): el control de la unidad se gestiona **solo en horas** (sin capa contable en moneda). Además, la prioridad es unir **liquidación de horas** con **prefactura de horas**.
+
 ### 2.1. Qué está bien
 
 1. **Arquitectura analítica modular**: buena separación de cálculo en librerías puras (`analisisDemanda`, `analisisFinanciera`, `analisisInforme`, `analisisBolsa`, `analisisUniverso`), lo que baja riesgo de regresión y facilita testing.
@@ -116,7 +118,7 @@ Evidencia: `extractReady`, `demandaFromHoursBalances`, `financieraFromHoursBalan
 
 ### 2.2. Qué falta o puede inducir decisiones erróneas
 
-1. **Sin importes/margen real**: hoy es excelente en horas, débil en resultado económico (no hay puente directo a $ por objetivo/cliente).
+1. **Alineación de alcance (fortaleza y límite)**: al trabajar solo en horas, el módulo está bien orientado al control operativo; el riesgo es de expectativa (usuarios esperando rentabilidad en $ dentro de Análisis).
 2. **No existe “cierre” analítico mensual versionado**: el tablero puede cambiar por fichadas tardías o recálculos; útil para operación, débil para comité financiero/auditoría.
 3. **Riesgo de confusión 192 vs 200**: el código explica la diferencia, pero en operación diaria puede mezclarse “capacidad” con “techo liquidable”.
 4. **Carga de ausencias potencialmente cara**: `fetchAusenciasAll` trae colección completa por empresa y filtra luego.
@@ -176,11 +178,11 @@ Evidencia: `extractReady`, `demandaFromHoursBalances`, `financieraFromHoursBalan
 
 ### 5.2. Qué falta para control financiero de negocio
 
-1. **Margen por objetivo/cliente** en moneda (requiere tarifa venta + costo hora normal/extra/FT).
-2. **Puente Liquidación vs Facturación** por ciclo para explicar diferencias.
-3. **Centro de costo y rentabilidad** (CC) integrado a objetivos SLA.
-4. **Forecast de cierre** (estimado de sobrecosto fin de período basado en tendencia real).
-5. **Alertas tempranas financieras** con umbrales pactados (ej. FT > X% SLA del objetivo).
+1. **Puente Liquidación hs vs Prefactura hs** por ciclo y objetivo (misma fuente, mismas reglas y trazabilidad de diferencias).
+2. **Centro de costo en horas** integrado al objetivo (sin monto), para detectar dónde se consume sobre SLA.
+3. **Forecast de cierre en horas** (proyección fin de período de FT/ext/ausencias/vacantes).
+4. **Matriz de desvíos en horas** (SLA vs plan vs real vs prefactura) con causal principal.
+5. **Alertas tempranas en horas** con umbrales pactados (ej. FT > X% SLA del objetivo).
 
 ## 6. Tablero mínimo viable de control de unidad de negocio (métricas + fuentes + frecuencia)
 
@@ -196,17 +198,17 @@ Evidencia: `extractReady`, `demandaFromHoursBalances`, `financieraFromHoursBalan
 | 6. Carga extrema por guardia | guardias >200h y guardias 160-200h | `actual.byGuard` en `index.tsx` | Semanal |
 | 7. Eficiencia hs-hombre (%) | `slaHours / hsConsumo` | `buildAnalisisFinanciera` + `rollAnalisisFinanciera` | Semanal/mensual |
 | 8. Horas no productivas (hs) | `hsFranco + hsRet + hsDespliegue` | `analisisFinanciera` | Semanal |
-| 9. Delta consumo vs SLA (hs) | `hsConsumo - slaHours` por cliente/objetivo | `rollAnalisisFinanciera` | Semanal/mensual |
+| 9. Gap liquidación vs prefactura (hs) | `hsLiquidación - hsPrefactura` por ciclo/objetivo | `getPayrollSnapshotInternal` + reportes prefactura (`useReportes`) | Semanal/cierre de ciclo |
 | 10. Riesgo ART.12 (casos) | guardias >25km con data confiable + casos con coord. dudosa | cálculo ART12 en `index.tsx` + geo RRHH/objetivos | Semanal |
 | 11. Viabilidad diaria (días en déficit) | días con `gap > 0` por servicio | `buildViabilityRangeReport` | Diario |
 | 12. Calidad de dato crítico (%) | `% turnos con hora válida`, `% legajos con geo válida`, `% objetivo mapeado` | `turnos`, `empleados`, `objetivos/clients` | Semanal |
 
 ## 7. Gaps vs lo que hay hoy (priorizado P0/P1/P2)
 
-### P0 (impacto directo en decisiones de negocio)
+### P0 (impacto directo en decisiones de negocio en horas)
 
-1. **No hay margen en moneda por objetivo/cliente** (solo horas): impide decidir rentabilidad real.
-2. **No hay conciliación automática con liquidación/facturación**: difícil explicar desvíos económicos al cierre.
+1. **No hay conciliación automática Liquidación hs vs Prefactura hs** por ciclo/objetivo/cliente.
+2. **No hay matriz única de desvío de horas** (SLA vendido, planificado, fichado, liquidado, prefacturado).
 3. **No hay snapshot de cierre versionado** del tablero analítico: el número “se mueve” y complica auditoría.
 
 ### P1 (impacto alto en operación y control RRHH)
@@ -223,13 +225,13 @@ Evidencia: `extractReady`, `demandaFromHoursBalances`, `financieraFromHoursBalan
 
 ## 8. Preguntas para Mauro
 
-1. ¿La decisión objetivo para 2026/2027 es controlar **margen** por objetivo o seguir primero en **horas**?
+1. Confirmado: ¿sostenemos como alcance formal del módulo que el control será **solo en horas** (sin importes) durante esta etapa?
 2. ¿Cuál es el umbral de alerta FT aceptable por objetivo (% de SLA) para disparar acción operativa?
 3. ¿Qué versión debe ser “oficial” para comité: corte diario dinámico o snapshot de cierre mensual congelado?
 4. ¿Qué reglas de compliance laboral quieren ver primero en tablero (descanso, nocturnidad, topes)?
 5. ¿Qué periodicidad necesitan para revisión ejecutiva (diario de operaciones, semanal de jefaturas, mensual de directorio)?
-6. ¿El costo de RET/REF/ESC debe imputarse íntegro al objetivo o también al centro de costo de estructura?
-7. ¿Se valida incorporar precios/tarifas al tablero de Análisis o mantenerlo separado de Liquidaciones/Facturación?
+6. ¿Las horas RET/REF/ESC se imputan 100% al objetivo o parte va a un centro de costo de estructura (siempre en horas)?
+7. ¿La conciliación objetivo es **Liquidación hs vs Prefactura hs** (sin facturación en $) como KPI principal de cierre?
 8. ¿Qué tan prioritario es incorporar un indicador de “calidad de dato” como KPI de gestión (geo, IDs, fichadas)?
 
 ---
