@@ -182,6 +182,7 @@ import {
 import { findPlanificacionConflictNeighbors } from '@/lib/planificacion/findPlanificacionConflictNeighbors';
 import { resolvePlanificacionConflict } from '@/lib/planificacion/resolvePlanificacionConflict';
 import { submitPlanificacionRRHHNovedad } from '@/lib/planificacion/submitPlanificacionRRHHNovedad';
+import { resetPlanificacionVacancyModal } from '@/lib/planificacion/resetPlanificacionVacancyModal';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -4630,18 +4631,20 @@ export default function PlanificacionPage() {
         });
     };
     const finalizeVacancyModal = () => {
-        setShowVacancyModal(false);
-        setVacancyData(null);
-        setVacancyReplacementSearch('');
-        setVacancyReplacementOpen(false);
-        setVacancyActiveDates(new Set());
-        setVacancyDayCoverages({});
-        setVacancyFrancoAuthApproved(false);
-        setVacancyEditingDay(null);
-        setVacancyPickerTab('substitute');
-        setVacancySplitExtId('');
-        setVacancySplitAdelId('');
-        setVacancyApplyToAllSelected(true);
+        resetPlanificacionVacancyModal({
+            setShowVacancyModal,
+            setVacancyData,
+            setVacancyReplacementSearch,
+            setVacancyReplacementOpen,
+            setVacancyActiveDates,
+            setVacancyDayCoverages,
+            setVacancyFrancoAuthApproved,
+            setVacancyEditingDay,
+            setVacancyPickerTab,
+            setVacancySplitExtId,
+            setVacancySplitAdelId,
+            setVacancyApplyToAllSelected,
+        });
     };
 
     const handleProcessVacancy = () => {
