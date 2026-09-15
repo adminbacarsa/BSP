@@ -916,6 +916,37 @@ async function runModoDemoForEmpresa(
     }
   }
 
+  // === Pase 0b: Demo — cubridores OPERATIONS_COVERAGE sin fichada → presente simulado
+  // (mismo circuito que Auto ya fichado; arregla lab donde solo quedó «cubre X» en el ausente)
+  for (const doc of snap.docs) {
+    const t = doc.data() as any;
+    if (t.isPresent || t.isCompleted || t.isAbsent || t.isFranco) continue;
+    if (isVacant(t) || isPassiveStandby(t)) continue;
+    const resolved = String(t.resolvedBy || '').toUpperCase();
+    const origin = String(t.origin || '').toUpperCase();
+    const isDemoCover =
+      resolved === 'MODO_DEMO'
+      || !!t.modoDemoAt
+      || (origin === 'OPERATIONS_COVERAGE' && (!!t.coverageEventId || !!t.coversAbsenceEmployeeName || !!t.absenceShiftId || !!t.coveredShiftId || !!t.isFrancoTrabajado));
+    if (!isDemoCover) continue;
+    const startMs = (t.adjustedStartTime?.seconds ?? t.startTime?.seconds ?? 0) * 1000;
+    // No adelantar ACTIVO de turnos que aún no deberían haber empezado
+    if (startMs > now.getTime() + 15 * 60 * 1000) continue;
+    const startTs = t.adjustedStartTime || t.startTime || nowTs;
+    batch.update(doc.ref, {
+      isPresent: true,
+      status: 'PRESENT',
+      presentAt: startTs,
+      realStartTime: startTs,
+      autoPresencia: true,
+      demoSimulated: true,
+      modoDemoAt: nowTs,
+      demoCovererHealAt: nowTs,
+    });
+    batchOps += 1;
+    presencias++;
+  }
+
   // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
   const WINDOW_AFTER_MS = 5 * 60 * 1000;

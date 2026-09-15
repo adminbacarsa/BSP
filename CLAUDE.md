@@ -190,7 +190,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 EXT+ADV parten la vacante en dos mitades por banda vecina; el suplente puede ser de **otro puesto** del mismo objetivo (`coversPositionName`). CROSS_POS es redirección de jornada completa (no mitades). RET pasivo **no ficha**; ficha recién cuando el modal/cascada le asigna el turno real del hueco.
 
-**Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = laboratorio en empresa de prueba: simula marcaciones/ausencias/tardanzas (ficticias pero bien formadas, con `modoDemoAt` / `source: MODO_DEMO` para auditoría) y dispara el **mismo pipeline** que Auto (cascada, convocatorias, ledger, vacantes). Las respuestas a convocatorias se simulan sin esperar al guardia real. Planificación y Ops **muestran** el resultado para verificar trazabilidad de punta a punta — no se oculta.
+**Modos Ops:** Manual (operador en CC) y Auto (sin persona). **Demo** = laboratorio: **inventa** el trigger (presente/ausente/tarde ficticios, sellados `modoDemoAt` / `source: MODO_DEMO`) y dispara el **mismo pipeline** que Auto (cascada, convocatorias, ledger, vacantes). Las respuestas a convocatorias se simulan; al cubrir, Demo también **simula la fichada del cubridor** para que ACTIVO/trazabilidad queden iguales a un circuito real ya fichado. Auto en prod hace lo mismo sin inventar: ausencias reales + check-in real del cubridor. Planificación y Ops muestran el resultado de punta a punta.
 
 **Continuidad al fin de banda** (`shiftContinuity` + `autoCompletarTurnos`): 24hs SLA → retención; si el presente tiene **turno posterior** en el mismo objetivo → retención; si hay extensión TURA/D12/N12 → retención; solo sin posterior ni extensión → cierre auto.
 

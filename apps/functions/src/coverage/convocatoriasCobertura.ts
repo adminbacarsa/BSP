@@ -908,6 +908,29 @@ function isShiftAlreadyCovered(data: Record<string, any> | undefined | null): bo
 }
 
 /**
+ * Demo = mismo circuito que Auto; solo inventa trigger (ausencia) y respuestas.
+ * Al materializar cobertura inventa también la fichada del cubridor para que
+ * Ops muestre ACTIVO con trazabilidad idéntica a un circuito real ya fichado.
+ * Auto/Manual: no aplica (isPresent recién con check-in real).
+ */
+function demoCovererPresenceFields(
+  resolvedBy: string,
+  presentAt?: Timestamp | null,
+): Record<string, unknown> {
+  if (resolvedBy !== 'MODO_DEMO') return {};
+  const at = presentAt || Timestamp.now();
+  return {
+    isPresent: true,
+    status: 'PRESENT',
+    presentAt: at,
+    realStartTime: at,
+    autoPresencia: true,
+    demoSimulated: true,
+    modoDemoAt: FieldValue.serverTimestamp(),
+  };
+}
+
+/**
  * Claim atómico PENDING|ESCALATED → ACCEPTED.
  * Devuelve false si otro ya ganó o la convocatoria ya no está abierta.
  */
@@ -1001,6 +1024,10 @@ async function resolverCobertura(
   };
 
   const vacantRef = db.collection('turnos').doc(conv.shiftId);
+  const gapPresentAt: Timestamp | null =
+    conv.startTime instanceof Timestamp
+      ? conv.startTime
+      : ((vacantData as any).startTime instanceof Timestamp ? (vacantData as any).startTime : null);
 
   if (conv.type === 'EXTEND' && conv.extendShiftId) {
     const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
@@ -1023,6 +1050,8 @@ async function resolverCobertura(
           coverageSegmentRole: 'EXTENSION',
         }
         : {}),
+      // EXT ya suele estar presente; Demo refuerza sello de fichada lab
+      ...demoCovererPresenceFields(resolvedBy, extendData.presentAt || extendData.realStartTime || gapPresentAt),
       ...covererLedgerFields({
         ...ledgerBase,
         vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1082,7 +1111,7 @@ async function resolverCobertura(
           coverageSegmentRole: 'EARLY_START',
         }
         : {}),
-      ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
+      ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
       ...covererLedgerFields({
         ...ledgerBase,
         vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1155,7 +1184,7 @@ async function resolverCobertura(
           },
         ),
         vacancyLabel: vacLabel,
-        ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
+        ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
         ...covererLedgerFields({
           ...ledgerBase,
           vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1232,11 +1261,15 @@ async function resolverCobertura(
             coverageEventId,
           },
         ),
-        isPresent: wasPresent,
-        status: wasPresent ? 'PRESENT' : 'PENDING',
+        // Demo: siempre presente en el hueco. Auto: conserva presencia si ya fichó en el puesto origen.
+        ...(resolvedBy === 'MODO_DEMO'
+          ? demoCovererPresenceFields(resolvedBy, gapPresentAt)
+          : {
+            isPresent: wasPresent,
+            status: wasPresent ? 'PRESENT' : 'PENDING',
+          }),
         vacatedShiftId: freedRef.id,
         vacancyLabel: vacLabel,
-        ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
         ...covererLedgerFields({
           ...ledgerBase,
           vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1261,7 +1294,8 @@ async function resolverCobertura(
         shiftCode: conv.shiftCode,
         objectiveName: conv.objectiveName,
       });
-      // Dual reloj: planned = banda del hueco; no marcar presente hasta fichada real
+      // Dual reloj (Auto/Manual): planned = banda del hueco; no marcar presente hasta fichada real.
+      // Demo: inventa fichada para cerrar el circuito lab con ACTIVO visible.
       batch.update(ftRef, {
         code: 'FT',
         isFranco: false,
@@ -1277,7 +1311,7 @@ async function resolverCobertura(
         francoTrabajadoAt: FieldValue.serverTimestamp(),
         francoObjectiveId: conv.objectiveId,
         francoObjectiveName: conv.objectiveName || null,
-        ...(resolvedBy === 'MODO_DEMO' ? { modoDemoAt: FieldValue.serverTimestamp() } : {}),
+        ...demoCovererPresenceFields(resolvedBy, gapPresentAt),
         ...covererLedgerFields({
           ...ledgerBase,
           vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
@@ -1297,6 +1331,7 @@ async function resolverCobertura(
   } else {
     // SIN_TURNO / VOLANTE / SIN_TURNO_CON_EXP — nuevo turno operativo (como protocolo manual)
     const newRef = db.collection('turnos').doc();
+    const demoPresence = demoCovererPresenceFields(resolvedBy, gapPresentAt);
     batch.set(newRef, {
       empresaId: conv.empresaId,
       employeeId: conv.candidateEmployeeId,
@@ -1305,15 +1340,19 @@ async function resolverCobertura(
       clientName: conv.clientName || null,
       objectiveId: conv.objectiveId,
       objectiveName: conv.objectiveName || '',
+      positionName: (vacantData as any).positionName || conv.positionName || null,
       code: String(conv.shiftCode || 'M'),
       startTime: conv.startTime,
       endTime: conv.endTime || null,
-      status: 'PENDING',
+      plannedStartTime: conv.startTime,
+      plannedEndTime: conv.endTime || null,
+      status: demoPresence.status || 'PENDING',
       origin: 'OPERATIONS_COVERAGE',
       resolvedBy,
       coverageType: conv.type,
       assignedAt: FieldValue.serverTimestamp(),
       createdAt: FieldValue.serverTimestamp(),
+      ...demoPresence,
       ...covererLedgerFields({
         ...ledgerBase,
         vacancyShiftId: titular.vacancyShiftId || conv.shiftId,
