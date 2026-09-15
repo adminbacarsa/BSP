@@ -1,4 +1,5 @@
 import { operationalGuideForModuleKey } from './cospKnowledge';
+import { buildModuleHelpMenuReply } from './assistantQuickReplies';
 import {
   ejecutarBuscarEmpleadosPorNombre,
   ejecutarConsultarTurnosEmpleado,
@@ -2267,6 +2268,28 @@ function matchPlanningAutomateIntent(t: string): boolean {
   return /\b(planific|cronograma|grilla|mes|turnos|dotaci[oó]n)\b/.test(t);
 }
 
+
+function matchModuleHelpMenuIntent(t: string): boolean {
+  // `t` ya viene por normText (sin tildes).
+  if (/\b(cuantos|cuantas|horas?|quien|presentes|ausentes|legajo|sla|turno\s+hoy)\b/.test(t)) {
+    return false;
+  }
+  const asksHelp = /\b(ayuda\w*|usar|uso|explic\w*|opciones|que\s+puedo|como\s+uso|ensena\w*|guiame)\b/.test(t);
+  const aboutModule = /\b(modulo|pantalla|aca|esto|esta|aqui|planific|operacion|rrhh|crm|servicio|reporte|config)\b/.test(t);
+  if (asksHelp && aboutModule) return true;
+  if (/^(ayuda|ayudame|ayudarme|help|que\s+puedo\s+hacer)\.?$/i.test(t.trim())) return true;
+  return false;
+}
+
+export function tryDeterministicModuleHelpMenuReply(
+  lastUser: string,
+  moduleKey: string | null | undefined,
+): string | null {
+  const t = normText(lastUser);
+  if (!matchModuleHelpMenuIntent(t)) return null;
+  return buildModuleHelpMenuReply(moduleKey);
+}
+
 function tryDeterministicPlanningAutomateReply(t: string): string | null {
   if (!matchPlanningAutomateIntent(t)) return null;
   return (
@@ -2592,6 +2615,9 @@ export async function tryDeterministicDataReply(
 
   const t = normText(raw);
   const mk = typeof moduleKey === 'string' && moduleKey.trim() ? moduleKey.trim() : null;
+  const helpMenu = tryDeterministicModuleHelpMenuReply(raw, mk);
+  if (helpMenu?.trim()) return helpMenu.trim();
+
 
   try {
     const ausentesLic = await tryDeterministicAusentesLicenciasDiaReply(t, toolCtx, recent);
