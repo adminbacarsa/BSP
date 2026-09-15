@@ -55,7 +55,10 @@ export type DemandaObjectiveRow = {
   name: string;
   client: string;
   slaHours: number;
+  /** Plan comprometido (turnos no-draft). Base de Análisis / realidad operativa. */
   planHours: number;
+  /** Plan total grilla = publicado + borrador (Estado de Cronogramas / pie planificador). */
+  planHoursTotal: number;
   extHours: number;
   adelHours: number;
   ftHours: number;
