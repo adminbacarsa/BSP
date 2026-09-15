@@ -560,6 +560,34 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
       required: [],
     },
   } as any,
+  {
+    name: 'resumen_alertas_operativas_ia',
+    description:
+      'Resume alertas operativas generadas automáticamente por IA (marcaciones tardías, turnos vencidos, solapamientos, ausencias sin cobertura) para hoy o una fecha dada. Usá para «qué alertas raras hay», «alertas IA pendientes», «anomalías operativas».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD opcional. Si se omite, usa hoy del cliente.' },
+        solo_pendientes: { type: SchemaType.BOOLEAN, description: 'true (default): solo status pending.' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas de muestra (default 40).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'checklist_cierre_operativo_mes',
+    description:
+      'Genera checklist operativo de cierre (liquidación + prefactura): marcaciones pendientes, turnos abiertos vencidos, ausencias sin resolver, horas SLA vendidas vs planificadas vs ejecutadas y recomendación de cierre. Usá para «cómo vengo para cerrar mayo», «control de prefactura cierre», «faltantes de liquidación».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        anio: { type: SchemaType.NUMBER, description: 'Año del cierre (ej. 2026).' },
+        mes: { type: SchemaType.NUMBER, description: 'Mes 1-12 (ej. mayo = 5).' },
+        persistir_snapshot: { type: SchemaType.BOOLEAN, description: 'true por default: guarda snapshot en operational_closure_checklists.' },
+      },
+      required: [],
+    },
+  } as any,
 );
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
