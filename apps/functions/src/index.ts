@@ -2935,6 +2935,7 @@ export const getPayrollSnapshotInternal = functions
         }
         const { parseCycleId } = await import('./payroll-api/cycle');
         const { buildLiquidacionSnapshot } = await import('./payroll-api/calc');
+        const { readLockedLiquidacionSnapshot } = await import('./payroll-api/lockedSnapshot');
         const cycleId = String(data?.cycleId || '');
         const empresaId = String(data?.empresaId || '');
         const cycle = parseCycleId(cycleId);
@@ -2943,6 +2944,25 @@ export const getPayrollSnapshotInternal = functions
         }
         if (!empresaId) {
             throw new functions.https.HttpsError('invalid-argument', 'empresaId requerido.');
+        }
+        try {
+            const locked = await readLockedLiquidacionSnapshot({
+                cycleId,
+                empresaId,
+                clientIdFilter: data?.clientIdFilter ? String(data.clientIdFilter) : undefined,
+                page: data?.page ? Number(data.page) : 1,
+                pageSize: data?.pageSize ? Number(data.pageSize) : 500,
+            });
+            if (locked.locked) return locked.snapshot;
+        } catch (error) {
+            const code = error instanceof Error ? error.message : '';
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                code === 'locked_client_filter_not_available'
+                    ? 'El ciclo está cerrado y su snapshot no admite recalcular por cliente.'
+                    : 'El ciclo está cerrado, pero su snapshot inmutable no está disponible.',
+                { code: code || 'locked_snapshot_error' },
+            );
         }
         const hoursMode: 'planned' | 'real' = data?.hoursMode === 'planned' ? 'planned' : 'real';
         return buildLiquidacionSnapshot({

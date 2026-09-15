@@ -7,6 +7,7 @@ const auth_1 = require("./auth");
 const cycle_1 = require("./cycle");
 const calc_1 = require("./calc");
 const settings_1 = require("./settings");
+const lockedSnapshot_1 = require("./lockedSnapshot");
 const applyCors = (req, res) => {
     res.set('Access-Control-Allow-Origin', '*');
     res.set('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -57,6 +58,34 @@ async function handleLiquidacion(req, res) {
         });
     }
     const empresaId = req.integration.empresaId;
+    try {
+        const locked = await (0, lockedSnapshot_1.readLockedLiquidacionSnapshot)({
+            cycleId,
+            empresaId,
+            clientIdFilter: req.query?.clientId ? String(req.query.clientId) : undefined,
+            page: req.query?.page ? Number(req.query.page) : 1,
+            pageSize: req.query?.pageSize ? Number(req.query.pageSize) : 100,
+        });
+        if (locked.locked)
+            return json(res, 200, locked.snapshot);
+    }
+    catch (error) {
+        const code = error instanceof Error ? error.message : '';
+        if (code === 'locked_client_filter_not_available') {
+            return json(res, 409, {
+                error: {
+                    code,
+                    message: 'El ciclo está cerrado y su snapshot no admite recalcular por cliente.',
+                },
+            });
+        }
+        return json(res, 500, {
+            error: {
+                code: code || 'locked_snapshot_error',
+                message: 'El ciclo está cerrado, pero su snapshot inmutable no está disponible.',
+            },
+        });
+    }
     const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
     const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({
         cycle,
@@ -95,7 +124,21 @@ async function handleCloseCycle(req, res, cycleId) {
     }
     const empresaId = req.integration.empresaId;
     const hoursMode = await (0, settings_1.resolveEmpresaHoursMode)(empresaId);
-    const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({ cycle, empresaId, hoursMode });
+    const snapshot = await (0, calc_1.buildLiquidacionSnapshot)({
+        cycle,
+        empresaId,
+        hoursMode,
+        page: 1,
+        pageSize: 500,
+    });
+    if (snapshot.items.length < snapshot.pagination.total) {
+        return json(res, 409, {
+            error: {
+                code: 'cycle_snapshot_too_large',
+                message: `El ciclo contiene ${snapshot.pagination.total} empleados y supera el máximo seguro de 500 para cierre.`,
+            },
+        });
+    }
     const now = admin.firestore.Timestamp.now();
     const lockedBy = `integraciones_api/${req.integration.id}`;
     await lockRef.set({
