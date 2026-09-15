@@ -10,12 +10,16 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { inferModuleKeyFromPath, moduleTitleEs } from '@/lib/assistant/inferModuleKeyFromPath';
 import {
+  parseQuickRepliesMarker,
+  splitAssistantQuickReplies,
+} from '@/lib/assistant/quickReplies';
+import {
   clientDeployForAssistant,
   getClientDeployContext,
   type ClientDeployContext,
 } from '@/lib/appBuildInfo';
 
-type ChatMsg = { role: 'user' | 'assistant'; content: string };
+type ChatMsg = { role: 'user' | 'assistant'; content: string; quickReplies?: string[] };
 
 type PendingAction = {
   type: string;
@@ -127,55 +131,6 @@ function loadFabPos(): FabPos {
   return { bottom: 20, right: 20 };
 }
 
-/** Detecta viñetas de menú (· / - **opción**) para chips clicables. No convierte pasos numerados. */
-function parseQuickReplyLabel(line: string): string | null {
-  const t = line.trim();
-  if (!t) return null;
-  // Saludo / menú con punto medio
-  let m = t.match(/^[·]\s+(.+)$/);
-  if (m) {
-    const label = m[1].replace(/\*\*/g, '').trim();
-    if (label.length >= 3 && label.length <= 110) return label;
-  }
-  // - **Opción**  |  - **Opción** — detalle
-  m = t.match(/^[-*•]\s+\*\*([^*]+)\*\*(?:\s*[—–:\-].*)?$/);
-  if (m) {
-    const label = m[1].trim();
-    if (label.length >= 3 && label.length <= 110) return label;
-  }
-  // - Opción corta sin negrita (menú), evita frases largas con punto
-  m = t.match(/^[-*•]\s+([^*\n]{3,90})$/);
-  if (m) {
-    const label = m[1].trim();
-    if (label.length <= 90 && !/[.!?]$/.test(label) && label.split(/\s+/).length <= 12) {
-      return label;
-    }
-  }
-  return null;
-}
-
-function splitAssistantQuickReplies(content: string): { prose: string; replies: string[] } {
-  const lines = content.replace(/\r\n/g, '\n').split('\n');
-  const replies: string[] = [];
-  const proseLines: string[] = [];
-  const seen = new Set<string>();
-  for (const line of lines) {
-    const label = parseQuickReplyLabel(line);
-    if (label) {
-      const key = label.toLowerCase();
-      if (!seen.has(key)) {
-        seen.add(key);
-        replies.push(label);
-      }
-      continue;
-    }
-    proseLines.push(line);
-  }
-  // Si quedó un menú de una sola viñeta aislada y no hay contexto de "por ejemplo", igual sirve.
-  const prose = proseLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
-  return { prose, replies };
-}
-
 /** Parte el texto en bloques legibles: doble salto, ítems numerados o viñetas en líneas aparte. */
 function expandAssistantParagraphBlocks(text: string): string[] {
   const normalized = text.replace(/\r\n/g, '\n').trim();
@@ -214,16 +169,21 @@ function formatAssistantMessage(
     onQuickReply?: (text: string) => void;
     brandColor?: string;
     disabled?: boolean;
+    quickReplies?: string[];
   },
 ): React.ReactNode {
-  const { prose, replies } = splitAssistantQuickReplies(content);
+  const split = splitAssistantQuickReplies(content);
+  const prose = split.prose;
+  const replies = [
+    ...new Set([...(opts?.quickReplies ?? []), ...split.replies].map((r) => r.trim()).filter(Boolean)),
+  ];
   const blocks = expandAssistantParagraphBlocks(prose);
   const onQuickReply = opts?.onQuickReply;
   const brandColor = opts?.brandColor || '#6366f1';
   const disabled = opts?.disabled === true || !onQuickReply;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {blocks.map((para, pi) => (
         <p key={pi} className="mb-0 whitespace-pre-wrap leading-relaxed">
           {para.split('\n').map((line, li) => (
@@ -235,18 +195,25 @@ function formatAssistantMessage(
         </p>
       ))}
       {replies.length > 0 && (
-        <div className="flex flex-wrap gap-1.5 pt-1">
+        <div className="flex flex-col gap-1.5 pt-0.5">
+          <p className="text-[10px] font-black uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            Tocá una opción
+          </p>
           {replies.map((reply) => (
             <button
               key={reply}
               type="button"
               disabled={disabled}
-              onClick={() => onQuickReply?.(reply)}
-              className="max-w-full rounded-xl border px-2.5 py-1.5 text-left text-[12px] font-bold leading-snug shadow-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white dark:hover:bg-slate-700"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onQuickReply?.(reply);
+              }}
+              className="w-full rounded-xl border px-3 py-2.5 text-left text-[13px] font-bold leading-snug shadow-sm transition active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed hover:brightness-95"
               style={{
-                borderColor: `${brandColor}55`,
+                borderColor: `${brandColor}66`,
                 color: brandColor,
-                backgroundColor: `${brandColor}12`,
+                backgroundColor: `${brandColor}18`,
               }}
               title={`Enviar: ${reply}`}
             >
@@ -371,7 +338,8 @@ export function AssistantFloatingBubble(): React.ReactNode {
     const moduleKey = inferModuleKeyFromPath(currentPathRef.current);
     const moduleName = moduleTitleEs(moduleKey);
     const greeting = buildGreeting(moduleKey, moduleName);
-    setMsgs([{ role: 'assistant', content: greeting }]);
+    const split = splitAssistantQuickReplies(greeting);
+    setMsgs([{ role: 'assistant', content: split.prose || greeting, quickReplies: split.replies }]);
     setGreetingDone(true);
   }, [open, greetingDone]);
 
@@ -442,8 +410,17 @@ export function AssistantFloatingBubble(): React.ReactNode {
       });
       const data = res.data as { reply?: string };
       const rawReply = String(data?.reply ?? '').trim() || '(Sin respuesta.)';
-      const { cleanText, action } = parseActionProposal(rawReply);
-      setMsgs([...next, { role: 'assistant', content: cleanText }]);
+      const { cleanText: withoutAction, action } = parseActionProposal(rawReply);
+      const { cleanText, replies } = parseQuickRepliesMarker(withoutAction);
+      const split = splitAssistantQuickReplies(cleanText);
+      setMsgs([
+        ...next,
+        {
+          role: 'assistant',
+          content: split.prose || cleanText,
+          quickReplies: [...new Set([...replies, ...split.replies])],
+        },
+      ]);
       if (action) {
         if (empresa?.pilotoAutoEnabled) {
           await executeAction(action);
@@ -655,6 +632,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
                         onQuickReply: (text) => void sendText(text),
                         brandColor,
                         disabled: busy || !greetingDone,
+                        quickReplies: m.quickReplies,
                       })
                     : m.content}
                 </div>

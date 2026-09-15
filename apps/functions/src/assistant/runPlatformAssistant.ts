@@ -26,7 +26,8 @@ import {
   tryDeterministicDataReply,
   tryDeterministicOnboardingGuideReply,
   looksLikeFalseEmptyTurnosReply,
-} from './assistantDeterministicRouter';
+  tryDeterministicModuleHelpMenuReply } from './assistantDeterministicRouter';
+import { attachQuickRepliesMarker } from './assistantQuickReplies';
 import { empresaAllowed, resolveAssistantUser, type AssistantPersona } from './resolveAssistantUser';
 import { isSuperAdminRole } from '../common/role.util';
 import { resolveAssistantEmpresaScope } from './assistantEmpresaScope';
@@ -44,7 +45,7 @@ Cómo responder (subir calidad sin inventar datos):
 
 4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
 
-4b) Si ofrecés un **menú de opciones** ("puedo ayudarte con…", "por ejemplo"): usá viñetas con el título en **negritas** (una opción por línea), p. ej. `- **Consultar turnos planificados**`. El chat las muestra como botones clicables; el usuario no necesita reescribirlas. **No** uses lista numerada para menús de elección (la numerada queda para pasos de procedimiento).
+4b) Si ofrecés un **menú de opciones** ("puedo ayudarte con…", "por ejemplo"): usá viñetas con el título en **negritas** (una opción por línea), p. ej. \`- **Consultar turnos planificados**\`. El chat las muestra como botones clicables; el usuario no necesita reescribirlas. **No** uses lista numerada para menús de elección (la numerada queda para pasos de procedimiento).
 
 5) En resúmenes o varios temas seguidos: **un párrafo o un ítem por bloque**, separados con línea en blanco; no amontones todo en un solo párrafo.
 
@@ -396,9 +397,16 @@ export async function runPlatformAssistant(
 
   try {
     const onboardingDirect = tryDeterministicOnboardingGuideReply(lastUser, moduleKey);
-    if (onboardingDirect?.trim()) return { reply: onboardingDirect.trim() };
+    if (onboardingDirect?.trim()) return { reply: attachQuickRepliesMarker(onboardingDirect.trim()) };
   } catch (e) {
     console.warn('[assistant] tryDeterministicOnboardingGuideReply', e);
+  }
+
+  try {
+    const helpMenu = tryDeterministicModuleHelpMenuReply(lastUser, moduleKey);
+    if (helpMenu?.trim()) return { reply: attachQuickRepliesMarker(helpMenu.trim()) };
+  } catch (e) {
+    console.warn('[assistant] tryDeterministicModuleHelpMenuReply', e);
   }
 
   if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
@@ -411,7 +419,7 @@ export async function runPlatformAssistant(
         pathname,
         priorRaw.map((m) => ({ role: m.role, content: m.content })),
       );
-      if (direct?.trim()) return { reply: direct.trim() };
+      if (direct?.trim()) return { reply: attachQuickRepliesMarker(direct.trim()) };
     } catch (e) {
       console.warn('[assistant] tryDeterministicDataReply', e);
     }
@@ -585,7 +593,7 @@ async function runGeminiAssistantChat(
         pathname,
         recentMessages,
       );
-      if (recovered?.trim()) return { reply: recovered.trim() };
+      if (recovered?.trim()) return { reply: attachQuickRepliesMarker(recovered.trim()) };
     } catch (e) {
       console.warn('[assistant] recover false empty turnos', e);
     }
@@ -601,7 +609,7 @@ async function runGeminiAssistantChat(
         pathname,
         recentMessages,
       );
-      if (recovered?.trim()) return { reply: recovered.trim() };
+      if (recovered?.trim()) return { reply: attachQuickRepliesMarker(recovered.trim()) };
     } catch (e) {
       console.warn('[assistant] recover fake tool narration', e);
     }
@@ -634,7 +642,7 @@ async function runGeminiAssistantChat(
   }
   const finalReply = reply.slice(0, 8000);
   if (capturedActionProposal) {
-    return { reply: `${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->` };
+    return { reply: attachQuickRepliesMarker(`${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->`) };
   }
-  return { reply: finalReply };
+  return { reply: attachQuickRepliesMarker(finalReply) };
 }
