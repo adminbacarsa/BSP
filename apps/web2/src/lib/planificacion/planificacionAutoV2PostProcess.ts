@@ -230,3 +230,44 @@ export async function rebalancePlanificacionAutoForm({
         setAutoV2Rebalancing(false);
     }
 }
+
+export type ApplyPlanificacionCoverageToStatsParams = {
+    coveredCount: number;
+    extraHours?: number;
+    slaVendidas: number;
+    setAutoV2Coverage: Dispatch<SetStateAction<CoverageVerificationReport | null>>;
+    setAutoV2GenStats: Dispatch<SetStateAction<AutoV2GenStats | null>>;
+};
+
+export function applyPlanificacionCoverageToStats({
+    coveredCount,
+    extraHours = 0,
+    slaVendidas,
+    setAutoV2Coverage,
+    setAutoV2GenStats,
+}: ApplyPlanificacionCoverageToStatsParams): void {
+    setAutoV2Coverage(prev => {
+        if (!prev) return prev;
+        const newUncovered = Math.max(0, prev.coverage.uncoveredSlots - coveredCount);
+        const newCovered = prev.coverage.coveredSlots + coveredCount;
+        return {
+            ...prev,
+            coverage: {
+                ...prev.coverage,
+                uncoveredSlots: newUncovered,
+                coveredSlots: newCovered,
+                coverageRatio: prev.coverage.totalSlots > 0 ? newCovered / prev.coverage.totalSlots : 1,
+            },
+            ok: newUncovered === 0 && !prev.restViolations?.length && !prev.licenseConflicts?.length,
+        };
+    });
+    setAutoV2GenStats(prev => {
+        if (!prev) return prev;
+        const newUncovered = Math.max(0, (prev.uncoveredSlots ?? 0) - coveredCount);
+        const newBillable = prev.totalBillableHours + extraHours;
+        const slaClosed = newUncovered === 0
+            && (slaVendidas <= 0 || newBillable >= slaVendidas - 0.5);
+        return { ...prev, uncoveredSlots: newUncovered, totalBillableHours: newBillable, slaHoursClosed: slaClosed };
+    });
+}
+

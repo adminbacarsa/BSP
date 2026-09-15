@@ -112,9 +112,6 @@ import {
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
-    filterSlasForPlanningTenant,
-    filterSlasForPlanningContext,
-    pickSlaForPlanningMonth,
     isPlanningPositionExcludedOnDate,
     isPlanningShiftExcludedOnDate,
     getPlanningExcludedShiftCodesOnDate,
@@ -203,9 +200,12 @@ import {
 import { applyPlanificacionAutoScheduleV2 } from '@/lib/planificacion/applyPlanificacionAutoScheduleV2';
 import { runPlanificacionAutoV2PlanningAgentGemini } from '@/lib/planificacion/runPlanificacionAutoV2PlanningAgentGemini';
 import {
+    applyPlanificacionCoverageToStats,
     rebalancePlanificacionAutoForm,
     reprocessPlanificacionAutoIssues,
 } from '@/lib/planificacion/planificacionAutoV2PostProcess';
+import { fetchPlanificacionSlaDebug } from '@/lib/planificacion/fetchPlanificacionSlaDebug';
+import { applyPlanificacionColumnCopy } from '@/lib/planificacion/applyPlanificacionColumnCopy';
 import { isShiftConsolidated, rfzDocToShiftView } from '@/lib/planificacion/planificacionShiftViewUtils';
 import { toast } from 'sonner';
 import {
@@ -5481,31 +5481,14 @@ export default function PlanificacionPage() {
      * extraHours: horas billables adicionales generadas (ej: extensiones D12 = d12Count×4h,
      *             cobertura externa = gaps×8h). Suma a totalBillableHours para cerrar el SLA.
      */
-    const applyCoverageToStats = (coveredCount: number, extraHours = 0) => {
-        setAutoV2Coverage(prev => {
-            if (!prev) return prev;
-            const newUncovered = Math.max(0, prev.coverage.uncoveredSlots - coveredCount);
-            const newCovered = prev.coverage.coveredSlots + coveredCount;
-            return {
-                ...prev,
-                coverage: {
-                    ...prev.coverage,
-                    uncoveredSlots: newUncovered,
-                    coveredSlots: newCovered,
-                    coverageRatio: prev.coverage.totalSlots > 0 ? newCovered / prev.coverage.totalSlots : 1,
-                },
-                ok: newUncovered === 0 && !prev.restViolations?.length && !prev.licenseConflicts?.length,
-            };
+    const applyCoverageToStats = (coveredCount: number, extraHours = 0) =>
+        applyPlanificacionCoverageToStats({
+            coveredCount,
+            extraHours,
+            slaVendidas,
+            setAutoV2Coverage,
+            setAutoV2GenStats,
         });
-        setAutoV2GenStats(prev => {
-            if (!prev) return prev;
-            const newUncovered = Math.max(0, (prev.uncoveredSlots ?? 0) - coveredCount);
-            const newBillable = prev.totalBillableHours + extraHours;
-            const slaClosed = newUncovered === 0
-                && (slaVendidas <= 0 || newBillable >= slaVendidas - 0.5);
-            return { ...prev, uncoveredSlots: newUncovered, totalBillableHours: newBillable, slaHoursClosed: slaClosed };
-        });
-    };
 
     /** Rebalanceo manual de forma: swaps trabajo↔F/RET entre guardias (sin F→turno unilateral). */
     const rebalanceAutoForm = async () =>
@@ -5528,69 +5511,36 @@ export default function PlanificacionPage() {
         });
 
     /** Debug: trae el doc de servicios_sla vigente para el mes en pantalla y lo muestra crudo. */
-    const fetchSlaDebug = async () => {
-        if (!selectedClient || !selectedObjective) { toast.error('Seleccioná cliente y objetivo'); return; }
-        setSlaDebugLoading(true);
-        try {
-            const snap = await getDocs(empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa));
-            const allDocs = filterSlasForPlanningTenant(
-                snap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })),
-                empresaId,
-                scopeEmpresa,
-                tenantClientIds,
-            );
-            const matching = filterSlasForPlanningContext(
-                allDocs,
-                selectedClient,
-                selectedObjective,
-                clients,
-                slaIdToObjId,
-            );
-            const y = currentDate.getFullYear(), m = currentDate.getMonth();
-            const { vigente, fallback } = pickSlaForPlanningMonth(matching, y, m);
-            const srv = vigente ?? fallback;
-            if (!srv) { toast.error('No se encontró ningún servicios_sla para este objetivo'); return; }
-            const { id, ...rest } = srv;
-            setSlaDebug({ id, data: rest });
-        } catch (e:any) {
-            toast.error('Error trayendo SLA');
-            console.error('[slaDebug]', e);
-        } finally {
-            setSlaDebugLoading(false);
-        }
-    };
-
-
-    const applyColumnCopy = () => {
-        if (columnSelectSource === null || !selection.start || !selection.end) return;
-        const startCol = Math.min(selection.start.c, selection.end.c);
-        const endCol   = Math.max(selection.start.c, selection.end.c);
-        const srcDate  = getDateKey(daysInMonth[columnSelectSource]);
-        const newChanges = { ...pendingChanges };
-        let copied = 0;
-        displayedEmployees.forEach((emp: any) => {
-            const srcKey = `${emp.id}_${srcDate}`;
-            const srcShift = pendingChanges[srcKey] ? (pendingChanges[srcKey].isDeleted ? null : pendingChanges[srcKey]) : shiftsMap[srcKey];
-            for (let c = startCol; c <= endCol; c++) {
-                if (c === columnSelectSource) continue;
-                const tgtDate = getDateKey(daysInMonth[c]);
-                if (isDateLocked(tgtDate)) continue;
-                const tgtKey = `${emp.id}_${tgtDate}`;
-                if (!srcShift) {
-                    if (pendingChanges[tgtKey] || shiftsMap[tgtKey]) newChanges[tgtKey] = { isDeleted: true };
-                } else {
-                    newChanges[tgtKey] = { ...srcShift, isTemp: true, employeeId: emp.id, objectiveId: selectedObjective };
-                    copied++;
-                }
-            }
+    const fetchSlaDebug = async () =>
+        fetchPlanificacionSlaDebug({
+            selectedClient,
+            selectedObjective,
+            empresaId,
+            scopeEmpresa,
+            tenantClientIds,
+            clients,
+            slaIdToObjId,
+            currentDate,
+            setSlaDebugLoading,
+            setSlaDebug,
         });
-        setPendingChanges(newChanges);
-        setSelection({ start: null, end: null });
-        setColumnSelectMode(false);
-        setColumnSelectSource(null);
-        setIsDragging(false);
-        toast.success(`Día copiado a ${endCol - startCol} día(s) — ${copied} turnos`);
-    };
+
+
+    const applyColumnCopy = () =>
+        applyPlanificacionColumnCopy({
+            columnSelectSource,
+            selection,
+            daysInMonth,
+            pendingChanges,
+            displayedEmployees,
+            shiftsMap,
+            selectedObjective,
+            setPendingChanges,
+            setSelection,
+            setColumnSelectMode,
+            setColumnSelectSource,
+            setIsDragging,
+        });
 
     // 🛑 V8.20: RENDERIZADO DUAL (SPLIT SCREEN) - RESTAURADO
     const calculatePlannedHoursForDate = (dateStr: string) => {
