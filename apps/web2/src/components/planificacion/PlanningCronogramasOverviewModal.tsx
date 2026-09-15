@@ -3,6 +3,7 @@ import { X, Loader2, ChevronLeft, ChevronRight, Database, ExternalLink, RefreshC
 import {
   CRONOGRAMA_ESTADO_LABEL,
   loadCronogramaOverview,
+  type CronogramaAvanceBand,
   type CronogramaEstado,
   type CronogramaOverviewRow,
 } from '@/lib/planificacion/planningCronogramaOverview';
@@ -26,6 +27,46 @@ const ESTADO_DOT: Record<CronogramaEstado, string> = {
   PUBLICADO_CON_CAMBIOS: 'bg-rose-500',
   SIN_DATOS: 'bg-slate-300',
 };
+
+/** Marcador semáforo: avance de hs reales vs plan publicado (15 bloques R/Y/G). */
+function CronogramaAvanceGauge({
+  ratio,
+  band,
+  realHours,
+  publishedPlanHours,
+}: {
+  ratio: number | null;
+  band: CronogramaAvanceBand;
+  realHours: number;
+  publishedPlanHours: number;
+}) {
+  if (band === 'NONE' || ratio == null || publishedPlanHours <= 0) {
+    return <span className="text-slate-300 text-[10px]">—</span>;
+  }
+  const clamped = Math.max(0, Math.min(1, ratio));
+  const markerIdx = Math.min(14, Math.max(0, Math.round(clamped * 14)));
+  const pct = Math.round(clamped * 100);
+  const blocks = Array.from({ length: 15 }, (_, i) => {
+    const color = i < 5 ? 'bg-rose-500' : i < 10 ? 'bg-amber-400' : 'bg-emerald-500';
+    return (
+      <span
+        key={i}
+        className={`w-1.5 h-1.5 rounded-[2px] ${color} ${i === markerIdx ? 'ring-1 ring-slate-700 scale-125' : 'opacity-80'}`}
+      />
+    );
+  });
+  return (
+    <div
+      className="inline-flex flex-col items-end gap-0.5 min-w-[88px]"
+      title={`Reales ${realHours.toLocaleString('es-AR')} hs / Plan pub. ${publishedPlanHours.toLocaleString('es-AR')} hs (${pct}%)`}
+    >
+      <div className="flex items-center gap-[2px] px-0.5 py-0.5 border-y border-slate-300">{blocks}</div>
+      <span className="text-[9px] font-black tabular-nums text-slate-600">
+        {pct}% · {Math.round(realHours).toLocaleString('es-AR')}h
+      </span>
+    </div>
+  );
+}
 
 type Props = {
   isOpen: boolean;
@@ -286,10 +327,15 @@ export default function PlanningCronogramasOverviewModal({
                     <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[16%] bg-slate-100">
                       Estado
                     </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-indigo-600 px-4 py-3 border-r border-slate-200 w-[9%] bg-indigo-50/50">
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-indigo-600 px-4 py-3 border-r border-slate-200 w-[10%] bg-indigo-50/50">
                       Hs plan
+                      <span className="block normal-case font-bold text-[8px] text-indigo-400">pub+borr</span>
                     </th>
-                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[9%] bg-slate-100">
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-emerald-700 px-3 py-3 border-r border-slate-200 w-[11%] bg-emerald-50/50">
+                      Avance real
+                      <span className="block normal-case font-bold text-[8px] text-emerald-500">vs plan pub.</span>
+                    </th>
+                    <th className="text-right text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[8%] bg-slate-100">
                       Turnos
                     </th>
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-orange-600 px-3 py-3 border-r border-slate-200 w-[8%] bg-orange-50/60">
@@ -354,10 +400,25 @@ export default function PlanningCronogramasOverviewModal({
                           </td>
                           <td className="px-4 py-2.5 border-r border-slate-100 text-right font-black tabular-nums text-indigo-700">
                             {r.plannedHours > 0 ? (
-                              <span>{r.plannedHours.toLocaleString('es-AR')} hs</span>
+                              <div className="flex flex-col items-end gap-0.5">
+                                <span>{r.plannedHours.toLocaleString('es-AR')} hs</span>
+                                {r.publishedPlanHours > 0 && r.publishedPlanHours !== r.plannedHours && (
+                                  <span className="text-[8px] font-bold text-emerald-700">
+                                    {r.publishedPlanHours.toLocaleString('es-AR')} pub
+                                  </span>
+                                )}
+                              </div>
                             ) : (
                               <span className="text-slate-300">—</span>
                             )}
+                          </td>
+                          <td className="px-3 py-2.5 border-r border-slate-100 text-right">
+                            <CronogramaAvanceGauge
+                              ratio={r.completionRatio}
+                              band={r.avanceBand}
+                              realHours={r.realHours}
+                              publishedPlanHours={r.publishedPlanHours}
+                            />
                           </td>
                           <td className="px-4 py-2.5 border-r border-slate-100 text-right font-mono text-[10px]">
                             {r.totalShifts === 0 ? (
@@ -446,7 +507,7 @@ export default function PlanningCronogramasOverviewModal({
               </p>
               {totalPlannedHours > 0 && (
                 <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-0.5 rounded-lg tabular-nums">
-                  Σ visible: {Math.round(totalPlannedHours).toLocaleString('es-AR')} hs plan cob.
+                  Σ visible: {Math.round(totalPlannedHours).toLocaleString('es-AR')} hs plan total (pub+borr)
                 </span>
               )}
               {portfolioPlannedHours > 0 && filtered.length !== rows.length && (

@@ -125,6 +125,15 @@ export function isPlanificadorPlannedHoursShift(t: any): boolean {
   return true;
 }
 
+/**
+ * Plan comprometido / realidad operativa: misma regla que Hs. Plan. pero **sin borradores**.
+ * Análisis, hours_balances y cobertura vs SLA deben usar esto — el draft no está en ejecución.
+ */
+export function isPublishedPlanificadorPlannedHoursShift(t: any): boolean {
+  if (!isPlanificadorPlannedHoursShift(t)) return false;
+  return t?.draft !== true;
+}
+
 function instantFromShiftClock(val: unknown): Date | null {
   if (!val) return null;
   if (typeof (val as { toDate?: () => Date }).toDate === 'function') {

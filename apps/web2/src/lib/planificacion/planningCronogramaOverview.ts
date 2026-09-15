@@ -1,4 +1,4 @@
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
+import { collection, doc, getDocs, query, serverTimestamp, setDoc, Timestamp, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import {
   belongsToEmpresaView,
@@ -10,17 +10,22 @@ import {
 import {
   buildDemandaByObjective,
   coveragePlannedFromDemandaRow,
+  coveragePlannedTotalFromDemandaRow,
 } from '@/lib/analisis/analisisDemanda';
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
 import { isOperationalOriginShift } from '@/lib/shifts/operationalShift';
+import { fichadaHoursForShift } from '@/lib/crm/fichadaHours';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
   | 'BORRADOR'
   | 'PUBLICADO_CON_CAMBIOS'
   | 'SIN_DATOS';
+
+/** Banda visual del avance real vs plan publicado (marcador tipo semáforo). */
+export type CronogramaAvanceBand = 'RED' | 'YELLOW' | 'GREEN' | 'NONE';
 
 export interface CronogramaOverviewRow {
   clientId: string;
@@ -35,8 +40,15 @@ export interface CronogramaOverviewRow {
   totalShifts: number;
   /** Ausencias sin cobertura asignada (sin coveredBy). */
   openVacancies: number;
-  /** Horas planificadas base SLA (misma regla que pie del planificador / CRM / Análisis). */
+  /** Horas planificadas totales (publicado + borrador) — grilla completa. */
   plannedHours: number;
+  /** Horas del plan comprometido (solo no-draft) — lo que Ops/Análisis ven como plan. */
+  publishedPlanHours: number;
+  /** Horas reales fichadas del mes en el objetivo. */
+  realHours: number;
+  /** real / publishedPlan (0–1+); null si no hay plan publicado. */
+  completionRatio: number | null;
+  avanceBand: CronogramaAvanceBand;
   publishedBy: string;
   publishedAt: Date | null;
   lastModifiedAt: Date | null;
@@ -76,6 +88,13 @@ export function deriveCronogramaEstado(
   if (hasPublishedAt && draftCount === 0) return 'PUBLICADO';
   if (hasPublishedAt && draftCount > 0) return 'PUBLICADO_CON_CAMBIOS';
   return 'BORRADOR';
+}
+
+export function deriveCronogramaAvanceBand(ratio: number | null): CronogramaAvanceBand {
+  if (ratio == null || !Number.isFinite(ratio)) return 'NONE';
+  if (ratio < 0.34) return 'RED';
+  if (ratio < 0.67) return 'YELLOW';
+  return 'GREEN';
 }
 
 export const CRONOGRAMA_ESTADO_LABEL: Record<CronogramaEstado, string> = {
@@ -122,8 +141,7 @@ export async function touchPlanificacionEstadoActivity(params: {
   const { empresaId, objectiveId, year, month, actorName } = params;
   if (!empresaId?.trim() || !objectiveId?.trim() || !actorName?.trim()) return;
   const stateKey = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
-  const primaryRef = doc(db, 'planificacion_estados', stateKey);
-  const payload: Record<string, unknown> = {
+  await setDoc(doc(db, 'planificacion_estados', stateKey), {
     empresaId,
     objectiveId,
     objetivoId: objectiveId,
@@ -133,30 +151,7 @@ export async function touchPlanificacionEstadoActivity(params: {
     mes: month,
     lastModifiedAt: serverTimestamp(),
     lastModifiedBy: actorName,
-  };
-  // Si el doc tenant aún no tiene publishedAt, no tapar una publicación legacy.
-  try {
-    const primary = await getDoc(primaryRef);
-    const primaryPublished = primary.exists()
-      ? (primary.data() as Record<string, unknown>).publishedAt
-      : undefined;
-    if (primaryPublished == null || primaryPublished === '') {
-      const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
-      if (legacyId !== stateKey) {
-        const legacy = await getDoc(doc(db, 'planificacion_estados', legacyId));
-        if (legacy.exists()) {
-          const ld = legacy.data() as Record<string, unknown>;
-          if (ld.publishedAt != null && ld.publishedAt !== '') {
-            payload.publishedAt = ld.publishedAt;
-            if (ld.publishedBy != null) payload.publishedBy = ld.publishedBy;
-          }
-        }
-      }
-    }
-  } catch {
-    // best-effort; el touch de actividad no debe fallar por esto
-  }
-  await setDoc(primaryRef, payload, { merge: true });
+  }, { merge: true });
 }
 
 /** SuperAdmin: panorama de cronogramas por objetivo en un mes (cualquier estado). */
@@ -205,20 +200,20 @@ export async function loadCronogramaOverview(params: {
   const shiftCountsByObjective = new Map<string, ShiftCounts>();
   const turnosByObjective = new Map<string, any[]>();
   const activityFromShifts = new Map<string, ActivityMeta>();
+  const realHoursByObjective = new Map<string, number>();
 
   const svcSnap = await getDocs(
     empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa),
   );
   const slaRaw: any[] = [];
   svcSnap.docs.forEach((d) => {
-    const data = { id: d.id, ...d.data() };
+    const data: any = { id: d.id, ...d.data() };
     if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
     slaRaw.push(data);
   });
   const vigenteSlas = pickVigenteSlasForPeriod(slaRaw, firstDay, lastDay);
   const objectiveAliases = buildObjectiveAliasesFromSla(vigenteSlas);
   const slaExclusionCtx = buildSlaExclusionContext(vigenteSlas, firstDay, lastDay);
-  const plannedRange = { start: firstDay, end: lastDay };
 
   const turnosQ = scopeEmpresa
     ? query(
@@ -238,7 +233,15 @@ export async function loadCronogramaOverview(params: {
     const data = d.data() as Record<string, unknown>;
     if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
     const objId = String(data.objectiveId || '').trim();
-    if (!objId || !turnoCuentaParaCrono(data, objId)) return;
+    if (!objId) return;
+
+    // Horas reales: fichadas del objetivo (incl. ops), no inventa si no fichó.
+    const realHs = fichadaHoursForShift({ id: d.id, ...data });
+    if (realHs > 0) {
+      realHoursByObjective.set(objId, (realHoursByObjective.get(objId) || 0) + realHs);
+    }
+
+    if (!turnoCuentaParaCrono(data, objId)) return;
     const counts = shiftCountsByObjective.get(objId) || { draft: 0, published: 0, openVacancies: 0 };
     const code = String(data.code || '').toUpperCase();
     if (ABSENCE_CODES.has(code) && !data.coveredBy) {
@@ -270,7 +273,10 @@ export async function loadCronogramaOverview(params: {
     objectiveAliases,
     slaExclusionCtx,
   });
-  const plannedByObjective = new Map<string, number>(
+  const plannedTotalByObjective = new Map<string, number>(
+    demandaOverview.rows.map((r) => [r.id, coveragePlannedTotalFromDemandaRow(r)]),
+  );
+  const plannedPublishedByObjective = new Map<string, number>(
     demandaOverview.rows.map((r) => [r.id, coveragePlannedFromDemandaRow(r)]),
   );
 
@@ -296,7 +302,12 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedBy ?? '',
       );
       const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
-      const plannedHours = plannedByObjective.get(objectiveId) || 0;
+      const plannedHours = plannedTotalByObjective.get(objectiveId) || 0;
+      const publishedPlanHours = plannedPublishedByObjective.get(objectiveId) || 0;
+      const realHours = Math.round((realHoursByObjective.get(objectiveId) || 0) * 10) / 10;
+      const completionRatio =
+        publishedPlanHours > 0 ? Math.min(2, realHours / publishedPlanHours) : null;
+      const avanceBand = deriveCronogramaAvanceBand(completionRatio);
 
       rows.push({
         clientId: client.id,
@@ -311,6 +322,10 @@ export async function loadCronogramaOverview(params: {
         totalShifts: counts.draft + counts.published,
         openVacancies: counts.openVacancies,
         plannedHours,
+        publishedPlanHours,
+        realHours,
+        completionRatio,
+        avanceBand,
         publishedBy: pub?.publishedBy || '',
         publishedAt: pub?.publishedAt ?? null,
         lastModifiedAt: mergedActivity.lastModifiedAt,
