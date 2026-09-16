@@ -2639,8 +2639,8 @@ export default function OperacionesPage() {
             await updateDoc(doc(db, 'empresas', empresaId), { modoDemoEnabled: next });
             toast.success(
                 next
-                    ? 'Demo ON — sala cerrada · pipeline Auto + simulador (empresa lab)'
-                    : 'Demo OFF — sala en Auto (realidad, sin simulador)',
+                    ? 'Demo ON — sesión manual del CC cerrada · Auto + simulador (lab)'
+                    : 'Demo OFF — CC en Auto (realidad, sin simulador)',
             );
         } catch (e) {
             console.error(e);
@@ -2661,12 +2661,12 @@ export default function OperacionesPage() {
             await session.startSession();
             toast.success(
                 joining
-                    ? 'Entraste como copiloto — pedí el mando al piloto si necesitás'
-                    : 'Sala MANUAL · sos el piloto',
+                    ? 'Uniste al CC como apoyo — podés solicitar el mando si hace falta'
+                    : 'Operador manual · tenés el mando del CC',
             );
         } catch (e) {
             console.error(e);
-            toast.error('No se pudo iniciar guardia manual');
+            toast.error('No se pudo iniciar sesión manual del CC');
         } finally {
             setGuardiaActionLoading(false);
         }
@@ -2677,15 +2677,15 @@ export default function OperacionesPage() {
         try {
             if (session.isPilot) {
                 await session.endRoomToAuto();
-                toast.success('Sala cerrada · Auto ON para todos');
+                toast.success('CC en Auto para todos (sesión manual cerrada)');
             } else {
                 await session.endSession();
-                toast.success('Saliste de la sala (copiloto)');
+                toast.success('Saliste del CC (apoyo)');
             }
             setConfirmEndSession(false);
         } catch (e) {
             console.error(e);
-            toast.error('No se pudo cerrar la guardia manual');
+            toast.error('No se pudo cerrar la sesión manual del CC');
         } finally {
             setGuardiaActionLoading(false);
         }
@@ -4627,7 +4627,7 @@ export default function OperacionesPage() {
                                             ? 'bg-violet-600 border-violet-700 text-white shadow-sm'
                                             : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
                                     }`}
-                                    title="Demo = Auto + simulador. Al activar cierra la sala Manual de todos."
+                                    title="Demo = Auto + simulador. Al activar cierra la sesión manual del CC para todos."
                                 >
                                     <Zap size={10} />
                                     {toggleModoDemoLoading ? 'Demo…' : `Demo ${opsCaps.labels.demo}`}
@@ -4647,7 +4647,7 @@ export default function OperacionesPage() {
                                         ? 'bg-cyan-600 border-cyan-700 text-white shadow-sm'
                                         : 'bg-slate-50 border-slate-200 text-slate-400'
                                 }`}
-                                title="Auto = para todos cuando la sala Manual está vacía"
+                                title="Auto = para todos cuando no hay operador manual activo en el CC"
                             >
                                 <Radio size={10} />
                                 Auto {opsCaps.labels.auto}
@@ -4658,32 +4658,11 @@ export default function OperacionesPage() {
                                         ? 'bg-emerald-600 border-emerald-700 text-white shadow-sm'
                                         : 'bg-slate-50 border-slate-200 text-slate-400'
                                 }`}
-                                title="Sala Manual: piloto + copilotos. Auto queda OFF para todos."
+                                title="Operador manual: a mando + apoyo en el CC. Auto queda OFF para todos."
                             >
                                 <Shield size={10} />
-                                Manual {opsCaps.labels.manual}{manualGuardiaOn && elapsed ? ` · ${elapsed}` : ''}
+                                Operador manual {opsCaps.labels.manual}{manualGuardiaOn && elapsed ? ` · ${elapsed}` : ''}
                             </span>
-                            {ccManualOn && session.isPilot && (
-                                <button
-                                    type="button"
-                                    onClick={() => {
-                                        const next = !manualAssist;
-                                        setManualAssist(next);
-                                        writeManualAssistPreference(next);
-                                        toast.success(next
-                                            ? 'Manual asistido ON — cierres y retención (solo piloto)'
-                                            : 'Manual asistido OFF — solo el piloto escribe');
-                                    }}
-                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${
-                                        manualAssist
-                                            ? 'bg-teal-600 border-teal-700 text-white'
-                                            : 'bg-slate-100 border-slate-300 text-slate-500 hover:bg-slate-200'
-                                    }`}
-                                    title="Asistido: solo el piloto corre cierres/retención automáticos"
-                                >
-                                    Asistido {manualAssist ? 'ON' : 'OFF'}
-                                </button>
-                            )}
                             {ccAutoOn && !isCCOperator && (
                                 <button
                                     type="button"
@@ -4692,7 +4671,7 @@ export default function OperacionesPage() {
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-100 border-amber-300 text-amber-900 hover:bg-amber-200 disabled:opacity-50"
                                 >
                                     <PlayCircle size={10} />
-                                    {guardiaActionLoading ? '…' : 'Abrir sala (piloto)'}
+                                    {guardiaActionLoading ? '…' : 'Tomar mando CC'}
                                 </button>
                             )}
                             {ccManualOn && !session.inRoom && !isCCOperator && !ccDemoOn && (
@@ -4703,7 +4682,7 @@ export default function OperacionesPage() {
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-sky-100 border-sky-300 text-sky-900 hover:bg-sky-200 disabled:opacity-50"
                                 >
                                     <Users size={10} />
-                                    {guardiaActionLoading ? '…' : 'Entrar copiloto'}
+                                    {guardiaActionLoading ? '…' : 'Unirse (apoyo)'}
                                 </button>
                             )}
                             {session.isCopiloto && (
@@ -4713,7 +4692,7 @@ export default function OperacionesPage() {
                                         onClick={() => session.cancelPilotRequest().then(() => toast.message('Pedido cancelado')).catch(() => toast.error('No se pudo cancelar'))}
                                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-amber-50 border-amber-300 text-amber-800"
                                     >
-                                        Pedido piloto…
+                                        Solicitud de mando…
                                     </button>
                                 ) : (
                                     <button
@@ -4723,7 +4702,7 @@ export default function OperacionesPage() {
                                             setGuardiaActionLoading(true);
                                             try {
                                                 await session.requestPilot();
-                                                toast.success('Pedido enviado al piloto');
+                                                toast.success('Solicitud enviada al operador a mando');
                                             } catch {
                                                 toast.error('No se pudo pedir el mando');
                                             } finally {
@@ -4732,7 +4711,7 @@ export default function OperacionesPage() {
                                         }}
                                         className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border bg-indigo-100 border-indigo-300 text-indigo-900 hover:bg-indigo-200 disabled:opacity-50"
                                     >
-                                        Pedir piloto
+                                        Solicitar mando
                                     </button>
                                 )
                             )}
@@ -4790,11 +4769,11 @@ export default function OperacionesPage() {
                                     disabled={guardiaActionLoading}
                                     className="flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border border-emerald-400 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
                                 >
-                                    {session.isPilot ? 'Pasar a Auto' : 'Salir sala'}
+                                    {session.isPilot ? 'Pasar a Auto' : 'Salir (apoyo)'}
                                 </button>
                             ) : null}
                             {isCCOperator && ccAutoOn && (
-                                <span className="text-[8px] font-bold text-amber-700 px-1">Iniciando guardia…</span>
+                                <span className="text-[8px] font-bold text-amber-700 px-1">Iniciando sesión CC…</span>
                             )}
                             {alertsOnCc ? (
                                 <button type="button" onClick={() => setNotifPanelOpen(v => !v)} className={`ml-auto flex items-center gap-1 px-2 py-1 rounded-lg text-[8px] font-black uppercase border transition-colors ${totalAlertsCount > 0 ? 'bg-rose-600 border-rose-700 text-white' : 'bg-slate-100 border-slate-200 text-slate-600 hover:bg-slate-200'}`}><Bell size={10} className={totalAlertsCount > 0 ? 'animate-pulse' : ''}/>{totalAlertsCount > 0 ? totalAlertsCount : 'Alertas'}</button>
@@ -4808,23 +4787,52 @@ export default function OperacionesPage() {
                         {ccManualOn && !ccDemoOn && (
                             <div className="mb-1.5 shrink-0 rounded-xl border border-emerald-200 bg-emerald-50/80 dark:bg-emerald-950/30 dark:border-emerald-800 px-2.5 py-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <span className="text-[9px] font-black uppercase text-emerald-800 dark:text-emerald-200 tracking-wide">
-                                    Sala Manual
+                                    Operador manual
                                 </span>
                                 <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200">
-                                    Piloto:{' '}
+                                    A mando:{' '}
                                     <span className="text-emerald-700 dark:text-emerald-300">
                                         {session.pilotSession?.operatorName || '—'}
                                         {session.isPilot ? ' (vos)' : ''}
                                     </span>
                                 </span>
                                 <span className="text-[10px] text-slate-600 dark:text-slate-300">
-                                    Copilotos:{' '}
+                                    Apoyo:{' '}
                                     {session.copilotoSessions.length
                                         ? session.copilotoSessions.map((s) => s.operatorName).join(', ')
-                                        : 'ninguno'}
+                                        : 'nadie'}
                                 </span>
+                                {session.isPilot && session.inRoom ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            const next = !manualAssist;
+                                            setManualAssist(next);
+                                            writeManualAssistPreference(next);
+                                            toast.success(next
+                                                ? 'Manual asistido ON — cierres y retención automáticos (operador a mando)'
+                                                : 'Manual asistido OFF — solo acciones manuales del operador a mando');
+                                        }}
+                                        className={`flex items-center gap-1 px-2 py-0.5 rounded-lg text-[9px] font-black uppercase border transition-colors ${
+                                            manualAssist
+                                                ? 'bg-teal-600 border-teal-700 text-white shadow-sm'
+                                                : 'bg-white border-teal-300 text-teal-800 hover:bg-teal-50'
+                                        }`}
+                                        title="Manual asistido: el sistema puede cerrar turnos y retención T+0 mientras vos operás manualmente"
+                                    >
+                                        Manual asistido {manualAssist ? 'ON' : 'OFF'}
+                                    </button>
+                                ) : (
+                                    <span
+                                        className="text-[9px] font-bold text-teal-800 dark:text-teal-200 bg-teal-50 dark:bg-teal-950/40 border border-teal-200 dark:border-teal-800 px-2 py-0.5 rounded-lg"
+                                        title="Solo el operador a mando dentro del CC puede activar manual asistido"
+                                    >
+                                        Manual asistido: solo operador a mando
+                                        {!session.inRoom ? ' — tomá mando del CC o unite en apoyo' : ''}
+                                    </span>
+                                )}
                                 <span className="text-[9px] text-slate-500 dark:text-slate-400">
-                                    Auto OFF para todos mientras haya sala abierta
+                                    Auto OFF para todos mientras haya operador manual activo
                                 </span>
                             </div>
                         )}

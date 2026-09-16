@@ -2,7 +2,7 @@
  * Modos del Centro de Control (mutuamente excluyentes a nivel EMPRESA / sala):
  * - DEMO:   mismo pipeline que Auto + generador de eventos (presente/ausente/tarde).
  * - AUTO:   pipeline sin simulador — realidad. Vale para TODOS si no hay Manual en sala.
- * - MANUAL: hay ≥1 sesión activa. Piloto = primero / transferido; resto = copilotos.
+ * - MANUAL: hay ≥1 sesión activa en el CC. A mando = primero / transferido; resto = apoyo.
  */
 
 export type OpsMode = 'DEMO' | 'AUTO' | 'MANUAL';
@@ -23,7 +23,7 @@ export interface OpsModeCapabilities {
   isManual: boolean;
   /**
    * Pipeline rutinario (cierres, retención T+0, autorelevo).
-   * Demo / Auto / Manual asistido del PILOTO (copiloto no escribe solo).
+   * Demo / Auto / Manual asistido del operador a mando (apoyo no corre pipeline solo).
    */
   pipelineRoutine: boolean;
   /**
@@ -70,9 +70,9 @@ export function getOpsCapabilities(
       manual: isManual
         ? (inRoom
           ? (isPilot
-            ? (manualAssist ? 'ON · piloto · asistido' : 'ON · piloto')
-            : 'ON · copiloto')
-          : 'ON · sala')
+            ? (manualAssist ? 'ON · asistido' : 'ON · a mando')
+            : 'ON · apoyo')
+          : 'ON · CC activo')
         : 'OFF',
     },
   };
