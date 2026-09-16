@@ -1,6 +1,13 @@
 # Modo capacitación — alcance y opciones
 
 > **Decisión de producto (Mauro, 2026-09-16):** la capacitación debe ser una **empresa aparte** (sandbox tenant), con **datos efímeros** que se borran al terminar; el **rol del usuario** define qué módulos aprender; dentro de cada módulo hay un **seguimiento guiado paso a paso** (ej. Planificación: crear cronograma → generar turno → publicar). Los datos de práctica **no se conservan** como operación real.
+>
+> **Gate 0 cerrado (Mauro + recomendación Crono, 2026-09-16):**
+> 1. Sandbox **compartido** `capacitacion` + aislamiento por `trainingSessionId` (no empresa 1:1 por alumno en MVP).
+> 2. **Rol real** = qué módulos enseña el coach; **rol práctica** = permisos de escritura temporales solo dentro del sandbox.
+> 3. Plan de módulos = **rol asignado** (si solo PLANNING → arranca en Planificación; si tiene SERVICES → carga servicios; etc.).
+> 4. **Borrado al terminar cada módulo** (no solo al cierre total) + registro de “entendió / aprobado” del módulo.
+> 5. **Guardar todo el progreso pedagógico y calificar** (score/rúbrica por módulo e historial para instructor).
 
 ---
 
@@ -26,10 +33,10 @@ La guía actual (`/admin/guia`) es útil como onboarding conceptual, pero no ree
 ### 2.1 Principio pedagógico acordado
 
 1. **Empresa aparte** (`capacitacion_*`) — nunca Bacarsa ni tenants productivos.
-2. **Datos solo para práctica** — se escriben en el tenant de capacitación y se **eliminan al cerrar/completar** la sesión (o al abortar).
-3. **Recorrido por rol** — los módulos a aprender salen de `roles/{id}.permissions` (mismos módulos que usa el panel).
+2. **Datos solo para práctica** — se escriben en el tenant de capacitación y se **eliminan al completar cada módulo** (y al abortar/TTL de sesión).
+3. **Recorrido por rol** — los módulos a aprender salen del **rol real asignado** (`roles/{id}.permissions`, mismos módulos que usa el panel). Ejemplo: planificador sin SERVICES → coach de Planificación (con seed previo); quien carga servicios → coach de SERVICES primero.
 4. **Coach in-situ por módulo** — al entrar a un módulo, un overlay/wizard lleva al alumno por cada micro-paso (no slideshow separado).
-5. **Seguimiento de aprendizaje** — cada micro-paso se marca por evidencia (acción real en UI + doc creado/actualizado), no por checkbox manual.
+5. **Seguimiento + calificación** — cada micro-paso se marca por evidencia (acción real en UI + doc creado/actualizado); al cerrar el módulo se guarda score/rúbrica y se registra que el alumno **entendió el funcionamiento** del módulo.
 
 ### 2.2 Cadena operativa completa (cuando el rol lo permita)
 
@@ -66,7 +73,7 @@ Reutilizar la matriz ya existente:
 - Permisos del alumno: `roles/{roleId}.permissions` + `system_users/{uid}.role`.
 - Onboarding tracks actuales (`OPERATIONS`, `PLANNING`, `CRM`, `SERVICES`, `RRHH` en `index.ts` / guía) se pueden mapear 1:1 a coaches por módulo, pero con evidencia real.
 
-Regla: **si el rol no tiene READ del módulo, ese coach no aparece**. Si tiene READ pero no CREATE/PUBLISH, el coach enseña lectura + explica límites (o usa cuenta de práctica con permisos de escritura solo en el tenant capacitación).
+Regla: **si el rol real no tiene READ del módulo, ese coach no aparece**. Si el rol real tiene READ pero no CREATE/PUBLISH, en sandbox se activa el **rol práctica** (escritura temporal solo en `capacitacion`) para que pueda completar el circuito; fuera del sandbox vuelve a su rol real.
 
 ---
 
@@ -242,11 +249,12 @@ Impacto: ruido operativo, notificaciones y costos si el tenant de capacitación 
 
 | Requisito Mauro | Diseño |
 |---|---|
-| Empresa aparte | Tenant `capacitacion_*` (o uno por cohorte/sesión), nunca Bacarsa |
-| Al terminar, borrar lo creado | Purge tenant/sesión al completar, abortar o timeout |
-| Usar el rol para ver qué módulos aprender | Coaches derivados de `roles.permissions` |
-| Seguimiento paso a paso en cada módulo | Overlay/wizard in-situ (ej. Planificación: cronograma → turno → publicar) |
-| Datos que no se deben guardar | Solo sandbox; progreso pedagógico sí se guarda (hitos/score), datos de negocio no |
+| Empresa aparte | Tenant compartido `capacitacion` (+ `trainingSessionId`), nunca Bacarsa |
+| Borrar lo creado | Purge por `trainingSessionId` **al completar cada módulo**; TTL/abort de sesión |
+| Usar el rol para ver qué módulos aprender | Coaches = permisos READ del **rol real** |
+| Poder practicar aunque el rol sea solo lectura | **Rol práctica**: create/update/publish solo dentro del sandbox |
+| Seguimiento paso a paso en cada módulo | Overlay/wizard in-situ + evidencia + **calificación** |
+| Datos que no se deben guardar | Negocio de práctica no; progreso + score + historial sí |
 
 **Opción D** queda como roadmap de riesgo: si el purge/hardening no alcanza o el volumen de alumnos crece, mover el sandbox a proyecto Firebase separado (B).
 
@@ -267,8 +275,9 @@ Racional:
 3. **Plan de aprendizaje por rol**: lista de módulos = permisos READ del rol (map a coaches CRM/Servicios/Planificación/Operaciones/RRHH).
 4. **Coach in-situ en al menos 2 módulos MVP** (propuesta: **CRM + Planificación**), con micro-pasos verificables.
 5. **Seguimiento de aprendizaje** por usuario: hitos completados, módulo actual, % progreso (persistente).
-6. **Cleanup al terminar**: al marcar “Finalizar capacitación” (o al salir forzado), borrar datos de negocio creados en la sesión/tenant de práctica; conservar solo el progreso pedagógico.
+6. **Cleanup por módulo**: al marcar un módulo como “entendido/aprobado”, borrar datos de negocio de ese módulo/sesión; conservar progreso + calificación. Al abortar o TTL, purge residual.
 7. **Guardrails**: sin SuperAdmin en sesión alumno; sin API keys/AFIP/payroll; Centro de Control apagado o aislado para no disparar crons/push reales.
+8. **Calificación**: score por módulo (evidencia + tiempos + reintentos) visible para instructor.
 
 ### Completo (versión madura)
 
@@ -287,72 +296,102 @@ Racional:
 
 ```
 system_users/{uid}
-  role → define módulos a aprender
+  role → ROL REAL (define qué módulos enseña el coach)
 capacitacion_sesiones/{sessionId}
-  empresaId: "capacitacion_..."
-  alumnoUid, roleId
+  empresaId: "capacitacion"          // sandbox compartido MVP
+  alumnoUid, roleIdReal
+  practiceWriteEnabled: true         // rol práctica solo en sandbox
   status: ACTIVE | COMPLETED | ABORTED
-  modulesPlan: ["CLIENTS","PLANNING",...]
-  progress: { CLIENTS: { stepsDone: [...], completedAt }, ... }
+  modulesPlan: ["CLIENTS","PLANNING",...]  // derivado del rol real
+  progress: {
+    CLIENTS: {
+      stepsDone: [...],
+      understoodAt,                  // “dio por entendido”
+      score: 0-100,
+      attempts, durationMs,
+      cleanedUpAt
+    },
+    ...
+  }
+  overallScore
   startedAt, endedAt
 ```
 
 Todo doc de negocio creado en la sesión lleva:
 
-- `empresaId` = empresa capacitación
-- `trainingSessionId` = sessionId (para purge selectivo)
+- `empresaId` = `capacitacion`
+- `trainingSessionId` = sessionId (purge selectivo por alumno/módulo)
+- `trainingModuleKey` (opcional, para purge fino al cerrar un módulo)
 
-**Persistente al terminar:** progreso/score en sesión o en `system_users.onboardingGuide` extendido.  
-**No persistente:** `clients`, `servicios_sla`, `turnos`, `ausencias`, `novedades`, etc. de la práctica.
+**Persistente al terminar módulo/sesión:** progreso, score, historial de intentos/tiempos, flag `understood`.  
+**No persistente:** `clients`, `servicios_sla`, `turnos`, `ausencias`, `novedades`, etc. de la práctica (se borran al completar el módulo o al abortar).
 
 ### 7.2 Empresa de entrenamiento
 
-- Crear empresa dedicada (no Bacarsa legacy).
+- **Una sola** empresa compartida `capacitacion` en MVP (recomendación Crono; ver §10.1).
 - `migracionCompleta=true` desde inicio.
-- Flags sugeridos: `isTrainingEmpresa: true`, `centroControlEnabled: false` (evitar crons/push reales).
-- Usuarios de práctica con `empresaId` fijo al sandbox; sin `allEmpresas`.
+- Flags: `isTrainingEmpresa: true`, `centroControlEnabled: false`.
+- Alumnos con `empresaId` fijado al sandbox durante training; sin `allEmpresas`.
+- Aislamiento concurrente por `trainingSessionId` (no por empresa 1:1).
 
-### 7.3 Cleanup al terminar (contrato “no se deben guardar”)
+### 7.3 Rol real vs rol práctica
+
+| Concepto | Qué es | Para qué sirve |
+|---|---|---|
+| **Rol real** | El rol COSP del usuario (`system_users.role` → `roles/{id}.permissions`) | Decide **qué módulos** aparecen en el plan de capacitación |
+| **Rol práctica** | Capacidad temporal de create/update/publish **solo** en `empresaId=capacitacion` y mientras `session.status=ACTIVE` | Permite completar el circuito aunque el rol real sea solo lectura |
+
+Ejemplos:
+
+- Usuario “Planificador” (PLANNING create/publish, sin SERVICES) → coaches de Planificación; el seed de CRM/SLA lo provee el sistema o un instructor.
+- Usuario “Comercial/CRM” (CLIENTS + SERVICES) → coaches CRM → Servicios; luego puede o no tocar Planificación según permisos.
+- Usuario “Operador” (OPERATIONS) → coach Operaciones sobre planificación ya publicada (seed).
+
+El rol práctica **no** eleva permisos en Bacarsa/prod ni en CONFIG.
+
+### 7.4 Cleanup al completar cada módulo (contrato Mauro)
 
 Flujo:
 
-1. Alumno / instructor cierra sesión de capacitación (o timeout).
-2. Callable `finalizeTrainingSession({ sessionId })`:
-   - valida que `empresaId` sea training y pertenezca a la sesión;
-   - borra docs con `trainingSessionId == sessionId` (preferible) o purge tenant completo si la empresa es 1:1 con la sesión;
-   - marca sesión `COMPLETED` y congela progreso pedagógico;
-   - escribe `audit_logs` del cleanup.
-3. Si falla parte del purge → estado `CLEANUP_PARTIAL` + alerta a Sistemas (no silenciar).
+1. Alumno completa evidencia del módulo → coach pide confirmar “Entendí el funcionamiento”.
+2. Callable `completeTrainingModule({ sessionId, moduleKey })`:
+   - valida evidencia + calcula `score`;
+   - setea `progress[module].understoodAt` + `score`;
+   - borra docs con `trainingSessionId == sessionId` **y** (si aplica) `trainingModuleKey == moduleKey` o grafo de dependencia del módulo;
+   - deja audit log.
+3. Al cerrar toda la sesión / abort / TTL: `finalizeTrainingSession` purga residuales de la sesión.
+4. Si falla parte del purge → `CLEANUP_PARTIAL` + alerta a Sistemas.
 
-**Control clave**: el callable debe rechazar cualquier `empresaId` que no sea de capacitación.
+**Control clave**: callables de purge rechazan cualquier `empresaId` que no sea `capacitacion` / `isTrainingEmpresa`.
 
-### 7.4 Coach + checklist verificable
+### 7.5 Coach + checklist verificable + calificación
 
 Ejemplo Planificación (evidencia):
 
-| Micro-paso | Evidencia |
-|---|---|
-| Elegir cliente/objetivo | UI state + ids válidos del tenant training |
-| Crear/asignar turno | existe `turnos` con `trainingSessionId` |
-| Publicar | `planificacion_estados.publishedAt` set |
-| Módulo completo | todos los micro-pasos OK → `progress.PLANNING.completedAt` |
+| Micro-paso | Evidencia | Peso score (ej.) |
+|---|---|---|
+| Elegir cliente/objetivo | UI state + ids válidos del tenant training | 10 |
+| Crear/asignar turno | existe `turnos` con `trainingSessionId` | 40 |
+| Publicar | `planificacion_estados.publishedAt` set | 40 |
+| Módulo completo / entendido | todos OK + confirmación → `understoodAt` | 10 |
 
 Ejemplo CRM:
 
-| Micro-paso | Evidencia |
-|---|---|
-| Crear cliente | `clients` con `empresaId` training |
-| Cargar objetivo | `clients.objetivos[]` con id |
-| (Opcional) contrato | `contracts` training |
+| Micro-paso | Evidencia | Peso score (ej.) |
+|---|---|---|
+| Crear cliente | `clients` con `empresaId` training | 40 |
+| Cargar objetivo | `clients.objetivos[]` con id | 40 |
+| (Opcional) contrato | `contracts` training | 20 |
 
+Rúbrica mínima MVP: % de micro-pasos con evidencia + penalización por reintentos excesivos + tiempo (informativo, no bloqueante).  
 No usar checkboxes locales como fuente de verdad (como hace hoy `/admin/guia` con `localStorage`).
 
-### 7.5 Guardrails
+### 7.6 Guardrails
 
 - Bloquear/ocultar CONFIG global, API keys, AFIP, mobile builds, restore/migrate.
-- Denegar callables legacy de alto impacto al rol en sesión training (o forzar que pasen por wrapper con `assertPanelTenantCallable` + allowlist de empresa training).
+- Denegar callables legacy de alto impacto al rol en sesión training (o forzar wrapper con `assertPanelTenantCallable` + allowlist `capacitacion`).
 - Silenciar FCM/email en docs training (o no registrar `device_tokens` de práctica).
-- Banner visible: “Modo capacitación — los datos de práctica se borran al finalizar”.
+- Banner visible: “Modo capacitación — los datos de práctica se borran al completar cada módulo”.
 
 ---
 
@@ -374,31 +413,103 @@ No usar checkboxes locales como fuente de verdad (como hace hoy `/admin/guia` co
 
 ## 9. Criterios de éxito
 
-1. El alumno practica en pantallas reales de COSP dentro de una **empresa aparte**.
-2. Solo ve coaches de módulos permitidos por **su rol**.
-3. En Planificación (y demás módulos MVP) el coach lo lleva **paso a paso** hasta completar la acción real (ej. publicar).
-4. Al finalizar, **no quedan** clientes/SLA/turnos/novedades de práctica en Firestore (progreso pedagógico sí).
-5. Cero escrituras en tenants productivos (`bacarsa` u otros) durante la sesión.
-6. El circuito es repetible: nueva sesión = sandbox limpio + mismos coaches.
+1. El alumno practica en pantallas reales de COSP dentro de la **empresa `capacitacion`**.
+2. Solo ve coaches de módulos permitidos por **su rol real**.
+3. Puede escribir en sandbox vía **rol práctica** aunque su rol real sea solo lectura en ese módulo.
+4. En cada módulo MVP el coach lo lleva **paso a paso** hasta completar la acción real; al cerrar se registra **entendido + score**.
+5. Al completar un módulo, **no quedan** datos de negocio de esa práctica; el score/historial sí.
+6. Cero escrituras en tenants productivos (`bacarsa` u otros) durante la sesión.
+7. El circuito es repetible: nueva sesión = datos limpios + mismos coaches + calificación acumulable.
 
 ---
 
-## 10. Preguntas para Mauro (bloqueantes antes de implementar)
+## 10. Gate 0 — respuestas Mauro + recomendación Crono
 
-Resueltas por decisión previa:
-- Empresa aparte + datos efímeros + coach por rol → **sí**.
+### 10.1 Sandbox compartido vs 1:1 — **¿qué me parece?**
 
-Pendientes (gates de arranque):
+**Recomendación: empresa compartida `capacitacion` + `trainingSessionId` por alumno/sesión.**
 
-1. **Sandbox 1:1**: ¿una sola empresa `capacitacion` compartida (con `trainingSessionId` por alumno) o una empresa/sesión por alumno?
-2. **Permisos de escritura**: ¿el alumno usa su rol real (puede que solo tenga READ) o un rol “práctica” con create/update/publish solo en el sandbox?
-3. **Alcance MVP de coaches**: ¿arranquemos por CRM + Planificación, o priorizás Operaciones?
-4. **Momento del borrado**: ¿solo al “Finalizar”, también al cerrar sesión/navegador, y/o TTL automático (ej. 24 h)?
-5. **Qué sí guardar**: ¿además del % de progreso, historial de intentos/tiempos por paso para el instructor?
-6. **Notificaciones**: ¿sandbox total sin push/email?
-7. **Herramienta de ejecución**: ¿Cursor Cloud, Claude Code, o mix por fase? (recomendación abajo)
+Por qué:
 
----
+- Más barato de operar (un solo seed, un banner, un flag `isTrainingEmpresa`).
+- Evita proliferar empresas fantasmas en `empresas/` y en selectores SuperAdmin.
+- El aislamiento concurrente ya se resuelve stampando `trainingSessionId` en cada doc y purgando por ese id (por módulo y al cerrar).
+- Empresa 1:1 por alumno escala mal (N empresas, N seeds, riesgo de residuos huérfanos) y solo vale la pena si el volumen o el cumplimiento lo exigen → queda como **Opción D / Fase madura**.
+
+**Decisión Gate 0:** compartido + `trainingSessionId` (MVP). Revisar 1:1 solo si hay colisiones reales en pruebas concurrentes.
+
+### 10.2 Rol real vs rol práctica — **qué significa**
+
+| | Rol real | Rol práctica |
+|---|---|---|
+| Origen | `system_users.role` / matriz de permisos productiva | Flag/sesión de training (`practiceWriteEnabled`) |
+| Decide | **Qué módulos** entran al plan de capacitación | **Si puede crear/editar/publicar** dentro del sandbox |
+| Ámbito | Toda la app (identidad del usuario) | Solo `empresaId=capacitacion` mientras la sesión esté ACTIVE |
+| Ejemplo | “Soy planificador → me enseñan Planificación” | “Aunque en prod solo leo, en capacitación puedo publicar un cronograma de mentira” |
+
+Sin rol práctica, un usuario READ-only no puede “aprender haciendo”. Sin rol real, no sabríamos qué circuito enseñarle.
+
+**Decisión Gate 0:** rol real define el plan; rol práctica habilita escritura solo en sandbox.
+
+### 10.3 Alcance de módulos — **depende del rol asignado**
+
+Confirmado por Mauro: el recorrido **no es fijo para todos**.
+
+- Si el rol tiene PLANNING y no SERVICES → arranca (o solo ve) Planificación; CRM/SLA vienen de **seed** del sandbox.
+- Si el rol tiene CLIENTS/SERVICES → coaches de alta de cliente/objetivo/SLA.
+- Si tiene OPERATIONS → opera sobre malla publicada (seed o de otro módulo previo de la misma sesión si el rol lo incluye).
+
+MVP de implementación de coaches (ingeniería): CRM + Planificación primero; el **plan visible al alumno** sigue filtrado por rol. Operaciones/RRHH en fases siguientes.
+
+**Decisión Gate 0:** módulos = rol asignado; coaches MVP técnicos = CRM + Planificación.
+
+### 10.4 Momento del borrado — **al terminar cada módulo**
+
+Confirmado por Mauro: al cerrar un módulo de capacitación (evidencia OK + “entendí el funcionamiento”) se:
+
+1. Registra `understoodAt` + score del módulo.
+2. Borra los datos de práctica asociados a ese módulo/sesión.
+3. Deja el sandbox listo para el siguiente módulo o para reintento.
+
+Además (operativo, recomendado Crono, no contradice a Mauro):
+
+- Abort / “Finalizar capacitación” → purge residual de la sesión.
+- TTL diario (ej. 24–48 h) para sesiones abandonadas → evita basura.
+
+**Decisión Gate 0:** purge **por módulo** al entender/aprobar; purge residual al cerrar/TTL.
+
+### 10.5 Qué guardar — **todo el progreso + calificar**
+
+Confirmado por Mauro: guardar y calificar.
+
+Persistir (pedagógico):
+
+- Hitos/evidencia por micro-paso.
+- `understoodAt` por módulo.
+- Score 0–100 por módulo + `overallScore`.
+- Intentos, duración, reintentos (para instructor).
+- Estado cleanup OK/PARTIAL.
+
+No persistir: clientes/SLA/turnos/novedades de práctica.
+
+**Decisión Gate 0:** historial completo + rúbrica/score; negocio efímero.
+
+### 10.6 Notificaciones y herramienta (defaults Crono, no bloqueantes)
+
+- **Notificaciones:** sandbox **sin** push/email reales (mails `*@capacitacion.local` si hace falta).
+- **Ejecución:** mix por fase (§12.2) — Cursor para UI/modelo; review humana en purge/hardening.
+
+### 10.7 Checklist Gate 0 (firmado)
+
+- [x] Empresa aparte + datos efímeros + coach por rol.
+- [x] Sandbox compartido + `trainingSessionId` (no 1:1 en MVP).
+- [x] Rol real = módulos; rol práctica = escritura sandbox.
+- [x] Plan de módulos = rol asignado.
+- [x] Borrado al completar cada módulo + registro de entendimiento.
+- [x] Guardar progreso + calificar.
+- [x] Coaches MVP técnicos: CRM + Planificación (resto por fases).
+- [x] Sin push/email reales en sandbox (default).
+- [x] Ejecución por fases §12; sin implementación hasta autorización explícita de Mauro para F1.
 
 ## 11. Inventario: qué ya existe de la guía interactiva (reutilizar)
 
@@ -425,19 +536,21 @@ Pendientes (gates de arranque):
 |---|---|---|
 | Guía = slideshow en `/admin/guia` | No practica in situ | Mantener como **hub de progreso**; el aprendizaje ocurre en el módulo con coach overlay |
 | Checklist = checkboxes + `localStorage` | Declarativo, no evidencia | Reemplazar por detectores Firestore (`trainingSessionId`) |
-| Progreso solo pedagógico | No hay sandbox | Extender `onboardingGuide` o agregar `capacitacion_sesiones` sin romper campos actuales |
+| Progreso solo pedagógico | No hay sandbox | Extender `onboardingGuide` + `capacitacion_sesiones` (score, understoodAt) |
+| Sin calificación | — | Rúbrica por módulo en F5 / instructor F7 |
 | “Abrir módulo” sin coach | El alumno queda solo | Al abrir módulo en modo training, montar coach paso a paso |
-| Empresa del usuario = prod | Riesgo de datos reales | Forzar contexto a empresa `capacitacion_*` durante la sesión |
+| Empresa del usuario = prod | Riesgo de datos reales | Forzar contexto a `capacitacion` durante la sesión |
+| Cleanup solo al final | Residuos entre módulos | Purge al completar cada módulo (`completeTrainingModule`) |
 
 ### 11.3 Activos NUEVOS (hay que construir)
 
-1. Empresa/flag `isTrainingEmpresa` + seed baseline.
-2. Sesión `capacitacion_sesiones` (o extensión tipada de `onboardingGuide`).
-3. Stamp `trainingSessionId` en escrituras de práctica.
-4. Coach overlays in-situ (MVP: CRM + Planificación).
-5. Callable `finalizeTrainingSession` (purge efímero).
-6. Guardrails: silenciar push/crons/API/AFIP en training.
-7. Evidencia automática de micro-pasos (queries de hitos).
+1. Empresa training compartida `capacitacion` + flags + seed.
+2. Sesión `capacitacion_sesiones` + stamp `trainingSessionId` / `trainingModuleKey`.
+3. Rol práctica (escritura sandbox) desacoplado del rol real.
+4. Coach overlays in-situ (MVP: CRM + Planificación) + confirmación “entendí”.
+5. Callables `completeTrainingModule` (score + purge módulo) y `finalizeTrainingSession`.
+6. Detector de evidencia server-side + rúbrica.
+7. Hardening de callables legacy / silenciar push-crons-AFIP en training.
 
 ### 11.4 Qué NO tocar en las primeras fases
 
@@ -452,10 +565,10 @@ Pendientes (gates de arranque):
 
 ### 12.1 Principios de control
 
-1. **Analysis-only hasta Gate 0** (preguntas §10 respondidas).
+1. **Gate 0 cerrado** (§10.7); implementación solo tras autorización explícita de Mauro para F1.
 2. **Una fase = un PR** (o un worktree), con criterios de aceptación binarios.
 3. **Reutilizar** onboarding existente; no duplicar tracks/progreso.
-4. **Datos de negocio efímeros**; progreso pedagógico persistente.
+4. **Datos de negocio efímeros por módulo**; progreso + score persistentes.
 5. **Smoke obligatorio** antes de pasar de fase (lista en cada fase).
 6. **Rollback**: cada fase debe poder apagarse con flag (`trainingModeEnabled` / feature flag) sin romper la guía actual.
 
@@ -468,34 +581,35 @@ Pendientes (gates de arranque):
 | F2 Extender progreso + sesión training | **Cursor** | Tipado TS + callables alineados a `onboardingGuide` |
 | F3 Coach in-situ CRM + Planificación | **Cursor** (UI) o **Claude** (si hay skill UI larga) | Mucho JSX en pantallas grandes; Cursor con contexto de repo |
 | F4 Evidencia automática de hitos | **Cursor** | Queries Firestore + tests/smoke |
-| F5 Cleanup/purge al finalizar | **Cursor** + review humana | Riesgo de borrado; necesita allowlist estricta |
+| F5 Cleanup/purge por módulo + score | **Cursor** + review humana | Riesgo de borrado; needs allowlist estricta |
 | F6 Hardening callables/guardrails | **Cursor** + review | Seguridad; no confiar en un solo agente |
 | F7 Instructor + métricas | Cualquiera | Extiende `OnboardingTab` |
 
-**Recomendación de mix:** Mauro responde F0 → ejecutar F1–F2–F4–F5 en Cursor Cloud con este doc como protocol → F3 coach UI en Cursor (rama dedicada) → F6 con review obligatoria de Sistemas antes de merge a `main`/`eventos-deploy`.
+**Recomendación de mix:** Gate 0 cerrado → con OK de Mauro ejecutar F1–F2–F4–F5 en Cursor Cloud con este doc como protocol → F3 coach UI en Cursor (rama dedicada) → F6 con review obligatoria de Sistemas antes de merge a `main`/`eventos-deploy`.
 
 ### 12.3 Fases detalladas
 
-#### Gate 0 — Decisiones (bloqueante)
+#### Gate 0 — Decisiones (bloqueante) — **CERRADO 2026-09-16**
 
-- [ ] Responder §10 (sandbox 1:1 vs compartido, permisos escritura, coaches MVP, TTL cleanup).
-- [ ] Congelar alcance MVP: **CRM + Planificación** (salvo que Mauro priorice Operaciones).
-- [ ] Confirmar: la guía actual sigue como hub obligatorio hasta que el coach in-situ cubra los tracks.
+- [x] Responder §10 (sandbox compartido + `trainingSessionId`, rol real/práctica, coaches MVP, purge por módulo, score).
+- [x] Congelar alcance MVP coaches: **CRM + Planificación** (plan visible sigue filtrado por rol).
+- [x] Confirmar: la guía actual sigue como hub obligatorio hasta que el coach in-situ cubra los tracks.
+- [ ] Autorización explícita de Mauro para arrancar **Fase 1** (implementación).
 
-**Salida:** checklist Gate 0 firmado en este doc o comentario de PR.
+**Salida:** checklist Gate 0 firmado en §10.7 de este doc.
 
 ---
 
 #### Fase 1 — Sandbox empresa (S/M)
 
-**Objetivo:** existir `empresas/capacitacion_*` usable sin tocar Bacarsa.
+**Objetivo:** existir `empresas/capacitacion` (compartida) usable sin tocar Bacarsa.
 
 **Reusar:** `guardarEmpresa`, `EmpresaContext`, seed scripts (`seed-empresa-prueba.js` si aplica).
 
 **Hacer:**
-1. Crear empresa training con `migracionCompleta=true`, `isTrainingEmpresa=true`, `centroControlEnabled=false`.
+1. Crear empresa `capacitacion` con `migracionCompleta=true`, `isTrainingEmpresa=true`, `centroControlEnabled=false`.
 2. Seed mínimo: 1 cliente, 1 objetivo, 1 SLA, 3–5 empleados ficticios (emails no productivos).
-3. Usuario alumno de prueba con `empresaId=capacitacion_*`, sin `allEmpresas`.
+3. Usuario alumno de prueba con `empresaId=capacitacion`, sin `allEmpresas`.
 4. Banner/contexto UI cuando `empresa.isTrainingEmpresa`.
 
 **Aceptación:**
@@ -517,14 +631,16 @@ Pendientes (gates de arranque):
 1. Extender modelo (opción preferida):
    - `onboardingGuide.mode: 'GUIDE' | 'TRAINING'`
    - `onboardingGuide.activeSessionId`
-   - o colección `capacitacion_sesiones` referenciada desde la guía.
-2. Al iniciar training: crear sesión + plan de tracks = `filterTracksByRolePermissions(...)`.
-3. Mantener gate `needsMandatoryOnboarding` (training incompleto = bloqueo igual que guía).
-4. Compatibilidad: usuarios solo-guía (sin sandbox) siguen funcionando.
+   - colección `capacitacion_sesiones` (score, understoodAt, practiceWriteEnabled).
+2. Al iniciar training: crear sesión + plan de tracks = `filterTracksByRolePermissions(...)` (**rol real**).
+3. Activar **rol práctica** (`practiceWriteEnabled`) solo mientras `status=ACTIVE` y `empresaId=capacitacion`.
+4. Mantener gate `needsMandatoryOnboarding` (training incompleto = bloqueo igual que guía).
+5. Compatibilidad: usuarios solo-guía (sin sandbox) siguen funcionando.
 
 **Aceptación:**
 - Asignar onboarding desde Config sigue funcionando.
 - Iniciar training crea `sessionId` y no borra `completedTracks` previos sin RESET explícito.
+- Plan de módulos refleja el rol real; escritura sandbox no eleva permisos en prod.
 - Rollback: `mode=GUIDE` restaura comportamiento actual.
 
 **Smoke:** assign tracks → progreso PROGRESS/COMPLETE sin sesión; luego con sesión.
@@ -543,11 +659,13 @@ Pendientes (gates de arranque):
    - `crm/index.tsx` (crear cliente → objetivo),
    - `planificacion/index.tsx` (seleccionar → turno → publicar).
 3. Cada acción exitosa emite evento `training_step_done` → actualiza progreso remoto.
-4. Hub `/admin/guia` muestra estado del coach (“CRM 2/3”, “Planificación pendiente”) en lugar de solo slideshow.
+4. Hub `/admin/guia` muestra estado del coach (“CRM 2/3 · score 80”, “Planificación pendiente”) en lugar de solo slideshow.
+5. Al cerrar módulo: CTA “Entendí el funcionamiento” → dispara score + purge del módulo (F5).
 
 **Aceptación:**
 - Alumno sin leer el slideshow puede completar CRM+Planificación solo con el overlay.
 - Publicar cronograma marca hito PLANNING.
+- Confirmación “entendí” deja `understoodAt` (purge en F5).
 - Fuera de modo training, overlay no aparece.
 
 **Smoke:** grabación/manual: flujo completo CRM→publicar en sandbox.
@@ -571,25 +689,27 @@ Pendientes (gates de arranque):
 
 ---
 
-#### Fase 5 — Cleanup efímero (M) — crítico
+#### Fase 5 — Cleanup efímero por módulo + score (M) — crítico
 
-**Objetivo:** al finalizar, borrar datos de negocio de la práctica.
+**Objetivo:** al completar/entender un módulo, calificar y borrar datos de negocio de esa práctica.
 
 **Reusar:** idea de `eliminarEmpresaYDatos`, pero **no** usarla cruda (inventario incompleto).
 
 **Hacer:**
 1. Inventario cerrado de colecciones a purgar (doc interno en el PR de la fase).
-2. Callable `finalizeTrainingSession`:
-   - allowlist `empresaId` training,
-   - preferir delete por `trainingSessionId`,
-   - conservar `onboardingGuide` progreso,
-   - audit log del purge.
-3. Estados: `COMPLETED` | `CLEANUP_PARTIAL`.
-4. TTL opcional (job diario) para sesiones abandonadas.
+2. Callable `completeTrainingModule({ sessionId, moduleKey })`:
+   - valida evidencia,
+   - calcula score/rúbrica,
+   - setea `understoodAt`,
+   - purge por `trainingSessionId` (+ `trainingModuleKey` si aplica),
+   - conserva progreso pedagógico.
+3. Callable `finalizeTrainingSession({ sessionId })` para residuales / abort.
+4. Estados: `COMPLETED` | `CLEANUP_PARTIAL`.
+5. TTL opcional (job diario) para sesiones abandonadas.
 
 **Aceptación:**
-- Tras finalizar: 0 docs de negocio con ese `trainingSessionId`.
-- Progreso pedagógico permanece (`COMPLETED` / `completedTracks`).
+- Tras completar un módulo: 0 docs de negocio de ese módulo/sesión; score + `understoodAt` quedan.
+- Tras finalizar sesión: 0 docs residuales con ese `trainingSessionId`.
 - Intentar purge de `bacarsa` → `permission-denied`.
 
 **Smoke + control:** dry-run primero; luego run real en sandbox vacío de prod.
@@ -615,9 +735,10 @@ Pendientes (gates de arranque):
 **Reusar:** `OnboardingTab` stats + assign.
 
 **Hacer:**
-1. Columnas: sesión activa, último hito, cleanup OK/PARTIAL.
+1. Columnas: sesión activa, último hito, score por módulo, cleanup OK/PARTIAL.
 2. Botón “Forzar cleanup”.
-3. (Opcional) coaches Operaciones/RRHH/Servicios.
+3. Vista de calificación (overall + por módulo).
+4. (Opcional) coaches Operaciones/RRHH/Servicios.
 
 ---
 
@@ -645,8 +766,8 @@ Al terminar: checklist de aceptación de la fase marcado con evidencia.
 ### 12.6 Criterios globales de “listo para producción pedagógica”
 
 1. Guía actual sigue funcionando para usuarios no-training.
-2. Alumno training completa CRM+Planificación in situ.
-3. Cleanup deja sandbox limpio; progreso queda.
+2. Alumno training completa CRM+Planificación in situ según su rol.
+3. Al completar un módulo: score + `understoodAt` quedan; datos de negocio de esa práctica no.
 4. Auditoría no muestra writes a tenants productivos.
 5. Feature flag apaga todo el modo training sin romper el panel.
 
@@ -654,8 +775,9 @@ Al terminar: checklist de aceptación de la fase marcado con evidencia.
 
 ## Síntesis ejecutiva
 
-- **Diseño acordado**: empresa aparte + datos **efímeros** + plan por **rol** + **coach in-situ**.
-- **No partir de cero**: ya existen tracks, progreso remoto, gate obligatorio, instructor y callables de onboarding — hay que **encajar** el sandbox/coach encima.
-- **Plan controlado**: Gate 0 → F1…F7; MVP = F1–F5 (+ hardening mínimo F6).
+- **Diseño acordado**: empresa `capacitacion` compartida + datos **efímeros por módulo** + plan por **rol real** + escritura **rol práctica** + **coach in-situ** + **calificación**.
+- **Gate 0 cerrado** (§10.7): falta solo autorización de Mauro para F1.
+- **No partir de cero**: tracks, progreso remoto, gate obligatorio, instructor y callables de onboarding — encajar sandbox/coach encima.
+- **Plan controlado**: F1…F7; MVP = F1–F5 (+ hardening mínimo F6).
 - **Ejecución**: fases en PRs separados; Cursor para implementación; review humana en purge/hardening.
-- **Condición no negociable**: nunca escribir práctica en Bacarsa/prod; al terminar no quedan datos de negocio de la sesión.
+- **Condición no negociable**: nunca escribir práctica en Bacarsa/prod; al completar un módulo no quedan datos de negocio de esa práctica; sí quedan score e historial.
