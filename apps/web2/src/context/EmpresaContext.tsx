@@ -24,6 +24,8 @@ export interface Empresa {
   pilotoAutoEnabled?: boolean;
   modoDemoEnabled?: boolean;
   migracionCompleta?: boolean;
+  /** true = empresa sandbox de capacitación; muestra banner en la UI */
+  isTrainingEmpresa?: boolean;
   /** Maps JavaScript API — restringir por HTTP referrer en Google Cloud. */
   googleMapsApiKey?: string;
 }

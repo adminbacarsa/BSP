@@ -302,6 +302,20 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   );
 }
 
+// ─── TRAINING BANNER ──────────────────────────────────────────────────────────
+function TrainingBanner({ empresa }: { empresa: import('@/context/EmpresaContext').Empresa | null }) {
+  if (!empresa?.isTrainingEmpresa) return null;
+  return (
+    <div className="flex items-center gap-2 px-4 py-2 border-b text-sm font-medium shrink-0"
+      style={{ backgroundColor: 'rgba(251,191,36,0.15)', borderColor: 'rgba(251,191,36,0.4)', color: 'var(--tw-amber-700, #b45309)' }}>
+      <FlaskConical size={15} className="shrink-0 text-amber-500" />
+      <span className="text-amber-700 dark:text-amber-300">
+        Modo Capacitación — empresa sandbox. Los datos de práctica no afectan producción.
+      </span>
+    </div>
+  );
+}
+
 // ─── INNER LAYOUT ─────────────────────────────────────────────────────────────
 function LayoutInner({ children }: { children: React.ReactNode }) {
   const [isPinned, setIsPinned]       = useState(false);
@@ -798,11 +812,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className={'absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ' + (topbarVisible ? 'opacity-0' : 'opacity-60')}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
-          <main ref={mainScrollRef} className="h-full overflow-y-auto min-h-0">{children}</main>
+          <main ref={mainScrollRef} className="h-full overflow-y-auto min-h-0">
+            <TrainingBanner empresa={empresa} />
+            {children}
+          </main>
         </div>
       ) : (
         <div className={'flex-1 transition-all duration-300 ease-in-out ' + (isPinned ? 'lg:ml-64' : 'lg:ml-16') + ' min-w-0'}>
           <DashboardHeader isSidebarOpen={sidebarOpen} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
+          <TrainingBanner empresa={empresa} />
           {/* Supervisión usa su propia bottom nav en mobile */}
           <main ref={compactSidebar ? undefined : mainScrollRef} className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
             {children}
