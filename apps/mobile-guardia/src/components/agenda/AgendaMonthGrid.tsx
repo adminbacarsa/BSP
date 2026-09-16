@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   AGENDA_WEEKDAY_LABELS,
+  agendaDayAccent,
   type MonthCell,
 } from '../../lib/agendaCalendar';
 import { radius } from '../../theme/tokens';
@@ -30,13 +31,10 @@ export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
       <View style={styles.grid}>
         {cells.map((cell) => {
           const selected = cell.key === selectedKey;
-          const accent = cell.hasEv
-            ? palette.warning
-            : cell.hasWork
-              ? palette.primary
-              : cell.hasFranco
-                ? palette.success
-                : 'transparent';
+          const accent = agendaDayAccent(cell, palette);
+          const showDot =
+            (cell.hasWork || cell.hasFranco || cell.hasEv || cell.hasAbsent || cell.hasWorked) &&
+            !selected;
 
           return (
             <Pressable
@@ -49,6 +47,10 @@ export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
                   borderColor: palette.primary,
                 },
                 cell.isToday && !selected && { borderColor: palette.primary },
+                cell.hasAbsent && !selected
+                  ? { backgroundColor: 'rgba(180, 83, 9, 0.08)' }
+                  : null,
+                cell.hasWorked && !cell.hasAbsent && !selected ? { opacity: 0.85 } : null,
               ]}
             >
               <Text
@@ -88,9 +90,7 @@ export function AgendaMonthGrid({ cells, selectedKey, onSelectDay }: Props) {
                   <View style={styles.codePlaceholder} />
                 )}
               </View>
-              {(cell.hasWork || cell.hasFranco || cell.hasEv) && !selected ? (
-                <View style={[styles.dot, { backgroundColor: accent }]} />
-              ) : null}
+              {showDot ? <View style={[styles.dot, { backgroundColor: accent }]} /> : null}
             </Pressable>
           );
         })}

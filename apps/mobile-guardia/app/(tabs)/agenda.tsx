@@ -65,11 +65,13 @@ function AgendaScreenContent() {
     [cursor.getFullYear(), cursor.getMonth()],
   );
 
-  const { shifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null, monthAnchor);
+  const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null, monthAnchor);
   const { objectivesMap } = useObjectivesMap();
   const { eventosMap } = useEventosMap(employee?.empresaId);
 
-  const byDay = useMemo(() => groupShiftsByDateKey(shifts), [shifts]);
+  // Incluye ausentes: en Hoy se ocultan del “próximo turno”, pero en Agenda deben verse.
+  const agendaShifts = allShifts?.length ? allShifts : shifts;
+  const byDay = useMemo(() => groupShiftsByDateKey(agendaShifts), [agendaShifts]);
   const monthCells = useMemo(() => buildMonthCells(monthAnchor, byDay), [monthAnchor, byDay]);
   const cellsByKey = useMemo(() => {
     const map: Record<string, (typeof monthCells)[number]> = {};

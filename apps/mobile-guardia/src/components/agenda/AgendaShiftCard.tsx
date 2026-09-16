@@ -1,7 +1,11 @@
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 import { formatDateAr, formatTimeAr, isEvShift, resolveEvShiftDisplay } from '@cosp/portal-core';
 import type { Evento, ObjectiveLocation, Shift } from '@cosp/portal-types';
-import { isOpsCoverageShift } from '../../lib/agendaCalendar';
+import {
+  isAgendaAbsentShift,
+  isAgendaWorkedShift,
+  isOpsCoverageShift,
+} from '../../lib/agendaCalendar';
 import { resolveShiftPlacement } from '../../lib/shiftPlacement';
 import { CommandButton } from '../ui/CommandButton';
 import { radius, shadow } from '../../theme/tokens';
@@ -16,27 +20,33 @@ type Props = {
 export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
   const { palette } = useTheme();
   const isOps = isOpsCoverageShift(item);
-  const isFranco = !!item.isFranco && !isOps && !item.isFrancoTrabajado;
+  const isAbsent = isAgendaAbsentShift(item);
+  const isWorked = !isAbsent && isAgendaWorkedShift(item);
+  const isFranco = !!item.isFranco && !isOps && !item.isFrancoTrabajado && !isAbsent;
   const isFt = !!item.isFrancoTrabajado || String(item.code || '').toUpperCase() === 'FT';
   const ev = resolveEvShiftDisplay(item, eventosMap);
   const isEv = isEvShift(item);
   const placement = resolveShiftPlacement(item, objectivesMap);
 
-  const codeLabel = isFranco
-    ? 'F'
-    : isFt
-      ? 'FT'
-      : isEv
-        ? 'EV'
-        : String(item.code || 'T').toUpperCase();
-
-  const title = isOps
-    ? 'Cobertura'
+  const codeLabel = isAbsent
+    ? 'AA'
     : isFranco
-      ? 'Franco'
+      ? 'F'
       : isFt
-        ? 'Franco trabajado'
-        : ev?.nombre || placement.objective;
+        ? 'FT'
+        : isEv
+          ? 'EV'
+          : String(item.code || 'T').toUpperCase();
+
+  const title = isAbsent
+    ? 'Ausente'
+    : isOps
+      ? 'Cobertura'
+      : isFranco
+        ? 'Franco'
+        : isFt
+          ? 'Franco trabajado'
+          : ev?.nombre || placement.objective;
 
   const timeLine = isFranco
     ? formatDateAr(item.startTime)
@@ -44,13 +54,25 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
       ? `${formatDateAr(item.startTime)} · ${ev.horarioBadge}`
       : `${formatDateAr(item.startTime)} · ${formatTimeAr(item.startTime)} – ${formatTimeAr(item.endTime)}`;
 
-  const metaLine = isOps
-    ? `Turno asignado · ${placement.line}`
-    : isFranco
-      ? 'Día libre programado'
-      : placement.line;
+  const metaLine = isAbsent
+    ? `${placement.line} · no corresponde asistir`
+    : isOps
+      ? `Turno asignado · ${placement.line}`
+      : isFranco
+        ? 'Día libre programado'
+        : isWorked
+          ? `${placement.line} · ya trabajado`
+          : placement.line;
 
-  const accentColor = isOps ? '#ea580c' : isEv ? palette.warning : palette.primary;
+  const accentColor = isAbsent
+    ? '#b45309'
+    : isOps
+      ? '#ea580c'
+      : isWorked
+        ? '#64748b'
+        : isEv
+          ? palette.warning
+          : palette.primary;
 
   return (
     <View
@@ -58,8 +80,21 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
         styles.row,
         palette.useCardShadow && shadow.card,
         {
-          backgroundColor: isEv ? palette.inputBg : palette.card,
-          borderColor: isOps ? '#fdba74' : isEv ? palette.warning : palette.cardBorder,
+          backgroundColor: isAbsent
+            ? 'rgba(180, 83, 9, 0.08)'
+            : isEv
+              ? palette.inputBg
+              : palette.card,
+          borderColor: isAbsent
+            ? '#f59e0b'
+            : isOps
+              ? '#fdba74'
+              : isWorked
+                ? '#cbd5e1'
+                : isEv
+                  ? palette.warning
+                  : palette.cardBorder,
+          opacity: isWorked && !isAbsent ? 0.92 : 1,
         },
       ]}
     >
@@ -76,6 +111,11 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
         >
           {metaLine}
         </Text>
+        {isAbsent ? (
+          <Text style={[styles.certHint, { color: '#92400e' }]}>
+            Si corresponde, presentá el certificado a RRHH (idealmente hoy).
+          </Text>
+        ) : null}
         {ev?.eventoNombre && ev.eventoNombre !== ev.nombre ? (
           <Text style={[styles.rowMeta, { color: palette.warning }]}>{ev.eventoNombre}</Text>
         ) : null}
@@ -84,7 +124,7 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
             {ev.direccion}
           </Text>
         ) : null}
-        {ev?.mapsUrl ? (
+        {ev?.mapsUrl && !isAbsent ? (
           <CommandButton
             label="Cómo llegar"
             variant="ghost"
@@ -93,9 +133,13 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
           />
         ) : null}
       </View>
-      {item.isPresent ? (
+      {isAbsent ? (
+        <View style={styles.badgeAbsent}>
+          <Text style={styles.badgeAbsentText}>Ausente</Text>
+        </View>
+      ) : item.isPresent || isWorked ? (
         <View style={styles.badgeOk}>
-          <Text style={styles.badgeOkText}>Presente</Text>
+          <Text style={styles.badgeOkText}>{item.isPresent ? 'Presente' : 'Trabajado'}</Text>
         </View>
       ) : isOps ? (
         <View style={styles.badgeOps}>
@@ -180,6 +224,7 @@ const styles = StyleSheet.create({
   rowTitle: { fontWeight: '800', fontSize: 16 },
   rowSub: { fontSize: 13, fontWeight: '600' },
   rowMeta: { fontSize: 12, fontWeight: '700' },
+  certHint: { fontSize: 11, fontWeight: '700', lineHeight: 15, marginTop: 2 },
   rowAddr: { fontSize: 12, lineHeight: 17 },
   mapsBtn: { alignSelf: 'flex-start', marginTop: 2 },
   badgeOk: {
@@ -191,6 +236,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#d1fae5',
   },
   badgeOkText: { fontWeight: '800', fontSize: 11 },
+  badgeAbsent: {
+    alignSelf: 'center',
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: '#fef3c7',
+  },
+  badgeAbsentText: { fontWeight: '800', fontSize: 11, color: '#92400e' },
   badgeOps: {
     alignSelf: 'center',
     marginRight: 12,

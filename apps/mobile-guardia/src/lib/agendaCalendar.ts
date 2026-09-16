@@ -1,5 +1,5 @@
 import type { Shift } from '@cosp/portal-types';
-import { isOperationsCoverageShift, toDate } from '@cosp/portal-core';
+import { isAbsentLikeShift, isOperationsCoverageShift, toDate } from '@cosp/portal-core';
 
 export type AgendaViewMode = 'day' | 'week' | 'month';
 
@@ -104,13 +104,43 @@ export type MonthCell = {
   hasEv: boolean;
   hasWork: boolean;
   hasFranco: boolean;
+  hasAbsent: boolean;
+  hasWorked: boolean;
 };
 
 export function isOpsCoverageShift(s: Shift): boolean {
   return isOperationsCoverageShift(s);
 }
 
+export function isAgendaAbsentShift(s: Shift): boolean {
+  return isAbsentLikeShift(s as unknown as Record<string, unknown>);
+}
+
+/** Turno de trabajo ya cumplido (presente, completado o horario pasado). */
+export function isAgendaWorkedShift(s: Shift, now = new Date()): boolean {
+  if (isAgendaAbsentShift(s)) return false;
+  if (s.isFranco && !s.isFrancoTrabajado && !isOpsCoverageShift(s)) return false;
+  if (s.isPresent === true || s.isCompleted === true) return true;
+  const status = String(s.status || '').toUpperCase();
+  if (
+    status === 'PRESENT' ||
+    status === 'COMPLETED' ||
+    status === 'FINALIZED' ||
+    status === 'FINALIZADO'
+  ) {
+    return true;
+  }
+  const end = toDate(s.endTime);
+  if (end && end.getTime() <= now.getTime()) return true;
+  return false;
+}
+
 function shiftCodeLabel(s: Shift): string {
+  if (isAgendaAbsentShift(s)) {
+    const code = String(s.code || '').trim().toUpperCase();
+    if (code && code !== 'AA') return `AA`;
+    return 'AA';
+  }
   // Cobertura ops: siempre el código de banda (T/M/…), nunca como franco.
   if (isOpsCoverageShift(s)) {
     return String(s.code || 'T').toUpperCase().slice(0, 3);
@@ -122,7 +152,11 @@ function shiftCodeLabel(s: Shift): string {
 }
 
 /** Grilla 6×7 empezando en lunes, anclada al mes de `anchor`. */
-export function buildMonthCells(anchor: Date, byDay: Record<string, Shift[]>, today = new Date()): MonthCell[] {
+export function buildMonthCells(
+  anchor: Date,
+  byDay: Record<string, Shift[]>,
+  today = new Date(),
+): MonthCell[] {
   const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const gridStart = startOfWeekMonday(monthStart);
   const todayKey = toDateKey(today);
@@ -133,6 +167,8 @@ export function buildMonthCells(anchor: Date, byDay: Record<string, Shift[]>, to
     const key = toDateKey(date);
     const dayShifts = byDay[key] ?? [];
     const codes = [...new Set(dayShifts.map(shiftCodeLabel))].slice(0, 3);
+    const hasAbsent = dayShifts.some(isAgendaAbsentShift);
+    const hasWorked = dayShifts.some((s) => isAgendaWorkedShift(s, today));
     cells.push({
       date,
       key,
@@ -140,8 +176,20 @@ export function buildMonthCells(anchor: Date, byDay: Record<string, Shift[]>, to
       isToday: key === todayKey,
       codes,
       hasEv: dayShifts.some((s) => !!s.eventoId || String(s.code || '').toUpperCase() === 'EV'),
-      hasWork: dayShifts.some((s) => isOpsCoverageShift(s) || !s.isFranco),
-      hasFranco: dayShifts.some((s) => !!s.isFranco && !isOpsCoverageShift(s) && !s.isFrancoTrabajado),
+      hasWork: dayShifts.some(
+        (s) =>
+          !isAgendaAbsentShift(s) &&
+          (isOpsCoverageShift(s) || !s.isFranco || !!s.isFrancoTrabajado),
+      ),
+      hasFranco: dayShifts.some(
+        (s) =>
+          !!s.isFranco &&
+          !isOpsCoverageShift(s) &&
+          !s.isFrancoTrabajado &&
+          !isAgendaAbsentShift(s),
+      ),
+      hasAbsent,
+      hasWorked,
     });
   }
 
@@ -155,4 +203,22 @@ export function weekDaysFrom(selected: Date): Date[] {
 
 export function isSameMonth(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
+}
+
+/** Color de acento del día en la grilla (prioridad: ausencia → EV → trabajado → trabajo → franco). */
+export function agendaDayAccent(
+  cell: Pick<MonthCell, 'hasAbsent' | 'hasEv' | 'hasWorked' | 'hasWork' | 'hasFranco'>,
+  palette: {
+    warning: string;
+    primary: string;
+    success: string;
+    error?: string;
+  },
+): string {
+  if (cell.hasAbsent) return palette.error || '#b45309';
+  if (cell.hasEv) return palette.warning;
+  if (cell.hasWorked) return '#64748b';
+  if (cell.hasWork) return palette.primary;
+  if (cell.hasFranco) return palette.success;
+  return 'transparent';
 }

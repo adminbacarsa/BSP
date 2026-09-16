@@ -98,7 +98,7 @@ export function HeroShiftPanel({
           ]}
         >
           <Text style={[styles.francoText, { color: isDark ? '#fbbf24' : '#78350f' }]}>
-            Ausente — no corresponde asistir a este turno
+            Hoy estuviste ausente — presentá el certificado hasta las 24:00
           </Text>
         </View>
       ) : null}

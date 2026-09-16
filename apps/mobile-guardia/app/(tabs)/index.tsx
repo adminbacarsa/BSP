@@ -185,7 +185,7 @@ function HoyScreenContent() {
 
   const heroSub =
     todayAbsentShift
-      ? 'Hoy no corresponde asistir — turno marcado ausente'
+      ? 'Hoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés tiempo hasta las 24:00 de hoy.'
       : mainShift?.isFranco
         ? 'Día de descanso programado'
         : mainShift
@@ -298,7 +298,7 @@ function HoyScreenContent() {
               }
               subline={
                 todayAbsentShift
-                  ? `${formatHeroTimeRange(todayAbsentShift)}\nHoy no corresponde asistir — turno marcado ausente`
+                  ? `${formatHeroTimeRange(todayAbsentShift)}\nHoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés hasta las 24:00 de hoy.`
                   : heroSub
               }
               shift={todayAbsentShift || mainShift}
@@ -308,7 +308,7 @@ function HoyScreenContent() {
               statusSlot={
                 todayAbsentShift ? (
                   <Text style={[styles.pendingLine, { color: palette.warning || '#b45309' }]}>
-                    No fichar — cobertura / ausencia operativa
+                    No fichar · certificado idealmente hoy (hasta 24:00)
                   </Text>
                 ) : (
                   <>
