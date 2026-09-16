@@ -12,6 +12,7 @@ import { initTheme } from '@/lib/themeManager';
 import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 import { useAdminFcm } from '@/hooks/useAdminFcm';
 import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
+import { useTrainingCleanup } from '@/hooks/useTrainingCleanup';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
@@ -20,6 +21,7 @@ function AdminFcmRegistrar() {
 
 function TrainingEvidenceWatcher() {
   useTrainingEvidence();
+  useTrainingCleanup();
   return null;
 }
 
