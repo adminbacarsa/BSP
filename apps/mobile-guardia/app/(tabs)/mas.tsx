@@ -72,7 +72,7 @@ function MasScreenContent() {
           </Text>
           <Text style={[styles.versionLine, { color: palette.onSurface }]}>{getAppVersionLabel()}</Text>
           <CommandButton
-            label={updateBusy ? 'Descargando…' : 'Descargar actualización'}
+            label={updateBusy ? 'Buscando…' : 'Buscar / descargar actualización'}
             variant="primary"
             loading={updateBusy}
             onPress={onCheckUpdate}
