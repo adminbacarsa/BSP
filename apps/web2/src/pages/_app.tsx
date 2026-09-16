@@ -22,6 +22,11 @@ const AssistantFloatingBubble = dynamic(
   { ssr: false },
 );
 
+const TrainingCoachBubble = dynamic(
+  () => import('@/components/training/TrainingCoachBubble').then((m) => m.TrainingCoachBubble),
+  { ssr: false },
+);
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const showAssistant = !router.pathname.startsWith('/empleado')
@@ -70,6 +75,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <AdminFcmRegistrar />
         <Component {...pageProps} />
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
+        <TrainingCoachBubble />
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>
       </EmpresaProvider>
