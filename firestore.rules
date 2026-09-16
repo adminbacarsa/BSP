@@ -596,9 +596,9 @@ service cloud.firestore {
       allow create: if request.auth != null && isAdmin() && tenantAdminCreate()
         && request.resource.data.operatorId == request.auth.uid
         && request.resource.data.status == 'ACTIVO';
-      allow update: if request.auth != null && isAdmin()
-        && resource.data.operatorId == request.auth.uid
-        && tenantMatches(resource.data);
+      // Sala multi-operador: cualquier admin del tenant puede actualizar
+      // (transferir piloto, cerrar sala → Auto, reconciliar roles).
+      allow update: if request.auth != null && isAdmin() && tenantMatches(resource.data);
       allow delete: if tenantAdminDelete();
     }
 
