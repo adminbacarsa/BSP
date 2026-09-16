@@ -1,5 +1,9 @@
 # Modo capacitación — alcance y opciones
 
+> **Decisión de producto (Mauro, 2026-09-16):** la capacitación debe ser una **empresa aparte** (sandbox tenant), con **datos efímeros** que se borran al terminar; el **rol del usuario** define qué módulos aprender; dentro de cada módulo hay un **seguimiento guiado paso a paso** (ej. Planificación: crear cronograma → generar turno → publicar). Los datos de práctica **no se conservan** como operación real.
+
+---
+
 ## 1. Problema (por qué la guía actual no alcanza)
 
 La guía actual (`/admin/guia`) es útil como onboarding conceptual, pero no reemplaza entrenamiento operativo real:
@@ -8,17 +12,26 @@ La guía actual (`/admin/guia`) es útil como onboarding conceptual, pero no ree
 - No obliga a completar la cadena punta a punta (CRM → SLA → Planificación → Operaciones → RRHH → Reportes).
 - No permite medir desempeño por evidencia transaccional (qué creó, qué publicó, qué corrigió, qué cerró).
 - No genera “muscle memory” de resolución de incidentes (ausencias, vacantes, retenciones, refuerzos).
+- No borra automáticamente lo practicado: deja residuos o fuerza al instructor a limpiar a mano.
 
 **Evidencia en código**
 
-- `apps/web2/src/pages/admin/guia/index.tsx` implementa pasos guiados y checks locales, con sincronización de progreso, pero no impone validaciones por resultado de negocio.
-- El progreso de onboarding está orientado a completitud de guía, no a aprobación de acciones operativas reales.
+- `apps/web2/src/pages/admin/guia/index.tsx` implementa pasos guiados y checks locales, con sincronización de progreso, pero no impone validaciones por resultado de negocio ni cleanup de datos.
+- El progreso de onboarding está orientado a completitud de guía, no a aprobación de acciones operativas reales ni a borrado post-sesión.
 
 ---
 
 ## 2. Recorrido de capacitación objetivo (pasos in situ)
 
-Recorrido objetivo solicitado por Mauro, mapeado a módulo + colecciones principales.
+### 2.1 Principio pedagógico acordado
+
+1. **Empresa aparte** (`capacitacion_*`) — nunca Bacarsa ni tenants productivos.
+2. **Datos solo para práctica** — se escriben en el tenant de capacitación y se **eliminan al cerrar/completar** la sesión (o al abortar).
+3. **Recorrido por rol** — los módulos a aprender salen de `roles/{id}.permissions` (mismos módulos que usa el panel).
+4. **Coach in-situ por módulo** — al entrar a un módulo, un overlay/wizard lleva al alumno por cada micro-paso (no slideshow separado).
+5. **Seguimiento de aprendizaje** — cada micro-paso se marca por evidencia (acción real en UI + doc creado/actualizado), no por checkbox manual.
+
+### 2.2 Cadena operativa completa (cuando el rol lo permita)
 
 | Paso capacitación | Módulo UI | Lectura/escritura principal |
 |---|---|---|
@@ -32,9 +45,28 @@ Recorrido objetivo solicitado por Mauro, mapeado a módulo + colecciones princip
 | 8. Crear refuerzos/cobertura | `/admin/operaciones` + solicitudes | `solicitudes_refuerzo`, `turnos` (RFZ/TURA/ops), `novedades` |
 | 9. Ver impacto final | `/admin/reportes` y `/admin/analisis` | `turnos`, `ausencias`, `servicios_sla`, `hours_balances`, agregados de liquidación |
 
-**Conclusión de recorrido**
+### 2.3 Ejemplo de coach por módulo: Planificación
 
-Para entrenamiento real, hay que cubrir al menos estos 9 pasos sobre datos reales de Firestore, en un tenant aislado y reseteable.
+Cuando el alumno entra a Planificación (y su rol tiene `PLANNING.read` + create/update/publish según corresponda), el coach lo lleva por:
+
+1. Seleccionar **Cliente** y **Objetivo** (seed o creados en pasos previos).
+2. Elegir **período** (mes/año).
+3. Asignar/generar turnos en la grilla (crear al menos un turno real).
+4. Revisar vacantes / consistencia básica vs SLA.
+5. **Publicar cronograma** (`planificacion_estados.publishedAt`).
+6. Confirmar evidencia: existe turno + publicación → marcar hito del módulo.
+
+Lo mismo aplica a CRM, Servicios, Operaciones, RRHH: **pasos concretos de la pantalla real**, no textos aparte.
+
+### 2.4 Módulos según rol (fuente de verdad)
+
+Reutilizar la matriz ya existente:
+
+- Definición de módulos: `apps/web2/src/config/modules.ts` (`CLIENTS`, `SERVICES`, `PLANNING`, `OPERATIONS`, `RRHH`, etc.).
+- Permisos del alumno: `roles/{roleId}.permissions` + `system_users/{uid}.role`.
+- Onboarding tracks actuales (`OPERATIONS`, `PLANNING`, `CRM`, `SERVICES`, `RRHH` en `index.ts` / guía) se pueden mapear 1:1 a coaches por módulo, pero con evidencia real.
+
+Regla: **si el rol no tiene READ del módulo, ese coach no aparece**. Si tiene READ pero no CREATE/PUBLISH, el coach enseña lectura + explica límites (o usa cuenta de práctica con permisos de escritura solo en el tenant capacitación).
 
 ---
 
@@ -54,6 +86,7 @@ Para entrenamiento real, hay que cubrir al menos estos 9 pasos sobre datos reale
      - `stampEmpresaId`
      - `assertDocBelongsToEmpresa`
    - El patrón de escritura en módulos usa `stampEmpresaId` y/o validación previa de ownership tenant.
+   - Ya existe `eliminarEmpresaYDatos` (purge por `empresaId`) — base técnica para cleanup post-capacitación (hoy no es soft-delete; borra docs del tenant).
 
 3. **Helpers backend para callables modernas**
    - `apps/functions/src/auth/panel-tenant-auth.util.ts` aporta `assertPanelTenantCallable` y `tenantMatchesDoc` con soporte legacy Bacarsa + `allEmpresas`/superadmin.
@@ -66,6 +99,7 @@ Para entrenamiento real, hay que cubrir al menos estos 9 pasos sobre datos reale
 
 - Existe compatibilidad explícita para documentos sin `empresaId` como legacy de Bacarsa (`bacarsaLegacyOpen`, fallbacks en `belongsToEmpresaView` y reglas).
 - Es funcional para transición, pero agrega complejidad y puntos de ambigüedad (especialmente cuando hay docs históricos no etiquetados).
+- **Implicancia**: la empresa de capacitación **debe nacer con `migracionCompleta=true` y `empresaId` sellado en todo alta**, sin depender de fallbacks Bacarsa.
 
 ### 3.3 Veredicto de aislamiento
 
@@ -74,6 +108,8 @@ Para entrenamiento real, hay que cubrir al menos estos 9 pasos sobre datos reale
 - el usuario no tenga bypass (`SuperAdmin` / `allEmpresas`),
 - se usen rutas frontend y callables que respetan tenant,
 - y se controlen superficies globales/legacy listadas en riesgos.
+
+Para el diseño acordado (“datos que no se deben guardar”), el aislamiento tenant + **purge al terminar** es el mecanismo correcto: se practica en pantallas reales, sin dejar huella operativa permanente.
 
 ---
 
@@ -115,41 +151,45 @@ Impacto: cambios en capacitación pueden alterar comportamiento global si se hab
 
 Crons (`autoCompletarTurnos`, `detectarAusencias`, `gestionarVacantes`, etc.) procesan datos de múltiples empresas en el mismo proyecto; aplican lógica por `empresaId`, pero el runtime es compartido.
 
-Impacto: ruido operativo, notificaciones y costos si no se diseña política específica para tenant de entrenamiento.
+Impacto: ruido operativo, notificaciones y costos si el tenant de capacitación genera turnos “reales” visibles a los crons. Mitigación: `centroControlEnabled=false` y/o `modoDemoEnabled` solo en ese tenant, o flag `isTrainingEmpresa`.
 
 ### R6 — Canales externos reales (MEDIO)
 
 - Notificaciones push (FCM), correo de activación portal, AFIP, payroll, backups Drive.
 - Aunque muchos flujos sellan `empresaId`, siguen operando sobre infraestructura productiva real.
+- Mitigación MVP: deshabilitar push/email/AFIP/payroll en sesión de capacitación.
 
 ### R7 — Modelo legacy Bacarsa (MEDIO)
 
 - Documentos sin `empresaId` y fallbacks Bacarsa pueden inducir lecturas ambiguas en casos límite.
 
-### R8 — IDs/documents cross-tenant en migraciones/imports (MEDIO)
+### R8 — Cleanup incompleto deja residuos (MEDIO) — relevante al diseño “no guardar”
 
-- Hay utilidades de migración/restauración con soporte cross-tenant deliberado (`backup/restore`, `migrateEmpresaData`), útiles para admin, pero peligrosas si se exponen sin guardrails de proceso.
+- `eliminarEmpresaYDatos` hoy no cubre todas las colecciones usadas en el circuito (faltan, según uso real: `hours_balances`, `contracts`, `quotes`, `solicitudes_refuerzo`, `convocatorias_cobertura`, `tipos_novedad`, locks de payroll, etc.).
+- Auth users / `device_tokens` / emails no se revierten con el purge de Firestore.
+- **Hipótesis H4**: el purge de capacitación debe ser un callable dedicado con inventario exhaustivo + borrado de docs marcados `sessionId`/`createdByTrainingSession`, no solo `eliminarEmpresaYDatos` tal cual.
 
 ### Hipótesis a validar (etiquetadas)
 
 - **H1**: algunos flujos viejos de UI todavía pueden invocar callables legacy de forma no evidente para el usuario.
 - **H2**: la operación diaria actual ya no depende de varias rutas legacy, pero siguen desplegadas por compatibilidad.
 - **H3**: los permisos por rol en producción real reducen riesgo práctico, aunque no eliminan riesgo técnico por callable.
+- **H4**: hace falta un inventario cerrado de colecciones a purgar por sesión de capacitación (más amplio que `COLECCIONES_A_ELIMINAR` actual).
 
 ---
 
 ## 5. Opciones A/B/C/D y recomendación
 
-### A) Empresa de entrenamiento dentro del Firebase productivo
+### A) Empresa de entrenamiento dentro del Firebase productivo (sandbox tenant)
 
 **Pros**
 - Más rápida de habilitar.
-- Reusa autenticación, módulos y datos reales del producto.
-- Excelente para entrenamiento in situ.
+- Reusa autenticación, módulos y UX real (coach in-situ).
+- Encaja con “empresa aparte + borrar datos al terminar”.
 
 **Contras**
 - Convivencia con superficies globales/callables legacy.
-- Requiere disciplina fuerte de permisos/proceso para evitar bleed.
+- Requiere hardening y purge confiable.
 
 **Esfuerzo estimado**: **M**
 
@@ -162,8 +202,8 @@ Impacto: ruido operativo, notificaciones y costos si no se diseña política esp
 - Riesgo de contaminación productiva casi nulo por diseño.
 
 **Contras**
-- Mayor costo operativo (deploys, seed, mantenimiento de entornos).
-- Necesita sincronización funcional continua con producción.
+- Mayor costo operativo (deploys, seed, mantenimiento).
+- El coach in-situ sigue haciendo falta; el aislamiento solo no enseña.
 
 **Esfuerzo estimado**: **L**
 
@@ -176,112 +216,143 @@ Impacto: ruido operativo, notificaciones y costos si no se diseña política esp
 - Permite bloquear funciones peligrosas cuando `trainingMode=true`.
 
 **Contras**
-- Si comparte proyecto productivo, sigue existiendo riesgo residual en capas no cubiertas por flag.
-- Alto trabajo de cobertura para no dejar huecos.
+- Si comparte proyecto productivo, sigue existiendo riesgo residual.
+- Sin “empresa aparte” clara, el alumno puede confundir prod vs práctica.
 
 **Esfuerzo estimado**: **M/L**
 
 ---
 
-### D) Híbrido (arranque A endurecido + evolución a B)
+### D) Híbrido (A endurecido ahora → B si hace falta)
 
 **Pros**
-- Valor rápido para capacitación.
-- Camino de reducción de riesgo progresivo sin frenar adopción.
-- Permite validar el producto pedagógico antes de invertir en separación total.
+- Valor rápido + camino a aislamiento físico.
+- Valida pedagogía (coach por rol) antes de invertir en segundo proyecto.
 
 **Contras**
-- Requiere gobernanza clara por fases.
-- Durante fase 1 persiste riesgo residual controlado (no cero).
+- Gobernanza por fases; riesgo residual controlado en fase 1.
 
-**Esfuerzo estimado**: **L (total)**, con fase 1 **M**.
+**Esfuerzo estimado**: **L (total)**, fase 1 **M**.
 
 ---
 
-### Recomendación
+### Recomendación (actualizada a la decisión de Mauro)
 
-**Recomiendo Opción D (Híbrida)**:
+**Recomendación operativa: Opción A endurecida**, con el contrato de producto:
 
-1. **Fase MVP inmediata**: empresa de entrenamiento dentro del proyecto actual, con hardening de permisos, reset controlado y checklist verificable.
-2. **Fase objetivo**: migrar capacitación a proyecto Firebase separado cuando el circuito esté estable y validado.
+| Requisito Mauro | Diseño |
+|---|---|
+| Empresa aparte | Tenant `capacitacion_*` (o uno por cohorte/sesión), nunca Bacarsa |
+| Al terminar, borrar lo creado | Purge tenant/sesión al completar, abortar o timeout |
+| Usar el rol para ver qué módulos aprender | Coaches derivados de `roles.permissions` |
+| Seguimiento paso a paso en cada módulo | Overlay/wizard in-situ (ej. Planificación: cronograma → turno → publicar) |
+| Datos que no se deben guardar | Solo sandbox; progreso pedagógico sí se guarda (hitos/score), datos de negocio no |
+
+**Opción D** queda como roadmap de riesgo: si el purge/hardening no alcanza o el volumen de alumnos crece, mover el sandbox a proyecto Firebase separado (B).
 
 Racional:
 
-- Mauro necesita entrenamiento real ya (time-to-value).
-- El aislamiento lógico actual es suficientemente bueno para una primera fase controlada.
-- Los riesgos críticos detectados (callables legacy/globales) justifican objetivo de aislamiento físico posterior.
+- Mauro pide práctica in situ en pantallas reales + datos descartables: eso es un **sandbox tenant con coach**, no un segundo slideshow ni un lab sin UX.
+- El aislamiento lógico actual alcanza para MVP si el alumno **no** es SuperAdmin/`allEmpresas` y las escrituras van siempre con `empresaId` de capacitación.
+- Lo que NO debe persistir: clientes/SLA/turnos/novedades de práctica. Lo que SÍ puede persistir: progreso de aprendizaje del usuario (`capacitacion_progreso` / campos en `system_users`).
 
 ---
 
 ## 6. Alcance MVP vs completo
 
-## MVP (mínimo útil de capacitación real)
+### MVP (mínimo útil — alineado a la decisión)
 
-1. **Empresa entrenamiento dedicada** (ej. `capacitacion_bacarsa`) con usuarios/roles propios.
-2. **Seed inicial reproducible** (cliente, objetivo, SLA base, plantilla mínima de empleados).
-3. **Reset de tenant** en 1 click (solo esa empresa), con restauración a snapshot base.
-4. **Checklist verificable por evidencia de datos** (no checklist manual):
-   - cliente creado,
-   - objetivo creado,
-   - SLA creado,
-   - grilla publicada,
-   - ausencia registrada,
-   - vacante gestionada,
-   - refuerzo asignado,
-   - reporte consultado.
-5. **Rol “Capacitación Admin”** sin permisos globales (`allEmpresas=false`, no superadmin).
-6. **Bloqueos explícitos en capacitación** para acciones de alto riesgo (API keys reales, AFIP prod, limpiezas globales).
+1. **Empresa entrenamiento dedicada** (`capacitacion_*`, `migracionCompleta=true`).
+2. **Entrada a modo capacitación** que fija el contexto del alumno a ese tenant (sin selector de empresas productivas).
+3. **Plan de aprendizaje por rol**: lista de módulos = permisos READ del rol (map a coaches CRM/Servicios/Planificación/Operaciones/RRHH).
+4. **Coach in-situ en al menos 2 módulos MVP** (propuesta: **CRM + Planificación**), con micro-pasos verificables.
+5. **Seguimiento de aprendizaje** por usuario: hitos completados, módulo actual, % progreso (persistente).
+6. **Cleanup al terminar**: al marcar “Finalizar capacitación” (o al salir forzado), borrar datos de negocio creados en la sesión/tenant de práctica; conservar solo el progreso pedagógico.
+7. **Guardrails**: sin SuperAdmin en sesión alumno; sin API keys/AFIP/payroll; Centro de Control apagado o aislado para no disparar crons/push reales.
 
-## Completo (versión madura)
+### Completo (versión madura)
 
-1. **Aislamiento físico** (proyecto Firebase lab dedicado).
-2. **Instructor view** con trazabilidad por alumno, score y tiempos por paso.
-3. **Escenarios de práctica parametrizados** (operaciones normales, ausencias masivas, cobertura urgente, etc.).
-4. **Motor de evaluación automática** con rúbricas por rol (Operaciones, Planificación, RRHH, CRM).
-5. **Integración de evidencia** (export de resultados, intentos, historial por cohorte).
+1. Coaches para todos los módulos del circuito (CRM → … → Reportes).
+2. Escenarios de incidente (ausencia, vacante, refuerzo) con rúbrica automática.
+3. Instructor view (estado por alumno, reintentos, tiempos por paso).
+4. Sesiones concurrentes (sandbox por alumno o por cohorte) sin pisarse.
+5. Proyecto Firebase separado si el riesgo/volumen lo exige.
+6. Soft-fail de cleanup + reporte de residuos no purgados.
 
 ---
 
-## 7. Diseño propuesto (empresa entrenamiento + reset + checklist verificable)
+## 7. Diseño propuesto (empresa aparte + datos efímeros + coach por rol)
 
-### 7.1 Empresa de entrenamiento
+### 7.1 Modelo de sesión
+
+```
+system_users/{uid}
+  role → define módulos a aprender
+capacitacion_sesiones/{sessionId}
+  empresaId: "capacitacion_..."
+  alumnoUid, roleId
+  status: ACTIVE | COMPLETED | ABORTED
+  modulesPlan: ["CLIENTS","PLANNING",...]
+  progress: { CLIENTS: { stepsDone: [...], completedAt }, ... }
+  startedAt, endedAt
+```
+
+Todo doc de negocio creado en la sesión lleva:
+
+- `empresaId` = empresa capacitación
+- `trainingSessionId` = sessionId (para purge selectivo)
+
+**Persistente al terminar:** progreso/score en sesión o en `system_users.onboardingGuide` extendido.  
+**No persistente:** `clients`, `servicios_sla`, `turnos`, `ausencias`, `novedades`, etc. de la práctica.
+
+### 7.2 Empresa de entrenamiento
 
 - Crear empresa dedicada (no Bacarsa legacy).
 - `migracionCompleta=true` desde inicio.
-- Usuarios de capacitación sin bypass de tenant.
-- Prohibir uso de cuentas SuperAdmin durante entrenamiento estándar.
+- Flags sugeridos: `isTrainingEmpresa: true`, `centroControlEnabled: false` (evitar crons/push reales).
+- Usuarios de práctica con `empresaId` fijo al sandbox; sin `allEmpresas`.
 
-### 7.2 Reset seguro
+### 7.3 Cleanup al terminar (contrato “no se deben guardar”)
 
-Flujo propuesto:
+Flujo:
 
-1. Congelar sesión activa de entrenamiento.
-2. Ejecutar limpieza tenant-scoped de colecciones operativas.
-3. Restaurar snapshot semilla de la empresa entrenamiento.
-4. Rehidratar estado base de planificación/servicios.
-5. Registrar auditoría del reset.
+1. Alumno / instructor cierra sesión de capacitación (o timeout).
+2. Callable `finalizeTrainingSession({ sessionId })`:
+   - valida que `empresaId` sea training y pertenezca a la sesión;
+   - borra docs con `trainingSessionId == sessionId` (preferible) o purge tenant completo si la empresa es 1:1 con la sesión;
+   - marca sesión `COMPLETED` y congela progreso pedagógico;
+   - escribe `audit_logs` del cleanup.
+3. Si falla parte del purge → estado `CLEANUP_PARTIAL` + alerta a Sistemas (no silenciar).
 
-**Control clave**: reset debe exigir `empresaId` fijo de entrenamiento y rechazar cualquier otro.
+**Control clave**: el callable debe rechazar cualquier `empresaId` que no sea de capacitación.
 
-### 7.3 Checklist verificable (evidencia técnica)
+### 7.4 Coach + checklist verificable
 
-Cada hito se marca por consulta de estado real en Firestore:
+Ejemplo Planificación (evidencia):
 
-- H1 Cliente: existe `clients/{id}` con `empresaId=capacitacion_*`.
-- H2 Objetivo: `clients.objetivos[]` contiene objetivo válido.
-- H3 SLA: existe `servicios_sla` activo para objetivo.
-- H4 Planificación: `turnos` + `planificacion_estados.publishedAt`.
-- H5 Operación: cambios de estado en `turnos` (present/absent/completed).
-- H6 RRHH: alta de `ausencias`/`novedades` asociadas.
-- H7 Cobertura: evidencia de refuerzo/convocatoria/cobertura.
-- H8 Reporte: lectura de extracto (`hours_balances`) o cálculo de período.
+| Micro-paso | Evidencia |
+|---|---|
+| Elegir cliente/objetivo | UI state + ids válidos del tenant training |
+| Crear/asignar turno | existe `turnos` con `trainingSessionId` |
+| Publicar | `planificacion_estados.publishedAt` set |
+| Módulo completo | todos los micro-pasos OK → `progress.PLANNING.completedAt` |
 
-### 7.4 Guardrails de seguridad para entrenamiento
+Ejemplo CRM:
 
-- Bloquear/ocultar módulos globales no necesarios.
-- Denegar callables legacy o de alto impacto para rol capacitación.
-- Aislar notificaciones y correos a usuarios de prueba.
-- Etiquetar todo evento de entrenamiento con `empresaId` + bandera de sesión para trazabilidad.
+| Micro-paso | Evidencia |
+|---|---|
+| Crear cliente | `clients` con `empresaId` training |
+| Cargar objetivo | `clients.objetivos[]` con id |
+| (Opcional) contrato | `contracts` training |
+
+No usar checkboxes locales como fuente de verdad (como hace hoy `/admin/guia` con `localStorage`).
+
+### 7.5 Guardrails
+
+- Bloquear/ocultar CONFIG global, API keys, AFIP, mobile builds, restore/migrate.
+- Denegar callables legacy de alto impacto al rol en sesión training (o forzar que pasen por wrapper con `assertPanelTenantCallable` + allowlist de empresa training).
+- Silenciar FCM/email en docs training (o no registrar `device_tokens` de práctica).
+- Banner visible: “Modo capacitación — los datos de práctica se borran al finalizar”.
 
 ---
 
@@ -289,43 +360,45 @@ Cada hito se marca por consulta de estado real en Firestore:
 
 | Workstream | Descripción | Esfuerzo |
 |---|---|---|
-| WS1 Gobernanza de permisos | Rol capacitación, exclusión de superadmin/allEmpresas, matriz por módulo | **M** |
-| WS2 Hardening backend callables | Cerrar rutas legacy sin tenant assert / validar `empresaId` en endpoints sensibles | **L** |
-| WS3 Seed + snapshot base | Dataset inicial reproducible y versionado | **M** |
-| WS4 Reset automático | Limpieza + restore seguro de empresa entrenamiento | **M** |
-| WS5 Checklist verificable | Motor de hitos por evidencia Firestore | **M** |
-| WS6 UX capacitación | Vista alumno + progreso operativo real | **M** |
-| WS7 Instructor view | Seguimiento multi-alumno, estado por etapa, reproceso | **M/L** |
-| WS8 Aislamiento integraciones | AFIP, payroll API keys, notificaciones y correo en modo capacitación | **M** |
-| WS9 Opción B futura | Proyecto Firebase separado + pipeline CI/CD paralelo | **L** |
+| WS1 Sesión + empresa training | Crear/activar sandbox, flags, fijar contexto alumno | **M** |
+| WS2 Plan por rol | Derivar módulos a aprender desde `roles.permissions` | **S** |
+| WS3 Coach in-situ | Overlay/wizard por módulo (MVP: CRM + Planificación) | **M/L** |
+| WS4 Evidencia de hitos | Detectores de progreso por queries/acciones reales | **M** |
+| WS5 Cleanup al finalizar | Callable purge por `trainingSessionId` / tenant training | **M** |
+| WS6 Hardening callables | Tenant assert + bloqueo de rutas peligrosas en training | **L** |
+| WS7 UX progreso alumno | Panel “qué me falta” + reanudar módulo | **M** |
+| WS8 Instructor view | Estado multi-alumno, forzar cleanup, reintentos | **M/L** |
+| WS9 Aislamiento físico (opcional) | Proyecto Firebase lab si se escala | **L** |
 
 ---
 
 ## 9. Criterios de éxito
 
-1. Un alumno completa circuito completo (pasos 1–9) sin tocar datos de empresas productivas.
-2. Reset deja entorno idéntico a baseline en tiempo acotado y trazable.
-3. No se detectan escrituras cross-tenant en auditoría.
-4. Instructor puede verificar progreso por evidencia, no por declaración.
-5. El circuito es repetible por múltiples cohortes sin intervención manual de ingeniería.
+1. El alumno practica en pantallas reales de COSP dentro de una **empresa aparte**.
+2. Solo ve coaches de módulos permitidos por **su rol**.
+3. En Planificación (y demás módulos MVP) el coach lo lleva **paso a paso** hasta completar la acción real (ej. publicar).
+4. Al finalizar, **no quedan** clientes/SLA/turnos/novedades de práctica en Firestore (progreso pedagógico sí).
+5. Cero escrituras en tenants productivos (`bacarsa` u otros) durante la sesión.
+6. El circuito es repetible: nueva sesión = sandbox limpio + mismos coaches.
 
 ---
 
 ## 10. Preguntas para Mauro
 
-1. **Nivel de riesgo aceptable**: ¿aceptamos fase inicial en mismo Firebase (con hardening) o exigimos aislamiento físico desde día 1?
-2. **Perfil de alumno**: ¿quién se capacita como “admin entrenamiento” y quién solo como “operador”?
-3. **Profundidad del circuito MVP**: ¿incluimos desde inicio payroll/API keys/AFIP o quedan explícitamente fuera?
-4. **Política de reset**: ¿reset por demanda (botón instructor) o automático por cohorte/fecha?
-5. **Estrategia de notificaciones**: ¿usar canales reales filtrados o sandbox total sin push/email reales?
-6. **Métrica de aprobación**: ¿qué puntaje/hitos mínimos definen “apto” por rol?
-7. **Cadencia de evolución a aislamiento físico**: ¿qué condición funcional/disponibilidad dispara paso a opción B?
+1. **Sandbox 1:1**: ¿una sola empresa `capacitacion` compartida (con `trainingSessionId` por alumno) o una empresa/sesión por alumno?
+2. **Permisos de escritura**: ¿el alumno usa su rol real (puede que solo tenga READ) o un rol “práctica” con create/update/publish solo en el sandbox?
+3. **Alcance MVP de coaches**: ¿arranquemos por CRM + Planificación, o priorizás Operaciones?
+4. **Momento del borrado**: ¿solo al “Finalizar”, también al cerrar sesión/navegador, y/o TTL automático (ej. 24 h)?
+5. **Qué sí guardar**: ¿además del % de progreso, querés historial de intentos/tiempos por paso para el instructor?
+6. **Notificaciones**: ¿sandbox total sin push/email, o push solo a cuentas de prueba?
+7. **Cuándo subir a proyecto Firebase aparte**: ¿umbral de alumnos, o después de cerrar riesgos R1–R3?
 
 ---
 
 ## Síntesis ejecutiva
 
-- **Recomendación**: **Opción D (híbrida)**: activar rápido empresa entrenamiento endurecida + roadmap a proyecto aislado.
-- **Riesgos principales**: callables legacy sin tenant assert, endpoints globales por secret, superficies de configuración global.
-- **MVP útil**: empresa dedicada + seed + reset + checklist verificable + rol capacitación restringido.
-- **Condición no negociable**: bloquear accesos y operaciones de alcance global durante entrenamiento.
+- **Diseño acordado**: empresa de capacitación aparte + datos de práctica **efímeros** (se borran al terminar) + recorrido **por rol** + **coach paso a paso** dentro de cada módulo.
+- **Recomendación técnica**: Opción **A endurecida** (sandbox tenant en el mismo Firebase) con purge confiable; Opción **B** solo si el riesgo/volumen lo exige.
+- **Riesgos principales**: callables legacy sin tenant assert, endpoints globales, crons/push compartidos, purge incompleto de colecciones.
+- **MVP**: sesión training + plan por rol + coaches CRM/Planificación + evidencia de hitos + cleanup al finalizar.
+- **Condición no negociable**: el alumno nunca escribe en Bacarsa/prod; al terminar no quedan datos de negocio de la práctica.
