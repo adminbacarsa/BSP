@@ -17,17 +17,26 @@ export declare const checkSystemHealth: functions.HttpsFunction & functions.Runn
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const executeAgentAction: functions.HttpsFunction & functions.Runnable<any>;
 export declare const modoDemoCron: functions.CloudFunction<unknown>;
+export declare const operationalAlertsCron: functions.CloudFunction<unknown>;
+export declare const dailyReplanCron: functions.CloudFunction<unknown>;
 export declare const onTurnoAbsenciaDetectada: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot>, {
     shiftId: string;
 }>>;
 export declare const autoPresenciaYCierre: functions.HttpsFunction & functions.Runnable<any>;
 export declare const optimizePlanningGemini: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runPlanningAutomationP0: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runOperationalAlertsScan: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runOperationalClosureChecklist: functions.HttpsFunction & functions.Runnable<any>;
+export declare const recommendCoverageCandidatesP1: functions.HttpsFunction & functions.Runnable<any>;
+export declare const runDailyReplanP1: functions.HttpsFunction & functions.Runnable<any>;
 export { vplanRun } from './vplan';
 export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnable<any>;
 export declare const runAjustarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
+export declare const updateOnboardingGuideProgress: functions.HttpsFunction & functions.Runnable<any>;
+export declare const assignOnboardingGuide: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;

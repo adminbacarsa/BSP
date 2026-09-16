@@ -36,6 +36,7 @@ import {
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
     isOrphanShiftNoiseNovedad,
+    isStaleIaAutomationNovedad,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
@@ -1077,6 +1078,7 @@ export default function TacticalMapView() {
     const logic = useOperacionesMonitor();
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
+    const [atendiendoTodasNovedades, setAtendiendoTodasNovedades] = useState(false);
     // Refresh key: reconecta listener al volver de background, recuperar red, o cada 3 min
     const [refreshKey, setRefreshKey] = useState(0);
     useEffect(() => {
@@ -1119,6 +1121,7 @@ export default function TacticalMapView() {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
             if (isHiddenFromOpsAlerts(n)) return false;
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false;
+            if (isStaleIaAutomationNovedad(n, logic.processedData)) return false;
             if (n.enGestion) return false;
             if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
                 const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);
@@ -1235,6 +1238,54 @@ export default function TacticalMapView() {
             );
             toast.success(`${toAtend.length} novedades descartadas`);
         } catch { toast.error('Error al descartar novedades'); }
+    };
+
+    const handleAtenderTodasNovedades = async () => {
+        const toAtend = pendingNovedades;
+        if (!toAtend.length || atendiendoTodasNovedades) return;
+        const needsOpsAction = toAtend.some((n: any) =>
+            n.type === 'AUSENCIA_CORTO_PLAZO' ||
+            n.type === 'VACANTE_PROTOCOLO_COBERTURA' ||
+            n.type === 'POSICION_SIN_RELEVO' ||
+            n.type === 'RELEVO_NO_PRESENTADO',
+        );
+        const msg = needsOpsAction
+            ? `Marcar como atendidas las ${toAtend.length} alertas del panel.\n\nNo abre cobertura ni protocolos: solo las saca de la bandeja. ¿Continuar?`
+            : `¿Marcar como atendidas las ${toAtend.length} novedades del panel?`;
+        if (!window.confirm(msg)) return;
+
+        const auth = getAuth();
+        const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        setAtendiendoTodasNovedades(true);
+        try {
+            const CHUNK = 400;
+            for (let i = 0; i < toAtend.length; i += CHUNK) {
+                const batch = writeBatch(db);
+                toAtend.slice(i, i + CHUNK).forEach((n: any) => {
+                    batch.update(doc(db, 'novedades', n.id), {
+                        status: 'ATENDIDA',
+                        atendidaAt: serverTimestamp(),
+                        atendidaPor: actorName,
+                        atendidaPorUid: auth.currentUser?.uid || null,
+                        atendidaMasivo: true,
+                        enGestion: false,
+                        enGestionBy: null,
+                    });
+                });
+                await batch.commit();
+            }
+            registrarBitacoraOpsBg(
+                'ATENDER_NOVEDADES_MASIVO',
+                `Atendió ${toAtend.length} novedades desde panel Alertas (masivo).`,
+                empresaId,
+                { actorName },
+            );
+            toast.success(`${toAtend.length} novedades atendidas`);
+        } catch (e: any) {
+            toast.error('Error al atender novedades: ' + (e?.message || 'desconocido'));
+        } finally {
+            setAtendiendoTodasNovedades(false);
+        }
     };
 
     const handleAtenderNovedad = async (novedad: any) => {
@@ -1706,6 +1757,17 @@ export default function TacticalMapView() {
                             <Siren size={14} className="text-rose-400 shrink-0 animate-pulse"/>
                             <span className="font-black uppercase text-xs text-white flex-1 tracking-wide">Alertas y Prioridad</span>
                             {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
+                            {pendingNovedades.length > 0 && (
+                                <button
+                                    type="button"
+                                    disabled={atendiendoTodasNovedades}
+                                    onClick={handleAtenderTodasNovedades}
+                                    className="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg hover:bg-white/10 disabled:opacity-50 shrink-0"
+                                    title="Marcar todas las novedades como atendidas"
+                                >
+                                    {atendiendoTodasNovedades ? '…' : 'Atender todas'}
+                                </button>
+                            )}
                             <button onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg transition-colors"><X size={14} className="text-slate-400"/></button>
                         </div>
 

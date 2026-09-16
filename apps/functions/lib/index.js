@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.backfillCoverageLedger = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = void 0;
+exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.assignOnboardingGuide = exports.updateOnboardingGuideProgress = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.runDailyReplanP1 = exports.recommendCoverageCandidatesP1 = exports.runOperationalClosureChecklist = exports.runOperationalAlertsScan = exports.runPlanningAutomationP0 = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.dailyReplanCron = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.backfillCoverageLedger = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -35,6 +35,8 @@ const runPlatformAssistant_1 = require("./assistant/runPlatformAssistant");
 const assistantWriteActions_1 = require("./assistant/assistantWriteActions");
 const assistantInteractionLog_1 = require("./assistant/assistantInteractionLog");
 const planningGeminiServer_1 = require("./assistant/planningGeminiServer");
+const operationalAutomation_1 = require("./automation/operationalAutomation");
+const operationalAutomationP1_1 = require("./automation/operationalAutomationP1");
 const runAutoSchedule_1 = require("./scheduling/runAutoSchedule");
 const runAjustarCrono_1 = require("./scheduling/runAjustarCrono");
 const runEquilibrarCrono_1 = require("./scheduling/runEquilibrarCrono");
@@ -56,6 +58,110 @@ async function getService(service) {
 const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manager', 'Manager', 'Operator', 'Supervisor'];
 const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES = ['admin', 'employee'];
+const ONBOARDING_TRACK_VALUES = ['OPERATIONS', 'PLANNING', 'CRM', 'SERVICES', 'RRHH'];
+const ONBOARDING_TRACKS = new Set(ONBOARDING_TRACK_VALUES);
+const ONBOARDING_TRACK_MODULES = {
+    OPERATIONS: ['OPERATIONS', 'DASHBOARD'],
+    PLANNING: ['PLANNING'],
+    CRM: ['CLIENTS'],
+    SERVICES: ['SERVICES'],
+    RRHH: ['RRHH'],
+};
+function normalizeOnboardingTrack(raw) {
+    const value = String(raw ?? '').trim().toUpperCase();
+    if (ONBOARDING_TRACKS.has(value))
+        return value;
+    if (value === 'CLIENTS' || value === 'CLIENTES')
+        return 'CRM';
+    if (value === 'SERVICIOS' || value === 'SLA')
+        return 'SERVICES';
+    if (value === 'PERSONAL' || value === 'HR')
+        return 'RRHH';
+    if (value === 'PLANIFICACION' || value === 'PLAN')
+        return 'PLANNING';
+    if (value === 'OPERACIONES' || value === 'OPS')
+        return 'OPERATIONS';
+    return 'OPERATIONS';
+}
+function normalizeOnboardingTracks(raw, fallbackTrack) {
+    const fromArray = Array.isArray(raw) ? raw.map((x) => normalizeOnboardingTrack(x)) : [];
+    const unique = [];
+    for (const t of fromArray) {
+        if (!unique.includes(t))
+            unique.push(t);
+    }
+    if (unique.length)
+        return unique;
+    return [normalizeOnboardingTrack(fallbackTrack)];
+}
+function roleHasModuleRead(permissions, moduleKey) {
+    const actions = permissions?.[moduleKey];
+    return Array.isArray(actions) && actions.includes('read');
+}
+function tracksAvailableForRolePermissions(permissions, isSuperAdmin = false) {
+    if (isSuperAdmin)
+        return [...ONBOARDING_TRACK_VALUES];
+    const available = ONBOARDING_TRACK_VALUES.filter((track) => {
+        const modules = ONBOARDING_TRACK_MODULES[track] || [];
+        return modules.some((m) => roleHasModuleRead(permissions, m));
+    });
+    return available.length ? available : ['OPERATIONS'];
+}
+function filterTracksByRolePermissions(tracks, permissions, isSuperAdmin = false) {
+    const allowed = tracksAvailableForRolePermissions(permissions, isSuperAdmin);
+    const filtered = tracks.filter((t) => allowed.includes(t));
+    return filtered.length ? filtered : allowed.slice(0, 1);
+}
+async function loadRolePermissionsForOnboarding(roleId) {
+    if ((0, backup_auth_util_1.isSuperAdminBackupRole)(roleId)) {
+        return { permissions: null, isSuperAdmin: true };
+    }
+    const id = String(roleId ?? '').trim();
+    if (!id)
+        return { permissions: null, isSuperAdmin: false };
+    try {
+        const snap = await admin.firestore().collection('roles').doc(id).get();
+        if (!snap.exists)
+            return { permissions: null, isSuperAdmin: false };
+        const raw = snap.data()?.permissions;
+        if (!raw || typeof raw !== 'object')
+            return { permissions: null, isSuperAdmin: false };
+        const permissions = {};
+        for (const [key, value] of Object.entries(raw)) {
+            if (Array.isArray(value)) {
+                permissions[key] = value.map((x) => String(x));
+            }
+        }
+        return { permissions, isSuperAdmin: false };
+    }
+    catch {
+        return { permissions: null, isSuperAdmin: false };
+    }
+}
+async function resolveOnboardingTracksForRole(roleId, rawTracks, fallbackTrack) {
+    const requested = normalizeOnboardingTracks(rawTracks, fallbackTrack);
+    const { permissions, isSuperAdmin } = await loadRolePermissionsForOnboarding(roleId);
+    return filterTracksByRolePermissions(requested, permissions, isSuperAdmin);
+}
+function normalizeOnboardingStatus(raw) {
+    const status = String(raw ?? '').trim().toUpperCase();
+    if (status === 'IN_PROGRESS')
+        return 'IN_PROGRESS';
+    if (status === 'COMPLETED')
+        return 'COMPLETED';
+    return 'NOT_STARTED';
+}
+function normalizeCompletedTracks(raw, allowed) {
+    if (!Array.isArray(raw))
+        return [];
+    const out = [];
+    for (const item of raw) {
+        const t = normalizeOnboardingTrack(item);
+        if (allowed.includes(t) && !out.includes(t))
+            out.push(t);
+    }
+    return out;
+}
 exports.createUser = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida.');
@@ -981,6 +1087,68 @@ exports.modoDemoCron = functions
         }
     }
 });
+exports.operationalAlertsCron = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .pubsub.schedule('*/15 * * * *')
+    .timeZone('America/Argentina/Buenos_Aires')
+    .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+        const empresaId = empresaDoc.id;
+        if (empresaDoc.data()?.active === false)
+            continue;
+        if (empresaDoc.data()?.centroControlEnabled === false)
+            continue;
+        try {
+            const out = await (0, operationalAutomation_1.scanOperationalAlertsForEmpresa)({
+                empresaId,
+                lookbackHours: 24,
+                lookaheadHours: 8,
+                toleranceMinutes: 25,
+            });
+            if (out.alertsCreated > 0) {
+                console.log(`[operationalAlertsCron] ${empresaId}: shifts=${out.evaluatedShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated}`);
+            }
+        }
+        catch (e) {
+            console.warn(`[operationalAlertsCron] ${empresaId}:`, String(e?.message ?? e));
+        }
+    }
+});
+exports.dailyReplanCron = functions
+    .runWith({ timeoutSeconds: 300, memory: '1GB' })
+    .pubsub.schedule('0 6 * * *')
+    .timeZone('America/Argentina/Buenos_Aires')
+    .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+        const empresaId = empresaDoc.id;
+        const data = empresaDoc.data() || {};
+        if (data.active === false)
+            continue;
+        if (data.centroControlEnabled === false)
+            continue;
+        if (data.pilotoAutoEnabled !== true)
+            continue;
+        try {
+            const out = await (0, operationalAutomationP1_1.runDailyReplanWindow)({
+                empresaId,
+                windowDays: 3,
+                dryRun: true,
+                autoApplyRet: false,
+                maxVacancies: 40,
+            });
+            if (out.vacanciesFound > 0) {
+                console.log(`[dailyReplanCron] ${empresaId}: vacancies=${out.vacanciesFound} recommendations=${out.recommendations} run=${out.runId}`);
+            }
+        }
+        catch (e) {
+            console.warn(`[dailyReplanCron] ${empresaId}:`, String(e?.message ?? e));
+        }
+    }
+});
 exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 60 }, async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -1164,6 +1332,180 @@ exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
+async function assertModuleReadAccess(uid, tokenRole, expectedModule) {
+    const { resolveAssistantUser } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
+    const profile = await resolveAssistantUser(uid, { tokenRole });
+    if (!profile) {
+        throw new functions.https.HttpsError('permission-denied', 'Usuario no reconocido.');
+    }
+    if (!profile.isSuperAdmin && !profile.readableModuleKeys.includes(expectedModule)) {
+        throw new functions.https.HttpsError('permission-denied', `Tu rol no tiene permiso de lectura sobre ${expectedModule}.`);
+    }
+    return { empresaId: profile.empresaId || '', isSuperAdmin: profile.isSuperAdmin };
+}
+async function runPlanningAutomationP0Handler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    await assertModuleReadAccess(context.auth.uid, tokenRole, 'PLANNING');
+    const empresaId = String(data?.empresaId ?? '').trim();
+    const objectiveId = String(data?.objectiveId ?? '').trim();
+    const year = Number(data?.year ?? 0);
+    const month = Number(data?.month ?? 0);
+    if (!empresaId || !objectiveId || !year || !month) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId, objectiveId, year y month son obligatorios.');
+    }
+    await (0, panel_tenant_auth_util_1.assertPanelTenantCallable)(context, empresaId, undefined, 'No tenés permiso para ejecutar automatización de planificación.');
+    try {
+        return await (0, operationalAutomation_1.runPlanningAutomationCycle)({
+            empresaId,
+            objectiveId,
+            year,
+            month,
+            applyGemini: data?.applyGemini !== false,
+            overwriteAutoDrafts: data?.overwriteAutoDrafts !== false,
+            dryRun: data?.dryRun === true,
+        });
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error de automatización de planificación');
+        throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+    }
+}
+exports.runPlanningAutomationP0 = process.env.FUNCTIONS_EMULATOR === 'true'
+    ? functions
+        .runWith({ timeoutSeconds: 180, memory: '512MB' })
+        .https.onCall(runPlanningAutomationP0Handler)
+    : functions
+        .runWith({ timeoutSeconds: 180, memory: '512MB', secrets: ['GEMINI_API_KEY'] })
+        .https.onCall(runPlanningAutomationP0Handler);
+async function runOperationalAlertsScanHandler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+    const empresaId = String(data?.empresaId ?? '').trim();
+    if (!empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+    }
+    await (0, panel_tenant_auth_util_1.assertPanelTenantCallable)(context, empresaId, undefined, 'No tenés permiso para ejecutar el escaneo operativo.');
+    try {
+        const empresaSnap = await admin.firestore().collection('empresas').doc(empresaId).get();
+        if (empresaSnap.exists && empresaSnap.data()?.centroControlEnabled === false) {
+            return {
+                ok: true,
+                empresaId,
+                evaluatedShifts: 0,
+                anomaliesDetected: 0,
+                alertsCreated: 0,
+                byType: {},
+                generatedAt: new Date().toISOString(),
+            };
+        }
+        return await (0, operationalAutomation_1.scanOperationalAlertsForEmpresa)({
+            empresaId,
+            lookbackHours: data?.lookbackHours,
+            lookaheadHours: data?.lookaheadHours,
+            toleranceMinutes: data?.toleranceMinutes,
+        });
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error en escaneo operativo');
+        throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+    }
+}
+exports.runOperationalAlertsScan = functions
+    .runWith({ timeoutSeconds: 120, memory: '256MB' })
+    .https.onCall(runOperationalAlertsScanHandler);
+async function runOperationalClosureChecklistHandler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    await assertModuleReadAccess(context.auth.uid, tokenRole, 'REPORTS');
+    const empresaId = String(data?.empresaId ?? '').trim();
+    const year = Number(data?.year ?? 0);
+    const month = Number(data?.month ?? 0);
+    if (!empresaId || !year || !month) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId, year y month son obligatorios.');
+    }
+    await (0, panel_tenant_auth_util_1.assertPanelTenantCallable)(context, empresaId, undefined, 'No tenés permiso para ejecutar checklist de cierre.');
+    try {
+        return await (0, operationalAutomation_1.buildOperationalClosureChecklist)({
+            empresaId,
+            year,
+            month,
+            persistSnapshot: data?.persistSnapshot !== false,
+        });
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error en checklist de cierre');
+        throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+    }
+}
+exports.runOperationalClosureChecklist = functions
+    .runWith({ timeoutSeconds: 120, memory: '256MB' })
+    .https.onCall(runOperationalClosureChecklistHandler);
+async function recommendCoverageCandidatesP1Handler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+    const empresaId = String(data?.empresaId ?? '').trim();
+    if (!empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+    }
+    await (0, panel_tenant_auth_util_1.assertPanelTenantCallable)(context, empresaId, undefined, 'No tenés permiso para recomendar cobertura.');
+    try {
+        return await (0, operationalAutomationP1_1.recommendCoverageCandidates)({
+            empresaId,
+            shiftId: data?.shiftId,
+            objectiveId: data?.objectiveId,
+            fecha: data?.fecha,
+            banda: data?.banda,
+            limite: data?.limite,
+        });
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error en recomendación de cobertura');
+        throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+    }
+}
+exports.recommendCoverageCandidatesP1 = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .https.onCall(recommendCoverageCandidatesP1Handler);
+async function runDailyReplanP1Handler(data, context) {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
+    }
+    const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
+    await assertModuleReadAccess(context.auth.uid, tokenRole, 'OPERATIONS');
+    const empresaId = String(data?.empresaId ?? '').trim();
+    if (!empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'empresaId es obligatorio.');
+    }
+    await (0, panel_tenant_auth_util_1.assertPanelTenantCallable)(context, empresaId, undefined, 'No tenés permiso para ejecutar replan diario.');
+    try {
+        return await (0, operationalAutomationP1_1.runDailyReplanWindow)({
+            empresaId,
+            windowDays: data?.windowDays,
+            objectiveId: data?.objectiveId,
+            dryRun: data?.dryRun !== false,
+            autoApplyRet: data?.autoApplyRet === true,
+            maxVacancies: data?.maxVacancies,
+        });
+    }
+    catch (e) {
+        const msg = String(e?.message ?? e ?? 'Error en replan diario');
+        throw new functions.https.HttpsError('internal', msg.slice(0, 380));
+    }
+}
+exports.runDailyReplanP1 = functions
+    .runWith({ timeoutSeconds: 300, memory: '1GB' })
+    .https.onCall(runDailyReplanP1Handler);
 var vplan_1 = require("./vplan");
 Object.defineProperty(exports, "vplanRun", { enumerable: true, get: function () { return vplan_1.vplanRun; } });
 exports.runAutoSchedule = functions
@@ -1182,8 +1524,10 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
         throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
     }
-    const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
+    const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, onboardingTrack: rawOnboardingTrack, onboardingTracks: rawOnboardingTracks } = data;
     const roleNorm = (0, backup_auth_util_1.normalizeBackupRole)(role);
+    const onboardingTracks = await resolveOnboardingTracksForRole(roleNorm, rawOnboardingTracks, rawOnboardingTrack);
+    const onboardingTrack = onboardingTracks[0];
     const roleIsSuper = (0, backup_auth_util_1.isSuperAdminBackupRole)(roleNorm);
     const multiEmpresa = !roleIsSuper &&
         (rawAllEmpresas === true || String(rawEmpresaId ?? '').trim() === ALL_EMPRESAS_SENTINEL);
@@ -1220,6 +1564,18 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
             role: roleNorm,
             empresaId: targetEmpresaId,
             ...(allEmpresas ? { allEmpresas: true } : {}),
+            onboardingGuide: {
+                required: true,
+                track: onboardingTrack,
+                tracks: onboardingTracks,
+                completedTracks: [],
+                status: 'NOT_STARTED',
+                progressPct: 0,
+                currentStepId: null,
+                startedAt: null,
+                completedAt: null,
+                lastEventAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
             status: 'ACTIVE',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });
@@ -1254,6 +1610,223 @@ exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     }
     await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
     return { ok: true, uid: targetUid, role };
+});
+exports.updateOnboardingGuideProgress = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isPanelUser) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo usuarios de panel pueden registrar onboarding.');
+    }
+    const payload = (data || {});
+    const action = String(payload.action ?? 'PROGRESS').trim().toUpperCase();
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const userRef = admin.firestore().collection('system_users').doc(context.auth.uid);
+    const userSnap = await userRef.get();
+    if (!userSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Perfil de usuario no encontrado.');
+    }
+    const userData = userSnap.data() || {};
+    const currentGuide = userData.onboardingGuide || {};
+    const storedTracks = normalizeOnboardingTracks(currentGuide.tracks, currentGuide.track || payload.track);
+    const roleMeta = await loadRolePermissionsForOnboarding(userData.role);
+    const requiredTracks = filterTracksByRolePermissions(storedTracks, roleMeta.permissions, roleMeta.isSuperAdmin);
+    const requestedTrack = normalizeOnboardingTrack(payload.track ?? requiredTracks[0]);
+    const track = requiredTracks.includes(requestedTrack) ? requestedTrack : requiredTracks[0];
+    const stepId = typeof payload.stepId === 'string' && payload.stepId.trim() ? payload.stepId.trim() : null;
+    const progressRaw = Number(payload.progressPct ?? 0);
+    const progressPct = Number.isFinite(progressRaw) ? Math.min(100, Math.max(0, Math.round(progressRaw))) : 0;
+    const currentStatus = normalizeOnboardingStatus(currentGuide.status);
+    let completedTracks = normalizeCompletedTracks(currentGuide.completedTracks, requiredTracks);
+    const patch = {
+        'onboardingGuide.required': true,
+        'onboardingGuide.track': track,
+        'onboardingGuide.tracks': requiredTracks,
+        'onboardingGuide.lastEventAt': now,
+    };
+    let resultStatus = currentStatus;
+    let resultProgress = progressPct;
+    let resultStepId = stepId;
+    if (action === 'RESET') {
+        completedTracks = [];
+        patch['onboardingGuide.status'] = 'NOT_STARTED';
+        patch['onboardingGuide.progressPct'] = 0;
+        patch['onboardingGuide.currentStepId'] = null;
+        patch['onboardingGuide.startedAt'] = null;
+        patch['onboardingGuide.completedAt'] = null;
+        patch['onboardingGuide.completedChecklist'] = [];
+        patch['onboardingGuide.completedTracks'] = [];
+        resultStatus = 'NOT_STARTED';
+        resultProgress = 0;
+        resultStepId = null;
+    }
+    else if (action === 'PROGRESS') {
+        patch['onboardingGuide.currentStepId'] = stepId;
+        const base = requiredTracks.length
+            ? Math.round((completedTracks.length / requiredTracks.length) * 100)
+            : 0;
+        const blended = Math.max(base, Math.min(99, progressPct));
+        patch['onboardingGuide.progressPct'] = currentStatus === 'COMPLETED' ? 100 : blended;
+        resultProgress = currentStatus === 'COMPLETED' ? 100 : blended;
+        if (currentStatus !== 'COMPLETED') {
+            patch['onboardingGuide.status'] = blended > 0 || stepId || completedTracks.length ? 'IN_PROGRESS' : 'NOT_STARTED';
+            resultStatus = patch['onboardingGuide.status'];
+            if (!currentGuide?.startedAt && (blended > 0 || stepId || completedTracks.length)) {
+                patch['onboardingGuide.startedAt'] = now;
+            }
+        }
+        else {
+            resultStatus = 'COMPLETED';
+        }
+    }
+    else if (action === 'COMPLETE') {
+        const checklist = Array.isArray(payload.checklist)
+            ? payload.checklist.map((x) => String(x ?? '').trim()).filter(Boolean)
+            : [];
+        if (!checklist.length) {
+            throw new functions.https.HttpsError('invalid-argument', 'Checklist obligatorio para completar onboarding.');
+        }
+        if (!completedTracks.includes(track))
+            completedTracks = [...completedTracks, track];
+        const allDone = requiredTracks.every((t) => completedTracks.includes(t));
+        patch['onboardingGuide.completedTracks'] = completedTracks;
+        patch[`onboardingGuide.checklistByTrack.${track}`] = checklist.slice(0, 32);
+        patch['onboardingGuide.completedChecklist'] = checklist.slice(0, 32);
+        patch['onboardingGuide.currentStepId'] = stepId || 'cierre';
+        resultStepId = stepId || 'cierre';
+        if (!currentGuide?.startedAt)
+            patch['onboardingGuide.startedAt'] = now;
+        if (allDone) {
+            patch['onboardingGuide.status'] = 'COMPLETED';
+            patch['onboardingGuide.progressPct'] = 100;
+            patch['onboardingGuide.completedAt'] = now;
+            resultStatus = 'COMPLETED';
+            resultProgress = 100;
+        }
+        else {
+            const pct = Math.round((completedTracks.length / Math.max(1, requiredTracks.length)) * 100);
+            patch['onboardingGuide.status'] = 'IN_PROGRESS';
+            patch['onboardingGuide.progressPct'] = Math.min(99, Math.max(1, pct));
+            resultStatus = 'IN_PROGRESS';
+            resultProgress = Math.min(99, Math.max(1, pct));
+        }
+    }
+    else {
+        throw new functions.https.HttpsError('invalid-argument', `Acción de onboarding inválida: ${action}`);
+    }
+    await userRef.set(patch, { merge: true });
+    return {
+        ok: true,
+        onboardingGuide: {
+            required: true,
+            track,
+            tracks: requiredTracks,
+            completedTracks,
+            status: resultStatus,
+            progressPct: resultProgress,
+            currentStepId: resultStepId,
+        },
+    };
+});
+exports.assignOnboardingGuide = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const caller = await (0, backup_auth_util_1.resolveBackupCaller)(context.auth.uid, context.auth.token?.role);
+    if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden asignar onboarding.');
+    }
+    const payload = (data || {});
+    const targetUid = String(payload.uid ?? '').trim();
+    if (!targetUid) {
+        throw new functions.https.HttpsError('invalid-argument', 'Falta uid del usuario.');
+    }
+    const db = admin.firestore();
+    const targetRef = db.collection('system_users').doc(targetUid);
+    const targetSnap = await targetRef.get();
+    if (!targetSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Usuario de sistema no encontrado.');
+    }
+    const targetData = targetSnap.data() || {};
+    const targetEmpresa = String(targetData.empresaId ?? '').trim();
+    const targetAllEmpresas = targetData.allEmpresas === true;
+    if (!caller.isSuper) {
+        if (targetAllEmpresas || (0, backup_auth_util_1.isSuperAdminBackupRole)(targetData.role)) {
+            throw new functions.https.HttpsError('permission-denied', 'No podés modificar onboarding de SuperAdmin o multi-empresa.');
+        }
+        if (caller.profileEmpresa && targetEmpresa && targetEmpresa !== caller.profileEmpresa) {
+            throw new functions.https.HttpsError('permission-denied', 'Usuario de otra empresa.');
+        }
+    }
+    const required = payload.required !== false;
+    const tracks = await resolveOnboardingTracksForRole(targetData.role, payload.tracks, payload.track);
+    const track = tracks[0];
+    const resetProgress = payload.resetProgress !== false;
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    if (!required) {
+        await targetRef.set({
+            onboardingGuide: {
+                required: false,
+                track,
+                tracks,
+                completedTracks: tracks,
+                status: 'COMPLETED',
+                progressPct: 100,
+                currentStepId: null,
+                lastEventAt: now,
+            },
+        }, { merge: true });
+        return {
+            ok: true,
+            onboardingGuide: {
+                required: false,
+                track,
+                tracks,
+                completedTracks: tracks,
+                status: 'COMPLETED',
+                progressPct: 100,
+                currentStepId: null,
+            },
+        };
+    }
+    const currentGuide = targetData.onboardingGuide || {};
+    const patch = {
+        'onboardingGuide.required': true,
+        'onboardingGuide.track': track,
+        'onboardingGuide.tracks': tracks,
+        'onboardingGuide.lastEventAt': now,
+    };
+    if (resetProgress || currentGuide.required !== true) {
+        patch['onboardingGuide.status'] = 'NOT_STARTED';
+        patch['onboardingGuide.progressPct'] = 0;
+        patch['onboardingGuide.currentStepId'] = null;
+        patch['onboardingGuide.startedAt'] = null;
+        patch['onboardingGuide.completedAt'] = null;
+        patch['onboardingGuide.completedChecklist'] = [];
+        patch['onboardingGuide.completedTracks'] = [];
+    }
+    await targetRef.set(patch, { merge: true });
+    return {
+        ok: true,
+        onboardingGuide: {
+            required: true,
+            track,
+            tracks,
+            completedTracks: resetProgress || currentGuide.required !== true
+                ? []
+                : normalizeCompletedTracks(currentGuide.completedTracks, tracks),
+            status: resetProgress || currentGuide.required !== true
+                ? 'NOT_STARTED'
+                : normalizeOnboardingStatus(currentGuide.status),
+            progressPct: resetProgress || currentGuide.required !== true
+                ? 0
+                : Number(currentGuide.progressPct ?? 0),
+            currentStepId: resetProgress || currentGuide.required !== true
+                ? null
+                : (currentGuide.currentStepId ?? null),
+        },
+    };
 });
 function normalizeSystemRole(role) {
     return String(role ?? "").trim().toUpperCase().replace(/\s+/g, "_");

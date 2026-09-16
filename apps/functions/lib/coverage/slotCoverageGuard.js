@@ -87,11 +87,9 @@ async function slotCoverageStatus(db, slot) {
         const data = d.data();
         const dPos = normalizePosMatch(data.positionName);
         const coversPos = normalizePosMatch(data.coversPositionName);
-        if (pos && dPos !== pos && coversPos !== pos && isRealCovererDoc(data))
-            continue;
-        if (pos && dPos && dPos !== pos && isVacancyDoc(data))
-            continue;
         if (isVacancyDoc(data)) {
+            if (pos && dPos && dPos !== pos)
+                continue;
             const st = String(data.status || '').toUpperCase();
             if (st !== 'COVERED' && st !== 'CANCELLED' && st !== 'COMPLETED')
                 openVacancies++;

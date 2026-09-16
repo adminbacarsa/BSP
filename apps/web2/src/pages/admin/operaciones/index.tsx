@@ -37,6 +37,7 @@ import {
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
     isOrphanShiftNoiseNovedad,
+    isStaleIaAutomationNovedad,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import {
@@ -3257,6 +3258,7 @@ export default function OperacionesPage() {
     const [activeConvsList, setActiveConvsList] = useState<any[]>([]);
     const [convsPanelOpen, setConvsPanelOpen] = useState(true);
     const [notifPanelOpen, setNotifPanelOpen] = useState(false);
+    const [atendiendoTodasNovedades, setAtendiendoTodasNovedades] = useState(false);
     const [authorizedAbsences, setAuthorizedAbsences] = useState<any[]>([]);
     const [absencesPanelOpen, setAbsencesPanelOpen] = useState(false);
     // Refresh key: reconecta listeners al volver de background o recuperar red
@@ -3303,6 +3305,7 @@ export default function OperacionesPage() {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
+            if (isStaleIaAutomationNovedad(n, logic.processedData)) return false; // IA sobre vacantes/huecos de malla
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
@@ -3546,6 +3549,52 @@ export default function OperacionesPage() {
             );
             toast.success(`${toAtend.length} novedades descartadas`);
         } catch(e) { toast.error('Error al descartar novedades'); }
+    };
+
+    const handleAtenderTodasNovedades = async () => {
+        const toAtend = pendingNovedades;
+        if (!toAtend.length || atendiendoTodasNovedades) return;
+        const needsOpsAction = toAtend.some((n: any) =>
+            n.type === 'AUSENCIA_CORTO_PLAZO' ||
+            n.type === 'VACANTE_PROTOCOLO_COBERTURA' ||
+            n.type === 'POSICION_SIN_RELEVO' ||
+            n.type === 'RELEVO_NO_PRESENTADO',
+        );
+        const msg = needsOpsAction
+            ? `Marcar como atendidas las ${toAtend.length} alertas del panel.\n\nNo abre cobertura ni protocolos: solo las saca de la bandeja. ¿Continuar?`
+            : `¿Marcar como atendidas las ${toAtend.length} novedades del panel?`;
+        if (!window.confirm(msg)) return;
+
+        const auth = getAuth();
+        const actorName = auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+        setAtendiendoTodasNovedades(true);
+        try {
+            const CHUNK = 400;
+            for (let i = 0; i < toAtend.length; i += CHUNK) {
+                const batch = writeBatch(db);
+                toAtend.slice(i, i + CHUNK).forEach((n: any) => {
+                    batch.update(doc(db, 'novedades', n.id), {
+                        status: 'ATENDIDA',
+                        atendidaAt: serverTimestamp(),
+                        atendidaPor: actorName,
+                        atendidaPorUid: auth.currentUser?.uid || null,
+                        atendidaMasivo: true,
+                    });
+                });
+                await batch.commit();
+            }
+            registrarBitacoraOpsBg(
+                'ATENDER_NOVEDADES_MASIVO',
+                `Atendió ${toAtend.length} novedades desde panel Alertas (masivo).`,
+                empresaId,
+                { actorName },
+            );
+            toast.success(`${toAtend.length} novedades atendidas`);
+        } catch (e: any) {
+            toast.error('Error al atender novedades: ' + (e?.message || 'desconocido'));
+        } finally {
+            setAtendiendoTodasNovedades(false);
+        }
     };
 
     // Limpia novedades duplicadas: para cada (type, shiftId) con >1 pending,
@@ -6017,6 +6066,16 @@ export default function OperacionesPage() {
                                 <Siren size={14} className="text-rose-400"/>
                                 <span className="text-xs font-black uppercase text-white flex-1">Alertas</span>
                                 {totalAlertsCount > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlertsCount}</span>}
+                                {pendingNovedades.length > 0 && (
+                                    <button
+                                        type="button"
+                                        disabled={atendiendoTodasNovedades}
+                                        onClick={handleAtenderTodasNovedades}
+                                        className="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg hover:bg-white/10 disabled:opacity-50 shrink-0"
+                                    >
+                                        {atendiendoTodasNovedades ? '…' : 'Atender todas'}
+                                    </button>
+                                )}
                                 <button type="button" onClick={() => setNotifPanelOpen(false)} className="p-1 hover:bg-white/10 rounded-lg"><X size={14} className="text-slate-400"/></button>
                             </div>
                             <div className="flex-1 min-h-0 overflow-y-auto">
@@ -6030,7 +6089,7 @@ export default function OperacionesPage() {
                                                 <p className="text-slate-400 truncate">{s.positionName}</p>
                                             </div>
                                         ))}
-                                        {pendingNovedades.slice(0, 12).map((n: any) => {
+                                        {pendingNovedades.map((n: any) => {
                                             const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN', COBERTURA_RESUELTA:'CUBIERTO' };
                                             const label = tl[n.type] || (n.type || '').replace(/_/g,' ').slice(0,8).toUpperCase();
                                             const headline = novedadHeadline(n);
@@ -6083,6 +6142,17 @@ export default function OperacionesPage() {
                                 <Siren size={14} className="text-rose-400 shrink-0"/>
                                 <span className="font-black uppercase text-xs text-white flex-1">Alertas y Prioridad</span>
                                 {totalAlerts > 0 && <span className="bg-rose-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full">{totalAlerts}</span>}
+                                {pendingNovedades.length > 0 && (
+                                    <button
+                                        type="button"
+                                        disabled={atendiendoTodasNovedades}
+                                        onClick={handleAtenderTodasNovedades}
+                                        className="text-[9px] font-black uppercase text-emerald-400 hover:text-emerald-300 px-2 py-1 rounded-lg hover:bg-white/10 disabled:opacity-50 shrink-0"
+                                        title="Marcar todas las novedades como atendidas"
+                                    >
+                                        {atendiendoTodasNovedades ? '…' : 'Atender todas'}
+                                    </button>
+                                )}
                                 {pendingNovedades.some((n: any) => pendingNovedades.filter((x: any) => x.type === n.type && x.shiftId === n.shiftId).length > 1) && (
                                     <button onClick={cleanupDuplicateNovedades} title="Limpiar alertas duplicadas" className="p-1.5 hover:bg-amber-500/30 rounded-lg transition-colors text-amber-400" >
                                         <RefreshCw size={12}/>

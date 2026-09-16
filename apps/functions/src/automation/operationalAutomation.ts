@@ -173,6 +173,115 @@ function isOpsCoverageShift(row: TurnoDoc): boolean {
   );
 }
 
+function planificacionPublishLookupKey(objectiveId: string, year: number, month: number): string {
+  return `${String(objectiveId ?? '').trim()}_${year}_${month}`;
+}
+
+function isShiftUnassigned(row: TurnoDoc): boolean {
+  const empId = String(row.employeeId ?? '').trim();
+  return !empId || empId.toUpperCase() === 'VACANTE' || row.isUnassigned === true;
+}
+
+function isRealOperativeVacancy(row: TurnoDoc): boolean {
+  if (!isShiftUnassigned(row)) return false;
+  const origin = String(row.origin ?? '');
+  return (
+    origin === 'VACANTE_POR_AUSENCIA' ||
+    origin === 'VACANTE_CORRECCION' ||
+    origin === 'VACANTE_POR_EVENTO' ||
+    origin === 'INTERRUPTION' ||
+    origin === 'VACANTE_OPERATIVA' ||
+    row.vacancyOrigin === 'ABSENCE' ||
+    !!row.causedByShiftId ||
+    !!row.causedByEmployeeId
+  );
+}
+
+function isOperationalOriginForOps(row: TurnoDoc, code: string): boolean {
+  const origin = String(row.origin ?? '');
+  const isClientRefuerzoPlanificado =
+    origin === 'CLIENT_REQUEST' && (code === 'RFZ' || code === 'TURA');
+  return (
+    origin === 'RETEN' ||
+    origin === 'OPERATIONS_COVERAGE' ||
+    origin === 'SLA_VIRTUAL' ||
+    (origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado) ||
+    origin === 'EVENTO' ||
+    row.isReten === true ||
+    row.resolvedBy === 'OPERACIONES'
+  );
+}
+
+/** Hueco de malla publicada sin guardia: Operaciones no lo muestra como vacante accionable. */
+function isPlannedCellWithoutAssignee(row: TurnoDoc, code: string): boolean {
+  if (!isShiftUnassigned(row)) return false;
+  if (isRealOperativeVacancy(row)) return false;
+  if (row.isSinCobertura === true) return false;
+  if (code === 'RFZ' || code === 'TURA') return false;
+  if (row.status === 'REPORTED_TO_PLANNING' || row.isReported === true) return false;
+  return true;
+}
+
+function isRetPassiveWithoutCheckin(row: TurnoDoc, code: string): boolean {
+  if (code === 'RET') return row.isPresent !== true;
+  if (row.origin === 'RETEN' || row.isReten === true) {
+    return row.isPresent !== true && row.resolvedBy !== 'OPERACIONES';
+  }
+  return false;
+}
+
+function shiftEligibleForIaAlert(row: TurnoDoc, start: Timestamp, publishedPlanKeys: Set<string>): boolean {
+  const code = normalizeCode(row.code);
+  if (row.draft === true || row.isVirtual === true || row.isFranco === true || isFrancoCode(code)) {
+    return false;
+  }
+  if (isShiftUnassigned(row)) return false;
+  if (row.status === 'COVERED' && row.isAbsent !== true) return false;
+  if (isPlannedCellWithoutAssignee(row, code)) return false;
+  if (isRetPassiveWithoutCheckin(row, code)) return false;
+
+  if (!isOperationalOriginForOps(row, code)) {
+    const ymd = arDateFromTimestamp(start);
+    const [y, m] = ymd.split('-').map(Number);
+    const objId = String(row.objectiveId ?? '').trim();
+    if (!objId || !publishedPlanKeys.has(planificacionPublishLookupKey(objId, y, m))) {
+      return false;
+    }
+    if (isPlannedCellWithoutAssignee(row, code)) return false;
+  }
+  return true;
+}
+
+function parsePlanificacionEstadoDocId(docId: string): { objectiveId: string; year: number; month: number } | null {
+  const parts = String(docId ?? '').split('_');
+  if (parts.length < 3) return null;
+  const month = parseInt(parts[parts.length - 1], 10);
+  const year = parseInt(parts[parts.length - 2], 10);
+  if (!Number.isFinite(month) || !Number.isFinite(year) || year < 2000) return null;
+  if (parts.length === 3) return { objectiveId: parts[0], year, month };
+  if (parts.length === 4) return { objectiveId: parts[1], year, month };
+  return { objectiveId: parts.slice(1, -2).join('_'), year, month };
+}
+
+async function loadPublishedPlanKeys(empresaId: string): Promise<Set<string>> {
+  const keys = new Set<string>();
+  const db = admin.firestore();
+  const snap = await db.collection('planificacion_estados').where('empresaId', '==', empresaId).limit(800).get();
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (!data.publishedAt) continue;
+    const objId = String(data.objectiveId ?? data.objetivoId ?? '').trim();
+    const y = Number(data.year ?? data.año);
+    const m = Number(data.month ?? data.mes);
+    if (objId && Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
+      keys.add(planificacionPublishLookupKey(objId, y, m));
+    }
+    const parsed = parsePlanificacionEstadoDocId(doc.id);
+    if (parsed) keys.add(planificacionPublishLookupKey(parsed.objectiveId, parsed.year, parsed.month));
+  }
+  return keys;
+}
+
 function sanitizeDocId(raw: string): string {
   return raw.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 220);
 }
@@ -375,6 +484,104 @@ function toNovedadDescription(data: {
   return `${data.employeeName} · ${data.objectiveName} · ${data.code} — ${data.detail}`;
 }
 
+type AlertNameContext = {
+  objectives: Map<string, string>;
+  employees: Map<string, string>;
+  publishedPlanKeys: Set<string>;
+};
+
+function etiquetaPareceIdFirestore(text: string, docId = ''): boolean {
+  const e = String(text || '').trim();
+  if (!e) return true;
+  const id = String(docId || '').trim();
+  if (id && (e === id || e === id.slice(0, 12))) return true;
+  return e.length >= 10 && !/\s/.test(e) && /^[a-zA-Z0-9_-]+$/.test(e);
+}
+
+function nombreLegibleEmpleadoRow(row: Record<string, unknown>): string {
+  const ln = String(row.lastName ?? '').trim();
+  const fn = String(row.firstName ?? '').trim();
+  if (ln && fn) return `${ln}, ${fn}`;
+  if (ln || fn) return [ln, fn].filter(Boolean).join(' ');
+  const nameRaw = String(row.name ?? row.nombre ?? '').trim();
+  if (nameRaw) return nameRaw.replace(/\s+/g, ' ').trim();
+  return '';
+}
+
+async function loadObjectiveNameMap(empresaId: string): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const db = admin.firestore();
+  const snap = await db.collection('clients').where('empresaId', '==', empresaId).limit(200).get();
+  for (const doc of snap.docs) {
+    const objetivos = (doc.data().objetivos ?? []) as Array<Record<string, unknown>>;
+    for (const o of objetivos) {
+      const id = String(o.id ?? o.objectiveId ?? '').trim();
+      const name = String(o.nombre ?? o.name ?? o.objetivoNombre ?? '').trim();
+      if (id && name && !etiquetaPareceIdFirestore(name, id)) map.set(id, name);
+    }
+  }
+  return map;
+}
+
+async function loadEmployeeNameMap(empresaId: string, employeeIds: string[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const db = admin.firestore();
+  const uniq = [...new Set(employeeIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (uniq.length === 0) return map;
+
+  const chunkSize = 100;
+  for (let i = 0; i < uniq.length; i += chunkSize) {
+    const chunk = uniq.slice(i, i + chunkSize);
+    const refs = chunk.map((id) => db.collection('empleados').doc(id));
+    const snaps = await db.getAll(...refs);
+    for (const s of snaps) {
+      if (!s.exists) continue;
+      const row = s.data() as Record<string, unknown>;
+      const empE = String(row.empresaId ?? '').trim();
+      if (empE && empE.toLowerCase() !== empresaId.toLowerCase()) continue;
+      const nombre = nombreLegibleEmpleadoRow(row);
+      if (nombre) map.set(s.id, nombre);
+    }
+  }
+
+  try {
+    const scoped = await db.collection('empleados').where('empresaId', '==', empresaId).limit(900).get();
+    for (const d of scoped.docs) {
+      if (map.has(d.id)) continue;
+      const nombre = nombreLegibleEmpleadoRow(d.data() as Record<string, unknown>);
+      if (nombre) map.set(d.id, nombre);
+    }
+  } catch {
+    // índice ausente en entornos viejos: batch por id alcanza
+  }
+  return map;
+}
+
+function resolveEmployeeDisplayName(row: TurnoDoc, ctx: AlertNameContext, employeeIdHint = ''): string {
+  const raw = String(row.employeeName ?? row.empleadoNombre ?? '').trim();
+  const empId = String(employeeIdHint || (row.employeeId ?? '')).trim();
+  if (raw && !etiquetaPareceIdFirestore(raw, empId)) {
+    if (raw.toUpperCase() === 'VACANTE') return 'Vacante';
+    return raw;
+  }
+  if (!empId) return 'Guardia sin nombre';
+  if (empId.toUpperCase() === 'VACANTE') return 'Vacante';
+  const fromMap = ctx.employees.get(empId);
+  if (fromMap) return fromMap;
+  return 'Guardia (sin nombre en legajo)';
+}
+
+function resolveObjectiveDisplayName(row: TurnoDoc, ctx: AlertNameContext): string {
+  const raw = String(row.objectiveName ?? row.objetivoNombre ?? '').trim();
+  const objId = String(row.objectiveId ?? '').trim();
+  if (raw && !etiquetaPareceIdFirestore(raw, objId)) return raw;
+  if (objId) {
+    const fromMap = ctx.objectives.get(objId);
+    if (fromMap) return fromMap;
+  }
+  return 'Objetivo sin nombre en CRM';
+}
+
 type DetectedAnomaly = {
   fingerprint: string;
   type: string;
@@ -391,20 +598,6 @@ type DetectedAnomaly = {
 function turnosTimestamp(row: TurnoDoc, key: 'startTime' | 'endTime' | 'realStartTime' | 'realEndTime'): Timestamp | null {
   const value = row[key];
   return value instanceof Timestamp ? value : null;
-}
-
-function turnoDisplayName(row: TurnoDoc): string {
-  const ln = String(row.employeeName ?? row.empleadoNombre ?? '').trim();
-  if (ln) return ln;
-  const id = String(row.employeeId ?? '').trim();
-  return id || 'Guardia sin nombre';
-}
-
-function turnoObjectiveName(row: TurnoDoc): string {
-  const o = String(row.objectiveName ?? row.objetivoNombre ?? '').trim();
-  if (o) return o;
-  const id = String(row.objectiveId ?? '').trim();
-  return id || 'Objetivo sin nombre';
 }
 
 async function queryShiftsForWindow(
@@ -445,6 +638,7 @@ function detectOperationalAnomalies(
   shifts: Array<{ id: string; data: TurnoDoc }>,
   now: Date,
   toleranceMinutes: number,
+  nameCtx: AlertNameContext,
 ): DetectedAnomaly[] {
   const anomalies: DetectedAnomaly[] = [];
   const tolMs = toleranceMinutes * 60 * 1000;
@@ -460,11 +654,11 @@ function detectOperationalAnomalies(
     const start = turnosTimestamp(row.data, 'startTime');
     const end = turnosTimestamp(row.data, 'endTime');
     if (!start || !end) continue;
-    if (row.data.draft === true || row.data.isVirtual === true || row.data.isFranco === true) continue;
+    if (!shiftEligibleForIaAlert(row.data, start, nameCtx.publishedPlanKeys)) continue;
     const employeeId = String(row.data.employeeId ?? '').trim();
     const objectiveId = String(row.data.objectiveId ?? '').trim();
-    const employeeName = turnoDisplayName(row.data);
-    const objectiveName = turnoObjectiveName(row.data);
+    const employeeName = resolveEmployeeDisplayName(row.data, nameCtx, employeeId);
+    const objectiveName = resolveObjectiveDisplayName(row.data, nameCtx);
     const nowMs = now.getTime();
     const startMs = start.toMillis();
     const endMs = end.toMillis();
@@ -562,8 +756,11 @@ function detectOperationalAnomalies(
 
   const byEmployee = new Map<string, Array<{ id: string; data: TurnoDoc }>>();
   for (const row of shifts) {
+    const start = turnosTimestamp(row.data, 'startTime');
+    if (!start) continue;
+    if (!shiftEligibleForIaAlert(row.data, start, nameCtx.publishedPlanKeys)) continue;
     const emp = String(row.data.employeeId ?? '').trim();
-    if (!emp) continue;
+    if (!emp || emp.toUpperCase() === 'VACANTE') continue;
     if (!byEmployee.has(emp)) byEmployee.set(emp, []);
     byEmployee.get(emp)!.push(row);
   }
@@ -574,7 +771,7 @@ function detectOperationalAnomalies(
         start: turnosTimestamp(r.data, 'startTime'),
         end: turnosTimestamp(r.data, 'endTime'),
       }))
-      .filter((r) => r.start && r.end)
+      .filter((r) => r.start && r.end && shiftEligibleForIaAlert(r.row.data, r.start!, nameCtx.publishedPlanKeys))
       .sort((a, b) => a.start!.toMillis() - b.start!.toMillis());
     for (let i = 1; i < ordered.length; i++) {
       const prev = ordered[i - 1];
@@ -582,8 +779,9 @@ function detectOperationalAnomalies(
       if (!prev.end || !cur.start) continue;
       if (prev.end.toMillis() > cur.start.toMillis() + 5 * 60 * 1000) {
         const codePrev = normalizeCode(prev.row.data.code);
-        const employeeName = turnoDisplayName(cur.row.data);
-        const objectiveName = turnoObjectiveName(cur.row.data);
+        const codeCur = normalizeCode(cur.row.data.code);
+        const employeeName = resolveEmployeeDisplayName(cur.row.data, nameCtx, emp);
+        const objectiveName = resolveObjectiveDisplayName(cur.row.data, nameCtx);
         const fp = `overlap__${prev.row.id}__${cur.row.id}`;
         anomalies.push({
           fingerprint: fp,
@@ -594,7 +792,10 @@ function detectOperationalAnomalies(
             employeeName,
             objectiveName,
             code: codePrev,
-            detail: `turnos superpuestos para empleado ${emp}`,
+            detail:
+              codePrev === codeCur
+                ? `turnos superpuestos (${codePrev}) para ${employeeName}`
+                : `turnos superpuestos (${codePrev} y ${codeCur}) para ${employeeName}`,
           }),
           shiftId: cur.row.id,
           employeeId: emp,
@@ -986,7 +1187,14 @@ export async function scanOperationalAlertsForEmpresa(
   const end = Timestamp.fromDate(new Date(now.getTime() + lookaheadHours * 3600000));
   const docs = await queryShiftsForWindow(empresaId, start, end, 2500);
   const shifts = docs.map((d) => ({ id: d.id, data: d.data() as TurnoDoc }));
-  const anomalies = detectOperationalAnomalies(shifts, now, toleranceMinutes);
+  const employeeIds = shifts.map((s) => String(s.data.employeeId ?? '').trim()).filter(Boolean);
+  const [objectives, employees, publishedPlanKeys] = await Promise.all([
+    loadObjectiveNameMap(empresaId),
+    loadEmployeeNameMap(empresaId, employeeIds),
+    loadPublishedPlanKeys(empresaId),
+  ]);
+  const nameCtx: AlertNameContext = { objectives, employees, publishedPlanKeys };
+  const anomalies = detectOperationalAnomalies(shifts, now, toleranceMinutes, nameCtx);
   const created = await persistOperationalAnomalies(empresaId, anomalies);
   const byType: Record<string, number> = {};
   for (const an of anomalies) byType[an.type] = (byType[an.type] ?? 0) + 1;

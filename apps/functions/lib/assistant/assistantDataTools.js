@@ -33,6 +33,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
 const assistantLiquidacionAggregate_1 = require("./assistantLiquidacionAggregate");
 const assistantSlaHours_1 = require("./assistantSlaHours");
+const operationalAutomation_1 = require("../automation/operationalAutomation");
 const planificacionEstadoKeys_1 = require("./planificacionEstadoKeys");
 const AR_DAY_OFFSET = '-03:00';
 exports.ASSISTANT_TURNOS_DIA_QUERY_LIMIT = 900;
@@ -3315,6 +3316,40 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
     else if (name === 'desactivar_modo_demo') {
         raw = await ejecutarToggleModoDemo(ctx, false);
     }
+    else if (name === 'resumen_alertas_operativas_ia') {
+        raw = await ejecutarResumenAlertasOperativasIa(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            solo_pendientes: args.solo_pendientes !== false,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'checklist_cierre_operativo_mes') {
+        raw = await ejecutarChecklistCierreOperativoMes(ctx, {
+            anio: args.anio != null ? Number(args.anio) : undefined,
+            mes: args.mes != null ? Number(args.mes) : undefined,
+            persistir_snapshot: args.persistir_snapshot !== false,
+        });
+    }
+    else if (name === 'recomendar_cobertura_vacante') {
+        raw = await ejecutarRecomendarCoberturaVacante(ctx, {
+            shift_id: args.shift_id != null ? String(args.shift_id) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            banda: args.banda != null ? String(args.banda) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'ejecutar_replan_diario') {
+        raw = await ejecutarReplanDiario(ctx, {
+            dias_ventana: args.dias_ventana != null ? Number(args.dias_ventana) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            simulacion: args.simulacion !== false,
+            aplicar_ret: args.aplicar_ret === true,
+            max_vacantes: args.max_vacantes != null ? Number(args.max_vacantes) : undefined,
+        });
+    }
     else {
         raw = { error: 'herramienta_desconocida', name };
     }
@@ -4013,6 +4048,182 @@ async function ejecutarToggleModoDemo(ctx, activar) {
         mensaje: activar
             ? '✓ Modo Demo **activado**. El sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos.'
             : '✓ Modo Demo **desactivado**. Los turnos ya no se procesarán automáticamente.',
+    };
+}
+async function ejecutarResumenAlertasOperativasIa(ctx, args) {
+    if (ctx.persona !== 'SYSTEM')
+        return { error: 'sin_permiso_alertas_ia' };
+    if (!ctx.empresaId.trim())
+        return { error: 'sin_empresa' };
+    if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'DASHBOARD', 'ANALYSIS', 'REPORTS'].includes(k))) {
+        return { error: 'sin_permiso_alertas_ia' };
+    }
+    const fecha = String(args.fecha || ctx.referenceDateYsMmDd).slice(0, 10);
+    const soloPendientes = args.solo_pendientes !== false;
+    const limite = Math.max(10, Math.min(120, Number(args.limite ?? 40)));
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    let q = db
+        .collection('novedades')
+        .where('empresaId', '==', ctx.empresaId)
+        .where('origin', '==', 'AUTOMATION_P0')
+        .where('createdAt', '>=', startTs)
+        .where('createdAt', '<', endTs)
+        .limit(limite);
+    if (soloPendientes) {
+        q = q.where('status', '==', 'pending');
+    }
+    const snap = await q.get();
+    const byType = {};
+    const muestra = snap.docs.map((doc) => {
+        const data = doc.data();
+        const type = String(data.type || 'ALERTA_IA');
+        byType[type] = (byType[type] ?? 0) + 1;
+        return {
+            tipo: type,
+            severidad: String(data.severity || 'medium'),
+            descripcion: String(data.description || data.title || '').slice(0, 180),
+            objectiveName: String(data.objectiveName || ''),
+            employeeName: String(data.employeeName || ''),
+            estado: String(data.status || 'pending'),
+        };
+    });
+    return {
+        fecha,
+        total_alertas: snap.size,
+        total_por_tipo: byType,
+        muestra_alertas: muestra.slice(0, 30),
+        criterio_estado: soloPendientes ? 'pending' : 'todos',
+        nota: 'Estas alertas se generan por escaneo automático de marcaciones y anomalías operativas.',
+    };
+}
+async function ejecutarChecklistCierreOperativoMes(ctx, args) {
+    if (ctx.persona !== 'SYSTEM')
+        return { error: 'sin_permiso_checklist_cierre' };
+    if (!ctx.empresaId.trim())
+        return { error: 'sin_empresa' };
+    if (!ctx.readableModuleKeys.some((k) => ['REPORTS', 'ANALYSIS', 'CONFIG', 'OPERATIONS'].includes(k))) {
+        return { error: 'sin_permiso_checklist_cierre' };
+    }
+    let year = Number(args.anio ?? 0);
+    let month = Number(args.mes ?? 0);
+    if (!year || !month) {
+        const p = parseYmd(ctx.referenceDateYsMmDd);
+        year = p.y;
+        month = p.m;
+    }
+    if (month < 1 || month > 12)
+        return { error: 'mes_invalido', mes: month };
+    const result = await (0, operationalAutomation_1.buildOperationalClosureChecklist)({
+        empresaId: ctx.empresaId,
+        year,
+        month,
+        persistSnapshot: args.persistir_snapshot !== false,
+    });
+    return {
+        periodo: result.period,
+        checks: result.checks,
+        totales: result.totals,
+        horas: result.horas,
+        prefactura: result.prefactura,
+        recomendaciones: result.recomendaciones,
+        mensaje_cierre: result.checks.listoParaCierre
+            ? `Checklist ${result.period}: listo para cierre operativo.`
+            : `Checklist ${result.period}: hay pendientes antes del cierre.`,
+    };
+}
+async function ejecutarRecomendarCoberturaVacante(ctx, args) {
+    if (ctx.persona !== 'SYSTEM')
+        return { error: 'sin_permiso_recomendar_cobertura' };
+    if (!ctx.empresaId.trim())
+        return { error: 'sin_empresa' };
+    if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'PLANNING', 'CONFIG'].includes(k))) {
+        return { error: 'sin_permiso_recomendar_cobertura' };
+    }
+    let objectiveId = args.id_objetivo?.trim() || undefined;
+    if (!objectiveId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objectiveId = found.id;
+    }
+    if (!args.shift_id && !objectiveId) {
+        return { error: 'falta_shift_o_objetivo' };
+    }
+    const { recommendCoverageCandidates } = await Promise.resolve().then(() => require('../automation/operationalAutomationP1'));
+    const result = await recommendCoverageCandidates({
+        empresaId: ctx.empresaId,
+        shiftId: args.shift_id,
+        objectiveId,
+        fecha: args.fecha || ctx.referenceDateYsMmDd,
+        banda: args.banda,
+        limite: args.limite,
+    });
+    return {
+        objetivo: result.objectiveName,
+        fecha: result.fecha,
+        banda: result.banda,
+        urgencia: result.urgency,
+        total_candidatos: result.candidates.length,
+        top_candidatos: result.candidates.slice(0, 8).map((c) => ({
+            empleado: c.employeeName,
+            paso_cascada: c.cascadeStep,
+            score: c.score,
+            costo: c.costScore,
+            riesgo: c.riskScore,
+            distancia_km: c.distanceKm,
+            motivo: c.reason,
+        })),
+        notas: result.notes,
+        mensaje: result.candidates.length > 0
+            ? `Mejor opción: ${result.candidates[0].employeeName} (${result.candidates[0].cascadeStep}, score ${result.candidates[0].score}).`
+            : 'Sin candidatos elegibles para esa vacante.',
+    };
+}
+async function ejecutarReplanDiario(ctx, args) {
+    if (ctx.persona !== 'SYSTEM')
+        return { error: 'sin_permiso_replan_diario' };
+    if (!ctx.empresaId.trim())
+        return { error: 'sin_empresa' };
+    if (!ctx.readableModuleKeys.some((k) => ['OPERATIONS', 'PLANNING', 'CONFIG'].includes(k))) {
+        return { error: 'sin_permiso_replan_diario' };
+    }
+    let objectiveId = args.id_objetivo?.trim() || undefined;
+    if (!objectiveId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objectiveId = found.id;
+    }
+    const dryRun = args.simulacion !== false;
+    const { runDailyReplanWindow } = await Promise.resolve().then(() => require('../automation/operationalAutomationP1'));
+    const result = await runDailyReplanWindow({
+        empresaId: ctx.empresaId,
+        windowDays: args.dias_ventana,
+        objectiveId,
+        dryRun,
+        autoApplyRet: !dryRun && args.aplicar_ret === true,
+        maxVacancies: args.max_vacantes,
+    });
+    return {
+        run_id: result.runId,
+        ventana_dias: result.windowDays,
+        vacantes_encontradas: result.vacanciesFound,
+        recomendaciones: result.recommendations,
+        borradores_creados: result.draftsCreated,
+        simulacion: result.dryRun,
+        muestra: result.items.slice(0, 15).map((it) => ({
+            fecha: it.date,
+            objetivo: it.objectiveName,
+            banda: it.code,
+            accion: it.action,
+            detalle: it.detail,
+            mejor: it.recommended
+                ? `${it.recommended.employeeName} (${it.recommended.cascadeStep})`
+                : null,
+        })),
+        mensaje: `Replan P1: ${result.vacanciesFound} vacante(s), ${result.recommendations} recomendación(es), ${result.draftsCreated} borrador(es). Run \`${result.runId}\`.`,
     };
 }
 //# sourceMappingURL=assistantDataTools.js.map

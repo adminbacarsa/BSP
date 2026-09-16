@@ -5,6 +5,47 @@
 
 const TRAILING_DASHES = /\s*[—\-–·.]{1,4}\s*$/g;
 
+/** Evita mostrar IDs Firestore como si fueran nombres de objetivo/guardia. */
+export function etiquetaPareceIdFirestore(text: string, docId = ''): boolean {
+    const e = String(text || '').trim();
+    if (!e) return true;
+    const id = String(docId || '').trim();
+    if (id && (e === id || e === id.slice(0, 12))) return true;
+    return e.length >= 10 && !/\s/.test(e) && /^[a-zA-Z0-9_-]+$/.test(e);
+}
+
+type IaAlertParsed = {
+    employeeName?: string;
+    objectiveName?: string;
+    code?: string;
+    detail?: string;
+};
+
+function parseIaAlertDescription(body: string): IaAlertParsed | null {
+    const raw = String(body || '').trim();
+    if (!raw) return null;
+    const sep = raw.indexOf(' — ');
+    if (sep < 0) return null;
+    const head = raw.slice(0, sep);
+    const detail = raw.slice(sep + 3).trim();
+    const headParts = head.split(' · ').map((p) => p.trim()).filter(Boolean);
+    if (headParts.length < 3) return null;
+    const [employeeName, objectiveName, code] = headParts;
+    return {
+        employeeName,
+        objectiveName: etiquetaPareceIdFirestore(objectiveName) ? undefined : objectiveName,
+        code,
+        detail: detail.replace(/\bpara empleado [a-zA-Z0-9_-]{10,}\b/gi, '').replace(/\s+/g, ' ').trim(),
+    };
+}
+
+function sanitizeDisplayLabel(text: string, docId = ''): string {
+    const t = String(text || '').trim();
+    if (!t) return '';
+    if (etiquetaPareceIdFirestore(t, docId)) return '';
+    return t;
+}
+
 export function novedadBodyText(n: any): string {
     const raw = String(n?.description || n?.message || n?.body || n?.motivo || '').trim();
     return raw.replace(TRAILING_DASHES, '').trim();
@@ -22,14 +63,26 @@ export function novedadActorName(n: any): string {
 }
 
 export function novedadHeadline(n: any): string {
-    const actor = novedadActorName(n);
-    const obj = String(n?.objectiveName || '').trim();
+    const type = String(n?.type || '');
+    const actor = sanitizeDisplayLabel(novedadActorName(n), String(n?.employeeId || ''));
+    let obj = sanitizeDisplayLabel(String(n?.objectiveName || '').trim(), String(n?.objectiveId || ''));
+
+    if (type.startsWith('IA_ALERTA_')) {
+        const parsed = parseIaAlertDescription(novedadBodyText(n));
+        const name = sanitizeDisplayLabel(parsed?.employeeName || actor, String(n?.employeeId || '')) || actor;
+        const place = parsed?.objectiveName || obj;
+        if (name && place) return `${name} · ${place}`;
+        if (name) return name;
+        const title = String(n?.title || '').trim();
+        if (title) return title;
+    }
+
     if (actor && obj) return `${actor} · ${obj}`;
     if (actor) return actor;
     if (obj) return obj;
     const title = String(n?.title || '').trim();
     if (title) return title;
-    return String(n?.type || 'Novedad').replace(/_/g, ' ');
+    return type.replace(/_/g, ' ') || 'Novedad';
 }
 
 /** Segunda línea: puesto / mensaje, sin repetir el nombre del headline. */
@@ -38,6 +91,17 @@ export function novedadSubline(n: any): string {
     const pos = String(n?.positionName || '').trim();
     const actor = novedadActorName(n);
     const type = String(n?.type || '');
+
+    if (type.startsWith('IA_ALERTA_')) {
+        const parsed = parseIaAlertDescription(body);
+        if (parsed?.detail) {
+            const codePart = parsed.code ? `${parsed.code} — ` : '';
+            return `${codePart}${parsed.detail}`;
+        }
+        if (body && !etiquetaPareceIdFirestore(body.split(' · ')[1] || '')) return body;
+        const title = String(n?.title || '').trim();
+        if (title) return title;
+    }
 
     if (type === 'COBERTURA_RESUELTA') {
         if (body) return body;
@@ -102,6 +166,22 @@ export function isHiddenFromOpsAlerts(n: any): boolean {
  * REC+12 / retención: ocultar si el turno ya no está presente en el monitor
  * (cerrado, fuera de ventana, u objetivo sin ACT) o si el horario ya venció hace rato (zombie).
  */
+/** Alertas IA ligadas a turnos que Ops no trata como guardia real (vacante de malla, fuera de monitor, etc.). */
+export function isStaleIaAutomationNovedad(n: any, processedData: any[]): boolean {
+    const type = String(n?.type || '');
+    if (!type.startsWith('IA_ALERTA_')) return false;
+    const shiftId = String(n?.shiftId || '').trim();
+    if (!shiftId) return true;
+    const shift = (processedData || []).find((s: any) => s.id === shiftId);
+    if (!shift) return true;
+    const empId = String(shift.employeeId || '').trim();
+    if (!empId || empId.toUpperCase() === 'VACANTE') return true;
+    if (shift.isFranco === true) return true;
+    if (shift.isCompleted === true) return true;
+    if (shift.status === 'COVERED' && shift.isAbsent !== true) return true;
+    return false;
+}
+
 export function isOrphanShiftNoiseNovedad(n: any, processedData: any[]): boolean {
     const type = String(n?.type || '');
     if (!SHIFT_TIED_NOISE_TYPES.has(type)) return false;
