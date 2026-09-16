@@ -146,7 +146,7 @@ export function TrainingCoachBubble() {
             {completing ? 'Guardando…' : 'Marcar paso como listo'}
           </button>
           <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 mt-1">
-            F4 detectará esto automáticamente
+            También se detecta automáticamente al completar la acción
           </p>
         </div>
       </div>

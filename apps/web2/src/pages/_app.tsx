@@ -11,9 +11,15 @@ import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
 import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 import { useAdminFcm } from '@/hooks/useAdminFcm';
+import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
+  return null;
+}
+
+function TrainingEvidenceWatcher() {
+  useTrainingEvidence();
   return null;
 }
 
@@ -73,6 +79,7 @@ export default function App({ Component, pageProps }: AppProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
         <AdminFcmRegistrar />
+        <TrainingEvidenceWatcher />
         <Component {...pageProps} />
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
         <TrainingCoachBubble />
