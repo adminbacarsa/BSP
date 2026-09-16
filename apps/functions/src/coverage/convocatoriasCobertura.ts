@@ -21,6 +21,7 @@ export interface ConvocatoriaCoberturaDoc {
   shiftId: string;           // vacante que se quiere cubrir
   objectiveId: string;
   objectiveName?: string;
+  positionName?: string;
   clientId?: string;
   clientName?: string;
   shiftCode?: string;        // M/T/N/D12/N12
@@ -81,16 +82,43 @@ async function crearNotifConvocatoria(
     LLEGADA_TARDE: '¿Estás en camino?',
   };
 
+  const tz = 'America/Argentina/Buenos_Aires';
   const startDate =
     conv.startTime instanceof Timestamp
-      ? conv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
-      : '--:--';
+      ? conv.startTime.toDate()
+      : null;
+  const endDate =
+    conv.endTime instanceof Timestamp
+      ? conv.endTime.toDate()
+      : null;
+  const horaInicio = startDate
+    ? startDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
+    : '--:--';
+  const horaFin = endDate
+    ? endDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
+    : '';
+  const fechaTurno = startDate
+    ? startDate.toLocaleDateString('es-AR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        timeZone: tz,
+      })
+    : '';
+
+  const lugar = [conv.clientName, conv.objectiveName, conv.positionName]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ');
+  const lugarTxt = lugar || 'objetivo / puesto';
+  const horarioTxt = horaFin ? `${horaInicio}–${horaFin}` : horaInicio;
+  const codigo = String(conv.shiftCode || '').trim();
 
   const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
   const title = isLlegadaTarde ? '⏰ ¿Estás en camino?' : `[${urgencyLabel}] Cobertura requerida`;
-  const body  = isLlegadaTarde
-    ? `Tu turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'el puesto'} comenzó a las ${startDate}. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
-    : `${typeLabel[conv.type]} en ${conv.objectiveName || 'el puesto'} — turno ${conv.shiftCode || ''} ${startDate}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
+  const body = isLlegadaTarde
+    ? `Tu turno ${codigo} en ${lugarTxt} (${fechaTurno} ${horarioTxt}) ya comenzó. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
+    : `${typeLabel[conv.type]} en ${lugarTxt}. Turno ${codigo || '—'} · ${fechaTurno} ${horarioTxt}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
 
   await db.collection('user_notifications').add({
     uid: conv.candidateUid || null,
@@ -102,6 +130,13 @@ async function crearNotifConvocatoria(
     convocatoriaId: conv.id,
     shiftId: conv.shiftId,
     objectiveId: conv.objectiveId,
+    objectiveName: conv.objectiveName || null,
+    positionName: conv.positionName || null,
+    clientId: conv.clientId || null,
+    clientName: conv.clientName || null,
+    shiftCode: conv.shiftCode || null,
+    startTime: conv.startTime || null,
+    endTime: conv.endTime || null,
     read: false,
     readAt: null,
     createdAt: FieldValue.serverTimestamp(),
@@ -892,6 +927,7 @@ export const crearConvocatoriaCobertura = functions
       shiftId,
       objectiveId: String(shift.objectiveId || ''),
       objectiveName: String(shift.objectiveName || ''),
+      positionName: String(shift.positionName || ''),
       clientId: String(shift.clientId || ''),
       clientName: String(shift.clientName || ''),
       shiftCode: String(shift.code || ''),
@@ -1175,16 +1211,27 @@ async function asignarRETDirecto(
   const startTime = retConv.startTime instanceof Timestamp
     ? retConv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
     : '--:--';
+  const lugar = [baseConv.clientName, baseConv.objectiveName, baseConv.positionName]
+    .map((s) => String(s || '').trim())
+    .filter(Boolean)
+    .join(' · ') || 'el puesto';
   await db.collection('user_notifications').add({
     uid: candidate.uid || null,
     employeeId: candidate.id,
     type: 'CONVOCATORIA_COBERTURA',
     title: '⚡ Turno RET asignado',
-    body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${baseConv.objectiveName || 'el puesto'} desde las ${startTime}. Confirmá lectura.`,
+    body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${lugar} desde las ${startTime}. Confirmá lectura.`,
     empresaId: baseConv.empresaId,
     convocatoriaId: convId,
     shiftId: baseConv.shiftId,
     objectiveId: baseConv.objectiveId,
+    objectiveName: baseConv.objectiveName || null,
+    positionName: baseConv.positionName || null,
+    clientId: baseConv.clientId || null,
+    clientName: baseConv.clientName || null,
+    shiftCode: baseConv.shiftCode || null,
+    startTime: baseConv.startTime || null,
+    endTime: baseConv.endTime || null,
     isReadReceipt: true,
     read: false,
     readAt: null,
@@ -1198,6 +1245,7 @@ export interface ShiftDataForCascade {
   id: string;
   objectiveId: string;
   objectiveName?: string;
+  positionName?: string;
   clientId?: string;
   clientName?: string;
   code?: string;
@@ -1242,6 +1290,7 @@ export async function iniciarCascadaCobertura(
     shiftId: shift.id,
     objectiveId: String(shift.objectiveId || ''),
     objectiveName: String(shift.objectiveName || ''),
+    positionName: String(shift.positionName || ''),
     clientId: String(shift.clientId || ''),
     clientName: String(shift.clientName || ''),
     shiftCode: String(shift.code || ''),

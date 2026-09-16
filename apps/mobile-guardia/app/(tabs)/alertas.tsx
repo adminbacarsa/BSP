@@ -29,9 +29,40 @@ import {
 import { getPortalCallables, isEmulatorMode } from '../../src/lib/portal';
 import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
+import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-core';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
+
+function formatShiftWindow(n: PortalInboxItem): string | null {
+  const start = n.startTime ? toDate(n.startTime as never) : null;
+  const end = n.endTime ? toDate(n.endTime as never) : null;
+  if (!start && !n.shiftCode) return null;
+  const parts: string[] = [];
+  if (n.shiftCode) parts.push(`Código ${n.shiftCode}`);
+  if (start) {
+    const day = start.toLocaleDateString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    const hi = start.toLocaleTimeString('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    const hf = end
+      ? end.toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'America/Argentina/Buenos_Aires',
+        })
+      : '';
+    parts.push(hf ? `${day} ${hi}–${hf}` : `${day} ${hi}`);
+  }
+  return parts.join(' · ');
+}
 
 function hrefFromRoute(route: string): Href {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
@@ -357,6 +388,9 @@ function AlertasScreenContent() {
           const busy = busyId === n.id;
           const route = routeFromNotificationData({ type: n.type });
           const settled = !needsAck && !isCoverage && (n.read || !!n.ackedAt);
+          const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
+          const detailLines = portalInboxDetailLines(n);
+          const shiftWindow = formatShiftWindow(n);
 
           if (settled) {
             return (
@@ -380,6 +414,16 @@ function AlertasScreenContent() {
                   >
                     {n.title || 'Alerta'}
                   </Text>
+                  {receivedAt ? (
+                    <Text style={[styles.metaLine, { color: palette.onSurfaceMuted }]} numberOfLines={1}>
+                      Recibida {receivedAt}
+                    </Text>
+                  ) : null}
+                  {detailLines[0] ? (
+                    <Text style={[styles.metaLine, { color: palette.onSurfaceMuted }]} numberOfLines={1}>
+                      {detailLines[0]}
+                    </Text>
+                  ) : null}
                 </View>
                 <CommandButton
                   label={busy ? '…' : 'Quitar'}
@@ -414,13 +458,30 @@ function AlertasScreenContent() {
                   <Text style={[styles.nueva, { color: palette.error }]}>Nueva</Text>
                 )}
               </View>
+              {receivedAt ? (
+                <Text style={[styles.receivedAt, { color: palette.onSurfaceMuted }]}>
+                  Recibida {receivedAt}
+                </Text>
+              ) : null}
               <Text style={[styles.inboxTitle, { color: palette.onSurface }]}>
                 {n.title || 'Alerta'}
               </Text>
               {n.body ? (
-                <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+                <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={4}>
                   {n.body}
                 </Text>
+              ) : null}
+              {detailLines.length > 0 || shiftWindow ? (
+                <View style={[styles.detailBox, { backgroundColor: palette.inputBg, borderColor: palette.cardBorder }]}>
+                  {detailLines.map((line) => (
+                    <Text key={line} style={[styles.detailLine, { color: palette.onSurface }]}>
+                      {line}
+                    </Text>
+                  ))}
+                  {shiftWindow ? (
+                    <Text style={[styles.detailLine, { color: palette.onSurface }]}>{shiftWindow}</Text>
+                  ) : null}
+                </View>
               ) : null}
               <View style={styles.rowBtns}>
                 {isCoverage ? (
@@ -536,6 +597,17 @@ const styles = StyleSheet.create({
   inboxTitle: { fontWeight: '800', fontSize: 15 },
   inboxTitleCompact: { fontWeight: '700', fontSize: 13, marginTop: 2 },
   inboxBody: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  receivedAt: { fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  metaLine: { fontSize: 11, marginTop: 2, lineHeight: 15 },
+  detailBox: {
+    marginTop: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  detailLine: { fontSize: 12, fontWeight: '700', lineHeight: 17 },
   rowBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   btnFlex: { flexGrow: 1, flexBasis: '45%', minWidth: 120 },
 });

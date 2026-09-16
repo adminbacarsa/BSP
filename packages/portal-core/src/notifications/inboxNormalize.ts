@@ -12,10 +12,25 @@ export type PortalInboxNormalized = {
   createdAt?: unknown;
   shiftId?: string;
   objectiveId?: string;
+  objectiveName?: string;
+  positionName?: string;
+  clientName?: string;
+  clientId?: string;
+  shiftCode?: string;
+  startTime?: unknown;
+  endTime?: unknown;
+  convocatoriaId?: string;
+  protocoloStep?: string;
   solicitudId?: string;
   eventoId?: string;
   servicioId?: string;
 };
+
+function asOptionalString(v: unknown): string | undefined {
+  if (typeof v !== 'string') return undefined;
+  const t = v.trim();
+  return t ? t : undefined;
+}
 
 export function normalizePortalInboxItem(
   id: string,
@@ -33,11 +48,20 @@ export function normalizePortalInboxItem(
     requiresAck: raw.requiresAck === true,
     ackedAt: raw.ackedAt,
     createdAt: raw.createdAt,
-    shiftId: typeof raw.shiftId === 'string' ? raw.shiftId : undefined,
-    objectiveId: typeof raw.objectiveId === 'string' ? raw.objectiveId : undefined,
-    solicitudId: typeof raw.solicitudId === 'string' ? raw.solicitudId : undefined,
-    eventoId: typeof raw.eventoId === 'string' ? raw.eventoId : undefined,
-    servicioId: typeof raw.servicioId === 'string' ? raw.servicioId : undefined,
+    shiftId: asOptionalString(raw.shiftId),
+    objectiveId: asOptionalString(raw.objectiveId),
+    objectiveName: asOptionalString(raw.objectiveName ?? raw.objetivoNombre),
+    positionName: asOptionalString(raw.positionName ?? raw.puestoNombre ?? raw.puesto),
+    clientName: asOptionalString(raw.clientName ?? raw.clienteNombre),
+    clientId: asOptionalString(raw.clientId),
+    shiftCode: asOptionalString(raw.shiftCode ?? raw.code ?? raw.codigoTurno),
+    startTime: raw.startTime ?? raw.shiftStartTime ?? undefined,
+    endTime: raw.endTime ?? raw.shiftEndTime ?? undefined,
+    convocatoriaId: asOptionalString(raw.convocatoriaId),
+    protocoloStep: asOptionalString(raw.protocolStep ?? raw.protocoloStep),
+    solicitudId: asOptionalString(raw.solicitudId),
+    eventoId: asOptionalString(raw.eventoId),
+    servicioId: asOptionalString(raw.servicioId),
   };
 }
 
@@ -58,4 +82,14 @@ export function solicitudEventoStatusLabel(status: string): string {
     default:
       return status || '—';
   }
+}
+
+/** Líneas de detalle turno/objetivo para la tarjeta de alerta. */
+export function portalInboxDetailLines(n: PortalInboxNormalized): string[] {
+  const lines: string[] = [];
+  const lugar = [n.clientName, n.objectiveName, n.positionName].filter(Boolean);
+  if (lugar.length) lines.push(lugar.join(' · '));
+  const codigo = n.shiftCode ? `Turno ${n.shiftCode}` : null;
+  if (codigo) lines.push(codigo);
+  return lines;
 }

@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Linking, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import type { Shift } from '@cosp/portal-types';
-import { formatDateAr, formatTimeAr, toDate } from '@cosp/portal-core';
+import { formatDateAr, formatTimeAr, toDate, isAbsentLikeShift } from '@cosp/portal-core';
 import { radius, shadow, typography } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
 import { CommandBadge } from './CommandButton';
@@ -18,8 +18,9 @@ type Props = {
   placement?: ShiftPlacement;
   /** @deprecated usar placement */
   objective?: ShiftPlacement['objectiveLocation'];
+  /** @deprecated la empresa ya figura en el header; se ignora */
   empresaNombre?: string;
-  /** En curso → "Turno actual"; futuro → "Próximo turno" */
+  /** En curso → "Turno actual"; futuro → "Próximo turno"; ausente → "Ausente" */
   sectionLabel?: string;
   footer?: ReactNode;
   statusSlot?: ReactNode;
@@ -31,7 +32,6 @@ export function HeroShiftPanel({
   shift,
   placement: placementProp,
   objective,
-  empresaNombre,
   sectionLabel = 'Próximo turno',
   footer,
   statusSlot,
@@ -48,20 +48,23 @@ export function HeroShiftPanel({
       : mapsTarget?.address
         ? `https://www.google.com/maps/search/${encodeURIComponent(mapsTarget.address)}`
         : null;
+  const isAbsentHero =
+    sectionLabel === 'Ausente' ||
+    (!!shift && isAbsentLikeShift(shift as unknown as Record<string, unknown>));
 
   const inner = (
     <>
       <View style={styles.topRow}>
-        <Text style={[styles.sectionLabel, { color: palette.heroSubtext }]}>{sectionLabel}</Text>
-        {empresaNombre ? (
-          <View style={[styles.empresaPill, { borderColor: palette.chipBg }]}>
-            <Text style={[styles.empresaText, { color: palette.heroSubtext }]} numberOfLines={1}>
-              {empresaNombre}
-            </Text>
-          </View>
-        ) : null}
+        <Text
+          style={[
+            styles.sectionLabel,
+            { color: isAbsentHero ? '#fde68a' : palette.heroSubtext },
+          ]}
+        >
+          {sectionLabel}
+        </Text>
       </View>
-      {isDark ? (
+      {isDark && !isAbsentHero ? (
         <View style={styles.darkStatusRow}>
           <View style={[styles.statusDot, { backgroundColor: palette.success }]} />
           <Text style={[styles.sectionLabel, { color: palette.success }]}>OPERATIVO</Text>
@@ -84,7 +87,23 @@ export function HeroShiftPanel({
         </View>
       ) : null}
 
-      {shift?.isFranco ? (
+      {isAbsentHero ? (
+        <View
+          style={[
+            styles.francoBox,
+            {
+              backgroundColor: isDark ? 'rgba(245,158,11,0.18)' : 'rgba(245,158,11,0.22)',
+              borderColor: '#f59e0b',
+            },
+          ]}
+        >
+          <Text style={[styles.francoText, { color: isDark ? '#fbbf24' : '#78350f' }]}>
+            Ausente — no corresponde asistir a este turno
+          </Text>
+        </View>
+      ) : null}
+
+      {shift?.isFranco && !isAbsentHero ? (
         <View
           style={[
             styles.francoBox,
@@ -98,7 +117,7 @@ export function HeroShiftPanel({
         </View>
       ) : null}
 
-      {mapsUrl ? (
+      {mapsUrl && !isAbsentHero ? (
         <Text style={[styles.mapsLink, { color: palette.heroSubtext }]} onPress={() => Linking.openURL(mapsUrl)}>
           Cómo llegar →
         </Text>
@@ -117,7 +136,9 @@ export function HeroShiftPanel({
           shadow.hero,
           {
             backgroundColor: palette.card,
-            borderColor: palette.heroBorderAccent ?? palette.cardBorder,
+            borderColor: isAbsentHero
+              ? '#f59e0b'
+              : palette.heroBorderAccent ?? palette.cardBorder,
           },
         ]}
       >
@@ -127,7 +148,10 @@ export function HeroShiftPanel({
   }
 
   return (
-    <LinearGradient colors={palette.heroGradient} style={[styles.hero, shadow.hero]}>
+    <LinearGradient
+      colors={isAbsentHero ? ['#b45309', '#92400e'] : palette.heroGradient}
+      style={[styles.hero, shadow.hero]}
+    >
       <View style={styles.orbTop} />
       <View style={styles.orbBottom} />
       <View style={[styles.inner, isCompact && styles.innerCompact]}>{inner}</View>
@@ -201,15 +225,6 @@ const styles = StyleSheet.create({
   sectionLabel: {
     ...typography.sectionLabel,
   },
-  empresaPill: {
-    maxWidth: '46%',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-  },
-  empresaText: { fontSize: 10, fontWeight: '800' },
   headline: {
     fontSize: 26,
     fontWeight: '900',

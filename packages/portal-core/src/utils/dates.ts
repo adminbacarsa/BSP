@@ -22,3 +22,21 @@ export function formatTimeAr(val: FirestoreTimestampLike): string {
   const d = toDate(val);
   return d ? d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '-';
 }
+
+/** Fecha + hora AR (dd/MM/yyyy HH:mm) para bandeja de alertas. */
+export function formatDateTimeAr(val: FirestoreTimestampLike): string {
+  const d = toDate(val);
+  if (!d) return '';
+  const date = d.toLocaleDateString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  const time = d.toLocaleTimeString('es-AR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'America/Argentina/Buenos_Aires',
+  });
+  return `${date} ${time}`;
+}
