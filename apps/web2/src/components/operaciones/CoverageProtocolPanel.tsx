@@ -122,14 +122,25 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
 
   // ─── Candidatos por paso ─────────────────────────────────────────────────
 
-  const busyIds = new Set<string>(
+  const assignedAnyTodayIds = new Set<string>(
     (logic.processedData || [])
-      .filter((s: any) => isSameDay(s.shiftDateObj, now) && !s.isFranco && s.code !== 'RET' && s.code !== 'ESC' && s.code !== 'REF')
-      .map((s: any) => s.employeeId)
+      .filter((s: any) => {
+        if (!isSameDay(s.shiftDateObj, now)) return false;
+        const eid = String(s.employeeId || '').trim();
+        if (!eid || eid === 'VACANTE') return false;
+        if (s.isUnassigned === true || s.isVirtual === true) return false;
+        return true;
+      })
+      .map((s: any) => String(s.employeeId)),
   );
 
   const candidatesBySin: any[] = (logic.employees || [])
-    .filter((e: any) => !busyIds.has(e.id) && e.id !== absenceShift.employeeId)
+    .filter((e: any) => {
+      const id = String(e.id || '').trim();
+      if (!id || id === absenceShift.employeeId) return false;
+      if (assignedAnyTodayIds.has(id)) return false;
+      return true;
+    })
     .map((e: any) => ({ ...e, fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '', phone: e.phone || e.celular || '' }));
 
   const candidatesRet: any[] = (logic.processedData || [])
@@ -158,7 +169,11 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
     .slice(0, 1);
 
   const candidatesFt: any[] = (logic.processedData || [])
-    .filter((s: any) => s.isFranco && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado)
+    .filter((s: any) => {
+      const code = String(s.code || '').trim().toUpperCase();
+      const isFrancoDay = s.isFranco === true || code === 'F' || code === 'FF' || code === 'FP';
+      return isFrancoDay && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado && code !== 'FT';
+    })
     .map((s: any) => {
       const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
       return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };
