@@ -6,6 +6,10 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 import { getAuth } from 'firebase/auth';
+import {
+  buildEmployeesAssignedToday,
+  collectFrancoShiftRowsToday,
+} from '@/lib/operaciones/coverageAssignedToday';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 
@@ -122,16 +126,10 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
 
   // ─── Candidatos por paso ─────────────────────────────────────────────────
 
-  const assignedAnyTodayIds = new Set<string>(
-    (logic.processedData || [])
-      .filter((s: any) => {
-        if (!isSameDay(s.shiftDateObj, now)) return false;
-        const eid = String(s.employeeId || '').trim();
-        if (!eid || eid === 'VACANTE') return false;
-        if (s.isUnassigned === true || s.isVirtual === true) return false;
-        return true;
-      })
-      .map((s: any) => String(s.employeeId)),
+  const assignedAnyTodayIds = buildEmployeesAssignedToday(
+    logic.rawShifts,
+    logic.processedData,
+    now,
   );
 
   const candidatesBySin: any[] = (logic.employees || [])
@@ -168,12 +166,7 @@ export function CoverageProtocolPanel({ isOpen, onClose, absenceShift, logic, on
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
     .slice(0, 1);
 
-  const candidatesFt: any[] = (logic.processedData || [])
-    .filter((s: any) => {
-      const code = String(s.code || '').trim().toUpperCase();
-      const isFrancoDay = s.isFranco === true || code === 'F' || code === 'FF' || code === 'FP';
-      return isFrancoDay && isSameDay(s.shiftDateObj, now) && !s.isFrancoTrabajado && code !== 'FT';
-    })
+  const candidatesFt: any[] = collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
     .map((s: any) => {
       const emp = (logic.employees || []).find((e: any) => e.id === s.employeeId);
       return { ...s, fullName: s.employeeName, phone: s.phone || emp?.phone || emp?.celular || '' };

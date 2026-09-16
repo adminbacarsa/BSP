@@ -24,6 +24,10 @@ import {
   supersedeOpsCoveragesForAbsence,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
+import {
+  buildEmployeesAssignedToday,
+  collectFrancoShiftRowsToday,
+} from '@/lib/operaciones/coverageAssignedToday';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -130,19 +134,17 @@ const resolveCoverageShiftForEmployee = (
   employeeId: string,
   stepKey: StepKey,
   now: Date,
+  rawShifts?: any[],
 ): any | null => {
   const eid = String(employeeId || '').trim();
   if (!eid) return null;
+  if (stepKey === 'FT') {
+    return collectFrancoShiftRowsToday(rawShifts, processedData, now)
+      .find((sh: any) => String(sh.employeeId || '').trim() === eid) || null;
+  }
   const todayRows = (processedData || []).filter(
     (sh: any) => String(sh.employeeId || '').trim() === eid && isSameDay(sh.shiftDateObj, now),
   );
-  if (stepKey === 'FT') {
-    return todayRows.find((sh: any) => {
-      const code = normBandCode(sh.code);
-      const isFrancoDay = sh.isFranco === true || code === 'F' || code === 'FF' || code === 'FP';
-      return isFrancoDay && !sh.isFrancoTrabajado && code !== 'FT' && sh.isVirtual !== true;
-    }) || null;
-  }
   if (stepKey === 'RET_PASIVO') {
     return todayRows.find((sh: any) => normBandCode(sh.code) === 'RET' && !sh.isAbsent && sh.isVirtual !== true) || null;
   }
@@ -355,16 +357,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
    * Sin turno = sin NINGUNA celda de malla hoy (ni M/T/N, ni F/FF/FP, ni RET/ESC/REF, ni V/L…).
    * Los de franco van al paso FT, no acá.
    */
-  const assignedAnyTodayIds = new Set<string>(
-    (logic.processedData || [])
-      .filter((sh: any) => {
-        if (!isSameDay(sh.shiftDateObj, now)) return false;
-        const eid = String(sh.employeeId || '').trim();
-        if (!eid || eid === 'VACANTE') return false;
-        if (sh.isUnassigned === true || sh.isVirtual === true) return false;
-        return true;
-      })
-      .map((sh: any) => String(sh.employeeId)),
+  const assignedAnyTodayIds = buildEmployeesAssignedToday(
+    logic.rawShifts,
+    logic.processedData,
+    now,
   );
 
   // Empleados con afinidad al objetivo ausente (trabajaron allí hoy o tienen turno allí)
@@ -427,17 +423,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       case 'RETENCION':
         return [];
       case 'FT':
-        return (logic.processedData || [])
-          .filter((sh: any) => {
-            const code = String(sh.code || '').trim().toUpperCase();
-            const isFrancoDay = sh.isFranco === true || code === 'F' || code === 'FF' || code === 'FP';
-            return isFrancoDay && isSameDay(sh.shiftDateObj, now) && !sh.isFrancoTrabajado && code !== 'FT' && !crossSessionBusy.has(sh.employeeId);
-          })
+        return collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
+          .filter((sh: any) => !crossSessionBusy.has(sh.employeeId))
           .map((sh: any) => {
             const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
             return {
               ...sh,
-              fullName: sh.employeeName,
+              fullName: sh.employeeName || emp?.fullName || emp?.name || '',
               phone: sh.phone || emp?.phone || emp?.celular || '',
               hasAffinity: objectiveAffinity.has(sh.employeeId),
             };
@@ -518,7 +510,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const turnoId =
         cand.id && String(cand.id) !== String(empId)
           ? String(cand.id)
-          : resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now)?.id;
+          : resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts)?.id;
       onUpd({
         status: 'PENDING',
         pending: { notifId: ref.id, empId, sec: step.timeoutSec, shiftId: turnoId || undefined },
@@ -536,7 +528,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       (s.pending.shiftId
         ? (logic.processedData || []).find((sh: any) => sh.id === s.pending!.shiftId)
         : null)
-      || resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now);
+      || resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts);
     const empRow = (logic.employees || []).find((e: any) => e.id === empId);
     const cand = coverageShift || empRow || (logic.processedData || []).find((sh: any) => sh.employeeId === empId);
     if (!cand) return;
@@ -578,7 +570,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       } else {
         shiftId = String(s.pending.shiftId || coverageShift?.id || '').trim() || null;
         if (!shiftId || shiftId === empId) {
-          const resolved = resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now);
+          const resolved = resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts);
           shiftId = resolved?.id ? String(resolved.id) : null;
         }
         if (!shiftId) {

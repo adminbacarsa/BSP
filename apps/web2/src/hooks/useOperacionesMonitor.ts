@@ -7,6 +7,7 @@ import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
+import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -133,13 +134,14 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'TODOS':
             // Devueltas y descubiertas no son “cola viva”: salen de TODOS/VAC.
             if (s.isUnassigned && (s.isReportedToPlanning || isVacancyDescubierto(s))) return false;
+            if (s.isPassiveRetStandby) return false;
             return !s.isFranco;
         case 'PRIORIDAD':
-            return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco;
+            return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco && !s.isPassiveRetStandby;
         case 'NO_LLEGO':
-            return (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad;
+            return (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad && !s.isPassiveRetStandby;
         case 'PLAN':
-            return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet;
+            return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet && !s.isPassiveRetStandby;
         case 'ACTIVOS':
             return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention;
         case 'RETENIDOS':
@@ -595,6 +597,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const isUnassigned = !isValidEmployee;
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
+            const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
             const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
             const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
@@ -685,15 +688,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
             const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
 
-            const isImminent = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
-            const isFuture = !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
+            const isImminent = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
+            const isFuture = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
             // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
-            const isLateNotified = !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
-            const isLateUnnotified = !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateNotified = !isPassiveRetStandby && !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
+            const isLateUnnotified = !isPassiveRetStandby && !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
             const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
             // Potencial ausencia: T+30 sin confirmar presencia — fallback si el cron no alcanzó a correr
-            const isPotentialAbsence = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
+            const isPotentialAbsence = !isPassiveRetStandby && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -703,7 +706,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
             // isSinCobertura / descubierto NO cuentan como cobertura real ni como VAC accionable.
-            const countsForCoverage = !isAutoNotification && (
+            const countsForCoverage = !isPassiveRetStandby && !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee) ||
                 (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
@@ -727,7 +730,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost,
                 duration: getDuration(shift.shiftDateObj, effectiveEndDateObj),
                 endDateObj: effectiveEndDateObj || shift.endDateObj,
-                countsForCoverage, isRetentionByField, isSinCobertura, isDescubierto,
+                countsForCoverage, isPassiveRetStandby, isRetentionByField, isSinCobertura, isDescubierto,
                 isRfzVacante, isTuraVacante, isTuraCutSegment,
                 turaRequiresSeparateCheckIn: isTuraCutSegment,
                 isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',

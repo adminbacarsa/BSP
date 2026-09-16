@@ -64,7 +64,9 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
           Number.isFinite(Number(obj.lng)),
       )
       .map((obj: any) => {
-        const shiftsInObjective = filteredShifts.filter((s: any) => normId(s.objectiveId) === normId(obj.id));
+        const shiftsInObjective = filteredShifts
+          .filter((s: any) => normId(s.objectiveId) === normId(obj.id))
+          .filter((s: any) => !s.isPassiveRetStandby);
         const eventShifts = shiftsInObjective.filter(isEventShift);
         const hasEvent = eventShifts.length > 0;
 
@@ -74,6 +76,7 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
 
         if (shiftsInObjective.length > 0) {
           shiftsInObjective.forEach((s: any) => {
+            if (s.isPassiveRetStandby) return;
             const now = new Date();
             const start = s.shiftDateObj
               ? s.shiftDateObj.seconds
