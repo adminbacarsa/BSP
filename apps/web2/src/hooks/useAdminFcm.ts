@@ -6,10 +6,11 @@ import { useEmpresa } from '@/context/EmpresaContext';
 
 export function useAdminFcm() {
   const { user, isAdmin } = useAuth();
-  const { empresaId } = useEmpresa();
+  const { empresa, empresaId } = useEmpresa();
 
   useEffect(() => {
     if (!user || !isAdmin) return;
+    if (empresa?.isTrainingEmpresa) return;
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
 
@@ -63,5 +64,5 @@ export function useAdminFcm() {
     })();
 
     return () => { cancelled = true; };
-  }, [user?.uid, isAdmin, empresaId]);
+  }, [user?.uid, isAdmin, empresa?.isTrainingEmpresa, empresaId]);
 }
