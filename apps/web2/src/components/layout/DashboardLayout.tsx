@@ -18,6 +18,8 @@ import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
+import { useTrainingSession } from '@/hooks/useTrainingSession';
+import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -302,17 +304,21 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   );
 }
 
-// ─── TRAINING BANNER ──────────────────────────────────────────────────────────
+// ─── TRAINING BANNER + PROGRESS ───────────────────────────────────────────────
 function TrainingBanner({ empresa }: { empresa: import('@/context/EmpresaContext').Empresa | null }) {
+  const { session } = useTrainingSession();
   if (!empresa?.isTrainingEmpresa) return null;
   return (
-    <div className="flex items-center gap-2 px-4 py-2 border-b text-sm font-medium shrink-0"
-      style={{ backgroundColor: 'rgba(251,191,36,0.15)', borderColor: 'rgba(251,191,36,0.4)', color: 'var(--tw-amber-700, #b45309)' }}>
-      <FlaskConical size={15} className="shrink-0 text-amber-500" />
-      <span className="text-amber-700 dark:text-amber-300">
-        Modo Capacitación — empresa sandbox. Los datos de práctica no afectan producción.
-      </span>
-    </div>
+    <>
+      <div className="flex items-center gap-2 px-4 py-2 border-b text-sm font-medium shrink-0"
+        style={{ backgroundColor: 'rgba(251,191,36,0.15)', borderColor: 'rgba(251,191,36,0.4)' }}>
+        <FlaskConical size={15} className="shrink-0 text-amber-500" />
+        <span className="text-amber-700 dark:text-amber-300">
+          Modo Capacitación — empresa sandbox. Los datos de práctica no afectan producción.
+        </span>
+      </div>
+      {session && <TrainingProgressPanel session={session} />}
+    </>
   );
 }
 
