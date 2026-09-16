@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, Clock
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, Clock, GraduationCap
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -41,6 +41,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/analisis'))        return 'Análisis';
   if (pathname.startsWith('/admin/supervision'))     return 'Supervisión';
   if (pathname.startsWith('/admin/kpis'))            return 'KPIs';
+  if (pathname.startsWith('/admin/capacitacion'))    return 'Capacitación';
   return null;
 }
 
@@ -759,6 +760,22 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                 </span>
               )}
             </Link>
+          )}
+
+          {empresa?.isTrainingEmpresa && (
+            <>
+              {sidebarOpen && (
+                <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
+                  style={{ color: 'var(--sb-section)' }}>Capacitación</div>
+              )}
+              {!sidebarOpen && <div className="h-2" />}
+              <Link href="/admin/capacitacion" prefetch={false} title="Vista Instructor"
+                className={getLinkHoverClass('/admin/capacitacion')}
+                style={getLinkStyle('/admin/capacitacion')}>
+                <GraduationCap size={18} className="shrink-0" />
+                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Vista Instructor</span>}
+              </Link>
+            </>
           )}
 
           {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && (

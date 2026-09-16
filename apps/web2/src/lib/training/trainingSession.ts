@@ -111,7 +111,7 @@ export function buildModulePlan(rolePermissions: Record<string, string[]>): stri
 }
 
 /** Inicializa el objeto de progreso para un plan de módulos dado */
-function initProgress(modulePlan: string[]): Record<string, ModuleProgress> {
+export function initProgress(modulePlan: string[]): Record<string, ModuleProgress> {
   const progress: Record<string, ModuleProgress> = {};
   for (const key of modulePlan) {
     progress[key] = { status: 'pending', stepsCompleted: [], attempts: 0 };
@@ -203,5 +203,18 @@ export async function completeStep(params: {
     currentModuleKey,
     status: allModulesDone ? 'completed' : 'active',
     updatedAt: serverTimestamp(),
+  });
+}
+
+/** Reinicia la sesión de un alumno (instructor) */
+export async function resetSession(sessionId: string, modulePlan: string[]): Promise<void> {
+  const ref = doc(db, 'training_sessions', sessionId);
+  await updateDoc(ref, {
+    status: 'active',
+    currentModuleKey: modulePlan[0] ?? null,
+    progress: initProgress(modulePlan),
+    startedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    completedAt: null,
   });
 }
