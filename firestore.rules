@@ -740,5 +740,21 @@ service cloud.firestore {
       allow update: if tenantAdminUpdate() || empleadoDocOwnedByAuth(resource.data.candidateEmployeeId);
       allow delete: if tenantAdminDelete();
     }
+
+    // Sesiones de capacitación sandbox (training_sessions).
+    // Doc id = {empresaId}_{userId}. El alumno (admin de empresa capacitación) lee y escribe la propia.
+    match /training_sessions/{sessionId} {
+      allow read:   if tenantAdminRead()
+                       || (isAdmin() && request.auth != null
+                           && sessionId == (userEmpresaId() + '_' + request.auth.uid));
+      allow create: if tenantAdminCreate()
+                       || (isAdmin() && request.auth != null
+                           && sessionId == (request.resource.data.empresaId + '_' + request.auth.uid)
+                           && request.resource.data.empresaId == userEmpresaId());
+      allow update: if tenantAdminUpdate()
+                       || (isAdmin() && request.auth != null
+                           && sessionId == (resource.data.empresaId + '_' + request.auth.uid));
+      allow delete: if tenantAdminDelete();
+    }
   }
 }
