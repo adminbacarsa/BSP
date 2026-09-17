@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import Head from 'next/head';
-import { 
-  Shield, Users, Clock, AlertTriangle, 
-  CheckCircle, Briefcase, MapPin, 
-  Activity, ArrowRight, Calendar 
-, AlertOctagon } from 'lucide-react';
+import {
+  Shield, Users, Clock, AlertTriangle,
+  CheckCircle, Briefcase, MapPin,
+  Activity, ArrowRight, Calendar,
+  GraduationCap,
+} from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { withAuthGuard } from '@/components/common/withAuthGuard';
+import { useEmpresa } from '@/context/EmpresaContext';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp } from 'firebase/firestore';
 
@@ -64,17 +66,19 @@ const ActivityHeatmap = ({ hourlyData }: { hourlyData: number[] }) => {
 };
 
 function AdminDashboard() {
+  const { empresa } = useEmpresa();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState<IDashboardStats>({ coverage: 0, vacancies: 0, totalHours: 0, activeGuards: 0, totalShifts: 0 });
   const [vacanciesList, setVacanciesList] = useState<IVacancy[]>([]);
   const [topClients, setTopClients] = useState<IClientLoad[]>([]);
   const [activityCurve, setActivityCurve] = useState<number[]>(new Array(24).fill(0));
-  
+
   const today = new Date();
+  const isTraining = !!empresa?.isTrainingEmpresa;
 
   useEffect(() => {
-    loadDashboardData();
-  }, []);
+    if (!isTraining) loadDashboardData();
+  }, [isTraining]);
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -178,12 +182,38 @@ function AdminDashboard() {
     }
   };
 
+  if (isTraining) {
+    return (
+      <DashboardLayout>
+        <Head><title>Capacitación | COSP</title></Head>
+        <div className="p-8 max-w-2xl mx-auto flex flex-col items-center justify-center min-h-[60vh] text-center gap-6">
+          <div className="w-16 h-16 rounded-2xl bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center">
+            <GraduationCap size={32} className="text-amber-500" />
+          </div>
+          <div>
+            <h1 className="text-2xl font-black text-slate-900 dark:text-white mb-2">
+              Modo Capacitación activo
+            </h1>
+            <p className="text-slate-500 dark:text-slate-400 text-sm leading-relaxed">
+              Estás en el entorno de práctica. El coach te guía paso a paso por cada módulo.
+              Las métricas y el monitor operativo están desactivados — usá el entorno para practicar
+              las acciones reales en cada sección.
+            </p>
+          </div>
+          <div className="text-xs text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-xl px-4 py-3">
+            Seguí las instrucciones del coach (abajo a la derecha) para avanzar por los módulos.
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
+
   return (
     <DashboardLayout>
       <Head><title>Dashboard | CronoApp</title></Head>
-      
+
       <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in">
-        
+
         {/* HEADER FECHA */}
         <div className="flex justify-between items-end mb-4">
             <div>
