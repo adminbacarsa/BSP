@@ -3633,6 +3633,7 @@ export default function CRMPage() {
                           setEditingObjectiveIndex(editingObjectiveIndex === -1 ? null : -1);
                         }}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-colors"
+                        data-action="nueva-sede"
                       >
                         <Plus size={13} /> Nueva Sede
                       </button>
@@ -3711,7 +3712,7 @@ export default function CRMPage() {
                           </div>
                         </label>
                         <div className="flex gap-2 pt-1">
-                          <button onClick={handleSaveObjective} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">
+                          <button onClick={handleSaveObjective} data-action="guardar-sede" className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">
                             Guardar
                           </button>
                           <button onClick={resetObjectiveForm} className="bg-white hover:bg-slate-50 border border-slate-200 px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">

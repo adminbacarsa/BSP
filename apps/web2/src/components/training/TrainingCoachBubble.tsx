@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
@@ -11,6 +11,20 @@ import { getActiveCoachStep, COACH_STEPS } from '@/lib/training/coachContent';
 import { TRAINABLE_MODULES } from '@/lib/training/trainingSession';
 import { completeStep } from '@/lib/training/trainingSession';
 import { TrainingSpotlight } from './TrainingSpotlight';
+
+const STORAGE_KEY = 'training-coach-pos';
+const BUBBLE_W = 320;
+
+function loadPos(): { x: number; y: number } | null {
+  try { const s = sessionStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function savePos(p: { x: number; y: number }) {
+  try { sessionStorage.setItem(STORAGE_KEY, JSON.stringify(p)); } catch {}
+}
+function defaultPos() {
+  return { x: window.innerWidth - BUBBLE_W - 24, y: window.innerHeight - 420 };
+}
 
 /** Convierte **texto** en negrita en JSX */
 function renderInstruction(text: string): React.ReactNode {
@@ -28,6 +42,37 @@ export function TrainingCoachBubble() {
   const router = useRouter();
   const [collapsed, setCollapsed] = useState(false);
   const [completing, setCompleting] = useState(false);
+
+  // ── Drag ────────────────────────────────────────────────────────────────────
+  const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
+  const dragData = useRef<{ startMX: number; startMY: number; origX: number; origY: number } | null>(null);
+
+  // Inicializar posición en el cliente
+  useEffect(() => {
+    setPos(loadPos() ?? defaultPos());
+  }, []);
+
+  const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('button')) return;
+    e.preventDefault();
+    const cur = pos ?? defaultPos();
+    dragData.current = { startMX: e.clientX, startMY: e.clientY, origX: cur.x, origY: cur.y };
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragData.current) return;
+      const nx = Math.max(0, Math.min(window.innerWidth - BUBBLE_W, dragData.current.origX + ev.clientX - dragData.current.startMX));
+      const ny = Math.max(0, Math.min(window.innerHeight - 80, dragData.current.origY + ev.clientY - dragData.current.startMY));
+      setPos({ x: nx, y: ny });
+    };
+    const onUp = () => {
+      dragData.current = null;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setPos(prev => { if (prev) savePos(prev); return prev; });
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [pos]);
 
   // Calcular coachStep antes de cualquier return condicional (reglas de hooks)
   const coachStep = session
@@ -57,8 +102,11 @@ export function TrainingCoachBubble() {
 
   // Si no hay paso activo, el recorrido terminó
   if (!coachStep) {
+    const doneStyle: React.CSSProperties = pos
+      ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: 288 }
+      : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: 288 };
     return (
-      <div className="fixed bottom-24 right-4 lg:bottom-6 lg:right-6 z-[900] w-72">
+      <div style={doneStyle}>
         <div className="rounded-2xl shadow-xl border border-green-200 dark:border-green-800 bg-white dark:bg-slate-900 p-4 text-sm">
           <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold mb-1">
             <CheckCircle2 size={16} />
@@ -75,11 +123,16 @@ export function TrainingCoachBubble() {
   const mod = TRAINABLE_MODULES.find(m => m.key === coachStep.moduleKey);
   const isOnTargetRoute = router.pathname.startsWith(coachStep.targetRoute);
 
+  const bubbleStyle: React.CSSProperties = pos
+    ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' }
+    : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' };
+
   if (collapsed) {
     return (
       <button
         onClick={() => setCollapsed(false)}
-        className="fixed bottom-24 right-4 lg:bottom-6 lg:right-6 z-[900] w-12 h-12 rounded-full shadow-lg flex items-center justify-center bg-amber-400 hover:bg-amber-500 text-white transition-colors"
+        style={bubbleStyle}
+        className="w-12 h-12 rounded-full shadow-lg flex items-center justify-center bg-amber-400 hover:bg-amber-500 text-white transition-colors"
         title="Coach de capacitación"
       >
         <GraduationCap size={20} />
@@ -92,11 +145,14 @@ export function TrainingCoachBubble() {
     {isOnTargetRoute && coachStep.highlightSelector && (
       <TrainingSpotlight selector={coachStep.highlightSelector} />
     )}
-    <div className="fixed bottom-24 right-4 lg:bottom-6 lg:right-6 z-[900] w-80 max-w-[calc(100vw-2rem)]">
+    <div style={bubbleStyle}>
       <div className="rounded-2xl shadow-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 overflow-hidden">
 
-        {/* Header */}
-        <div className="flex items-center gap-2 px-4 py-3 bg-amber-400 text-white">
+        {/* Header — arrastrable */}
+        <div
+          className="flex items-center gap-2 px-4 py-3 bg-amber-400 text-white cursor-grab active:cursor-grabbing select-none"
+          onMouseDown={onHeaderMouseDown}
+        >
           <GraduationCap size={16} className="shrink-0" />
           <div className="flex-1 min-w-0">
             <div className="text-xs font-black uppercase tracking-wide opacity-80">Coach</div>
