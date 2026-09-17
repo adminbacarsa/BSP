@@ -7,7 +7,11 @@ import type {
   CcSessionRow,
 } from '@/hooks/useSupervisionCcBoard';
 import type { ObjectiveLiveSummary } from '@/hooks/useSupervisionTablero';
-import { formatYmdDisplayAr } from '@/lib/supervision/supervisionUtils';
+import {
+  COVERAGE_STATUS_STYLES,
+  formatYmdDisplayAr,
+  rollupObjectiveCoverage,
+} from '@/lib/supervision/supervisionUtils';
 
 const TZ = 'America/Argentina/Cordoba';
 
@@ -86,10 +90,24 @@ export function downloadSupervisionCcDayPdf(input: CcDayReportPdfInput): void {
     pdf.setFont('helvetica', 'bold');
     pdf.text('Snapshot en vivo (objetivos):', 14, y);
     y += 6;
+    const objRollup = rollupObjectiveCoverage(
+      input.objectiveSummaries.map((o) => ({
+        vacantes: o.vacantes,
+        ausentes: o.ausentes,
+        alertas: o.alertas,
+      })),
+    );
     autoTable(pdf, {
       startY: y,
-      head: [['Activos', 'Vacantes', 'Ausentes', 'Alertas']],
-      body: [[String(input.totals.activos), String(input.totals.vacantes), String(input.totals.ausentes), String(input.totals.alertas)]],
+      head: [['Activos', 'Vacantes', 'Ausentes', 'Obj. sin huecos']],
+      body: [
+        [
+          String(input.totals.activos),
+          String(input.totals.vacantes),
+          String(input.totals.ausentes),
+          `${objRollup.withoutVacancies} / ${objRollup.total}`,
+        ],
+      ],
       styles: { fontSize: 9 },
       headStyles: { fillColor: [30, 64, 175] },
     });
@@ -186,7 +204,7 @@ export function downloadSupervisionCcDayPdf(input: CcDayReportPdfInput): void {
         String(o.activos),
         String(o.vacantes),
         String(o.ausentes),
-        o.status,
+        COVERAGE_STATUS_STYLES[o.status].label,
       ]),
       styles: { fontSize: 7 },
       headStyles: { fillColor: [30, 64, 175] },

@@ -90,6 +90,27 @@ export function objectiveCoverageStatus(stats: {
   return 'OK';
 }
 
+/** Agregado por objetivo (informes CC / PDF). "Cubierto" = sin vacantes; ausencias = incidencia. */
+export function rollupObjectiveCoverage(
+  rows: Array<{ vacantes: number; ausentes?: number; alertas?: number }>,
+): { total: number; withoutVacancies: number; withIncidents: number; critical: number } {
+  let withoutVacancies = 0;
+  let withIncidents = 0;
+  let critical = 0;
+  for (const r of rows) {
+    const stats = {
+      vacantes: r.vacantes,
+      ausentes: r.ausentes ?? 0,
+      alertas: r.alertas ?? 0,
+    };
+    const st = objectiveCoverageStatus(stats);
+    if (st === 'CRITICO') critical += 1;
+    else withoutVacancies += 1;
+    if (st === 'ALERTA') withIncidents += 1;
+  }
+  return { total: rows.length, withoutVacancies, withIncidents, critical };
+}
+
 export const COVERAGE_STATUS_STYLES: Record<'OK' | 'ALERTA' | 'CRITICO', { dot: string; bg: string; text: string; label: string }> = {
   OK: { dot: 'bg-emerald-500', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Cubierto' },
   ALERTA: { dot: 'bg-amber-500', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'Incidencia' },

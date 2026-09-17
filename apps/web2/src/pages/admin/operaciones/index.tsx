@@ -40,6 +40,7 @@ import {
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
     isOrphanShiftNoiseNovedad,
+    isStaleIaAutomationNovedad,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import {
@@ -49,6 +50,7 @@ import {
     writeManualAssistPreference,
 } from '@/lib/operaciones/opsMode';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
+import { rollupObjectiveCoverage } from '@/lib/supervision/supervisionUtils';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import {
@@ -2857,6 +2859,7 @@ export default function OperacionesPage() {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
+            if (isStaleIaAutomationNovedad(n, logic.processedData)) return false; // IA fuera de ventana CC
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
@@ -3310,6 +3313,7 @@ export default function OperacionesPage() {
             if (autoFinAttendedRef.current.has(n.id)) return false;
             if (n.type === 'TURNO_COMPLETADO_AUTO') return true;
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return true;
+            if (isStaleIaAutomationNovedad(n, logic.processedData)) return true;
             return false;
         });
         if (!stale.length) return;
@@ -3478,8 +3482,57 @@ export default function OperacionesPage() {
         const retainedNow    = todayShifts.filter((s: any) => s.isRetention);
         const vacantToday    = todayShifts.filter((s: any) => s.isUnassigned);
         const absentToday    = todayShifts.filter((s: any) => s.isAbsent || s.isPotentialAbsence);
-        const distinctObjs   = new Set(todayShifts.map((s:any)=>s.objectiveId).filter(Boolean));
-        const coveredObjs    = new Set(todayShifts.filter((s:any)=>s.isPresent||s.isCompleted).map((s:any)=>s.objectiveId).filter(Boolean));
+
+        const objMap = new Map<string, any>();
+        todayShifts.forEach((s: any) => {
+            if (!s.objectiveId) return;
+            if (s.isVirtual) return;
+            if (!objMap.has(s.objectiveId)) {
+                objMap.set(s.objectiveId, {
+                    name: s.objectiveName || s.objectiveId,
+                    plan: 0,
+                    activo: 0,
+                    compl: 0,
+                    ausente: 0,
+                    vacante: 0,
+                    ret: 0,
+                    planHrs: 0,
+                    realHrs: 0,
+                    tardanzas: 0,
+                });
+            }
+            const o = objMap.get(s.objectiveId);
+            o.plan++;
+            if (s.isPresent && !s.isCompleted) o.activo++;
+            if (s.isCompleted) o.compl++;
+            if (s.isAbsent || s.isPotentialAbsence) o.ausente++;
+            if (s.isUnassigned && !s.isReportedToPlanning) o.vacante++;
+            if (s.isRetention) o.ret++;
+            try {
+                const ph = (toDate(s.endDateObj).getTime() - toDate(s.shiftDateObj).getTime()) / 3600000;
+                if (ph > 0 && ph <= 24) o.planHrs += ph;
+            } catch { /* ignore */ }
+            if (s.isCompleted) {
+                const rs = s.realStartTime?.seconds ? new Date(s.realStartTime.seconds * 1000) : null;
+                const re = s.realEndTime?.seconds ? new Date(s.realEndTime.seconds * 1000) : null;
+                if (rs && re) {
+                    const h = (re.getTime() - rs.getTime()) / 3600000;
+                    if (h > 0 && h <= 36) o.realHrs += h;
+                }
+                const planS = toDate(s.shiftDateObj);
+                if (rs && (rs.getTime() - planS.getTime()) / 60000 > 5) o.tardanzas++;
+            }
+        });
+        const objRollup = rollupObjectiveCoverage(
+            Array.from(objMap.values()).map((o: any) => ({
+                vacantes: o.vacante,
+                ausentes: o.ausente,
+                alertas: 0,
+            })),
+        );
+        const objectiveCoveragePct =
+            objRollup.total > 0 ? Math.round((objRollup.withoutVacancies / objRollup.total) * 100) : 100;
+
         const totalPlanHrs   = todayShifts.filter((s:any)=>!s.isUnassigned).reduce((a:number,s:any)=>{ try{ return a+Math.max(0,(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000); }catch{return a;} },0);
         const totalRealHrs   = completedToday.reduce((a:number,s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null; if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; return h>0&&h<=36?a+h:a;} return a; },0);
         // Denominador: turnos operativos del día (excl. vacantes, francos y virtuales)
@@ -3492,11 +3545,22 @@ export default function OperacionesPage() {
         operationalShifts.forEach((s:any) => console.log(' -', s.employeeName||'?', '|', s.objectiveName||s.objectiveId||'?', '|', s.positionName||'?', '| status:', s.status||'?', '| isPresent:', s.isPresent, '| isCompleted:', s.isCompleted, '| isAbsent:', s.isAbsent));
         console.groupEnd();
         const coveredShifts  = completedToday.length + activeNow.length + retainedNow.length;
-        const coveragePct    = totalOpShifts > 0 ? Math.min(100, Math.round((coveredShifts / totalOpShifts) * 100)) : 0;
+        const vacantSlots    = todayShifts.filter(
+            (s: any) => s.isUnassigned && !s.isReportedToPlanning && !s.isVirtual && !s.isFranco,
+        ).length;
+        const shiftSlotCoveragePct =
+            totalOpShifts > 0 ? Math.min(100, Math.round(((totalOpShifts - vacantSlots) / totalOpShifts) * 100)) : 100;
+        const coveragePct    = objectiveCoveragePct;
         const punctualCount  = completedToday.filter((s:any)=>{ const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null; if(!rs)return true; return (rs.getTime()-toDate(s.shiftDateObj).getTime())/60000<=5; }).length;
         const punctualPct    = completedToday.length > 0 ? Math.round((punctualCount/completedToday.length)*100) : 100;
-        const hasIncidents   = (absentToday.length + vacantToday.length) > 0;
-        const statusLabel    = hasIncidents ? 'CON INCIDENCIAS' : 'NORMAL';
+        const hasCoverageGaps = vacantSlots > 0 || objRollup.critical > 0;
+        const hasPersonnelIncidents = absentToday.length > 0;
+        const hasIncidents   = hasCoverageGaps || hasPersonnelIncidents;
+        const statusLabel    = hasCoverageGaps
+            ? 'HUECOS DE COBERTURA'
+            : hasPersonnelIncidents
+              ? 'CON INCIDENCIAS'
+              : 'NORMAL';
 
         // ── Alertas deduplicadas ─────────────────────────────────────────────
         const noiseTypes = new Set(['RECARGO_12H','RETENCION_DETECTADA','RETENCION_LARGA','RETENCIÓN','RETENCION']);
@@ -3527,29 +3591,6 @@ export default function OperacionesPage() {
             return OPS_ACTIONS.has(a) || a.includes('CHECK') || a.includes('GUARD') || a.includes('TURNO') || a.includes('SHIFT') || a.includes('ABSENT') || a.includes('HANDOVER') || a.includes('COVERAGE') || a.includes('FRANCO') || a.includes('INTERRUPT');
         });
 
-        // ── Por objetivo ─────────────────────────────────────────────────────
-        const objMap = new Map<string,any>();
-        todayShifts.forEach((s:any) => {
-            if (!s.objectiveId) return;
-            if (s.isVirtual) return; // excluir slots SLA_VIRTUAL sintéticos del informe
-            if (!objMap.has(s.objectiveId)) objMap.set(s.objectiveId,{name:s.objectiveName||s.objectiveId,plan:0,activo:0,compl:0,ausente:0,vacante:0,ret:0,planHrs:0,realHrs:0,tardanzas:0});
-            const o = objMap.get(s.objectiveId);
-            o.plan++;
-            if (s.isPresent && !s.isCompleted) o.activo++;
-            if (s.isCompleted) o.compl++;
-            if (s.isAbsent || s.isPotentialAbsence) o.ausente++;
-            if (s.isUnassigned && !s.isReportedToPlanning) o.vacante++;
-            if (s.isRetention) o.ret++;
-            try { const ph=(toDate(s.endDateObj).getTime()-toDate(s.shiftDateObj).getTime())/3600000; if(ph>0&&ph<=24)o.planHrs+=ph; } catch {}
-            if (s.isCompleted) {
-                const rs=s.realStartTime?.seconds?new Date(s.realStartTime.seconds*1000):null;
-                const re=s.realEndTime?.seconds?new Date(s.realEndTime.seconds*1000):null;
-                if(rs&&re){const h=(re.getTime()-rs.getTime())/3600000; if(h>0&&h<=36)o.realHrs+=h;}
-                const planS=toDate(s.shiftDateObj);
-                if(rs&&(rs.getTime()-planS.getTime())/60000>5)o.tardanzas++;
-            }
-        });
-
         // ═══════════════════════════════════════════════════════════════════════
         // PÁGINA 1 — PORTADA
         // ═══════════════════════════════════════════════════════════════════════
@@ -3562,7 +3603,11 @@ export default function OperacionesPage() {
         pdf.text(sanitize(empresaNombre), pageW / 2, 58, { align: 'center' });
         pdf.setFontSize(10);
         pdf.text(fmtDateLong(now).toUpperCase(), pageW / 2, 72, { align: 'center' });
-        const badgeColor: [number,number,number] = hasIncidents ? [220,38,38] : [5,150,105];
+        const badgeColor: [number,number,number] = hasCoverageGaps
+            ? [220, 38, 38]
+            : hasPersonnelIncidents
+              ? [217, 119, 6]
+              : [5, 150, 105];
         pdf.setFillColor(...badgeColor);
         pdf.roundedRect(pageW/2 - 32, 80, 64, 11, 2, 2, 'F');
         pdf.setFontSize(9); pdf.setFont('helvetica', 'bold');
@@ -3607,7 +3652,12 @@ export default function OperacionesPage() {
         pdf.setFont('helvetica', 'bold'); pdf.text('CIERRE / REPORTE:', col1, metaY + 16);
         pdf.setFont('helvetica', 'normal'); pdf.text(sanitize(reportTime), col1 + 41, metaY + 16);
         pdf.setFont('helvetica', 'bold'); pdf.text('TURNOS CUBIERTOS:', col2, metaY);
-        pdf.setFont('helvetica', 'normal'); pdf.text(`${coveredShifts} / ${totalOpShifts} (${coveragePct}%)`, col2 + 44, metaY);
+        pdf.setFont('helvetica', 'normal');
+        pdf.text(
+            `${objRollup.withoutVacancies} / ${objRollup.total} obj. (${coveragePct}%) · turnos ${coveredShifts}/${totalOpShifts}`,
+            col2 + 44,
+            metaY,
+        );
         pdf.setFont('helvetica', 'bold'); pdf.text('HORAS PLANIFICADAS:', col2, metaY + 8);
         pdf.setFont('helvetica', 'normal'); pdf.text(`${totalPlanHrs.toFixed(1)} hs`, col2 + 46, metaY + 8);
         pdf.setFont('helvetica', 'bold'); pdf.text('HORAS EJECUTADAS:', col2, metaY + 16);
@@ -3623,7 +3673,8 @@ export default function OperacionesPage() {
                 ['Turnos planificados hoy', String(totalOpShifts),       'Guardias presentes',        String(logic.stats.activos)],
                 ['Turnos completados',       String(completedToday.length),'Retenciones activas',      String(logic.stats.retenidos)],
                 ['Vacantes sin cubrir',      String(logic.stats.vacantes), 'Ausencias registradas',    String(absentToday.length)],
-                ['Objetivos con cobertura',  `${coveredObjs.size} / ${distinctObjs.size}`,'% Turnos cubiertos',`${coveragePct}%`],
+                ['Objetivos sin huecos', `${objRollup.withoutVacancies} / ${objRollup.total}`, '% Objetivos cubiertos', `${objectiveCoveragePct}%`],
+                ['Turnos en puesto/fin.', String(coveredShifts), '% Turnos sin vacante', `${shiftSlotCoveragePct}%`],
                 ['Horas planificadas',       `${totalPlanHrs.toFixed(1)} hs`,'Horas ejecutadas (compl.)',`${totalRealHrs.toFixed(1)} hs`],
                 ['Indice de puntualidad',    `${punctualPct}%`,            'Alertas registradas',      String(dedupedAlerts.length)],
                 ['Alertas pendientes',       String(pendingNovedades.length),'Estado de guardia',       statusLabel],
@@ -3642,7 +3693,12 @@ export default function OperacionesPage() {
                 if (data.section==='body' && data.column.index===3) {
                     const v = String(data.cell.raw);
                     if (v===statusLabel && hasIncidents) { data.cell.styles.textColor=[220,38,38]; data.cell.styles.fontStyle='bold'; }
-                    if (v.endsWith('%') && parseInt(v)<80 && v!==`${punctualPct}%`) data.cell.styles.textColor=[220,38,38];
+                    if (v.endsWith('%') && parseInt(v, 10) < 80 && v !== `${punctualPct}%` && v !== `${shiftSlotCoveragePct}%`) {
+                        data.cell.styles.textColor = [220, 38, 38];
+                    }
+                    if (v === `${objectiveCoveragePct}%` && objectiveCoveragePct >= 90) {
+                        data.cell.styles.textColor = [5, 150, 105];
+                    }
                 }
                 if (data.section==='body' && data.column.index===1) {
                     const v = String(data.cell.raw);
@@ -3681,7 +3737,15 @@ export default function OperacionesPage() {
                 if (data.section==='body') {
                     const col = data.column.index;
                     const v = parseInt(String(data.cell.raw));
-                    if ((col===4||col===5) && v>0) { data.cell.styles.textColor=[220,38,38]; data.cell.styles.fontStyle='bold'; }
+                    if (col === 5 && v > 0) {
+                        data.cell.styles.textColor = [220, 38, 38];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
+                    if (col === 4 && v > 0) {
+                        const vac = parseInt(String(objRows[data.row.index]?.[5] ?? '0'), 10);
+                        data.cell.styles.textColor = vac > 0 ? [220, 38, 38] : [217, 119, 6];
+                        data.cell.styles.fontStyle = 'bold';
+                    }
                     if (col===8) {
                         const pct = parseInt(String(data.cell.raw));
                         if (pct>=90) data.cell.styles.textColor=[5,150,105];
