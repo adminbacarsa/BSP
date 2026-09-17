@@ -22,7 +22,7 @@ import {
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
-import { db, getDocsOnce, functions } from '@/lib/firebase';
+import { db, getDocsOnce, functions, onSnapshotFresh } from '@/lib/firebase';
 import { httpsCallable } from 'firebase/functions';
 import { eventoService, eventosParaFecha, serviciosParaFecha, calcHorasEvento, type Evento, type ServicioEvento } from '@/services/eventoService';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
@@ -108,6 +108,7 @@ import {
     buildPlanificacionEstadoDocId,
     planificacionPublishLookupKey,
     fetchPlanificacionEstadoDoc,
+    fetchPlanificacionPublishStatus,
     fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
@@ -170,12 +171,14 @@ import {
     setCachedPlanningMonth,
 } from '@/lib/planificacion/planningMonthCache';
 import { planningMonthAccess, classifyYearMonth } from '@/lib/dataRetention';
-import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
+import { ingestPlanningTurnosSnapshot, planningShiftViewFromSnap } from '@/lib/planificacion/planningTurnosIngest';
+import type { OpsCoverageTooltipContext } from '@/lib/planificacion/opsCoverageCellTooltip';
 import {
     buildPlanningEventosCellsByDay,
     formatPlanningEventosTooltip,
 } from '@/lib/planificacion/planningEventosExtras';
 import { formatShiftClockRange, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
+import { buildOpsCoverageCellTooltip } from '@/lib/planificacion/opsCoverageCellTooltip';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -1104,7 +1107,12 @@ export default function PlanificacionPage() {
         try { return JSON.parse(localStorage.getItem('planif_emp_order') || '{}'); } catch { return {}; }
     });
     const [dragOverVisual, setDragOverVisual] = useState<number | null>(null);
-    const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null } | null>(null);
+    const [shiftTooltip, setShiftTooltip] = useState<{ label: string | null; pos: string | null; range: string | null; x: number; y: number; restHours?: number | null; readOnlyOps?: boolean } | null>(null);
+    const [opsCoverageDetailModal, setOpsCoverageDetailModal] = useState<{
+        guardName: string;
+        dateLabel: string;
+        body: string;
+    } | null>(null);
     const [secondBlockMap, setSecondBlockMap] = useState<Record<string, { startTime: any; endTime: any }>>({});
     const [coverageTooltip, setCoverageTooltip] = useState<{
         dateStr: string;
@@ -1904,6 +1912,31 @@ export default function PlanificacionPage() {
         }
         return out;
     }, [forceShowAll, dotacionPoolReady, selectedObjective, selectedObjectiveData, employees, dotacionBaseEmployees, nearbyKmRadius, deferredDotacionPoolSearch, dotacionPoolType, daysInMonth, pendingChanges, shiftsMap]);
+
+    const planningShiftById = useMemo(() => {
+        const m: Record<string, any> = {};
+        Object.values(shiftsMap).forEach((s) => {
+            if (s?.id) m[s.id] = s;
+        });
+        Object.values(cellTurnosMap).forEach((arr) => {
+            arr.forEach((s) => {
+                if (s?.id) m[s.id] = s;
+            });
+        });
+        return m;
+    }, [shiftsMap, cellTurnosMap]);
+
+    const opsCoverageTooltipCtxFor = useCallback(
+        (shift: any, coverGuardName: string): OpsCoverageTooltipContext => {
+            const absId = String(shift?.absenceShiftId || shift?.coveredShiftId || '').trim();
+            return {
+                coverGuardName,
+                getEmployeeName: (id) => employees.find((e: any) => e.id === id)?.name,
+                titularShift: absId ? planningShiftById[absId] : null,
+            };
+        },
+        [employees, planningShiftById],
+    );
 
     const displayedEmployees = useMemo(() => {
         let list = dotacionBaseEmployees;
@@ -5066,29 +5099,50 @@ export default function PlanificacionPage() {
         gruposService.getByEmpresa(empresaId).then(setGrupos);
     }, [empresaId]);
 
-    // Cargar estado de publicación cuando cambia objetivo o mes
+    // Estado de publicación (tenant + legacy) + listener para no quedar en BORRADOR tras publicar en otra pestaña.
     useEffect(() => {
-        if (!selectedObjective) return;
+        if (!selectedObjective || !empresaId) return;
         const year = currentDate.getFullYear();
         const month = currentDate.getMonth() + 1;
         const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
-        fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
-            .then(row => {
-                // Solo publishedAt marca publicación. Asignar puestos crea el mismo doc sin publicar.
-                if (row && row.data.publishedAt) {
-                    setPublishStatusMap(prev => ({
+        const primaryId = buildPlanificacionEstadoDocId(empresaId, selectedObjective, year, month);
+        const legacyId = buildPlanificacionEstadoDocId('', selectedObjective, year, month);
+
+        const syncPublishStatus = () => {
+            fetchPlanificacionPublishStatus(empresaId, selectedObjective, year, month)
+                .then((st) => {
+                    setPublishStatusMap((prev) => ({
                         ...prev,
-                        [lookupKey]: {
-                            publishedAt: row.data.publishedAt,
-                            publishedBy: String(row.data.publishedBy ?? ''),
-                        },
+                        [lookupKey]: st
+                            ? { publishedAt: st.publishedAt, publishedBy: st.publishedBy }
+                            : null,
                     }));
-                } else {
-                    setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-                }
+                })
+                .catch(() => {
+                    setPublishStatusMap((prev) => ({ ...prev, [lookupKey]: null }));
+                });
+        };
+
+        fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month)
+            .then((row) => {
                 const disabled = (row?.data.rotacionesDesactivadasMes as string[] | undefined) ?? [];
                 setMesRotacionesDesactivadas(new Set(disabled));
-            }).catch(() => { setMesRotacionesDesactivadas(new Set()); });
+            })
+            .catch(() => {
+                setMesRotacionesDesactivadas(new Set());
+            });
+
+        syncPublishStatus();
+
+        const unsubs: Array<() => void> = [
+            onSnapshotFresh(doc(db, 'planificacion_estados', primaryId), syncPublishStatus, () => {}),
+        ];
+        if (legacyId !== primaryId) {
+            unsubs.push(onSnapshotFresh(doc(db, 'planificacion_estados', legacyId), syncPublishStatus, () => {}));
+        }
+        return () => {
+            unsubs.forEach((u) => u());
+        };
     }, [selectedObjective, currentDate, empresaId, dataRefreshNonce]);
 
     // Carga asignaciones de puesto: base desde empleados + overlay mensual desde planificacion_estados.
@@ -5457,25 +5511,20 @@ export default function PlanificacionPage() {
             const monthPrefix = `${year}-${String(month).padStart(2, '0')}`;
             const lookupKey = planificacionPublishLookupKey(selectedObjective, year, month);
 
-            const [estadoRow, turnosSnap] = await Promise.all([
-                fetchPlanificacionEstadoDoc(empresaId, selectedObjective, year, month),
+            const [publishSt, turnosSnap] = await Promise.all([
+                fetchPlanificacionPublishStatus(empresaId, selectedObjective, year, month),
                 getDocs(query(
                     collection(db, 'turnos'),
                     where('objectiveId', '==', selectedObjective),
                 )),
             ]);
 
-            if (estadoRow && estadoRow.data.publishedAt) {
-                setPublishStatusMap(prev => ({
-                    ...prev,
-                    [lookupKey]: {
-                        publishedAt: estadoRow.data.publishedAt,
-                        publishedBy: String(estadoRow.data.publishedBy ?? ''),
-                    },
-                }));
-            } else {
-                setPublishStatusMap(prev => ({ ...prev, [lookupKey]: null }));
-            }
+            setPublishStatusMap((prev) => ({
+                ...prev,
+                [lookupKey]: publishSt
+                    ? { publishedAt: publishSt.publishedAt, publishedBy: publishSt.publishedBy }
+                    : null,
+            }));
 
             const mergedEstado = await fetchMergedPlanificacionEstadoData(empresaId, selectedObjective, year, month);
             const monthlyPos = (mergedEstado.defaultPositionByEmp as Record<string, string>) || {};
@@ -5506,17 +5555,7 @@ export default function PlanificacionPage() {
                     const dateKey = getDateKey(data.startTime);
                     if (!dateKey.startsWith(monthPrefix)) return;
                     const empKey = `${data.employeeId}_${dateKey}`;
-                    next[empKey] = {
-                        id: d.id, ...data, code: data.code || data.type, objectiveId: data.objectiveId,
-                        startTime: data.startTime, endTime: data.endTime, realStartTime: data.realStartTime,
-                        status: data.status, isPresent: data.isPresent || false, isAbsent: data.isAbsent || false,
-                        isExtended: data.isExtended, isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
-                        isFrancoTrabajado: data.isFrancoTrabajado || false, isFrancoCompensatorio: data.isFrancoCompensatorio || false,
-                        swapWith: data.swapWith, swapDate: data.swapDate, hasNovedad: data.hasNovedad, plannedNovedad: data.plannedNovedad,
-                        positionName: data.positionName,
-                        coveredBy: data.coveredBy,
-                        draft: data.draft,
-                    };
+                    next[empKey] = planningShiftViewFromSnap(d);
                 });
                 return next;
             });
@@ -8189,7 +8228,14 @@ export default function PlanificacionPage() {
                     selectedObjective &&
                     isOpsCoverageShiftForObjective(effectiveShift, selectedObjective)
                 ) {
-                    toast.message('Turno asignado (Operaciones) · Cobertura — solo lectura en este cronograma.');
+                    const ctx = opsCoverageTooltipCtxFor(effectiveShift, emp.name || '');
+                    const body = buildOpsCoverageCellTooltip(effectiveShift, ctx);
+                    const dayLabel = day.toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+                    setOpsCoverageDetailModal({
+                        guardName: emp.name || 'Guardia',
+                        dateLabel: dayLabel,
+                        body,
+                    });
                     return;
                 }
                 if (
@@ -10330,14 +10376,15 @@ export default function PlanificacionPage() {
                                             style += ' ring-1 ring-rose-400';
                                         }
                                         if (isGuest && (s || p)) { style += ' border-t-2 border-t-amber-400'; }
+                                        const opsShiftForCell =
+                                            s && selectedObjective && isOpsCoverageShiftForObjective(s, selectedObjective)
+                                                ? s
+                                                : null;
                                         const activeShift = (p && !p.isDeleted) ? p : (s || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
-                                        const isOpsCoverageCell = !!(
-                                            selectedObjective
-                                            && activeShift
-                                            && isOpsCoverageShiftForObjective(activeShift, selectedObjective)
-                                        );
-                                        if (isOpsCoverageCell) {
-                                            const opsCode = String(activeShift.code || 'T').toUpperCase();
+                                        const isOpsCoverageCell = !!opsShiftForCell;
+                                        const opsTooltipShift = opsShiftForCell || activeShift;
+                                        if (isOpsCoverageCell && opsShiftForCell) {
+                                            const opsCode = String(opsShiftForCell.code || 'T').toUpperCase();
                                             content = opsCode;
                                             style = `${getDefaultStyle(opsCode)} ${OPS_COVERAGE_CELL_RING}`;
                                             isFT = false;
@@ -10424,7 +10471,7 @@ export default function PlanificacionPage() {
                                             : '';
                                         return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
                                                     ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _opsHint = isOpsCoverageCell ? `\n🟠 Cobertura ops${activeShift?.coversEmployeeName ? ` — cubre: ${activeShift.coversEmployeeName}` : ''}` : ''; setShiftTooltip({ label: shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_opsHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _opsHint || _covHint || _billHint || null), pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isOpsCoverageCell ? 'Turno asignado (Operaciones) · Cobertura — solo lectura' : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{isOpsCoverageCell && content && (<div className="absolute -bottom-0.5 right-0 text-[6px] font-black bg-orange-500 text-white px-0.5 rounded" title="Turno asignado (Operaciones) · Cobertura">COB</div>)}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isOpsCoverageCell ? undefined : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
@@ -10824,7 +10871,7 @@ export default function PlanificacionPage() {
                     className="fixed z-[9999] pointer-events-none"
                     style={{ left: shiftTooltip.x + 10, top: shiftTooltip.y - 64 }}
                 >
-                    <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[240px] ${shiftTooltip.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>
+                    <div className={`bg-slate-900 text-white text-[10px] font-black px-2.5 py-2 rounded-lg shadow-sm flex flex-col gap-1 max-w-[320px] ${shiftTooltip.label?.includes('\n') ? 'whitespace-pre-line' : 'whitespace-nowrap'}`}>
                         {shiftTooltip.label && (
                             <div className="flex items-start gap-1.5 text-white font-medium">
                                 {shiftTooltip.label.startsWith('Tipo:') ? (
@@ -10853,9 +10900,61 @@ export default function PlanificacionPage() {
                                 Descanso total: <span className="font-black text-green-200">{shiftTooltip.restHours}h</span>
                             </div>
                         )}
-                        <div className="text-[8px] text-slate-500 font-medium pt-0.5 border-t border-slate-700">Click para ver detalle / Cambiar</div>
+                        <div className="text-[8px] text-slate-500 font-medium pt-0.5 border-t border-slate-700">
+                            {shiftTooltip.readOnlyOps
+                                ? 'Solo lectura (Operaciones) — click en la celda para informe completo'
+                                : 'Click para ver detalle / Cambiar'}
+                        </div>
                     </div>
                     <div className="w-2 h-2 bg-slate-900 rotate-45 ml-2 -mt-1" />
+                </div>
+            )}
+            {opsCoverageDetailModal && (
+                <div
+                    className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4"
+                    onClick={() => setOpsCoverageDetailModal(null)}
+                >
+                    <div
+                        className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-lg border border-orange-200 dark:border-orange-800/60 overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <div className="px-5 py-4 bg-orange-50 dark:bg-orange-950/40 border-b border-orange-100 dark:border-orange-900/50 flex items-start justify-between gap-3">
+                            <div>
+                                <h3 className="text-sm font-black text-slate-900 dark:text-white flex items-center gap-2">
+                                    <ShieldCheck size={16} className="text-orange-600 shrink-0" />
+                                    Cobertura desde Operaciones
+                                </h3>
+                                <p className="text-[10px] font-bold text-slate-600 dark:text-slate-400 mt-1">
+                                    {opsCoverageDetailModal.guardName} · {opsCoverageDetailModal.dateLabel}
+                                </p>
+                                <p className="text-[9px] text-slate-500 dark:text-slate-500 mt-0.5">
+                                    Cronograma publicado — esta celda no se edita desde Planificación.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                className="p-1.5 rounded-xl hover:bg-white/80 dark:hover:bg-slate-800 text-slate-500"
+                                onClick={() => setOpsCoverageDetailModal(null)}
+                                aria-label="Cerrar"
+                            >
+                                <X size={18} />
+                            </button>
+                        </div>
+                        <div className="px-5 py-4 max-h-[min(60vh,420px)] overflow-y-auto custom-scrollbar">
+                            <pre className="text-[11px] font-medium text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed font-sans">
+                                {opsCoverageDetailModal.body}
+                            </pre>
+                        </div>
+                        <div className="px-5 py-3 border-t border-slate-100 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/50 flex justify-end">
+                            <button
+                                type="button"
+                                className="px-4 py-2 rounded-xl bg-indigo-600 text-white text-xs font-black shadow-sm hover:bg-indigo-700 active:scale-95"
+                                onClick={() => setOpsCoverageDetailModal(null)}
+                            >
+                                Entendido
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
             {empPosPicker && typeof document !== 'undefined' && createPortal(

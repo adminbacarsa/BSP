@@ -1,7 +1,7 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 
-function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
+export function planningShiftViewFromSnap(d: QueryDocumentSnapshot): any {
     const data = d.data();
     return {
         id: d.id,
@@ -112,7 +112,7 @@ export function ingestPlanningTurnosSnapshot(
             const key = `${data.employeeId}_${dateKey}`;
             if (!allIds[key]) allIds[key] = [];
             allIds[key].push(d.id);
-            const normalized = normalizePlanningShiftDoc(d);
+            const normalized = planningShiftViewFromSnap(d);
             if (!cellTurnos[key]) cellTurnos[key] = [];
             cellTurnos[key].push(normalized);
             if (data.isSecondBlock) {
