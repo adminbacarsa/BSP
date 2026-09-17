@@ -276,6 +276,22 @@ function absenceShiftIdLinkedFromCoverage(row: TurnoDoc): string {
   ).trim();
 }
 
+function shiftActsAsAbsenceCoverage(data: TurnoDoc): boolean {
+  if (data.isAbsent === true || data.isFranco === true) return false;
+  if (isShiftUnassigned(data)) return false;
+  const origin = String(data.origin ?? '');
+  if (origin === 'VACANTE_POR_AUSENCIA' || origin === 'INTERRUPTION') return false;
+  if (
+    isOpsCoverageShift(data) ||
+    isOperationalCoverageTurno(data) ||
+    origin === 'OPERATIONS_COVERAGE' ||
+    data.isPresent === true
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Titulares ausentes cubiertos por turno ops (p. ej. OPERATIONS_COVERAGE + absenceShiftId). */
 function collectAbsentShiftIdsWithOpsCoverage(
   shifts: Array<{ id: string; data: TurnoDoc }>,
@@ -283,9 +299,7 @@ function collectAbsentShiftIdsWithOpsCoverage(
   const covered = new Set<string>();
   for (const row of shifts) {
     const data = row.data;
-    if (data.isAbsent === true || data.isFranco === true) continue;
-    if (isShiftUnassigned(data)) continue;
-    if (!isOpsCoverageShift(data) && !isOperationalCoverageTurno(data)) continue;
+    if (!shiftActsAsAbsenceCoverage(data)) continue;
     const link = absenceShiftIdLinkedFromCoverage(data);
     if (link) covered.add(link);
   }
@@ -792,10 +806,15 @@ function detectOperationalAnomalies(
     }
 
     if (row.data.isAbsent === true) {
+      // Fuera del slot accionable: no repetir IA todo el día (demo/ops ya corrieron).
+      if (nowMs > endMs + tolMs) continue;
       const key = buildCoverageKey(row.data);
       const hasCoverage =
         coverageKeys.has(key) || absentShiftIdsWithOpsCoverage.has(row.id);
-      const resolved = row.data.resolvedBy === 'OPERACIONES' || row.data.isReportedToPlanning === true;
+      const resolved =
+        row.data.resolvedBy === 'OPERACIONES' ||
+        row.data.resolvedBy === 'MODO_DEMO' ||
+        row.data.isReportedToPlanning === true;
       if (!hasCoverage && !resolved) {
         const fp = `absence_uncovered__${row.id}`;
         anomalies.push({

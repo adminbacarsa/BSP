@@ -157,15 +157,27 @@ function isOperationalCoverageTurno(row) {
 function absenceShiftIdLinkedFromCoverage(row) {
     return String(row.absenceShiftId ?? row.coveredShiftId ?? row.causedByShiftId ?? '').trim();
 }
+function shiftActsAsAbsenceCoverage(data) {
+    if (data.isAbsent === true || data.isFranco === true)
+        return false;
+    if (isShiftUnassigned(data))
+        return false;
+    const origin = String(data.origin ?? '');
+    if (origin === 'VACANTE_POR_AUSENCIA' || origin === 'INTERRUPTION')
+        return false;
+    if (isOpsCoverageShift(data) ||
+        isOperationalCoverageTurno(data) ||
+        origin === 'OPERATIONS_COVERAGE' ||
+        data.isPresent === true) {
+        return true;
+    }
+    return false;
+}
 function collectAbsentShiftIdsWithOpsCoverage(shifts) {
     const covered = new Set();
     for (const row of shifts) {
         const data = row.data;
-        if (data.isAbsent === true || data.isFranco === true)
-            continue;
-        if (isShiftUnassigned(data))
-            continue;
-        if (!isOpsCoverageShift(data) && !isOperationalCoverageTurno(data))
+        if (!shiftActsAsAbsenceCoverage(data))
             continue;
         const link = absenceShiftIdLinkedFromCoverage(data);
         if (link)
@@ -640,9 +652,13 @@ function detectOperationalAnomalies(shifts, now, toleranceMinutes, nameCtx) {
             });
         }
         if (row.data.isAbsent === true) {
+            if (nowMs > endMs + tolMs)
+                continue;
             const key = buildCoverageKey(row.data);
             const hasCoverage = coverageKeys.has(key) || absentShiftIdsWithOpsCoverage.has(row.id);
-            const resolved = row.data.resolvedBy === 'OPERACIONES' || row.data.isReportedToPlanning === true;
+            const resolved = row.data.resolvedBy === 'OPERACIONES' ||
+                row.data.resolvedBy === 'MODO_DEMO' ||
+                row.data.isReportedToPlanning === true;
             if (!hasCoverage && !resolved) {
                 const fp = `absence_uncovered__${row.id}`;
                 anomalies.push({

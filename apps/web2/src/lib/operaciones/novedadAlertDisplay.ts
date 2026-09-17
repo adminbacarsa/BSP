@@ -106,6 +106,22 @@ export function isHiddenFromOpsAlerts(n: any): boolean {
  */
 const IA_AUTOMATION_TYPE_PREFIX = 'IA_ALERTA_';
 
+function processedDataHasAbsenceCoverage(processedData: any[], absentShiftId: string): boolean {
+    return (processedData || []).some((s: any) => {
+        if (!s || s.isAbsent || s.isUnassigned) return false;
+        const emp = String(s.employeeId || '').trim().toUpperCase();
+        if (!emp || emp === 'VACANTE') return false;
+        const link = String(s.absenceShiftId || s.coveredShiftId || s.causedByShiftId || '').trim();
+        if (link !== absentShiftId) return false;
+        return (
+            s.origin === 'OPERATIONS_COVERAGE' ||
+            s.resolvedBy === 'OPERACIONES' ||
+            s.isPresent === true ||
+            s.isAwaitingCoverageCheckIn === true
+        );
+    });
+}
+
 /** IA P0: ocultar si el turno ya no está en la ventana operativa del monitor. */
 export function isStaleIaAutomationNovedad(n: any, processedData: any[]): boolean {
     const type = String(n?.type || '');
@@ -113,11 +129,22 @@ export function isStaleIaAutomationNovedad(n: any, processedData: any[]): boolea
     if (String(n?.origin || '') !== 'AUTOMATION_P0') return false;
     const shiftId = String(n?.shiftId || '').trim();
     if (!shiftId) return true;
+
+    if (type === 'IA_ALERTA_AUSENCIA_SIN_COBERTURA') {
+        if (processedDataHasAbsenceCoverage(processedData, shiftId)) return true;
+    }
+
     const shift = (processedData || []).find((s: any) => s.id === shiftId);
     if (!shift) return true;
     const now = new Date();
     if (!isOpsShiftHoy(shift, now)) return true;
     if (shift.isCompleted && !shift.isRetention) return true;
+
+    if (type === 'IA_ALERTA_AUSENCIA_SIN_COBERTURA') {
+        const endMs = shift.endDateObj?.getTime?.() ?? 0;
+        if (endMs > 0 && now.getTime() > endMs + 30 * 60 * 1000) return true;
+    }
+
     return false;
 }
 
