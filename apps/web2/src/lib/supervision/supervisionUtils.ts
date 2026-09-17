@@ -2,7 +2,7 @@ import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'CAMPO';
+export type SupervisionMainTab = 'TABLERO' | 'CC' | 'BANDEJA' | 'CAMPO';
 
 /** Sub-secciones del tab Campo (libro, rondas, consignas). */
 export type SupervisionCampoSection = 'NOVEDADES' | 'VISITAS' | 'CONSIGNAS';
@@ -12,8 +12,21 @@ export type SupervisionMainTabLegacy = SupervisionMainTab | 'NOVEDADES' | 'MAS';
 
 export function normalizeSupervisionMainTab(tab: string | null | undefined): SupervisionMainTab {
   if (tab === 'NOVEDADES' || tab === 'MAS') return 'CAMPO';
-  if (tab === 'TABLERO' || tab === 'BANDEJA' || tab === 'CAMPO') return tab;
+  if (tab === 'TABLERO' || tab === 'CC' || tab === 'BANDEJA' || tab === 'CAMPO') return tab;
   return 'TABLERO';
+}
+
+/** Inicio/fin del día calendario Argentina (YYYY-MM-DD). */
+export function dayBoundsAr(ymd: string): { start: Date; end: Date } {
+  const start = new Date(`${ymd}T00:00:00-03:00`);
+  const end = new Date(`${ymd}T23:59:59.999-03:00`);
+  return { start, end };
+}
+
+export function formatYmdDisplayAr(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00-03:00`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
 }
 
 export function legacyMainTabToCampoSection(tab: string | null | undefined): SupervisionCampoSection | null {

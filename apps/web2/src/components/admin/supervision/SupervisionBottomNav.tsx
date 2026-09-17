@@ -1,10 +1,11 @@
 import React from 'react';
-import { LayoutGrid, Inbox, MapPin } from 'lucide-react';
+import { LayoutGrid, Inbox, MapPin, Radio } from 'lucide-react';
 import type { SupervisionMainTab } from '@/lib/supervision/supervisionUtils';
 import { SUPERVISION_MAIN_TABS } from '@/lib/supervision/supervisionNav';
 
 const TAB_ICONS: Record<SupervisionMainTab, React.ElementType> = {
   TABLERO: LayoutGrid,
+  CC: Radio,
   BANDEJA: Inbox,
   CAMPO: MapPin,
 };

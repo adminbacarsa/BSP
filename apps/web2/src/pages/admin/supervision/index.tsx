@@ -36,6 +36,7 @@ import SupervisionNuevoPedidoButton from '@/components/admin/supervision/Supervi
 import SupervisionPedidosPanel from '@/components/admin/supervision/SupervisionPedidosPanel';
 import SupervisionPedidosViewToggle from '@/components/admin/supervision/SupervisionPedidosViewToggle';
 import SupervisionTablero from '@/components/admin/supervision/SupervisionTablero';
+import SupervisionCentroControl from '@/components/admin/supervision/SupervisionCentroControl';
 import SupervisionCampo from '@/components/admin/supervision/SupervisionCampo';
 import SupervisionClienteObjetivoPicker from '@/components/admin/supervision/SupervisionClienteObjetivoPicker';
 import { SupervisorPinInput } from '@/components/ui';
@@ -1291,6 +1292,13 @@ export default function SupervisionPage() {
               objectiveIds={objectiveIds}
               canViewAllObjectives={canViewAllObjectives}
               onNuevoPedido={handleNuevoPedidoDesdeTablero}
+            />
+          )}
+
+          {mainTab === 'CC' && (
+            <SupervisionCentroControl
+              objectiveIds={objectiveIds}
+              canViewAllObjectives={canViewAllObjectives}
             />
           )}
 

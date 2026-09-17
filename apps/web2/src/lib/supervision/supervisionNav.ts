@@ -16,6 +16,7 @@ export type SupervisionCampoNavSection = {
 /** Orden pensado para app móvil: pulse operativo → pedidos → campo. */
 export const SUPERVISION_MAIN_TABS: SupervisionNavTab[] = [
   { id: 'TABLERO', label: 'Tablero', labelKey: 'supervision.tablero' },
+  { id: 'CC', label: 'CC', labelKey: 'supervision.cc' },
   { id: 'BANDEJA', label: 'Pedidos', labelKey: 'supervision.pedidos' },
   { id: 'CAMPO', label: 'Campo', labelKey: 'supervision.campo' },
 ];
