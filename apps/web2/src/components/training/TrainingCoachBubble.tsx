@@ -26,14 +26,17 @@ function defaultPos() {
   return { x: window.innerWidth - BUBBLE_W - 24, y: window.innerHeight - 420 };
 }
 
-/** Convierte **texto** en negrita en JSX */
+/** Convierte **texto** en negrita y \n en saltos de línea */
 function renderInstruction(text: string): React.ReactNode {
-  const parts = text.split(/(\*\*[^*]+\*\*)/g);
-  return parts.map((part, i) =>
-    part.startsWith('**') && part.endsWith('**')
-      ? <strong key={i} className="font-semibold text-slate-800 dark:text-slate-100">{part.slice(2, -2)}</strong>
-      : <span key={i}>{part}</span>
-  );
+  return text.split('\n').map((line, li) => {
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    const rendered = parts.map((part, i) =>
+      part.startsWith('**') && part.endsWith('**')
+        ? <strong key={i} className="font-semibold text-slate-800 dark:text-slate-100">{part.slice(2, -2)}</strong>
+        : <span key={i}>{part}</span>
+    );
+    return <React.Fragment key={li}>{rendered}{li < text.split('\n').length - 1 && <br />}</React.Fragment>;
+  });
 }
 
 export function TrainingCoachBubble() {
@@ -83,7 +86,7 @@ export function TrainingCoachBubble() {
     ? COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey).map(s => s.stepId)
     : [];
 
-  // Calcula el paso anterior para permitir retroceder
+  // Calcula el paso anterior para permitir retroceder (incluye targetRoute para navegar)
   const prevStepInfo = session ? (() => {
     const { currentModuleKey, modulePlan, progress } = session;
     if (!currentModuleKey || !coachStep) return null;
@@ -91,14 +94,16 @@ export function TrainingCoachBubble() {
     const completedInMod = progress[currentModuleKey]?.stepsCompleted ?? [];
     const activeIdx = modSteps.findIndex(s => !completedInMod.includes(s.stepId));
     if (activeIdx > 0) {
-      return { targetModuleKey: currentModuleKey, targetStepId: modSteps[activeIdx - 1].stepId, newCurrentModuleKey: currentModuleKey };
+      const prevStep = modSteps[activeIdx - 1];
+      return { targetModuleKey: currentModuleKey, targetStepId: prevStep.stepId, newCurrentModuleKey: currentModuleKey, targetRoute: prevStep.targetRoute };
     }
     const modIdx = modulePlan.indexOf(currentModuleKey);
     if (modIdx > 0) {
       const prevModKey = modulePlan[modIdx - 1];
       const prevModSteps = COACH_STEPS.filter(s => s.moduleKey === prevModKey);
       if (prevModSteps.length > 0) {
-        return { targetModuleKey: prevModKey, targetStepId: prevModSteps[prevModSteps.length - 1].stepId, newCurrentModuleKey: prevModKey };
+        const prevStep = prevModSteps[prevModSteps.length - 1];
+        return { targetModuleKey: prevModKey, targetStepId: prevStep.stepId, newCurrentModuleKey: prevModKey, targetRoute: prevStep.targetRoute };
       }
     }
     return null;
@@ -109,11 +114,15 @@ export function TrainingCoachBubble() {
     if (!session || !prevStepInfo || reverting) return;
     setReverting(true);
     try {
-      await uncompleteStep({ sessionId: session.id, ...prevStepInfo });
+      const { targetRoute, ...uncompleteParams } = prevStepInfo;
+      await uncompleteStep({ sessionId: session.id, ...uncompleteParams });
+      if (targetRoute && !router.pathname.startsWith(targetRoute)) {
+        router.push(targetRoute);
+      }
     } finally {
       setReverting(false);
     }
-  }, [session, prevStepInfo, reverting]);
+  }, [session, prevStepInfo, reverting, router]);
 
   const handleComplete = useCallback(async () => {
     if (!session || !coachStep || completing) return;
@@ -163,11 +172,14 @@ export function TrainingCoachBubble() {
     return (
       <button
         onClick={() => setCollapsed(false)}
-        style={bubbleStyle}
-        className="w-12 h-12 rounded-full shadow-lg flex items-center justify-center bg-amber-400 hover:bg-amber-500 text-white transition-colors"
-        title="Coach de capacitación"
+        title="Abrir coach de capacitación"
+        style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 900 }}
+        className="flex flex-col items-center gap-1.5 bg-amber-400 hover:bg-amber-500 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors"
       >
-        <GraduationCap size={20} />
+        <GraduationCap size={16} />
+        <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+          Coach
+        </span>
       </button>
     );
   }
