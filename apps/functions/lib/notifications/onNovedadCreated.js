@@ -12,6 +12,11 @@ const ALERT_TYPES = [
     'VACANTE_A_PLANIFICACION',
     'AUSENCIA_CORTO_PLAZO',
     'AVISO_AUSENCIA_ANTICIPADA',
+    'IA_ALERTA_MARCACION_TARDIA',
+    'IA_ALERTA_TURNO_VENCIDO_ABIERTO',
+    'IA_ALERTA_JORNADA_EXCESIVA',
+    'IA_ALERTA_SOLAPAMIENTO_TURNOS',
+    'IA_ALERTA_AUSENCIA_SIN_COBERTURA',
 ];
 const TYPE_LABELS = {
     INGRESO_AUTOREGISTRO: '⚡ Ingreso por Portal',
@@ -22,6 +27,11 @@ const TYPE_LABELS = {
     VACANTE_A_PLANIFICACION: '📋 Vacante → Planificación',
     AUSENCIA_CORTO_PLAZO: '🚨 Ausencia Urgente — menos de 4hs',
     AVISO_AUSENCIA_ANTICIPADA: '⚠️ Aviso Anticipado de Ausencia',
+    IA_ALERTA_MARCACION_TARDIA: '🤖 Marcación tardía (IA)',
+    IA_ALERTA_TURNO_VENCIDO_ABIERTO: '🤖 Turno vencido abierto (IA)',
+    IA_ALERTA_JORNADA_EXCESIVA: '🤖 Jornada excesiva (IA)',
+    IA_ALERTA_SOLAPAMIENTO_TURNOS: '🤖 Solapamiento de turnos (IA)',
+    IA_ALERTA_AUSENCIA_SIN_COBERTURA: '🤖 Ausencia sin cobertura (IA)',
 };
 exports.onNovedadCreated = functions
     .runWith({ timeoutSeconds: 30, memory: '128MB' })

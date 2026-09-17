@@ -1,10 +1,13 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.looksLikeFalseEmptyTurnosReply = looksLikeFalseEmptyTurnosReply;
+exports.tryDeterministicModuleHelpMenuReply = tryDeterministicModuleHelpMenuReply;
+exports.tryDeterministicOnboardingGuideReply = tryDeterministicOnboardingGuideReply;
 exports.shouldPrefetchMetricsSnapshot = shouldPrefetchMetricsSnapshot;
 exports.shouldPrefetchOperationsMetricsInSnapshot = shouldPrefetchOperationsMetricsInSnapshot;
 exports.tryDeterministicDataReply = tryDeterministicDataReply;
 const cospKnowledge_1 = require("./cospKnowledge");
+const assistantQuickReplies_1 = require("./assistantQuickReplies");
 const assistantDataTools_1 = require("./assistantDataTools");
 const SPANISH_MONTHS = {
     enero: 1,
@@ -2080,6 +2083,24 @@ function matchPlanningAutomateIntent(t) {
     }
     return /\b(planific|cronograma|grilla|mes|turnos|dotaci[oó]n)\b/.test(t);
 }
+function matchModuleHelpMenuIntent(t) {
+    if (/\b(cuantos|cuantas|horas?|quien|presentes|ausentes|legajo|sla|turno\s+hoy)\b/.test(t)) {
+        return false;
+    }
+    const asksHelp = /\b(ayuda\w*|usar|uso|explic\w*|opciones|que\s+puedo|como\s+uso|ensena\w*|guiame)\b/.test(t);
+    const aboutModule = /\b(modulo|pantalla|aca|esto|esta|aqui|planific|operacion|rrhh|crm|servicio|reporte|config)\b/.test(t);
+    if (asksHelp && aboutModule)
+        return true;
+    if (/^(ayuda|ayudame|ayudarme|help|que\s+puedo\s+hacer)\.?$/i.test(t.trim()))
+        return true;
+    return false;
+}
+function tryDeterministicModuleHelpMenuReply(lastUser, moduleKey) {
+    const t = normText(lastUser);
+    if (!matchModuleHelpMenuIntent(t))
+        return null;
+    return (0, assistantQuickReplies_1.buildModuleHelpMenuReply)(moduleKey);
+}
 function tryDeterministicPlanningAutomateReply(t) {
     if (!matchPlanningAutomateIntent(t))
         return null;
@@ -2112,6 +2133,48 @@ function tryDeterministicPlanificacionHowToReply(t) {
     const body = guide.replace(/^GUÍA OPERATIVA[^\n]*\n/, '').trim();
     return (`**Planificación en COSP**\n\n${body.slice(0, 1500)}\n\n` +
         `Para datos concretos (quién trabaja, horas SLA vs planificadas), decime cliente/objetivo y mes.`).slice(0, 7500);
+}
+function matchOnboardingGuideIntent(t) {
+    if (/\b(onboarding|guia interactiva|gu[ií]a obligatoria)\b/.test(t))
+        return true;
+    if (/\b(completar|finalizar|habilitar|checklist)\b/.test(t) && /\b(guia|gu[ií]a|onboarding)\b/.test(t)) {
+        return true;
+    }
+    if (/\b(quien|qui[eé]n)\b/.test(t) && /\b(completo|completó|termino|terminó)\b/.test(t) && /\b(guia|gu[ií]a|onboarding)\b/.test(t)) {
+        return true;
+    }
+    if (/\b(bloqueado|no puedo entrar|me manda a la guia|me manda a la gu[ií]a)\b/.test(t))
+        return true;
+    return false;
+}
+function tryDeterministicOnboardingGuideReply(lastUser, moduleKey) {
+    const raw = lastUser.trim();
+    if (!raw)
+        return null;
+    const t = normText(raw);
+    const mk = typeof moduleKey === 'string' ? moduleKey.trim() : '';
+    if (!matchOnboardingGuideIntent(t) && mk !== 'GUIDE')
+        return null;
+    if (/\b(quien|qui[eé]n)\b/.test(t) && /\b(completo|completó|termino|terminó|progreso|seguimiento)\b/.test(t)) {
+        return ('**Seguimiento de onboarding**\n\n' +
+            '1. Menú lateral → **Configuración**.\n\n' +
+            '2. Solapa **Onboarding**.\n\n' +
+            'Ahí ves quién tiene la guía requerida, el recorrido (Operaciones / Planificación), el estado y el % de progreso.\n\n' +
+            'Desde esa misma solapa un admin puede **exigir la guía** a usuarios existentes.').slice(0, 7500);
+    }
+    if (/\b(checklist|operaciones|planificacion|planificación)\b/.test(t) && /\b(marcar|completar|finalizar)\b/.test(t)) {
+        return ('**Checklist para habilitarte**\n\n' +
+            'En el **último paso** de la **Guía** marcá el checklist de tu recorrido:\n\n' +
+            '**Operaciones:** identificar PLAN/ACTIVOS/AUSENTES, registrar ausencia/vacante, ingreso-relevo-salida y novedad.\n\n' +
+            '**Planificación:** cliente/objetivo/período, asignar turnos y vacantes, revisar SLA y entender impacto en Operaciones/Reportes.\n\n' +
+            'Después tocá **Finalizar y habilitar**. Sin checklist no se completa el onboarding.').slice(0, 7500);
+    }
+    const guide = (0, cospKnowledge_1.operationalGuideForModuleKey)('GUIDE');
+    const body = guide
+        ? guide.replace(/^GUÍA OPERATIVA[^\n]*\n/, '').trim()
+        : 'La guía obligatoria está en el menú **Guía**. Completá los pasos y el checklist final para habilitar el panel.';
+    return (`**Guía interactiva / onboarding**\n\n${body.slice(0, 2200)}\n\n` +
+        `Si estás bloqueado, quedate en **Guía**, marcá el checklist y tocá **Finalizar y habilitar**.`).slice(0, 7500);
 }
 function tryDeterministicPlanningUiReply(moduleKey) {
     if (!moduleKey || (moduleKey !== 'PLANNING' && moduleKey !== 'PLANNING_AI'))
@@ -2316,6 +2379,9 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
         return null;
     const t = normText(raw);
     const mk = typeof moduleKey === 'string' && moduleKey.trim() ? moduleKey.trim() : null;
+    const helpMenu = tryDeterministicModuleHelpMenuReply(raw, mk);
+    if (helpMenu?.trim())
+        return helpMenu.trim();
     try {
         const ausentesLic = await tryDeterministicAusentesLicenciasDiaReply(t, toolCtx, recent);
         if (ausentesLic?.trim())
@@ -2362,6 +2428,9 @@ async function tryDeterministicDataReply(lastUser, toolCtx, toolsEnabled, module
     const planHowTo = tryDeterministicPlanificacionHowToReply(t);
     if (planHowTo?.trim())
         return planHowTo.trim();
+    const onboardingGuide = tryDeterministicOnboardingGuideReply(raw, mk);
+    if (onboardingGuide?.trim())
+        return onboardingGuide.trim();
     try {
         const crm = await tryDeterministicCrmReply(t, toolCtx, recent);
         if (crm?.trim())

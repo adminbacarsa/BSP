@@ -268,7 +268,7 @@ function buildSystemPrompt(
     '',
     `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
     toolsEnabled
-      ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
+      ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes, recomendar_cobertura_vacante, ejecutar_replan_diario), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
       : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
     '',
     `Contexto servidor (verificado por backend):`,

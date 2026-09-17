@@ -1,4 +1,4 @@
-import {
+﻿import {
   calcPlanificadorShiftHours,
   calcPlanningSlaReconciliationHours,
   isOperationalOriginShift,
@@ -30,7 +30,7 @@ function isExtensionShift(t: any): boolean {
 }
 
 export function coveragePlannedBillableHours(plan: number, ext = 0, adel = 0): number {
-  // Plan cobertura = malla + extensión + adelanto. RET/REF/ESC y ops van aparte (fuera de cobertura).
+  // Plan cobertura = malla + extensi├│n + adelanto. RET/REF/ESC y ops van aparte (fuera de cobertura).
   return Math.round((plan + ext + adel) * 10) / 10;
 }
 
@@ -38,6 +38,13 @@ export function coveragePlannedFromDemandaRow(
   row: Pick<DemandaObjectiveRow, 'planHours' | 'extHours' | 'adelHours'>,
 ): number {
   return coveragePlannedBillableHours(row.planHours, row.extHours, row.adelHours);
+}
+
+/** Plan total grilla (publicado + borrador) + ext/adel. */
+export function coveragePlannedTotalFromDemandaRow(
+  row: Pick<DemandaObjectiveRow, 'planHoursTotal' | 'extHours' | 'adelHours'>,
+): number {
+  return coveragePlannedBillableHours(row.planHoursTotal, row.extHours, row.adelHours);
 }
 
 export function buildDemandaByObjective(opts: {
@@ -71,6 +78,7 @@ export function buildDemandaByObjective(opts: {
     name: string;
     client: string;
     plan: number;
+    planDraft: number;
     ext: number;
     adel: number;
     ft: number;
@@ -82,7 +90,7 @@ export function buildDemandaByObjective(opts: {
   const byObj = new Map<string, Acc>();
   const touch = (id: string, name: string, client: string): Acc => {
     const row = byObj.get(id) || {
-      name, client, plan: 0, ext: 0, adel: 0, ft: 0, ops: 0, vacant: 0, absence: 0, absenceCovered: 0,
+      name, client, plan: 0, planDraft: 0, ext: 0, adel: 0, ft: 0, ops: 0, vacant: 0, absence: 0, absenceCovered: 0,
     };
     byObj.set(id, row);
     return row;
@@ -90,13 +98,30 @@ export function buildDemandaByObjective(opts: {
 
   slaByObj.forEach((info, id) => touch(id, info.name, info.client));
 
-  /** Plan de cobertura = base SLA por celda (coalesce), igual que pie del planificador. */
-  const planCellGroups = new Map<string, Map<string, any[]>>();
+  /** Plan comprometido (publicado) vs borrador ÔÇö coalesce por celda. */
+  const planCellGroupsPub = new Map<string, Map<string, any[]>>();
+  const planCellGroupsDraft = new Map<string, Map<string, any[]>>();
+
+  const pushPlanCell = (
+    map: Map<string, Map<string, any[]>>,
+    objId: string,
+    cellKey: string,
+    t: any,
+  ) => {
+    let byCell = map.get(objId);
+    if (!byCell) {
+      byCell = new Map();
+      map.set(objId, byCell);
+    }
+    const list = byCell.get(cellKey) || [];
+    list.push(t);
+    byCell.set(cellKey, list);
+  };
 
   turnos.forEach((t: any) => {
     const plannedStart = t.startTime?.seconds ? new Date(t.startTime.seconds * 1000) : null;
     const scheduleDateKey = plannedStart ? getDateKeyInTimezone(plannedStart) : '';
-    // periodStart/periodEnd acotan la malla (CRM trae ±2 días de padding para fichadas; no deben inflar plan).
+    // periodStart/periodEnd acotan la malla (CRM trae ┬▒2 d├¡as de padding para fichadas; no deben inflar plan).
     if (scheduleDateKey) {
       const periodStartKey = getDateKeyInTimezone(periodStart);
       const periodEndKey = getDateKeyInTimezone(periodEnd);
@@ -124,8 +149,11 @@ export function buildDemandaByObjective(opts: {
     const row = touch(ok, slaInfo?.name || t.objectiveName || ok, slaInfo?.client || t.clientName || 'Sin Cliente');
 
     const isFt = isFrancoTrabajadoShift(t) && !isVacantShift(t);
+    const isDraft = t?.draft === true;
 
     if (isOperationalOriginShift(t) && !isVacantShift(t) && !isProformaVacancyShift(t)) {
+      // Ops reales no van en borrador; si viniera draft, no cuenta como realidad.
+      if (isDraft) return;
       const hs = coverageHoursFromShift(t);
       if (hs > 0) row.ops += hs;
       return;
@@ -139,30 +167,27 @@ export function buildDemandaByObjective(opts: {
       : coverageHoursFromShift(t);
     const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
     if (isVacantShift(t)) {
-      if (base > 0) row.vacant += base;
+      if (base > 0 && !isDraft) row.vacant += base;
       return;
     }
     if (isFt) {
       const ftHs = coverageHoursFromShift(t) || gross;
       if (ftHs > 0) {
-        row.ft += ftHs;
-        row.plan += ftHs;
+        if (isDraft) row.planDraft += ftHs;
+        else {
+          row.ft += ftHs;
+          row.plan += ftHs;
+        }
       }
       return;
     }
     if (isPlanificadorPlannedHoursShift(t) && t.employeeId && t.employeeId !== 'VACANTE' && scheduleDateKey) {
       const empId = String(t.employeeId);
       const cellKey = `${empId}_${scheduleDateKey}`;
-      let byCell = planCellGroups.get(ok);
-      if (!byCell) {
-        byCell = new Map();
-        planCellGroups.set(ok, byCell);
-      }
-      const list = byCell.get(cellKey) || [];
-      list.push(t);
-      byCell.set(cellKey, list);
+      pushPlanCell(isDraft ? planCellGroupsDraft : planCellGroupsPub, ok, cellKey, t);
     }
-    if (extra > 0) {
+    // Ext/adel solo entran a cobertura operativa si el turno no es borrador.
+    if (extra > 0 && !isDraft) {
       if (isAdelantoShift(t) && !isExtensionShift(t)) row.adel += extra;
       else if (isAdelantoShift(t) && isExtensionShift(t)) {
         row.adel += extra / 2;
@@ -171,17 +196,24 @@ export function buildDemandaByObjective(opts: {
     }
   });
 
-  planCellGroups.forEach((byCell, objId) => {
-    const row = byObj.get(objId);
-    if (!row) return;
-    const hint = slaCodeHoursHintByObjective[objId];
-    byCell.forEach((cellTurnos) => {
-      const merged = coalescePlannedTurnosForCell(cellTurnos, hint);
-      if (!merged) return;
-      const base = calcPlanningSlaReconciliationHours(merged, hint);
-      if (base > 0) row.plan += base;
+  const flushPlanCells = (
+    map: Map<string, Map<string, any[]>>,
+    target: 'plan' | 'planDraft',
+  ) => {
+    map.forEach((byCell, objId) => {
+      const row = byObj.get(objId);
+      if (!row) return;
+      const hint = slaCodeHoursHintByObjective[objId];
+      byCell.forEach((cellTurnos) => {
+        const merged = coalescePlannedTurnosForCell(cellTurnos, hint);
+        if (!merged) return;
+        const base = calcPlanningSlaReconciliationHours(merged, hint);
+        if (base > 0) row[target] += base;
+      });
     });
-  });
+  };
+  flushPlanCells(planCellGroupsPub, 'plan');
+  flushPlanCells(planCellGroupsDraft, 'planDraft');
 
   (ausenciasStats?.detalle || []).forEach((ev) => {
     const ok = ev.objectiveId
@@ -198,12 +230,14 @@ export function buildDemandaByObjective(opts: {
   const rows: DemandaObjectiveRow[] = [...byObj.entries()].map(([id, d]) => {
     const slaHours = round1(slaByObj.get(id)?.sla || 0);
     const planHours = round1(d.plan);
+    const planHoursTotal = round1(d.plan + d.planDraft);
     const extHours = round1(d.ext);
     const adelHours = round1(d.adel);
     const ftHours = round1(d.ft);
     const opsHours = round1(d.ops);
     const vacantHours = round1(d.vacant);
     const absenceHours = round1(d.absence);
+    // Resultante operativa = solo plan publicado + ext/adel/ops (sin borrador).
     const resultante = coverageResultanteHours({ planHours, extHours, adelHours, opsHours });
     return {
       id,
@@ -211,6 +245,7 @@ export function buildDemandaByObjective(opts: {
       client: d.client,
       slaHours,
       planHours,
+      planHoursTotal,
       extHours,
       adelHours,
       ftHours,
@@ -223,7 +258,7 @@ export function buildDemandaByObjective(opts: {
       deltaPlan: round1(resultante - planHours),
     };
   }).filter((r) =>
-    r.slaHours > 0 || r.planHours > 0 || r.resultante > 0 || r.vacantHours > 0 || r.absenceHours > 0,
+    r.slaHours > 0 || r.planHours > 0 || r.planHoursTotal > 0 || r.resultante > 0 || r.vacantHours > 0 || r.absenceHours > 0,
   ).sort((a, b) => (b.slaHours + b.resultante) - (a.slaHours + a.resultante));
 
   const totals = rows.reduce<DemandaObjectiveRow>((acc, r) => ({
@@ -232,6 +267,7 @@ export function buildDemandaByObjective(opts: {
     client: '',
     slaHours: acc.slaHours + r.slaHours,
     planHours: acc.planHours + r.planHours,
+    planHoursTotal: acc.planHoursTotal + r.planHoursTotal,
     extHours: acc.extHours + r.extHours,
     adelHours: acc.adelHours + r.adelHours,
     ftHours: acc.ftHours + r.ftHours,
@@ -243,7 +279,7 @@ export function buildDemandaByObjective(opts: {
     deltaSla: acc.deltaSla + r.deltaSla,
     deltaPlan: acc.deltaPlan + r.deltaPlan,
   }), {
-    id: '_total', name: 'Total', client: '', slaHours: 0, planHours: 0, extHours: 0, adelHours: 0,
+    id: '_total', name: 'Total', client: '', slaHours: 0, planHours: 0, planHoursTotal: 0, extHours: 0, adelHours: 0,
     ftHours: 0, opsHours: 0, vacantHours: 0, absenceHours: 0, absenceCoveredHours: 0,
     resultante: 0, deltaSla: 0, deltaPlan: 0,
   });
@@ -255,6 +291,7 @@ export function buildDemandaByObjective(opts: {
       ...totals,
       slaHours: r1(totals.slaHours),
       planHours: r1(totals.planHours),
+      planHoursTotal: r1(totals.planHoursTotal),
       extHours: r1(totals.extHours),
       adelHours: r1(totals.adelHours),
       ftHours: r1(totals.ftHours),

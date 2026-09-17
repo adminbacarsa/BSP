@@ -1,5 +1,5 @@
-/**
- * Pintado rápido de Análisis desde el extracto mensual CRM (`hours_balances`).
+﻿/**
+ * Pintado r├ípido de An├ílisis desde el extracto mensual CRM (`hours_balances`).
  * Misma idea que el dashboard: 1 doc por objetivo/mes, sin bajar la malla de turnos.
  * F/RET/REF, desglose SUS/V/E y guardias llegan cuando carga la malla.
  */
@@ -34,6 +34,7 @@ function emptyDemandaTotals(): DemandaObjectiveRow {
     client: '',
     slaHours: 0,
     planHours: 0,
+    planHoursTotal: 0,
     extHours: 0,
     adelHours: 0,
     ftHours: 0,
@@ -164,6 +165,8 @@ export function demandaFromHoursBalances(
       client: a.clientName,
       slaHours: a.slaHours,
       planHours,
+      // Extracto CRM = plan comprometido; total grilla se completa al cargar malla.
+      planHoursTotal: planHours,
       extHours: a.extHours,
       adelHours: a.adelHours,
       ftHours: a.ftHours,
@@ -183,6 +186,7 @@ export function demandaFromHoursBalances(
     ...acc,
     slaHours: acc.slaHours + r.slaHours,
     planHours: acc.planHours + r.planHours,
+    planHoursTotal: acc.planHoursTotal + r.planHoursTotal,
     extHours: acc.extHours + r.extHours,
     adelHours: acc.adelHours + r.adelHours,
     ftHours: acc.ftHours + r.ftHours,
@@ -201,6 +205,7 @@ export function demandaFromHoursBalances(
       ...totals,
       slaHours: r1(totals.slaHours),
       planHours: r1(totals.planHours),
+      planHoursTotal: r1(totals.planHoursTotal),
       extHours: r1(totals.extHours),
       adelHours: r1(totals.adelHours),
       ftHours: r1(totals.ftHours),

@@ -26,6 +26,7 @@ import {
   demandaFromHoursBalances,
   financieraFromHoursBalances,
 } from '../src/lib/analisis/analisisFromHoursBalance';
+import { countPresentAtSinIsPresent } from '../src/lib/analisis/analisisCalidad';
 import {
   buildInformeAnalitico,
   buildInformeSeries,
@@ -302,6 +303,7 @@ const extractRows = [{
 const demExtract = demandaFromHoursBalances(extractRows);
 assert(demExtract.totals.slaHours === 160, `extract demanda SLA 160 (got ${demExtract.totals.slaHours})`);
 assert(demExtract.totals.planHours === 148, `extract demanda plan 148 (got ${demExtract.totals.planHours})`);
+assert(demExtract.totals.planHoursTotal === 148, `extract demanda planHoursTotal = plan pub (got ${demExtract.totals.planHoursTotal})`);
 assert(demExtract.totals.ftHours === 16, `extract demanda FT 16 (got ${demExtract.totals.ftHours})`);
 assert(demExtract.totals.resultante === 152, `extract resultante 148+4 sin FT (got ${demExtract.totals.resultante})`);
 const finExtract = financieraFromHoursBalances(extractRows);
@@ -329,7 +331,7 @@ const inf = buildInformeAnalitico({
   capHsPerGuardPeriod: 192,
   demandaTotals: {
     id: '_total', name: 'Total', client: '',
-    slaHours: 1000, planHours: 920, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
+    slaHours: 1000, planHours: 920, planHoursTotal: 950, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
     vacantHours: 30, absenceHours: 80, absenceCoveredHours: 40,
     resultante: 998, deltaSla: -2, deltaPlan: 78,
   },
@@ -356,15 +358,58 @@ assert(isShiftFichado({
   realEndTime: { seconds: 8 * 3600 + 1 },
 }), 'fichado por timestamps');
 assert(!isShiftFichado({ isPresent: true, isAbsent: true, code: 'M' }), 'ausente no es fichado');
+assert(
+  !isShiftFichado({
+    code: 'M',
+    presentAt: { seconds: Math.floor(Date.now() / 1000) },
+    endTime: { seconds: Math.floor(Date.now() / 1000) + 3600 },
+  }),
+  'presentAt en curso (banda no terminó) no suma a realizadas del mes',
+);
+assert(
+  isShiftFichado({
+    code: 'M',
+    presentAt: { seconds: Math.floor(Date.now() / 1000) - 10 * 3600 },
+    endTime: { seconds: Math.floor(Date.now() / 1000) - 2 * 3600 },
+  }),
+  'presentAt + banda terminada cuenta como fichado',
+);
 assert(fichadaHoursForShift({ isPresent: true, code: 'M' }) === 8, 'fichada M = 8');
 assert(fichadaHoursForShift({ code: 'M' }) === 0, 'sin fichada = 0 hs reales');
+assert(
+  countPresentAtSinIsPresent([{
+    code: 'M',
+    presentAt: { seconds: Math.floor(Date.now() / 1000) },
+  }]) === 1,
+  'presentAt sin isPresent cuenta gap calidad',
+);
+assert(
+  countPresentAtSinIsPresent([{ code: 'M', isPresent: true }]) === 0,
+  'isPresent no es gap',
+);
+
+const infExtract = buildInformeAnalitico({
+  plantel: 10,
+  capHsPerGuardPeriod: 192,
+  demandaTotals: {
+    id: '_total', name: 'Total', client: '',
+    slaHours: 1000, planHours: 920, planHoursTotal: 1000, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
+    vacantHours: 30, absenceHours: 80, absenceCoveredHours: 40,
+    resultante: 998, deltaSla: -2, deltaPlan: 78,
+  },
+  ausenciasStats: null,
+  turnos: [],
+  extractRealHours: 120,
+});
+assert(infExtract.hsRealizadas === 120, 'informe reales desde extracto si malla vacía');
+assert(infExtract.hsPlanificadas === 920, 'informe plan = plan_pub (sin sumar ext/adel)');
 
 const infSus = buildInformeAnalitico({
   plantel: 10,
   capHsPerGuardPeriod: 192,
   demandaTotals: {
     id: '_total', name: 'Total', client: '',
-    slaHours: 1000, planHours: 920, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
+    slaHours: 1000, planHours: 920, planHoursTotal: 950, extHours: 20, adelHours: 10, ftHours: 40, opsHours: 8,
     vacantHours: 30, absenceHours: 80, absenceCoveredHours: 40,
     resultante: 998, deltaSla: -2, deltaPlan: 78,
   },
@@ -592,17 +637,18 @@ assert(finBases[0].hsPlan === 16, `financiera plan 16 = M cubierto + FT como tur
 assert(finBases[0].hsReal === 8, `financiera real 8 (got ${finBases[0].hsReal})`);
 assert(finBases[0].hsFt === 8, `financiera FT 8 recargo (got ${finBases[0].hsFt})`);
 assert(finBases[0].novedades.vac === 8, `financiera vac 8 (got ${finBases[0].novedades.vac})`);
-assert(finConsumoHours(finBases[0], 'planned') === 32, `consumo plan = 16 cobertura + 8FT + 8V (got ${finConsumoHours(finBases[0], 'planned')})`);
+assert(finConsumoHours(finBases[0], 'planned') === 24, `consumo plan = 16 plan_pub (FT 1×) + 8V (got ${finConsumoHours(finBases[0], 'planned')})`);
 assert(finPlanHours(finBases[0], 'planned') === 16, `hs plan = 16 cobertura (got ${finPlanHours(finBases[0], 'planned')})`);
-assert(finSumadasHours(finBases[0]) === 16, `sumadas = 8V+8FT (got ${finSumadasHours(finBases[0])})`);
+assert(finSumadasHours(finBases[0]) === 8, `sumadas = 8V sin FT (FT ya en plan) (got ${finSumadasHours(finBases[0])})`);
 assert((finBases[0].novedades.byCode?.V || 0) === 8, `novedad V desglosada 8 (got ${finBases[0].novedades.byCode?.V})`);
-assert(finConsumoHours(finBases[0], 'real') === 24, `consumo real = 8 fichadas + 8FT + 8V (got ${finConsumoHours(finBases[0], 'real')})`);
+assert(finConsumoHours(finBases[0], 'real') === 16, `consumo real = 8 fichadas + 8V (FT ya en plan, no duplica) (got ${finConsumoHours(finBases[0], 'real')})`);
 const finRoll = rollAnalisisFinanciera(finBases, 'planned');
 assert(finRoll.hsMalla === 24, `malla plan = 16 cobertura + 8 vac (got ${finRoll.hsMalla})`);
 assert(finRoll.clientes === 1 && finRoll.objetivos === 1, 'financiera rollup 1 cliente');
-assert(finRoll.hsConsumo === 32, `empresa consumo 32 (got ${finRoll.hsConsumo})`);
+assert(finRoll.hsConsumo === 24, `empresa consumo 24 (got ${finRoll.hsConsumo})`);
 assert(finRoll.guardias === 2, `2 guardias tocaron el objetivo (got ${finRoll.guardias})`);
-assert(finRoll.hsConsumoPorGuardia === 16, `16 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
+assert(finRoll.hsConsumoPorGuardia === 12, `12 hs/guardia (got ${finRoll.hsConsumoPorGuardia})`);
+assert(Math.abs(demFt.rows[0].planHours - finBases[0].hsPlan) < 1, 'Demanda plan ≈ Financiera hsPlan (±1h)');
 assert(
   finRoll.clients[0].rows[0].hsSlaPorGuardia === Math.round((finRoll.clients[0].rows[0].slaHours / 2) * 10) / 10,
   `SLA/guardia = sla/2 (got ${finRoll.clients[0].rows[0].hsSlaPorGuardia} sla=${finRoll.clients[0].rows[0].slaHours})`,
@@ -722,7 +768,7 @@ assert(finIdle[0].hsPlan === 16, `idle: malla cobertura 16 = M + turno FT (got $
 assert(finIdle[0].hsRet === 8, `idle: RET no usado 8, RET del mismo día que M no duplica (got ${finIdle[0].hsRet})`);
 assert(finIdle[0].hsFranco === 8, `idle: franco F 8 (got ${finIdle[0].hsFranco})`);
 assert(finIdle[0].hsDespliegue === 8, `idle: REF 8 (got ${finIdle[0].hsDespliegue})`);
-assert(finConsumoHours(finIdle[0], 'planned') === 56, `idle consumo 16plan+8FT+8V+8RET+8F+8REF (got ${finConsumoHours(finIdle[0], 'planned')})`);
+assert(finConsumoHours(finIdle[0], 'planned') === 48, `idle consumo 16plan(FT1×)+8V+8RET+8F+8REF (got ${finConsumoHours(finIdle[0], 'planned')})`);
 
 const vacHuerfana = buildAusenciasStats({
   ausencias: [{

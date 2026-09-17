@@ -8,6 +8,7 @@ const cospKnowledge_1 = require("./cospKnowledge");
 const assistantDataTools_1 = require("./assistantDataTools");
 const assistantToolDeclarations_1 = require("./assistantToolDeclarations");
 const assistantDeterministicRouter_1 = require("./assistantDeterministicRouter");
+const assistantQuickReplies_1 = require("./assistantQuickReplies");
 const resolveAssistantUser_1 = require("./resolveAssistantUser");
 const role_util_1 = require("../common/role.util");
 const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
@@ -23,6 +24,8 @@ Cómo responder (subir calidad sin inventar datos):
 3) Cumpliendo la regla 0): si al inicio del mensaje de sistema aparece el bloque **MÉTRICAS YA CALCULADAS EN ESTE TURNO**, **usá esas cifras** para SLA del mes u operaciones del día de referencia cuando la pregunta coincida; no inventes otros totales genéricos. Si preguntaron **cantidad exacta** (cuántos, cuántas, número de…): después de datos de herramientas o de ese bloque, **respondé ese número en la primera oración**. Para **horas de un colaborador en un período** (semana, mes, «cuántas hs trabajó») usá **resumen_horas_empleado_periodo** (totales y por código; no es liquidación legal — remití a Reportes si piden noche/feriado/CCT fino). Para **«cuántas horas a planificar»**, **horas vendidas del SLA** o **planificado vs vendidas** de un objetivo/servicio en un mes (también si es seguimiento de un contrato que acabás de nombrar, ej. CASISA - Obrador): usá **resumen_horas_objetivo_sla_periodo** con texto_objetivo o id_objetivo y fecha_referencia en ese mes; respondé con horas_vendidas_sla_mes, horas_ya_planificadas_turnos_mes y horas_pendientes_a_planificar. Para **servicios SLA / «cuántos servicios activos» como en el panel o KPI del mes** usá **contar_servicios_sla_vigentes_empresa** y el campo **cuenta_para_tarjeta_servicios_activos_del_mes** (y **cuenta_objetivos_distintos_con_sla_en_ese_mes** si hablan de objetivos). **Nunca inventes nombres de contratos o SLA**: si listás cuáles son, los textos salen **solo** del array muestra_contratos_en_mes (campos cliente y objetivo) devuelto por esa herramienta; si no alcanza la muestra, decí que hay más y que revisen el módulo Servicios y SLA. Para **«cuántos empleados en nómina/plantilla»** o la tarjeta del panel: **no** des un número ni cites Firestore; indicá la tarjeta **Empleados en nómina** del **Panel principal** o **RRHH y legajos**. Para **quién está de franco o en RET** un día usá **listado_franco_ret_dia**; si necesitás **id_objetivo_cercania** y el usuario dio sólo el nombre del sitio, llamá antes **buscar_objetivos_por_nombre**. Para **buscar persona por nombre** usá **buscar_empleados_por_nombre** con el texto tal cual lo dijo el usuario (nombre y apellido en cualquier orden, o legajo); no exijas «nombre completo» si ya dio apellido y nombre en una sola frase. Para **listado de nombres de la empresa** o «quiénes son los empleados» usá **listado_empleados_empresa** (opcional filtro y solo_activos_nomina_panel). Para lista de guardias por día según Operaciones usá **listado_turnos_operativos_dia**; para totales de presencia **resumen_presencias_objetivos_dia**; empleados concretos: buscar + **consultar_turnos_empleado**. No te limites sólo al tutorial UI si existe herramienta numérica lista.
 
 4) Para procedimientos ("cómo hago…"): **lista numerada** con **doble salto de línea entre pasos** (así queda punto y aparte al renderizar). Párrafos cortos. Resaltá controles con **negritas**: **Cliente**, **Objetivo**, **grilla**, **publicar cronograma**.
+
+4b) Si ofrecés un **menú de opciones** ("puedo ayudarte con…", "por ejemplo"): usá viñetas con el título en **negritas** (una opción por línea), p. ej. \`- **Consultar turnos planificados**\`. El chat las muestra como botones clicables; el usuario no necesita reescribirlas. **No** uses lista numerada para menús de elección (la numerada queda para pasos de procedimiento).
 
 5) En resúmenes o varios temas seguidos: **un párrafo o un ítem por bloque**, separados con línea en blanco; no amontones todo en un solo párrafo.
 
@@ -197,11 +200,13 @@ function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsE
         ASSISTANT_RESPONSE_STYLE,
         '',
         cospKnowledge_1.COSP_PLATFORM_KNOWLEDGE,
+        '',
+        cospKnowledge_1.ONBOARDING_GUIDE_KNOWLEDGE,
         guide ? `\n${guide}` : '',
         '',
         `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
         toolsEnabled
-            ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
+            ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes, recomendar_cobertura_vacante, ejecutar_replan_diario), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
             : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
         '',
         `Contexto servidor (verificado por backend):`,
@@ -299,11 +304,27 @@ async function runPlatformAssistant(uid, payload, opts) {
         referenceDateYsMmDd: referenceYsMmDd,
     };
     const toolsEnabled = (0, assistantDataTools_1.assistantToolsEnabledForContext)(toolCtx);
+    try {
+        const onboardingDirect = (0, assistantDeterministicRouter_1.tryDeterministicOnboardingGuideReply)(lastUser, moduleKey);
+        if (onboardingDirect?.trim())
+            return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(onboardingDirect.trim()) };
+    }
+    catch (e) {
+        console.warn('[assistant] tryDeterministicOnboardingGuideReply', e);
+    }
+    try {
+        const helpMenu = (0, assistantDeterministicRouter_1.tryDeterministicModuleHelpMenuReply)(lastUser, moduleKey);
+        if (helpMenu?.trim())
+            return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(helpMenu.trim()) };
+    }
+    catch (e) {
+        console.warn('[assistant] tryDeterministicModuleHelpMenuReply', e);
+    }
     if (toolsEnabled && profile.persona === 'SYSTEM' && empresaForTools.trim()) {
         try {
             const direct = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, toolsEnabled, moduleKey, pathname, priorRaw.map((m) => ({ role: m.role, content: m.content })));
             if (direct?.trim())
-                return { reply: direct.trim() };
+                return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(direct.trim()) };
         }
         catch (e) {
             console.warn('[assistant] tryDeterministicDataReply', e);
@@ -432,7 +453,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         try {
             const recovered = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, true, moduleKey, pathname, recentMessages);
             if (recovered?.trim())
-                return { reply: recovered.trim() };
+                return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(recovered.trim()) };
         }
         catch (e) {
             console.warn('[assistant] recover false empty turnos', e);
@@ -442,7 +463,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         try {
             const recovered = await (0, assistantDeterministicRouter_1.tryDeterministicDataReply)(lastUser, toolCtx, true, moduleKey, pathname, recentMessages);
             if (recovered?.trim())
-                return { reply: recovered.trim() };
+                return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(recovered.trim()) };
         }
         catch (e) {
             console.warn('[assistant] recover fake tool narration', e);
@@ -469,8 +490,8 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
     }
     const finalReply = reply.slice(0, 8000);
     if (capturedActionProposal) {
-        return { reply: `${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->` };
+        return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(`${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->`) };
     }
-    return { reply: finalReply };
+    return { reply: (0, assistantQuickReplies_1.attachQuickRepliesMarker)(finalReply) };
 }
 //# sourceMappingURL=runPlatformAssistant.js.map

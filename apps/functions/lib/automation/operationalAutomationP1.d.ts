@@ -1,0 +1,71 @@
+import { type CascadeStepType } from '../coverage/eligibilityFilter';
+export type CoverageRecommendInput = {
+    empresaId: string;
+    shiftId?: string;
+    objectiveId?: string;
+    fecha?: string;
+    banda?: string;
+    limite?: number;
+};
+export type CoverageCandidateScore = {
+    employeeId: string;
+    employeeName: string;
+    cascadeStep: CascadeStepType;
+    cascadeRank: number;
+    score: number;
+    costScore: number;
+    riskScore: number;
+    knowledgeScore: number;
+    distanceKm: number | null;
+    reason: string;
+    sourceShiftId?: string;
+    sourceCode?: string;
+};
+export type CoverageRecommendResult = {
+    ok: boolean;
+    empresaId: string;
+    shiftId: string | null;
+    objectiveId: string;
+    objectiveName: string;
+    fecha: string;
+    banda: string;
+    urgency: 'URGENTE' | 'INTERMEDIO' | 'NORMAL';
+    candidates: CoverageCandidateScore[];
+    generatedAt: string;
+    notes: string[];
+};
+export type DailyReplanInput = {
+    empresaId: string;
+    windowDays?: number;
+    objectiveId?: string;
+    dryRun?: boolean;
+    autoApplyRet?: boolean;
+    maxVacancies?: number;
+};
+export type DailyReplanVacancy = {
+    shiftId: string;
+    objectiveId: string;
+    objectiveName: string;
+    employeeId: string;
+    employeeName: string;
+    code: string;
+    date: string;
+    startMs: number;
+    recommended?: CoverageCandidateScore | null;
+    action: 'recommend_only' | 'draft_created' | 'skipped';
+    detail: string;
+};
+export type DailyReplanResult = {
+    ok: boolean;
+    runId: string;
+    empresaId: string;
+    windowDays: number;
+    vacanciesFound: number;
+    recommendations: number;
+    draftsCreated: number;
+    dryRun: boolean;
+    items: DailyReplanVacancy[];
+    generatedAt: string;
+};
+export declare function recommendCoverageCandidates(input: CoverageRecommendInput): Promise<CoverageRecommendResult>;
+export declare function runDailyReplanWindow(input: DailyReplanInput): Promise<DailyReplanResult>;

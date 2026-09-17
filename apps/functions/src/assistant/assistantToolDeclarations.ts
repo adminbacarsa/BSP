@@ -560,6 +560,68 @@ ASSISTANT_FUNCTION_DECLARATIONS.push(
       required: [],
     },
   } as any,
+  {
+    name: 'resumen_alertas_operativas_ia',
+    description:
+      'Resume alertas operativas generadas automáticamente por IA (marcaciones tardías, turnos vencidos, solapamientos, ausencias sin cobertura) para hoy o una fecha dada. Usá para «qué alertas raras hay», «alertas IA pendientes», «anomalías operativas».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD opcional. Si se omite, usa hoy del cliente.' },
+        solo_pendientes: { type: SchemaType.BOOLEAN, description: 'true (default): solo status pending.' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de filas de muestra (default 40).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'checklist_cierre_operativo_mes',
+    description:
+      'Genera checklist operativo de cierre (liquidación + prefactura): marcaciones pendientes, turnos abiertos vencidos, ausencias sin resolver, horas SLA vendidas vs planificadas vs ejecutadas y recomendación de cierre. Usá para «cómo vengo para cerrar mayo», «control de prefactura cierre», «faltantes de liquidación».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        anio: { type: SchemaType.NUMBER, description: 'Año del cierre (ej. 2026).' },
+        mes: { type: SchemaType.NUMBER, description: 'Mes 1-12 (ej. mayo = 5).' },
+        persistir_snapshot: { type: SchemaType.BOOLEAN, description: 'true por default: guarda snapshot en operational_closure_checklists.' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'recomendar_cobertura_vacante',
+    description:
+      'Recomienda candidatos de cobertura ordenados por costo/riesgo CCT (SIN_TURNO→RET→ESC→…→FT) para una vacante o ausencia. Usá para «quién conviene para cubrir a García», «mejor opción de cobertura», «candidatos baratos para la vacante».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        shift_id: { type: SchemaType.STRING, description: 'ID Firestore del turno vacante/ausente (preferido).' },
+        id_objetivo: { type: SchemaType.STRING, description: 'ID del objetivo si no hay shift_id.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo si no hay id.' },
+        fecha: { type: SchemaType.STRING, description: 'YYYY-MM-DD. Default: hoy cliente o fecha del turno.' },
+        banda: { type: SchemaType.STRING, description: 'Código de banda (M/T/N/D12/N12). Default: del turno.' },
+        limite: { type: SchemaType.NUMBER, description: 'Máximo de candidatos (default 12).' },
+      },
+      required: [],
+    },
+  } as any,
+  {
+    name: 'ejecutar_replan_diario',
+    description:
+      'Ejecuta replanificación diaria rolling window (P1): detecta vacantes/ausencias en los próximos N días y recomienda cobertura. Con simulacion=true (default) solo recomienda y registra automation_runs. Con simulacion=false y aplicar_ret=true puede crear borradores RET de cobertura. Usá para «replan de los próximos días», «qué vacantes vienen», «armar cobertura preventiva».',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        dias_ventana: { type: SchemaType.NUMBER, description: 'Días hacia adelante (1-14, default 3).' },
+        id_objetivo: { type: SchemaType.STRING, description: 'Opcional: limitar a un objetivo.' },
+        texto_objetivo: { type: SchemaType.STRING, description: 'Nombre del objetivo si no hay id.' },
+        simulacion: { type: SchemaType.BOOLEAN, description: 'true (default): no escribe turnos. false: permite aplicar.' },
+        aplicar_ret: { type: SchemaType.BOOLEAN, description: 'Si simulacion=false, crear borradores RET del mejor candidato RET.' },
+        max_vacantes: { type: SchemaType.NUMBER, description: 'Tope de vacantes a procesar (default 40).' },
+      },
+      required: [],
+    },
+  } as any,
 );
 
 export const ASSISTANT_TOOL_ROUNDS_MAX = 4;
@@ -576,6 +638,8 @@ const WRITE_TOOL_MODULE_REQUIREMENTS: Record<string, string> = {
   activar_modo_demo: 'OPERATIONS',
   desactivar_modo_demo: 'OPERATIONS',
   estado_modo_demo: 'OPERATIONS',
+  recomendar_cobertura_vacante: 'OPERATIONS',
+  ejecutar_replan_diario: 'OPERATIONS',
 };
 
 export function getFilteredDeclarations(readableModuleKeys: string[]): typeof ASSISTANT_FUNCTION_DECLARATIONS {

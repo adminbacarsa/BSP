@@ -217,6 +217,10 @@ export function OperacionesMapPopup({
                   : new Date(shift.endTime)
                 : null;
             const diffMin = (now.getTime() - start.getTime()) / 60000;
+            const codeU = String(shift.code || '').toUpperCase();
+            const isPassiveStandby = shift.isPassiveStandby === true
+              || ((codeU === 'RET' || shift.isReten === true)
+                && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             const canCheckIn = !isPassiveStandby && diffMin >= -15 && diffMin <= 60 && !shift.isPresent;
             const s = getShiftStatusStyle(shift, diffMin);
             const t1 = start.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
@@ -226,10 +230,6 @@ export function OperacionesMapPopup({
             let statusLabel = 'PLAN';
             let statusColor = '#94a3b8';
             const refuerzoLabel = getRefuerzoLabel(shift);
-            const codeU = String(shift.code || '').toUpperCase();
-            const isPassiveStandby = shift.isPassiveStandby === true
-              || ((codeU === 'RET' || shift.isReten === true)
-                && String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE');
             if (shift.isFranco) {
               statusLabel = 'FRANCO';
               statusColor = '#3b82f6';
