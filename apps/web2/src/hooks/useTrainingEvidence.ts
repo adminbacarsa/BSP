@@ -22,10 +22,16 @@ export function useTrainingEvidence() {
   const empresaId  = session?.empresaId ?? '';
 
   // ── Convertir startedAt a Timestamp de Firestore ─────────────────────────
+  // session.startedAt puede ser un Timestamp de Firestore (leído via onSnapshot)
+  // o un ISO string (objeto local recién creado). Manejar ambos casos.
   const sessionStart: Timestamp | null = (() => {
     if (!session?.startedAt) return null;
     try {
-      return Timestamp.fromDate(new Date(session.startedAt));
+      const sa = session.startedAt as unknown;
+      if (sa instanceof Timestamp) return sa;
+      const d = new Date(sa as string);
+      if (isNaN(d.getTime())) return null;
+      return Timestamp.fromDate(d);
     } catch {
       return null;
     }
