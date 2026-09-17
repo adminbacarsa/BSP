@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
-import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target, Check, Search } from 'lucide-react';
+import { Plus, CheckCircle, XCircle, Shield, RefreshCw, X, Edit3, Trash2, Building2, Eye, EyeOff, LockKeyhole, Target, Check, Search, GraduationCap } from 'lucide-react';
 import { db, functions } from '@/lib/firebase';
 import { collection, getDocs, query, orderBy, where, doc, updateDoc, deleteDoc, deleteField } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -29,7 +29,7 @@ export default function UsersTab() {
     const [isProcessing, setIsProcessing] = useState(false);
     const [editMode, setEditMode]         = useState(false);
 
-    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false, objetivosAsignados: [] as string[] };
+    const initialForm = { id: '', firstName: '', lastName: '', email: '', password: '', role: '', empresaId: '', supervisorPin: '', showPin: false, objetivosAsignados: [] as string[], requiresTraining: false };
     const [formData, setFormData] = useState(initialForm);
 
     const empresasDropdown = isSuperAdmin
@@ -95,6 +95,7 @@ export default function UsersTab() {
             supervisorPin: user.supervisorPin || '',
             showPin: false,
             objetivosAsignados: user.objetivosAsignados || [],
+            requiresTraining: user.requiresTraining ?? false,
         });
         setIsModalOpen(true);
     };
@@ -138,6 +139,7 @@ export default function UsersTab() {
                         empresaId:           efectivaEmpresaId,
                         supervisorPin:       formData.supervisorPin || null,
                         objetivosAsignados:  formData.objetivosAsignados,
+                        requiresTraining:    formData.requiresTraining,
                     };
                     if (allEmpresas) patch.allEmpresas = true;
                     else patch.allEmpresas = deleteField();
@@ -149,14 +151,15 @@ export default function UsersTab() {
                 } else {
                     const createFn = httpsCallable(functions, 'crearUsuarioSistema');
                     await createFn({
-                        firstName:     formData.firstName,
-                        lastName:      formData.lastName,
-                        email:         formData.email,
-                        password:      formData.password,
-                        role:          formData.role,
-                        empresaId:     efectivaEmpresaId,
+                        firstName:        formData.firstName,
+                        lastName:         formData.lastName,
+                        email:            formData.email,
+                        password:         formData.password,
+                        role:             formData.role,
+                        empresaId:        efectivaEmpresaId,
                         allEmpresas,
-                        supervisorPin: formData.supervisorPin || null,
+                        supervisorPin:    formData.supervisorPin || null,
+                        requiresTraining: formData.requiresTraining,
                     });
                     resolve('Usuario creado y acceso concedido');
                 }
@@ -196,6 +199,7 @@ export default function UsersTab() {
         empresas.find(e => e.id === id)?.name || id || '—';
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
+    const selectedEmpresaIsTraining = (empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa ?? false;
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -476,6 +480,29 @@ export default function UsersTab() {
                                     </div>
                                 );
                             })()}
+
+                            {/* Toggle: requiere capacitación */}
+                            {selectedEmpresaIsTraining && (
+                              <div
+                                className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer select-none transition-colors ${formData.requiresTraining ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-amber-300'}`}
+                                onClick={() => setFormData(f => ({ ...f, requiresTraining: !f.requiresTraining }))}
+                              >
+                                <div className={`mt-0.5 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${formData.requiresTraining ? 'bg-amber-500 border-amber-500' : 'border-slate-300 dark:border-slate-600'}`}>
+                                  {formData.requiresTraining && <Check size={11} className="text-white" strokeWidth={3}/>}
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <GraduationCap size={13} className={formData.requiresTraining ? 'text-amber-600' : 'text-slate-400'}/>
+                                    <span className={`text-xs font-black ${formData.requiresTraining ? 'text-amber-700 dark:text-amber-300' : 'text-slate-600 dark:text-slate-300'}`}>
+                                      Requiere completar capacitación
+                                    </span>
+                                  </div>
+                                  <p className="text-[10px] text-slate-400 mt-0.5 leading-relaxed">
+                                    El usuario deberá terminar el circuito de capacitación antes de poder navegar la plataforma libremente.
+                                  </p>
+                                </div>
+                              </div>
+                            )}
 
                           </div>{/* fin scroll */}
                           <div className="shrink-0 px-8 pb-8 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-3">

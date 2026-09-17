@@ -1309,7 +1309,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
     throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
   }
   
-  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
+  const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, requiresTraining } = data;
   const roleNorm = normalizeBackupRole(role);
   const roleIsSuper = isSuperAdminBackupRole(roleNorm);
   const multiEmpresa =
@@ -1354,6 +1354,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
       role: roleNorm,
       empresaId: targetEmpresaId,
       ...(allEmpresas ? { allEmpresas: true } : {}),
+      ...(requiresTraining ? { requiresTraining: true } : {}),
       status: 'ACTIVE',
       createdAt: admin.firestore.FieldValue.serverTimestamp()
     });

@@ -35,6 +35,11 @@ const TrainingCoachBubble = dynamic(
   { ssr: false },
 );
 
+const TrainingGate = dynamic(
+  () => import('@/components/training/TrainingGate').then((m) => m.TrainingGate),
+  { ssr: false },
+);
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const showTrainingCoach = router.pathname.startsWith('/admin');
@@ -86,6 +91,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <Component {...pageProps} />
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
         {showTrainingCoach && <TrainingCoachBubble />}
+        {showTrainingCoach && <TrainingGate />}
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>
       </EmpresaProvider>
