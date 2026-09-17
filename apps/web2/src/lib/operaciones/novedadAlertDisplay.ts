@@ -1,3 +1,5 @@
+import { isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
+
 /**
  * Normaliza campos de novedades para el panel Alertas / popup de detalle.
  * El backend a veces usa `message` (p. ej. COBERTURA_RESUELTA) y a veces `description`.
@@ -102,6 +104,23 @@ export function isHiddenFromOpsAlerts(n: any): boolean {
  * REC+12 / retención: ocultar si el turno ya no está presente en el monitor
  * (cerrado, fuera de ventana, u objetivo sin ACT) o si el horario ya venció hace rato (zombie).
  */
+const IA_AUTOMATION_TYPE_PREFIX = 'IA_ALERTA_';
+
+/** IA P0: ocultar si el turno ya no está en la ventana operativa del monitor. */
+export function isStaleIaAutomationNovedad(n: any, processedData: any[]): boolean {
+    const type = String(n?.type || '');
+    if (!type.startsWith(IA_AUTOMATION_TYPE_PREFIX)) return false;
+    if (String(n?.origin || '') !== 'AUTOMATION_P0') return false;
+    const shiftId = String(n?.shiftId || '').trim();
+    if (!shiftId) return true;
+    const shift = (processedData || []).find((s: any) => s.id === shiftId);
+    if (!shift) return true;
+    const now = new Date();
+    if (!isOpsShiftHoy(shift, now)) return true;
+    if (shift.isCompleted && !shift.isRetention) return true;
+    return false;
+}
+
 export function isOrphanShiftNoiseNovedad(n: any, processedData: any[]): boolean {
     const type = String(n?.type || '');
     if (!SHIFT_TIED_NOISE_TYPES.has(type)) return false;

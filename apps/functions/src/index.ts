@@ -75,6 +75,7 @@ import {
   triggerMobileAppPreviewBuildHandler,
   refreshMobileAppBuildStatusHandler,
 } from './mobileApp/mobileAppHandlers';
+import { scanOperationalAlertsForEmpresa } from './automation/operationalAutomation';
 
 // InicializaciÃ³n de Firebase Admin
 if (!admin.apps.length) {
@@ -1025,6 +1026,37 @@ export const modoDemoCron = functions
         }
       } catch (e) {
         console.warn(`[modoDemoCron] Error empresa ${empDoc.id}:`, (e as Error)?.message);
+      }
+    }
+  });
+
+// =========================================================
+// ALERTAS OPERATIVAS IA (P0) — misma ventana que Operaciones (isOpsShiftHoy)
+// =========================================================
+export const operationalAlertsCron = functions
+  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
+  .pubsub.schedule('*/15 * * * *')
+  .timeZone('America/Argentina/Buenos_Aires')
+  .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+      const empresaId = empresaDoc.id;
+      if (empresaDoc.data()?.active === false) continue;
+      if (empresaDoc.data()?.centroControlEnabled === false) continue;
+      try {
+        const out = await scanOperationalAlertsForEmpresa({
+          empresaId,
+          toleranceMinutes: 25,
+        });
+        if (out.alertsCreated > 0 || out.alertsAutoClosed > 0) {
+          console.log(
+            `[operationalAlertsCron] ${empresaId}: query=${out.evaluatedShifts} opsHoy=${out.opsWindowShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated} autoClosed=${out.alertsAutoClosed}`,
+          );
+        }
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.warn(`[operationalAlertsCron] ${empresaId}:`, msg);
       }
     }
   });

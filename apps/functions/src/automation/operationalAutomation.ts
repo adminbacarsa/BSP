@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { Timestamp, type Query, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import { runAutoScheduleCore, type RunAutoScheduleInput, type RunAutoScheduleOutput } from '../scheduling/runAutoSchedule';
 import { runPlanningGeminiOptimize, type GeminiRespuesta } from '../assistant/planningGeminiServer';
+import { isOpsShiftHoyServer, opsMonitorQueryWindow } from './opsShiftWindow';
 
 type TurnoDoc = Record<string, unknown>;
 type EmployeeDoc = Record<string, unknown>;
@@ -48,8 +49,10 @@ export type OperationalAlertScanResult = {
   ok: boolean;
   empresaId: string;
   evaluatedShifts: number;
+  opsWindowShifts: number;
   anomaliesDetected: number;
   alertsCreated: number;
+  alertsAutoClosed: number;
   byType: Record<string, number>;
   generatedAt: string;
 };
@@ -235,6 +238,7 @@ function shiftEligibleForIaAlert(row: TurnoDoc, start: Timestamp, publishedPlanK
   if (row.draft === true || row.isVirtual === true || row.isFranco === true || isFrancoCode(code)) {
     return false;
   }
+  if (row.isCompleted === true && row.isReten !== true) return false;
   if (isShiftUnassigned(row)) return false;
   if (row.status === 'COVERED' && row.isAbsent !== true) return false;
   if (isPlannedCellWithoutAssignee(row, code)) return false;
@@ -259,7 +263,33 @@ function shiftCountsForOverlapCapacity(row: TurnoDoc): boolean {
 
 function isOperationalCoverageTurno(row: TurnoDoc): boolean {
   const origin = String(row.origin ?? '');
-  return origin === 'OPERATIONS_COVERAGE' || row.resolvedBy === 'OPERACIONES';
+  return (
+    origin === 'OPERATIONS_COVERAGE' ||
+    row.resolvedBy === 'OPERACIONES' ||
+    row.resolvedBy === 'MODO_DEMO'
+  );
+}
+
+function absenceShiftIdLinkedFromCoverage(row: TurnoDoc): string {
+  return String(
+    row.absenceShiftId ?? row.coveredShiftId ?? row.causedByShiftId ?? '',
+  ).trim();
+}
+
+/** Titulares ausentes cubiertos por turno ops (p. ej. OPERATIONS_COVERAGE + absenceShiftId). */
+function collectAbsentShiftIdsWithOpsCoverage(
+  shifts: Array<{ id: string; data: TurnoDoc }>,
+): Set<string> {
+  const covered = new Set<string>();
+  for (const row of shifts) {
+    const data = row.data;
+    if (data.isAbsent === true || data.isFranco === true) continue;
+    if (isShiftUnassigned(data)) continue;
+    if (!isOpsCoverageShift(data) && !isOperationalCoverageTurno(data)) continue;
+    const link = absenceShiftIdLinkedFromCoverage(data);
+    if (link) covered.add(link);
+  }
+  return covered;
 }
 
 /** Cobertura ops ligada a ausencia titular: no es doble asignación de planificación. */
@@ -272,11 +302,8 @@ function overlapPairAllowedByCoverage(prev: OverlapShiftRef, cur: OverlapShiftRe
   ]) {
     if (absentSide.data.isAbsent !== true) continue;
     if (!isOperationalCoverageTurno(activeSide.data)) continue;
-    const link = String(
-      activeSide.data.absenceShiftId ?? activeSide.data.coveredShiftId ?? '',
-    ).trim();
+    const link = absenceShiftIdLinkedFromCoverage(activeSide.data);
     if (link && link === absentSide.id) return true;
-    return true;
   }
   const prevAbs = String(prev.data.absenceShiftId ?? prev.data.coveredShiftId ?? '').trim();
   const curAbs = String(cur.data.absenceShiftId ?? cur.data.coveredShiftId ?? '').trim();
@@ -679,6 +706,7 @@ function detectOperationalAnomalies(
   const anomalies: DetectedAnomaly[] = [];
   const tolMs = toleranceMinutes * 60 * 1000;
   const coverageKeys = new Set<string>();
+  const absentShiftIdsWithOpsCoverage = collectAbsentShiftIdsWithOpsCoverage(shifts);
   for (const row of shifts) {
     if (isOpsCoverageShift(row.data) && row.data.isAbsent !== true) {
       coverageKeys.add(buildCoverageKey(row.data));
@@ -765,7 +793,8 @@ function detectOperationalAnomalies(
 
     if (row.data.isAbsent === true) {
       const key = buildCoverageKey(row.data);
-      const hasCoverage = coverageKeys.has(key);
+      const hasCoverage =
+        coverageKeys.has(key) || absentShiftIdsWithOpsCoverage.has(row.id);
       const resolved = row.data.resolvedBy === 'OPERACIONES' || row.data.isReportedToPlanning === true;
       if (!hasCoverage && !resolved) {
         const fp = `absence_uncovered__${row.id}`;
@@ -927,6 +956,70 @@ async function persistOperationalAnomalies(empresaId: string, anomalies: Detecte
     );
   }
   return created;
+}
+
+const IA_ALERTA_TYPE_PREFIX = 'IA_ALERTA_';
+
+async function reconcileStaleIaAutomationAlerts(
+  empresaId: string,
+  activeFingerprints: Set<string>,
+): Promise<number> {
+  const db = admin.firestore();
+  const snap = await db
+    .collection('novedades')
+    .where('empresaId', '==', empresaId)
+    .where('origin', '==', 'AUTOMATION_P0')
+    .where('status', '==', 'pending')
+    .limit(450)
+    .get();
+
+  const nowTs = Timestamp.now();
+  let closed = 0;
+  let batch = db.batch();
+  let batchOps = 0;
+
+  for (const docSnap of snap.docs) {
+    const data = docSnap.data();
+    const type = String(data.type ?? '');
+    if (!type.startsWith(IA_ALERTA_TYPE_PREFIX)) continue;
+    const fp = String(data.automationFingerprint ?? '').trim();
+    if (fp && activeFingerprints.has(fp)) continue;
+
+    batch.update(docSnap.ref, {
+      status: 'ATENDIDA',
+      atendidaAt: nowTs,
+      atendidaPor: 'operationalAlertsScan',
+      autoClosedBy: 'operationalAlertsScan',
+      autoCloseReason: 'STALE_OPS_WINDOW',
+    });
+    closed += 1;
+    batchOps += 1;
+
+    if (fp) {
+      const ledgerRef = db.collection('automation_alerts_ledger').doc(sanitizeDocId(`${empresaId}__${fp}`));
+      batch.set(
+        ledgerRef,
+        {
+          empresaId,
+          fingerprint: fp,
+          status: 'AUTO_CLOSED',
+          autoClosedAt: nowTs,
+          autoCloseReason: 'STALE_OPS_WINDOW',
+        },
+        { merge: true },
+      );
+      batchOps += 1;
+    }
+
+    if (batchOps >= 400) {
+      await batch.commit();
+      batch = db.batch();
+      batchOps = 0;
+    }
+  }
+
+  if (batchOps > 0) await batch.commit();
+  return closed;
 }
 
 async function queryTurnosInMonth(empresaId: string, year: number, month: number): Promise<Array<{ id: string; data: TurnoDoc }>> {
@@ -1233,14 +1326,25 @@ export async function scanOperationalAlertsForEmpresa(
 ): Promise<OperationalAlertScanResult> {
   const empresaId = String(input.empresaId || '').trim();
   if (!empresaId) throw new Error('empresaId requerido.');
-  const lookbackHours = Math.max(2, Math.min(72, Number(input.lookbackHours ?? 24)));
-  const lookaheadHours = Math.max(0, Math.min(24, Number(input.lookaheadHours ?? 8)));
   const toleranceMinutes = Math.max(5, Math.min(180, Number(input.toleranceMinutes ?? 25)));
   const now = new Date();
-  const start = Timestamp.fromDate(new Date(now.getTime() - lookbackHours * 3600000));
-  const end = Timestamp.fromDate(new Date(now.getTime() + lookaheadHours * 3600000));
+  const opsWindow = opsMonitorQueryWindow(now);
+  const useLegacyWindow =
+    input.lookbackHours != null ||
+    input.lookaheadHours != null;
+  const lookbackHours = Math.max(2, Math.min(72, Number(input.lookbackHours ?? 24)));
+  const lookaheadHours = Math.max(0, Math.min(24, Number(input.lookaheadHours ?? 8)));
+  const queryStart = useLegacyWindow
+    ? new Date(now.getTime() - lookbackHours * 3600000)
+    : opsWindow.start;
+  const queryEnd = useLegacyWindow
+    ? new Date(now.getTime() + lookaheadHours * 3600000)
+    : opsWindow.end;
+  const start = Timestamp.fromDate(queryStart);
+  const end = Timestamp.fromDate(queryEnd);
   const docs = await queryShiftsForWindow(empresaId, start, end, 2500);
-  const shifts = docs.map((d) => ({ id: d.id, data: d.data() as TurnoDoc }));
+  const allShifts = docs.map((d) => ({ id: d.id, data: d.data() as TurnoDoc }));
+  const shifts = allShifts.filter((s) => isOpsShiftHoyServer(s.data, now));
   const employeeIds = shifts.map((s) => String(s.data.employeeId ?? '').trim()).filter(Boolean);
   const [objectives, employees, publishedPlanKeys] = await Promise.all([
     loadObjectiveNameMap(empresaId),
@@ -1249,15 +1353,21 @@ export async function scanOperationalAlertsForEmpresa(
   ]);
   const nameCtx: AlertNameContext = { objectives, employees, publishedPlanKeys };
   const anomalies = detectOperationalAnomalies(shifts, now, toleranceMinutes, nameCtx);
-  const created = await persistOperationalAnomalies(empresaId, anomalies);
+  const activeFingerprints = new Set(anomalies.map((a) => a.fingerprint));
+  const [created, autoClosed] = await Promise.all([
+    persistOperationalAnomalies(empresaId, anomalies),
+    reconcileStaleIaAutomationAlerts(empresaId, activeFingerprints),
+  ]);
   const byType: Record<string, number> = {};
   for (const an of anomalies) byType[an.type] = (byType[an.type] ?? 0) + 1;
   return {
     ok: true,
     empresaId,
-    evaluatedShifts: shifts.length,
+    evaluatedShifts: allShifts.length,
+    opsWindowShifts: shifts.length,
     anomaliesDetected: anomalies.length,
     alertsCreated: created,
+    alertsAutoClosed: autoClosed,
     byType,
     generatedAt: nowIso(),
   };

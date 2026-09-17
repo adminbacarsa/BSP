@@ -17,6 +17,7 @@ export declare const checkSystemHealth: functions.HttpsFunction & functions.Runn
 export declare const chatPlatformAssistant: functions.HttpsFunction & functions.Runnable<any>;
 export declare const executeAgentAction: functions.HttpsFunction & functions.Runnable<any>;
 export declare const modoDemoCron: functions.CloudFunction<unknown>;
+export declare const operationalAlertsCron: functions.CloudFunction<unknown>;
 export declare const onTurnoAbsenciaDetectada: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").QueryDocumentSnapshot>, {
     shiftId: string;
 }>>;

@@ -36,6 +36,7 @@ import {
     isInformationalNovedad,
     isHiddenFromOpsAlerts,
     isOrphanShiftNoiseNovedad,
+    isStaleIaAutomationNovedad,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
@@ -1070,6 +1071,7 @@ export default function TacticalMapView() {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
             if (isHiddenFromOpsAlerts(n)) return false;
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false;
+            if (isStaleIaAutomationNovedad(n, logic.processedData)) return false;
             if (n.enGestion) return false;
             if ((n.type === 'VACANTE_OPERATIVA' || n.type === 'TURA_EXTENSION') && n.tipoSolicitud === 'TURA' && n.parentEmpleadoId) {
                 const target = resolveTuraExtensionOperacionesTarget(n, logic.processedData);

@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = void 0;
+exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -39,6 +39,7 @@ const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys")
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
 const mobileAppHandlers_1 = require("./mobileApp/mobileAppHandlers");
+const operationalAutomation_1 = require("./automation/operationalAutomation");
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -857,6 +858,34 @@ exports.modoDemoCron = functions
         }
     }
 });
+exports.operationalAlertsCron = functions
+    .runWith({ timeoutSeconds: 120, memory: '512MB' })
+    .pubsub.schedule('*/15 * * * *')
+    .timeZone('America/Argentina/Buenos_Aires')
+    .onRun(async () => {
+    const db = admin.firestore();
+    const empresasSnap = await db.collection('empresas').limit(250).get();
+    for (const empresaDoc of empresasSnap.docs) {
+        const empresaId = empresaDoc.id;
+        if (empresaDoc.data()?.active === false)
+            continue;
+        if (empresaDoc.data()?.centroControlEnabled === false)
+            continue;
+        try {
+            const out = await (0, operationalAutomation_1.scanOperationalAlertsForEmpresa)({
+                empresaId,
+                toleranceMinutes: 25,
+            });
+            if (out.alertsCreated > 0 || out.alertsAutoClosed > 0) {
+                console.log(`[operationalAlertsCron] ${empresaId}: query=${out.evaluatedShifts} opsHoy=${out.opsWindowShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated} autoClosed=${out.alertsAutoClosed}`);
+            }
+        }
+        catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(`[operationalAlertsCron] ${empresaId}:`, msg);
+        }
+    }
+});
 exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 60 }, async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
@@ -876,6 +905,7 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         id: event.params.shiftId,
         objectiveId: String(after.objectiveId || ''),
         objectiveName: String(after.objectiveName || ''),
+        positionName: String(after.positionName || ''),
         clientId: String(after.clientId || ''),
         clientName: String(after.clientName || ''),
         code: String(after.code || ''),
@@ -2845,6 +2875,7 @@ exports.gestionarVacantes = functions
                 empresaId: shiftEmpresaId(shift) || 'bacarsa',
                 objectiveId: String(shift.objectiveId || ''),
                 objectiveName: String(shift.objectiveName || ''),
+                positionName: String(shift.positionName || ''),
                 clientId: String(shift.clientId || ''),
                 clientName: String(shift.clientName || ''),
                 code: String(shift.code || ''),
@@ -2894,6 +2925,7 @@ exports.gestionarVacantes = functions
                 empresaId: shiftEmpresaId(shift) || 'bacarsa',
                 objectiveId: String(shift.objectiveId || ''),
                 objectiveName: String(shift.objectiveName || ''),
+                positionName: String(shift.positionName || ''),
                 clientId: String(shift.clientId || ''),
                 clientName: String(shift.clientName || ''),
                 code: String(shift.code || ''),
