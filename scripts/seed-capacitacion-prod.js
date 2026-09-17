@@ -68,7 +68,9 @@ async function run() {
   console.log('✓ roles/ADMIN_CAPACITACION');
 
   // ── Usuario admin ─────────────────────────────────────────────────────────────
-  const adminUid = await ensureAuthUser(ADMIN_EMAIL, ADMIN_PASS, { role: 'ADMIN_CAPACITACION' }, 'Admin Capacitación');
+  // role: 'admin' para que isAdmin() en firestore.rules lo reconozca como tenant admin.
+  // ADMIN_CAPACITACION queda en system_users para la lógica de la app.
+  const adminUid = await ensureAuthUser(ADMIN_EMAIL, ADMIN_PASS, { role: 'admin', empresaId: EMPRESA_ID }, 'Admin Capacitación');
   await db.collection('system_users').doc(adminUid).set({
     email: ADMIN_EMAIL,
     role: 'ADMIN_CAPACITACION',

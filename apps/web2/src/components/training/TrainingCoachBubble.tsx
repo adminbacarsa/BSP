@@ -29,9 +29,31 @@ export function TrainingCoachBubble() {
   const [collapsed, setCollapsed] = useState(false);
   const [completing, setCompleting] = useState(false);
 
-  if (!empresa?.isTrainingEmpresa || !session || session.status === 'completed') return null;
+  // Calcular coachStep antes de cualquier return condicional (reglas de hooks)
+  const coachStep = session
+    ? getActiveCoachStep(session.currentModuleKey, session.progress)
+    : null;
 
-  const coachStep = getActiveCoachStep(session.currentModuleKey, session.progress);
+  const allStepsForModule = coachStep
+    ? COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey).map(s => s.stepId)
+    : [];
+
+  const handleComplete = useCallback(async () => {
+    if (!session || !coachStep || completing) return;
+    setCompleting(true);
+    try {
+      await completeStep({
+        sessionId: session.id,
+        moduleKey: coachStep.moduleKey,
+        stepId: coachStep.stepId,
+        allStepsForModule,
+      });
+    } finally {
+      setCompleting(false);
+    }
+  }, [session, coachStep, allStepsForModule, completing]);
+
+  if (!empresa?.isTrainingEmpresa || !session || session.status === 'completed') return null;
 
   // Si no hay paso activo, el recorrido terminó
   if (!coachStep) {
@@ -52,24 +74,6 @@ export function TrainingCoachBubble() {
 
   const mod = TRAINABLE_MODULES.find(m => m.key === coachStep.moduleKey);
   const isOnTargetRoute = router.pathname.startsWith(coachStep.targetRoute);
-  const allStepsForModule = COACH_STEPS
-    .filter(s => s.moduleKey === coachStep.moduleKey)
-    .map(s => s.stepId);
-
-  const handleComplete = useCallback(async () => {
-    if (!session || completing) return;
-    setCompleting(true);
-    try {
-      await completeStep({
-        sessionId: session.id,
-        moduleKey: coachStep.moduleKey,
-        stepId: coachStep.stepId,
-        allStepsForModule,
-      });
-    } finally {
-      setCompleting(false);
-    }
-  }, [session, coachStep, allStepsForModule, completing]);
 
   if (collapsed) {
     return (
