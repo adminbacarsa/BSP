@@ -2,14 +2,14 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
-  GraduationCap, ChevronRight, X, ExternalLink,
+  GraduationCap, ChevronRight, ChevronLeft, X, ExternalLink,
   CheckCircle2, Lightbulb, ArrowRight,
 } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useTrainingSession } from '@/hooks/useTrainingSession';
 import { getActiveCoachStep, COACH_STEPS } from '@/lib/training/coachContent';
 import { TRAINABLE_MODULES } from '@/lib/training/trainingSession';
-import { completeStep } from '@/lib/training/trainingSession';
+import { completeStep, uncompleteStep } from '@/lib/training/trainingSession';
 import { TrainingSpotlight } from './TrainingSpotlight';
 
 const STORAGE_KEY = 'training-coach-pos';
@@ -82,6 +82,38 @@ export function TrainingCoachBubble() {
   const allStepsForModule = coachStep
     ? COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey).map(s => s.stepId)
     : [];
+
+  // Calcula el paso anterior para permitir retroceder
+  const prevStepInfo = session ? (() => {
+    const { currentModuleKey, modulePlan, progress } = session;
+    if (!currentModuleKey || !coachStep) return null;
+    const modSteps = COACH_STEPS.filter(s => s.moduleKey === currentModuleKey);
+    const completedInMod = progress[currentModuleKey]?.stepsCompleted ?? [];
+    const activeIdx = modSteps.findIndex(s => !completedInMod.includes(s.stepId));
+    if (activeIdx > 0) {
+      return { targetModuleKey: currentModuleKey, targetStepId: modSteps[activeIdx - 1].stepId, newCurrentModuleKey: currentModuleKey };
+    }
+    const modIdx = modulePlan.indexOf(currentModuleKey);
+    if (modIdx > 0) {
+      const prevModKey = modulePlan[modIdx - 1];
+      const prevModSteps = COACH_STEPS.filter(s => s.moduleKey === prevModKey);
+      if (prevModSteps.length > 0) {
+        return { targetModuleKey: prevModKey, targetStepId: prevModSteps[prevModSteps.length - 1].stepId, newCurrentModuleKey: prevModKey };
+      }
+    }
+    return null;
+  })() : null;
+
+  const [reverting, setReverting] = useState(false);
+  const handleBack = useCallback(async () => {
+    if (!session || !prevStepInfo || reverting) return;
+    setReverting(true);
+    try {
+      await uncompleteStep({ sessionId: session.id, ...prevStepInfo });
+    } finally {
+      setReverting(false);
+    }
+  }, [session, prevStepInfo, reverting]);
 
   const handleComplete = useCallback(async () => {
     if (!session || !coachStep || completing) return;
@@ -200,8 +232,8 @@ export function TrainingCoachBubble() {
           </div>
         )}
 
-        {/* Botón marcar listo */}
-        <div className="px-4 pb-4 pt-2">
+        {/* Botones acción */}
+        <div className="px-4 pb-4 pt-2 flex flex-col gap-2">
           <button
             onClick={handleComplete}
             disabled={completing}
@@ -210,7 +242,17 @@ export function TrainingCoachBubble() {
             <CheckCircle2 size={13} />
             {completing ? 'Guardando…' : 'Marcar paso como listo'}
           </button>
-          <p className="text-center text-[10px] text-slate-400 dark:text-slate-500 mt-1">
+          {prevStepInfo && (
+            <button
+              onClick={handleBack}
+              disabled={reverting}
+              className="w-full flex items-center justify-center gap-2 text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 text-xs py-1.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 transition-colors disabled:opacity-50"
+            >
+              <ChevronLeft size={13} />
+              {reverting ? 'Volviendo…' : 'Volver al paso anterior'}
+            </button>
+          )}
+          <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
             También se detecta automáticamente al completar la acción
           </p>
         </div>

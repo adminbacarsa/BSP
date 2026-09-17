@@ -206,6 +206,45 @@ export async function completeStep(params: {
   });
 }
 
+/** Deshace un paso completado (permite retroceder en el recorrido) */
+export async function uncompleteStep(params: {
+  sessionId: string;
+  targetModuleKey: string;
+  targetStepId: string;
+  newCurrentModuleKey: string;
+}): Promise<void> {
+  const { sessionId, targetModuleKey, targetStepId, newCurrentModuleKey } = params;
+  const ref = doc(db, 'training_sessions', sessionId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return;
+
+  const data = snap.data() as Omit<TrainingSession, 'id'>;
+  const mod: ModuleProgress = data.progress?.[targetModuleKey] ?? { status: 'pending', stepsCompleted: [], attempts: 0 };
+  const stepsCompleted = mod.stepsCompleted.filter(s => s !== targetStepId);
+
+  const updates: Record<string, unknown> = {
+    [`progress.${targetModuleKey}`]: {
+      ...mod,
+      status: stepsCompleted.length === 0 ? 'pending' : 'in_progress',
+      stepsCompleted,
+      completedAt: null,
+    },
+    currentModuleKey: newCurrentModuleKey,
+    status: 'active',
+    updatedAt: serverTimestamp(),
+  };
+
+  // Si volvemos a un módulo diferente que estaba 'completed', revertirlo
+  if (newCurrentModuleKey !== targetModuleKey) {
+    const prevMod = data.progress?.[newCurrentModuleKey];
+    if (prevMod?.status === 'completed') {
+      updates[`progress.${newCurrentModuleKey}`] = { ...prevMod, status: 'in_progress', completedAt: null };
+    }
+  }
+
+  await updateDoc(ref, updates);
+}
+
 /** Reinicia la sesión de un alumno (instructor) */
 export async function resetSession(sessionId: string, modulePlan: string[]): Promise<void> {
   const ref = doc(db, 'training_sessions', sessionId);
