@@ -22,7 +22,16 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     icon: '🏢',
     steps: [
       { id: 'crear_cliente',   label: 'Crear un cliente' },
-      { id: 'crear_objetivo',  label: 'Agregar objetivo/sede' },
+      { id: 'crear_objetivo',  label: 'Agregar sede al cliente' },
+    ],
+  },
+  {
+    key: 'RRHH',
+    label: 'RRHH — Empleados',
+    icon: '👥',
+    steps: [
+      { id: 'ver_empleado',    label: 'Explorar legajo de empleado' },
+      { id: 'cargar_novedad',  label: 'Cargar novedad' },
     ],
   },
   {
@@ -50,22 +59,6 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     steps: [
       { id: 'reg_presencia',   label: 'Registrar presencia' },
       { id: 'gestionar_aus',   label: 'Gestionar ausencia' },
-    ],
-  },
-  {
-    key: 'RRHH',
-    label: 'RRHH y Novedades',
-    icon: '👥',
-    steps: [
-      { id: 'cargar_novedad',  label: 'Cargar novedad' },
-    ],
-  },
-  {
-    key: 'REPORTS',
-    label: 'Reportes',
-    icon: '📊',
-    steps: [
-      { id: 'ver_reporte',     label: 'Consultar reporte de período' },
     ],
   },
 ];

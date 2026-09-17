@@ -42,6 +42,31 @@ export const COACH_STEPS: CoachStep[] = [
     highlightSelector: '[data-action="nueva-sede"]',
   },
 
+  // ── RRHH ───────────────────────────────────────────────────────────────────
+  {
+    moduleKey: 'RRHH',
+    stepId: 'ver_empleado',
+    title: 'Explorar el legajo de un empleado',
+    instruction:
+      'En **RRHH**, buscá a uno de los guardias de práctica (ej: **Laura Fernández**). ' +
+      'Hacé clic en su nombre para abrir el legajo. ' +
+      'Revisá las solapas **Datos**, **Turnos** y **Novedades** para conocer la estructura del legajo.',
+    hint: 'Los guardias de práctica ya están cargados: Laura Fernández, Roberto Gómez, Natalia Sosa, Marcelo Torres.',
+    targetRoute: '/admin/rrhh',
+    targetRouteLabel: 'RRHH',
+  },
+  {
+    moduleKey: 'RRHH',
+    stepId: 'cargar_novedad',
+    title: 'Cargar una novedad al empleado',
+    instruction:
+      'Dentro del legajo abierto, hacé clic en **"+ Novedad"** o **"Agregar novedad"**. ' +
+      'Seleccioná tipo **Licencia** o **Ausencia autorizada**, elegí una fecha y hacé clic en **"Guardar"**.',
+    hint: 'Las novedades quedan registradas en el legajo y afectan la planificación del período.',
+    targetRoute: '/admin/rrhh',
+    targetRouteLabel: 'RRHH',
+  },
+
   // ── SERVICES ───────────────────────────────────────────────────────────────
   {
     moduleKey: 'SERVICES',
@@ -118,20 +143,6 @@ export const COACH_STEPS: CoachStep[] = [
     hint: 'El protocolo de cobertura sigue: Sin turno → RET → ESC/REF → EXT 12h → FT.',
     targetRoute: '/admin/operaciones',
     targetRouteLabel: 'Operaciones',
-  },
-
-  // ── RRHH ───────────────────────────────────────────────────────────────────
-  {
-    moduleKey: 'RRHH',
-    stepId: 'cargar_novedad',
-    title: 'Cargar una novedad al empleado',
-    instruction:
-      'En **RRHH**, buscá un empleado (ej: Laura Fernández) y abrí su legajo. ' +
-      'Hacé clic en **"+ Novedad"** o **"Agregar novedad"**. ' +
-      'Seleccioná tipo **Licencia** o **Ausencia autorizada**, elegí fecha y guardá.',
-    hint: 'Las novedades quedan registradas en el legajo y afectan la planificación del período.',
-    targetRoute: '/admin/rrhh',
-    targetRouteLabel: 'RRHH',
   },
 
   // ── REPORTS ────────────────────────────────────────────────────────────────

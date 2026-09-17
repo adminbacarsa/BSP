@@ -17,7 +17,7 @@ import {
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId: myEmpresaId, empresa: activeEmpresa, empresas } = useEmpresa();
+    const { empresaId: myEmpresaId, empresas } = useEmpresa();
     const normId = (s?: string) => (s || '').toLowerCase().replace(/[\s.]/g, '');
 
     const [users, setUsers]         = useState<any[]>([]);
@@ -199,9 +199,6 @@ export default function UsersTab() {
         empresas.find(e => e.id === id)?.name || id || '—';
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
-    const selectedEmpresaIsTraining =
-      !!activeEmpresa?.isTrainingEmpresa ||
-      !!((empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa);
 
     return (
         <div className="space-y-6 animate-in fade-in">
@@ -484,8 +481,7 @@ export default function UsersTab() {
                             })()}
 
                             {/* Toggle: requiere capacitación */}
-                            {selectedEmpresaIsTraining && (
-                              <div
+                            <div
                                 className={`flex items-start gap-3 p-4 rounded-xl border-2 cursor-pointer select-none transition-colors ${formData.requiresTraining ? 'border-amber-400 bg-amber-50 dark:bg-amber-900/20' : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 hover:border-amber-300'}`}
                                 onClick={() => setFormData(f => ({ ...f, requiresTraining: !f.requiresTraining }))}
                               >
@@ -503,8 +499,7 @@ export default function UsersTab() {
                                     El usuario deberá terminar el circuito de capacitación antes de poder navegar la plataforma libremente.
                                   </p>
                                 </div>
-                              </div>
-                            )}
+                            </div>
 
                           </div>{/* fin scroll */}
                           <div className="shrink-0 px-8 pb-8 pt-4 border-t border-slate-100 dark:border-slate-700 flex gap-3">
