@@ -2353,6 +2353,7 @@ export default function CRMPage() {
           action={
             <button
               onClick={() => setNewClientOpen(true)}
+              data-action="nuevo-cliente"
               className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
             >
               <Plus size={13} /> Cliente

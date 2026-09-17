@@ -10,6 +10,7 @@ import { useTrainingSession } from '@/hooks/useTrainingSession';
 import { getActiveCoachStep, COACH_STEPS } from '@/lib/training/coachContent';
 import { TRAINABLE_MODULES } from '@/lib/training/trainingSession';
 import { completeStep } from '@/lib/training/trainingSession';
+import { TrainingSpotlight } from './TrainingSpotlight';
 
 /** Convierte **texto** en negrita en JSX */
 function renderInstruction(text: string): React.ReactNode {
@@ -83,6 +84,10 @@ export function TrainingCoachBubble() {
   }
 
   return (
+    <>
+    {isOnTargetRoute && coachStep.highlightSelector && (
+      <TrainingSpotlight selector={coachStep.highlightSelector} />
+    )}
     <div className="fixed bottom-24 right-4 lg:bottom-6 lg:right-6 z-[900] w-80 max-w-[calc(100vw-2rem)]">
       <div className="rounded-2xl shadow-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 overflow-hidden">
 
@@ -151,5 +156,6 @@ export function TrainingCoachBubble() {
         </div>
       </div>
     </div>
+    </>
   );
 }
