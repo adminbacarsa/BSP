@@ -1856,7 +1856,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <RotateCw size={14} className={loading ? 'animate-spin' : ''}/>
               </button>
               {canCreateService && mainTab === 'sla' && (
-              <button onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
+              <button data-action="nuevo-servicio" onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
                 <Plus size={14}/> Nuevo Servicio
               </button>
               )}

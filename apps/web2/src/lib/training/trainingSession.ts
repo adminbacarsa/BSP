@@ -39,8 +39,9 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     label: 'Servicios y SLA',
     icon: '📋',
     steps: [
-      { id: 'crear_sla',       label: 'Crear contrato/SLA' },
-      { id: 'conf_puesto',     label: 'Configurar puesto' },
+      { id: 'crear_sla',          label: 'Crear contrato/SLA' },
+      { id: 'conf_puesto_24hs',   label: 'Puesto 24 horas' },
+      { id: 'conf_puesto_custom', label: 'Puesto personalizado' },
     ],
   },
   {

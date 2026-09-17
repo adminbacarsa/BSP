@@ -82,7 +82,7 @@ export const COACH_STEPS: CoachStep[] = [
       'Si cargás una novedad antes de planificar, el sistema no le asigna turno en esos días.\n\n' +
       '**Paso a paso:**\n' +
       '1. Hacé clic en la pestaña **NOVEDADES** (barra superior del módulo RRHH).\n' +
-      '2. Clic en el botón **+ NUEVA NOVEDAD** (rojo/naranja, arriba a la derecha).\n' +
+      '2. Clic en el botón **+ NUEVA NOVEDAD** (rojo/naranja, arriba a la derecha — el sistema lo va a resaltar).\n' +
       '3. En **Empleado** buscá y seleccioná a **Roberto Gómez**.\n' +
       '4. En **Tipo** elegí **Licencia**.\n' +
       '5. En **Estado** elegí **Autorizada**.\n' +
@@ -91,6 +91,7 @@ export const COACH_STEPS: CoachStep[] = [
     hint: '💡 Regla de oro: cargá las vacaciones y licencias del mes antes de armar el cronograma, así el planificador las respeta automáticamente.',
     targetRoute: '/admin/rrhh',
     targetRouteLabel: 'RRHH',
+    highlightSelector: '[data-action="nueva-novedad"]',
   },
 
   // ── SERVICES ───────────────────────────────────────────────────────────────
@@ -99,33 +100,55 @@ export const COACH_STEPS: CoachStep[] = [
     stepId: 'crear_sla',
     title: '¿Qué es un Servicio/SLA? Creá el contrato',
     instruction:
-      'El **SLA (contrato de servicio)** define exactamente cuántas horas de seguridad prometiste al cliente, en qué turno y con cuántos guardias. ' +
+      'El **SLA (contrato de servicio)** define cuántas horas de seguridad prometiste al cliente, en qué turno y con cuántos guardias. ' +
       'Sin esto, el Planificador no sabe qué cubrir.\n\n' +
       '**Paso a paso:**\n' +
-      '1. En Servicios, hacé clic en **+ NUEVO SERVICIO** (botón naranja, arriba a la derecha).\n' +
-      '2. En **Cliente** seleccioná **Banco del Sur SA**.\n' +
-      '3. En **Objetivo** seleccioná **Sucursal Centro**.\n' +
+      '1. Clic en el botón azul **+ NUEVO SERVICIO** (arriba a la derecha — el sistema lo va a resaltar).\n' +
+      '2. En **Cliente** seleccioná el cliente de práctica que aparece en la lista (ej: "Fábrica Demo SRL").\n' +
+      '3. En **Objetivo** seleccioná la sede disponible (ej: "Planta Norte").\n' +
       '4. Dejá las fechas de Inicio y Fin del mes actual.\n' +
-      '5. Clic en **Guardar** (el servicio queda en borrador, sin puestos todavía).',
-    hint: '💡 El contador superior derecho muestra el total de horas del contrato. Se calcula automáticamente cuando agregás los puestos.',
+      '5. Clic en **Guardar** — el servicio queda creado sin puestos todavía.',
+    hint: '💡 El contador arriba a la derecha muestra las horas totales del contrato. Se calcula automáticamente al agregar los puestos.',
+    targetRoute: '/admin/servicios',
+    targetRouteLabel: 'Servicios',
+    highlightSelector: '[data-action="nuevo-servicio"]',
+  },
+  {
+    moduleKey: 'SERVICES',
+    stepId: 'conf_puesto_24hs',
+    title: 'Puesto 24 horas — Cobertura continua',
+    instruction:
+      'Un puesto **24 horas** cubre el objetivo las 24hs del día en 3 bandas: Mañana (07–15hs), Tarde (15–23hs) y Noche (23–07hs). ' +
+      'Es el tipo más común en contratos de seguridad.\n\n' +
+      '**Paso a paso:**\n' +
+      '1. Dentro del servicio que creaste, clic en **+ AGREGAR PUESTO**.\n' +
+      '2. En **Nombre del puesto** escribí: **Control y Vigilancia**\n' +
+      '3. En **Tipo de cobertura** elegí **24 HORAS (Lunes a Lunes)**.\n' +
+      '4. En **PAX** escribí **2** (2 guardias por banda = 6 personas por día).\n' +
+      '5. Dejá los días activos L a D (todos los días).\n' +
+      '6. En **Inicio M** dejá **07:00** — T y N se encadenan automáticamente.\n' +
+      '7. Clic en **Confirmar** para agregar el puesto.',
+    hint: '💡 Con PAX 2 en 24hs: el sistema calcula que necesitás mínimo 8 guardias rotativos según CCT 422/05 (ciclo 6+2, 180hs/mes cada uno).',
     targetRoute: '/admin/servicios',
     targetRouteLabel: 'Servicios',
   },
   {
     moduleKey: 'SERVICES',
-    stepId: 'conf_puesto',
-    title: '¿Qué es un Puesto? Configurá uno',
+    stepId: 'conf_puesto_custom',
+    title: 'Puesto personalizado — Horario a medida',
     instruction:
-      'Un **puesto** define un rol de seguridad dentro del contrato: cuántos guardias necesitás, en qué horario y cuántos días. ' +
-      'Por ejemplo: "Acceso principal — 1 guardia, turno Mañana (M), lunes a viernes".\n\n' +
+      'Un puesto **personalizado** permite definir exactamente qué días y en qué horario opera, con PAX distinto por turno. ' +
+      'Ideal para puestos que no funcionan todos los días o con horario especial.\n\n' +
       '**Paso a paso:**\n' +
-      '1. Dentro del servicio que creaste, clic en **+ AGREGAR PUESTO**.\n' +
-      '2. En **Nombre del puesto** escribí: **Acceso Principal**\n' +
-      '3. En **Tipo de cobertura** elegí **12 HORAS DIURNO**.\n' +
-      '4. En **PAX** (personas por turno) poné **1**.\n' +
-      '5. Marcá los **días activos**: L, M, X, J, V (lunes a viernes).\n' +
-      '6. Clic en **Confirmar** y luego **Guardar** el servicio.',
-    hint: '💡 PAX = cantidad de guardias por banda horaria. Si ponés PAX 2 en turno 24hs: necesitás 2 personas a las 7hs, 2 a las 15hs y 2 a las 23hs. El sistema calcula cuántos guardias necesitás en total según CCT 422/05.',
+      '1. En el mismo servicio, clic en **+ AGREGAR PUESTO** (nuevo puesto).\n' +
+      '2. En **Nombre del puesto** escribí: **Recepción Diurna**\n' +
+      '3. En **Tipo de cobertura** elegí **PERSONALIZADO / TURNOS ESPECÍFICOS**.\n' +
+      '4. Clic en **+ Agregar turno** → elegí turno estándar **Mañana (8h)**.\n' +
+      '5. Marcá solo los días **L, M, X, J, V** (lunes a viernes).\n' +
+      '6. En **PAX** de ese turno poné **1**.\n' +
+      '7. Clic en **+ Agregar** y luego **Confirmar**.\n' +
+      '8. Guardá el servicio con el botón **Guardar** al pie del formulario.',
+    hint: '💡 Este puesto genera solo 1 guardia por turno Mañana, de lunes a viernes. El planificador va a crear exactamente esas vacantes — ni más ni menos.',
     targetRoute: '/admin/servicios',
     targetRouteLabel: 'Servicios',
   },
@@ -139,7 +162,7 @@ export const COACH_STEPS: CoachStep[] = [
       'La **grilla de planificación** es el cronograma del mes. Cada fila es un guardia, cada columna es un día, y en cada celda ponés el código de turno.\n\n' +
       '**Códigos más usados:** M = Mañana (07:00–15:00), T = Tarde (15:00–23:00), N = Noche (23:00–07:00), F = Franco (día libre).\n\n' +
       '**Paso a paso:**\n' +
-      '1. Arriba seleccioná el **Cliente** "Banco del Sur SA" y el **Objetivo** "Sucursal Centro".\n' +
+      '1. Arriba seleccioná el **Cliente** y el **Objetivo** que configuraste (los que aparecen en la lista).\n' +
       '2. En la columna de la izquierda vas a ver los guardias asignados (ej: Laura Fernández).\n' +
       '3. Hacé **clic en una celda vacía** de cualquier día.\n' +
       '4. En el modal que aparece, elegí el código **M** (Mañana).\n' +
@@ -158,12 +181,13 @@ export const COACH_STEPS: CoachStep[] = [
       '**Paso a paso:**\n' +
       '1. Verificá que el **Diagnóstico de Cobertura** (badge naranja arriba) muestre los días completos.\n' +
       '2. Clic en el botón **GUARDAR** si hay cambios pendientes (la barra "Planificando como..." lo indica).\n' +
-      '3. Clic en el botón **PUBLICAR** (arriba a la derecha de la grilla).\n' +
+      '3. Clic en el botón **PUBLICAR** (arriba a la derecha de la grilla — el sistema lo va a resaltar).\n' +
       '4. El badge cambia a **PUBLICADO** (verde) — las celdas muestran un punto verde en la esquina.\n\n' +
       'Una vez publicado, los guardias ven sus turnos en el portal del colaborador.',
     hint: '💡 Para corregir un cronograma ya publicado: botón CORREGIR → hacer cambios → GUARDAR → RE-PUBLICAR. Sin RE-PUBLICAR, los guardias no ven los cambios.',
     targetRoute: '/admin/planificacion',
     targetRouteLabel: 'Planificación',
+    highlightSelector: '[data-action="publicar-cronograma"]',
   },
 
   // ── OPERATIONS ─────────────────────────────────────────────────────────────

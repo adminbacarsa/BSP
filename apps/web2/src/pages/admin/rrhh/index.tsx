@@ -2028,7 +2028,7 @@ export default function EmployeesPage() {
                                         <Trash2 size={14}/> Eliminar {selectedAbsenceIds.size} seleccionada{selectedAbsenceIds.size !== 1 ? 's' : ''}
                                     </button>
                                 )}
-                                <button onClick={() => handleOpenAbsenceModal()} className="bg-rose-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-rose-500/25 flex items-center gap-1.5 hover:bg-rose-700 transition-colors">
+                                <button data-action="nueva-novedad" onClick={() => handleOpenAbsenceModal()} className="bg-rose-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-rose-500/25 flex items-center gap-1.5 hover:bg-rose-700 transition-colors">
                                     <Plus size={14}/> Nueva Novedad
                                 </button>
                             </div>

@@ -11397,6 +11397,7 @@ export default function PlanificacionPage() {
                                         )}
                                         {canPublishPlanning && (!published || needsRepublish) && (
                                             <button
+                                                data-action="publicar-cronograma"
                                                 onClick={openPublishConfirm}
                                                 disabled={isPublishing}
                                                 title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))

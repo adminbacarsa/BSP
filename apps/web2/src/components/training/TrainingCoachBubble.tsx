@@ -211,8 +211,44 @@ export function TrainingCoachBubble() {
           </button>
         </div>
 
+        {/* Progreso del módulo — tildes por paso */}
+        {mod && (() => {
+          const modCoachSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
+          const completed = session?.progress[coachStep.moduleKey]?.stepsCompleted ?? [];
+          return (
+            <div className="px-4 pt-3 pb-1 flex items-center gap-1 flex-wrap">
+              {modCoachSteps.map((s, i) => {
+                const isDone = completed.includes(s.stepId);
+                const isActive = s.stepId === coachStep.stepId;
+                return (
+                  <React.Fragment key={s.stepId}>
+                    {i > 0 && <span className="text-slate-300 dark:text-slate-600 text-[9px]">—</span>}
+                    <span
+                      title={s.title}
+                      className={[
+                        'flex items-center gap-0.5 text-[10px] font-bold rounded-full px-1.5 py-0.5 transition-colors',
+                        isDone
+                          ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
+                          : isActive
+                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                          : 'text-slate-400 dark:text-slate-500',
+                      ].join(' ')}
+                    >
+                      {isDone ? '✓' : isActive ? '●' : '○'}
+                      <span className="hidden">{i + 1}</span>
+                    </span>
+                  </React.Fragment>
+                );
+              })}
+              <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500">
+                {completed.length}/{modCoachSteps.length}
+              </span>
+            </div>
+          );
+        })()}
+
         {/* Paso actual */}
-        <div className="px-4 pt-3 pb-1">
+        <div className="px-4 pt-1 pb-1">
           <div className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 mb-1">
             <ChevronRight size={12} />
             {coachStep.title}

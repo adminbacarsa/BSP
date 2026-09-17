@@ -108,7 +108,7 @@ export function useTrainingEvidence() {
         break;
       }
 
-      case 'conf_puesto': {
+      case 'conf_puesto_24hs': {
         const q = query(
           collection(db, 'servicios_sla'),
           where('empresaId', '==', empresaId),
@@ -118,11 +118,31 @@ export function useTrainingEvidence() {
         unsub = onSnapshot(q, snap => {
           const configured = snap.docs.some(d => {
             const positions = d.data().positions ?? [];
-            return positions.some((p: { shifts?: unknown[] }) =>
+            return positions.some((p: { coverageType?: string; shifts?: unknown[] }) =>
+              (p.coverageType === '24hs' || p.coverageType === '24H' || p.coverageType === 'FULL_DAY') &&
               Array.isArray(p.shifts) && p.shifts.length > 0
             );
           });
           if (configured) markDone(moduleKey, stepId);
+        });
+        break;
+      }
+
+      case 'conf_puesto_custom': {
+        const q = query(
+          collection(db, 'servicios_sla'),
+          where('empresaId', '==', empresaId),
+          where('createdAt', '>=', sessionStart),
+          limit(5),
+        );
+        unsub = onSnapshot(q, snap => {
+          const hasTwoOrMore = snap.docs.some(d => {
+            const positions = d.data().positions ?? [];
+            return positions.filter((p: { shifts?: unknown[] }) =>
+              Array.isArray(p.shifts) && p.shifts.length > 0
+            ).length >= 2;
+          });
+          if (hasTwoOrMore) markDone(moduleKey, stepId);
         });
         break;
       }
