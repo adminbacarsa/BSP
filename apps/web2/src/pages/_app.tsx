@@ -37,6 +37,7 @@ const TrainingCoachBubble = dynamic(
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
+  const showTrainingCoach = router.pathname.startsWith('/admin');
   const showAssistant = !router.pathname.startsWith('/empleado')
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
@@ -84,7 +85,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <TrainingEvidenceWatcher />
         <Component {...pageProps} />
         {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
-        <TrainingCoachBubble />
+        {showTrainingCoach && <TrainingCoachBubble />}
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>
       </EmpresaProvider>
