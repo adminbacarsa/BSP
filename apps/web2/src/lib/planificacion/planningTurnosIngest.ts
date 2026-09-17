@@ -15,7 +15,7 @@ export function planningShiftViewFromSnap(d: QueryDocumentSnapshot): any {
         isPresent: data.isPresent || false,
         isAbsent: data.isAbsent || false,
         isExtended: data.isExtended,
-        isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+        isEarlyStart: data.isEarlyStart === true || data.isEarlyEntry === true || data.isAdvanced === true,
         isFrancoTrabajado: data.isFrancoTrabajado || false,
         isFrancoCompensatorio: data.isFrancoCompensatorio || false,
         swapWith: data.swapWith,

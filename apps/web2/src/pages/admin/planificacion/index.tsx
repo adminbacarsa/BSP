@@ -179,6 +179,7 @@ import {
 } from '@/lib/planificacion/planningEventosExtras';
 import { formatShiftClockRange, isTuraContiguousToParent } from '@/lib/refuerzo/turaContiguity';
 import { buildOpsCoverageCellTooltip } from '@/lib/planificacion/opsCoverageCellTooltip';
+import { PlanningCoverageLegend } from '@/components/planificacion/PlanningCoverageLegend';
 import {
     compareObjectiveMonthSchedules,
     formatCompareObjectiveMonthsReport,
@@ -1076,6 +1077,23 @@ export default function PlanificacionPage() {
     const [toolbarMoreOpen, setToolbarMoreOpen] = useState(false);
     const [cronoFullscreen, setCronoFullscreen] = useState(false);
     const [statsBarCollapsed, setStatsBarCollapsed] = useState(false);
+    const [coverageLegendOpen, setCoverageLegendOpen] = useState(() => {
+        if (typeof window === 'undefined') return false;
+        try {
+            return sessionStorage.getItem('planif_coverage_legend_open') === '1';
+        } catch {
+            return false;
+        }
+    });
+    const toggleCoverageLegend = useCallback(() => {
+        setCoverageLegendOpen((prev) => {
+            const next = !prev;
+            try {
+                sessionStorage.setItem('planif_coverage_legend_open', next ? '1' : '0');
+            } catch { /* ignore */ }
+            return next;
+        });
+    }, []);
     const [statsHoursView, setStatsHoursView] = useState<'total' | 'detalle'>('total');
 
     const [isDataSyncing, setIsDataSyncing] = useState(false);
@@ -10318,7 +10336,8 @@ export default function PlanificacionPage() {
                                         const isCellWeekend = [0, 6].includes(day.getDay());
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;
-                                        let isExtended = s?.isExtended || p?.isExtended; let isEarly = s?.isEarlyStart || p?.isEarlyStart; 
+                                        let isExtended = s?.isExtended || p?.isExtended;
+                                        let isEarly = s?.isEarlyStart || p?.isEarlyStart || s?.isAdvanced || p?.isAdvanced; 
                                         const covRole = p?.coverageSegmentRole || s?.coverageSegmentRole;
                                         const covNote = p?.coverageNote || s?.coverageNote;
                                         let plannedNov = s?.plannedNovedad || p?.plannedNovedad; 
@@ -10503,7 +10522,7 @@ export default function PlanificacionPage() {
                                                 content = snapShift.code;
                                                 style = getDefaultStyle(snapShift.code);
                                             }
-                                            if (snapShift.isExtended || snapShift.isEarlyStart) {
+                                            if (snapShift.isExtended || snapShift.isEarlyStart || snapShift.isAdvanced) {
                                                 style = SHIFT_STYLES['EXTENDED'];
                                             }
                                         }
@@ -11829,6 +11848,9 @@ export default function PlanificacionPage() {
                                 </div>
                             );
                         })()}
+                        {!comparingSnapshot && (
+                            <PlanningCoverageLegend open={coverageLegendOpen} onToggle={toggleCoverageLegend} />
+                        )}
                         {correctionMode && (
                             <>
                             <div className="mx-2 mb-1 flex items-center gap-2 bg-rose-600 text-white px-4 py-2 rounded-xl text-xs font-black no-print">
