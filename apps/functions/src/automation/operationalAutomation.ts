@@ -252,6 +252,42 @@ function shiftEligibleForIaAlert(row: TurnoDoc, start: Timestamp, publishedPlanK
   return true;
 }
 
+/** Ausencia titular no consume capacidad horaria (el guardia puede estar cubriendo en otro puesto). */
+function shiftCountsForOverlapCapacity(row: TurnoDoc): boolean {
+  return row.isAbsent !== true;
+}
+
+function isOperationalCoverageTurno(row: TurnoDoc): boolean {
+  const origin = String(row.origin ?? '');
+  return origin === 'OPERATIONS_COVERAGE' || row.resolvedBy === 'OPERACIONES';
+}
+
+/** Cobertura ops ligada a ausencia titular: no es doble asignación de planificación. */
+type OverlapShiftRef = { id: string; data: TurnoDoc };
+
+function overlapPairAllowedByCoverage(prev: OverlapShiftRef, cur: OverlapShiftRef): boolean {
+  for (const [absentSide, activeSide] of [
+    [prev, cur] as const,
+    [cur, prev] as const,
+  ]) {
+    if (absentSide.data.isAbsent !== true) continue;
+    if (!isOperationalCoverageTurno(activeSide.data)) continue;
+    const link = String(
+      activeSide.data.absenceShiftId ?? activeSide.data.coveredShiftId ?? '',
+    ).trim();
+    if (link && link === absentSide.id) return true;
+    return true;
+  }
+  const prevAbs = String(prev.data.absenceShiftId ?? prev.data.coveredShiftId ?? '').trim();
+  const curAbs = String(cur.data.absenceShiftId ?? cur.data.coveredShiftId ?? '').trim();
+  if (prevAbs && prevAbs === cur.id) return true;
+  if (curAbs && curAbs === prev.id) return true;
+  const causedPrev = String(prev.data.causedByShiftId ?? '').trim();
+  const causedCur = String(cur.data.causedByShiftId ?? '').trim();
+  if (causedPrev === cur.id || causedCur === prev.id) return true;
+  return false;
+}
+
 function parsePlanificacionEstadoDocId(docId: string): { objectiveId: string; year: number; month: number } | null {
   const parts = String(docId ?? '').split('_');
   if (parts.length < 3) return null;
@@ -759,6 +795,7 @@ function detectOperationalAnomalies(
     const start = turnosTimestamp(row.data, 'startTime');
     if (!start) continue;
     if (!shiftEligibleForIaAlert(row.data, start, nameCtx.publishedPlanKeys)) continue;
+    if (!shiftCountsForOverlapCapacity(row.data)) continue;
     const emp = String(row.data.employeeId ?? '').trim();
     if (!emp || emp.toUpperCase() === 'VACANTE') continue;
     if (!byEmployee.has(emp)) byEmployee.set(emp, []);
@@ -771,18 +808,38 @@ function detectOperationalAnomalies(
         start: turnosTimestamp(r.data, 'startTime'),
         end: turnosTimestamp(r.data, 'endTime'),
       }))
-      .filter((r) => r.start && r.end && shiftEligibleForIaAlert(r.row.data, r.start!, nameCtx.publishedPlanKeys))
+      .filter(
+        (r) =>
+          r.start &&
+          r.end &&
+          shiftEligibleForIaAlert(r.row.data, r.start!, nameCtx.publishedPlanKeys) &&
+          shiftCountsForOverlapCapacity(r.row.data),
+      )
       .sort((a, b) => a.start!.toMillis() - b.start!.toMillis());
     for (let i = 1; i < ordered.length; i++) {
       const prev = ordered[i - 1];
       const cur = ordered[i];
       if (!prev.end || !cur.start) continue;
+      if (overlapPairAllowedByCoverage(prev.row, cur.row)) continue;
       if (prev.end.toMillis() > cur.start.toMillis() + 5 * 60 * 1000) {
         const codePrev = normalizeCode(prev.row.data.code);
         const codeCur = normalizeCode(cur.row.data.code);
         const employeeName = resolveEmployeeDisplayName(cur.row.data, nameCtx, emp);
         const objectiveName = resolveObjectiveDisplayName(cur.row.data, nameCtx);
+        const objPrev = resolveObjectiveDisplayName(prev.row.data, nameCtx);
+        const objCur = resolveObjectiveDisplayName(cur.row.data, nameCtx);
+        const posPrev = String(prev.row.data.positionName ?? '').trim();
+        const posCur = String(cur.row.data.positionName ?? '').trim();
         const fp = `overlap__${prev.row.id}__${cur.row.id}`;
+        let detail: string;
+        if (objPrev === objCur) {
+          detail =
+            posPrev && posCur && posPrev !== posCur
+              ? `mismo horario en ${objPrev}: ${posPrev} (${codePrev}) y ${posCur} (${codeCur})`
+              : `dos turnos ${codePrev} superpuestos en ${objPrev} (mismo legajo, revisar malla)`;
+        } else {
+          detail = `horarios superpuestos: ${objPrev} (${codePrev}) y ${objCur} (${codeCur})`;
+        }
         anomalies.push({
           fingerprint: fp,
           type: 'IA_ALERTA_SOLAPAMIENTO_TURNOS',
@@ -792,10 +849,7 @@ function detectOperationalAnomalies(
             employeeName,
             objectiveName,
             code: codePrev,
-            detail:
-              codePrev === codeCur
-                ? `turnos superpuestos (${codePrev}) para ${employeeName}`
-                : `turnos superpuestos (${codePrev} y ${codeCur}) para ${employeeName}`,
+            detail,
           }),
           shiftId: cur.row.id,
           employeeId: emp,
