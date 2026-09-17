@@ -76,19 +76,23 @@ export function pendingHoursLabel(hours: number | null): string | null {
   return `Hace ${hours} h`;
 }
 
+/**
+ * Semáforo supervisión por objetivo (cobertura operativa, no RRHH puro).
+ * CRÍTICO = hueco sin cubrir (vacante/descubierto). Ausente con puesto cubierto → ATENCIÓN.
+ */
 export function objectiveCoverageStatus(stats: {
   vacantes: number;
   ausentes: number;
   alertas: number;
 }): 'OK' | 'ALERTA' | 'CRITICO' {
-  if (stats.vacantes > 0 || stats.ausentes > 0) return 'CRITICO';
-  if (stats.alertas > 0) return 'ALERTA';
+  if (stats.vacantes > 0) return 'CRITICO';
+  if (stats.ausentes > 0 || stats.alertas > 0) return 'ALERTA';
   return 'OK';
 }
 
 export const COVERAGE_STATUS_STYLES: Record<'OK' | 'ALERTA' | 'CRITICO', { dot: string; bg: string; text: string; label: string }> = {
   OK: { dot: 'bg-emerald-500', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Cubierto' },
-  ALERTA: { dot: 'bg-amber-500', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'Atención' },
+  ALERTA: { dot: 'bg-amber-500', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'Incidencia' },
   CRITICO: { dot: 'bg-rose-500', bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', label: 'Crítico' },
 };
 
