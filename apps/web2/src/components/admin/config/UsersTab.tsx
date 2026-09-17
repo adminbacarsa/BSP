@@ -17,7 +17,7 @@ import {
 
 export default function UsersTab() {
     const { isSuperAdmin } = useAuth();
-    const { empresaId: myEmpresaId, empresas } = useEmpresa();
+    const { empresaId: myEmpresaId, empresa: activeEmpresa, empresas } = useEmpresa();
     const normId = (s?: string) => (s || '').toLowerCase().replace(/[\s.]/g, '');
 
     const [users, setUsers]         = useState<any[]>([]);
@@ -199,7 +199,10 @@ export default function UsersTab() {
         empresas.find(e => e.id === id)?.name || id || '—';
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
-    const selectedEmpresaIsTraining = (empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa ?? false;
+    const selectedEmpresaIsTraining =
+      formData.empresaId === myEmpresaId
+        ? !!activeEmpresa?.isTrainingEmpresa
+        : !!((empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa);
 
     return (
         <div className="space-y-6 animate-in fade-in">

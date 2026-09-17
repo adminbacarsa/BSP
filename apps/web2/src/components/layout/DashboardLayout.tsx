@@ -333,6 +333,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
+  const isTraining = !!empresa?.isTrainingEmpresa;
   const mainScrollRef = useRef<HTMLElement>(null);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
@@ -636,7 +637,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {showAutoLabNav && (
+          {showAutoLabNav && !isTraining && (
             <Link href="/admin/planificacion/auto-lab" prefetch={false} title="Auto Lab — casos de planificación"
               className={getLinkHoverClass('/admin/planificacion/auto-lab')}
               style={getLinkStyle('/admin/planificacion/auto-lab')}>
@@ -690,7 +691,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('ANALYSIS') && (
+          {canReadModule('ANALYSIS') && !isTraining && (
             <Link href="/admin/analisis" prefetch={false} title="Análisis"
               className={getLinkHoverClass('/admin/analisis')}
               style={getLinkStyle('/admin/analisis')}>
@@ -724,7 +725,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('SUPERVISION') && (
+          {canReadModule('SUPERVISION') && !isTraining && (
             <Link href="/admin/supervision" prefetch={false} title="Supervisión"
               className={`${getLinkHoverClass('/admin/supervision')} relative`}
               style={getLinkStyle('/admin/supervision')}>
@@ -754,7 +755,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </>
           )}
 
-          {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && (
+          {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && !isTraining && (
             <>
               {sidebarOpen && (
                 <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
