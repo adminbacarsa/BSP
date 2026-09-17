@@ -10014,7 +10014,7 @@ export default function PlanificacionPage() {
         const compareCompact = !!gridOpts?.compactRows;
         return (
         <table className="planning-grid-table border-separate border-spacing-0 w-full text-xs">
-            <thead className="sticky top-0 z-10 bg-slate-100 shadow-md">
+            <thead className="sticky top-0 z-30 bg-slate-100 shadow-md">
                 {compareMinimal ? (
                 <tr className="h-7">
                     <th className="planning-sticky-corner bg-slate-100 p-1.5 text-left border-b border-r relative select-none z-20" style={{ width: nameColWidth, minWidth: nameColWidth }}>
@@ -11085,7 +11085,7 @@ export default function PlanificacionPage() {
             </div>
             <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'fixed inset-0 z-[1100] bg-white dark:bg-slate-900 overflow-hidden p-1 space-y-1' : comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex items-center justify-between gap-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-y-1.5 gap-x-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                         <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="text-[10px] font-black text-slate-700 truncate max-w-[220px]" title={`${selectedClientLabel} · ${selectedObjectiveLabel}`}>
@@ -11130,7 +11130,7 @@ export default function PlanificacionPage() {
                         </div>
                     ) : (
                         <>
-                            <div className="flex-1 min-w-0 flex items-center gap-1.5 flex-wrap">
+                            <div className="grow shrink basis-[320px] min-w-0 flex items-center gap-1.5 flex-wrap">
                             <div className="flex items-center gap-1.5 no-print">
                                 {selectedGrupo ? (
                                     /* MODO GRUPO: etiqueta del grupo + tabs por objetivo */
@@ -11278,161 +11278,6 @@ export default function PlanificacionPage() {
                                 </div>
                             )}
 
-                            {/* DIAGNÓSTICO DE ESTRUCTURA — expandible */}
-                            {selectedObjective && !isServiceLocked && (
-                                <div className="relative hidden md:block">
-                                    <button
-                                        ref={diagnosticBtnRef}
-                                        onClick={() => {
-                                            if (showDiagnostic) {
-                                                setShowDiagnostic(false);
-                                            } else {
-                                                repositionDiagnosticPanel();
-                                                setShowDiagnostic(true);
-                                            }
-                                        }}
-                                        className="flex px-3 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-2 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
-                                    >
-                                        <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-[9px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Diagnóstico de Estructura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 flex-wrap">
-                                                {objectiveCronogramRules && (
-                                                    <>
-                                                        <span
-                                                            className="text-indigo-600 font-black"
-                                                            title={objectiveCronogramRules.playbook.join('\n')}
-                                                        >
-                                                            {objectiveCronogramRules.cronogramTypeLabel}
-                                                        </span>
-                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                    </>
-                                                )}
-                                                {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
-                                                    : positionStructure.length} Puestos
-                                                <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                    ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
-                                                    : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)} Pax</span>
-                                                {genderRestrictedPositionsCount > 0 && (
-                                                    <>
-                                                        <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                        <span className="text-pink-600 font-black" title="Puestos con preferencia de género (M/F) definida en Servicios/SLA">
-                                                            {genderRestrictedPositionsCount} c/ género
-                                                        </span>
-                                                    </>
-                                                )}
-                                                {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && <><span className="text-slate-300 dark:text-slate-600">|</span><span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h vend.</span></>}
-                                            </span>
-                                        </div>
-                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
-                                    </button>
-                                </div>
-                            )}
-
-                            {/* DIAGNÓSTICO DE COBERTURA — qué falta por objetivo/mes */}
-                            {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
-                                const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
-                                const _ok = _rpt.worstDays.length === 0;
-                                return (
-                                <div className="relative hidden md:block">
-                                    <button
-                                        ref={coverageDiagnosticBtnRef}
-                                        onClick={() => {
-                                            if (showCoverageDiagnostic) {
-                                                setShowCoverageDiagnostic(false);
-                                            } else {
-                                                repositionCoveragePanel();
-                                                setShowCoverageDiagnostic(true);
-                                            }
-                                        }}
-                                        className={`flex px-3 py-1.5 border rounded-xl items-center gap-2 animate-in fade-in shadow-sm transition-colors ${
-                                            _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
-                                        }`}
-                                    >
-                                        <ShieldCheck size={14} className={_ok ? 'text-emerald-500' : 'text-rose-500 shrink-0'}/>
-                                        <div className="flex flex-col leading-none">
-                                            <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Diagnóstico Cobertura</span>
-                                            <span className="text-[10px] font-bold text-slate-700 flex items-center gap-1">
-                                                <span className="text-emerald-600 font-black">{_rpt.daysFull} días OK</span>
-                                                <span className="text-slate-300">|</span>
-                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty} con huecos</span>
-                                            </span>
-                                        </div>
-                                        <ChevronDown size={12} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
-                                    </button>
-                                </div>
-                                );
-                            })()}
-
-                            {selectedObjective && (() => {
-                                const publishLookupKey = planificacionPublishLookupKey(
-                                    selectedObjective,
-                                    currentDate.getFullYear(),
-                                    currentDate.getMonth() + 1,
-                                );
-                                const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
-                                const needsRepublish = !!needsRepublishMap[publishLookupKey];
-                                return (
-                                    <div className="flex items-center gap-2 no-print">
-                                        <button
-                                            type="button"
-                                            onClick={() => void refreshCronogramaView()}
-                                            disabled={isRefreshingCrono}
-                                            title="Actualizar turnos y puestos sin recargar la página"
-                                            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[10px] font-black border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 shadow-sm disabled:opacity-60"
-                                        >
-                                            <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
-                                            {isRefreshingCrono ? '…' : 'ACTUALIZAR'}
-                                        </button>
-                                        {published ? (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
-                                                <CheckCircle size={12}/> PUBLICADO
-                                            </span>
-                                        ) : (
-                                            <span className="flex items-center gap-1.5 text-[10px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-3 py-1.5 rounded-xl">
-                                                <Ghost size={12}/> BORRADOR
-                                            </span>
-                                        )}
-                                        {canPublishPlanning && (!published || needsRepublish) && (
-                                            <button
-                                                data-action="publicar-cronograma"
-                                                onClick={openPublishConfirm}
-                                                disabled={isPublishing}
-                                                title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
-                                                    ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
-                                                    : undefined}
-                                                className={`flex items-center gap-1.5 disabled:opacity-60 text-white px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : isSuperAdmin ? 'bg-indigo-600 hover:bg-indigo-700 ring-1 ring-indigo-300/50' : 'bg-indigo-600 hover:bg-indigo-700'}`}
-                                            >
-                                                {isPublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarCheck size={12}/>}
-                                                {published ? 'RE-PUBLICAR' : 'PUBLICAR'}
-                                            </button>
-                                        )}
-                                        {published && canCorrectPlanning && (
-                                            <button
-                                                onClick={() => setCorrectionMode(v => !v)}
-                                                title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
-                                            >
-                                                <ShieldAlert size={12}/>
-                                                {correctionMode ? 'CORRECCIÓN ACTIVA' : 'CORREGIR'}
-                                            </button>
-                                        )}
-                                        {published && isSuperAdmin && (
-                                            <button
-                                                onClick={handleUnpublish}
-                                                disabled={isUnpublishing}
-                                                title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
-                                                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-white text-slate-600 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
-                                            >
-                                                {isUnpublishing ? <Loader2 size={12} className="animate-spin"/> : <CalendarX size={12}/>}
-                                                DESPUBLICAR
-                                            </button>
-                                        )}
-                                    </div>
-                                );
-                            })()}
                             {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
                                 <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
                                     {backgroundSaveCount > 0 && (
@@ -11459,7 +11304,7 @@ export default function PlanificacionPage() {
                             )}
                             </div>
 
-                            <div className="flex-shrink-0 flex items-center gap-2 no-print">
+                            <div className="flex flex-wrap items-center justify-end gap-2 min-w-0 ml-auto no-print shrink-0">
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
@@ -11551,6 +11396,161 @@ export default function PlanificacionPage() {
                                     </>,
                                     document.body,
                                 )}
+
+                                {/* DIAGNÓSTICO ESTRUCTURA — compacto, toolbar derecho (no wrap 2ª fila) */}
+                                {selectedObjective && !isServiceLocked && (
+                                    <div className="relative hidden lg:block shrink-0">
+                                        <button
+                                            ref={diagnosticBtnRef}
+                                            onClick={() => {
+                                                if (showDiagnostic) {
+                                                    setShowDiagnostic(false);
+                                                } else {
+                                                    repositionDiagnosticPanel();
+                                                    setShowDiagnostic(true);
+                                                }
+                                            }}
+                                            className="flex px-2.5 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
+                                        >
+                                            <Activity size={12} className="text-emerald-500 animate-pulse shrink-0"/>
+                                            <div className="flex flex-col leading-none">
+                                                <span className="text-[8px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Estructura</span>
+                                                <span className="text-[9px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 whitespace-nowrap">
+                                                    {objectiveCronogramRules && (
+                                                        <>
+                                                            <span className="text-indigo-600 font-black max-w-[72px] truncate" title={objectiveCronogramRules.playbook.join('\n')}>
+                                                                {objectiveCronogramRules.cronogramTypeLabel}
+                                                            </span>
+                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                        </>
+                                                    )}
+                                                    {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
+                                                        : positionStructure.length}P
+                                                    <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                    <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
+                                                        : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)}Pax</span>
+                                                    {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && (
+                                                        <>
+                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
+                                                            <span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h</span>
+                                                        </>
+                                                    )}
+                                                </span>
+                                            </div>
+                                            <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
+                                        </button>
+                                    </div>
+                                )}
+
+                                {/* DIAGNÓSTICO COBERTURA — compacto, toolbar derecho */}
+                                {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
+                                    const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
+                                    const _ok = _rpt.worstDays.length === 0;
+                                    return (
+                                        <div className="relative hidden lg:block shrink-0">
+                                            <button
+                                                ref={coverageDiagnosticBtnRef}
+                                                onClick={() => {
+                                                    if (showCoverageDiagnostic) {
+                                                        setShowCoverageDiagnostic(false);
+                                                    } else {
+                                                        repositionCoveragePanel();
+                                                        setShowCoverageDiagnostic(true);
+                                                    }
+                                                }}
+                                                className={`flex px-2.5 py-1.5 border rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm transition-colors shrink-0 ${
+                                                    _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
+                                                }`}
+                                            >
+                                                <ShieldCheck size={12} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
+                                                <div className="flex flex-col leading-none">
+                                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Cobertura</span>
+                                                    <span className="text-[9px] font-bold text-slate-700 flex items-center gap-1 whitespace-nowrap">
+                                                        <span className="text-emerald-600 font-black">{_rpt.daysFull}OK</span>
+                                                        {(_rpt.daysPartial + _rpt.daysEmpty) > 0 && (
+                                                            <>
+                                                                <span className="text-slate-300">|</span>
+                                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty}✗</span>
+                                                            </>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
+                                            </button>
+                                        </div>
+                                    );
+                                })()}
+
+                                {/* Publicación — compacta, toolbar derecho */}
+                                {selectedObjective && (() => {
+                                    const publishLookupKey = planificacionPublishLookupKey(
+                                        selectedObjective,
+                                        currentDate.getFullYear(),
+                                        currentDate.getMonth() + 1,
+                                    );
+                                    const published = isPlanificacionPublished(publishStatusMap[publishLookupKey]);
+                                    const needsRepublish = !!needsRepublishMap[publishLookupKey];
+                                    return (
+                                        <div className="flex items-center gap-1 shrink-0">
+                                            <button
+                                                type="button"
+                                                onClick={() => void refreshCronogramaView()}
+                                                disabled={isRefreshingCrono}
+                                                title="Actualizar turnos y puestos sin recargar la página"
+                                                className="p-1.5 rounded-lg border border-slate-200 bg-white text-slate-500 hover:bg-slate-50 shadow-sm disabled:opacity-60"
+                                            >
+                                                <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
+                                            </button>
+                                            {published ? (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg" title="Cronograma publicado">
+                                                    <CheckCircle size={10}/> PUB
+                                                </span>
+                                            ) : (
+                                                <span className="flex items-center gap-1 text-[9px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg" title="Borrador">
+                                                    <Ghost size={10}/> BOR
+                                                </span>
+                                            )}
+                                            {canPublishPlanning && (!published || needsRepublish) && (
+                                                <button
+                                                    data-action="publicar-cronograma"
+                                                    onClick={openPublishConfirm}
+                                                    disabled={isPublishing}
+                                                    title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
+                                                        ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
+                                                        : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
+                                                    className={`flex items-center gap-1 disabled:opacity-60 text-white px-2 py-1 rounded-lg text-[9px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                >
+                                                    {isPublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarCheck size={10}/>}
+                                                    {published ? 'RE-PUB' : 'PUBLICAR'}
+                                                </button>
+                                            )}
+                                            {published && canCorrectPlanning && (
+                                                <button
+                                                    onClick={() => setCorrectionMode(v => !v)}
+                                                    title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
+                                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
+                                                >
+                                                    <ShieldAlert size={10}/>
+                                                    {correctionMode ? 'CORR ●' : 'CORR'}
+                                                </button>
+                                            )}
+                                            {published && isSuperAdmin && (
+                                                <button
+                                                    onClick={handleUnpublish}
+                                                    disabled={isUnpublishing}
+                                                    title="SuperAdmin: despublica solo este objetivo y mes. No borra turnos."
+                                                    className="p-1.5 rounded-lg border bg-white text-slate-500 border-slate-300 hover:bg-slate-50 disabled:opacity-60"
+                                                >
+                                                    {isUnpublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarX size={10}/>}
+                                                </button>
+                                            )}
+                                        </div>
+                                    );
+                                })()}
+
+                                <div className="w-px h-5 bg-slate-200 shrink-0 hidden sm:block" aria-hidden />
 
                                 {/* < MES > — siempre visible */}
                                 <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className={`px-3 font-black text-xs w-24 text-center capitalize ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
