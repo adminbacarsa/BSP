@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, GraduationCap
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, GraduationCap, Lock
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -334,6 +334,18 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
   const isTraining = !!empresa?.isTrainingEmpresa;
+  const { session: trainingSession } = useTrainingSession();
+  // Módulos desbloqueados: completados + el módulo activo actual
+  const trainingUnlocked = React.useMemo(() => {
+    if (!isTraining || !trainingSession) return null;
+    const s = new Set<string>();
+    for (const key of (trainingSession.modulePlan || [])) {
+      s.add(key);
+      if (trainingSession.progress[key]?.status !== 'completed') break;
+    }
+    return s;
+  }, [isTraining, trainingSession]);
+  const isModuleLocked = (moduleKey: string) => !!trainingUnlocked && !trainingUnlocked.has(moduleKey);
   const mainScrollRef = useRef<HTMLElement>(null);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
@@ -588,10 +600,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {(canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING')) && (
             <Link href="/admin/operaciones" prefetch={false} title="Centro Control"
-              className={`${getLinkHoverClass('/admin/operaciones')} relative`}
+              className={`${getLinkHoverClass('/admin/operaciones')} relative${isModuleLocked('OPERATIONS') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/operaciones', true)}>
               <Radio size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Centro Control</span>}
+              {isTraining && isModuleLocked('OPERATIONS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {opsTaskCount > 0 && (
                 <button
                   type="button"
@@ -613,10 +626,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('PLANNING') && (
             <Link href="/admin/planificacion" prefetch={false} title="Planificador"
-              className={`${getLinkHoverClass('/admin/planificacion')} relative`}
+              className={`${getLinkHoverClass('/admin/planificacion')} relative${isModuleLocked('PLANNING') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/planificacion')}>
               <Calendar size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
+              {isTraining && isModuleLocked('PLANNING') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {(rfzPlanifCount + rfzEstructuralCount) > 0 && (
                 <button
                   type="button"
@@ -660,18 +674,20 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               {!sidebarOpen && <div className="h-2" />}
               {canReadModule('CLIENTS') && (
                 <Link href="/admin/crm" prefetch={false} title="CRM Clientes"
-                  className={getLinkHoverClass('/admin/crm')}
+                  className={`${getLinkHoverClass('/admin/crm')}${isModuleLocked('CLIENTS') ? ' opacity-40 pointer-events-none' : ''}`}
                   style={getLinkStyle('/admin/crm')}>
                   <Briefcase size={18} className="shrink-0" />
-                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">CRM Clientes</span>}
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">CRM Clientes</span>}
+                  {isTraining && isModuleLocked('CLIENTS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
                 </Link>
               )}
               {(canReadModule('SERVICES') || canReadModule('CLIENTS')) && (
                 <Link href="/admin/servicios" prefetch={false} title="Servicios"
-                  className={`${getLinkHoverClass('/admin/servicios')} relative`}
+                  className={`${getLinkHoverClass('/admin/servicios')} relative${isModuleLocked('SERVICES') ? ' opacity-40 pointer-events-none' : ''}`}
                   style={getLinkStyle('/admin/servicios')}>
                   <ShieldCheck size={18} className="shrink-0" />
                   {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Servicios</span>}
+                  {isTraining && isModuleLocked('SERVICES') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
                   {serviciosTaskCount > 0 && (
                     <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-amber-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
                       {serviciosTaskCount > 99 ? '99+' : serviciosTaskCount}
@@ -684,10 +700,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('REPORTS') && (
             <Link href="/admin/reportes" prefetch={false} title="Reportes"
-              className={getLinkHoverClass('/admin/reportes')}
+              className={`${getLinkHoverClass('/admin/reportes')}${isModuleLocked('REPORTS') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/reportes')}>
               <BarChart3 size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Reportes</span>}
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Reportes</span>}
+              {isTraining && isModuleLocked('REPORTS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
             </Link>
           )}
 
@@ -702,10 +719,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('RRHH') && (
             <Link href="/admin/rrhh" prefetch={false} title="RRHH"
-              className={`${getLinkHoverClass('/admin/rrhh')} relative`}
+              className={`${getLinkHoverClass('/admin/rrhh')} relative${isModuleLocked('RRHH') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/rrhh')}>
               <Users size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">RRHH</span>}
+              {isTraining && isModuleLocked('RRHH') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {rfzEstructuralCount > 0 && (
                 <button
                   type="button"

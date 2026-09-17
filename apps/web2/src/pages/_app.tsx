@@ -13,6 +13,7 @@ import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 import { useAdminFcm } from '@/hooks/useAdminFcm';
 import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
 import { useTrainingCleanup } from '@/hooks/useTrainingCleanup';
+import { useEmpresa } from '@/context/EmpresaContext';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
@@ -23,6 +24,14 @@ function TrainingEvidenceWatcher() {
   useTrainingEvidence();
   useTrainingCleanup();
   return null;
+}
+
+function AssistantWrapper() {
+  const { empresa } = useEmpresa();
+  if (empresa?.isTrainingEmpresa) {
+    return <AssistantFloatingBubble />;
+  }
+  return <div className="hidden lg:block"><AssistantFloatingBubble /></div>;
 }
 
 const AssistantFloatingBubble = dynamic(
@@ -89,7 +98,7 @@ export default function App({ Component, pageProps }: AppProps) {
         <AdminFcmRegistrar />
         <TrainingEvidenceWatcher />
         <Component {...pageProps} />
-        {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
+        {showAssistant && <AssistantWrapper />}
         {showTrainingCoach && <TrainingCoachBubble />}
         {showTrainingCoach && <TrainingGate />}
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
