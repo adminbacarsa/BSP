@@ -200,9 +200,8 @@ export default function UsersTab() {
 
     const formRoleIsSuperAdmin = isSuperAdminRole(formData.role);
     const selectedEmpresaIsTraining =
-      formData.empresaId === myEmpresaId
-        ? !!activeEmpresa?.isTrainingEmpresa
-        : !!((empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa);
+      !!activeEmpresa?.isTrainingEmpresa ||
+      !!((empresasDropdown.find(e => e.id === formData.empresaId) as any)?.isTrainingEmpresa);
 
     return (
         <div className="space-y-6 animate-in fade-in">

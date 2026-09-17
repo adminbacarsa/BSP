@@ -755,31 +755,35 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </>
           )}
 
-          {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && !isTraining && (
+          {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && (
             <>
               {sidebarOpen && (
                 <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
                   style={{ color: 'var(--sb-section)' }}>Sistema</div>
               )}
               {!sidebarOpen && <div className="h-2" />}
-              <Link href="/admin/liquidaciones" prefetch={false} title="Liquidaciones"
-                className={getLinkHoverClass('/admin/liquidaciones')}
-                style={getLinkStyle('/admin/liquidaciones')}>
-                <ClipboardList size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Liquidaciones</span>}
-              </Link>
+              {!isTraining && (
+                <Link href="/admin/liquidaciones" prefetch={false} title="Liquidaciones"
+                  className={getLinkHoverClass('/admin/liquidaciones')}
+                  style={getLinkStyle('/admin/liquidaciones')}>
+                  <ClipboardList size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Liquidaciones</span>}
+                </Link>
+              )}
               <Link href="/admin/configuracion" prefetch={false} title="Configuración"
                 className={getLinkHoverClass('/admin/configuracion')}
                 style={getLinkStyle('/admin/configuracion')}>
                 <Settings size={18} className="shrink-0" />
                 {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Configuración</span>}
               </Link>
-              <Link href="/admin/guia" prefetch={false} title="Guía"
-                className={getLinkHoverClass('/admin/guia')}
-                style={getLinkStyle('/admin/guia')}>
-                <BookOpen size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
-              </Link>
+              {!isTraining && (
+                <Link href="/admin/guia" prefetch={false} title="Guía"
+                  className={getLinkHoverClass('/admin/guia')}
+                  style={getLinkStyle('/admin/guia')}>
+                  <BookOpen size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
+                </Link>
+              )}
             </>
           )}
         </nav>
