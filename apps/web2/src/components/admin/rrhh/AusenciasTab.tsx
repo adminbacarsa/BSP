@@ -497,6 +497,11 @@ function AbsenceRow({
         <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase ${coberturaBadgeClass(a.coberturaEstado)}`}>
           {a.coberturaEstado || 'PENDIENTE'}
         </span>
+        {a.coberturaEstado === 'GESTIONADA' && (a.coveredByEmployeeName || a.coveredByEmployeeId) && (
+          <p className="text-[8px] text-teal-700 mt-0.5 font-bold leading-tight truncate max-w-[120px]" title={a.coveredByEmployeeName || a.coveredByEmployeeId}>
+            {a.coveredByEmployeeName || a.coveredByEmployeeId}
+          </p>
+        )}
         {(!a.coberturaEstado || a.coberturaEstado === 'PENDIENTE') && a.status !== 'Rechazada' && (
           <p className="text-[8px] text-slate-400 mt-0.5 font-bold leading-tight">Planificación</p>
         )}

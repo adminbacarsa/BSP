@@ -1,5 +1,10 @@
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { AGENDA_WEEKDAY_LABELS, toDateKey, type MonthCell } from '../../lib/agendaCalendar';
+import {
+  AGENDA_WEEKDAY_LABELS,
+  agendaDayAccent,
+  toDateKey,
+  type MonthCell,
+} from '../../lib/agendaCalendar';
 import { radius } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
 
@@ -24,13 +29,7 @@ export function AgendaWeekStrip({ days, cellsByKey, selectedKey, onSelectDay }: 
         const cell = cellsByKey[key];
         const selected = key === selectedKey;
         const codes = cell?.codes ?? [];
-        const accent = cell?.hasEv
-          ? palette.warning
-          : cell?.hasWork
-            ? palette.primary
-            : cell?.hasFranco
-              ? palette.success
-              : palette.outline;
+        const accent = cell ? agendaDayAccent(cell, palette) : palette.outline;
 
         return (
           <Pressable
@@ -40,7 +39,11 @@ export function AgendaWeekStrip({ days, cellsByKey, selectedKey, onSelectDay }: 
               styles.dayCard,
               {
                 backgroundColor: selected ? palette.primary : palette.card,
-                borderColor: selected ? palette.primary : palette.cardBorder,
+                borderColor: selected
+                  ? palette.primary
+                  : cell?.hasAbsent
+                    ? '#f59e0b'
+                    : palette.cardBorder,
               },
             ]}
           >
@@ -64,8 +67,18 @@ export function AgendaWeekStrip({ days, cellsByKey, selectedKey, onSelectDay }: 
               style={[styles.codes, { color: selected ? palette.onPrimary : accent }]}
               numberOfLines={1}
             >
-              {codes.length > 0 ? codes.join(' ') : '—'}
+              {codes.length > 0 ? codes.join(' · ') : '—'}
             </Text>
+            {cell?.hasWorked && !cell.hasAbsent ? (
+              <Text
+                style={[
+                  styles.workedHint,
+                  { color: selected ? palette.onPrimary : '#64748b' },
+                ]}
+              >
+                Hecho
+              </Text>
+            ) : null}
           </Pressable>
         );
       })}
@@ -87,4 +100,5 @@ const styles = StyleSheet.create({
   weekday: { fontSize: 11, fontWeight: '800' },
   dayNum: { fontSize: 20, fontWeight: '900' },
   codes: { fontSize: 10, fontWeight: '800' },
+  workedHint: { fontSize: 9, fontWeight: '800' },
 });

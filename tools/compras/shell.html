@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Tablero financiero — Compras imputadas 08/2026</title>
+  <style>
+    :root {
+      --bg: #0f172a; --bg-2: #111827; --card: #1e293b; --stroke: #334155;
+      --text: #f1f5f9; --muted: #94a3b8; --indigo: #6366f1; --indigo-2: #818cf8;
+      --emerald: #34d399; --amber: #fbbf24; --rose: #fb7185; --sky: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Inter, system-ui, sans-serif; min-height: 100%; }
+    body { padding: 28px 28px 64px; }
+    .wrap { max-width: 1280px; margin: 0 auto; }
+    .wrap.wide { max-width: 1680px; }
+    header.top {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 24px;
+      padding: 22px 26px; box-shadow: 0 10px 30px rgba(0,0,0,.28); margin-bottom: 18px;
+    }
+    .kicker { color: var(--indigo-2); font-size: 12px; letter-spacing: .16em; text-transform: uppercase; font-weight: 650; }
+    h1 { font-size: 28px; font-weight: 700; letter-spacing: -.03em; margin-top: 4px; }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 12px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 6px; }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+    .tab {
+      border: 1px solid var(--stroke); background: var(--bg-2); color: var(--muted);
+      border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .tab:hover { background: #1e293b; color: var(--text); }
+    .tab.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .grid { display: grid; gap: 14px; overflow: visible; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 20px;
+      padding: 16px 18px; box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    }
+    .stat .v { font-size: 24px; font-weight: 700; letter-spacing: -.03em; }
+    .stat .l { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .has-tip { position: relative; cursor: help; z-index: 1; }
+    .has-tip:hover, .has-tip:focus-within { z-index: 40; }
+    .tip-mark {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 15px; height: 15px; margin-left: 6px; border-radius: 99px;
+      border: 1px solid #64748b; color: #94a3b8; font-size: 10px; font-weight: 700;
+    }
+    .tip {
+      display: none; position: absolute; left: 10px; right: 10px; top: calc(100% + 8px);
+      z-index: 50; background: #0b1220; border: 1px solid #6366f1; border-radius: 14px;
+      padding: 10px 12px; font-size: 12px; line-height: 1.45; color: #e2e8f0;
+      box-shadow: 0 12px 28px rgba(0,0,0,.45);
+    }
+    .tip b { color: #a5b4fc; font-weight: 650; }
+    .has-tip:hover .tip, .has-tip:focus-within .tip { display: block; }
+    .warn { color: var(--amber); }
+    .danger { color: var(--rose); }
+    .ok { color: var(--emerald); }
+    .info { color: var(--sky); }
+    .callout { border-radius: 20px; padding: 14px 16px; font-size: 14px; line-height: 1.5; margin: 14px 0; }
+    .callout.info { background: #0b1c33; border: 1px solid #1e3a5f; color: #bfdbfe; }
+    .callout.warning { background: #1a1408; border: 1px solid #854d0e; color: #fde68a; }
+    .glosario { margin-bottom: 14px; }
+    .glosario h2 { margin-top: 0; }
+    .glosario .lead { color: var(--muted); font-size: 13px; line-height: 1.5; margin: -2px 0 12px; }
+    details.glosario > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px;
+      font-size: 18px; font-weight: 700; letter-spacing: -.02em; user-select: none;
+    }
+    details.glosario > summary::-webkit-details-marker { display: none; }
+    details.glosario > summary::before {
+      content: ""; width: 8px; height: 8px; border-right: 2px solid #818cf8; border-bottom: 2px solid #818cf8;
+      transform: rotate(-45deg); margin-top: -2px; flex-shrink: 0;
+    }
+    details.glosario[open] > summary::before { transform: rotate(45deg); margin-top: 2px; }
+    details.glosario > summary .open-hint {
+      margin-left: auto; font-size: 11px; font-weight: 650; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--indigo-2);
+    }
+    details.glosario[open] > summary .open-hint { display: none; }
+    details.glosario[open] > .lead { margin-top: 12px; }
+    table.glosa { width: 100%; font-size: 13px; }
+    table.glosa th { text-transform: none; letter-spacing: 0; font-size: 11px; color: #64748b; font-weight: 700; }
+    table.glosa td { white-space: normal; line-height: 1.45; vertical-align: top; color: #cbd5e1; }
+    table.glosa td.kpi { width: 140px; white-space: nowrap; font-weight: 700; color: var(--indigo-2); }
+    table.glosa td.kpi.ok { color: var(--emerald); }
+    table.glosa td.kpi.alza { color: var(--rose); }
+    table.glosa td.kpi.ice { color: var(--amber); }
+    table.glosa td.para { color: #94a3b8; }
+    .usage { height: 14px; border-radius: 999px; overflow: hidden; display: flex; background: #0f172a; border: 1px solid var(--stroke); }
+    .usage span { display: block; height: 100%; }
+    .legend { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 8px; font-size: 12px; color: var(--muted); }
+    .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 99px; margin-right: 6px; }
+    .hbar { display: grid; grid-template-columns: 220px 1fr 110px; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+    .hbar .track { height: 10px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; }
+    .hbar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { padding: 8px 8px; text-align: left; border-bottom: 1px solid #334155; white-space: nowrap; }
+    th { color: var(--muted); font-weight: 650; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; position: sticky; top: 0; background: var(--card); }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #243044; }
+    .tbl-wrap { overflow: auto; max-height: 640px; border-radius: 12px; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .pill.fc { background: #0c2a3a; color: var(--sky); }
+    .pill.nc { background: #3f1d24; color: var(--rose); }
+    .pill.nd { background: #3b2a0b; color: var(--amber); }
+    .pill.rc { background: #1e293b; color: #94a3b8; }
+    .pill.a { background: #06281f; color: var(--emerald); }
+    .pill.c { background: #1e1b4b; color: var(--indigo-2); }
+    .pill.m { background: #3b2a0b; color: var(--amber); }
+    input, select {
+      background: #0f172a; border: 1px solid var(--stroke); color: var(--text);
+      border-radius: 12px; padding: 8px 12px; font-size: 13px;
+    }
+    .toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+    .sortbtn {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--muted);
+      border-radius: 999px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .sortbtn.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .foot { margin-top: 22px; color: #64748b; font-size: 12px; }
+    input.inc { width: 16px; height: 16px; accent-color: #6366f1; cursor: pointer; }
+    table.roster tr.off { opacity: .45; }
+    table.roster td.chk { width: 34px; text-align: center; }
+    .excl-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    .excl-pills button {
+      border: 1px solid #7f1d1d; background: #3f1d24; color: #fb7185;
+      border-radius: 999px; padding: 4px 10px; font-size: 12px; cursor: pointer;
+    }
+    .btn-ghost, .btn-csv {
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--text);
+      border-radius: 999px; padding: 7px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+    }
+    .btn-xls { border: 0; background: #065f46; color: #ecfdf5; border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 700; cursor: pointer; }
+    @media (max-width: 980px) { .g4, .g3, .g2 { grid-template-columns: 1fr 1fr; } body { padding: 16px; } .hbar { grid-template-columns: 1fr; } }
+    @media (max-width: 640px) { .g4, .g3, .g2 { grid-template-columns: 1fr; } h1 { font-size: 22px; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="kicker">Grupo Bacar · Compras</div>
+      <h1>Tablero financiero — Compras imputadas</h1>
+      <p class="sub">Período de imputación agosto 2026 (fecha efecto). El comprobante puede ser de otro mes: nafta 2024 entra acá si se imputó en agosto.</p>
+      <div class="tabs" id="tabs"></div>
+    </header>
+    <section class="panel on" id="tablero"></section>
+    <section class="panel" id="proveedores"></section>
+    <section class="panel" id="cuentas"></section>
+    <section class="panel" id="comprobantes"></section>
+    <section class="panel" id="planilla"></section>
+    <p class="foot">Fuente: compras.CSV. El total del CSV ya trae signo (NC negativa). Los recibos RC van en $0 y no entran al dinero: el campo retperiva de esos renglones no es compra. Destildá proveedores o cuentas para sacarlos del cálculo.</p>
+  </div>
+  <script>
+    const DOCS = %%DOCS%%;
+    const EXCL_PROV = "compras-excl-prov-202608";
+    const EXCL_CTA = "compras-excl-cta-202608";
+    function loadSet(key) {
+      try {
+        const raw = JSON.parse(localStorage.getItem(key) || "[]");
+        return new Set(Array.isArray(raw) ? raw.map(String) : []);
+      } catch (e) { return new Set(); }
+    }
+    let excludedProv = loadSet(EXCL_PROV);
+    let excludedCta = loadSet(EXCL_CTA);
+    const leyendaOpen = {};
+    document.addEventListener("toggle", (e) => {
+      const d = e.target;
+      if (d && d.matches && d.matches("details[data-ley]")) leyendaOpen[d.dataset.ley] = d.open;
+    }, true);
+    function saveExcluded() {
+      localStorage.setItem(EXCL_PROV, JSON.stringify([...excludedProv]));
+      localStorage.setItem(EXCL_CTA, JSON.stringify([...excludedCta]));
+    }
+
+    function fmtPeso(n) {
+      const sign = n < 0 ? "-" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + "$ " + (a / 1e6).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " M";
+      return sign + "$ " + a.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+    }
+    function fmtFull(n) {
+      const sign = n < 0 ? "-" : "";
+      return sign + "$ " + Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function pct(n, d) { return d ? ((n / d) * 100).toFixed(1) + "%" : "—"; }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function fmtFecha(iso) {
+      if (!iso) return "—";
+      const [y, m, d] = iso.split("-");
+      return d + "/" + m + "/" + y;
+    }
+    function shortName(n) { return n.length > 42 ? n.slice(0, 40) + "…" : n; }
+    function isMoney(d) { return d.tipo !== "RC"; }
+    function isNc(d) { return d.tipo === "NC"; }
+    function isFcLike(d) { return d.tipo === "FC" || d.tipo === "ND"; }
+    function compKey(d) { return [d.tipo, d.letra, d.pto, d.nro, d.prov, d.fecha].join("|"); }
+    function letraPill(l) { return l === "C" ? "c" : l === "M" ? "m" : "a"; }
+    function tipoPill(t) { return t === "NC" ? "nc" : t === "ND" ? "nd" : t === "RC" ? "rc" : "fc"; }
+
+    function roster() {
+      return DOCS.filter(d => !excludedProv.has(d.prov) && !excludedCta.has(d.cta));
+    }
+
+    function metrics(list) {
+      const money = list.filter(isMoney);
+      const T = {
+        n: list.length, nMoney: money.length, nFc: 0, nNc: 0, nNd: 0, nRc: 0,
+        nA: 0, nC: 0, nM: 0, bruto: 0, nc: 0, nd: 0, total: 0,
+        neto: 0, cng: 0, iva: 0, impint: 0, retiva: 0, retiibb: 0, retmun: 0
+      };
+      const byProv = {};
+      const byCta = {};
+      const byDay = {};
+      const keys = new Set();
+      const fcKeys = new Set();
+      for (const d of list) {
+        if (d.tipo === "FC") T.nFc += 1;
+        else if (d.tipo === "NC") T.nNc += 1;
+        else if (d.tipo === "ND") T.nNd += 1;
+        else if (d.tipo === "RC") T.nRc += 1;
+        if (d.letra === "A") T.nA += 1;
+        else if (d.letra === "C") T.nC += 1;
+        else if (d.letra === "M") T.nM += 1;
+        const day = d.efecto || d.fecha;
+        if (!byDay[day]) byDay[day] = { n: 0, total: 0, bruto: 0, nc: 0 };
+        byDay[day].n += 1;
+        if (!byProv[d.prov]) byProv[d.prov] = { n: 0, nFc: 0, nNc: 0, bruto: 0, nc: 0, total: 0 };
+        if (!byCta[d.cta]) byCta[d.cta] = { n: 0, nFc: 0, nNc: 0, bruto: 0, nc: 0, total: 0 };
+        byProv[d.prov].n += 1;
+        byCta[d.cta].n += 1;
+        if (!isMoney(d)) continue;
+        keys.add(compKey(d));
+        T.total += d.total;
+        T.neto += d.neto;
+        T.cng += d.cng;
+        T.iva += d.iva;
+        T.impint += d.impint;
+        T.retiva += d.retiva;
+        T.retiibb += d.retiibb;
+        T.retmun += d.retmun;
+        byDay[day].total += d.total;
+        byProv[d.prov].total += d.total;
+        byCta[d.cta].total += d.total;
+        if (isNc(d)) {
+          T.nc += -d.total;
+          byDay[day].nc += -d.total;
+          byProv[d.prov].nNc += 1;
+          byProv[d.prov].nc += -d.total;
+          byCta[d.cta].nNc += 1;
+          byCta[d.cta].nc += -d.total;
+        } else {
+          T.bruto += d.total;
+          byDay[day].bruto += d.total;
+          byProv[d.prov].nFc += 1;
+          byProv[d.prov].bruto += d.total;
+          byCta[d.cta].nFc += 1;
+          byCta[d.cta].bruto += d.total;
+          if (d.tipo === "ND") T.nd += d.total;
+          fcKeys.add(compKey(d));
+        }
+      }
+      const provArr = Object.entries(byProv).map(([prov, v]) => ({ prov, ...v })).sort((a, b) => b.total - a.total);
+      const ctaArr = Object.entries(byCta).map(([cta, v]) => ({ cta, ...v })).sort((a, b) => b.total - a.total);
+      const days = Object.keys(byDay).sort();
+      T.nComp = keys.size;
+      T.nFcComp = fcKeys.size;
+      T.ticket = T.nFcComp ? T.bruto / T.nFcComp : 0;
+      T.nProv = provArr.filter(x => x.prov !== "(sin proveedor)").length;
+      T.nCta = ctaArr.filter(x => x.cta !== "(sin cuenta)").length;
+      T.avgProv = T.nProv ? T.total / T.nProv : 0;
+      T.avgDay = days.length ? T.total / days.length : 0;
+      const top5 = provArr.slice(0, 5).reduce((a, x) => a + x.total, 0);
+      const top10 = provArr.slice(0, 10).reduce((a, x) => a + x.total, 0);
+      return { T, byProv, byCta, byDay, provArr, ctaArr, days, top5, top10 };
+    }
+
+    function ctx() { return metrics(roster()); }
+
+    function stat(v, l, cls, hint) {
+      return `<div class="card stat${hint?" has-tip":""}"${hint?` tabindex="0"`:""}><div class="v ${cls||""}">${v}</div><div class="l">${l}${hint?` <span class="tip-mark" aria-hidden="true">i</span>`:""}</div>${hint?`<div class="tip" role="tooltip">${hint}</div>`:""}</div>`;
+    }
+    function hbars(items, max, color) {
+      return items.map(([label, val]) => {
+        const w = max ? Math.max(4, (Math.abs(val) / Math.max(Math.abs(max), 1)) * 100) : 0;
+        const col = val < 0 ? "#fb7185" : color;
+        return `<div class="hbar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${w}%;background:${col}"></div></div><div class="val">${fmtPeso(val)}</div></div>`;
+      }).join("");
+    }
+
+    const TABS = [["tablero","Tablero"],["proveedores","Proveedores"],["cuentas","Cuentas"],["comprobantes","Comprobantes"],["planilla","Planilla"]];
+    document.getElementById("tabs").innerHTML = TABS.map(([id, l], i) =>
+      `<button class="tab${i===0?" on":""}" data-tab="${id}">${l}</button>`
+    ).join("");
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const b = e.target.closest(".tab");
+      if (!b) return;
+      document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+      document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === b.dataset.tab));
+      document.querySelector(".wrap").classList.toggle("wide", b.dataset.tab === "planilla");
+    });
+
+    function bindExcl(rootSel) {
+      document.querySelectorAll(rootSel + " [data-in]").forEach(btn => {
+        btn.addEventListener("click", () => {
+          const kind = btn.getAttribute("data-kind") || "prov";
+          const id = btn.getAttribute("data-in");
+          if (kind === "cta") excludedCta.delete(id);
+          else excludedProv.delete(id);
+          saveExcluded();
+          refresh();
+        });
+      });
+    }
+
+    function renderTablero() {
+      const { T, byDay, provArr, ctaArr, days, top5, top10 } = ctx();
+      const dayBars = days.map(d => [fmtFecha(d), byDay[d].total]);
+      const maxDay = Math.max(...dayBars.map(x => Math.abs(x[1])), 1);
+      const top8p = provArr.filter(x => x.prov !== "(sin proveedor)").slice(0, 8);
+      const top8c = ctaArr.filter(x => x.cta !== "(sin cuenta)").slice(0, 8);
+      const ncs = roster().filter(isNc).sort((a,b) => a.total - b.total).slice(0, 8);
+      const allProv = new Set(DOCS.map(d => d.prov)).size;
+      const allCta = new Set(DOCS.map(d => d.cta)).size;
+      const exclP = [...excludedProv];
+      const exclC = [...excludedCta];
+      const pub = (ctaArr.find(x => x.cta === "Publicidad") || { total: 0 }).total;
+      const cart = (ctaArr.find(x => x.cta === "Carteles y Elementos Publicitarios") || { total: 0 }).total;
+      const base = T.neto + T.cng + T.impint + T.iva;
+      document.getElementById("tablero").innerHTML = `
+        <details class="card glosario" data-ley="kpi"${leyendaOpen.kpi ? " open" : ""}>
+          <summary>Leyenda — qué es cada KPI y para qué <span class="open-hint">Abrir</span></summary>
+          <p class="lead">El número grande es el dato del universo tildado. El CSV ya trae signo: una NC entra negativa. La <b style="color:#a5b4fc">i</b> muestra la cuenta de este corte. Los recibos RC no suman plata.</p>
+          <div class="tbl-wrap" style="max-height:none">
+            <table class="glosa">
+              <thead><tr><th>KPI</th><th>Qué es</th><th>Para qué lo mirás</th></tr></thead>
+              <tbody>
+                <tr><td class="kpi ok">Total</td><td>Suma de la columna total (FC y ND suman, NC resta). Es lo imputado en agosto.</td><td class="para">El número de gasto. Si FILMEC o un club distorsiona, destildalo en Proveedores.</td></tr>
+                <tr><td class="kpi">Bruto</td><td>Facturas + notas de débito, sin restar NC.</td><td class="para">Volumen emitido por proveedores. Sirve para ver el tamaño de la máquina de compras.</td></tr>
+                <tr><td class="kpi alza">NC</td><td>Notas de crédito. En el CSV ya vienen negativas; acá se muestran en valor absoluto.</td><td class="para">Calidad de carga. Un NC grande suele ser refacturación (Bochas 180 M), no un “descuento”.</td></tr>
+                <tr><td class="kpi ice">Ticket</td><td>Bruto ÷ cantidad de FC/ND distintas (no líneas de alícuota).</td><td class="para">Tamaño medio. Lo mueven FILMEC, clubes y La Voz.</td></tr>
+                <tr><td class="kpi">Neto gravado / CNG / IVA</td><td>Desglose del comprobante. Total ≈ neto + no gravado + imp. internos + IVA + percepciones.</td><td class="para">Mix impositivo de la compra, no mix de caja.</td></tr>
+                <tr><td class="kpi">Imputación vs fecha</td><td>Efecto = cuándo entra al libro (siempre agosto). Fecha = del comprobante (puede ser 2024).</td><td class="para">Ver nafta/peajes viejos que se imputaron este mes. No es “compras del día”.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+        <details class="card glosario" data-ley="univ"${leyendaOpen.univ ? " open" : ""}>
+          <summary>Universo del cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Totales y ranking usan proveedores y cuentas tildados. Se guarda en este navegador. Los RC ($0) quedan afuera del dinero.</p>
+          <p class="muted">${T.nProv} proveedores · ${T.nCta} cuentas · ${T.nMoney} líneas con importe · ${T.nComp} comprobantes · ${T.nRc} recibos ignorados en $.</p>
+          ${exclP.length ? `<div class="excl-pills">${exclP.map(c => `<button type="button" data-kind="prov" data-in="${esc(c)}">${esc(shortName(c))} ×</button>`).join("")}</div>` : ""}
+          ${exclC.length ? `<div class="excl-pills">${exclC.map(c => `<button type="button" data-kind="cta" data-in="${esc(c)}">${esc(shortName(c))} ×</button>`).join("")}</div>` : ""}
+          ${!exclP.length && !exclC.length ? `<p class="muted" style="margin-top:8px">Nadie excluido. En Proveedores o Cuentas, destildá la fila para sacarla.</p>` : ""}
+        </details>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.total), "Total imputado", "ok", `<b>Suma columna total (con signo)</b><br>Bruto ${fmtFull(T.bruto)} − NC ${fmtFull(T.nc)} = ${fmtFull(T.total)}.`)}
+          ${stat(fmtPeso(T.bruto), "Bruto (FC + ND)", "", `<b>Facturas y débitos</b><br>${T.nFc} FC + ${T.nNd} ND = ${fmtFull(T.bruto)}.`)}
+          ${stat(fmtPeso(T.nc), "Notas de crédito", "danger", `<b>Suma |NC| (resta)</b><br>${T.nNc} NC = ${fmtFull(T.nc)} (${pct(T.nc, T.bruto)} del bruto).`)}
+          ${stat(fmtPeso(T.ticket), "Ticket medio FC/ND", "warn", `<b>Bruto ÷ comprobantes FC/ND distintos</b><br>${fmtFull(T.bruto)} / ${T.nFcComp} = ${fmtFull(T.ticket)}.`)}
+        </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(String(T.nComp), "Comprobantes (únicos)", "", `<b>Líneas con importe, sin duplicar alícuota</b><br>${T.nMoney} líneas · ${T.nComp} comps · ${T.nRc} RC afuera del $.`)}
+          ${stat(String(T.nProv), "Proveedores", "", `<b>Proveedores tildados con compra</b><br>${T.nProv} de ${allProv} en el CSV.`)}
+          ${stat(pct(top5, T.total), "Top 5 del total", "warn", `<b>Suma total top 5 / total</b><br>${fmtPeso(top5)} de ${fmtPeso(T.total)}.`)}
+          ${stat(pct(top10, T.total), "Top 10 del total", "danger", `<b>Suma total top 10 / total</b><br>${fmtPeso(top10)} de ${fmtPeso(T.total)}.`)}
+        </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(T.neto), "Neto gravado", "", `<b>Columna neto</b><br>${fmtFull(T.neto)}. Base IVA.`)}
+          ${stat(fmtPeso(T.cng), "No gravado (CNG)", "warn", `<b>Columna cng</b><br>${fmtFull(T.cng)}. Exento / no gravado (clubes, etc.).`)}
+          ${stat(fmtPeso(T.iva), "IVA", "", `<b>Columna iva_b</b><br>${fmtFull(T.iva)}.`)}
+          ${stat(fmtPeso(T.impint + T.retiva + T.retiibb + T.retmun), "Internos + percepciones", "", `<b>imp. internos + ret/percep IVA/IIBB/mun</b><br>Internos ${fmtFull(T.impint)} · IVA ${fmtFull(T.retiva)} · IIBB ${fmtFull(T.retiibb)}.`)}
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:8px">
+            <span>Total ${fmtPeso(T.total)} · bruto ${fmtPeso(T.bruto)}</span>
+            <span>NC ${fmtPeso(T.nc)} (${pct(T.nc, T.bruto)})</span>
+          </div>
+          <div class="usage">
+            <span style="width:${T.bruto ? (Math.max(0,T.total)/T.bruto*100) : 0}%;background:#34d399"></span>
+            <span style="width:${T.bruto ? (T.nc/T.bruto*100) : 0}%;background:#fb7185"></span>
+          </div>
+          <div class="legend">
+            <span><i style="background:#34d399"></i>Total (queda)</span>
+            <span><i style="background:#fb7185"></i>NC (se resta)</span>
+          </div>
+          <p class="muted" style="margin-top:10px">Composición del comprobante (neto ${pct(T.neto, base)} · CNG ${pct(T.cng, base)} · IVA ${pct(T.iva, base)}). Suman ${fmtPeso(base)} antes de percepciones.</p>
+        </div>
+        <div class="grid g2" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Mix letra A / C / M</h2>
+            ${hbars([["Letra A", T.nA], ["Letra C", T.nC], ["Letra M", T.nM]], Math.max(T.nA, T.nC, T.nM, 1), "#38bdf8")}
+            <p class="muted" style="margin-top:8px">${T.nA} A, ${T.nC} C, ${T.nM} M. Los C grandes son clubes (Bochas, Atenas, Independiente): no gravado, no IVA.</p>
+          </div>
+          <div class="card">
+            <h2>Publicidad + carteles</h2>
+            ${hbars([["Publicidad", pub], ["Carteles", cart]], Math.max(pub, cart, 1), "#818cf8")}
+            <p class="muted" style="margin-top:8px">${fmtPeso(pub + cart)} (${pct(pub + cart, T.total)} del total). Destildá las cuentas o los clubes para ver el gasto operativo.</p>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Total por día de imputación (${days.length} fechas)</h2>
+          ${hbars(dayBars, maxDay, "#fbbf24")}
+          <p class="muted">Promedio por día con movimiento: ${fmtPeso(T.avgDay)}. El 04, 05 y 11 de agosto concentran FILMEC, Atenas, Bochas y La Voz.</p>
+        </div>
+        <div class="grid g2" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Top 8 proveedores — total</h2>
+            ${top8p.length ? hbars(top8p.map(c => [shortName(c.prov), c.total]), top8p[0].total, "#34d399") : ""}
+          </div>
+          <div class="card">
+            <h2>Top 8 cuentas — total</h2>
+            ${top8c.length ? hbars(top8c.map(c => [shortName(c.cta), c.total]), top8c[0].total, "#818cf8") : ""}
+          </div>
+        </div>
+        <div class="card">
+          <h2>Mayores notas de crédito</h2>
+          ${ncs.length ? hbars(ncs.map(d => [shortName(d.prov) + " · " + fmtFecha(d.fecha), -d.total]), Math.max(...ncs.map(d => -d.total), 1), "#fb7185") : `<p class="muted">Sin NC en el universo.</p>`}
+        </div>
+        <div class="callout warning"><b>Lectura operativa.</b> 1) FILMEC (Gastos Taller) es un solo comprobante de ${fmtPeso((provArr.find(x=>x.prov==="FILMEC S.A.")||{total:0}).total)}: si lo dejás adentro, el promedio no describe al resto. 2) Bochas: FC de $180 M y NC de $180 M el 11/08 — queda $18 M. Es refacturación, no un gasto de $198 M. 3) Publicidad + carteles es ~${pct(pub+cart, T.total)} del mes (Atenas, La Voz, Independiente). 4) Viáticos BPC son 300 líneas y poco monto: ruido operativo, no el motor del total. 5) Hay comprobantes de 2024/2025 imputados en agosto (combustibles y peajes).</div>
+      `;
+      bindExcl("#tablero");
+    }
+
+    function rosterTable(kind, names, rows, q, sortKey, sorts, searchPh, counts) {
+      const set = kind === "cta" ? excludedCta : excludedProv;
+      const idKey = kind === "cta" ? "cta" : "prov";
+      const full = names.map(name => {
+        const row = rows.find(x => x[idKey] === name) || { n: 0, nFc: 0, nNc: 0, bruto: 0, nc: 0, total: 0 };
+        return { name, on: !set.has(name), ...row };
+      }).filter(r => !q || r.name.toLowerCase().includes(q))
+        .sort((a, b) => {
+          if (a.on !== b.on) return a.on ? -1 : 1;
+          return (b[sortKey] || 0) - (a[sortKey] || 0);
+        });
+      return { full, vis: full.map(r => r.name), set, idKey };
+    }
+
+    let provSort = "total";
+    let provQ = "";
+    function renderProveedores() {
+      const { T, provArr } = ctx();
+      const names = [...new Set(DOCS.map(d => d.prov))].sort();
+      const wrap = document.querySelector("#proveedores .tbl-wrap");
+      const y = wrap ? wrap.scrollTop : 0;
+      const { full, vis } = rosterTable("prov", names, provArr, provQ.trim().toLowerCase(), provSort);
+      const sorts = [["total","Total"],["bruto","Bruto"],["nc","NC"],["n","Líneas"]];
+      const exclList = [...excludedProv];
+      document.getElementById("proveedores").innerHTML = `
+        <details class="card glosario" data-ley="prov"${leyendaOpen.prov ? " open" : ""}>
+          <summary>Quién entra al cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Destildá FILMEC, un club o quien no deba promediarse. El Tablero se recalcula al toque.</p>
+          <div class="grid g4">
+            ${stat(T.nProv + " / " + names.filter(n => n !== "(sin proveedor)").length, "Incluidos / CSV", "", `<b>Proveedores tildados</b><br>${T.nProv} entran. ${exclList.length} afuera.`)}
+            ${stat(fmtPeso(T.avgProv), "Total / proveedor", "", `<b>Total ÷ proveedores incluidos</b><br>${fmtFull(T.total)} / ${T.nProv} = ${fmtFull(T.avgProv)}.`)}
+            ${stat(fmtPeso(T.ticket), "Ticket medio FC/ND", "warn", `<b>Bruto ÷ comprobantes</b><br>${fmtFull(T.ticket)}.`)}
+            ${stat(fmtPeso(T.total), "Total universo", "ok", `<b>Suma total de los tildados</b><br>${fmtFull(T.total)}.`)}
+          </div>
+          ${exclList.length ? `<div class="excl-pills" style="margin-top:12px">${exclList.map(c => `<button type="button" data-kind="prov" data-in="${esc(c)}">${esc(shortName(c))} ×</button>`).join("")}</div>` : ""}
+        </details>
+        <div class="toolbar">
+          <input id="pq" type="search" placeholder="Buscar proveedor…" value="${esc(provQ)}" style="width:280px" />
+          ${sorts.map(([id,l]) => `<button class="sortbtn${provSort===id?" on":""}" data-sort="${id}">${l}</button>`).join("")}
+          <button class="btn-ghost" type="button" id="incAllP">Incluir todos</button>
+          <button class="btn-ghost" type="button" id="excVisP">Excluir visibles</button>
+          <span class="muted">${full.length} filas · ${T.nProv} en el cálculo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="roster">
+              <thead><tr>
+                <th class="chk"><input type="checkbox" id="chkAllP" ${full.length && full.every(r => r.on) ? "checked" : ""} /></th>
+                <th>Proveedor</th><th class="num">Lín.</th><th class="num">FC/ND</th><th class="num">NC</th>
+                <th class="num">Bruto</th><th class="num">NC $</th><th class="num">Total</th><th class="num">% total</th>
+              </tr></thead>
+              <tbody>
+                ${full.map(r => `<tr class="${r.on?"":"off"}">
+                  <td class="chk"><input type="checkbox" class="inc" data-p="${esc(r.name)}" ${r.on?"checked":""} /></td>
+                  <td>${esc(r.name)}</td>
+                  <td class="num">${r.n}</td><td class="num">${r.nFc}</td><td class="num">${r.nNc}</td>
+                  <td class="num">${fmtPeso(r.bruto)}</td>
+                  <td class="num">${r.nc ? fmtPeso(r.nc) : "—"}</td>
+                  <td class="num">${fmtPeso(r.total)}</td>
+                  <td class="num">${r.on ? pct(r.total, T.total) : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      const wrap2 = document.querySelector("#proveedores .tbl-wrap");
+      if (wrap2) wrap2.scrollTop = y;
+      const pq = document.getElementById("pq");
+      pq.addEventListener("input", () => { provQ = pq.value; renderProveedores(); const el=document.getElementById("pq"); if(el){ el.focus(); el.setSelectionRange(provQ.length, provQ.length);} });
+      document.querySelectorAll("#proveedores .sortbtn").forEach(b => b.addEventListener("click", () => { provSort = b.dataset.sort; renderProveedores(); }));
+      document.querySelectorAll("#proveedores .inc").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const id = cb.getAttribute("data-p");
+          if (cb.checked) excludedProv.delete(id); else excludedProv.add(id);
+          saveExcluded();
+          refresh();
+        });
+      });
+      const chkAll = document.getElementById("chkAllP");
+      if (chkAll) chkAll.addEventListener("change", () => {
+        vis.forEach(id => { if (chkAll.checked) excludedProv.delete(id); else excludedProv.add(id); });
+        saveExcluded();
+        refresh();
+      });
+      document.getElementById("incAllP").addEventListener("click", () => { excludedProv = new Set(); saveExcluded(); refresh(); });
+      document.getElementById("excVisP").addEventListener("click", () => { vis.forEach(id => excludedProv.add(id)); saveExcluded(); refresh(); });
+      bindExcl("#proveedores");
+    }
+
+    let ctaSort = "total";
+    let ctaQ = "";
+    function renderCuentas() {
+      const { T, ctaArr } = ctx();
+      const names = [...new Set(DOCS.map(d => d.cta))].sort();
+      const wrap = document.querySelector("#cuentas .tbl-wrap");
+      const y = wrap ? wrap.scrollTop : 0;
+      const { full, vis } = rosterTable("cta", names, ctaArr, ctaQ.trim().toLowerCase(), ctaSort);
+      const sorts = [["total","Total"],["bruto","Bruto"],["nc","NC"],["n","Líneas"]];
+      const exclList = [...excludedCta];
+      document.getElementById("cuentas").innerHTML = `
+        <details class="card glosario" data-ley="cta"${leyendaOpen.cta ? " open" : ""}>
+          <summary>Qué cuenta entra al cálculo <span class="open-hint">Abrir</span></summary>
+          <p class="lead">Destildá Publicidad, Carteles o Taller para ver el gasto de operación (viáticos, nafta, repuestos).</p>
+          <div class="grid g4">
+            ${stat(T.nCta + " / " + names.filter(n => n !== "(sin cuenta)").length, "Cuentas / CSV", "", `<b>Cuentas tildadas</b><br>${T.nCta} entran. ${exclList.length} afuera.`)}
+            ${stat(fmtPeso(T.total), "Total universo", "ok", `<b>Suma total de las cuentas tildadas</b><br>${fmtFull(T.total)}.`)}
+            ${stat(String(T.nComp), "Comprobantes", "", `<b>Únicos con importe</b><br>${T.nComp}.`)}
+            ${stat(fmtPeso(T.ticket), "Ticket medio", "warn", `<b>Bruto ÷ FC/ND</b><br>${fmtFull(T.ticket)}.`)}
+          </div>
+          ${exclList.length ? `<div class="excl-pills" style="margin-top:12px">${exclList.map(c => `<button type="button" data-kind="cta" data-in="${esc(c)}">${esc(shortName(c))} ×</button>`).join("")}</div>` : ""}
+        </details>
+        <div class="toolbar">
+          <input id="tq" type="search" placeholder="Buscar cuenta…" value="${esc(ctaQ)}" style="width:280px" />
+          ${sorts.map(([id,l]) => `<button class="sortbtn${ctaSort===id?" on":""}" data-sort="${id}">${l}</button>`).join("")}
+          <button class="btn-ghost" type="button" id="incAllC">Incluir todas</button>
+          <button class="btn-ghost" type="button" id="excVisC">Excluir visibles</button>
+          <span class="muted">${full.length} filas · ${T.nCta} en el cálculo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table class="roster">
+              <thead><tr>
+                <th class="chk"><input type="checkbox" id="chkAllC" ${full.length && full.every(r => r.on) ? "checked" : ""} /></th>
+                <th>Cuenta</th><th class="num">Lín.</th><th class="num">FC/ND</th><th class="num">NC</th>
+                <th class="num">Bruto</th><th class="num">NC $</th><th class="num">Total</th><th class="num">% total</th>
+              </tr></thead>
+              <tbody>
+                ${full.map(r => `<tr class="${r.on?"":"off"}">
+                  <td class="chk"><input type="checkbox" class="inc" data-c="${esc(r.name)}" ${r.on?"checked":""} /></td>
+                  <td>${esc(r.name)}</td>
+                  <td class="num">${r.n}</td><td class="num">${r.nFc}</td><td class="num">${r.nNc}</td>
+                  <td class="num">${fmtPeso(r.bruto)}</td>
+                  <td class="num">${r.nc ? fmtPeso(r.nc) : "—"}</td>
+                  <td class="num">${fmtPeso(r.total)}</td>
+                  <td class="num">${r.on ? pct(r.total, T.total) : "—"}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      const wrap2 = document.querySelector("#cuentas .tbl-wrap");
+      if (wrap2) wrap2.scrollTop = y;
+      const tq = document.getElementById("tq");
+      tq.addEventListener("input", () => { ctaQ = tq.value; renderCuentas(); const el=document.getElementById("tq"); if(el){ el.focus(); el.setSelectionRange(ctaQ.length, ctaQ.length);} });
+      document.querySelectorAll("#cuentas .sortbtn").forEach(b => b.addEventListener("click", () => { ctaSort = b.dataset.sort; renderCuentas(); }));
+      document.querySelectorAll("#cuentas .inc").forEach(cb => {
+        cb.addEventListener("change", () => {
+          const id = cb.getAttribute("data-c");
+          if (cb.checked) excludedCta.delete(id); else excludedCta.add(id);
+          saveExcluded();
+          refresh();
+        });
+      });
+      const chkAll = document.getElementById("chkAllC");
+      if (chkAll) chkAll.addEventListener("change", () => {
+        vis.forEach(id => { if (chkAll.checked) excludedCta.delete(id); else excludedCta.add(id); });
+        saveExcluded();
+        refresh();
+      });
+      document.getElementById("incAllC").addEventListener("click", () => { excludedCta = new Set(); saveExcluded(); refresh(); });
+      document.getElementById("excVisC").addEventListener("click", () => { vis.forEach(id => excludedCta.add(id)); saveExcluded(); refresh(); });
+      bindExcl("#cuentas");
+    }
+
+    let docQ = "";
+    let docTipo = "ALL";
+    function renderComprobantes() {
+      const list = roster().filter(d => {
+        if (docTipo === "FC" && d.tipo !== "FC") return false;
+        if (docTipo === "NC" && d.tipo !== "NC") return false;
+        if (docTipo === "ND" && d.tipo !== "ND") return false;
+        if (docTipo === "RC" && d.tipo !== "RC") return false;
+        if (docTipo === "A" && d.letra !== "A") return false;
+        if (docTipo === "C" && d.letra !== "C") return false;
+        const q = docQ.trim().toLowerCase();
+        if (!q) return true;
+        return d.prov.toLowerCase().includes(q) || d.cta.toLowerCase().includes(q) || d.nro.includes(q) || d.comp.toLowerCase().includes(q) || d.cuit.includes(q);
+      }).sort((a,b) => Math.abs(b.total) - Math.abs(a.total));
+      const tipos = [["ALL","Todos"],["FC","Facturas"],["NC","NC"],["ND","ND"],["RC","Recibos"],["A","Letra A"],["C","Letra C"]];
+      document.getElementById("comprobantes").innerHTML = `
+        <div class="toolbar">
+          <input id="dq" type="search" placeholder="Buscar proveedor, cuenta, nro o CUIT…" value="${esc(docQ)}" style="width:320px" />
+          ${tipos.map(([id,l]) => `<button class="sortbtn${docTipo===id?" on":""}" data-tipo="${id}">${l}</button>`).join("")}
+          <span class="muted">${list.length} de ${roster().length} en el universo</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Imputación</th><th>Comprobante</th><th>Tipo</th><th>Letra</th><th>N°</th>
+                <th>Proveedor</th><th>Cuenta</th><th class="num">Total</th>
+              </tr></thead>
+              <tbody>
+                ${list.map(d => `<tr>
+                  <td>${fmtFecha(d.efecto)}</td>
+                  <td>${fmtFecha(d.fecha)}</td>
+                  <td><span class="pill ${tipoPill(d.tipo)}">${d.tipo}</span></td>
+                  <td>${d.letra ? `<span class="pill ${letraPill(d.letra)}">${d.letra}</span>` : "—"}</td>
+                  <td>${esc(d.pto)}-${esc(d.nro)}</td>
+                  <td>${esc(d.prov)}</td>
+                  <td>${esc(d.cta)}</td>
+                  <td class="num ${d.total<0?"danger": d.total>0?"ok":""}">${fmtFull(d.total)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      const dq = document.getElementById("dq");
+      dq.addEventListener("input", () => { docQ = dq.value; renderComprobantes(); const el=document.getElementById("dq"); if(el){ el.focus(); el.setSelectionRange(docQ.length, docQ.length);} });
+      document.querySelectorAll("#comprobantes .sortbtn").forEach(b => b.addEventListener("click", () => { docTipo = b.dataset.tipo; renderComprobantes(); }));
+    }
+
+    function renderPlanilla() {
+      const rows = roster();
+      document.getElementById("planilla").innerHTML = `
+        <div class="callout info"><b>Planilla del universo tildado.</b> El Excel descarga todas las líneas del CSV, no solo las tildadas. Una misma factura puede ocupar dos filas si tiene dos alícuotas.</div>
+        <div class="toolbar">
+          <button class="btn-xls" type="button" id="dlXls">Descargar Excel (.xls)</button>
+          <button class="btn-csv" type="button" id="dlCsv">Descargar CSV</button>
+          <span class="muted">${rows.length} filas en pantalla · ${DOCS.length} en el archivo origen</span>
+        </div>
+        <div class="card">
+          <div class="tbl-wrap">
+            <table>
+              <thead><tr>
+                <th>Imputación</th><th>Fecha</th><th>Tipo</th><th>Letra</th><th>Pto-Nro</th>
+                <th>Proveedor</th><th>CUIT</th><th>Cuenta</th><th>Cat.</th><th>Alic.</th>
+                <th class="num">Neto</th><th class="num">CNG</th><th class="num">IVA</th><th class="num">Total</th>
+              </tr></thead>
+              <tbody>
+                ${rows.map(d => `<tr>
+                  <td>${fmtFecha(d.efecto)}</td><td>${fmtFecha(d.fecha)}</td>
+                  <td>${d.tipo}</td><td>${d.letra || "—"}</td>
+                  <td>${esc(d.pto)}-${esc(d.nro)}</td>
+                  <td>${esc(d.prov)}</td><td>${esc(d.cuit)}</td><td>${esc(d.cta)}</td>
+                  <td>${esc(d.cat)}</td><td>${esc(d.alic)}</td>
+                  <td class="num">${fmtFull(d.neto)}</td>
+                  <td class="num">${fmtFull(d.cng)}</td>
+                  <td class="num">${fmtFull(d.iva)}</td>
+                  <td class="num">${fmtFull(d.total)}</td>
+                </tr>`).join("")}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+      document.getElementById("dlCsv").addEventListener("click", downloadCsv);
+      document.getElementById("dlXls").addEventListener("click", downloadXls);
+    }
+
+    function csvEscape(v) {
+      const s = String(v ?? "");
+      if (/[",;\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+      return s;
+    }
+    function triggerDownload(content, name, mime) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+    }
+    function downloadCsv() {
+      const headers = ["Imputacion","Fecha","Tipo","Letra","Punto","Numero","Proveedor","CUIT","Cuenta","Categoria","Alicuota","Neto","CNG","ImpInternos","IVA","RetPerIVA","RetPerIIBB","RetPerMun","Total"];
+      const body = [headers, ...DOCS.map(d => [d.efecto, d.fecha, d.tipo, d.letra, d.pto, d.nro, d.prov, d.cuit, d.cta, d.cat, d.alic, String(d.neto).replace(".", ","), String(d.cng).replace(".", ","), String(d.impint).replace(".", ","), String(d.iva).replace(".", ","), String(d.retiva).replace(".", ","), String(d.retiibb).replace(".", ","), String(d.retmun).replace(".", ","), String(d.total).replace(".", ",")]) ]
+        .map(line => line.map(csvEscape).join(";")).join("\r\n");
+      triggerDownload("\uFEFF" + body, "compras-imputadas-08-2026.csv", "text/csv;charset=utf-8");
+    }
+    function xCell(v) { return `<Cell><Data ss:Type="String">${esc(String(v))}</Data></Cell>`; }
+    function xNum(n) { return `<Cell><Data ss:Type="Number">${Number(n).toFixed(2)}</Data></Cell>`; }
+    function downloadXls() {
+      const header = ["Imputacion","Fecha","Tipo","Letra","Punto","Numero","Proveedor","CUIT","Cuenta","Categoria","Alicuota","Neto","CNG","ImpInternos","IVA","RetPerIVA","RetPerIIBB","RetPerMun","Total"];
+      let rows = "";
+      DOCS.forEach(d => {
+        rows += `<Row>${xCell(d.efecto)}${xCell(d.fecha)}${xCell(d.tipo)}${xCell(d.letra)}${xCell(d.pto)}${xCell(d.nro)}${xCell(d.prov)}${xCell(d.cuit)}${xCell(d.cta)}${xCell(d.cat)}${xCell(d.alic)}${xNum(d.neto)}${xNum(d.cng)}${xNum(d.impint)}${xNum(d.iva)}${xNum(d.retiva)}${xNum(d.retiibb)}${xNum(d.retmun)}${xNum(d.total)}</Row>`;
+      });
+      const xml = `<?xml version="1.0"?><?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
+  <Worksheet ss:Name="Compras"><Table>
+    <Row>${header.map(h => xCell(h)).join("")}</Row>
+    ${rows}
+  </Table></Worksheet>
+</Workbook>`;
+      triggerDownload(xml, "compras-imputadas-08-2026.xls", "application/vnd.ms-excel");
+    }
+
+    function refresh() {
+      const { T } = ctx();
+      const sub = document.querySelector("header.top .sub");
+      if (sub) {
+        const extra = [];
+        if (excludedProv.size) extra.push(excludedProv.size + " prov. afuera");
+        if (excludedCta.size) extra.push(excludedCta.size + " cuentas afuera");
+        sub.textContent = `Imputación 01/08/2026–31/08/2026 · comprobantes desde 16/11/2024 · ${DOCS.length} líneas · cálculo sobre ${T.nMoney} con importe / ${T.nProv} proveedores / ${T.nCta} cuentas${extra.length ? " (" + extra.join(", ") + ")" : ""} · Total ${fmtPeso(T.total)}.`;
+      }
+      const onTab = document.querySelector(".tab.on");
+      const tabId = onTab ? onTab.dataset.tab : "tablero";
+      renderTablero();
+      renderProveedores();
+      renderCuentas();
+      renderComprobantes();
+      renderPlanilla();
+      if (tabId && tabId !== "tablero") {
+        document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x.dataset.tab === tabId));
+        document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === tabId));
+        document.querySelector(".wrap").classList.toggle("wide", tabId === "planilla");
+      }
+    }
+    refresh();
+  </script>
+</body>
+</html>

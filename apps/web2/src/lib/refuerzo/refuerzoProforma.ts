@@ -1,6 +1,7 @@
 import type { SolicitudRefuerzo } from '@/services/solicitudRefuerzoService';
 import { calcRefuerzoPactadaHours, isSolicitudRefuerzoExtraVendible, refuerzoTipoCode } from './refuerzoDisplay';
 import type { ProformaDayCell, ProformaObjectiveGrid, ProformaPositionObjectiveGrid } from '@/lib/crm/proformaTypes';
+import { formatHoursHm } from '@/lib/crm/proformaGrid';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 
 const BILLABLE_ESTADOS = new Set(['APROBADA', 'ASIGNADA', 'COMPLETADA']);

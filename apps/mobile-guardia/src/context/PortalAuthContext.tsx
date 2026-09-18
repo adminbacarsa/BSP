@@ -22,7 +22,7 @@ import {
   type EmpleadoPortal,
 } from '@cosp/portal-types';
 import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
-import { getPortalFirebase } from '../lib/portal';
+import { getPortalFirebase, isEmulatorMode } from '../lib/portal';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 import { unregisterPushForUser } from '../lib/pushNotifications';
@@ -92,7 +92,7 @@ export function mapPortalAuthError(err: unknown, emulatorMode: boolean): string 
   const code = (err as { code?: string })?.code ?? '';
   if (['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password', 'auth/invalid-email'].includes(code)) {
     return emulatorMode
-      ? 'Correo o contraseña incorrectos en el emulador. Probá guardia@bacarsa.com.ar / guardia1234 (npm run seed). Si en el navegador sí entra, revisá EXPO_PUBLIC_FIREBASE_EMULATOR_HOST con la IP Wi‑Fi de la PC (no 127.0.0.1).'
+      ? 'Correo o contraseña incorrectos en el emulador. Ejecutá npm run seed y usá el usuario de prueba del seed. Si en el navegador sí entra, revisá EXPO_PUBLIC_FIREBASE_EMULATOR_HOST con la IP Wi‑Fi de la PC (no 127.0.0.1).'
       : 'Correo o contraseña incorrectos.';
   }
   if (code === 'auth/network-request-failed' || isNetworkOrFirestoreError(err)) {
@@ -240,7 +240,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           setEmployee(null);
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
           setEmployeeProfileError(
-            'No hay legajo para tu usuario. Cerrá sesión, ejecutá npm run seed en la PC y volvé a entrar con guardia@bacarsa.com.ar',
+            isEmulatorMode()
+              ? 'No hay legajo para tu usuario. Cerrá sesión, ejecutá npm run seed en la PC y volvé a entrar con el usuario de prueba.'
+              : 'No hay legajo vinculado a tu usuario. Pedile a RRHH que revise tu acceso al portal.',
           );
           return;
         }

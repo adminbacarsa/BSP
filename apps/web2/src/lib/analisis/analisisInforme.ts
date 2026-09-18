@@ -12,7 +12,8 @@ import {
 } from './analisisQueries';
 import { CCT_HS_TECHO_MENSUAL } from './analisisBolsa';
 import { coveragePlannedBillableHours } from './analisisDemanda';
-import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
+import { isShiftFichado } from '@/lib/crm/fichadaHours';
+import { sumPlantelLiquidationHours } from './analisisLiquidacionHours';
 
 export type InformeBalanceRow = {
   concepto: string;
@@ -38,7 +39,11 @@ export type InformeAnalitico = {
   dotacionActiva: number;
   hsVendidas: number;
   hsPlanificadas: number;
+  /** Alias histórico: hs liquidadas (mismo motor que Reportes → Liquidación). */
   hsRealizadas: number;
+  hsLiquidadas: number;
+  hsLiquidadasCobertura: number;
+  hsLiquidadasDespliegue: number;
   hsPendientesFichada: number;
   hsNormales: number;
   hsExtras50: number;
@@ -58,6 +63,7 @@ export type InformeAnalitico = {
   bolsaTieneHistorial: boolean;
   bolsaModo: 'con_indice' | 'sin_indice';
   coberturaPlanPct: number;
+  /** Cumplimiento = liquidadas / SLA. */
   coberturaEfectivaPct: number;
   desvioRealVsVendido: number;
   desvioExtras: number;
@@ -112,26 +118,24 @@ export function buildInformeAnalitico(opts: {
   const hsAusencias = r1(d.absenceHours);
   const hsAusenciasCubiertas = r1(d.absenceCoveredHours);
 
-  let hsRealizadas = 0;
   let hsPendientesFichada = 0;
-  let hsNormales = 0;
-
   turnos.forEach((t: any) => {
     if (isVacantShift(t) || isLeaveOrFranco(t)) return;
     const hs = coverageHoursFromShift(t);
     if (hs <= 0) return;
     if (isAusenteTurno(t)) return;
-    if (isShiftFichado(t)) {
-      hsRealizadas += fichadaHoursForShift(t) || hs;
-      if (!isFrancoTrabajadoShift(t)) hsNormales += fichadaHoursForShift(t) || hs;
-    } else if (t.employeeId && t.employeeId !== 'VACANTE') {
+    if (!isShiftFichado(t) && t.employeeId && t.employeeId !== 'VACANTE') {
       hsPendientesFichada += hs;
     }
   });
-
-  hsRealizadas = r1(hsRealizadas);
   hsPendientesFichada = r1(hsPendientesFichada);
-  hsNormales = r1(hsNormales);
+
+  const liq = sumPlantelLiquidationHours(turnos);
+  const hsLiquidadas = liq.horasReales;
+  const hsLiquidadasCobertura = liq.horasRealesCobertura;
+  const hsLiquidadasDespliegue = liq.horasRealesDespliegue;
+  const hsRealizadas = hsLiquidadas;
+  const hsNormales = r1(Math.max(0, hsLiquidadasCobertura));
 
   const techoFallback = Math.max(0, plantel) * CCT_HS_TECHO_MENSUAL;
   const bolsaInicial = r1(bolsa ? bolsa.inicial : techoFallback);
@@ -141,14 +145,14 @@ export function buildInformeAnalitico(opts: {
   const bolsaLookbackLabel = bolsa?.lookbackLabel || '';
   const bolsaTieneHistorial = bolsa?.tieneHistorial === true;
   const bolsaModo = bolsa?.modo || (bolsaTieneHistorial ? 'con_indice' : 'sin_indice');
-  const bolsaConsumida = r1(hsNormales > 0 ? hsNormales : hsPlanificadas);
+  const bolsaConsumida = r1(hsLiquidadas > 0 ? hsLiquidadas : hsPlanificadas);
   const bolsaDisponible = r1(Math.max(0, bolsaInicial - bolsaConsumida));
   const sobreBolsa = r1(Math.max(0, bolsaConsumida - bolsaInicial));
-  const desvioRealVsVendido = r1(hsRealizadas - hsVendidas);
+  const desvioRealVsVendido = r1(hsLiquidadas - hsVendidas);
   const desvioExtras = r1(hsExtras50 + hsFT100 + hsOps);
   const coberturaPlanPct = hsVendidas > 0 ? Math.round((hsPlanificadas / hsVendidas) * 1000) / 10 : 0;
   const coberturaEfectivaPct = hsVendidas > 0
-    ? Math.round((hsRealizadas / hsVendidas) * 1000) / 10
+    ? Math.round((hsLiquidadas / hsVendidas) * 1000) / 10
     : 0;
 
   const balance: InformeBalanceRow[] = [
@@ -172,25 +176,25 @@ export function buildInformeAnalitico(opts: {
           : `Plantel ${plantel} × ${CCT_HS_TECHO_MENSUAL} hs techo (sin índice). La jornada de referencia 192 no entra en esta KPI.`),
     },
     {
-      concepto: 'Horas realizadas (efectivas)',
-      horas: hsRealizadas,
-      observacion: hsRealizadas > 0
-        ? 'Turnos con presencia o cierre (fichada).'
+      concepto: 'Horas liquidadas (reales)',
+      horas: hsLiquidadas,
+      observacion: hsLiquidadas > 0
+        ? `Misma regla que Liquidación · cob. ${hsLiquidadasCobertura.toLocaleString('es-AR')} + fuera ${hsLiquidadasDespliegue.toLocaleString('es-AR')} (RET/REF/ESC). Incluye FT, ext/adel, TURA/RFZ.`
         : (hsPendientesFichada > 0
-          ? `Sin fichadas aún · ${hsPendientesFichada} hs asignadas pendientes de marcar.`
-          : 'Sin turnos fichados en el período.'),
+          ? `Sin reloj liquidable aún · ${hsPendientesFichada} hs asignadas pendientes de ingreso/egreso.`
+          : 'Sin hs liquidadas en el período (mismo motor que Reportes).'),
     },
     {
-      concepto: 'Diferencia (fichadas vs vendido)',
+      concepto: 'Diferencia (liquidadas vs vendido)',
       horas: desvioRealVsVendido,
-      observacion: hsRealizadas <= 0
+      observacion: hsLiquidadas <= 0
         ? (hsPendientesFichada > 0
-          ? `Sin fichadas: no se usa el plan (${hsPendientesFichada} hs asignadas) como si fueran reales.`
-          : 'Sin fichadas en el período: el desvío no se infiere de la malla.')
+          ? `Sin liquidadas: no se usa el plan (${hsPendientesFichada} hs asignadas) como si fueran reales.`
+          : 'Sin liquidadas en el período: el desvío no se infiere de la malla.')
         : desvioRealVsVendido > 4
-          ? 'Sobre-ejecución: se fichó más de lo vendido (presión de margen).'
+          ? 'Sobre-ejecución: se liquidó más de lo vendido (presión de margen).'
           : desvioRealVsVendido < -4
-            ? 'Déficit de fichadas frente al contrato.'
+            ? 'Déficit de hs liquidadas frente al contrato.'
             : 'Alineado al compromiso comercial.',
     },
     {
@@ -282,6 +286,9 @@ export function buildInformeAnalitico(opts: {
     hsVendidas,
     hsPlanificadas,
     hsRealizadas,
+    hsLiquidadas,
+    hsLiquidadasCobertura,
+    hsLiquidadasDespliegue,
     hsPendientesFichada,
     hsNormales,
     hsExtras50,
@@ -341,28 +348,28 @@ export function buildInformeConclusions(p: {
   if (p.hsRealizadas <= 0) {
     out.push({
       tipo: 'warn',
-      titulo: 'Sin fichadas en el período',
+      titulo: 'Sin hs liquidadas en el período',
       texto: p.hsPendientesFichada > 0
-        ? `Hay ${p.hsPendientesFichada.toLocaleString('es-AR')} hs asignadas pendientes de marcar. El plan no se cuenta como realizado.`
-        : 'No hay turnos fichados. Las horas realizadas quedan en 0; no se infieren del plan ni de la resultante.',
+        ? `Hay ${p.hsPendientesFichada.toLocaleString('es-AR')} hs asignadas sin ingreso/egreso liquidable. El plan no se cuenta como real.`
+        : 'No hay hs liquidadas (mismo motor que Reportes). Quedan en 0; no se infieren del plan.',
     });
   } else if (p.desvioRealVsVendido > 8) {
     out.push({
       tipo: 'risk',
-      titulo: 'Se fichó más de lo vendido',
-      texto: `Hay ${p.desvioRealVsVendido.toLocaleString('es-AR')} hs fichadas por encima del contrato. Eso comprime el margen: extras, FT u ops no estaban en el precio vendido.`,
+      titulo: 'Se liquidó más de lo vendido',
+      texto: `Hay ${p.desvioRealVsVendido.toLocaleString('es-AR')} hs liquidadas por encima del contrato. Eso comprime el margen: extras, FT u ops no estaban en el precio vendido.`,
     });
   } else if (p.desvioRealVsVendido < -8) {
     out.push({
       tipo: 'risk',
-      titulo: 'Se fichó menos de lo vendido',
-      texto: `Faltan ${Math.abs(p.desvioRealVsVendido).toLocaleString('es-AR')} hs fichadas respecto del SLA. Si el mes ya cerró, hay riesgo de reclamo; si sigue abierto, puede ser fichada pendiente.`,
+      titulo: 'Se liquidó menos de lo vendido',
+      texto: `Faltan ${Math.abs(p.desvioRealVsVendido).toLocaleString('es-AR')} hs liquidadas respecto del SLA. Si el mes ya cerró, hay riesgo de reclamo; si sigue abierto, puede faltar cierre de reloj.`,
     });
   } else {
     out.push({
       tipo: 'ok',
       titulo: 'Balance comercial alineado',
-      texto: `La diferencia fichadas vs vendido es de ${p.desvioRealVsVendido > 0 ? '+' : ''}${p.desvioRealVsVendido.toLocaleString('es-AR')} hs. El servicio está cerca del compromiso.`,
+      texto: `La diferencia liquidadas vs vendido es de ${p.desvioRealVsVendido > 0 ? '+' : ''}${p.desvioRealVsVendido.toLocaleString('es-AR')} hs. El servicio está cerca del compromiso.`,
     });
   }
 
@@ -405,8 +412,8 @@ export function buildInformeConclusions(p: {
   if (p.hsPendientesFichada > 0 && p.hsRealizadas === 0) {
     out.push({
       tipo: 'warn',
-      titulo: 'Efectivas aún no fichadas',
-      texto: `Hay ${p.hsPendientesFichada.toLocaleString('es-AR')} hs asignadas sin presencia/cierre. El KPI de realizadas va a subir a medida que Operaciones marque el período.`,
+      titulo: 'Hs liquidadas pendientes de reloj',
+      texto: `Hay ${p.hsPendientesFichada.toLocaleString('es-AR')} hs asignadas sin ingreso/egreso. El KPI de liquidadas sube cuando se cierra el turno (misma regla que Liquidación).`,
     });
   }
 

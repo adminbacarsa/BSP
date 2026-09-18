@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Editor imputación UN — Bacar</title>
+  <style>
+    :root { --bg:#0f172a; --surf:#1e293b; --border:#334155; --txt:#e2e8f0; --muted:#94a3b8; --ok:#34d399; --warn:#fbbf24; --accent:#6366f1; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--txt); }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 1.35rem; margin: 0 0 6px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; padding: 14px; background: var(--surf); border-radius: 12px; border: 1px solid var(--border); }
+    .toolbar input, .toolbar select, .toolbar button { font: inherit; }
+    .toolbar input, .toolbar select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    .toolbar button { padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 0.85rem; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surf); color: var(--txt); border: 1px solid var(--border) !important; }
+    .btn-success { background: #059669; color: #fff; }
+    .stats { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; font-size: 0.9rem; }
+    .stats b.ok { color: var(--ok); }
+    .stats b.warn { color: var(--warn); }
+    .callout { background: #172554; border: 1px solid #1e40af; border-radius: 10px; padding: 12px 14px; font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5; }
+    .callout code { background: var(--surf); padding: 2px 5px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+    th, td { border: 1px solid var(--border); padding: 8px; text-align: left; vertical-align: middle; }
+    th { background: var(--surf); position: sticky; top: 0; z-index: 1; }
+    tr.row-warn { background: #422006; }
+    tr.row-ok { background: var(--bg); }
+    tr.hidden { display: none; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    select.unidad-sel { width: 100%; min-width: 180px; max-width: 260px; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    input.nota-inp { width: 100%; min-width: 120px; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; }
+    .badge-ok { background: #064e3b; color: var(--ok); }
+    .badge-warn { background: #78350f; color: var(--warn); }
+    .tipo { text-transform: uppercase; font-size: 0.72rem; font-weight: 800; color: var(--muted); }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 280px); border-radius: 10px; border: 1px solid var(--border); }
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #059669; color: #fff; padding: 12px 18px; border-radius: 10px; font-weight: 700; display: none; z-index: 99; }
+    a { color: #818cf8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Editor de imputación — Unidades de negocio</h1>
+    <p class="muted">Período referencia: datos embebidos · Actualizado: <span id="updated">—</span></p>
+
+    <div class="callout">
+      <b>Cómo guardar en el tablero</b><br>
+      1) Elegí la unidad en cada fila · 2) <b>Descargar JSON</b> (va a Descargas) ·
+      3) En PowerShell: <code>npm run apply:imputacion-un</code> · 4) Recargá <a href="index.html">Control Directivo</a> (Ctrl+F5).
+      <br><span class="muted">El comando busca el JSON en Descargas o en esta carpeta automáticamente.</span>
+    </div>
+
+    <div class="stats">
+      <span>Total: <b id="statTotal">0</b></span>
+      <span>OK: <b class="ok" id="statOk">0</b></span>
+      <span>Pendientes: <b class="warn" id="statPend">0</b></span>
+    </div>
+
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Buscar concepto…" style="min-width:200px"/>
+      <select id="filterTipo">
+        <option value="">Todos los tipos</option>
+        <option value="ventas">Ventas</option>
+        <option value="mob">MOB</option>
+        <option value="compras">Compras</option>
+      </select>
+      <select id="filterEstado">
+        <option value="">Todos</option>
+        <option value="pendiente">Solo pendientes</option>
+        <option value="ok">Solo asignados</option>
+      </select>
+      <button type="button" class="btn-success" id="btnExport">Descargar JSON</button>
+      <label class="btn-secondary" style="display:inline-flex;align-items:center;cursor:pointer;padding:8px 14px;border-radius:8px">
+        Importar JSON
+        <input type="file" id="importFile" accept=".json,application/json" hidden/>
+      </label>
+      <button type="button" class="btn-secondary" id="btnClearDraft">Limpiar borrador local</button>
+      <a href="index.html" class="btn-secondary" style="text-decoration:none;padding:8px 14px;border-radius:8px;border:1px solid var(--border)">← Control Directivo</a>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Concepto</th>
+            <th class="num">Monto ref.</th>
+            <th>Unidad de negocio</th>
+            <th>Nota</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script>
+    const CFG = {"version":1,"actualizado":"2026-09-02T18:08:56Z","unidades":[{"id":"transporte_caudales","nombre":"Transporte de caudales","color":"#38bdf8","operativa":true},{"id":"gruas","nombre":"Grúas","color":"#fbbf24","operativa":true},{"id":"seguridad","nombre":"Seguridad privada","color":"#34d399","operativa":true},{"id":"tesoreria_bpc","nombre":"Tesorería BPC","color":"#a78bfa","operativa":true},{"id":"corporativo","nombre":"Corporativo y soporte","color":"#64748b","operativa":false,"nota":"Overhead / estructura — imputar explícitamente o prorratear"}],"reglas":{"comprasSinMapear":"prorratear","distribuirCorporativo":true,"criterioOverheadMob":"fijo","criterioOverheadCompras":"fijo","criterioOverheadVentas":"gasto_operativo","pesosOverheadFijos":{"transporte_caudales":50,"seguridad":30,"tesoreria_bpc":15,"gruas":5},"mostrarCorporativoEnTablero":false,"mostrarSinAsignarEnTablero":true},"imputaciones":[{"tipo":"ventas","label":"INGRESOS POR SEGURIDAD PRIVADA","unidadId":"seguridad","nota":"","montoRef":1708523047.83},{"tipo":"ventas","label":"SERVICIOS TERCERIZADOS DE TESORERIA","unidadId":"tesoreria_bpc","nota":"","montoRef":1340173242.12},{"tipo":"ventas","label":"INGRESOS POR RECAUDACION","unidadId":"transporte_caudales","nota":"","montoRef":954721523.61},{"tipo":"ventas","label":"ALQUILER CAJAS DE SEGURIDAD","unidadId":"transporte_caudales","nota":"","montoRef":12179984.46},{"tipo":"ventas","label":"OTROS INGRESOS","unidadId":"transporte_caudales","nota":"","montoRef":4471627.96},{"tipo":"ventas","label":"ING. POR SERVICIOS DE ATM","unidadId":"transporte_caudales","nota":"","montoRef":3995990.0},{"tipo":"ventas","label":"INGRESOS POR TRASLADOS","unidadId":"gruas","nota":"","montoRef":3534569.3},{"tipo":"ventas","label":"INGRESOS POR SERVICIOS","unidadId":"gruas","nota":"","montoRef":3121458.71},{"tipo":"ventas","label":"INGRESOS POR T.E.P.","unidadId":"gruas","nota":"","montoRef":1215179.0},{"tipo":"ventas","label":"AJUSTE GLOBAL DE GASTOS","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":1259.31},{"tipo":"ventas","label":"DIFERENCIAS POR REDONDEO","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":-0.02},{"tipo":"mob","label":"SERVICIO DE SEGURIDAD PRIVADA - Personal Permanente","unidadId":"seguridad","nota":"","montoRef":1380494851.42},{"tipo":"mob","label":"SERVICIOS DE TESORERIA TERCERIZADOS","unidadId":"tesoreria_bpc","nota":"","montoRef":551444256.05},{"tipo":"mob","label":"PROTECCION DE VALORES","unidadId":"transporte_caudales","nota":"","montoRef":273667857.74},{"tipo":"mob","label":"TESORERIA","unidadId":"transporte_caudales","nota":"","montoRef":119846444.26},{"tipo":"mob","label":"ADMINISTRACIÓN CENTRAL","unidadId":"corporativo","nota":"","montoRef":81682879.78},{"tipo":"mob","label":"GRUAS","unidadId":"gruas","nota":"","montoRef":46407687.56},{"tipo":"mob","label":"SEGURIDAD PLANTA","unidadId":"corporativo","nota":"","montoRef":43908631.44},{"tipo":"mob","label":"COMERCIAL","unidadId":"corporativo","nota":"","montoRef":40795307.84},{"tipo":"mob","label":"SISTEMAS Y TECNOLOGIA","unidadId":"corporativo","nota":"","montoRef":28883184.33},{"tipo":"mob","label":"CAPITAL HUMANO","unidadId":"corporativo","nota":"","montoRef":24101968.33},{"tipo":"mob","label":"SERVICIO DE SEGURIDAD PRIVADA - Eventuales Bacar","unidadId":"seguridad","nota":"","montoRef":11225691.81},{"tipo":"mob","label":"MANTENIMIENTO PLANTA","unidadId":"corporativo","nota":"","montoRef":2516694.75},{"tipo":"mob","label":"BACAR GASTOS","unidadId":"corporativo","nota":"","montoRef":2270732.92},{"tipo":"compras","label":"Publicidad","unidadId":"corporativo","nota":"","montoRef":102565498.5},{"tipo":"compras","label":"Gastos Taller","unidadId":"transporte_caudales","nota":"","montoRef":63663459.62},{"tipo":"compras","label":"Honorarios de Terceros","unidadId":"corporativo","nota":"","montoRef":59055141.57},{"tipo":"compras","label":"Carteles y Elementos Publicitarios","unidadId":"corporativo","nota":"","montoRef":37150663.48},{"tipo":"compras","label":"Combustibles y Lubricantes","unidadId":"transporte_caudales","nota":"","montoRef":28461405.03},{"tipo":"compras","label":"Servicios p/ Recontadoras  Sumadoras E Impresoras","unidadId":"transporte_caudales","nota":"","montoRef":21518095.5},{"tipo":"compras","label":"Comunicaciones","unidadId":"seguridad","nota":"","montoRef":17309295.51},{"tipo":"compras","label":"Viaticos Bpc","unidadId":"tesoreria_bpc","nota":"","montoRef":14842429.23},{"tipo":"compras","label":"Alquiler de Planta","unidadId":"corporativo","nota":"","montoRef":13154971.6},{"tipo":"compras","label":"Repuestos y Reparaciones","unidadId":"transporte_caudales","nota":"","montoRef":12026207.24},{"tipo":"compras","label":"Alquiler Equipos / Maquinas","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":11876150.0},{"tipo":"compras","label":"Plan de Ahorro","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":11192034.41},{"tipo":"compras","label":"Rodados","unidadId":"transporte_caudales","nota":"","montoRef":10865326.0},{"tipo":"compras","label":"Comisiones y Gtos. Bancarios","unidadId":"corporativo","nota":"","montoRef":9440811.1},{"tipo":"compras","label":"Atencion al Personal","unidadId":"corporativo","nota":"","montoRef":9095255.01},{"tipo":"compras","label":"Limpieza","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":8676169.69},{"tipo":"compras","label":"Intereses","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":8350957.9},{"tipo":"compras","label":"Energia Electrica","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":6906117.6},{"tipo":"compras","label":"Insumos y Servicios Informaticos","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":6796562.01},{"tipo":"compras","label":"Equipos Informáticos y Eq.","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":6274108.52},{"tipo":"compras","label":"Uniforme del Personal","unidadId":"corporativo","nota":"","montoRef":5742967.35},{"tipo":"compras","label":"Mantenimiento de Planta","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":4903270.88},{"tipo":"compras","label":"Obra Social Prepaga","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":4845066.48},{"tipo":"compras","label":"Gastos de Representacion","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":4161053.07},{"tipo":"compras","label":"Leasing","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":3973187.64},{"tipo":"compras","label":"Bolsas y Precintos","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":3537100.8},{"tipo":"compras","label":"Gastos de Viajes y Movilidad","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":3414368.14},{"tipo":"compras","label":"Servicios de Monitoreo","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":3049859.98},{"tipo":"compras","label":"Comestibles y Refrigerios","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":2574153.03},{"tipo":"compras","label":"Libreria Impresiones y Papeleria","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":2526909.41},{"tipo":"compras","label":"Servicios de Internet","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":2104133.14},{"tipo":"compras","label":"Imp. Internos  Tasas  Cont. y Servicios","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":2060199.34},{"tipo":"compras","label":"Peajes","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":2017852.09},{"tipo":"compras","label":"Maquinas de Oficina","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":1591229.77},{"tipo":"compras","label":"Medicina Laboral","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":1310067.0},{"tipo":"compras","label":"Leasing Bancario","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":1244463.84},{"tipo":"compras","label":"Equipos de Comunicacion","unidadId":"seguridad","nota":"PENDIENTE — definir unidadId","montoRef":1200000.0},{"tipo":"compras","label":"Alquiler Playa Vehículos","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":1085000.0},{"tipo":"compras","label":"Correo  Mensajeria y Cadeteria","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":1033531.8},{"tipo":"compras","label":"Ferreteria y Herramientas Varias","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":1020910.82},{"tipo":"compras","label":"Seg. Devengado por Adelantado","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":639760.04},{"tipo":"compras","label":"Bolsas Recaudadoras","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":630000.0},{"tipo":"compras","label":"Cerrajeria","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":624900.01},{"tipo":"compras","label":"Logistica y Seguridad","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":586870.0},{"tipo":"compras","label":"Cursos y Capacitacion Seguridad","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":450000.0},{"tipo":"compras","label":"Cursos y Capacitacion","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":412400.0},{"tipo":"compras","label":"Accesorios","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":382327.06},{"tipo":"compras","label":"Gastos Camara de Caudales","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":304142.75},{"tipo":"compras","label":"Telefonia Fijo","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":230867.0},{"tipo":"compras","label":"Elementos de Seguridad","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":144000.0},{"tipo":"compras","label":"Aranceles Anmac","unidadId":"seguridad","nota":"PENDIENTE — definir unidadId","montoRef":120000.0},{"tipo":"compras","label":"I.t.v.","unidadId":"seguridad","nota":"PENDIENTE — definir unidadId","montoRef":93143.0},{"tipo":"compras","label":"Gastos Varios Administracion","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":92259.86},{"tipo":"compras","label":"Chalecos Antibalas","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":80000.0},{"tipo":"compras","label":"Gastos Varios Mantenimiento","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":80000.0},{"tipo":"compras","label":"Seguro Automotor","unidadId":"transporte_caudales","nota":"PENDIENTE — definir unidadId","montoRef":70898.0},{"tipo":"compras","label":"Muebles y Utiles","unidadId":"corporativo","nota":"PENDIENTE — definir unidadId","montoRef":53410.04}]};
+    const LS_KEY = "bacar-imputacion-draft-v1";
+
+    function fmt(n) {
+      return Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function toast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      setTimeout(() => { el.style.display = "none"; }, 3500);
+    }
+
+    function unidadOptions(selected) {
+      let html = '<option value="">— Pendiente —</option>';
+      for (const u of CFG.unidades) {
+        const sel = u.id === selected ? " selected" : "";
+        html += `<option value="${u.id}"${sel}>${u.nombre}</option>`;
+      }
+      return html;
+    }
+
+    function loadDraft() {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch { return null; }
+    }
+
+    function saveDraft() {
+      const draft = CFG.imputaciones.map((r, i) => ({
+        i,
+        unidadId: document.querySelector(`select[data-i="${i}"]`)?.value || null,
+        nota: document.querySelector(`input[data-i="${i}"]`)?.value || "",
+      }));
+      localStorage.setItem(LS_KEY, JSON.stringify(draft));
+    }
+
+    function applyDraft(draft) {
+      if (!draft) return;
+      for (const d of draft) {
+        const sel = document.querySelector(`select[data-i="${d.i}"]`);
+        const inp = document.querySelector(`input[data-i="${d.i}"]`);
+        if (sel && d.unidadId !== undefined) sel.value = d.unidadId || "";
+        if (inp && d.nota !== undefined) inp.value = d.nota || "";
+      }
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = CFG.imputaciones.map((r, i) => {
+        const uid = r.unidadId || "";
+        const ok = !!uid;
+        return `<tr class="${ok ? "row-ok" : "row-warn"}" data-tipo="${r.tipo}" data-estado="${ok ? "ok" : "pendiente"}" data-label="${(r.label || "").toLowerCase()}">
+          <td class="tipo">${r.tipo}</td>
+          <td>${r.label}</td>
+          <td class="num">${fmt(r.montoRef)}</td>
+          <td><select class="unidad-sel" data-i="${i}">${unidadOptions(uid)}</select></td>
+          <td><input class="nota-inp" data-i="${i}" type="text" value="${(r.nota || "").replace(/"/g, "&quot;")}" placeholder="Opcional"/></td>
+          <td><span class="badge ${ok ? "badge-ok" : "badge-warn"}">${ok ? "OK" : "Pendiente"}</span></td>
+        </tr>`;
+      }).join("");
+
+      tbody.querySelectorAll("select, input").forEach(el => {
+        el.addEventListener("change", () => { updateStats(); saveDraft(); });
+        el.addEventListener("input", () => { updateStats(); saveDraft(); });
+      });
+
+      applyDraft(loadDraft());
+      updateStats();
+      applyFilters();
+    }
+
+    function updateStats() {
+      let ok = 0;
+      CFG.imputaciones.forEach((_, i) => {
+        if (document.querySelector(`select[data-i="${i}"]`)?.value) ok++;
+      });
+      const total = CFG.imputaciones.length;
+      document.getElementById("statTotal").textContent = total;
+      document.getElementById("statOk").textContent = ok;
+      document.getElementById("statPend").textContent = total - ok;
+
+      CFG.imputaciones.forEach((_, i) => {
+        const row = document.querySelector(`select[data-i="${i}"]`)?.closest("tr");
+        const sel = document.querySelector(`select[data-i="${i}"]`);
+        if (!row || !sel) return;
+        const has = !!sel.value;
+        row.className = has ? "row-ok" : "row-warn";
+        row.dataset.estado = has ? "ok" : "pendiente";
+        const badge = row.querySelector(".badge");
+        if (badge) {
+          badge.className = "badge " + (has ? "badge-ok" : "badge-warn");
+          badge.textContent = has ? "OK" : "Pendiente";
+        }
+      });
+    }
+
+    function applyFilters() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const tipo = document.getElementById("filterTipo").value;
+      const estado = document.getElementById("filterEstado").value;
+      document.querySelectorAll("#tbody tr").forEach(tr => {
+        let show = true;
+        if (tipo && tr.dataset.tipo !== tipo) show = false;
+        if (estado && tr.dataset.estado !== estado) show = false;
+        if (q && !(tr.dataset.label || "").includes(q)) show = false;
+        tr.classList.toggle("hidden", !show);
+      });
+    }
+
+    function buildExportConfig() {
+      const out = JSON.parse(JSON.stringify(CFG));
+      out.actualizado = new Date().toISOString();
+      out.imputaciones = CFG.imputaciones.map((r, i) => {
+        const uid = document.querySelector(`select[data-i="${i}"]`)?.value || null;
+        const nota = document.querySelector(`input[data-i="${i}"]`)?.value || "";
+        return {
+          tipo: r.tipo,
+          label: r.label,
+          unidadId: uid || null,
+          nota: nota,
+          montoRef: r.montoRef,
+        };
+      });
+      return out;
+    }
+
+    document.getElementById("btnExport").addEventListener("click", () => {
+      const out = buildExportConfig();
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "unidades-negocio.json";
+      a.click();
+      toast("JSON descargado. Ejecuta: npm run apply:imputacion-un");
+    });
+
+    document.getElementById("importFile").addEventListener("change", e => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!data.imputaciones) throw new Error("Formato inválido");
+          CFG.unidades = data.unidades || CFG.unidades;
+          CFG.reglas = data.reglas || CFG.reglas;
+          CFG.imputaciones = data.imputaciones;
+          localStorage.removeItem(LS_KEY);
+          renderTable();
+          toast("JSON importado en pantalla — revisá y descargá de nuevo para aplicar");
+        } catch (err) {
+          alert("No se pudo importar: " + err.message);
+        }
+      };
+      reader.readAsText(f, "utf-8");
+      e.target.value = "";
+    });
+
+    document.getElementById("btnClearDraft").addEventListener("click", () => {
+      localStorage.removeItem(LS_KEY);
+      renderTable();
+      toast("Borrador local eliminado");
+    });
+
+    document.getElementById("search").addEventListener("input", applyFilters);
+    document.getElementById("filterTipo").addEventListener("change", applyFilters);
+    document.getElementById("filterEstado").addEventListener("change", applyFilters);
+
+    document.getElementById("updated").textContent = CFG.actualizado || "—";
+    renderTable();
+  </script>
+</body>
+</html>

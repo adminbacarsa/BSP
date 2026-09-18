@@ -1,0 +1,21 @@
+Parametro,Valor,Unidad,Notas
+Moneda base,USD,,Costo de reemplazo internacional de referencia
+TC referencia ARS (ajustar),1200,ARS/USD,Solo para columna ARS — actualizar al TC que use contabilidad/capex
+Horas por persona-mes,160,hs,Estándar auditoría software
+Factor aceleracion IA (implementacion),0.75,ratio,25% menos PM en codificacion; no aplica a dominio/UAT/implementacion
+Margen contingencia conservador,15,%,Imprevistos + deuda tecnica
+Margen contingencia base,10,%,Escenario medio
+Margen contingencia agresivo,5,%,Alcance muy acotado y equipo senior estable
+Mantenimiento anual evolutivo,18,%,Sobre valor de reemplazo post go-live
+Onboarding cliente externo (rango bajo),15000,USD,Por tenant — datos + capacitacion + go-live
+Onboarding cliente externo (rango alto),40000,USD,Por tenant — migracion historica incluida
+Firebase + hosting anual (Bacar escala),1500,USD,Estimado — escala con tenants
+APIs IA anuales (Gemini etc),2500,USD,Estimado segun uso
+
+Escenario,USD por PM,Descripcion
+Interno AR (conservador),4000,2 seniors cargados Grupo Bacar — costo empresa
+Interno AR (base),5000,Promedio loaded cost senior + overhead
+Consultora LATAM (conservador),8000,Outsource regional especializado
+Consultora LATAM (base),10000,Tarifa mercado LATAM producto vertical
+Consultora LATAM (agresivo),12000,Senior + arquitecto + QA dedicado
+Agencia US/EU (referencia),24000,Benchmark internacional — no uso interno Bacar

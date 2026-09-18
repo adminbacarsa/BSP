@@ -1,7 +1,7 @@
 import type { QueryDocumentSnapshot } from 'firebase/firestore';
 import { belongsToEmpresaView } from '@/lib/multiempresa';
 
-function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
+export function planningShiftViewFromSnap(d: QueryDocumentSnapshot): any {
     const data = d.data();
     return {
         id: d.id,
@@ -15,7 +15,7 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         isPresent: data.isPresent || false,
         isAbsent: data.isAbsent || false,
         isExtended: data.isExtended,
-        isEarlyStart: data.isEarlyStart || data.isEarlyEntry,
+        isEarlyStart: data.isEarlyStart === true || data.isEarlyEntry === true || data.isAdvanced === true,
         isFrancoTrabajado: data.isFrancoTrabajado || false,
         isFrancoCompensatorio: data.isFrancoCompensatorio || false,
         swapWith: data.swapWith,
@@ -23,11 +23,15 @@ function normalizePlanningShiftDoc(d: QueryDocumentSnapshot): any {
         hasNovedad: data.hasNovedad,
         plannedNovedad: data.plannedNovedad,
         positionName: data.positionName,
-        coveredBy: data.coveredBy,
+        coveredBy: data.coveredBy || data.coveredByEmployeeName || undefined,
         coveragePackageId: data.coveragePackageId,
         coverageSegmentRole: data.coverageSegmentRole,
         coversPositionName: data.coversPositionName,
         coversEmployeeId: data.coversEmployeeId,
+        coversEmployeeName: data.coversEmployeeName,
+        absenceShiftId: data.absenceShiftId || data.coveredShiftId,
+        coveredShiftId: data.coveredShiftId || data.absenceShiftId,
+        coverageSuperseded: data.coverageSuperseded === true,
         coversBandCode: data.coversBandCode,
         coverageStatus: data.coverageStatus,
         coverageMode: data.coverageMode,
@@ -64,7 +68,7 @@ export function ingestPlanningTurnosSnapshot(
     empresaId: string,
     migracionCompleta: boolean,
     getDateKey: (dateInput: any) => string,
-    opts?: { rfzOnly?: boolean },
+    opts?: { rfzOnly?: boolean; turaOnly?: boolean },
 ): PlanningTurnosIngestResult {
     const map: Record<string, any> = {};
     const cellTurnos: Record<string, any[]> = {};
@@ -78,6 +82,7 @@ export function ingestPlanningTurnosSnapshot(
     docs.forEach((d) => {
         const data = d.data();
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+        if (data.isDeleted === true) return;
         const code = (data.code || data.type || '').toString().toUpperCase();
 
         if (code === 'RFZ') {
@@ -89,17 +94,25 @@ export function ingestPlanningTurnosSnapshot(
 
         if (rfzOnly) return;
 
-        if (code === 'TURA' && data.parentShiftId) {
-            turaM[data.parentShiftId] = { id: d.id, ...data };
+        if (code === 'TURA') {
+            const turaData = { id: d.id, ...data };
+            if (data.parentShiftId) {
+                turaM[data.parentShiftId] = turaData;
+            } else {
+                turaM[`__tura_${d.id}`] = turaData;
+            }
+            if (opts?.turaOnly) return;
             return;
         }
+
+        if (opts?.turaOnly) return;
 
         if (data.startTime?.seconds) {
             const dateKey = getDateKey(data.startTime);
             const key = `${data.employeeId}_${dateKey}`;
             if (!allIds[key]) allIds[key] = [];
             allIds[key].push(d.id);
-            const normalized = normalizePlanningShiftDoc(d);
+            const normalized = planningShiftViewFromSnap(d);
             if (!cellTurnos[key]) cellTurnos[key] = [];
             cellTurnos[key].push(normalized);
             if (data.isSecondBlock) {

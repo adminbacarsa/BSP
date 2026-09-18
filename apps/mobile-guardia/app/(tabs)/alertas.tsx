@@ -17,19 +17,52 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { RequireAuth } from '../../src/hooks/useRequireAuth';
 import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
+import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { usePortalInbox, type PortalInboxItem } from '../../src/hooks/usePortalInbox';
 import {
   alertNeedsAck,
   notificationActionLabel,
   notificationDomainLabel,
   routeFromNotificationData,
+  COVERAGE_RESPONSE_TYPES,
 } from '../../src/lib/notificationNavigation';
-import { getPortalCallables } from '../../src/lib/portal';
+import { getPortalCallables, isEmulatorMode } from '../../src/lib/portal';
 import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
+import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-core';
 
-const DOMAIN_FILTERS = ['Todas', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
+const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
+
+function formatShiftWindow(n: PortalInboxItem): string | null {
+  const start = n.startTime ? toDate(n.startTime as never) : null;
+  const end = n.endTime ? toDate(n.endTime as never) : null;
+  if (!start && !n.shiftCode) return null;
+  const parts: string[] = [];
+  if (n.shiftCode) parts.push(`Código ${n.shiftCode}`);
+  if (start) {
+    const day = start.toLocaleDateString('es-AR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    const hi = start.toLocaleTimeString('es-AR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Argentina/Buenos_Aires',
+    });
+    const hf = end
+      ? end.toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'America/Argentina/Buenos_Aires',
+        })
+      : '';
+    parts.push(hf ? `${day} ${hi}–${hf}` : `${day} ${hi}`);
+  }
+  return parts.join(' · ');
+}
 
 function hrefFromRoute(route: string): Href {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
@@ -53,10 +86,12 @@ export default function AlertasScreen() {
 
 function AlertasScreenContent() {
   const router = useRouter();
-  const { user, previewEmpDocId, isPreviewMode } = usePortalAuth();
+  const { user, previewEmpDocId, isPreviewMode, isSuperAdmin } = usePortalAuth();
   const { palette } = useTheme();
-  const { items, loading, unreadCount, markRead, acknowledge, dismiss, markAllUnreadRead, dismissAll } =
+  const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
+  const { items, loading, unreadCount, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
     usePortalInbox(user, previewEmpDocId);
+  const showTestPush = isEmulatorMode() || isPreviewMode || isSuperAdmin;
   const [testBusy, setTestBusy] = useState(false);
   const [markAllBusy, setMarkAllBusy] = useState(false);
   const [dismissAllBusy, setDismissAllBusy] = useState(false);
@@ -179,6 +214,38 @@ function AlertasScreenContent() {
     [acknowledge],
   );
 
+  const onRespond = useCallback(
+    (n: PortalInboxItem, response: 'ACCEPTED' | 'REJECTED') => {
+      const label = response === 'ACCEPTED' ? 'Aceptar' : 'Rechazar';
+      Alert.alert(
+        label,
+        response === 'ACCEPTED'
+          ? '¿Confirmás que aceptás la cobertura?'
+          : '¿Confirmás que rechazás la cobertura?',
+        [
+          { text: 'Cancelar', style: 'cancel' },
+          {
+            text: label,
+            style: response === 'ACCEPTED' ? 'default' : 'destructive',
+            onPress: () => {
+              void (async () => {
+                setBusyId(n.id);
+                try {
+                  await respond(n.id, response);
+                } catch {
+                  Alert.alert('Error', 'No se pudo enviar la respuesta. Reintentá.');
+                } finally {
+                  setBusyId(null);
+                }
+              })();
+            },
+          },
+        ],
+      );
+    },
+    [respond],
+  );
+
   const onDismiss = useCallback(
     (n: PortalInboxItem) => {
       const needsAck = alertNeedsAck(n);
@@ -217,7 +284,15 @@ function AlertasScreenContent() {
       <FlatList
         data={filtered}
         keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[
+          styles.list,
+          {
+            paddingHorizontal: horizontalPadding,
+            ...(contentMaxWidth
+              ? { maxWidth: contentMaxWidth, alignSelf: 'center' as const, width: '100%' }
+              : {}),
+          },
+        ]}
         ListHeaderComponent={
           <View style={styles.headerBlock}>
             <Text style={[styles.intro, { color: palette.onSurfaceMuted }]}>
@@ -282,13 +357,15 @@ function AlertasScreenContent() {
                   style={styles.headerBtnFlex}
                 />
               ) : null}
-              <CommandButton
-                label={testBusy ? 'Enviando…' : 'Probar push'}
-                variant="ghost"
-                onPress={sendTestPush}
-                disabled={headerBusy}
-                style={styles.headerBtnFlex}
-              />
+              {showTestPush ? (
+                <CommandButton
+                  label={testBusy ? 'Enviando…' : 'Probar push'}
+                  variant="ghost"
+                  onPress={sendTestPush}
+                  disabled={headerBusy}
+                  style={styles.headerBtnFlex}
+                />
+              ) : null}
             </View>
           </View>
         }
@@ -307,9 +384,13 @@ function AlertasScreenContent() {
         }
         renderItem={({ item: n }) => {
           const needsAck = alertNeedsAck(n);
+          const isCoverage = COVERAGE_RESPONSE_TYPES.has(String(n.type ?? '').toUpperCase());
           const busy = busyId === n.id;
           const route = routeFromNotificationData({ type: n.type });
-          const settled = !needsAck && (n.read || !!n.ackedAt);
+          const settled = !needsAck && !isCoverage && (n.read || !!n.ackedAt);
+          const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
+          const detailLines = portalInboxDetailLines(n);
+          const shiftWindow = formatShiftWindow(n);
 
           if (settled) {
             return (
@@ -333,6 +414,16 @@ function AlertasScreenContent() {
                   >
                     {n.title || 'Alerta'}
                   </Text>
+                  {receivedAt ? (
+                    <Text style={[styles.metaLine, { color: palette.onSurfaceMuted }]} numberOfLines={1}>
+                      Recibida {receivedAt}
+                    </Text>
+                  ) : null}
+                  {detailLines[0] ? (
+                    <Text style={[styles.metaLine, { color: palette.onSurfaceMuted }]} numberOfLines={1}>
+                      {detailLines[0]}
+                    </Text>
+                  ) : null}
                 </View>
                 <CommandButton
                   label={busy ? '…' : 'Quitar'}
@@ -356,25 +447,61 @@ function AlertasScreenContent() {
               ]}
             >
               <View style={styles.inboxTop}>
-                <Text style={[styles.domain, { color: palette.primary }]}>
+                <Text style={[styles.domain, { color: isCoverage ? palette.error : palette.primary }]}>
                   {notificationDomainLabel(n.type)}
                 </Text>
-                {needsAck ? (
+                {isCoverage ? (
+                  <Text style={[styles.nueva, { color: palette.error }]}>Responder</Text>
+                ) : needsAck ? (
                   <Text style={[styles.nueva, { color: palette.warning }]}>Confirmar</Text>
                 ) : (
                   <Text style={[styles.nueva, { color: palette.error }]}>Nueva</Text>
                 )}
               </View>
+              {receivedAt ? (
+                <Text style={[styles.receivedAt, { color: palette.onSurfaceMuted }]}>
+                  Recibida {receivedAt}
+                </Text>
+              ) : null}
               <Text style={[styles.inboxTitle, { color: palette.onSurface }]}>
                 {n.title || 'Alerta'}
               </Text>
               {n.body ? (
-                <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={2}>
+                <Text style={[styles.inboxBody, { color: palette.onSurfaceMuted }]} numberOfLines={4}>
                   {n.body}
                 </Text>
               ) : null}
+              {detailLines.length > 0 || shiftWindow ? (
+                <View style={[styles.detailBox, { backgroundColor: palette.inputBg, borderColor: palette.cardBorder }]}>
+                  {detailLines.map((line) => (
+                    <Text key={line} style={[styles.detailLine, { color: palette.onSurface }]}>
+                      {line}
+                    </Text>
+                  ))}
+                  {shiftWindow ? (
+                    <Text style={[styles.detailLine, { color: palette.onSurface }]}>{shiftWindow}</Text>
+                  ) : null}
+                </View>
+              ) : null}
               <View style={styles.rowBtns}>
-                {needsAck ? (
+                {isCoverage ? (
+                  <>
+                    <CommandButton
+                      label={busy ? '…' : 'Aceptar'}
+                      variant="success"
+                      onPress={() => onRespond(n, 'ACCEPTED')}
+                      disabled={busy}
+                      style={styles.btnFlex}
+                    />
+                    <CommandButton
+                      label={busy ? '…' : 'Rechazar'}
+                      variant="danger"
+                      onPress={() => onRespond(n, 'REJECTED')}
+                      disabled={busy}
+                      style={styles.btnFlex}
+                    />
+                  </>
+                ) : needsAck ? (
                   <CommandButton
                     label={busy ? '…' : 'Me enteré'}
                     variant="success"
@@ -383,7 +510,7 @@ function AlertasScreenContent() {
                     style={styles.btnFlex}
                   />
                 ) : null}
-                {route ? (
+                {!isCoverage && route ? (
                   <CommandButton
                     label={notificationActionLabel(n.type)}
                     variant="secondary"
@@ -410,7 +537,7 @@ function AlertasScreenContent() {
 
 const styles = StyleSheet.create({
   safe: { flex: 1 },
-  list: { padding: spacing.container, paddingBottom: 32, gap: 10 },
+  list: { paddingVertical: spacing.container, paddingBottom: 32, gap: 10 },
   headerBlock: { gap: 8, marginBottom: 8 },
   intro: { fontSize: 14, lineHeight: 21 },
   filtersScroll: { flexGrow: 0, marginHorizontal: -2 },
@@ -470,6 +597,17 @@ const styles = StyleSheet.create({
   inboxTitle: { fontWeight: '800', fontSize: 15 },
   inboxTitleCompact: { fontWeight: '700', fontSize: 13, marginTop: 2 },
   inboxBody: { fontSize: 13, marginTop: 4, lineHeight: 18 },
+  receivedAt: { fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  metaLine: { fontSize: 11, marginTop: 2, lineHeight: 15 },
+  detailBox: {
+    marginTop: 8,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 2,
+  },
+  detailLine: { fontSize: 12, fontWeight: '700', lineHeight: 17 },
   rowBtns: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 },
   btnFlex: { flexGrow: 1, flexBasis: '45%', minWidth: 120 },
 });

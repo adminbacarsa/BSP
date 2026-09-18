@@ -1,15 +1,69 @@
 /** Configuración central Google Maps — Operaciones CC y futuros rondines. */
 export const GOOGLE_MAPS_LIBRARIES: ('geometry' | 'drawing' | 'places')[] = ['geometry'];
 
-export function getGoogleMapsApiKey(): string {
+const MAPS_KEY_CACHE = 'cosp_gmaps_key';
+
+export function getEnvGoogleMapsApiKey(): string {
   return String(process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '').trim();
 }
 
-export function isGoogleMapsEnabled(): boolean {
-  return getGoogleMapsApiKey().length > 0;
+export function getCachedGoogleMapsApiKey(): string {
+  if (typeof window === 'undefined') return '';
+  try {
+    return String(localStorage.getItem(MAPS_KEY_CACHE) ?? '').trim();
+  } catch {
+    return '';
+  }
 }
 
-/** Estilo mapa operativo (Centro de Comando). */
+export function persistGoogleMapsApiKey(key?: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const v = String(key ?? '').trim();
+    if (v) localStorage.setItem(MAPS_KEY_CACHE, v);
+    else localStorage.removeItem(MAPS_KEY_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Prioridad: empresa (Firestore) → cache localStorage → env. */
+export function getGoogleMapsApiKey(runtimeKey?: string | null): string {
+  const fromEmpresa = String(runtimeKey ?? '').trim();
+  if (fromEmpresa) return fromEmpresa;
+  const cached = getCachedGoogleMapsApiKey();
+  if (cached) return cached;
+  return getEnvGoogleMapsApiKey();
+}
+
+export function isGoogleMapsEnabled(runtimeKey?: string | null): boolean {
+  return getGoogleMapsApiKey(runtimeKey).length > 0;
+}
+
+/**
+ * Estilo mapa operativo — claro/legible (no night mode).
+ * Terreno suave slate, calles blancas, agua azul, pines de estado destacan.
+ */
+export const OPERACIONES_MAP_STYLES: Array<Record<string, unknown>> = [
+  { elementType: 'geometry', stylers: [{ color: '#e8eef5' }] },
+  { elementType: 'labels.icon', stylers: [{ visibility: 'off' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#475569' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'administrative', elementType: 'geometry.stroke', stylers: [{ color: '#94a3b8' }] },
+  { featureType: 'administrative.land_parcel', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi', stylers: [{ visibility: 'off' }] },
+  { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#d4e8d4' }, { visibility: 'on' }] },
+  { featureType: 'poi.park', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+  { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
+  { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#cbd5e1' }] },
+  { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#fde68a' }] },
+  { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#f59e0b' }] },
+  { featureType: 'road.arterial', elementType: 'labels.text.fill', stylers: [{ color: '#64748b' }] },
+  { featureType: 'transit', stylers: [{ visibility: 'off' }] },
+  { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#93c5fd' }] },
+  { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#1e40af' }] },
+];
+
 export const OPERACIONES_MAP_OPTIONS = {
   disableDefaultUI: false,
   zoomControl: true,
@@ -17,10 +71,7 @@ export const OPERACIONES_MAP_OPTIONS = {
   streetViewControl: false,
   fullscreenControl: true,
   gestureHandling: 'greedy',
-  styles: [
-    { featureType: 'poi', elementType: 'labels', stylers: [{ visibility: 'off' }] },
-    { featureType: 'transit', stylers: [{ visibility: 'off' }] },
-  ],
+  styles: OPERACIONES_MAP_STYLES,
 };
 
 export const DEFAULT_MAP_CENTER = { lat: -31.4201, lng: -64.1888 };

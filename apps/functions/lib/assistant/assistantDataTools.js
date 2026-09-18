@@ -3224,9 +3224,795 @@ async function dispatchAssistantToolCallInner(ctx, name, args) {
             limite: args.limite != null ? Number(args.limite) : undefined,
         });
     }
+    else if (name === 'proponer_extender_jornada') {
+        raw = await ejecutarProponerExtenderJornada(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_cubrir_ausencia') {
+        raw = await ejecutarProponerCubrirAusencia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            banda: args.banda != null ? String(args.banda) : undefined,
+            id_empleado_ausente: args.id_empleado_ausente != null ? String(args.id_empleado_ausente) : undefined,
+        });
+    }
+    else if (name === 'proponer_crear_turno_refuerzo') {
+        raw = await ejecutarProponerCrearTurnoRefuerzo(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            banda: args.banda != null ? String(args.banda) : undefined,
+        });
+    }
+    else if (name === 'proponer_confirmar_presencia') {
+        raw = await ejecutarProponerConfirmarPresencia(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_registrar_ausencia') {
+        raw = await ejecutarProponerRegistrarAusencia(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            motivo: args.motivo != null ? String(args.motivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_cerrar_turno') {
+        raw = await ejecutarProponerCerrarTurno(ctx, {
+            id_firestore_empleado: args.id_firestore_empleado != null ? String(args.id_firestore_empleado) : undefined,
+            texto_empleado: args.texto_empleado != null ? String(args.texto_empleado) : undefined,
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'proponer_planificar_objetivo_mes') {
+        raw = await ejecutarProponerPlanificarObjetivoMes(ctx, {
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+            mes: args.mes != null ? Number(args.mes) : undefined,
+            anio: args.anio != null ? Number(args.anio) : undefined,
+        });
+    }
+    else if (name === 'consultar_vacantes_dia') {
+        raw = await ejecutarConsultarVacantesDia(ctx, {
+            fecha: args.fecha != null ? String(args.fecha) : undefined,
+            texto_objetivo: args.texto_objetivo != null ? String(args.texto_objetivo) : undefined,
+            id_objetivo: args.id_objetivo != null ? String(args.id_objetivo) : undefined,
+        });
+    }
+    else if (name === 'resumen_ausencias_pendientes') {
+        raw = await ejecutarResumenAusenciasPendientes(ctx, {
+            fecha_desde: args.fecha_desde != null ? String(args.fecha_desde) : undefined,
+            fecha_hasta: args.fecha_hasta != null ? String(args.fecha_hasta) : undefined,
+            limite: args.limite != null ? Number(args.limite) : undefined,
+        });
+    }
+    else if (name === 'ejecutar_auto_presencia_cierre') {
+        raw = await ejecutarAutoPresenciaCierre(ctx, {
+            simulacion: args.simulacion !== false,
+        });
+    }
+    else if (name === 'estado_modo_demo') {
+        raw = await ejecutarEstadoModoDemo(ctx);
+    }
+    else if (name === 'activar_modo_demo') {
+        raw = await ejecutarToggleModoDemo(ctx, true);
+    }
+    else if (name === 'desactivar_modo_demo') {
+        raw = await ejecutarToggleModoDemo(ctx, false);
+    }
     else {
         raw = { error: 'herramienta_desconocida', name };
     }
     return raw;
+}
+function bandaToNewCode(code) {
+    if (code === 'N')
+        return 'N12';
+    return 'D12';
+}
+function bandaToHoraInicio(banda) {
+    if (banda === 'T')
+        return '14:00';
+    if (banda === 'N')
+        return '22:00';
+    if (banda === 'D12')
+        return '06:00';
+    if (banda === 'N12')
+        return '18:00';
+    return '06:00';
+}
+function bandaToHoraFin(banda) {
+    if (banda === 'T')
+        return '22:00';
+    if (banda === 'N')
+        return '06:00';
+    if (banda === 'D12')
+        return '18:00';
+    if (banda === 'N12')
+        return '06:00';
+    return '14:00';
+}
+function startOfDayAr(dateYmd) {
+    const [y, m, d] = dateYmd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d, 3, 0, 0, 0));
+}
+function endOfDayAr(dateYmd) {
+    const [y, m, d] = dateYmd.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + 1, 3, 0, 0, 0));
+}
+async function resolverEmpleadoPorTexto(ctx, texto) {
+    const db = admin.firestore();
+    const n = norm(texto);
+    const docs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    const matches = docs.filter((d) => {
+        const data = d.data();
+        const full = norm(`${data.firstName ?? ''} ${data.lastName ?? ''} ${data.name ?? ''}`);
+        return full.includes(n) || n.split(' ').every((tok) => tok.length < 2 || full.includes(tok));
+    });
+    if (matches.length === 0)
+        return null;
+    const data = matches[0].data();
+    const nombre = [data.lastName, data.firstName].filter(Boolean).join(', ') || data.name || matches[0].id;
+    return { id: matches[0].id, nombre: String(nombre) };
+}
+async function resolverObjetivoPorTexto(ctx, texto) {
+    const db = admin.firestore();
+    const clientDocs = await (0, assistantEmpresaScope_1.queryClientsDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    for (const clientDoc of clientDocs) {
+        const data = clientDoc.data();
+        const objetivos = Array.isArray(data.objetivos) ? data.objetivos : [];
+        for (const obj of objetivos) {
+            if (objectiveHaystackMatchesNeedle(texto, obj.name ?? '', data.name ?? '')) {
+                return { id: String(obj.id ?? obj._id ?? ''), nombre: String(obj.name ?? ''), clientId: clientDoc.id };
+            }
+        }
+    }
+    return null;
+}
+async function ejecutarProponerExtenderJornada(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = empleadoId ?? '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const q = db
+        .collection('turnos')
+        .where('employeeId', '==', empleadoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(10);
+    const snap = await q.get();
+    let turnos = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    if (ctx.scopeEmpresa)
+        turnos = turnos.filter((t) => t.empresaId === ctx.empresaId);
+    if (args.texto_objetivo) {
+        turnos = turnos.filter((t) => objectiveHaystackMatchesNeedle(args.texto_objetivo, t.objetivoNombre ?? '', ''));
+    }
+    const extensibles = turnos.filter((t) => ['M', 'T', 'N'].includes(t.code) && !t.isFranco && !t.draft);
+    if (extensibles.length === 0) {
+        return { error: 'sin_turno_extensible', empleado: empleadoNombre, fecha, turnos_encontrados: turnos.length };
+    }
+    const turno = extensibles[0];
+    const nuevoCodigo = bandaToNewCode(turno.code);
+    const label = `Extender turno ${turno.code} → ${nuevoCodigo} de ${empleadoNombre} el ${fecha}${turno.objetivoNombre ? ' en ' + turno.objetivoNombre : ''}`;
+    return {
+        turno_encontrado: { id: turno.id, code: turno.code, empleado: empleadoNombre, objetivo: turno.objetivoNombre ?? '' },
+        nuevo_codigo: nuevoCodigo,
+        accion_propuesta: {
+            type: 'extender_jornada',
+            label,
+            payload: {
+                shiftId: turno.id,
+                nuevoCodigo,
+                empleadoNombre,
+                codigoActual: turno.code,
+                objetivoNombre: turno.objetivoNombre ?? '',
+                fecha,
+            },
+        },
+    };
+}
+async function ejecutarProponerCubrirAusencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    const db = admin.firestore();
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const turnosSnap = await db
+        .collection('turnos')
+        .where('objectiveId', '==', objetivoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(60)
+        .get();
+    const turnosDia = turnosSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }));
+    const empleadosConTurno = new Set(turnosDia.map((t) => t.employeeId).filter(Boolean));
+    const banda = args.banda ?? (args.id_empleado_ausente
+        ? turnosDia.find((t) => t.employeeId === args.id_empleado_ausente)?.code ?? 'M'
+        : 'M');
+    const retDisponibles = turnosDia.filter((t) => t.code === 'RET' && !t.isFranco && t.employeeId !== args.id_empleado_ausente);
+    const sinTurnoDocs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, ctx.empresaId, ctx.scopeEmpresa, 60);
+    const sinTurnoCandidatos = sinTurnoDocs
+        .filter((d) => !empleadosConTurno.has(d.id))
+        .slice(0, 5)
+        .map((d) => {
+        const data = d.data();
+        return { id: d.id, nombre: [data.lastName, data.firstName].filter(Boolean).join(', ') || data.name || d.id };
+    });
+    const candidatos = [
+        ...sinTurnoCandidatos.map((c) => ({ ...c, origen: 'SIN_TURNO' })),
+        ...retDisponibles.slice(0, 3).map((t) => ({ id: t.employeeId, nombre: t.empleadoNombre ?? t.employeeId, origen: 'RET' })),
+    ];
+    if (candidatos.length === 0) {
+        return { error: 'sin_candidatos', objetivo: objetivoNombre, fecha, banda };
+    }
+    const mejor = candidatos[0];
+    const label = `Cubrir turno ${banda} en ${objetivoNombre || objetivoId} el ${fecha} con ${mejor.nombre} (${mejor.origen})`;
+    return {
+        candidatos,
+        accion_propuesta: {
+            type: 'cubrir_ausencia',
+            label,
+            payload: {
+                empleadoId: mejor.id,
+                empleadoNombre: mejor.nombre,
+                objetivoId,
+                clientId,
+                objetivoNombre,
+                banda,
+                fecha,
+                origenCandidato: mejor.origen,
+            },
+        },
+    };
+}
+async function resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId) {
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    const snap = await db
+        .collection('turnos')
+        .where('employeeId', '==', empleadoId)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .limit(10)
+        .get();
+    if (snap.empty)
+        return null;
+    let docs = snap.docs;
+    if (objetivoId)
+        docs = docs.filter((d) => d.data().objectiveId === objetivoId);
+    const active = docs.filter((d) => {
+        const data = d.data();
+        return !data.isFranco && !data.draft && data.code !== 'F' && data.code !== 'FF' && data.code !== 'FP';
+    });
+    const chosen = active[0] ?? docs[0];
+    if (!chosen)
+        return null;
+    const data = chosen.data();
+    return {
+        shiftId: chosen.id,
+        code: String(data.code ?? ''),
+        objetivoId: String(data.objectiveId ?? ''),
+        objetivoNombre: data.objetivoNombre ? String(data.objetivoNombre) : undefined,
+        empresaId: String(data.empresaId ?? ''),
+    };
+}
+async function ejecutarProponerConfirmarPresencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const label = `Confirmar presencia de ${empleadoNombre} (turno ${turno.code})${objetivoNombre ? ' en ' + objetivoNombre : ''} el ${fecha}`;
+    return {
+        accion_propuesta: {
+            type: 'confirmar_presencia',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+        },
+    };
+}
+async function ejecutarProponerRegistrarAusencia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const motivo = args.motivo ?? 'AA';
+    const label = `Registrar ausencia de ${empleadoNombre} (${motivo}) el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+    return {
+        accion_propuesta: {
+            type: 'registrar_ausencia',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha, motivo },
+        },
+    };
+}
+async function ejecutarProponerCerrarTurno(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found) {
+            objetivoId = found.id;
+            objetivoNombre = found.nombre;
+        }
+    }
+    const turno = await resolverTurnoPorEmpleadoFecha(empleadoId, fecha, objetivoId);
+    if (!turno)
+        return { error: 'turno_no_encontrado', empleado: empleadoNombre, fecha };
+    if (!objetivoNombre && turno.objetivoNombre)
+        objetivoNombre = turno.objetivoNombre;
+    const label = `Cerrar turno ${turno.code} de ${empleadoNombre} el ${fecha}${objetivoNombre ? ' en ' + objetivoNombre : ''}`;
+    return {
+        accion_propuesta: {
+            type: 'cerrar_turno',
+            label,
+            payload: { shiftId: turno.shiftId, empleadoId, empleadoNombre, objetivoId: turno.objetivoId, objetivoNombre, fecha },
+        },
+    };
+}
+async function ejecutarProponerPlanificarObjetivoMes(ctx, args) {
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const refDate = new Date(ctx.referenceDateYsMmDd ?? new Date().toISOString().slice(0, 10));
+    const year = args.anio ?? refDate.getFullYear();
+    const month = args.mes ?? (refDate.getMonth() + 1);
+    const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+    const mesNombre = MESES[(month - 1)] ?? String(month);
+    const label = `Generar planificación CCT 6+2 para ${objetivoNombre || objetivoId} — ${mesNombre} ${year} (borradores para revisar)`;
+    return {
+        accion_propuesta: {
+            type: 'planificar_objetivo_mes',
+            label,
+            payload: { objetivoId, clientId, objetivoNombre, year, month },
+        },
+    };
+}
+async function ejecutarConsultarVacantesDia(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(fecha));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(fecha));
+    let objetivoId = args.id_objetivo;
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (found)
+            objetivoId = found.id;
+    }
+    let turnosSnap;
+    if (objetivoId) {
+        turnosSnap = await db.collection('turnos')
+            .where('objectiveId', '==', objetivoId)
+            .where('startTime', '>=', startTs)
+            .where('startTime', '<', endTs)
+            .limit(200)
+            .get();
+    }
+    else {
+        turnosSnap = await db.collection('turnos')
+            .where('empresaId', '==', ctx.empresaId)
+            .where('startTime', '>=', startTs)
+            .where('startTime', '<', endTs)
+            .limit(300)
+            .get();
+    }
+    const turnos = turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    const ausentes = turnos.filter((t) => t.isAbsent === true && !t.draft);
+    const cubiertos = new Set(turnos.filter((t) => t.origin === 'OPERATIONS_COVERAGE' || t.resolvedBy === 'OPERACIONES').map((t) => t.objectiveId + t.code + (t.startTime?.seconds ?? 0)));
+    const vacantes = ausentes.map((t) => ({
+        objetivo: t.objetivoNombre ?? t.objectiveId,
+        banda: t.code,
+        empleado: t.empleadoNombre ?? t.employeeId,
+        cubierto: cubiertos.has(t.objectiveId + t.code + (t.startTime?.seconds ?? 0)),
+    }));
+    if (vacantes.length === 0)
+        return { mensaje: `No hay vacantes registradas para el ${fecha}.`, fecha };
+    const sinCubrir = vacantes.filter((v) => !v.cubierto);
+    return {
+        fecha,
+        total_vacantes: vacantes.length,
+        sin_cubrir: sinCubrir.length,
+        vacantes: vacantes.slice(0, 50),
+        resumen: `${vacantes.length} vacante(s) el ${fecha}, ${sinCubrir.length} sin cubrir.`,
+    };
+}
+async function ejecutarResumenAusenciasPendientes(ctx, args) {
+    const ref = ctx.referenceDateYsMmDd;
+    const desde = args.fecha_desde || ref;
+    const hasta = args.fecha_hasta || desde;
+    const limite = Math.min(args.limite ?? 30, 80);
+    const db = admin.firestore();
+    const startTs = firestore_1.Timestamp.fromDate(startOfDayAr(desde));
+    const endTs = firestore_1.Timestamp.fromDate(endOfDayAr(hasta));
+    const turnosSnap = await db.collection('turnos')
+        .where('empresaId', '==', ctx.empresaId)
+        .where('isAbsent', '==', true)
+        .where('startTime', '>=', startTs)
+        .where('startTime', '<', endTs)
+        .orderBy('startTime', 'asc')
+        .limit(limite)
+        .get();
+    if (turnosSnap.empty)
+        return { mensaje: `No hay ausencias registradas entre ${desde} y ${hasta}.` };
+    const ausencias = turnosSnap.docs.map((d) => {
+        const data = d.data();
+        const starTs = data.startTime;
+        const fechaAR = new Date(starTs.toDate().getTime() - 3 * 3600000);
+        const fechaStr = fechaAR.toISOString().slice(0, 10);
+        return {
+            fecha: fechaStr,
+            empleado: data.empleadoNombre ?? data.employeeId,
+            objetivo: data.objetivoNombre ?? data.objectiveId,
+            banda: data.code,
+            resuelto: data.resolvedBy === 'OPERACIONES' || data.isReportedToPlanning === true,
+        };
+    });
+    const sinResolver = ausencias.filter((a) => !a.resuelto);
+    return {
+        rango: `${desde} a ${hasta}`,
+        total_ausencias: ausencias.length,
+        sin_resolver: sinResolver.length,
+        ausencias,
+        resumen: `${ausencias.length} ausencia(s) en el período, ${sinResolver.length} sin resolución de cobertura.`,
+    };
+}
+async function ejecutarProponerCrearTurnoRefuerzo(ctx, args) {
+    const fecha = args.fecha || ctx.referenceDateYsMmDd;
+    const banda = args.banda ?? 'M';
+    let empleadoId = args.id_firestore_empleado;
+    let empleadoNombre = '';
+    if (!empleadoId && args.texto_empleado) {
+        const found = await resolverEmpleadoPorTexto(ctx, args.texto_empleado);
+        if (!found)
+            return { error: 'empleado_no_encontrado', texto: args.texto_empleado };
+        empleadoId = found.id;
+        empleadoNombre = found.nombre;
+    }
+    if (!empleadoId)
+        return { error: 'falta_empleado' };
+    let objetivoId = args.id_objetivo;
+    let objetivoNombre = '';
+    let clientId = '';
+    if (!objetivoId && args.texto_objetivo) {
+        const found = await resolverObjetivoPorTexto(ctx, args.texto_objetivo);
+        if (!found)
+            return { error: 'objetivo_no_encontrado', texto: args.texto_objetivo };
+        objetivoId = found.id;
+        objetivoNombre = found.nombre;
+        clientId = found.clientId;
+    }
+    if (!objetivoId)
+        return { error: 'falta_objetivo' };
+    const horaInicio = bandaToHoraInicio(banda);
+    const horaFin = bandaToHoraFin(banda);
+    const label = `Crear refuerzo ${banda} (${horaInicio}–${horaFin}) para ${empleadoNombre} el ${fecha} en ${objetivoNombre || objetivoId}`;
+    return {
+        accion_propuesta: {
+            type: 'crear_turno_refuerzo',
+            label,
+            payload: {
+                empleadoId,
+                empleadoNombre,
+                objetivoId,
+                clientId,
+                objetivoNombre,
+                banda,
+                fecha,
+                horaInicio,
+                horaFin,
+            },
+        },
+    };
+}
+async function ejecutarAutoPresenciaCierre(ctx, args) {
+    const dryRun = args.simulacion !== false;
+    const db = admin.firestore();
+    const now = new Date();
+    const nowTs = firestore_1.Timestamp.fromDate(now);
+    const windowStart = firestore_1.Timestamp.fromDate(new Date(now.getTime() - 16 * 3600000));
+    const windowEnd = firestore_1.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
+    const snap = await db.collection('turnos')
+        .where('empresaId', '==', ctx.empresaId)
+        .where('startTime', '>=', windowStart)
+        .where('startTime', '<=', windowEnd)
+        .where('draft', '==', false)
+        .where('isFranco', '==', false)
+        .limit(500)
+        .get();
+    const empIdsToResolve = new Set();
+    const objIdsToResolve = new Set();
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (!t.empleadoNombre && t.employeeId)
+            empIdsToResolve.add(String(t.employeeId));
+        if (!t.objetivoNombre && t.objectiveId)
+            objIdsToResolve.add(String(t.objectiveId));
+    }
+    const empNames = new Map();
+    if (empIdsToResolve.size > 0) {
+        const empIds = [...empIdsToResolve].slice(0, 30);
+        const empDocs = await Promise.all(empIds.map(id => db.collection('empleados').doc(id).get()));
+        for (const d of empDocs) {
+            if (!d.exists)
+                continue;
+            const data = d.data();
+            const name = [data.lastName, data.firstName].filter(Boolean).join(', ')
+                || data.name || data.fullName || d.id;
+            empNames.set(d.id, name);
+        }
+    }
+    const objNames = new Map();
+    if (objIdsToResolve.size > 0) {
+        const clientsSnap = await db.collection('clients').where('empresaId', '==', ctx.empresaId).get();
+        for (const cdoc of clientsSnap.docs) {
+            const objetivos = cdoc.data().objetivos ?? [];
+            for (const obj of objetivos) {
+                if (obj.id && objIdsToResolve.has(obj.id)) {
+                    objNames.set(obj.id, obj.name || obj.nombre || obj.id);
+                }
+            }
+        }
+    }
+    function formatHhMm(seconds) {
+        const arMs = seconds * 1000 - 3 * 3600000;
+        const d = new Date(arMs);
+        return `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
+    }
+    function turnoLabel(t, startSec, endSec, oid) {
+        const emp = t.empleadoNombre || empNames.get(t.employeeId) || t.employeeId || '?';
+        const obj = t.objetivoNombre || objNames.get(oid) || oid || '?';
+        const desde = startSec ? formatHhMm(startSec) : '?';
+        const hasta = endSec ? formatHhMm(endSec) : '?';
+        return `${emp} — ${t.code} ${desde}–${hasta} en ${obj}`;
+    }
+    const byObjective = new Map();
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        const oid = String(t.objectiveId || '');
+        if (!oid)
+            continue;
+        if (!byObjective.has(oid))
+            byObjective.set(oid, []);
+        byObjective.get(oid).push({
+            shiftId: doc.id,
+            startMs: (t.startTime?.seconds ?? 0) * 1000,
+            endMs: (t.endTime?.seconds ?? 0) * 1000,
+            isPresent: !!t.isPresent,
+            isCompleted: !!t.isCompleted,
+            isAbsent: !!t.isAbsent,
+        });
+    }
+    function hayRelevaYPresente(objectiveId, shiftEndMs) {
+        return (byObjective.get(objectiveId) ?? []).some(r => r.isPresent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
+    }
+    function hayRelevoPendiente(objectiveId, shiftEndMs) {
+        return (byObjective.get(objectiveId) ?? []).some(r => !r.isPresent && !r.isAbsent && !r.isCompleted && Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
+    }
+    const presenciaMarcada = [];
+    const turnosCerrados = [];
+    const turnosEnRetencion = [];
+    const batch = db.batch();
+    let ops = 0;
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted || t.isAbsent)
+            continue;
+        const startSec = t.startTime?.seconds ?? 0;
+        const endSec = t.endTime?.seconds ?? 0;
+        const startMs = startSec * 1000;
+        const oid = String(t.objectiveId || '');
+        if (startMs > now.getTime())
+            continue;
+        presenciaMarcada.push(turnoLabel(t, startSec, endSec, oid));
+        const idx = byObjective.get(oid);
+        if (idx) {
+            const entry = idx.find(r => r.shiftId === doc.id);
+            if (entry)
+                entry.isPresent = true;
+        }
+        if (!dryRun) {
+            batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+            ops++;
+        }
+    }
+    for (const doc of snap.docs) {
+        const t = doc.data();
+        if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted)
+            continue;
+        const startSec = t.startTime?.seconds ?? 0;
+        const endSec = t.endTime?.seconds ?? 0;
+        const endMs = endSec * 1000;
+        const oid = String(t.objectiveId || '');
+        if (!endMs || endMs > now.getTime())
+            continue;
+        const label = turnoLabel(t, startSec, endSec, oid);
+        if (oid && hayRelevaYPresente(oid, endMs)) {
+            turnosCerrados.push(`${label} [relevo completado]`);
+            if (!dryRun) {
+                batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
+                ops++;
+                db.collection('novedades')
+                    .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+                    .then(ns => {
+                    if (ns.empty)
+                        return;
+                    const b2 = db.batch();
+                    ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                        .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+                    return b2.commit();
+                }).catch(() => { });
+            }
+        }
+        else if (oid && hayRelevoPendiente(oid, endMs)) {
+            turnosEnRetencion.push(label);
+        }
+        else {
+            turnosCerrados.push(label);
+            if (!dryRun) {
+                batch.update(doc.ref, { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: nowTs, autoCierre: true });
+                ops++;
+                db.collection('novedades')
+                    .where('shiftId', '==', doc.id).where('status', '==', 'pending').limit(10).get()
+                    .then(ns => {
+                    if (ns.empty)
+                        return;
+                    const b2 = db.batch();
+                    ns.docs.filter(d => ['RETENCION_LARGA', 'RECARGO_12H', 'RETENCION_DETECTADA'].includes(d.data().type))
+                        .forEach(d => b2.update(d.ref, { status: 'ATENDIDA', atendidaAt: nowTs, atendidaPor: 'AUTO_AGENTE' }));
+                    return b2.commit();
+                }).catch(() => { });
+            }
+        }
+    }
+    if (!dryRun && ops > 0)
+        await batch.commit();
+    const modo = dryRun ? 'SIMULACIÓN' : 'EJECUTADO';
+    const resumen = dryRun
+        ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}`
+        : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.`;
+    return {
+        modo,
+        turnos_evaluados: snap.size,
+        presencias_a_marcar: presenciaMarcada.length,
+        turnos_a_cerrar: turnosCerrados.length,
+        turnos_en_retencion: turnosEnRetencion.length,
+        detalle_presencias: presenciaMarcada,
+        detalle_cierres: turnosCerrados,
+        detalle_retencion: turnosEnRetencion,
+        resumen,
+        instruccion: dryRun
+            ? 'Para ejecutar los cambios reales, respondé "ejecutá" o "activá modo demo".'
+            : undefined,
+    };
+}
+async function ejecutarEstadoModoDemo(ctx) {
+    const db = admin.firestore();
+    const empSnap = await db.collection('empresas').doc(ctx.empresaId).get();
+    const activo = empSnap.exists ? empSnap.data()?.modoDemoEnabled === true : false;
+    return {
+        modoDemoEnabled: activo,
+        estado: activo ? 'ACTIVO' : 'INACTIVO',
+        mensaje: activo
+            ? 'El Modo Demo está **activo**: el sistema da presentes, cierra turnos y hace relevos automáticamente cada 5 minutos.'
+            : 'El Modo Demo está **inactivo**. Decí «activá el modo demo» para encenderlo.',
+    };
+}
+async function ejecutarToggleModoDemo(ctx, activar) {
+    if (!ctx.empresaId)
+        return { error: 'sin_empresa', mensaje: 'No hay empresa en sesión.' };
+    const db = admin.firestore();
+    await db.collection('empresas').doc(ctx.empresaId).update({ modoDemoEnabled: activar });
+    return {
+        modoDemoEnabled: activar,
+        estado: activar ? 'ACTIVO' : 'INACTIVO',
+        mensaje: activar
+            ? '✓ Modo Demo **activado**. El sistema dará presentes, cerrará turnos y hará relevos automáticamente cada 5 minutos.'
+            : '✓ Modo Demo **desactivado**. Los turnos ya no se procesarán automáticamente.',
+    };
 }
 //# sourceMappingURL=assistantDataTools.js.map

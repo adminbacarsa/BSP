@@ -1,0 +1,621 @@
+{
+  "version": 1,
+  "actualizado": "2026-09-02T18:08:56Z",
+  "unidades": [
+    {
+      "id": "transporte_caudales",
+      "nombre": "Transporte de caudales",
+      "color": "#38bdf8",
+      "operativa": true
+    },
+    {
+      "id": "gruas",
+      "nombre": "Grúas",
+      "color": "#fbbf24",
+      "operativa": true
+    },
+    {
+      "id": "seguridad",
+      "nombre": "Seguridad privada",
+      "color": "#34d399",
+      "operativa": true
+    },
+    {
+      "id": "tesoreria_bpc",
+      "nombre": "Tesorería BPC",
+      "color": "#a78bfa",
+      "operativa": true
+    },
+    {
+      "id": "corporativo",
+      "nombre": "Corporativo y soporte",
+      "color": "#64748b",
+      "operativa": false,
+      "nota": "Overhead / estructura — imputar explícitamente o prorratear"
+    }
+  ],
+  "reglas": {
+    "comprasSinMapear": "prorratear",
+    "distribuirCorporativo": true,
+    "criterioOverheadMob": "fijo",
+    "criterioOverheadCompras": "fijo",
+    "criterioOverheadVentas": "gasto_operativo",
+    "pesosOverheadFijos": {
+      "transporte_caudales": 50,
+      "seguridad": 30,
+      "tesoreria_bpc": 15,
+      "gruas": 5
+    },
+    "mostrarCorporativoEnTablero": false,
+    "mostrarSinAsignarEnTablero": true
+  },
+  "imputaciones": [
+    {
+      "tipo": "ventas",
+      "label": "INGRESOS POR SEGURIDAD PRIVADA",
+      "unidadId": "seguridad",
+      "nota": "",
+      "montoRef": 1708523047.83
+    },
+    {
+      "tipo": "ventas",
+      "label": "SERVICIOS TERCERIZADOS DE TESORERIA",
+      "unidadId": "tesoreria_bpc",
+      "nota": "",
+      "montoRef": 1340173242.12
+    },
+    {
+      "tipo": "ventas",
+      "label": "INGRESOS POR RECAUDACION",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 954721523.61
+    },
+    {
+      "tipo": "ventas",
+      "label": "ALQUILER CAJAS DE SEGURIDAD",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 12179984.46
+    },
+    {
+      "tipo": "ventas",
+      "label": "OTROS INGRESOS",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 4471627.96
+    },
+    {
+      "tipo": "ventas",
+      "label": "ING. POR SERVICIOS DE ATM",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 3995990.0
+    },
+    {
+      "tipo": "ventas",
+      "label": "INGRESOS POR TRASLADOS",
+      "unidadId": "gruas",
+      "nota": "",
+      "montoRef": 3534569.3
+    },
+    {
+      "tipo": "ventas",
+      "label": "INGRESOS POR SERVICIOS",
+      "unidadId": "gruas",
+      "nota": "",
+      "montoRef": 3121458.71
+    },
+    {
+      "tipo": "ventas",
+      "label": "INGRESOS POR T.E.P.",
+      "unidadId": "gruas",
+      "nota": "",
+      "montoRef": 1215179.0
+    },
+    {
+      "tipo": "ventas",
+      "label": "AJUSTE GLOBAL DE GASTOS",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1259.31
+    },
+    {
+      "tipo": "ventas",
+      "label": "DIFERENCIAS POR REDONDEO",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": -0.02
+    },
+    {
+      "tipo": "mob",
+      "label": "SERVICIO DE SEGURIDAD PRIVADA - Personal Permanente",
+      "unidadId": "seguridad",
+      "nota": "",
+      "montoRef": 1380494851.42
+    },
+    {
+      "tipo": "mob",
+      "label": "SERVICIOS DE TESORERIA TERCERIZADOS",
+      "unidadId": "tesoreria_bpc",
+      "nota": "",
+      "montoRef": 551444256.05
+    },
+    {
+      "tipo": "mob",
+      "label": "PROTECCION DE VALORES",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 273667857.74
+    },
+    {
+      "tipo": "mob",
+      "label": "TESORERIA",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 119846444.26
+    },
+    {
+      "tipo": "mob",
+      "label": "ADMINISTRACIÓN CENTRAL",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 81682879.78
+    },
+    {
+      "tipo": "mob",
+      "label": "GRUAS",
+      "unidadId": "gruas",
+      "nota": "",
+      "montoRef": 46407687.56
+    },
+    {
+      "tipo": "mob",
+      "label": "SEGURIDAD PLANTA",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 43908631.44
+    },
+    {
+      "tipo": "mob",
+      "label": "COMERCIAL",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 40795307.84
+    },
+    {
+      "tipo": "mob",
+      "label": "SISTEMAS Y TECNOLOGIA",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 28883184.33
+    },
+    {
+      "tipo": "mob",
+      "label": "CAPITAL HUMANO",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 24101968.33
+    },
+    {
+      "tipo": "mob",
+      "label": "SERVICIO DE SEGURIDAD PRIVADA - Eventuales Bacar",
+      "unidadId": "seguridad",
+      "nota": "",
+      "montoRef": 11225691.81
+    },
+    {
+      "tipo": "mob",
+      "label": "MANTENIMIENTO PLANTA",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 2516694.75
+    },
+    {
+      "tipo": "mob",
+      "label": "BACAR GASTOS",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 2270732.92
+    },
+    {
+      "tipo": "compras",
+      "label": "Publicidad",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 102565498.5
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos Taller",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 63663459.62
+    },
+    {
+      "tipo": "compras",
+      "label": "Honorarios de Terceros",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 59055141.57
+    },
+    {
+      "tipo": "compras",
+      "label": "Carteles y Elementos Publicitarios",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 37150663.48
+    },
+    {
+      "tipo": "compras",
+      "label": "Combustibles y Lubricantes",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 28461405.03
+    },
+    {
+      "tipo": "compras",
+      "label": "Servicios p/ Recontadoras  Sumadoras E Impresoras",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 21518095.5
+    },
+    {
+      "tipo": "compras",
+      "label": "Comunicaciones",
+      "unidadId": "seguridad",
+      "nota": "",
+      "montoRef": 17309295.51
+    },
+    {
+      "tipo": "compras",
+      "label": "Viaticos Bpc",
+      "unidadId": "tesoreria_bpc",
+      "nota": "",
+      "montoRef": 14842429.23
+    },
+    {
+      "tipo": "compras",
+      "label": "Alquiler de Planta",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 13154971.6
+    },
+    {
+      "tipo": "compras",
+      "label": "Repuestos y Reparaciones",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 12026207.24
+    },
+    {
+      "tipo": "compras",
+      "label": "Alquiler Equipos / Maquinas",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 11876150.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Plan de Ahorro",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 11192034.41
+    },
+    {
+      "tipo": "compras",
+      "label": "Rodados",
+      "unidadId": "transporte_caudales",
+      "nota": "",
+      "montoRef": 10865326.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Comisiones y Gtos. Bancarios",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 9440811.1
+    },
+    {
+      "tipo": "compras",
+      "label": "Atencion al Personal",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 9095255.01
+    },
+    {
+      "tipo": "compras",
+      "label": "Limpieza",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 8676169.69
+    },
+    {
+      "tipo": "compras",
+      "label": "Intereses",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 8350957.9
+    },
+    {
+      "tipo": "compras",
+      "label": "Energia Electrica",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 6906117.6
+    },
+    {
+      "tipo": "compras",
+      "label": "Insumos y Servicios Informaticos",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 6796562.01
+    },
+    {
+      "tipo": "compras",
+      "label": "Equipos Informáticos y Eq.",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 6274108.52
+    },
+    {
+      "tipo": "compras",
+      "label": "Uniforme del Personal",
+      "unidadId": "corporativo",
+      "nota": "",
+      "montoRef": 5742967.35
+    },
+    {
+      "tipo": "compras",
+      "label": "Mantenimiento de Planta",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 4903270.88
+    },
+    {
+      "tipo": "compras",
+      "label": "Obra Social Prepaga",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 4845066.48
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos de Representacion",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 4161053.07
+    },
+    {
+      "tipo": "compras",
+      "label": "Leasing",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 3973187.64
+    },
+    {
+      "tipo": "compras",
+      "label": "Bolsas y Precintos",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 3537100.8
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos de Viajes y Movilidad",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 3414368.14
+    },
+    {
+      "tipo": "compras",
+      "label": "Servicios de Monitoreo",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 3049859.98
+    },
+    {
+      "tipo": "compras",
+      "label": "Comestibles y Refrigerios",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 2574153.03
+    },
+    {
+      "tipo": "compras",
+      "label": "Libreria Impresiones y Papeleria",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 2526909.41
+    },
+    {
+      "tipo": "compras",
+      "label": "Servicios de Internet",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 2104133.14
+    },
+    {
+      "tipo": "compras",
+      "label": "Imp. Internos  Tasas  Cont. y Servicios",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 2060199.34
+    },
+    {
+      "tipo": "compras",
+      "label": "Peajes",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 2017852.09
+    },
+    {
+      "tipo": "compras",
+      "label": "Maquinas de Oficina",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1591229.77
+    },
+    {
+      "tipo": "compras",
+      "label": "Medicina Laboral",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1310067.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Leasing Bancario",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1244463.84
+    },
+    {
+      "tipo": "compras",
+      "label": "Equipos de Comunicacion",
+      "unidadId": "seguridad",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1200000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Alquiler Playa Vehículos",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1085000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Correo  Mensajeria y Cadeteria",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1033531.8
+    },
+    {
+      "tipo": "compras",
+      "label": "Ferreteria y Herramientas Varias",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 1020910.82
+    },
+    {
+      "tipo": "compras",
+      "label": "Seg. Devengado por Adelantado",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 639760.04
+    },
+    {
+      "tipo": "compras",
+      "label": "Bolsas Recaudadoras",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 630000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Cerrajeria",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 624900.01
+    },
+    {
+      "tipo": "compras",
+      "label": "Logistica y Seguridad",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 586870.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Cursos y Capacitacion Seguridad",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 450000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Cursos y Capacitacion",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 412400.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Accesorios",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 382327.06
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos Camara de Caudales",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 304142.75
+    },
+    {
+      "tipo": "compras",
+      "label": "Telefonia Fijo",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 230867.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Elementos de Seguridad",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 144000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Aranceles Anmac",
+      "unidadId": "seguridad",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 120000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "I.t.v.",
+      "unidadId": "seguridad",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 93143.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos Varios Administracion",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 92259.86
+    },
+    {
+      "tipo": "compras",
+      "label": "Chalecos Antibalas",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 80000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Gastos Varios Mantenimiento",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 80000.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Seguro Automotor",
+      "unidadId": "transporte_caudales",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 70898.0
+    },
+    {
+      "tipo": "compras",
+      "label": "Muebles y Utiles",
+      "unidadId": "corporativo",
+      "nota": "PENDIENTE — definir unidadId",
+      "montoRef": 53410.04
+    }
+  ]
+}

@@ -10,8 +10,8 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "update:preview": "eas update --channel preview --environment preview",
-    "update:production": "eas update --channel production --environment production"
+    "update:preview": "npx --yes eas-cli update --channel preview --environment preview",
+    "update:production": "npx --yes eas-cli update --channel production --environment production"
   },
   "dependencies": {
     "@cosp/portal-core": "file:../../packages/portal-core",

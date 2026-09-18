@@ -1029,6 +1029,29 @@ export async function fetchPlanificacionEstadoDoc(
   return null;
 }
 
+/** Estado de publicación: tenant primero; si no hay publishedAt, fallback legacy (cronograma publicado pre-multiempresa). */
+export async function fetchPlanificacionPublishStatus(
+  empresaId: string,
+  objectiveId: string,
+  year: number,
+  month: number,
+): Promise<{ publishedAt: unknown; publishedBy: string } | null> {
+  const primaryId = buildPlanificacionEstadoDocId(empresaId, objectiveId, year, month);
+  const legacyId = buildPlanificacionEstadoDocId('', objectiveId, year, month);
+  const ids = [primaryId, legacyId].filter((id, i, arr) => arr.indexOf(id) === i);
+
+  for (const id of ids) {
+    const snap = await getDoc(doc(db, 'planificacion_estados', id));
+    if (!snap.exists()) continue;
+    const d = snap.data() as Record<string, unknown>;
+    const publishedAt = d.publishedAt;
+    if (publishedAt != null && publishedAt !== '') {
+      return { publishedAt, publishedBy: String(d.publishedBy ?? '') };
+    }
+  }
+  return null;
+}
+
 /** Fusiona tenant + legacy: puestos/bandas de ambos docs; trailing del primero que lo tenga.
  *  publishedAt: si existe doc tenant, manda ese (aunque no tenga publishedAt = borrador).
  *  No heredar publishedAt legacy si el doc tenant ya existe sin publicar. */

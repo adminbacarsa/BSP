@@ -1,4 +1,5 @@
 import { toDate } from '../utils/dates';
+import { isAbsentLikeShift } from './isAbsentLikeShift';
 
 export type EmployeeShiftVisibilityInput = {
   draft?: boolean | null;
@@ -10,9 +11,14 @@ export type EmployeeShiftVisibilityInput = {
   isCompleted?: boolean | null;
   isAbsent?: boolean | null;
   status?: string | null;
+  absenceType?: string | null;
+  operacionallyCovered?: boolean | null;
+  coveredByEmployeeId?: string | null;
+  coverageStatus?: string | null;
   objectiveId?: string | null;
   startTime?: unknown;
   eventoId?: string | null;
+  [key: string]: unknown;
 };
 
 /** Orígenes / códigos que el vigilador debe ver aunque el mes no esté publicado. */
@@ -71,6 +77,11 @@ export function isShiftVisibleToEmployee(
   shift: EmployeeShiftVisibilityInput,
   publishedKeys: Set<string> | null,
 ): boolean {
+  // Ausente / cubierto: el titular no ve ese turno como fichable (la cobertura es otro doc).
+  if (isAbsentLikeShift(shift as Record<string, unknown>)) {
+    return false;
+  }
+
   // EV / operativos: visibles aunque el mes esté en borrador (no dependen del crono).
   if (isOperationalPortalShift(shift)) return true;
 

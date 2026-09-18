@@ -1,0 +1,12 @@
+{
+  "enabled": false,
+  "base": "https://comtroldata.web.app/tableros",
+  "modules": {
+    "control_directivo": "https://comtroldata.web.app/tableros/control-directivo/",
+    "ventas_cobranzas": "https://comtroldata.web.app/tableros/ventas-cobranzas/",
+    "facturas": "https://comtroldata.web.app/tableros/facturas-electronicas/",
+    "compras": "https://comtroldata.web.app/tableros/compras/",
+    "mano_obra": "https://comtroldata.web.app/tableros/mano-de-obra/",
+    "camioneros": "https://comtroldata.web.app/tableros/novedades-camioneros/"
+  }
+}

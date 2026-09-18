@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Editor imputación UN — Bacar</title>
+  <style>
+    :root { --bg:#0f172a; --surf:#1e293b; --border:#334155; --txt:#e2e8f0; --muted:#94a3b8; --ok:#34d399; --warn:#fbbf24; --accent:#6366f1; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: var(--bg); color: var(--txt); }
+    .wrap { max-width: 1400px; margin: 0 auto; padding: 20px; }
+    h1 { font-size: 1.35rem; margin: 0 0 6px; }
+    .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0; padding: 14px; background: var(--surf); border-radius: 12px; border: 1px solid var(--border); }
+    .toolbar input, .toolbar select, .toolbar button { font: inherit; }
+    .toolbar input, .toolbar select { padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    .toolbar button { padding: 8px 14px; border-radius: 8px; border: none; cursor: pointer; font-weight: 700; font-size: 0.85rem; }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-secondary { background: var(--surf); color: var(--txt); border: 1px solid var(--border) !important; }
+    .btn-success { background: #059669; color: #fff; }
+    .stats { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 12px; font-size: 0.9rem; }
+    .stats b.ok { color: var(--ok); }
+    .stats b.warn { color: var(--warn); }
+    .callout { background: #172554; border: 1px solid #1e40af; border-radius: 10px; padding: 12px 14px; font-size: 0.85rem; margin-bottom: 16px; line-height: 1.5; }
+    .callout code { background: var(--surf); padding: 2px 5px; border-radius: 4px; }
+    table { border-collapse: collapse; width: 100%; font-size: 0.82rem; }
+    th, td { border: 1px solid var(--border); padding: 8px; text-align: left; vertical-align: middle; }
+    th { background: var(--surf); position: sticky; top: 0; z-index: 1; }
+    tr.row-warn { background: #422006; }
+    tr.row-ok { background: var(--bg); }
+    tr.hidden { display: none; }
+    .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    select.unidad-sel { width: 100%; min-width: 180px; max-width: 260px; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    input.nota-inp { width: 100%; min-width: 120px; padding: 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--txt); }
+    .badge { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 0.7rem; font-weight: 800; text-transform: uppercase; }
+    .badge-ok { background: #064e3b; color: var(--ok); }
+    .badge-warn { background: #78350f; color: var(--warn); }
+    .tipo { text-transform: uppercase; font-size: 0.72rem; font-weight: 800; color: var(--muted); }
+    .muted { color: var(--muted); font-size: 0.85rem; }
+    .table-wrap { overflow: auto; max-height: calc(100vh - 280px); border-radius: 10px; border: 1px solid var(--border); }
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #059669; color: #fff; padding: 12px 18px; border-radius: 10px; font-weight: 700; display: none; z-index: 99; }
+    a { color: #818cf8; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Editor de imputación — Unidades de negocio</h1>
+    <p class="muted">Período referencia: datos embebidos · Actualizado: <span id="updated">—</span></p>
+
+    <div class="callout">
+      <b>Cómo guardar en el tablero</b><br>
+      1) Elegí la unidad en cada fila · 2) <b>Descargar JSON</b> (va a Descargas) ·
+      3) En PowerShell: <code>npm run apply:imputacion-un</code> · 4) Recargá <a href="index.html">Control Directivo</a> (Ctrl+F5).
+      <br><span class="muted">El comando busca el JSON en Descargas o en esta carpeta automáticamente.</span>
+    </div>
+
+    <div class="stats">
+      <span>Total: <b id="statTotal">0</b></span>
+      <span>OK: <b class="ok" id="statOk">0</b></span>
+      <span>Pendientes: <b class="warn" id="statPend">0</b></span>
+    </div>
+
+    <div class="toolbar">
+      <input type="search" id="search" placeholder="Buscar concepto…" style="min-width:200px"/>
+      <select id="filterTipo">
+        <option value="">Todos los tipos</option>
+        <option value="ventas">Ventas</option>
+        <option value="mob">MOB</option>
+        <option value="compras">Compras</option>
+      </select>
+      <select id="filterEstado">
+        <option value="">Todos</option>
+        <option value="pendiente">Solo pendientes</option>
+        <option value="ok">Solo asignados</option>
+      </select>
+      <button type="button" class="btn-success" id="btnExport">Descargar JSON</button>
+      <label class="btn-secondary" style="display:inline-flex;align-items:center;cursor:pointer;padding:8px 14px;border-radius:8px">
+        Importar JSON
+        <input type="file" id="importFile" accept=".json,application/json" hidden/>
+      </label>
+      <button type="button" class="btn-secondary" id="btnClearDraft">Limpiar borrador local</button>
+      <a href="index.html" class="btn-secondary" style="text-decoration:none;padding:8px 14px;border-radius:8px;border:1px solid var(--border)">← Control Directivo</a>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Concepto</th>
+            <th class="num">Monto ref.</th>
+            <th>Unidad de negocio</th>
+            <th>Nota</th>
+            <th>Estado</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+  <div id="toast"></div>
+
+  <script>
+    const CFG = %%CFG%%;
+    const LS_KEY = "bacar-imputacion-draft-v1";
+
+    function fmt(n) {
+      return Number(n || 0).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function toast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      setTimeout(() => { el.style.display = "none"; }, 3500);
+    }
+
+    function unidadOptions(selected) {
+      let html = '<option value="">— Pendiente —</option>';
+      for (const u of CFG.unidades) {
+        const sel = u.id === selected ? " selected" : "";
+        html += `<option value="${u.id}"${sel}>${u.nombre}</option>`;
+      }
+      return html;
+    }
+
+    function loadDraft() {
+      try {
+        const raw = localStorage.getItem(LS_KEY);
+        if (!raw) return null;
+        return JSON.parse(raw);
+      } catch { return null; }
+    }
+
+    function saveDraft() {
+      const draft = CFG.imputaciones.map((r, i) => ({
+        i,
+        unidadId: document.querySelector(`select[data-i="${i}"]`)?.value || null,
+        nota: document.querySelector(`input[data-i="${i}"]`)?.value || "",
+      }));
+      localStorage.setItem(LS_KEY, JSON.stringify(draft));
+    }
+
+    function applyDraft(draft) {
+      if (!draft) return;
+      for (const d of draft) {
+        const sel = document.querySelector(`select[data-i="${d.i}"]`);
+        const inp = document.querySelector(`input[data-i="${d.i}"]`);
+        if (sel && d.unidadId !== undefined) sel.value = d.unidadId || "";
+        if (inp && d.nota !== undefined) inp.value = d.nota || "";
+      }
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("tbody");
+      tbody.innerHTML = CFG.imputaciones.map((r, i) => {
+        const uid = r.unidadId || "";
+        const ok = !!uid;
+        return `<tr class="${ok ? "row-ok" : "row-warn"}" data-tipo="${r.tipo}" data-estado="${ok ? "ok" : "pendiente"}" data-label="${(r.label || "").toLowerCase()}">
+          <td class="tipo">${r.tipo}</td>
+          <td>${r.label}</td>
+          <td class="num">${fmt(r.montoRef)}</td>
+          <td><select class="unidad-sel" data-i="${i}">${unidadOptions(uid)}</select></td>
+          <td><input class="nota-inp" data-i="${i}" type="text" value="${(r.nota || "").replace(/"/g, "&quot;")}" placeholder="Opcional"/></td>
+          <td><span class="badge ${ok ? "badge-ok" : "badge-warn"}">${ok ? "OK" : "Pendiente"}</span></td>
+        </tr>`;
+      }).join("");
+
+      tbody.querySelectorAll("select, input").forEach(el => {
+        el.addEventListener("change", () => { updateStats(); saveDraft(); });
+        el.addEventListener("input", () => { updateStats(); saveDraft(); });
+      });
+
+      applyDraft(loadDraft());
+      updateStats();
+      applyFilters();
+    }
+
+    function updateStats() {
+      let ok = 0;
+      CFG.imputaciones.forEach((_, i) => {
+        if (document.querySelector(`select[data-i="${i}"]`)?.value) ok++;
+      });
+      const total = CFG.imputaciones.length;
+      document.getElementById("statTotal").textContent = total;
+      document.getElementById("statOk").textContent = ok;
+      document.getElementById("statPend").textContent = total - ok;
+
+      CFG.imputaciones.forEach((_, i) => {
+        const row = document.querySelector(`select[data-i="${i}"]`)?.closest("tr");
+        const sel = document.querySelector(`select[data-i="${i}"]`);
+        if (!row || !sel) return;
+        const has = !!sel.value;
+        row.className = has ? "row-ok" : "row-warn";
+        row.dataset.estado = has ? "ok" : "pendiente";
+        const badge = row.querySelector(".badge");
+        if (badge) {
+          badge.className = "badge " + (has ? "badge-ok" : "badge-warn");
+          badge.textContent = has ? "OK" : "Pendiente";
+        }
+      });
+    }
+
+    function applyFilters() {
+      const q = document.getElementById("search").value.trim().toLowerCase();
+      const tipo = document.getElementById("filterTipo").value;
+      const estado = document.getElementById("filterEstado").value;
+      document.querySelectorAll("#tbody tr").forEach(tr => {
+        let show = true;
+        if (tipo && tr.dataset.tipo !== tipo) show = false;
+        if (estado && tr.dataset.estado !== estado) show = false;
+        if (q && !(tr.dataset.label || "").includes(q)) show = false;
+        tr.classList.toggle("hidden", !show);
+      });
+    }
+
+    function buildExportConfig() {
+      const out = JSON.parse(JSON.stringify(CFG));
+      out.actualizado = new Date().toISOString();
+      out.imputaciones = CFG.imputaciones.map((r, i) => {
+        const uid = document.querySelector(`select[data-i="${i}"]`)?.value || null;
+        const nota = document.querySelector(`input[data-i="${i}"]`)?.value || "";
+        return {
+          tipo: r.tipo,
+          label: r.label,
+          unidadId: uid || null,
+          nota: nota,
+          montoRef: r.montoRef,
+        };
+      });
+      return out;
+    }
+
+    document.getElementById("btnExport").addEventListener("click", () => {
+      const out = buildExportConfig();
+      const blob = new Blob([JSON.stringify(out, null, 2)], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "unidades-negocio.json";
+      a.click();
+      toast("JSON descargado. Ejecuta: npm run apply:imputacion-un");
+    });
+
+    document.getElementById("importFile").addEventListener("change", e => {
+      const f = e.target.files?.[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const data = JSON.parse(reader.result);
+          if (!data.imputaciones) throw new Error("Formato inválido");
+          CFG.unidades = data.unidades || CFG.unidades;
+          CFG.reglas = data.reglas || CFG.reglas;
+          CFG.imputaciones = data.imputaciones;
+          localStorage.removeItem(LS_KEY);
+          renderTable();
+          toast("JSON importado en pantalla — revisá y descargá de nuevo para aplicar");
+        } catch (err) {
+          alert("No se pudo importar: " + err.message);
+        }
+      };
+      reader.readAsText(f, "utf-8");
+      e.target.value = "";
+    });
+
+    document.getElementById("btnClearDraft").addEventListener("click", () => {
+      localStorage.removeItem(LS_KEY);
+      renderTable();
+      toast("Borrador local eliminado");
+    });
+
+    document.getElementById("search").addEventListener("input", applyFilters);
+    document.getElementById("filterTipo").addEventListener("change", applyFilters);
+    document.getElementById("filterEstado").addEventListener("change", applyFilters);
+
+    document.getElementById("updated").textContent = CFG.actualizado || "—";
+    renderTable();
+  </script>
+</body>
+</html>

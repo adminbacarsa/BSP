@@ -6,7 +6,7 @@ export type { PortalCallables } from './callables';
 export { PORTAL_CALLABLES } from './callables/names';
 export type { PortalCallableName } from './callables/names';
 export { resolveEmpDocId, resolveEmpDocIdWithRetry } from './empleado/resolveEmpDocId';
-export { toDate, formatDateAr, formatTimeAr } from './utils/dates';
+export { toDate, formatDateAr, formatTimeAr, formatDateTimeAr } from './utils/dates';
 export { haversineKm, isWithinCheckInRadius, CHECK_IN_MAX_DISTANCE_KM } from './geo/haversine';
 export { loadObjectivesMap, getObjectiveForShift } from './objectives/loadObjectivesMap';
 export {
@@ -14,6 +14,7 @@ export {
   buildCheckInPayload,
   flushPendingCheckins,
   getCheckInTiming,
+  isOperationsCoverageShift,
   parsePendingCheckins,
   validateCheckInDistance,
 } from './checkIn/portalCheckIn';
@@ -63,7 +64,11 @@ export {
   assignGuardToEvent,
 } from './eventos/eventoPortal';
 export type { AssignGuardToEventParams } from './eventos/eventoPortal';
-export { normalizePortalInboxItem, solicitudEventoStatusLabel } from './notifications/inboxNormalize';
+export {
+  normalizePortalInboxItem,
+  solicitudEventoStatusLabel,
+  portalInboxDetailLines,
+} from './notifications/inboxNormalize';
 export type { PortalInboxNormalized } from './notifications/inboxNormalize';
 export {
   isOperationalPortalShift,
@@ -72,3 +77,4 @@ export {
   shiftPlanificacionLookupKey,
 } from './shifts/employeeShiftVisibility';
 export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';
+export { isAbsentLikeShift, isActiveAbsenceRecord } from './shifts/isAbsentLikeShift';

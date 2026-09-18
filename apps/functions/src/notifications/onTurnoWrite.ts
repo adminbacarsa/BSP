@@ -144,6 +144,9 @@ export const onTurnoWrite = functions
     const after  = change.after.exists  ? change.after.data()!  : null;
     const before = change.before.exists ? change.before.data()! : null;
 
+    // Empresa sandbox de capacitación: no emitir notificaciones ni liquidar
+    if (String((after || before)?.empresaId ?? '') === 'capacitacion') return;
+
     try {
       await updateLiquidacionOnTurnoComplete(db, change.after.id, after, before);
     } catch (e) {

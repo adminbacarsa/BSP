@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Hospital Santa Rosa — Río Primero — Agosto 2026</title>
+<style>
+  :root { --indigo:#4f46e5; --emerald:#10b981; --rose:#f43f5e; --amber:#f59e0b; --slate:#64748b; --bg:#0f172a; --card:#1e293b; --text:#e2e8f0; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Segoe UI,system-ui,sans-serif; background:linear-gradient(160deg,#0f172a,#1e1b4b); color:var(--text); padding:24px; line-height:1.5; }
+  h1 { font-size:1.75rem; margin:0 0 8px; }
+  .sub { color:#94a3b8; margin-bottom:24px; }
+  .grid { display:grid; gap:16px; }
+  .g4 { grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+  .g2 { grid-template-columns:1fr 1fr; }
+  .card { background:var(--card); border-radius:20px; padding:20px; box-shadow:0 8px 32px rgba(0,0,0,.35); border:1px solid #334155; }
+  .card h2 { margin:0 0 12px; font-size:1.05rem; color:#cbd5e1; }
+  .kpi { font-size:1.8rem; font-weight:700; }
+  .kpi small { display:block; font-size:.75rem; color:#94a3b8; font-weight:500; margin-top:4px; }
+  .ok { color:var(--emerald); }
+  .warn { color:var(--amber); }
+  .bad { color:var(--rose); }
+  .callout { border-left:4px solid var(--indigo); background:#1e293b99; padding:14px 18px; border-radius:12px; margin-bottom:20px; }
+  table { width:100%; border-collapse:collapse; font-size:.85rem; }
+  th,td { padding:8px 10px; border-bottom:1px solid #334155; text-align:left; }
+  th { color:#94a3b8; font-weight:600; }
+  .num { text-align:right; font-variant-numeric:tabular-nums; }
+  .heat { display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .day { border-radius:10px; padding:8px 4px; text-align:center; font-size:.72rem; min-height:72px; }
+  .day .n { font-weight:700; font-size:1rem; }
+  .bar-wrap { margin:12px 0; }
+  .bar-row { display:grid; grid-template-columns:140px 1fr 70px; gap:10px; align-items:center; margin:6px 0; font-size:.85rem; }
+  .bar { height:22px; border-radius:99px; background:#334155; overflow:hidden; }
+  .bar > i { display:block; height:100%; border-radius:99px; }
+  @media(max-width:900px) { .g2 { grid-template-columns:1fr; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const D = {"meta": {"id": "rio-primero", "titulo": "Hospital Santa Rosa — Río Primero", "objetivo": "SP - Hospital Ramon Bautista Mestre", "periodo": "Agosto 2026", "generado": "2026-09-07 11:49", "plan_leyenda": "lun–sáb: 2M 1T 1N · dom: 1M 1T 1N", "parametro_label": "Parámetro SLA (2×24×31)", "resumen": ["“2 vigiladores por turno × 24 hs” en facturación implica 1.488 h/mes — no coincide ni con lo facturado (960 h) ni con las fichadas corregidas.", "Las 960 h facturadas vs 952 h plan operativo → brecha SLA − operativo = +8 h.", "Fichadas corregidas: olvido cierre >10 h o 0 h → 8 h nominal por turno."], "facturacion": {"facturado": 960, "plan_operativo": 952, "parametro_cargado": 1488, "gap_parametro": 528, "gap_plan": 8}}, "objetivo": "SP - Hospital Ramon Bautista Mestre", "periodo": "Agosto 2026", "marcaciones": 119, "guardias": [{"nombre": "ANCHAVAL Hernan Nicolas", "turnos": 23, "horas": 189.58, "bandas": {"T": 10, "M": 7, "N": 6}, "dni": "37166797"}, {"nombre": "BANEGA Maximiliano Ezequiel", "turnos": 24, "horas": 195.96, "bandas": {"M": 12, "T": 6, "N": 6}, "dni": "41439544"}, {"nombre": "CORONEL Fernando Exequiel", "turnos": 23, "horas": 189.86, "bandas": {"N": 9, "M": 8, "T": 6}, "dni": "36589139"}, {"nombre": "JUNCOS Lucas Ezequiel", "turnos": 23, "horas": 188.7, "bandas": {"T": 9, "N": 9, "M": 5}, "dni": "41280881"}, {"nombre": "MOLINA Sergio Hernan", "turnos": 26, "horas": 212.73, "bandas": {"M": 25, "T": 1}, "dni": "40419953"}], "calendario": [{"fecha": "2026-08-01", "dia": 1, "domingo": false, "plan_hs": 32, "real_hs": 32.79, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-02", "dia": 2, "domingo": true, "plan_hs": 24, "real_hs": 24.71, "counts": {"M": 1, "T": 1, "N": 1}, "plan_counts": {"M": 1, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-03", "dia": 3, "domingo": false, "plan_hs": 32, "real_hs": 32.77, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-04", "dia": 4, "domingo": false, "plan_hs": 32, "real_hs": 32.6, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-05", "dia": 5, "domingo": false, "plan_hs": 32, "real_hs": 32.67, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-06", "dia": 6, "domingo": false, "plan_hs": 32, "real_hs": 32.84, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-07", "dia": 7, "domingo": false, "plan_hs": 32, "real_hs": 33.27, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-08", "dia": 8, "domingo": false, "plan_hs": 32, "real_hs": 33.02, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-09", "dia": 9, "domingo": true, "plan_hs": 24, "real_hs": 24.64, "counts": {"M": 1, "T": 1, "N": 1}, "plan_counts": {"M": 1, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-10", "dia": 10, "domingo": false, "plan_hs": 32, "real_hs": 32.7, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-11", "dia": 11, "domingo": false, "plan_hs": 32, "real_hs": 32.99, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-12", "dia": 12, "domingo": false, "plan_hs": 32, "real_hs": 32.88, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-13", "dia": 13, "domingo": false, "plan_hs": 32, "real_hs": 32.95, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-14", "dia": 14, "domingo": false, "plan_hs": 32, "real_hs": 32.76, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-15", "dia": 15, "domingo": false, "plan_hs": 32, "real_hs": 32.77, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-16", "dia": 16, "domingo": true, "plan_hs": 24, "real_hs": 24.75, "counts": {"M": 1, "T": 1, "N": 1}, "plan_counts": {"M": 1, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-17", "dia": 17, "domingo": false, "plan_hs": 32, "real_hs": 33.02, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-18", "dia": 18, "domingo": false, "plan_hs": 32, "real_hs": 33.03, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-19", "dia": 19, "domingo": false, "plan_hs": 32, "real_hs": 33.04, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-20", "dia": 20, "domingo": false, "plan_hs": 32, "real_hs": 32.94, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-21", "dia": 21, "domingo": false, "plan_hs": 32, "real_hs": 33.14, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-22", "dia": 22, "domingo": false, "plan_hs": 32, "real_hs": 32.7, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-23", "dia": 23, "domingo": true, "plan_hs": 24, "real_hs": 24.63, "counts": {"M": 1, "T": 1, "N": 1}, "plan_counts": {"M": 1, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-24", "dia": 24, "domingo": false, "plan_hs": 32, "real_hs": 32.86, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-25", "dia": 25, "domingo": false, "plan_hs": 32, "real_hs": 32.79, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-26", "dia": 26, "domingo": false, "plan_hs": 32, "real_hs": 32.66, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-27", "dia": 27, "domingo": false, "plan_hs": 32, "real_hs": 32.81, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-28", "dia": 28, "domingo": false, "plan_hs": 32, "real_hs": 24.44, "counts": {"M": 1, "T": 2, "N": 0}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": false}, {"fecha": "2026-08-29", "dia": 29, "domingo": false, "plan_hs": 32, "real_hs": 40.52, "counts": {"M": 3, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": false}, {"fecha": "2026-08-30", "dia": 30, "domingo": true, "plan_hs": 24, "real_hs": 24.35, "counts": {"M": 1, "T": 1, "N": 1}, "plan_counts": {"M": 1, "T": 1, "N": 1}, "ok": true}, {"fecha": "2026-08-31", "dia": 31, "domingo": false, "plan_hs": 32, "real_hs": 32.79, "counts": {"M": 2, "T": 1, "N": 1}, "plan_counts": {"M": 2, "T": 1, "N": 1}, "ok": true}], "incumplimientos": [{"fecha": "2026-08-28", "dia_sem": "Vie", "domingo": false, "plan": {"M": 2, "T": 1, "N": 1, "hs_dia": 32}, "real": {"M": 1, "T": 2, "N": 0}, "diffs": {"M": -1, "T": 1, "N": -1}, "horas_marcadas": 24.44}, {"fecha": "2026-08-29", "dia_sem": "Sáb", "domingo": false, "plan": {"M": 2, "T": 1, "N": 1, "hs_dia": 32}, "real": {"M": 3, "T": 1, "N": 1}, "diffs": {"M": 1, "T": 0, "N": 0}, "horas_marcadas": 40.52}], "dias_sin_marca": [], "validaciones": [{"fecha": "2026-08-07", "nombre": "ANCHAVAL Hernan Nicolas", "banda": "T", "entrada": "14:31", "salida": "23:03", "horas": 8.52, "horas_originales": 8.52, "corregido": false, "issues": ["Jornada extendida (8.52 h) — dentro de tolerancia"]}, {"fecha": "2026-08-18", "nombre": "JUNCOS Lucas Ezequiel", "banda": "M", "entrada": "06:52", "salida": "15:39", "horas": 8.78, "horas_originales": 8.78, "corregido": false, "issues": ["Jornada extendida (8.78 h) — dentro de tolerancia"]}, {"fecha": "2026-08-18", "nombre": "CORONEL Fernando Exequiel", "banda": "T", "entrada": "14:44", "salida": "14:42", "horas": 8.0, "horas_originales": 23.97, "corregido": true, "issues": ["Olvidó cerrar turno (23.97 h registradas) → 8 h"]}, {"fecha": "2026-08-19", "nombre": "MOLINA Sergio Hernan", "banda": "M", "entrada": "05:49", "salida": "14:21", "horas": 8.52, "horas_originales": 8.52, "corregido": false, "issues": ["Jornada extendida (8.52 h) — dentro de tolerancia"]}, {"fecha": "2026-08-19", "nombre": "ANCHAVAL Hernan Nicolas", "banda": "M", "entrada": "06:49", "salida": "14:42", "horas": 8.0, "horas_originales": 31.88, "corregido": true, "issues": ["Olvidó cerrar turno (31.88 h registradas) → 8 h"]}, {"fecha": "2026-08-27", "nombre": "CORONEL Fernando Exequiel", "banda": "N", "entrada": "22:43", "salida": "22:45", "horas": 8.0, "horas_originales": 24.02, "corregido": true, "issues": ["Olvidó cerrar turno (24.02 h registradas) → 8 h"]}, {"fecha": "2026-08-28", "nombre": "MOLINA Sergio Hernan", "banda": "T", "entrada": "14:00", "salida": "14:00", "horas": 8.0, "horas_originales": 0.0, "corregido": true, "issues": ["Fichada sin duración (0 h) → 8 h nominal del turno"]}, {"fecha": "2026-08-29", "nombre": "CORONEL Fernando Exequiel", "banda": "M", "entrada": "07:00", "salida": "06:45", "horas": 8.0, "horas_originales": 47.75, "corregido": true, "issues": ["Olvidó cerrar turno (47.75 h registradas) → 8 h"]}], "correcciones": [{"fecha": "2026-08-18", "nombre": "CORONEL Fernando Exequiel", "entrada": "14:44", "salida": "14:42", "horas_originales": 23.97, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (23.97 h registradas) → 8 h", "banda": "T"}, {"fecha": "2026-08-19", "nombre": "ANCHAVAL Hernan Nicolas", "entrada": "06:49", "salida": "14:42", "horas_originales": 31.88, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (31.88 h registradas) → 8 h", "banda": "M"}, {"fecha": "2026-08-27", "nombre": "CORONEL Fernando Exequiel", "entrada": "22:43", "salida": "22:45", "horas_originales": 24.02, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (24.02 h registradas) → 8 h", "banda": "N"}, {"fecha": "2026-08-28", "nombre": "MOLINA Sergio Hernan", "entrada": "14:00", "salida": "14:00", "horas_originales": 0.0, "horas_corregidas": 8.0, "motivo": "Fichada sin duración (0 h) → 8 h nominal del turno", "banda": "T"}, {"fecha": "2026-08-29", "nombre": "CORONEL Fernando Exequiel", "entrada": "07:00", "salida": "06:45", "horas_originales": 47.75, "horas_corregidas": 8.0, "motivo": "Olvidó cerrar turno (47.75 h registradas) → 8 h", "banda": "M"}], "anomalias": [], "totales": {"horas_marcadas_brutas": 1064.45, "horas_marcadas": 976.83, "horas_nominales_8h": 952.0, "turnos_marcados": 119, "turnos_corregidos": 5, "horas_plan_pdf": 952, "horas_facturadas": 960, "horas_teoricas_param": 1488, "dias_con_marca": 31, "dias_incompletos": 2}};
+const fmt = n => n.toLocaleString('es-AR', {maximumFractionDigits:1}) + ' h';
+const fmtN = n => n.toLocaleString('es-AR', {maximumFractionDigits:0});
+
+function bar(label, val, max, color, isHs=true) {
+  const pct = max ? Math.min(100, val/max*100) : 0;
+  const txt = isHs ? fmt(val) : fmtN(val);
+  return `<div class="bar-row"><span>${label}</span><div class="bar"><i style="width:${pct}%;background:${color}"></i></div><span class="num">${txt}</span></div>`;
+}
+
+function render() {
+  const t = D.totales;
+  const M = D.meta || {};
+  const comp = [
+    { label: M.parametro_label || 'Parámetro SLA', val: t.horas_teoricas_param, c:'#6366f1' },
+    { label:'Facturado SLA', val:t.horas_facturadas, c:'#f59e0b' },
+    { label:'Plan operativo', val:t.horas_plan_pdf, c:'#10b981' },
+    { label:'Fichadas corregidas', val:t.horas_marcadas, c:'#38bdf8' },
+  ];
+  const maxC = Math.max(...comp.map(x=>x.val));
+  const resumenHtml = (M.resumen || []).map((p,i) => `${i+1}. ${p}`).join('<br>');
+  const fac = M.facturacion;
+  const brecha = t.horas_facturadas - t.horas_plan_pdf;
+  const brechaCls = brecha === 0 ? 'ok' : (brecha > 0 ? 'warn' : 'bad');
+  const brechaNota = brecha === 0 ? 'SLA = plan operativo' : (brecha > 0 ? 'SLA > plan operativo' : 'SLA < plan operativo');
+  let facBlock = '';
+  if (fac && fac.principal != null) {
+    facBlock = `<div class="card" style="margin-bottom:14px;border-color:#f59e0b">
+      <h2>Desglose facturación vs plan operativo</h2>
+      <div class="grid g4">
+        <div><span class="muted">Principal</span><div class="kpi warn">${fmtN(fac.principal)}<small>teórico 3 vig: ${fmtN(fac.principal_teorico)} · gap interno ${fmtN(fac.gap_principal)} h</small></div></div>
+        <div><span class="muted">Refuerzo</span><div class="kpi">${fmtN(fac.refuerzo)}<small>1 vig × 24 × 31</small></div></div>
+        <div><span class="muted">Total facturado (SLA)</span><div class="kpi warn">${fmtN(t.horas_facturadas)}</div></div>
+        <div><span class="muted">Brecha (SLA − operativo)</span><div class="kpi ${brechaCls}">${fmtN(brecha)}<small>${brechaNota} · plan ${fmtN(t.horas_plan_pdf)} h</small></div></div>
+      </div>
+      <p style="color:#94a3b8;font-size:.85rem;margin:12px 0 0">Fichadas corregidas: <b>${fmt(t.horas_marcadas)}</b> (referencia) · ${t.turnos_corregidos} turno(s) normalizados · bruto ${fmt(t.horas_marcadas_brutas)}</p>
+    </div>`;
+  } else if (fac && fac.facturado != null) {
+    facBlock = `<div class="card" style="margin-bottom:14px;border-color:#f59e0b">
+      <h2>Desglose facturación vs plan operativo</h2>
+      <div class="grid g4">
+        <div><span class="muted">Facturado SLA</span><div class="kpi warn">${fmtN(t.horas_facturadas)}<small>hs mes agosto</small></div></div>
+        <div><span class="muted">Plan operativo</span><div class="kpi ok">${fmtN(t.horas_plan_pdf)}<small>${M.plan_leyenda || ''}</small></div></div>
+        <div><span class="muted">Brecha (SLA − operativo)</span><div class="kpi ${brechaCls}">${fmtN(brecha)}<small>${brechaNota}</small></div></div>
+        <div><span class="muted">Fichadas corregidas</span><div class="kpi">${fmt(t.horas_marcadas)}<small>referencia · ${t.turnos_corregidos} turnos norm.</small></div></div>
+      </div>
+    </div>`;
+  }
+
+  const heat = D.calendario.map(d => {
+    const cls = d.ok ? 'ok' : 'bad';
+    const bg = d.ok ? '#064e3b55' : '#7f1d1d55';
+    return `<div class="day" style="background:${bg}"><div class="n">${d.dia}</div><div class="${cls}">${d.counts.M}M ${d.counts.T}T ${d.counts.N}N</div><div style="color:#94a3b8">${d.real_hs}h</div></div>`;
+  }).join('');
+
+  const inc = D.incumplimientos.map(r => `<tr>
+    <td>${r.fecha} (${r.dia_sem})</td>
+    <td>${r.plan.M}M ${r.plan.T}T ${r.plan.N}N</td>
+    <td>${r.real.M}M ${r.real.T}T ${r.real.N}N</td>
+    <td class="num ${r.diffs.M||r.diffs.T||r.diffs.N?'bad':''}">${Object.entries(r.diffs).map(([k,v])=>v?k+(v>0?'+':'')+v:'').filter(Boolean).join(' ')||'—'}</td>
+    <td class="num">${r.horas_marcadas} h</td>
+  </tr>`).join('');
+
+  const guards = D.guardias.map(g => `<tr>
+    <td>${g.nombre}</td><td class="num">${g.turnos}</td><td class="num">${g.horas} h</td>
+    <td>M:${g.bandas.M||0} T:${g.bandas.T||0} N:${g.bandas.N||0}</td>
+  </tr>`).join('');
+
+  const val = D.validaciones.slice(0,25).map(v => `<tr>
+    <td>${v.fecha}</td><td>${v.nombre.split(' ')[0]}</td><td>${v.banda}</td>
+    <td>${v.entrada}–${v.salida}</td><td class="num">${v.horas} h</td>
+    <td class="warn">${v.issues.join('; ')}</td>
+  </tr>`).join('');
+
+  const corr = (D.correcciones||[]).map(v => `<tr>
+    <td>${v.fecha}</td><td>${v.nombre?.split(' ').slice(0,2).join(' ')||''}</td><td>${v.banda}</td>
+    <td>${v.entrada}–${v.salida}</td>
+    <td class="num bad">${v.horas_originales} h</td>
+    <td class="num ok">${v.horas_corregidas} h</td>
+    <td class="warn">${v.motivo}</td>
+  </tr>`).join('');
+
+  const anom = (D.anomalias||[]).map(v => `<tr>
+    <td>${v.fecha||v.entrada?.slice(0,10)}</td><td>${v.nombre?.split(' ')[0]||''}</td>
+    <td class="bad">${v.issues?.join('; ')||''}</td><td class="num">${v.horas} h</td>
+  </tr>`).join('');
+
+  document.getElementById('app').innerHTML = `
+    <h1>${M.titulo || 'Análisis'}</h1>
+    <p class="sub">${D.objetivo} · ${D.periodo} · ${D.marcaciones} marcaciones · ${D.guardias.length} guardias · <span style="color:#64748b">v ${M.generado || '?'}</span></p>
+
+    <div class="callout">
+      <b>Resumen del caso</b><br>
+      ${resumenHtml}<br><br>
+      <b>Brecha (SLA − operativo):</b> <span class="${brechaCls}">${fmtN(brecha)} h</span> · Fichadas corregidas: ${fmt(t.horas_marcadas)} (${t.turnos_corregidos} turnos norm.)
+    </div>
+    ${facBlock}
+
+    <div class="grid g4" style="margin-bottom:20px">
+      <div class="card"><h2>Facturado SLA</h2><div class="kpi warn">${fmtN(t.horas_facturadas)}<small>hs mes</small></div></div>
+      <div class="card"><h2>Plan operativo</h2><div class="kpi ok">${fmtN(t.horas_plan_pdf)}<small>${M.plan_leyenda || ''}</small></div></div>
+      <div class="card"><h2>Fichadas corregidas</h2><div class="kpi ok">${fmt(t.horas_marcadas)}<small>${t.turnos_corregidos} turnos normalizados · bruto ${fmt(t.horas_marcadas_brutas)}</small></div></div>
+      <div class="card"><h2>Parámetro / contrato</h2><div class="kpi bad">${fmtN(t.horas_teoricas_param)}<small>${M.parametro_label || ''}</small></div></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Comparativa de horas (conceptos)</h2>
+      <div class="bar-wrap">${comp.map(c=>bar(c.label,c.val,maxC,c.c)).join('')}</div>
+      <p style="color:#94a3b8;font-size:.85rem;margin:8px 0 0">
+        Fichadas corregidas: ${fmt(t.horas_marcadas)} (bruto ${fmt(t.horas_marcadas_brutas)}).<br>
+        <b>Brecha (SLA − operativo): ${fmtN(brecha)} h</b> — ${brechaNota}. Fichadas corregidas: ${fmt(t.horas_marcadas)} (referencia).
+      </p>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Cobertura diaria (marcaciones) — M / T / N por día</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Verde = coincide plan · Rojo = desvío · Esperado: ${M.plan_leyenda || 'ver plan operativo'}</p>
+      <div class="heat" style="margin-top:12px">${heat}</div>
+      <p style="margin-top:10px;color:#94a3b8">${t.dias_incompletos} días con cobertura distinta al plan · ${D.dias_sin_marca.length} días sin ninguna marca en el export</p>
+    </div>
+
+    <div class="grid g2" style="margin-bottom:20px">
+      <div class="card">
+        <h2>Desvíos vs plan (${D.incumplimientos.length} días)</h2>
+        <div style="overflow:auto;max-height:360px"><table>
+          <thead><tr><th>Fecha</th><th>Plan</th><th>Real</th><th>Δ</th><th class="num">Hs</th></tr></thead>
+          <tbody>${inc || '<tr><td colspan=5>Sin desvíos</td></tr>'}</tbody>
+        </table></div>
+      </div>
+      <div class="card">
+        <h2>Guardias — resumen</h2>
+        <table><thead><tr><th>Nombre</th><th class="num">Turnos</th><th class="num">Horas</th><th>Bandas</th></tr></thead>
+        <tbody>${guards}</tbody></table>
+      </div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Correcciones aplicadas (${(D.correcciones||[]).length}) — regla: máx. 8 h · si &gt;10 h o 0 h → 8 h nominal</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Turnos con olvido de cierre (ej. 23 h, 31 h) o fichada sin duración se normalizan a 8 h CCT para el análisis vs SLA.</p>
+      <div style="overflow:auto"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Banda</th><th>Horario fichado</th><th class="num">Hs brutas</th><th class="num">Hs usadas</th><th>Motivo</th></tr></thead>
+        <tbody>${corr || '<tr><td colspan=7>Sin correcciones</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card" style="margin-bottom:20px">
+      <h2>Otras observaciones (${(D.anomalias||[]).length})</h2>
+      <div style="overflow:auto"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Problema</th><th class="num">Hs reportadas</th></tr></thead>
+        <tbody>${anom || '<tr><td colspan=4>Ninguna</td></tr>'}</tbody>
+      </table></div>
+    </div>
+
+    <div class="card">
+      <h2>Validaciones horarias (entrada/salida vs banda 8 h)</h2>
+      <p style="color:#94a3b8;font-size:.85rem">Ventanas: M 05–08 → 14h · T 14–16 → 23h · N 22–01 → 07h</p>
+      <div style="overflow:auto;max-height:400px"><table>
+        <thead><tr><th>Fecha</th><th>Guardia</th><th>Banda</th><th>Horario</th><th class="num">Hs</th><th>Observación</th></tr></thead>
+        <tbody>${val}</tbody>
+      </table></div>
+    </div>
+  `;
+}
+render();
+</script>
+</body>
+</html>

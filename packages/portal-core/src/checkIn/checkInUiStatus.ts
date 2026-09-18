@@ -51,7 +51,19 @@ export function resolveCheckInUiStatus(
   }
 
   if (isShiftPresent(shift)) {
-    const turnoStart = toDate(shift.startTime) ?? toDate(shift.checkInTime);
+    const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+    const checkInAt = toDate(shift.checkInTime);
+    const turnoStart = toDate(shift.startTime) ?? checkInAt;
+    if (isOpsCoverage && checkInAt) {
+      return {
+        status: 'present',
+        title: `Presente desde las ${formatTimeAr(checkInAt)}`,
+        subtitle: turnoStart
+          ? `Turno asignado ${formatTimeAr(turnoStart)} · Cobertura`
+          : 'Cobertura confirmada',
+        tone: 'success',
+      };
+    }
     return {
       status: 'present',
       title: turnoStart ? `Tu turno comenzó a las ${formatTimeAr(turnoStart)}` : 'Presente confirmado',
@@ -96,6 +108,8 @@ export function resolveCheckInUiStatus(
     };
   }
 
+  const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+
   if (timing?.tooEarly) {
     return {
       status: 'too_early',
@@ -117,8 +131,10 @@ export function resolveCheckInUiStatus(
   if (timing?.canCheckIn) {
     return {
       status: 'ready',
-      title: 'Listo para fichar',
-      subtitle: 'Usá el botón con GPS en el puesto',
+      title: isOpsCoverage ? 'Cobertura: listo para fichar' : 'Listo para fichar',
+      subtitle: isOpsCoverage
+        ? 'Al llegar al objetivo, marcá presente con GPS'
+        : 'Usá el botón con GPS en el puesto',
       tone: 'info',
     };
   }

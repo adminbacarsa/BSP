@@ -1,0 +1,65 @@
+import * as admin from 'firebase-admin';
+import * as functions from 'firebase-functions/v1';
+import { Timestamp } from 'firebase-admin/firestore';
+import { CandidateType } from './eligibilityFilter';
+export type ConvocatoriaType = CandidateType | 'LLEGADA_TARDE';
+export interface ConvocatoriaCoberturaDoc {
+    empresaId: string;
+    shiftId: string;
+    objectiveId: string;
+    objectiveName?: string;
+    clientId?: string;
+    clientName?: string;
+    shiftCode?: string;
+    startTime: Timestamp;
+    endTime?: Timestamp;
+    aptitudesRequeridas?: string[];
+    type: ConvocatoriaType;
+    urgency: 'URGENTE' | 'INTERMEDIO' | 'NORMAL';
+    cascadeStep: number;
+    candidateEmployeeId: string;
+    candidateEmployeeName: string;
+    candidateUid?: string;
+    extendShiftId?: string;
+    advanceShiftId?: string;
+    ftShiftId?: string;
+    status: 'PENDING' | 'ESCALATED' | 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'CANCELLED';
+    timeoutAt: Timestamp;
+    createdAt: Timestamp;
+    createdBy: string;
+    createdByName?: string;
+    respondedAt?: Timestamp;
+    rejectionReason?: string;
+    resolvedAt?: Timestamp;
+}
+export declare const crearConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
+export declare const responderConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
+export declare const cancelarConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
+export declare const getCandidatosCobertura: functions.HttpsFunction & functions.Runnable<any>;
+export interface ShiftDataForCascade {
+    id: string;
+    objectiveId: string;
+    objectiveName?: string;
+    clientId?: string;
+    clientName?: string;
+    code?: string;
+    startTime: Timestamp;
+    endTime?: Timestamp;
+    empresaId: string;
+}
+export declare function iniciarCascadaCobertura(db: admin.firestore.Firestore, shift: ShiftDataForCascade, createdBy?: string): Promise<void>;
+export declare function simularRespuestasConvocatorias(db: admin.firestore.Firestore, empresaId: string): Promise<number>;
+export declare const checkConvocatoriaTimeouts: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare function crearConvocatoriaLlegadaTarde(db: admin.firestore.Firestore, shift: {
+    id: string;
+    empresaId: string;
+    objectiveId: string;
+    objectiveName: string;
+    clientId: string;
+    shiftCode: string;
+    startTime: Timestamp;
+    endTime?: Timestamp;
+    employeeId: string;
+    employeeName: string;
+    employeeUid?: string;
+}): Promise<void>;

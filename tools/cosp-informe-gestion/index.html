@@ -1,0 +1,380 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>COSP — Informe de gestión e implementación</title>
+  <style>
+    @page { margin: 0; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      background: #000;
+      color: #e2e8f0;
+      font-family: "Segoe UI", Inter, system-ui, sans-serif;
+      width: 1920px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    .sec {
+      width: 1920px;
+      background: #000;
+      padding: 56px 64px 40px;
+      position: relative;
+    }
+    .sec + .sec { border-top: 1px solid #111827; }
+    .sec::before {
+      content: "";
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 6px;
+      background: #10b981;
+    }
+    .kicker {
+      color: #34d399;
+      font-size: 14px;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+      font-weight: 650;
+    }
+    h1 { font-size: 50px; font-weight: 700; letter-spacing: -0.03em; line-height: 1.05; }
+    h2 { font-size: 32px; font-weight: 700; letter-spacing: -0.02em; }
+    h3 { font-size: 17px; font-weight: 650; color: #a7f3d0; }
+    p { font-size: 17px; line-height: 1.45; color: #cbd5e1; }
+    .sub { color: #94a3b8; font-size: 17px; line-height: 1.45; max-width: 1500px; }
+    .stats { display: grid; gap: 16px; }
+    .s4 { grid-template-columns: repeat(4, 1fr); }
+    .s3 { grid-template-columns: repeat(3, 1fr); }
+    .s2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: #0a0e16;
+      border: 1px solid #1e293b;
+      border-radius: 22px;
+      padding: 20px 22px;
+    }
+    .stat .v { font-size: 32px; font-weight: 700; color: #f8fafc; letter-spacing: -0.03em; }
+    .stat .v.ok { color: #34d399; }
+    .stat .v.warn { color: #fbbf24; }
+    .stat .l { margin-top: 6px; font-size: 13px; color: #94a3b8; line-height: 1.35; }
+    .warn {
+      background: #1a1408;
+      border: 1px solid #854d0e;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #fde68a;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .okbox {
+      background: #06150f;
+      border: 1px solid #065f46;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #a7f3d0;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    .info {
+      background: #0a1220;
+      border: 1px solid #1e3a5f;
+      border-radius: 22px;
+      padding: 18px 22px;
+      color: #bfdbfe;
+      font-size: 16px;
+      line-height: 1.45;
+    }
+    table { width: 100%; border-collapse: collapse; }
+    th {
+      text-align: left;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #64748b;
+      padding: 8px 12px 10px;
+      border-bottom: 1px solid #1e293b;
+    }
+    td {
+      padding: 8px 12px;
+      font-size: 15px;
+      line-height: 1.32;
+      border-bottom: 1px solid #111827;
+      vertical-align: top;
+    }
+    tr:nth-child(even) td { background: #070a10; }
+    tr.total td { background: #052e1f; color: #a7f3d0; font-weight: 650; }
+    .ok { color: #34d399; }
+    .warn-t { color: #fbbf24; }
+    .pill {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 3px 10px;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .pill.ok { background: #052e1f; color: #6ee7b7; }
+    .pill.warn { background: #2a1d04; color: #fcd34d; }
+    .pill.info { background: #0b1c33; color: #93c5fd; }
+    .foot { margin-top: 16px; color: #475569; font-size: 12px; }
+    .mt { margin-top: 18px; }
+    .mt8 { margin-top: 8px; }
+    .timeline { display: grid; grid-template-columns: repeat(6, 1fr); gap: 12px; }
+    .tl {
+      background: #0a0e16;
+      border: 1px solid #1e293b;
+      border-radius: 18px;
+      padding: 16px 14px 14px;
+      border-top: 3px solid #10b981;
+    }
+    .tl.now { border-top-color: #fbbf24; }
+    .tl .n { color: #34d399; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 700; }
+    .tl.now .n { color: #fbbf24; }
+    .tl h3 { margin-top: 8px; font-size: 15px; }
+    .tl p { font-size: 14px; margin-top: 6px; }
+    .bars { display: flex; align-items: flex-end; gap: 28px; height: 260px; }
+    .col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 8px; }
+    .bar-wrap { display: flex; align-items: flex-end; gap: 8px; height: 200px; width: 100%; justify-content: center; }
+    .bar { width: 56px; border-radius: 10px 10px 0 0; }
+    .bar.a { background: #34d399; }
+    .bar.b { background: #60a5fa; }
+    .bar.c { background: #818cf8; }
+    .bar.w { background: #fbbf24; }
+    .bar-lab { font-size: 13px; color: #94a3b8; text-align: center; }
+    .legend { display: flex; gap: 20px; color: #94a3b8; font-size: 13px; }
+    .dot { width: 10px; height: 10px; border-radius: 99px; display: inline-block; margin-right: 6px; }
+    .hbar { height: 14px; border-radius: 99px; background: #111827; overflow: hidden; }
+    .hfill { height: 100%; background: #34d399; border-radius: 99px; }
+    .hfill.w { background: #fbbf24; }
+  </style>
+</head>
+<body>
+
+  <section class="sec">
+    <div class="kicker">Grupo Bacar S.A. · Corte 18/08/2026 · CCT 422/05 SUVICO</div>
+    <h1 class="mt">COSP — Informe de gestión<br>e implementación</h1>
+    <p class="sub mt8">Audiencia: dirección, operaciones, sistemas y liquidaciones. El dato de prefactura es el reporte real de la plataforma, no un mock.</p>
+    <div class="stats s4 mt">
+      <div class="card stat"><div class="v ok">+90</div><div class="l">Objetivos con SLA y servicio. El universo comercial ya está adentro.</div></div>
+      <div class="card stat"><div class="v">10/08</div><div class="l">Inicio de carga de cronogramas en COSP. Julio–agosto se reconstruyen.</div></div>
+      <div class="card stat"><div class="v warn">~28/08</div><div class="l">Cierre de la malla de agosto. Sistemas estima ~10 días desde el corte.</div></div>
+      <div class="card stat"><div class="v ok">25/09</div><div class="l">Primer corte CCT defendible. Ciclo 26/08 → 25/09.</div></div>
+    </div>
+    <div class="warn mt">
+      Todavía no hay ciclo de liquidación cerrado. La plataforma ya opera (objetivos, SLA, malla, ops, RRHH, prefactura, análisis). Lo que falta no es el producto: es terminar de volcar los cronogramas. Sistemas estima completar agosto en 10 días. Septiembre se trabaja en tiempo real. El primer corte formal CCT es el 25/09. No se declara cerrado el ciclo 26/07–25/08.
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">Estado</div>
+    <h2>Dónde estamos</h2>
+    <p class="sub mt8">COSP dejó de ser un piloto. La malla no se inventó en el sistema: se reconstruye desde los Excel de cronogramas y se cruza con marcaciones del operador y con LOL para no liquidar ni prefacturar a ciegas.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Módulo</th><th>Estado</th><th>Qué significa</th></tr></thead>
+        <tbody>
+          <tr><td>CRM / objetivos</td><td class="ok">En producción</td><td>+90 objetivos con ficha y servicio</td></tr>
+          <tr><td>SLA</td><td class="ok">En producción</td><td>Horas vendidas por puesto y banda; base de prefactura y análisis</td></tr>
+          <tr><td>Planificación</td><td class="warn-t">Carga histórica en curso</td><td>Triangulando Excel, marcaciones del operador y plataforma LOL para llegar a la certeza del turno</td></tr>
+          <tr><td>Operaciones</td><td class="ok">En producción</td><td>Presencia, ausencia, vacante, cobertura; origen plan vs ops</td></tr>
+          <tr><td>RRHH / novedades</td><td class="warn-t">En control</td><td>Códigos CCT (V/L/E/A/AA/PG/SUS/MAVIC); listo para API</td></tr>
+          <tr><td>Prefacturación</td><td class="warn-t">En control</td><td>PDF/CSV/XLSX por cliente: horas, diurnas/nocturnas, grilla diaria</td></tr>
+          <tr><td>Análisis</td><td class="warn-t">En control</td><td>SLA vs plan vs real; bolsa 192/200; extracto hours_balances</td></tr>
+          <tr><td>Reportes horas</td><td class="ok">En producción</td><td>Mismo cálculo que publicará payrollApi</td></tr>
+          <tr><td>API liquidación LOL</td><td class="warn-t">Contrato pendiente</td><td>Especificación lista; presupuesto solicitado a LOL</td></tr>
+          <tr><td>Primer corte CCT</td><td class="ok">25/09/2026</td><td>Ciclo 26/08 → 25/09. Aún no hay ciclo completo cerrado</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">Certeza</div>
+    <h2>Cómo se garantiza la información</h2>
+    <p class="sub mt8">La certeza no sale de una sola planilla. Cada hora tiene que coincidir en tres preguntas: qué se vendió, qué se planificó y qué se fichó. LOL cierra el cuarto: qué se paga.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Fuente</th><th>Pregunta que responde</th><th>Rol en el cruce</th></tr></thead>
+        <tbody>
+          <tr><td>Excel de cronogramas</td><td>Qué se planificó</td><td>Fuente histórica de la malla; se está migrando a COSP</td></tr>
+          <tr><td>SLA COSP</td><td>Qué se vendió</td><td>Servicio por puesto/banda; no se inventa la hora</td></tr>
+          <tr><td>Plan COSP</td><td>Qué se asignó</td><td>Turnos con códigos CCT (M/T/N/D12/N12/RET/F/FT)</td></tr>
+          <tr><td>Marcaciones</td><td>Qué se fichó</td><td>Horas reales; desvío vs plan; warnings si falta marca</td></tr>
+          <tr><td>LOL</td><td>Qué se liquidó / legajo</td><td>Cruce de certeza hoy; destino de la API de haberes</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>Qué ya no se discute</h3>
+        <p class="mt8">El modelo es CCT 422/05: códigos M/T/N/D12/N12, RET/F/FT, descanso 10 h, techo 192/200, ciclo 26→25, nocturnidad 21–06.</p>
+        <p class="mt8">Prefactura y reportes leen la misma hora facturable. Análisis usa el extracto mensual (hours_balances) y la malla.</p>
+        <p class="mt8">La API de liquidación ya está especificada: horas plan/real, diurnas/nocturnas, FT al 100 %, plus feriado, bolsa 200, novedades RRHH y warnings de fichada faltante.</p>
+      </div>
+      <div class="card">
+        <h3>Qué todavía es trabajo de carga</h3>
+        <p class="mt8">Sistemas está ingresando cronogramas desde el 10/08. Julio no es un mes limpio de punta a punta en todos los objetivos.</p>
+        <p class="mt8">Agosto se cierra en los próximos 10 días. Hasta ahí, la prefactura refleja el avance de carga, no un cierre contable.</p>
+        <p class="mt8">LOL sigue siendo cruce manual / de contralor. El inserto de API (liquidación + novedades) tiene presupuesto pedido; no está desarrollado del lado de ellos.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">Camino al corte</div>
+    <h2>Línea de tiempo</h2>
+    <div class="timeline mt">
+      <div class="tl"><div class="n">10/08/2026</div><h3>Inicio de carga</h3><p>Sistemas arranca cronogramas en COSP desde el 10 de agosto.</p></div>
+      <div class="tl now"><div class="n">18/08/2026</div><h3>Hoy</h3><p>+90 objetivos con SLA. Julio–agosto en carga. Prefactura ya emite.</p></div>
+      <div class="tl now"><div class="n">~28/08/2026</div><h3>Cierre agosto</h3><p>10 días para terminar la malla de agosto.</p></div>
+      <div class="tl"><div class="n">01/09/2026</div><h3>Septiembre en tiempo</h3><p>El mes entra y se puede planificar sin retrabajo de Excel.</p></div>
+      <div class="tl"><div class="n">25/09/2026</div><h3>Primer corte CCT</h3><p>Ciclo 2026-09: 26/08 al 25/09. Primera liquidación formal.</p></div>
+      <div class="tl"><div class="n">Post 25/09</div><h3>Inserto LOL</h3><p>API horas + novedades, sujeto a presupuesto y desarrollo LOL.</p></div>
+    </div>
+    <div class="info mt">
+      Por qué el primer corte es el 25/09 y no el 25/08. El ciclo que cierra el 25/08 (26/07–25/08) cruza un julio en carga y un agosto que todavía se está volcando. Serviría como ensayo interno, no como haberes. El ciclo 26/08–25/09 ya corre sobre malla COSP en tiempo real. Ese es el primer corte que se puede defender.
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">CRM</div>
+    <h2>Prefacturación — ya está en la plataforma</h2>
+    <p class="sub mt8">CRM emite prefactura por cliente y mes calendario: carátula con horas totales / diurnas / nocturnas por objetivo, y una grilla diaria por legajo (igual que el cronograma que el cliente reconoce). Exporta PDF, CSV y Excel. Abajo, emisiones reales de julio/2026.</p>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Cliente</th><th>CUIT</th><th>Período</th><th>Horas</th><th>Cobertura</th><th>Emisión</th></tr></thead>
+        <tbody>
+          <tr><td>CASISA (Caminos de las Sierras)</td><td>30-69297553-3</td><td>Julio/2026</td><td>9.651 h</td><td>13 objetivos</td><td>18/08 12:27</td></tr>
+          <tr><td>CONIFERAL</td><td>30-54662890-2</td><td>Julio/2026</td><td>3.049 h</td><td>7 objetivos</td><td>11/08 10:40</td></tr>
+          <tr><td>Lotería–Casinos</td><td>30-69432723-7</td><td>Julio/2026</td><td>14.470,5 h</td><td>15 sedes</td><td>10/08 08:24</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3 class="mt">Ejemplo adjunto — CASISA / Caminos de las Sierras</h3>
+    <p class="sub mt8">Prefactura_CASISA_JULIO-2026 (2).pdf · 14 páginas · 18/08/2026 12:27. Carátula con SLA, horas ejecutadas, diurnas y nocturnas por sede; adentro, grilla diaria por legajo y fila «SIN COBERTURA» cuando el puesto no tiene guardia.</p>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>SLA vs ejecutadas · julio CASISA</h3>
+        <div class="bars mt">
+          <div class="col">
+            <div class="bar-wrap"><div class="bar b" style="height:200px"></div></div>
+            <div class="bar-lab">SLA<br>9.679 h</div>
+          </div>
+          <div class="col">
+            <div class="bar-wrap"><div class="bar a" style="height:199px"></div></div>
+            <div class="bar-lab">Ejecutadas<br>9.651 h</div>
+          </div>
+          <div class="col">
+            <div class="bar-wrap"><div class="bar c" style="height:162px"></div></div>
+            <div class="bar-lab">Diurnas<br>7.828 h</div>
+          </div>
+          <div class="col">
+            <div class="bar-wrap"><div class="bar w" style="height:38px"></div></div>
+            <div class="bar-lab">Nocturnas<br>1.823 h</div>
+          </div>
+        </div>
+        <div class="legend mt">
+          <span><i class="dot" style="background:#60a5fa"></i>Vendidas (SLA)</span>
+          <span><i class="dot" style="background:#34d399"></i>Ejecutadas</span>
+          <span><i class="dot" style="background:#818cf8"></i>Diurnas</span>
+          <span><i class="dot" style="background:#fbbf24"></i>Nocturnas 21–06</span>
+        </div>
+      </div>
+      <div class="card">
+        <h3>Cierre contra SLA</h3>
+        <p class="mt8">9.651 / 9.679 h · desvío 28 h (0,3%)</p>
+        <div class="hbar mt"><div class="hfill" style="width:99.7%"></div></div>
+        <p class="mt8">El desvío está en Peaje APC (496 vs 488) y Peaje E53 (600 vs 580). El resto de sedes calza 1:1.</p>
+        <p class="mt8">APC</p>
+        <div class="hbar mt8"><div class="hfill w" style="width:98.4%"></div></div>
+        <p class="mt8">E53</p>
+        <div class="hbar mt8"><div class="hfill w" style="width:96.7%"></div></div>
+        <p class="mt8" style="font-size:14px;color:#94a3b8;">Julio no es el mes de certeza. Prueba que, con la malla cargada, la prefactura deja de ser un Excel a mano.</p>
+      </div>
+    </div>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Objetivo / sede</th><th>SLA</th><th>Hs totales</th><th>Diurnas</th><th>Nocturnas</th></tr></thead>
+        <tbody>
+          <tr><td>Arroyo Tegua</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Obrador Malagueño</td><td>3.375:00</td><td>3.375:00</td><td>2.259:00</td><td>1.116:00</td></tr>
+          <tr><td>Peaje 9 Norte</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje 9 Sur</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje Anexo</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje APC</td><td>496:00</td><td>488:00</td><td>458:00</td><td>30:00</td></tr>
+          <tr><td>Peaje E53</td><td>600:00</td><td>580:00</td><td>445:00</td><td>135:00</td></tr>
+          <tr><td>Peaje E55</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje Ruta 19</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje Ruta 20</td><td>744:00</td><td>744:00</td><td>481:00</td><td>263:00</td></tr>
+          <tr><td>Peaje Ruta 36</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Peaje Ruta 5</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr><td>Piedras Moras</td><td>496:00</td><td>496:00</td><td>465:00</td><td>31:00</td></tr>
+          <tr class="total"><td>Total CASISA</td><td>9.679:00</td><td>9.651:00</td><td>7.828:00</td><td>1.823:00</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3><span class="pill warn">Lectura honesta</span> · Julio no es el mes de certeza</h3>
+        <p class="mt8">CASISA julio (emisión 18/08) ya cierra contra SLA: 9.679 h vendidas vs 9.651 h ejecutadas. El valor de gestión no es el PDF de julio. Es que agosto cerrado + septiembre en vivo = primer paquete defendible para cliente y para LOL el 25/09.</p>
+      </div>
+      <div class="card">
+        <h3><span class="pill ok">Lo que sí prueba</span> · El reporte sirve para facturar</h3>
+        <p class="mt8">Cuando la malla está cargada, la prefactura deja de ser un Excel armado a mano: es el mismo dato que ve planificación y el mismo criterio de hora facturable (diurna / nocturna 21–06).</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">Haberes</div>
+    <h2>LOL — liquidación y novedades</h2>
+    <p class="sub mt8">COSP ya publica el contrato que LOL tiene que consumir (payrollApi): ciclo 26→25, una fila por empleado, horas teóricas y reales, diurnas/nocturnas, FT al 100 %, plus feriado, bolsa 200 (simples / 50 %), novedades RRHH y warnings. El modo planificado vs fichado lo define COSP, no LOL. Ya se pidió presupuesto a LOL para el inserto de esa API (liquidaciones + novedades).</p>
+    <div class="s2 stats mt">
+      <div class="card">
+        <h3>Lo que COSP entrega el 25/09 aunque LOL no esté listo</h3>
+        <p class="mt8">JSON de liquidación del ciclo 2026-09 (y CSV/Excel de reportes).</p>
+        <p class="mt8">Prefactura de septiembre por cliente.</p>
+        <p class="mt8">Listado de novedades del ciclo y warnings de fichada faltante.</p>
+      </div>
+      <div class="card">
+        <h3>Lo que desbloquea el inserto LOL</h3>
+        <p class="mt8">Cero retruco de horas a mano en el sistema de haberes.</p>
+        <p class="mt8">Novedades V/L/E/A/PG/AA sin planilla puente.</p>
+        <p class="mt8">Cierre de ciclo con lock (payrollLockedAt) para que nadie edite lo liquidado.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="kicker">De acá al 25/09</div>
+    <h2>Riesgos</h2>
+    <div class="mt">
+      <table>
+        <thead><tr><th>Riesgo</th><th>Impacto</th><th>Si pasa</th><th>Mitigación</th></tr></thead>
+        <tbody>
+          <tr><td>Carga agosto no cierra en 10 días</td><td class="warn-t">Alto</td><td>Septiembre entra sucio y se corre el corte del 25/09</td><td>Priorizar objetivos con SLA activo; no reabrir julio salvo error material</td></tr>
+          <tr><td>Julio parcial se lee como mes cerrado</td><td>Medio</td><td>Un PDF viejo o un mes a medias se toma como cierre</td><td>Usar solo la prefactura vigente (CASISA 18/08: SLA 9.679 vs 9.651 ejecutadas)</td></tr>
+          <tr><td>LOL no inserta la API a tiempo</td><td>Medio</td><td>El 25/09 COSP puede cortar; LOL sigue cargando a mano</td><td>El 25/09 se exporta JSON/CSV igual. El inserto es acelerador, no bloqueante del corte</td></tr>
+          <tr><td>Doble fuente (Excel + COSP) en septiembre</td><td class="warn-t">Alto</td><td>Se rompe la certeza del cruce</td><td>A partir del 01/09 la malla oficial es COSP. Excel queda archivo, no operación</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h2 class="mt">Pedido a la mesa</h2>
+    <div class="s3 stats mt">
+      <div class="card">
+        <h3>Sistemas — 10 días</h3>
+        <p class="mt8">Terminar agosto. No reabrir julio salvo error que mueva prefactura o haberes. El 01/09 la malla oficial es COSP.</p>
+      </div>
+      <div class="card">
+        <h3>Operaciones / planificación</h3>
+        <p class="mt8">Septiembre se carga en la plataforma, no en Excel. El Excel queda archivo de consulta. Cualquier desvío se corrige en COSP.</p>
+      </div>
+      <div class="card">
+        <h3>Liquidaciones / LOL</h3>
+        <p class="mt8">Ensayo interno con el JSON del ciclo 26/08–25/09 apenas esté la malla. El presupuesto del inserto no frena el primer corte.</p>
+      </div>
+    </div>
+    <div class="okbox mt">
+      Lectura para dirección. COSP ya es el sistema de gestión de la operación (90+ objetivos, SLA, plan, prefactura). El cuello de botella de agosto es carga, no desarrollo. El hito que importa es el 25/09: primer ciclo CCT defendible. LOL es la última milla de haberes; no el permiso para seguir usando COSP.
+    </div>
+    <div class="foot">Fuente: estado de implementación informado el 18/08/2026 (carga desde 10/08, +90 objetivos, presupuesto LOL pedido). Prefacturas reales: CASISA 18/08 (2), Lotería–Casinos 10/08, CONIFERAL 11/08. Contrato API: docs/PAYROLL_API.md. No es un dictamen contable ni un cierre de ciclo. Regenerar: node tools/cosp-informe-gestion/export-pdf.mjs</div>
+  </section>
+
+</body>
+</html>

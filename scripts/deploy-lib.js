@@ -58,6 +58,14 @@ function runDeploy(projectRoot, args = []) {
 
   fs.mkdirSync(buildRoot, { recursive: true });
 
+  // Evita ENOENT en Windows cuando Next intenta unlink sobre un .next a medias (AV / dev server).
+  for (const dir of [dist, path.join(web2, '.next')]) {
+    if (fs.existsSync(dir)) {
+      console.log(`\n▶ Limpiando ${path.relative(projectRoot, dir).replace(/\\/g, '/')} ...`);
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    }
+  }
+
   // Build prod en build/.next-prod — apps/web2/.next (dev) no se toca
   run('npm --prefix apps/web2 run build', projectRoot, {
     NEXT_PUBLIC_USE_EMULATOR: 'false',

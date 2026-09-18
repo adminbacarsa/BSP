@@ -11,10 +11,27 @@ import Head from 'next/head';
 import { initTheme } from '@/lib/themeManager';
 import { applyCompanyThemeFromStorage } from '@/lib/companyTheme';
 import { useAdminFcm } from '@/hooks/useAdminFcm';
+import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
+import { useTrainingCleanup } from '@/hooks/useTrainingCleanup';
+import { useEmpresa } from '@/context/EmpresaContext';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
   return null;
+}
+
+function TrainingEvidenceWatcher() {
+  useTrainingEvidence();
+  useTrainingCleanup();
+  return null;
+}
+
+function AssistantWrapper() {
+  const { empresa } = useEmpresa();
+  if (empresa?.isTrainingEmpresa) {
+    return <AssistantFloatingBubble />;
+  }
+  return <div className="hidden lg:block"><AssistantFloatingBubble /></div>;
 }
 
 const AssistantFloatingBubble = dynamic(
@@ -22,8 +39,19 @@ const AssistantFloatingBubble = dynamic(
   { ssr: false },
 );
 
+const TrainingCoachBubble = dynamic(
+  () => import('@/components/training/TrainingCoachBubble').then((m) => m.TrainingCoachBubble),
+  { ssr: false },
+);
+
+const TrainingGate = dynamic(
+  () => import('@/components/training/TrainingGate').then((m) => m.TrainingGate),
+  { ssr: false },
+);
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
+  const showTrainingCoach = router.pathname.startsWith('/admin');
   const showAssistant = !router.pathname.startsWith('/empleado')
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
@@ -68,8 +96,11 @@ export default function App({ Component, pageProps }: AppProps) {
           <meta name="viewport" content="width=device-width, initial-scale=1" />
         </Head>
         <AdminFcmRegistrar />
+        <TrainingEvidenceWatcher />
         <Component {...pageProps} />
-        {showAssistant && <div className="hidden lg:block"><AssistantFloatingBubble /></div>}
+        {showAssistant && <AssistantWrapper />}
+        {showTrainingCoach && <TrainingCoachBubble />}
+        {showTrainingCoach && <TrainingGate />}
         <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
       </ToastProvider>
       </EmpresaProvider>

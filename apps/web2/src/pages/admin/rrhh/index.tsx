@@ -2028,7 +2028,7 @@ export default function EmployeesPage() {
                                         <Trash2 size={14}/> Eliminar {selectedAbsenceIds.size} seleccionada{selectedAbsenceIds.size !== 1 ? 's' : ''}
                                     </button>
                                 )}
-                                <button onClick={() => handleOpenAbsenceModal()} className="bg-rose-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-rose-500/25 flex items-center gap-1.5 hover:bg-rose-700 transition-colors">
+                                <button data-action="nueva-novedad" onClick={() => handleOpenAbsenceModal()} className="bg-rose-600 text-white px-4 py-2 rounded-xl font-black text-xs uppercase shadow-lg shadow-rose-500/25 flex items-center gap-1.5 hover:bg-rose-700 transition-colors">
                                     <Plus size={14}/> Nueva Novedad
                                 </button>
                             </div>
@@ -3358,6 +3358,7 @@ export default function EmployeesPage() {
                             <div className="relative">
                                 <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none z-[1]"/>
                                 <input
+                                    data-action="rrhh-novedad-empleado"
                                     autoFocus={!isEditingAbsence}
                                     type="text"
                                     placeholder="Buscar por apellido, nombre o legajo..."
@@ -3430,6 +3431,7 @@ export default function EmployeesPage() {
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Tipo</label>
                                 <select
+                                    data-action="rrhh-novedad-tipo"
                                     value={absenceForm.type}
                                     onChange={e => {
                                         const type = e.target.value;
@@ -3461,6 +3463,7 @@ export default function EmployeesPage() {
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Estado</label>
                                 <select
+                                    data-action="rrhh-novedad-estado"
                                     value={absenceForm.status}
                                     onChange={e => setAbsenceForm(f => ({...f, status: e.target.value as Absence['status']}))}
                                     className="w-full p-3 bg-slate-50 dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl font-bold text-sm text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-rose-400"
@@ -3489,6 +3492,7 @@ export default function EmployeesPage() {
                             <div>
                                 <label className="text-[10px] font-black uppercase text-slate-500 block mb-1 ml-1">Fecha inicio</label>
                                 <input
+                                    data-action="rrhh-novedad-fecha"
                                     type="date"
                                     value={absenceForm.startDate}
                                     onChange={e => {
@@ -3581,6 +3585,7 @@ export default function EmployeesPage() {
                     <div className="flex gap-3 mt-6">
                         <button onClick={() => setShowAbsenceModal(false)} className="flex-1 py-3 rounded-xl border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 font-black text-sm hover:bg-slate-50 transition-colors">Cancelar</button>
                         <button
+                            data-action="rrhh-novedad-registrar"
                             onClick={handleSaveAbsence}
                             disabled={!!absenceDateRangeError}
                             className="flex-1 py-3 rounded-xl bg-rose-600 hover:bg-rose-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black text-sm transition-colors flex items-center justify-center gap-2"

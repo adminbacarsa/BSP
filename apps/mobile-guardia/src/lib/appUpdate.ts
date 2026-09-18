@@ -7,10 +7,22 @@ export type AppUpdateResult = {
   reloading?: boolean;
 };
 
-export function getAppVersionLabel(): string {
+function shortId(id: string | null | undefined): string {
+  if (!id) return '—';
+  return id.length > 10 ? `${id.slice(0, 8)}…` : id;
+}
+
+export function getAppUpdateDiagnostics(): string {
   const v = Constants.expoConfig?.version ?? '—';
-  const channel = Updates.channel || null;
-  return channel ? `v${v} · canal ${channel}` : `v${v}`;
+  const channel = Updates.channel || '(sin canal)';
+  const runtime = Updates.runtimeVersion || Constants.expoConfig?.runtimeVersion || '—';
+  const updateId = shortId(Updates.updateId);
+  const embedded = Updates.isEmbeddedLaunch ? 'embebida' : 'OTA';
+  return `v${v} · canal ${channel} · runtime ${runtime} · ${embedded} · id ${updateId}`;
+}
+
+export function getAppVersionLabel(): string {
+  return getAppUpdateDiagnostics();
 }
 
 /**
@@ -21,11 +33,12 @@ export async function checkAndApplyAppUpdate(opts?: {
   apply?: boolean;
 }): Promise<AppUpdateResult> {
   const apply = opts?.apply !== false;
+  const diag = getAppUpdateDiagnostics();
 
   if (__DEV__) {
     return {
       status: 'disabled',
-      message: 'En desarrollo no hay OTA. Usá un build EAS preview/production.',
+      message: 'En desarrollo (Expo Go / metro) no hay OTA. Usá la APK preview de EAS.',
     };
   }
 
@@ -33,23 +46,36 @@ export async function checkAndApplyAppUpdate(opts?: {
     return {
       status: 'disabled',
       message:
-        'Esta instalación no admite actualización in-app. Instalá la APK preview nueva (con EAS Update).',
+        'Esta instalación no admite OTA. Desinstalá y volvé a instalar la APK preview (eas build --profile preview).',
     };
+  }
+
+  const channel = String(Updates.channel || '').trim().toLowerCase();
+  if (channel && channel !== 'preview' && channel !== 'production') {
+    // canal raro: igual intentamos
   }
 
   try {
     const check = await Updates.checkForUpdateAsync();
     if (!check.isAvailable) {
+      const canalHint =
+        channel === 'preview'
+          ? 'Canal preview OK.'
+          : channel === 'production'
+            ? 'Estás en canal PRODUCTION: no vas a recibir OTAs de preview.'
+            : 'Sin canal detectado: esta APK puede no estar atada a EAS Update.';
       return {
         status: 'upToDate',
-        message: `Ya estás al día (${getAppVersionLabel()}).`,
+        message:
+          `Expo no encuentra un OTA más nuevo.\n\n${diag}\n\n${canalHint}\n\n` +
+          'Si acabás de publicar un OTA y seguís viendo la UI vieja: cerrá COSP Guardia por completo (quitar de recientes) y abrila de nuevo. El botón no reinicia solo.',
       };
     }
 
     if (!apply) {
       return {
         status: 'ready',
-        message: 'Hay una actualización disponible. Tocá Buscar actualización para descargarla.',
+        message: `Hay una actualización disponible.\n\n${diag}`,
       };
     }
 
@@ -57,11 +83,12 @@ export async function checkAndApplyAppUpdate(opts?: {
     return {
       status: 'downloaded',
       message:
-        'Actualización descargada. Cerrá COSP Guardia por completo (quitar de recientes) y volvé a abrirla. No uses «Actualizar» otra vez.',
+        'Actualización descargada.\n\nCerrá COSP Guardia por completo (quitar de recientes) y volvé a abrirla.\nNo uses «Descargar» otra vez hasta reiniciar.\n\n' +
+        diag,
       reloading: false,
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'No se pudo comprobar la actualización';
-    return { status: 'error', message: msg };
+    return { status: 'error', message: `${msg}\n\n${diag}` };
   }
 }
