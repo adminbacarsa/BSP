@@ -1,160 +1,189 @@
 # COSP V1.0 — Agent Briefing
 
-> **Para agentes IA (Claude Code, Cursor, N8N, etc.)**
-> Leé este archivo antes de empezar cualquier tarea en este repo.
-> Complementa `CLAUDE.md` (protocolo general) con contexto de estado actual y reglas de colaboración multi-agente.
+> **Para agentes IA (Claude Code, Cursor Cloud Agent, N8N, etc.)**
+> Leé este archivo + `CLAUDE.md` antes de cualquier tarea. Este briefing no duplica CLAUDE.md — lo complementa con estado actual, mobile y reglas de equipo.
 
 ---
 
-## Instrucción rápida para Cursor / Claude Agent
+## Instrucción de carga para Cursor / Claude Agent
 
 ```text
-Leé el archivo docs/AGENT-BRIEFING.md y CLAUDE.md en la raíz del proyecto antes de empezar.
+Leé los archivos docs/AGENT-BRIEFING.md y CLAUDE.md en la raíz del proyecto antes de empezar.
+Son el protocolo del equipo y el estado actual del sistema.
 ```
 
 ---
 
-## 1. Contexto del proyecto
+## 1. Qué es COSP y el stack
 
-**COSP V1.0** — Sistema de gestión para empresas de seguridad privada.
-- **URL producción:** https://comtroldata.web.app
-- **Repo GitHub:** https://github.com/adminbacarsa/BSP.git
-- **Branch principal:** `main`
-- **Stack:** Next.js 14 (static export) + TypeScript + Tailwind CSS + Firebase (Firestore, Auth, Functions)
+**COSP V1.0** — Sistema operativo para empresas de seguridad privada (turnos, guardias, CRM, RRHH, liquidación).
 
-Ver `CLAUDE.md` para stack completo, colecciones Firestore, módulos y permisos.
+| Capa | Tecnología | Carpeta |
+|------|-----------|---------|
+| Panel web admin | Next.js 14 static export + TS + Tailwind | `apps/web2/` |
+| Backend | Firebase Functions (NestJS, Node 22) | `apps/functions/` |
+| Base de datos | Firestore (colecciones: turnos, empleados, servicios_sla, …) | Firebase |
+| Auth | Firebase Auth | Firebase |
+| App nativa guardia | Expo (React Native) — **solo Android v1** | `apps/mobile-guardia/` |
+| Paquetes compartidos | Portal-core (web ↔ app) | `packages/portal-core/` |
+| Hosting | Firebase Hosting | `comtroldata.web.app` |
+
+Ver `CLAUDE.md §2–4` para colecciones Firestore, módulos, códigos de turno y lógica de retención.
 
 ---
 
-## 2. Reglas de trabajo (NO negociables)
+## 2. Ramas y flujo de trabajo
+
+```
+NOTEBOOK (C:\APP\cronoapp)
+  └─ Desarrollo principal + commits + deploys a producción
+
+RAMAS DE AGENTE
+  cursor/cloud-agent-XXXXXXX   ← cada agente Cursor Cloud tiene su rama
+  main                         ← rama principal (PR review antes de mergear)
+
+TESTING (N8N — 192.168.0.8, B:\cronoapp)
+  git fetch origin && git reset --hard origin/main
+
+PRODUCCIÓN
+  npm run deploy:worktree   ← SIEMPRE usar esto, nunca firebase deploy directo
+  URL: https://comtroldata.web.app
+```
+
+### Reglas de commit/push
+
+- **Con varios agentes activos:** NO pushear en cada cambio. Acumular y pushear solo cuando el usuario lo pida.
+- **Siempre una rama por agente.** Nunca commitear directo a `main`.
+- **No crear PRs** sin que el usuario lo pida.
+- **No hacer deploy** salvo que el usuario diga "deploy", "subí" o nombre explícitamente producción.
+
+---
+
+## 3. Reglas de trabajo (NO negociables)
 
 | Regla | Detalle |
 |-------|---------|
 | **Idioma** | Responder siempre en **español** |
-| **Deploy** | Solo cuando el usuario lo pida explícitamente (`npm run deploy` o `npm run deploy:worktree`) |
-| **Commits** | Con múltiples agentes activos: acumular cambios localmente, **no pushear** hasta que el usuario lo ordene |
-| **Comentarios** | Solo cuando el WHY es no obvio. Sin comentarios obvios |
-| **Archivos .md** | No crear documentación nueva salvo que se pida explícitamente |
-| **firestore.rules** | NO tocar salvo que el merge lo traiga y esté revisado |
-| **Emuladores** | NO borrar emuladores ni matar `npm run dev` del lab |
+| **Deploy** | Solo explícito. Comando: `npm run deploy:worktree` |
+| **Commits** | Con múltiples agentes: acumular, no pushear solo |
+| **Comentarios** | Solo WHY no obvio. Sin comentarios descriptivos |
+| **Archivos .md** | No crear documentación salvo pedido explícito |
+| **firestore.rules** | NO tocar salvo merge revisado |
+| **Emuladores** | NO matar emuladores ni `npm run dev` del lab |
 | **`.env.local`** | NUNCA commitear |
-| **VPLAN** | NO hacer deploy de VPLAN / vplanRun hasta checklist en `docs/VPLAN.md` |
+| **VPLAN** | NO deployar `vplanRun` hasta checklist en `docs/VPLAN.md` |
 
 ---
 
-## 3. Flujo multi-agente (3 agentes simultáneos)
+## 4. Qué NO tocar
 
-Este proyecto tiene **hasta 3 agentes IA trabajando en paralelo**. Para evitar conflictos:
-
-1. **Cada agente trabaja en su propia rama** (ej: `cursor/cloud-agent-XXXX`)
-2. **No pushear ni commitear sin que el usuario lo pida**
-3. **No mergear a `main` directamente** — crear PR y esperar aprobación
-4. **Antes de cualquier `git checkout` o `reset`:** ejecutar `git status` y hacer stash si hay cambios
+| Archivo / carpeta | Razón |
+|-------------------|-------|
+| `useOperacionesMonitor.ts` | Lógica de ops en tiempo real, muy compleja, alto riesgo |
+| `firestore.rules` | Reglas de seguridad — cambio incorrecto bloquea usuarios |
+| `planificacion_estados` (colección) | Controla qué planificación es visible; borrar = pérdida de datos |
+| `apps/functions/src/vplan/` | VPLAN experimental — sin deploy hasta sign-off |
+| `apps/web2/.env.local` | Credenciales — jamás al repo |
 
 ---
 
-## 4. Estado actual del sistema — Modo Capacitación
+## 5. App nativa portal guardia (mobile-guardia)
 
-El módulo **Modo Capacitación** (`apps/web2/src/lib/training/` y `src/components/training/`) es un sistema de onboarding interactivo en la plataforma.
+**Tecnología:** Expo SDK 52, React Native, Android-only v1.  
+**Backend:** mismo Firebase `comtroldata`.  
+**Carpeta:** `apps/mobile-guardia/` + `packages/portal-core/`.
 
-### Componentes principales
+### Canales EAS
 
-| Archivo | Rol |
-|---------|-----|
-| `apps/web2/src/lib/training/trainingSession.ts` | Define módulos y pasos del circuito |
-| `apps/web2/src/lib/training/coachContent.ts` | Instrucciones y hints por paso |
-| `apps/web2/src/hooks/useTrainingEvidence.ts` | Detecta completación de pasos en Firestore |
-| `apps/web2/src/components/training/TrainingCoachBubble.tsx` | Coach flotante 3 estados |
-| `apps/web2/src/components/training/TrainingSpotlight.tsx` | Spotlight sobre el elemento target |
-| `apps/web2/src/components/training/TrainingProgressPanel.tsx` | Panel de progreso colapsable |
+| Canal | Uso | Qué recibe |
+|-------|-----|------------|
+| `production` | APK en Google Play (testers internos) | OTA updates automáticas |
+| `preview` | APK de desarrollo / QA manual | OTA updates automáticas |
 
-### Coach — 3 estados
+> **APK en Play Store = canal `production`.** Para enviar OTA a producción:
+> ```bash
+> eas update --channel production --message "descripción"
+> ```
+> Para preview:
+> ```bash
+> eas update --channel preview --message "descripción"
+> ```
 
-```
-expandido  ←→  compacto (barra slim 52px, no molesta)
-                  ↕
-              lateral (tab en el borde derecho)
-```
+### Estado actual (2026-09-18)
 
-- **X** en expanded → compacto
-- **Minimize2** en expanded → compacto
-- **clic en tab lateral** → expandido
-- **Auto-reabre** al cambiar de módulo
+| Fase | Nombre | Estado |
+|------|--------|--------|
+| F0 | Fundación | EN_CURSO (8/12) |
+| F1 | Auth, activación y turnos | **COMPLETA** |
+| F2 | Fichada con GPS | EN_CURSO (8/10) |
+| F3 | Ausencias, licencias y push | EN_CURSO (11/12) |
+| F4 | Permutas de turno | EN_CURSO (7/8) |
+| F5 | Credencial digital y UX | **COMPLETA** |
+| F6 | Beta cerrada y hardening | EN_CURSO (0/9) |
+| F7 | Publicación en Google Play | PENDIENTE |
 
-### Spotlight (`data-action` selectors)
+**Próximas tareas prioritarias:**
+- `F6-01` — Play Internal Testing (crear app + AAB + testers)
+- `F0-11` — Política de privacidad (URL pública para Data Safety)
 
-El coach resalta botones usando `data-action` attributes:
+**iOS:** descartado en v1. El código Expo es multiplataforma pero no se construye ni publica IPA.
 
-| Página | data-action | Paso |
-|--------|-------------|------|
+**Módulos recientes en la rama `cursor/cloud-agent-*`:**
+- Portal ausencias y alertas
+- Portal agenda de turnos
+- OTA enviada al canal `production`
+
+Ver estado completo en `docs/MOBILE-GUARDIA-IMPLEMENTACION.md`.
+
+---
+
+## 6. Estado actual — Panel web (Modo Capacitación)
+
+El módulo de onboarding interactivo está en `apps/web2/src/lib/training/` y `src/components/training/`.
+
+**Coach flotante:** 3 estados (expandido → compacto → tab lateral). Se auto-minimiza al hacer clic en el botón resaltado por el spotlight, y se auto-expande al avanzar de paso.
+
+**Pasos de práctica:** cada módulo termina con un ejercicio libre (`stepId: 'practica'`) donde el alumno trabaja sin guía y confirma manualmente.
+
+**data-action selectors para spotlight:**
+
+| Ruta | `data-action` | Paso |
+|------|---------------|------|
 | `/admin/crm` | `nuevo-cliente` | crear_cliente |
-| `/admin/crm` | `nueva-sede` | crear_sede |
+| `/admin/crm` | `nueva-sede` | crear_objetivo |
 | `/admin/servicios` | `nuevo-servicio` | crear_sla |
 | `/admin/rrhh` | `nueva-novedad` | cargar_novedad |
 | `/admin/planificacion` | `publicar-cronograma` | publicar_grilla |
 
-El spotlight **persiste en todos los estados del coach** (expandido, compacto, lateral).
+---
 
-### Módulo SERVICES — 3 pasos
+## 7. Lab local (desarrollo)
 
-```typescript
-steps: [
-  { id: 'crear_sla',          label: 'Crear contrato/SLA' },
-  { id: 'conf_puesto_24hs',   label: 'Puesto 24 horas' },
-  { id: 'conf_puesto_custom', label: 'Puesto personalizado' },
-]
+```bash
+npm run emulators   # Firestore + Auth + Functions (puerto 8080/9099/5001/4000)
+npm run seed        # Crea admin@bacarsa.com.ar / admin1234 + guardia@bacarsa.com.ar / guardia1234
+npm run dev         # Next.js en http://localhost:3001
+npm run diagnose:lab  # Diagnóstico si algo no levanta
 ```
-
-- `conf_puesto_24hs`: detecta posición con `coverageType: '24hs' | '24H' | 'FULL_DAY'`
-- `conf_puesto_custom`: detecta servicio con ≥2 posiciones configuradas (`shifts.length > 0`)
-
-### Instrucciones del coach — convenciones
-
-- Referencias genéricas: "el cliente de práctica que aparece en la lista (ej: Fábrica Demo SRL)"
-- **NO** hardcodear nombres como "Banco del Sur SA" o "Sucursal Centro"
-- Usar `\n` para saltos de línea (se renderiza como `<br />`)
-- Listas numeradas con `1. 2. 3.`
 
 ---
 
-## 5. Deploy rápido
+## 8. Deploy
 
 ```bash
-# Con lab corriendo (recomendado — usa worktree en ../cronoapp-deploy)
+# Panel web (con lab activo — worktree aislado)
 npm run deploy:worktree
 
-# Forzar build en esta carpeta (lab apagado)
+# Panel web (lab apagado)
 npm run deploy:here
+
+# Functions específica
+firebase deploy --only functions:chatPlatformAssistant
+
+# App nativa — OTA a producción
+eas update --channel production --message "fix: descripcion"
 ```
 
-**NUNCA** `firebase deploy` directo sin usar el script — puede tumbar el lab.
-
 ---
 
-## 6. Qué NO tocar
-
-- `useOperacionesMonitor.ts` — lógica de operaciones en tiempo real, muy compleja
-- `firestore.rules` — reglas de seguridad
-- `planificacion_estados` — colección que controla qué planificación está publicada
-- `apps/functions/src/vplan/` — código VPLAN experimental, sin deploy hasta sign-off
-
----
-
-## 7. Cómo correr el lab
-
-```bash
-# 1. Emuladores (Firestore + Auth + Functions)
-npm run emulators
-
-# 2. Seed (admin@bacarsa.com.ar / admin1234)
-npm run seed
-
-# 3. Dev server (http://localhost:3001)
-npm run dev
-```
-
-Diagnóstico: `npm run diagnose:lab`
-
----
-
-*Última actualización: 2026-09-18*
+*Última actualización: 2026-09-18 | Rama: cursor/cloud-agent-1789165375719-scvyk*
