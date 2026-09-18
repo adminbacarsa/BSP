@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useMemo, useRef, useTransition, useCallback, useDeferredValue } from 'react';
+﻿import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, useTransition, useCallback, useDeferredValue } from 'react';
 import { createPortal } from 'react-dom';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
@@ -1232,7 +1232,11 @@ export default function PlanificacionPage() {
     const [notifications, setNotifications] = useState<any[]>([]);
     const [showNotifications, setShowNotifications] = useState(false);
     const [notifPanelTop, setNotifPanelTop] = useState(0);
+    const [contextDropPanelPos, setContextDropPanelPos] = useState<{ top: number; left: number; minWidth: number } | null>(null);
     const notifBtnRef = useRef<HTMLButtonElement>(null);
+    const clientDropBtnRef = useRef<HTMLButtonElement>(null);
+    const grupoDropBtnRef = useRef<HTMLButtonElement>(null);
+    const objectiveDropBtnRef = useRef<HTMLButtonElement>(null);
     const diagnosticBtnRef = useRef<HTMLButtonElement>(null);
     const coverageDiagnosticBtnRef = useRef<HTMLButtonElement>(null);
     const [diagnosticPanelPos, setDiagnosticPanelPos] = useState<{ x: number; y: number } | null>(null);
@@ -5788,6 +5792,25 @@ export default function PlanificacionPage() {
         if (rect) setNotifPanelTop(rect.bottom + 8);
     }, []);
 
+    const repositionContextDropPanel = useCallback(() => {
+        const ref =
+            openDrop === 'client' ? clientDropBtnRef
+                : openDrop === 'grupo' ? grupoDropBtnRef
+                    : openDrop === 'objective' ? objectiveDropBtnRef
+                        : null;
+        const rect = ref?.current?.getBoundingClientRect();
+        if (!rect || !openDrop) {
+            setContextDropPanelPos(null);
+            return;
+        }
+        const minWidth = openDrop === 'grupo' ? 260 : 220;
+        setContextDropPanelPos({
+            top: rect.bottom + 6,
+            left: rect.left,
+            minWidth: Math.max(rect.width, minWidth),
+        });
+    }, [openDrop]);
+
     useEffect(() => {
         if (!showNotifications) return;
         repositionNotifPanel();
@@ -5798,6 +5821,24 @@ export default function PlanificacionPage() {
             window.removeEventListener('resize', repositionNotifPanel);
         };
     }, [showNotifications, repositionNotifPanel]);
+
+    useLayoutEffect(() => {
+        if (openDrop !== 'client' && openDrop !== 'grupo' && openDrop !== 'objective') {
+            setContextDropPanelPos(null);
+            return;
+        }
+        repositionContextDropPanel();
+    }, [openDrop, repositionContextDropPanel]);
+
+    useEffect(() => {
+        if (openDrop !== 'client' && openDrop !== 'grupo' && openDrop !== 'objective') return;
+        window.addEventListener('scroll', repositionContextDropPanel, true);
+        window.addEventListener('resize', repositionContextDropPanel);
+        return () => {
+            window.removeEventListener('scroll', repositionContextDropPanel, true);
+            window.removeEventListener('resize', repositionContextDropPanel);
+        };
+    }, [openDrop, repositionContextDropPanel]);
     const handleTransferEmployee = async (emp: any) => { if (!selectedObjective) return; if (!confirm(`¿Transferir a ${emp.name} a este objetivo?`)) return; try { await updateDoc(doc(db, 'empleados', emp.id), { preferredObjectiveId: selectedObjective }); await addDoc(collection(db, 'audit_logs'), stampEmpresaId({ action: 'TRANSFERENCIA_OBJETIVO', module: 'PLANIFICADOR', details: `Transfirió a ${emp.name} al objetivo ${getObjectiveName(selectedObjective)}`, timestamp: serverTimestamp(), actorName: activeActorName, actorUid: getAuth().currentUser?.uid, objectiveId: selectedObjective, objectiveName: getObjectiveName(selectedObjective) }, empresaId)); toast.success("Transferencia exitosa"); } catch (e) { toast.error("Error al transferir"); } };
     const handleDelete = async () => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg); return; }
@@ -11169,27 +11210,20 @@ export default function PlanificacionPage() {
                                 ) : !selectedClient ? (
                                     /* Sin contexto: botón Cliente + botón Grupos */
                                     <>
-                                        <div className="relative z-[60]" onClick={e => e.stopPropagation()}>
+                                        <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
                                             <button
+                                                ref={clientDropBtnRef}
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); setOpenDrop(d => d === 'client' ? null : 'client'); }}
                                                 className="flex items-center gap-1.5 bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide hover:bg-slate-700 transition-colors"
                                             >
                                                 Cliente <ChevronDown size={12}/>
                                             </button>
-                                            {openDrop === 'client' && (
-                                                <div className="absolute left-0 top-full mt-1 z-[70] bg-white border border-slate-200 rounded-xl shadow-lg min-w-[220px] max-h-64 overflow-y-auto">
-                                                    {[...clients].sort((a,b) => a.name.localeCompare(b.name)).map(c => (
-                                                        <button key={c.id} onClick={() => { handleContextChange(c.id, ''); }} className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 transition-colors first:rounded-t-xl last:rounded-b-xl border-b border-slate-100 last:border-0">
-                                                            {c.name}
-                                                        </button>
-                                                    ))}
-                                                </div>
-                                            )}
                                         </div>
                                         {/* Botón Grupos */}
-                                        <div className="relative z-[60]" onClick={e => e.stopPropagation()}>
+                                        <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
                                             <button
+                                                ref={grupoDropBtnRef}
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); setOpenDrop(d => d === 'grupo' ? null : 'grupo'); }}
                                                 className="flex items-center gap-1.5 bg-violet-700 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide hover:bg-violet-600 transition-colors"
@@ -11197,32 +11231,6 @@ export default function PlanificacionPage() {
                                             >
                                                 <Layers size={12}/> Grupos <ChevronDown size={12}/>
                                             </button>
-                                            {openDrop === 'grupo' && (
-                                                <div className="absolute left-0 top-full mt-1 z-[70] bg-white border border-slate-200 rounded-xl shadow-lg min-w-[240px] max-h-72 overflow-y-auto">
-                                                    {grupos.length === 0 && (
-                                                        <p className="px-4 py-3 text-xs text-slate-400 italic">No hay grupos creados.</p>
-                                                    )}
-                                                    {grupos.map(g => (
-                                                        <div key={g.id} className="flex items-center gap-1 px-3 py-2 border-b border-slate-100 last:border-0 hover:bg-violet-50 group">
-                                                            <button
-                                                                onClick={() => handleGrupoChange(g)}
-                                                                className="flex-1 text-left"
-                                                            >
-                                                                <p className="text-sm font-semibold text-slate-700 group-hover:text-violet-700">{g.nombre}</p>
-                                                                <p className="text-[10px] text-slate-400">{g.clientName} · {g.objectiveIds.length} obj.</p>
-                                                            </button>
-                                                            <button onClick={() => openGrupoForm('edit', g)} className="p-1 text-slate-300 hover:text-indigo-500" title="Editar"><Edit3 size={11}/></button>
-                                                            <button onClick={() => handleDeleteGrupo(g)} className="p-1 text-slate-300 hover:text-rose-500" title="Eliminar"><Trash2 size={11}/></button>
-                                                        </div>
-                                                    ))}
-                                                    <button
-                                                        onClick={() => openGrupoForm('new')}
-                                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-violet-700 hover:bg-violet-50 transition-colors rounded-b-xl border-t border-slate-100"
-                                                    >
-                                                        <Plus size={12}/> Nuevo grupo
-                                                    </button>
-                                                </div>
-                                            )}
                                         </div>
                                     </>
                                 ) : (
@@ -11234,8 +11242,9 @@ export default function PlanificacionPage() {
                                         </span>
                                         <ChevronRight size={12} className="text-slate-400"/>
                                         {/* Objetivo: dropdown custom al clic */}
-                                        <div className="relative z-[60]" onClick={e => e.stopPropagation()}>
+                                        <div className="relative shrink-0" onClick={e => e.stopPropagation()}>
                                             <button
+                                                ref={objectiveDropBtnRef}
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); setOpenDrop(d => d === 'objective' ? null : 'objective'); }}
                                                 className="flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-500 transition-colors max-w-[160px] min-w-0"
@@ -11243,28 +11252,6 @@ export default function PlanificacionPage() {
                                                 <span className="truncate">{(clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || 'Objetivo'}</span>
                                                 <ChevronDown size={12}/>
                                             </button>
-                                            {openDrop === 'objective' && (
-                                                <div className="absolute left-0 top-full mt-1 z-[70] bg-white border border-slate-200 rounded-xl shadow-lg min-w-[220px] max-h-64 overflow-y-auto">
-                                                    {/* Objetivos del cliente */}
-                                                    {[...(clients.find(c => c.id === selectedClient)?.objetivos||[])].sort((a:any,b:any) => a.name.localeCompare(b.name)).map((o:any) => (
-                                                        <button key={o.id||o.name} onClick={() => { handleContextChange(selectedClient, o.id||o.name); }} className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors first:rounded-t-xl border-b border-slate-100 last:border-0 ${(o.id||o.name) === selectedObjective ? 'bg-indigo-600 text-white' : 'text-slate-700 hover:bg-indigo-50 hover:text-indigo-700'}`}>
-                                                            {o.name}
-                                                        </button>
-                                                    ))}
-                                                    {/* Grupos de este cliente */}
-                                                    {grupos.filter(g => g.clientId === selectedClient).length > 0 && (
-                                                        <>
-                                                            <div className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 border-t border-slate-100">Grupos</div>
-                                                            {grupos.filter(g => g.clientId === selectedClient).map(g => (
-                                                                <button key={g.id} onClick={() => handleGrupoChange(g)} className="w-full text-left px-4 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50 transition-colors border-b border-slate-100 last:border-0 flex items-center gap-2">
-                                                                    <Layers size={11} className="shrink-0"/>{g.nombre}
-                                                                    <span className="text-[10px] text-slate-400 ml-auto">{g.objectiveIds.length} obj.</span>
-                                                                </button>
-                                                            ))}
-                                                        </>
-                                                    )}
-                                                </div>
-                                            )}
                                         </div>
                                         {/* Advertencia: objetivo sin coordenadas */}
                                         {selectedObjective && selectedObjectiveData && !Number(selectedObjectiveData?.lat ?? 0) && (
@@ -11368,6 +11355,87 @@ export default function PlanificacionPage() {
                                                     </div>
                                                 )) : <div className="p-6 text-center text-slate-400 text-xs">Sin novedades recientes.</div>}
                                             </div>
+                                        </div>
+                                    </>,
+                                    document.body,
+                                )}
+
+                                {openDrop && (openDrop === 'client' || openDrop === 'grupo' || openDrop === 'objective') && contextDropPanelPos && typeof document !== 'undefined' && createPortal(
+                                    <>
+                                        <div className="fixed inset-0 z-[9998]" aria-hidden onClick={() => setOpenDrop(null)} />
+                                        <div
+                                            className="fixed z-[9999] bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-600 rounded-xl shadow-2xl max-h-[min(70vh,320px)] overflow-y-auto custom-scrollbar animate-in zoom-in-95"
+                                            style={{
+                                                top: contextDropPanelPos.top,
+                                                left: contextDropPanelPos.left,
+                                                minWidth: contextDropPanelPos.minWidth,
+                                            }}
+                                            onClick={(e) => e.stopPropagation()}
+                                        >
+                                            {openDrop === 'client' && [...clients].sort((a, b) => a.name.localeCompare(b.name)).map((c) => (
+                                                <button
+                                                    key={c.id}
+                                                    type="button"
+                                                    onClick={() => { handleContextChange(c.id, ''); }}
+                                                    className="w-full text-left px-4 py-2.5 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0"
+                                                >
+                                                    {c.name}
+                                                </button>
+                                            ))}
+                                            {openDrop === 'grupo' && (
+                                                <>
+                                                    {grupos.length === 0 && (
+                                                        <p className="px-4 py-3 text-xs text-slate-400 italic">No hay grupos creados.</p>
+                                                    )}
+                                                    {grupos.map((g) => (
+                                                        <div key={g.id} className="flex items-center gap-1 px-3 py-2 border-b border-slate-100 dark:border-slate-700 last:border-0 hover:bg-violet-50 dark:hover:bg-violet-900/20 group">
+                                                            <button type="button" onClick={() => handleGrupoChange(g)} className="flex-1 text-left min-w-0">
+                                                                <p className="text-sm font-semibold text-slate-700 dark:text-slate-200 group-hover:text-violet-700 truncate">{g.nombre}</p>
+                                                                <p className="text-[10px] text-slate-400">{g.clientName} · {g.objectiveIds.length} obj.</p>
+                                                            </button>
+                                                            <button type="button" onClick={() => openGrupoForm('edit', g)} className="p-1 text-slate-300 hover:text-indigo-500" title="Editar"><Edit3 size={11}/></button>
+                                                            <button type="button" onClick={() => handleDeleteGrupo(g)} className="p-1 text-slate-300 hover:text-rose-500" title="Eliminar"><Trash2 size={11}/></button>
+                                                        </div>
+                                                    ))}
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => openGrupoForm('new')}
+                                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-xs font-bold text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors border-t border-slate-100 dark:border-slate-700"
+                                                    >
+                                                        <Plus size={12}/> Nuevo grupo
+                                                    </button>
+                                                </>
+                                            )}
+                                            {openDrop === 'objective' && selectedClient && (
+                                                <>
+                                                    {[...(clients.find((c) => c.id === selectedClient)?.objetivos || [])].sort((a: any, b: any) => a.name.localeCompare(b.name)).map((o: any) => (
+                                                        <button
+                                                            key={o.id || o.name}
+                                                            type="button"
+                                                            onClick={() => { handleContextChange(selectedClient, o.id || o.name); }}
+                                                            className={`w-full text-left px-4 py-2.5 text-sm font-semibold transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0 ${(o.id || o.name) === selectedObjective ? 'bg-indigo-600 text-white' : 'text-slate-700 dark:text-slate-200 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 hover:text-indigo-700'}`}
+                                                        >
+                                                            {o.name}
+                                                        </button>
+                                                    ))}
+                                                    {grupos.filter((g) => g.clientId === selectedClient).length > 0 && (
+                                                        <>
+                                                            <div className="px-4 py-1.5 text-[10px] font-black uppercase tracking-wider text-slate-400 bg-slate-50 dark:bg-slate-900 border-t border-slate-100 dark:border-slate-700">Grupos</div>
+                                                            {grupos.filter((g) => g.clientId === selectedClient).map((g) => (
+                                                                <button
+                                                                    key={g.id}
+                                                                    type="button"
+                                                                    onClick={() => handleGrupoChange(g)}
+                                                                    className="w-full text-left px-4 py-2.5 text-sm font-semibold text-violet-700 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors border-b border-slate-100 dark:border-slate-700 last:border-0 flex items-center gap-2"
+                                                                >
+                                                                    <Layers size={11} className="shrink-0"/>{g.nombre}
+                                                                    <span className="text-[10px] text-slate-400 ml-auto">{g.objectiveIds.length} obj.</span>
+                                                                </button>
+                                                            ))}
+                                                        </>
+                                                    )}
+                                                </>
+                                            )}
                                         </div>
                                     </>,
                                     document.body,
