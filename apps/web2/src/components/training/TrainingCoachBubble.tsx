@@ -313,13 +313,17 @@ export function TrainingCoachBubble() {
             </button>
           </div>
 
-          {/* Siguiente acción: hint de cadena o primera línea de instrucción */}
+          {/* Siguiente acción: hint de cadena, primera línea de consigna, o indicador de práctica */}
           <div className="px-3 py-2 flex items-center gap-2">
-            <ChevronRight size={12} className="text-amber-500 shrink-0" />
+            {isPractice
+              ? <Trophy size={12} className="text-indigo-500 shrink-0" />
+              : <ChevronRight size={12} className="text-amber-500 shrink-0" />}
             <p className="text-[12px] text-slate-600 dark:text-slate-300 line-clamp-2 leading-snug flex-1">
-              {chainIdx > 0 && chain[chainIdx - 1]
-                ? chain[chainIdx - 1].hint
-                : coachStep.instruction.split('\n')[0]}
+              {isPractice
+                ? coachStep.instruction.split('\n')[0]
+                : chainIdx > 0 && chain[chainIdx - 1]
+                  ? chain[chainIdx - 1].hint
+                  : coachStep.instruction.split('\n')[0]}
             </p>
             {!isOnTargetRoute && (
               <Link href={coachStep.targetRoute} className="shrink-0 text-[11px] font-semibold text-blue-500 hover:underline flex items-center gap-1">
@@ -402,15 +406,32 @@ export function TrainingCoachBubble() {
         </div>
 
         {/* Paso actual */}
-        <div className={`px-4 pt-1 pb-1 ${isPractice ? 'bg-indigo-50/50 dark:bg-indigo-900/10 mx-4 mb-1 rounded-xl border border-indigo-100 dark:border-indigo-800' : ''}`}>
-          <div className={`flex items-center gap-1 text-xs font-bold mb-1 ${isPractice ? 'text-indigo-600 dark:text-indigo-400' : 'text-amber-600 dark:text-amber-400'}`}>
-            {isPractice ? <Trophy size={12} /> : <ChevronRight size={12} />}
-            {coachStep.title}
+        {isPractice ? (
+          <div className="mx-3 mb-2">
+            {/* Banner "EJERCICIO PRÁCTICO" bien visible */}
+            <div className="flex items-center gap-2 bg-indigo-500 text-white rounded-t-xl px-3 py-2">
+              <Trophy size={14} className="shrink-0" />
+              <span className="text-[11px] font-black uppercase tracking-widest">Ejercicio práctico</span>
+            </div>
+            {/* Consigna con fondo destacado */}
+            <div className="bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-700 rounded-b-xl px-3 py-2.5">
+              <p className="text-[11px] font-black uppercase tracking-wide text-indigo-600 dark:text-indigo-400 mb-1.5">📋 Tu misión</p>
+              <p className="text-[12px] text-slate-700 dark:text-slate-200 leading-relaxed font-medium">
+                {renderInstruction(coachStep.instruction)}
+              </p>
+            </div>
           </div>
-          <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">
-            {renderInstruction(coachStep.instruction)}
-          </p>
-        </div>
+        ) : (
+          <div className="px-4 pt-1 pb-1">
+            <div className="flex items-center gap-1 text-xs font-bold mb-1 text-amber-600 dark:text-amber-400">
+              <ChevronRight size={12} />
+              {coachStep.title}
+            </div>
+            <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">
+              {renderInstruction(coachStep.instruction)}
+            </p>
+          </div>
+        )}
 
         {/* Hint */}
         {coachStep.hint && (

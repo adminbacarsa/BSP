@@ -90,6 +90,8 @@ export function useTrainingEvidence() {
       }
 
       case 'crear_objetivo': {
+        // Detectar por createdAt del objetivo individual (no del cliente)
+        // para que funcione aunque el alumno agregue sede a un cliente pre-existente
         const q = query(
           collection(db, 'clients'),
           where('empresaId', '==', empresaId),
@@ -97,10 +99,8 @@ export function useTrainingEvidence() {
         );
         unsub = onSnapshot(q, snap => {
           const hasObj = snap.docs.some(d => {
-            const data = d.data();
-            if (!isAfterStart(data.createdAt)) return false;
-            const obj = data.objetivos;
-            return Array.isArray(obj) && obj.length > 0;
+            const objs: Array<{ createdAt?: string }> = d.data().objetivos ?? [];
+            return objs.some(o => isAfterStart(o.createdAt));
           });
           if (hasObj) markDone(moduleKey, stepId);
         });

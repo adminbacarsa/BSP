@@ -1705,7 +1705,7 @@ export default function CRMPage() {
     if (payload.lng !== null && Number.isNaN(payload.lng)) return toast.error('Longitud inválida');
 
     if (editingObjectiveIndex !== null && editingObjectiveIndex >= 0) objetivos[editingObjectiveIndex] = { ...objetivos[editingObjectiveIndex], ...payload };
-    else objetivos.push({ id: String(Date.now()), ...payload });
+    else objetivos.push({ id: String(Date.now()), createdAt: new Date().toISOString(), ...payload });
 
     try {
       await updateClientForEmpresa(selectedClient.id, { objetivos }, empresaId, migracionCompleta, tenantAccess);
