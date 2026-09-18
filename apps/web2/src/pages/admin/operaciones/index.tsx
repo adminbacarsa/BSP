@@ -55,6 +55,10 @@ import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContig
 import { rollupObjectiveCoverage } from '@/lib/supervision/supervisionUtils';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
+import {
+    listOpsAdvCandidatesForVacancy,
+    listOpsExtCandidatesForVacancy,
+} from '@/lib/operaciones/opsExtAdvCandidates';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
