@@ -28,6 +28,10 @@ import {
   buildEmployeesAssignedToday,
   collectFrancoShiftRowsToday,
 } from '@/lib/operaciones/coverageAssignedToday';
+import {
+  buildOpsDualCoverageTurnoPatches,
+  opsPositionMatches,
+} from '@/lib/operaciones/opsDualCoverageApply';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -437,8 +441,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     }
   };
 
-  const candidatesExt = (logic.processedData || []).filter((sh: any) =>
-    sh.isPresent && !sh.isCompleted && sh.objectiveId === absenceShift.objectiveId && sh.positionName === absenceShift.positionName && sh.id !== absenceShift.id);
+  const candidatesExt = (logic.processedData || []).filter((sh: any) => {
+    if (!sh.isPresent || sh.isCompleted) return false;
+    if (sh.objectiveId !== absenceShift.objectiveId) return false;
+    if (!opsPositionMatches(sh.positionName, absenceShift.positionName)) return false;
+    if (sh.id === absenceShift.id) return false;
+    if (crossSessionBusy.has(sh.employeeId)) return false;
+    const shiftStartMs = sh.shiftDateObj ? toDate(sh.shiftDateObj).getTime() : 0;
+    return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
+  });
   // ADV: turno que aún no empezó en el mismo objetivo/puesto, dentro de las próximas 12h.
   // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
   const advWindowEnd = new Date(now.getTime() + 12 * 3600 * 1000);
@@ -447,7 +458,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const shStart = toDate(sh.shiftDateObj);
       return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
         && sh.objectiveId === absenceShift.objectiveId
-        && sh.positionName === absenceShift.positionName
+        && opsPositionMatches(sh.positionName, absenceShift.positionName)
+        && !crossSessionBusy.has(sh.employeeId)
         && shStart > now && shStart <= advWindowEnd;
     })
     .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
@@ -715,81 +727,145 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     if (!slot) return;
     setLoading('confirm_' + role);
     try {
-      const batch = writeBatch(db);
-      if (role === 'ext') {
-        const sh = candidatesExt.find((x: any) => x.employeeId === slot.empId);
-        if (sh) batch.update(doc(db, 'turnos', sh.id), { isRetention: true, retentionEndTime: Timestamp.fromDate(absenceEnd) });
-        await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'RETENCION', title: 'Retención EXT', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} retenido — 1ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
-        const newConfirmedExt = slot.empId;
-        if (s.confirmedAdv) {
-          // Ambos confirmados: marcar titular cubierto + sync RRHH GESTIONADA
-          const advSh = candidatesAdv.find((x: any) => x.employeeId === s.confirmedAdv);
-          const extName = (sh?.employeeName || '').split(' ')[0];
-          const advName = (advSh?.employeeName || '').split(' ')[0];
-          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
-          const advLabel = `${advName} adel ${fmtTime(advSh?.shiftDateObj)}–${hiEnd}`;
-          const covLabel = `${extLabel} + ${advLabel}`;
-          if (absenceShift.id) {
-            const fin = writeBatch(db);
-            const isAbsence = !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence || absenceShift.absenceType);
-            fin.update(doc(db, 'turnos', absenceShift.id), absentShiftCoveragePatch({
-              coveredByEmployeeId: slot.empId,
-              coveredByEmployeeName: covLabel,
-              coverageType: 'RETENCION',
-              isAbsence,
-            }));
-            await syncAusenciaCoberturaGestionada(db, {
-              shiftId: absenceShift.id,
-              coveredByEmployeeId: slot.empId,
-              coveredByEmployeeName: covLabel,
-              coverageType: 'RETENCION',
-              empresaId: tid || null,
-            }, fin);
-            await fin.commit();
-          }
-          toast.success('Cobertura completa');
-          onUpd({ status: 'CONFIRMED', confirmedExt: newConfirmedExt, pendingExt: null });
-          setTimeout(onClose, 2000);
-        } else onUpd({ confirmedExt: newConfirmedExt, pendingExt: null });
-      } else {
-        const sh = candidatesAdv.find((x: any) => x.employeeId === slot.empId);
-        if (sh) batch.update(doc(db, 'turnos', sh.id), { adjustedStartTime: serverTimestamp(), isEarlyStart: true });
-        await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'ADELANTO_TURNO', title: 'Adelanto ADV', status: 'pending', employeeId: slot.empId, employeeName: sh?.employeeName || '', objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: sh?.id || null, description: `${sh?.employeeName} adelantado — 2ª mitad`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
-        const newConfirmedAdv = slot.empId;
-        if (s.confirmedExt) {
-          const extSh = candidatesExt.find((x: any) => x.employeeId === s.confirmedExt);
-          const extName = (extSh?.employeeName || '').split(' ')[0];
-          const advName = (sh?.employeeName || '').split(' ')[0];
-          const extLabel = `${extName} ext ${hiStart}–${hiEnd}`;
-          const advLabel = `${advName} adel ${fmtTime(sh?.shiftDateObj)}–${hiEnd}`;
-          const covLabel = `${extLabel} + ${advLabel}`;
-          if (absenceShift.id) {
-            const fin = writeBatch(db);
-            const isAbsence = !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence || absenceShift.absenceType);
-            fin.update(doc(db, 'turnos', absenceShift.id), absentShiftCoveragePatch({
-              coveredByEmployeeId: slot.empId,
-              coveredByEmployeeName: covLabel,
-              coverageType: 'RETENCION',
-              isAbsence,
-            }));
-            await syncAusenciaCoberturaGestionada(db, {
-              shiftId: absenceShift.id,
-              coveredByEmployeeId: slot.empId,
-              coveredByEmployeeName: covLabel,
-              coverageType: 'RETENCION',
-              empresaId: tid || null,
-            }, fin);
-            await fin.commit();
-          }
-          toast.success('Cobertura completa');
-          onUpd({ status: 'CONFIRMED', confirmedAdv: newConfirmedAdv, pendingAdv: null });
-          setTimeout(onClose, 2000);
-        } else onUpd({ confirmedAdv: newConfirmedAdv, pendingAdv: null });
+      const nextExt = role === 'ext' ? slot.empId : s.confirmedExt;
+      const nextAdv = role === 'adv' ? slot.empId : s.confirmedAdv;
+      const pendingPatch =
+        role === 'ext'
+          ? { confirmedExt: nextExt, pendingExt: null as PendingSlot | null }
+          : { confirmedAdv: nextAdv, pendingAdv: null as PendingSlot | null };
+
+      if (!nextExt || !nextAdv) {
+        onUpd(pendingPatch);
+        toast.message(`Confirmado ${role === 'ext' ? 'EXT' : 'ADV'} — falta la otra mitad`);
+        return;
       }
-    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
-    finally { setLoading(null); }
+
+      if (absenceShift.id) {
+        const titularSnap = await getDoc(doc(db, 'turnos', absenceShift.id));
+        if (titularSnap.exists() && isTitularAlreadyCovered(titularSnap.data() as Record<string, unknown>)) {
+          toast.message('Esta ausencia ya tiene cobertura activa — no se duplica.');
+          onUpd({ status: 'CONFIRMED', ...pendingPatch, confirmedExt: nextExt, confirmedAdv: nextAdv });
+          setTimeout(onClose, 1200);
+          return;
+        }
+      }
+
+      const { patchesByDocId, coveredByLabel } = buildOpsDualCoverageTurnoPatches({
+        absenceShift,
+        extEmpId: nextExt,
+        advEmpId: nextAdv,
+        processedData: logic.processedData || [],
+        rawShifts: logic.rawShifts,
+        employees: logic.employees || [],
+        servicesSLA: logic.servicesSLA || [],
+      });
+
+      const batch = writeBatch(db);
+      if (absenceShift.id) {
+        await supersedeOpsCoveragesForAbsence(db, absenceShift.id, batch, {
+          supersededBy: `SESSION_DUAL_${s.id}`,
+        });
+        const isAbsence = !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence || absenceShift.absenceType);
+        batch.update(
+          doc(db, 'turnos', absenceShift.id),
+          absentShiftCoveragePatch({
+            coveredByEmployeeId: nextExt,
+            coveredByEmployeeName: coveredByLabel,
+            coverageType: 'RETENCION',
+            isAbsence,
+          }),
+        );
+        await syncAusenciaCoberturaGestionada(
+          db,
+          {
+            shiftId: absenceShift.id,
+            coveredByEmployeeId: nextExt,
+            coveredByEmployeeName: coveredByLabel,
+            coverageType: 'RETENCION',
+            empresaId: tid || null,
+          },
+          batch,
+        );
+      }
+      patchesByDocId.forEach((patch, docId) => {
+        batch.update(doc(db, 'turnos', docId), patch);
+      });
+      await batch.commit();
+
+      const extSh = candidatesExt.find((x: any) => x.employeeId === nextExt);
+      const advSh = candidatesAdv.find((x: any) => x.employeeId === nextAdv);
+      await addDoc(
+        collection(db, 'novedades'),
+        stampEmpresaId(
+          {
+            type: 'COBERTURA_ASIGNADA',
+            title: 'Cobertura EXT + ADV',
+            status: 'pending',
+            employeeId: nextExt,
+            employeeName: coveredByLabel,
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            shiftId: absenceShift.id || extSh?.id || null,
+            description: `Split ${coveredByLabel} · ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`,
+            createdAt: serverTimestamp(),
+            reportedBy: 'OPERACIONES',
+          },
+          tid,
+        ),
+      );
+      await addDoc(
+        collection(db, 'novedades'),
+        stampEmpresaId(
+          {
+            type: 'RETENCION',
+            title: 'Retención EXT',
+            status: 'pending',
+            employeeId: nextExt,
+            employeeName: extSh?.employeeName || '',
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            shiftId: extSh?.id || null,
+            description: `${extSh?.employeeName || 'EXT'} — 1ª mitad`,
+            createdAt: serverTimestamp(),
+            reportedBy: 'OPERACIONES',
+          },
+          tid,
+        ),
+      );
+      await addDoc(
+        collection(db, 'novedades'),
+        stampEmpresaId(
+          {
+            type: 'ADELANTO_TURNO',
+            title: 'Adelanto ADV',
+            status: 'pending',
+            employeeId: nextAdv,
+            employeeName: advSh?.employeeName || '',
+            objectiveId: absenceShift.objectiveId,
+            objectiveName: absenceShift.objectiveName,
+            shiftId: advSh?.id || null,
+            description: `${advSh?.employeeName || 'ADV'} — 2ª mitad`,
+            createdAt: serverTimestamp(),
+            reportedBy: 'OPERACIONES',
+          },
+          tid,
+        ),
+      );
+
+      toast.success('Cobertura EXT+ADV aplicada (Plan + Ops)');
+      onUpd({
+        status: 'CONFIRMED',
+        confirmedExt: nextExt,
+        confirmedAdv: nextAdv,
+        pendingExt: null,
+        pendingAdv: null,
+      });
+      setTimeout(onClose, 2000);
+    } catch (e: any) {
+      toast.error('Error al confirmar cobertura: ' + (e?.message || String(e)));
+    } finally {
+      setLoading(null);
+    }
   };
 
   // Mantener ref siempre actualizado (evita closures stale en onSnapshot)
@@ -867,10 +943,21 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     const isPending = s.status === 'PENDING_DUAL';
     const canNotify = !!s.selectedExtId && !!s.selectedAdvId && !isPending;
 
+    const shiftSubtitle = (cand: any) => {
+      const code = normBandCode(cand.code);
+      if (!cand.shiftDateObj && !code) return null;
+      const band = code ? `${code}${BAND_LABEL[code] && BAND_LABEL[code] !== code ? ` · ${BAND_LABEL[code]}` : ''}` : '';
+      const times = cand.shiftDateObj
+        ? `${fmtTime(cand.shiftDateObj)}–${fmtTime(cand.endDateObj)}`
+        : '';
+      return [band, times].filter(Boolean).join(' · ') || null;
+    };
+
     const DualCard = ({ cand, role }: { cand: any; role: 'ext' | 'adv' }) => {
       const empId = cand.employeeId || cand.id;
       const name = cand.fullName || cand.employeeName || cand.name || '—';
       const phone = cand.phone || cand.celular || simPhone(empId);
+      const sub = shiftSubtitle(cand);
       const isConfirmedThis = role === 'ext' ? s.confirmedExt === empId : s.confirmedAdv === empId;
       const pendingSlot = role === 'ext' ? s.pendingExt : s.pendingAdv;
       const isPendingThis = pendingSlot?.empId === empId;
@@ -882,6 +969,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-black flex-shrink-0">✓</div>
           <div className="flex-1 min-w-0">
             <div className="text-xs font-bold text-emerald-800 truncate">{name}</div>
+            {sub && <div className="text-[10px] text-emerald-700 font-semibold truncate">{sub}</div>}
             <div className="text-[10px] text-emerald-600">Confirmado</div>
           </div>
         </div>
@@ -892,6 +980,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className="w-7 h-7 rounded-full bg-amber-400 flex items-center justify-center text-amber-900 text-[9px] font-black font-mono flex-shrink-0">{fmtCd(pendingSlot!.sec)}</div>
           <div className="flex-1 min-w-0">
             <div className="text-xs font-bold text-amber-900 truncate">{name}</div>
+            {sub && <div className="text-[10px] font-semibold text-amber-800 truncate">{sub}</div>}
+            <div className="text-[10px] text-amber-700">Notificación enviada</div>
             <div className="text-xs font-black font-mono text-amber-800">📱 {phone}</div>
           </div>
         </div>
@@ -906,6 +996,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{isSelected ? '✓' : initials(name)}</div>
           <div className="flex-1 min-w-0">
             <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>{name}</div>
+            {sub && <div className="text-[10px] font-semibold text-slate-600 truncate">{sub}</div>}
             <div className="text-xs font-mono text-slate-600">📱 {phone}</div>
           </div>
         </div>
