@@ -42,6 +42,12 @@ export const COACH_STEPS: CoachStep[] = [
     targetRoute: '/admin/crm',
     targetRouteLabel: 'CRM',
     highlightSelector: '[data-action="nuevo-cliente"]',
+    highlightChain: [
+      { selector: '[data-action="crm-nuevo-nombre"]', hint: '→ Escribí el Nombre comercial (ej: Distribuidora Córdoba SA)' },
+      { selector: '[data-action="crm-nuevo-razonsocial"]', hint: '→ Completá la Razón social completa (ej: Distribuidora Córdoba Sociedad Anónima)' },
+      { selector: '[data-action="crm-nuevo-arca"]', hint: '→ Clic en ARCA para autocompletar dirección e impuestos del padrón' },
+      { selector: '[data-action="crm-nuevo-crear"]', hint: '→ Clic en CREAR CLIENTE para guardar' },
+    ],
   },
   {
     moduleKey: 'CLIENTS',
@@ -62,6 +68,12 @@ export const COACH_STEPS: CoachStep[] = [
     targetRoute: '/admin/crm',
     targetRouteLabel: 'CRM',
     highlightSelector: '[data-action="nueva-sede"]',
+    highlightChain: [
+      { selector: '[data-action="crm-sede-nombre"]', hint: '→ Escribí el nombre de la sede (ej: Sucursal Centro)' },
+      { selector: '[data-action="crm-sede-direccion"]', hint: '→ Ingresá la dirección completa (ej: Av. Colón 1234, Córdoba)' },
+      { selector: '[data-action="crm-sede-geolocalize"]', hint: '→ Clic en el botón de ubicación 📍 para geolocalizar en el mapa' },
+      { selector: '[data-action="guardar-sede"]', hint: '→ Clic en GUARDAR para crear la sede' },
+    ],
   },
 
   // ── RRHH ───────────────────────────────────────────────────────────────────
@@ -102,6 +114,13 @@ export const COACH_STEPS: CoachStep[] = [
     targetRoute: '/admin/rrhh',
     targetRouteLabel: 'RRHH',
     highlightSelector: '[data-action="nueva-novedad"]',
+    highlightChain: [
+      { selector: '[data-action="rrhh-novedad-empleado"]', hint: '→ Buscá y seleccioná el empleado (ej: Roberto Gómez)' },
+      { selector: '[data-action="rrhh-novedad-tipo"]', hint: '→ Elegí el Tipo de novedad (ej: Licencia)' },
+      { selector: '[data-action="rrhh-novedad-estado"]', hint: '→ Elegí el Estado (ej: Autorizada)' },
+      { selector: '[data-action="rrhh-novedad-fecha"]', hint: '→ Seleccioná la Fecha de inicio de la novedad' },
+      { selector: '[data-action="rrhh-novedad-registrar"]', hint: '→ Clic en REGISTRAR para guardar la novedad' },
+    ],
   },
 
   // ── SERVICES ───────────────────────────────────────────────────────────────

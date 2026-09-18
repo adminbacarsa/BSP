@@ -1286,10 +1286,10 @@ export default function CRMPage() {
         taxId: '20-12345678-9',
         legalName: 'Empresa de Seguridad Demo Sociedad Anónima',
         name: 'Demo SA',
-        address: 'Av. Corrientes 4567',
-        city: 'Buenos Aires',
-        state: 'Ciudad Autónoma de Buenos Aires',
-        postalCode: 'C1195AAA',
+        address: 'Av. Colón 1234',
+        city: 'Córdoba',
+        state: 'Córdoba',
+        postalCode: 'X5000AAA',
         ivaStatus: 'Responsable Inscripto',
         tipoPersona: 'JURIDICA',
         estadoClave: 'ACTIVO',
@@ -3691,6 +3691,7 @@ export default function CRMPage() {
                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">Nueva sede</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
+                            data-action="crm-sede-nombre"
                             className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Nombre de la sede"
                             value={objectiveForm.name}
@@ -3698,12 +3699,14 @@ export default function CRMPage() {
                           />
                           <div className="flex gap-2">
                             <input
+                              data-action="crm-sede-direccion"
                               className="borderflex-1 p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                               placeholder="Dirección completa"
                               value={objectiveForm.address}
                               onChange={(e) => setObjectiveForm({ ...objectiveForm, address: e.target.value })}
                             />
                             <button
+                              data-action="crm-sede-geolocalize"
                               onClick={handleGeocodeSede}
                               disabled={isGeocodingSede}
                               title="Geolocalizar por dirección o coordenadas"
@@ -4071,12 +4074,12 @@ export default function CRMPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Nombre comercial *</label>
-                <input className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Ej: Empresa SA" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} />
+                <input data-action="crm-nuevo-nombre" className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Ej: Empresa SA" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Razón social</label>
-                  <input className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Razón social" value={newClientForm.legalName} onChange={(e) => setNewClientForm({ ...newClientForm, legalName: e.target.value })} />
+                  <input data-action="crm-nuevo-razonsocial" className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Razón social" value={newClientForm.legalName} onChange={(e) => setNewClientForm({ ...newClientForm, legalName: e.target.value })} />
                 </div>
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">CUIT</label>
@@ -4087,6 +4090,7 @@ export default function CRMPage() {
                       disabled={afipLookupLoading === 'new'}
                       onClick={() => void handleAfipLookup('new')}
                       className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
+                      data-action="crm-nuevo-arca"
                       title="Consultar padrón ARCA"
                     >
                       {afipLookupLoading === 'new' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
@@ -4130,7 +4134,7 @@ export default function CRMPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setNewClientOpen(false)} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-500 font-black text-[10px] uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
-              <button onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-black text-[10px] uppercase hover:bg-indigo-700 transition-colors disabled:opacity-40">
+              <button data-action="crm-nuevo-crear" onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-black text-[10px] uppercase hover:bg-indigo-700 transition-colors disabled:opacity-40">
                 {savingNewClient ? 'Creando...' : 'Crear Cliente'}
               </button>
             </div>

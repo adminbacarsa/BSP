@@ -22,8 +22,6 @@ export function useTrainingEvidence() {
   const empresaId  = session?.empresaId ?? '';
 
   // ── Convertir startedAt a Timestamp de Firestore ─────────────────────────
-  // session.startedAt puede ser un Timestamp de Firestore (leído via onSnapshot)
-  // o un ISO string (objeto local recién creado). Manejar ambos casos.
   const sessionStart: Timestamp | null = (() => {
     if (!session?.startedAt) return null;
     try {
@@ -51,6 +49,20 @@ export function useTrainingEvidence() {
       .finally(() => completingRef.current.delete(key));
   };
 
+  // Helper: comparar timestamp de un doc contra sessionStart (client-side)
+  // Evita queries compuestas que requieren índices Firestore en producción.
+  const isAfterStart = (tsField: unknown): boolean => {
+    if (!sessionStart || !tsField) return false;
+    try {
+      const ts = tsField instanceof Timestamp
+        ? tsField
+        : Timestamp.fromDate(new Date(String(tsField)));
+      return ts.seconds >= sessionStart.seconds;
+    } catch {
+      return false;
+    }
+  };
+
   // ── Detectar evidencia según el paso activo ───────────────────────────────
   useEffect(() => {
     if (!isTraining || !session || !empresaId || !sessionStart) return;
@@ -64,29 +76,30 @@ export function useTrainingEvidence() {
     switch (stepId) {
       // ── CLIENTS ────────────────────────────────────────────────────────────
       case 'crear_cliente': {
+        // Query solo por empresaId (índice automático); filtro de fecha client-side
         const q = query(
           collection(db, 'clients'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(1),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
-          if (!snap.empty) markDone(moduleKey, stepId);
+          const hasNew = snap.docs.some(d => isAfterStart(d.data().createdAt));
+          if (hasNew) markDone(moduleKey, stepId);
         });
         break;
       }
 
       case 'crear_objetivo': {
-        // Detectar cuando hay al menos un cliente con objetivos no vacíos
         const q = query(
           collection(db, 'clients'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(5),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
           const hasObj = snap.docs.some(d => {
-            const obj = d.data().objetivos;
+            const data = d.data();
+            if (!isAfterStart(data.createdAt)) return false;
+            const obj = data.objetivos;
             return Array.isArray(obj) && obj.length > 0;
           });
           if (hasObj) markDone(moduleKey, stepId);
@@ -99,11 +112,11 @@ export function useTrainingEvidence() {
         const q = query(
           collection(db, 'servicios_sla'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(1),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
-          if (!snap.empty) markDone(moduleKey, stepId);
+          const hasNew = snap.docs.some(d => isAfterStart(d.data().createdAt));
+          if (hasNew) markDone(moduleKey, stepId);
         });
         break;
       }
@@ -112,12 +125,13 @@ export function useTrainingEvidence() {
         const q = query(
           collection(db, 'servicios_sla'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(5),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
           const configured = snap.docs.some(d => {
-            const positions = d.data().positions ?? [];
+            const data = d.data();
+            if (!isAfterStart(data.createdAt)) return false;
+            const positions = data.positions ?? [];
             return positions.some((p: { coverageType?: string; shifts?: unknown[] }) =>
               (p.coverageType === '24hs' || p.coverageType === '24H' || p.coverageType === 'FULL_DAY') &&
               Array.isArray(p.shifts) && p.shifts.length > 0
@@ -132,12 +146,13 @@ export function useTrainingEvidence() {
         const q = query(
           collection(db, 'servicios_sla'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(5),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
           const hasTwoOrMore = snap.docs.some(d => {
-            const positions = d.data().positions ?? [];
+            const data = d.data();
+            if (!isAfterStart(data.createdAt)) return false;
+            const positions = data.positions ?? [];
             return positions.filter((p: { shifts?: unknown[] }) =>
               Array.isArray(p.shifts) && p.shifts.length > 0
             ).length >= 2;
@@ -152,11 +167,11 @@ export function useTrainingEvidence() {
         const q = query(
           collection(db, 'turnos'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(1),
+          limit(30),
         );
         unsub = onSnapshot(q, snap => {
-          if (!snap.empty) markDone(moduleKey, stepId);
+          const hasNew = snap.docs.some(d => isAfterStart(d.data().createdAt));
+          if (hasNew) markDone(moduleKey, stepId);
         });
         break;
       }
@@ -172,7 +187,7 @@ export function useTrainingEvidence() {
             const pa = d.data().publishedAt;
             if (!pa) return false;
             const publishedTs = pa instanceof Timestamp ? pa : Timestamp.fromDate(new Date(pa));
-            return publishedTs.seconds >= sessionStart.seconds;
+            return publishedTs.seconds >= sessionStart!.seconds;
           });
           if (published) markDone(moduleKey, stepId);
         });
@@ -211,17 +226,19 @@ export function useTrainingEvidence() {
         const qAus = query(
           collection(db, 'ausencias'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(1),
+          limit(30),
         );
         const qNov = query(
           collection(db, 'novedades'),
           where('empresaId', '==', empresaId),
-          where('createdAt', '>=', sessionStart),
-          limit(1),
+          limit(30),
         );
-        const u1 = onSnapshot(qAus, snap => { if (!snap.empty) markDone(moduleKey, stepId); });
-        const u2 = onSnapshot(qNov, snap => { if (!snap.empty) markDone(moduleKey, stepId); });
+        const u1 = onSnapshot(qAus, snap => {
+          if (snap.docs.some(d => isAfterStart(d.data().createdAt))) markDone(moduleKey, stepId);
+        });
+        const u2 = onSnapshot(qNov, snap => {
+          if (snap.docs.some(d => isAfterStart(d.data().createdAt))) markDone(moduleKey, stepId);
+        });
         unsub = () => { u1(); u2(); };
         break;
       }
