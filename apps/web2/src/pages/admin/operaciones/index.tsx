@@ -55,11 +55,6 @@ import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContig
 import { rollupObjectiveCoverage } from '@/lib/supervision/supervisionUtils';
 import { updateDocForEmpresa, stampEmpresaId, assertDocBelongsToEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
-import {
-    CoverageSessionManager,
-    type CoverageSession,
-    createSession,
-} from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -619,7 +614,7 @@ const CoverageRow = ({ item, lKey, onAction, label, color, loading, onWA }: any)
     );
 };
 
-/** @deprecated Reemplazado en CC por CoverageSessionManager (mismo protocolo CCT que map-view). Se mantiene por si hay referencias locales internas; no se monta. */
+/** Modal principal de cobertura en Operaciones (retención, adelanto, permuta, convocatorias). Map-view usa CoverageSessionManager. */
 const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
@@ -2759,52 +2754,8 @@ export default function OperacionesPage() {
     // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    /** Protocolo CCT completo (mismo que map-view) — independiente del mapa abierto/cerrado. */
-    const [coverageSessions, setCoverageSessions] = useState<CoverageSession[]>([]);
-    const [activeCoverageId, setActiveCoverageId] = useState<string | null>(null);
-    const openCoverageProtocol = (shift: any) => {
-        if (!shift) return;
-        setCoverageSessions((prev) => {
-            const existing = prev.find((s) => s.absentShift?.id === shift?.id);
-            if (existing) {
-                setActiveCoverageId(existing.id);
-                return prev.map((s) => (s.id === existing.id ? { ...s, minimized: false } : s));
-            }
-            const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
-            setActiveCoverageId(newSess.id);
-            return [...prev, newSess];
-        });
-    };
-    const updateCoverageSession = (id: string, fn: (s: CoverageSession) => CoverageSession) => {
-        setCoverageSessions((prev) => prev.map((s) => (s.id === id ? fn(s) : s)));
-    };
-    const closeCoverageSession = (id: string) => {
-        setCoverageSessions((prev) => {
-            const next = prev.filter((s) => s.id !== id);
-            setActiveCoverageId((cur) => (cur === id ? (next[0]?.id ?? null) : cur));
-            return next;
-        });
-    };
-    /** Compat call-sites del CoverageModal viejo → abre el protocolo CCT de map-view. */
-    const setCoverageData = (v: { isOpen: boolean; shift: any }) => {
-        if (v?.isOpen && v.shift) {
-            openCoverageProtocol(v.shift);
-            return;
-        }
-        if (!v?.isOpen && v?.shift?.id) {
-            setCoverageSessions((prev) => {
-                const hit = prev.find((s) => s.absentShift?.id === v.shift.id);
-                if (!hit) return prev;
-                const next = prev.filter((s) => s.id !== hit.id);
-                setActiveCoverageId((cur) => (cur === hit.id ? (next[0]?.id ?? null) : cur));
-                return next;
-            });
-            return;
-        }
-        if (!v?.isOpen && activeCoverageId) {
-            closeCoverageSession(activeCoverageId);
-        }
-    };
+    /** Modal completo de cobertura (retención, adelanto, permuta, convocatorias, intercambio en relevo). */
+    const [coverageData, setCoverageData] = useState<{ isOpen: boolean; shift: any }>({ isOpen: false, shift: null });
     const [workedFrancoData, setWorkedFrancoData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [absenceDecisionData, setAbsenceDecisionData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [rrhhVacancyData, setRrhhVacancyData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
@@ -5979,16 +5930,14 @@ export default function OperacionesPage() {
                 logic={logic}
                 onVacancyCreated={handleVacancyCreated}
             />
-            <CoverageSessionManager
-                sessions={coverageSessions}
-                activeId={activeCoverageId}
+            <CoverageModal
+                isOpen={coverageData.isOpen}
+                onClose={() => setCoverageData({ isOpen: false, shift: null })}
+                absenceShift={coverageData.shift}
                 logic={logic}
-                onActivate={setActiveCoverageId}
-                onClose={closeCoverageSession}
-                onUpdate={updateCoverageSession}
             />
             <AbsenceDecisionModal isOpen={absenceDecisionData.isOpen} onClose={() => setAbsenceDecisionData({isOpen:false,shift:null})} shift={absenceDecisionData.shift} onDeclareAbsent={handleDeclareAbsentT5} onLateArrival={handleLateArrival} onOpenWA={handleOpenWA}/>
-            <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => openCoverageProtocol(s)} onSendToPlanning={handleReportPlanning}/>
+            <RRHHVacancyModal isOpen={rrhhVacancyData.isOpen} onClose={() => setRrhhVacancyData({isOpen:false,shift:null})} shift={rrhhVacancyData.shift} logic={logic} onCoverageProtocol={(s: any) => setCoverageData({ isOpen: true, shift: s })} onSendToPlanning={handleReportPlanning}/>
             <WorkedDayOffModal isOpen={workedFrancoData.isOpen} onClose={() => setWorkedFrancoData({isOpen:false,shift:null})} shift={workedFrancoData.shift}/>
             <ManualRetentionModal isOpen={manualRetentionData.isOpen} onClose={() => setManualRetentionData({isOpen:false,shift:null})} shift={manualRetentionData.shift}/>
             <WAComposeModal isOpen={waData.isOpen} onClose={() => setWaData({isOpen:false,ctx:{employeeName:'',phone:''}})} ctx={waData.ctx}/>
