@@ -1253,21 +1253,21 @@ export default function CRMPage() {
     const err = e as { code?: string; message?: string };
     const msg = callableErrorText(e);
     if (err.code === 'functions/unauthenticated' || /sesión|iniciar sesión/i.test(msg)) {
-      toast.error('Sesión expirada. Cerrá sesión y volvé a entrar, luego probá AFIP de nuevo.');
+      toast.error('Sesión expirada. Cerrá sesión y volvé a entrar, luego probá ARCA de nuevo.');
     } else if (err.code === 'functions/permission-denied') {
-      toast.error(msg || 'No tenés permiso para consultar AFIP.');
+      toast.error(msg || 'No tenés permiso para consultar ARCA.');
     } else if (err.code === 'functions/not-found') {
       toast.error(
         msg ||
-          'CUIT no encontrado en el padrón AFIP. Si en ARCA web sí aparece, activá certificado de producción en Configuración → Empresas.',
+          'CUIT no encontrado en el padrón ARCA. Si en ARCA web sí aparece, activá certificado de producción en Configuración → Empresas.',
         { duration: 16_000 },
       );
     } else if (err.code === 'functions/failed-precondition' || /401|certificado afip|AFIP rechazó|no configurado/i.test(msg)) {
       const hint = /no configurado/i.test(msg)
         ? ' Cargá el certificado en Configuración → Empresas (empresa activa).'
         : '';
-      toast.error((msg || 'Error de certificado o ambiente AFIP.') + hint, { duration: 14000 });
-    } else toast.error(msg || 'Error al consultar AFIP');
+      toast.error((msg || 'Error de certificado o ambiente ARCA.') + hint, { duration: 14000 });
+    } else toast.error(msg || 'Error al consultar ARCA');
   };
 
   const handleAfipLookup = async (target: 'new' | 'edit' | 'client') => {
@@ -1276,9 +1276,55 @@ export default function CRMPage() {
       return;
     }
     if (!empresaId?.trim()) {
-      toast.error('Seleccioná una empresa en el panel antes de consultar AFIP.');
+      toast.error('Seleccioná una empresa en el panel antes de consultar ARCA.');
       return;
     }
+
+    // Modo capacitación: simular lookup AFIP sin llamar al servicio real
+    if ((empresa as any)?.isTrainingEmpresa) {
+      const fakeData: AfipClientLookupResult = {
+        taxId: '20-12345678-9',
+        legalName: 'Empresa de Seguridad Demo Sociedad Anónima',
+        name: 'Demo SA',
+        address: 'Av. Corrientes 4567',
+        city: 'Buenos Aires',
+        state: 'Ciudad Autónoma de Buenos Aires',
+        postalCode: 'C1195AAA',
+        ivaStatus: 'Responsable Inscripto',
+        tipoPersona: 'JURIDICA',
+        estadoClave: 'ACTIVO',
+        actividadPrincipal: '80.300 - Enseñanza de formación y capacitación laboral',
+        afipImpuestos: 'IVA - Responsable Inscripto, Impuesto a las Ganancias - Inscripto',
+      };
+      if (target === 'new') {
+        setAfipLookupLoading('new');
+        await new Promise(r => setTimeout(r, 700));
+        setNewClientForm((f) => mergeAfipIntoClientForm(f, fakeData));
+        toast.success('Datos cargados desde ARCA (modo capacitación)');
+        setAfipLookupLoading(null);
+        return;
+      }
+      if (!selectedClient?.id || !selectedClientWritable) return;
+      setAfipLookupLoading(target);
+      await new Promise(r => setTimeout(r, 700));
+      try {
+        const fresh = await assertClientWritable(selectedClient.id, selectedClient.name);
+        const base = target === 'edit' ? { ...fresh, ...infoForm } : fresh;
+        const patch = mergeAfipIntoClientRecord(base, fakeData);
+        const { id: _id, collection: _col, ...patchClean } = patch as Record<string, unknown>;
+        await updateClientForEmpresa(fresh.id, patchClean, empresaId, migracionCompleta, tenantAccess);
+        setSelectedClient({ ...fresh, ...patch });
+        setInfoForm({ ...fresh, ...patch });
+        setIsEditingInfo(false);
+        toast.success('Ficha actualizada desde ARCA (modo capacitación)');
+      } catch (e: unknown) {
+        toast.error('Error al guardar la ficha');
+      } finally {
+        setAfipLookupLoading(null);
+      }
+      return;
+    }
+
     const taxId = target === 'new'
       ? newClientForm.taxId
       : target === 'edit'
@@ -1295,7 +1341,7 @@ export default function CRMPage() {
       try {
         const data = await lookupClientByCuitFromAfip(taxId, empresaId);
         setNewClientForm((f) => mergeAfipIntoClientForm(f, data));
-        toast.success(`Datos cargados desde AFIP: ${data.legalName}`);
+        toast.success(`Datos cargados desde ARCA: ${data.legalName}`);
         if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
       } catch (e: unknown) {
         afipLookupErrorToast(e);
@@ -1322,7 +1368,7 @@ export default function CRMPage() {
       setSelectedClient({ ...fresh, ...patch });
       setInfoForm({ ...fresh, ...patch });
       setIsEditingInfo(false);
-      toast.success(`Ficha actualizada desde AFIP: ${data.legalName}`);
+      toast.success(`Ficha actualizada desde ARCA: ${data.legalName}`);
       if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
     } catch (e: unknown) {
       afipLookupErrorToast(e);
@@ -2791,10 +2837,10 @@ export default function CRMPage() {
                             disabled={!selectedClientWritable || afipLookupLoading === 'client'}
                             onClick={() => void handleAfipLookup('client')}
                             className="font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-violet-200 text-violet-700 hover:bg-violet-50 flex items-center gap-1.5 disabled:opacity-40"
-                            title="Consultar AFIP y guardar en la ficha del cliente"
+                            title="Consultar ARCA y guardar en la ficha del cliente"
                           >
                             {afipLookupLoading === 'client' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                            Actualizar desde AFIP
+                            Actualizar desde ARCA
                           </button>
                         )}
                         <button
@@ -2835,10 +2881,10 @@ export default function CRMPage() {
                                     disabled={!selectedClientWritable || afipLookupLoading === 'edit'}
                                     onClick={() => void handleAfipLookup('edit')}
                                     className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
-                                    title="Consultar AFIP y guardar en la ficha"
+                                    title="Consultar ARCA y guardar en la ficha"
                                   >
                                     {afipLookupLoading === 'edit' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                    AFIP y guardar
+                                    ARCA y guardar
                                   </button>
                                 </div>
                               </div>
@@ -2937,7 +2983,7 @@ export default function CRMPage() {
                               <div className="grid grid-cols-2 divide-x divide-slate-100">
                                 {selectedClient.tipoPersona ? (
                                   <div className="px-4 py-3">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Tipo (AFIP)</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Tipo (ARCA)</p>
                                     <p className="font-black text-slate-800">
                                       {selectedClient.tipoPersona === 'FISICA' ? 'Persona física' : selectedClient.tipoPersona === 'JURIDICA' ? 'Persona jurídica' : selectedClient.tipoPersona}
                                     </p>
@@ -2945,7 +2991,7 @@ export default function CRMPage() {
                                 ) : <div className="px-4 py-3" />}
                                 {selectedClient.estadoClave ? (
                                   <div className="px-4 py-3">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado clave (AFIP)</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado clave (ARCA)</p>
                                     <p className="font-black text-slate-800">{selectedClient.estadoClave}</p>
                                   </div>
                                 ) : null}
@@ -2953,13 +2999,13 @@ export default function CRMPage() {
                             )}
                             {selectedClient.actividadPrincipal ? (
                               <div className="px-4 py-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Actividad principal (AFIP)</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Actividad principal (ARCA)</p>
                                 <p className="font-bold text-slate-700 text-sm leading-snug">{selectedClient.actividadPrincipal}</p>
                               </div>
                             ) : null}
                             {selectedClient.afipImpuestos ? (
                               <div className="px-4 py-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impuestos (AFIP)</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impuestos (ARCA)</p>
                                 <p className="font-bold text-slate-600 text-xs leading-relaxed">{selectedClient.afipImpuestos}</p>
                               </div>
                             ) : null}
@@ -4041,10 +4087,10 @@ export default function CRMPage() {
                       disabled={afipLookupLoading === 'new'}
                       onClick={() => void handleAfipLookup('new')}
                       className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
-                      title="Consultar padrón AFIP"
+                      title="Consultar padrón ARCA"
                     >
                       {afipLookupLoading === 'new' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                      AFIP
+                      ARCA
                     </button>
                   </div>
                 </div>

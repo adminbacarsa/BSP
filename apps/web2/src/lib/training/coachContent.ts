@@ -38,7 +38,7 @@ export const COACH_STEPS: CoachStep[] = [
       '3. En **Razón social** escribí: **Banco del Sur Sociedad Anónima**\n' +
       '4. En **Dirección** escribí: **Av. Corrientes 1234, CABA**\n' +
       '5. Clic en **CREAR CLIENTE** para guardar.',
-    hint: '💡 Si tenés el CUIT del cliente, escribilo y hacé clic en AFIP — el sistema autocompleta razón social e impuestos del padrón.',
+    hint: '💡 Clic en el botón ARCA — en modo capacitación autocompleta automáticamente con datos de demostración (no necesitás CUIT real).',
     targetRoute: '/admin/crm',
     targetRouteLabel: 'CRM',
     highlightSelector: '[data-action="nuevo-cliente"]',
@@ -250,7 +250,7 @@ export const COACH_STEPS: CoachStep[] = [
       '• Un cliente guardado con razón social y dirección.\n' +
       '• Una sede con dirección y pin en el mapa.\n\n' +
       'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
-    hint: '💡 Acordate del botón AFIP para autocompletar razón social con el CUIT.',
+    hint: '💡 Probá el botón ARCA — en modo capacitación carga datos de demostración automáticamente.',
     targetRoute: '/admin/crm',
     targetRouteLabel: 'CRM',
   },

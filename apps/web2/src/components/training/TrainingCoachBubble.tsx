@@ -55,6 +55,15 @@ export function TrainingCoachBubble() {
     setPos(loadPos() ?? defaultPos());
   }, []);
 
+  // Resetear la cadena de highlights al navegar a otra ruta
+  const prevPathname = useRef<string | null>(null);
+  useEffect(() => {
+    if (prevPathname.current !== null && prevPathname.current !== router.pathname) {
+      setChainIdx(0);
+    }
+    prevPathname.current = router.pathname;
+  }, [router.pathname]);
+
   // Auto-expandir cuando cambia el módulo O el paso activo
   const prevStepKey = useRef<string | null>(null);
   useEffect(() => {
