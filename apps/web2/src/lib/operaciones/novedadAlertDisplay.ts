@@ -106,6 +106,31 @@ export function isHiddenFromOpsAlerts(n: any): boolean {
  */
 const IA_AUTOMATION_TYPE_PREFIX = 'IA_ALERTA_';
 
+function shiftIsOverlapExemptOps(s: any): boolean {
+    if (!s) return false;
+    const origin = String(s.origin || '');
+    if (origin === 'OPERATIONS_COVERAGE') return true;
+    if (s.resolvedBy === 'OPERACIONES' || s.resolvedBy === 'MODO_DEMO') {
+        if (origin === 'OPERATIONS_COVERAGE' || s.absenceShiftId || s.coveredShiftId || s.modoDemoAt) {
+            return true;
+        }
+        if (String(s.code || '').toUpperCase() === 'FT') return true;
+    }
+    if (s.absenceShiftId || s.coveredShiftId) return true;
+    return false;
+}
+
+function parseOverlapFingerprint(fp: string): [string, string] | null {
+    const raw = String(fp || '').trim();
+    if (!raw.startsWith('overlap__')) return null;
+    const rest = raw.slice('overlap__'.length);
+    const sep = rest.lastIndexOf('__');
+    if (sep <= 0) return null;
+    const a = rest.slice(0, sep);
+    const b = rest.slice(sep + 2);
+    return a && b ? [a, b] : null;
+}
+
 function processedDataHasAbsenceCoverage(processedData: any[], absentShiftId: string): boolean {
     return (processedData || []).some((s: any) => {
         if (!s || s.isAbsent || s.isUnassigned) return false;
@@ -132,6 +157,18 @@ export function isStaleIaAutomationNovedad(n: any, processedData: any[]): boolea
 
     if (type === 'IA_ALERTA_AUSENCIA_SIN_COBERTURA') {
         if (processedDataHasAbsenceCoverage(processedData, shiftId)) return true;
+    }
+
+    if (type === 'IA_ALERTA_SOLAPAMIENTO_TURNOS') {
+        const fp = String(n?.automationFingerprint || '').trim();
+        const pair = parseOverlapFingerprint(fp);
+        if (pair) {
+            const [a, b] = pair;
+            const sa = (processedData || []).find((s: any) => s.id === a);
+            const sb = (processedData || []).find((s: any) => s.id === b);
+            if (shiftIsOverlapExemptOps(sa) || shiftIsOverlapExemptOps(sb)) return true;
+            if (sa?.isCompleted && sb?.isCompleted) return true;
+        }
     }
 
     const shift = (processedData || []).find((s: any) => s.id === shiftId);

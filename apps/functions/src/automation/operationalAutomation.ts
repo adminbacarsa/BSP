@@ -256,9 +256,30 @@ function shiftEligibleForIaAlert(row: TurnoDoc, start: Timestamp, publishedPlanK
   return true;
 }
 
+/** Turno generado por cobertura/demo/ops: no cuenta para solapamiento de planificación. */
+function isOverlapExemptOpsShift(row: TurnoDoc): boolean {
+  if (isOperationalCoverageTurno(row) || isOpsCoverageShift(row)) return true;
+  const origin = String(row.origin ?? '');
+  if (origin === 'OPERATIONS_COVERAGE') return true;
+  if (absenceShiftIdLinkedFromCoverage(row)) return true;
+  const code = normalizeCode(row.code);
+  if (
+    code === 'FT' &&
+    (row.resolvedBy === 'MODO_DEMO' ||
+      row.resolvedBy === 'OPERACIONES' ||
+      origin === 'OPERATIONS_COVERAGE' ||
+      !!row.modoDemoAt)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Ausencia titular no consume capacidad horaria (el guardia puede estar cubriendo en otro puesto). */
 function shiftCountsForOverlapCapacity(row: TurnoDoc): boolean {
-  return row.isAbsent !== true;
+  if (row.isAbsent === true) return false;
+  if (isOverlapExemptOpsShift(row)) return false;
+  return true;
 }
 
 function isOperationalCoverageTurno(row: TurnoDoc): boolean {
@@ -310,6 +331,34 @@ function collectAbsentShiftIdsWithOpsCoverage(
 type OverlapShiftRef = { id: string; data: TurnoDoc };
 
 function overlapPairAllowedByCoverage(prev: OverlapShiftRef, cur: OverlapShiftRef): boolean {
+  if (isOverlapExemptOpsShift(prev.data) && isOverlapExemptOpsShift(cur.data)) return true;
+  if (isOverlapExemptOpsShift(prev.data) || isOverlapExemptOpsShift(cur.data)) {
+    if (
+      isOperationalCoverageTurno(prev.data) ||
+      isOperationalCoverageTurno(cur.data) ||
+      isOpsCoverageShift(prev.data) ||
+      isOpsCoverageShift(cur.data) ||
+      absenceShiftIdLinkedFromCoverage(prev.data) ||
+      absenceShiftIdLinkedFromCoverage(cur.data)
+    ) {
+      return true;
+    }
+  }
+  const objPrev = String(prev.data.objectiveId ?? '').trim();
+  const objCur = String(cur.data.objectiveId ?? '').trim();
+  if (objPrev && objPrev === objCur) {
+    for (const side of [prev.data, cur.data]) {
+      const code = normalizeCode(side.code);
+      if (code !== 'FT') continue;
+      if (
+        isOverlapExemptOpsShift(side) ||
+        side.resolvedBy === 'MODO_DEMO' ||
+        side.resolvedBy === 'OPERACIONES'
+      ) {
+        return true;
+      }
+    }
+  }
   for (const [absentSide, activeSide] of [
     [prev, cur] as const,
     [cur, prev] as const,
