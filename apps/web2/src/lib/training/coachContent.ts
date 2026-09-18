@@ -12,6 +12,7 @@ export interface CoachStep {
   targetRoute: string;
   targetRouteLabel: string;
   highlightSelector?: string;
+  isPractice?: boolean;
 }
 
 export const COACH_STEPS: CoachStep[] = [
@@ -219,6 +220,83 @@ export const COACH_STEPS: CoachStep[] = [
       '4. Elegí un candidato y hacé clic en **"Cubrir"**.\n' +
       '5. El turno queda asignado y la vacante se cierra.',
     hint: '💡 Protocolo de cobertura (menor a mayor costo): Sin turno → RET → ESC → Extensión 12hs → Franco Trabajado (FT). El sistema propone siempre la opción más económica primero.',
+    targetRoute: '/admin/operaciones',
+    targetRouteLabel: 'Operaciones',
+  },
+
+  // ── PRÁCTICAS ──────────────────────────────────────────────────────────────
+  {
+    moduleKey: 'CLIENTS',
+    stepId: 'practica',
+    isPractice: true,
+    title: 'Tu turno: creá un cliente completo',
+    instruction:
+      'Creá un cliente nuevo (nombre y razón social distintos) con al menos una sede geolocalizada. Sin guía — usá lo que aprendiste.\n\n' +
+      '**Lo que tiene que quedar:**\n' +
+      '• Un cliente guardado con razón social y dirección.\n' +
+      '• Una sede con dirección y pin en el mapa.\n\n' +
+      'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
+    hint: '💡 Acordate del botón AFIP para autocompletar razón social con el CUIT.',
+    targetRoute: '/admin/crm',
+    targetRouteLabel: 'CRM',
+  },
+  {
+    moduleKey: 'RRHH',
+    stepId: 'practica',
+    isPractice: true,
+    title: 'Tu turno: registrá una novedad de vacaciones',
+    instruction:
+      'Registrá una novedad de **Vacaciones** (estado Autorizada) para cualquier empleado del listado, con al menos 5 días en el mes actual. Sin guía.\n\n' +
+      '**Lo que tiene que quedar:**\n' +
+      '• Novedad tipo Vacaciones, estado Autorizada.\n' +
+      '• Fechas dentro del mes actual.\n\n' +
+      'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
+    hint: '💡 Tip: cargá las vacaciones del mes antes de armar el cronograma, así el planificador las respeta.',
+    targetRoute: '/admin/rrhh',
+    targetRouteLabel: 'RRHH',
+  },
+  {
+    moduleKey: 'SERVICES',
+    stepId: 'practica',
+    isPractice: true,
+    title: 'Tu turno: armá un SLA de principio a fin',
+    instruction:
+      'Creá un nuevo SLA con un puesto 24hs ("Portería y Acceso", PAX 1) para el cliente de práctica. Sin guía paso a paso.\n\n' +
+      '**Lo que tiene que quedar:**\n' +
+      '• SLA guardado con cliente y sede.\n' +
+      '• Al menos un puesto configurado con turnos activos.\n\n' +
+      'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
+    hint: '💡 El contador de horas del contrato se actualiza automáticamente al agregar puestos.',
+    targetRoute: '/admin/servicios',
+    targetRouteLabel: 'Servicios',
+  },
+  {
+    moduleKey: 'PLANNING',
+    stepId: 'practica',
+    isPractice: true,
+    title: 'Tu turno: armá y publicá un cronograma',
+    instruction:
+      'Asigná al menos 3 turnos (M, T o N) en días distintos para el objetivo de práctica, y publicá la grilla. Sin guía.\n\n' +
+      '**Lo que tiene que quedar:**\n' +
+      '• Al menos 3 celdas con código de turno.\n' +
+      '• Grilla en estado **PUBLICADO** (verde).\n\n' +
+      'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
+    hint: '💡 Seleccioná varias celdas arrastrando para asignar el mismo código de golpe.',
+    targetRoute: '/admin/planificacion',
+    targetRouteLabel: 'Planificación',
+  },
+  {
+    moduleKey: 'OPERATIONS',
+    stepId: 'practica',
+    isPractice: true,
+    title: 'Tu turno: gestioná el turno en tiempo real',
+    instruction:
+      'Registrá la presencia de al menos un guardia con turno activo, o gestioná una ausencia cubriendo la vacante. Sin guía.\n\n' +
+      '**Lo que tiene que quedar:**\n' +
+      '• Al menos un guardia en estado **ACTIVO** (presente), o una vacante cubierta.\n\n' +
+      'Si el panel está vacío, primero publicá el cronograma del módulo anterior.\n\n' +
+      'Cuando lo tengas listo, hacé clic en **"Completé el ejercicio"**.',
+    hint: '💡 El check manual es el respaldo cuando falla el GPS del guardia.',
     targetRoute: '/admin/operaciones',
     targetRouteLabel: 'Operaciones',
   },

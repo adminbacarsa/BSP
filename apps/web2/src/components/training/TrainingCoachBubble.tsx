@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
   GraduationCap, ChevronRight, ChevronLeft, X, ExternalLink,
-  CheckCircle2, Lightbulb, ArrowRight, Maximize2, Minimize2,
+  CheckCircle2, Lightbulb, ArrowRight, Maximize2, Minimize2, Trophy,
 } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useTrainingSession } from '@/hooks/useTrainingSession';
@@ -169,9 +169,10 @@ export function TrainingCoachBubble() {
   const modCoachSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
   const completedSteps = session.progress[coachStep.moduleKey]?.stepsCompleted ?? [];
   const completedCount = completedSteps.length;
+  const isPractice = !!coachStep.isPractice;
 
-  // Spotlight: activo en cualquier modo cuando estamos en la ruta correcta
-  const spotlight = isOnTargetRoute && coachStep.highlightSelector
+  // Spotlight: activo en cualquier modo cuando estamos en la ruta correcta (no en práctica)
+  const spotlight = !isPractice && isOnTargetRoute && coachStep.highlightSelector
     ? <TrainingSpotlight selector={coachStep.highlightSelector} />
     : null;
 
@@ -184,11 +185,11 @@ export function TrainingCoachBubble() {
           onClick={() => setMode('compact')}
           title={`Coach: ${coachStep.title}`}
           style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 900 }}
-          className="flex flex-col items-center gap-1 bg-amber-400 hover:bg-amber-500 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors"
+          className={`flex flex-col items-center gap-1 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors ${isPractice ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-amber-400 hover:bg-amber-500'}`}
         >
-          <GraduationCap size={16} />
+          {isPractice ? <Trophy size={16} /> : <GraduationCap size={16} />}
           <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            Coach
+            {isPractice ? 'Práctica' : 'Coach'}
           </span>
           <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>{completedCount}/{modCoachSteps.length}</span>
           <div className="flex flex-col gap-0.5 mt-0.5">
@@ -197,7 +198,7 @@ export function TrainingCoachBubble() {
               const active = s.stepId === coachStep.stepId;
               return (
                 <span key={s.stepId} style={{ width: 6, height: 6, borderRadius: '50%', display: 'block' }}
-                  className={done ? 'bg-green-200' : active ? 'bg-white' : 'bg-amber-200/60'} />
+                  className={done ? 'bg-green-200' : active ? 'bg-white' : isPractice ? 'bg-indigo-200/60' : 'bg-amber-200/60'} />
               );
             })}
           </div>
@@ -216,8 +217,8 @@ export function TrainingCoachBubble() {
           className="rounded-2xl shadow-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 overflow-hidden"
         >
           {/* Barra compacta */}
-          <div className="flex items-center gap-2 px-3 py-2 bg-amber-400 text-white">
-            <GraduationCap size={14} className="shrink-0" />
+          <div className={`flex items-center gap-2 px-3 py-2 text-white ${isPractice ? 'bg-indigo-500' : 'bg-amber-400'}`}>
+            {isPractice ? <Trophy size={14} className="shrink-0" /> : <GraduationCap size={14} className="shrink-0" />}
 
             {/* Dots de progreso */}
             <div className="flex items-center gap-0.5">
@@ -236,11 +237,11 @@ export function TrainingCoachBubble() {
             <span className="flex-1 text-[11px] font-bold truncate">{coachStep.title}</span>
 
             {/* Expandir */}
-            <button onClick={() => setMode('expanded')} className="p-1 rounded hover:bg-amber-500 transition-colors" title="Ver instrucciones completas">
+            <button onClick={() => setMode('expanded')} className={`p-1 rounded transition-colors ${isPractice ? 'hover:bg-indigo-600' : 'hover:bg-amber-500'}`} title="Ver instrucciones completas">
               <Maximize2 size={13} />
             </button>
             {/* Ocultar al lateral */}
-            <button onClick={() => setMode('side')} className="p-1 rounded hover:bg-amber-500 transition-colors" title="Ocultar coach">
+            <button onClick={() => setMode('side')} className={`p-1 rounded transition-colors ${isPractice ? 'hover:bg-indigo-600' : 'hover:bg-amber-500'}`} title="Ocultar coach">
               <X size={13} />
             </button>
           </div>
@@ -275,18 +276,18 @@ export function TrainingCoachBubble() {
 
         {/* Header — arrastrable */}
         <div
-          className="flex items-center gap-2 px-4 py-3 bg-amber-400 text-white cursor-grab active:cursor-grabbing select-none"
+          className={`flex items-center gap-2 px-4 py-3 text-white cursor-grab active:cursor-grabbing select-none ${isPractice ? 'bg-indigo-500' : 'bg-amber-400'}`}
           onMouseDown={onHeaderMouseDown}
         >
-          <GraduationCap size={16} className="shrink-0" />
+          {isPractice ? <Trophy size={16} className="shrink-0" /> : <GraduationCap size={16} className="shrink-0" />}
           <div className="flex-1 min-w-0">
-            <div className="text-xs font-black uppercase tracking-wide opacity-80">Coach</div>
+            <div className="text-xs font-black uppercase tracking-wide opacity-80">{isPractice ? '🎯 Práctica libre' : 'Coach'}</div>
             <div className="text-sm font-bold truncate">{mod?.icon} {mod?.label}</div>
           </div>
           {/* Compactar */}
           <button
             onClick={() => setMode('compact')}
-            className="p-1 rounded-lg hover:bg-amber-500 transition-colors opacity-80 hover:opacity-100"
+            className={`p-1 rounded-lg transition-colors opacity-80 hover:opacity-100 ${isPractice ? 'hover:bg-indigo-600' : 'hover:bg-amber-500'}`}
             aria-label="Modo compacto"
             title="Minimizar (seguir trabajando)"
           >
@@ -295,7 +296,7 @@ export function TrainingCoachBubble() {
           {/* Ocultar al lateral */}
           <button
             onClick={() => setMode('side')}
-            className="p-1 rounded-lg hover:bg-amber-500 transition-colors opacity-80 hover:opacity-100"
+            className={`p-1 rounded-lg transition-colors opacity-80 hover:opacity-100 ${isPractice ? 'hover:bg-indigo-600' : 'hover:bg-amber-500'}`}
             aria-label="Ocultar al costado"
             title="Ocultar al costado"
           >
@@ -316,6 +317,7 @@ export function TrainingCoachBubble() {
                   className={[
                     'flex items-center gap-0.5 text-[10px] font-bold rounded-full px-1.5 py-0.5 transition-colors',
                     isDone ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
+                    : isActive && isPractice ? 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300'
                     : isActive ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
                     : 'text-slate-400 dark:text-slate-500',
                   ].join(' ')}
@@ -331,9 +333,9 @@ export function TrainingCoachBubble() {
         </div>
 
         {/* Paso actual */}
-        <div className="px-4 pt-1 pb-1">
-          <div className="flex items-center gap-1 text-xs font-bold text-amber-600 dark:text-amber-400 mb-1">
-            <ChevronRight size={12} />
+        <div className={`px-4 pt-1 pb-1 ${isPractice ? 'bg-indigo-50/50 dark:bg-indigo-900/10 mx-4 mb-1 rounded-xl border border-indigo-100 dark:border-indigo-800' : ''}`}>
+          <div className={`flex items-center gap-1 text-xs font-bold mb-1 ${isPractice ? 'text-indigo-600 dark:text-indigo-400' : 'text-amber-600 dark:text-amber-400'}`}>
+            {isPractice ? <Trophy size={12} /> : <ChevronRight size={12} />}
             {coachStep.title}
           </div>
           <p className="text-[13px] text-slate-600 dark:text-slate-300 leading-relaxed">
@@ -368,10 +370,10 @@ export function TrainingCoachBubble() {
           <button
             onClick={handleComplete}
             disabled={completing}
-            className="w-full flex items-center justify-center gap-2 bg-green-500 hover:bg-green-600 disabled:opacity-60 text-white text-xs font-bold py-2 px-4 rounded-xl transition-colors"
+            className={`w-full flex items-center justify-center gap-2 disabled:opacity-60 text-white text-xs font-bold py-2 px-4 rounded-xl transition-colors ${isPractice ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-green-500 hover:bg-green-600'}`}
           >
-            <CheckCircle2 size={13} />
-            {completing ? 'Guardando…' : 'Marcar paso como listo'}
+            {isPractice ? <Trophy size={13} /> : <CheckCircle2 size={13} />}
+            {completing ? 'Guardando…' : isPractice ? 'Completé el ejercicio' : 'Marcar paso como listo'}
           </button>
           {prevStepInfo && (
             <button
@@ -384,7 +386,9 @@ export function TrainingCoachBubble() {
             </button>
           )}
           <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
-            También se detecta automáticamente al completar la acción
+            {isPractice
+              ? 'Hacé el ejercicio libremente y avisá cuando terminés'
+              : 'También se detecta automáticamente al completar la acción'}
           </p>
         </div>
       </div>

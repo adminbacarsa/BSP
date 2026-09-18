@@ -23,6 +23,7 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     steps: [
       { id: 'crear_cliente',   label: 'Crear un cliente' },
       { id: 'crear_objetivo',  label: 'Agregar sede al cliente' },
+      { id: 'practica',        label: 'Ejercicio libre' },
     ],
   },
   {
@@ -32,6 +33,7 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     steps: [
       { id: 'ver_empleado',    label: 'Explorar legajo de empleado' },
       { id: 'cargar_novedad',  label: 'Cargar novedad' },
+      { id: 'practica',        label: 'Ejercicio libre' },
     ],
   },
   {
@@ -42,6 +44,7 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
       { id: 'crear_sla',          label: 'Crear contrato/SLA' },
       { id: 'conf_puesto_24hs',   label: 'Puesto 24 horas' },
       { id: 'conf_puesto_custom', label: 'Puesto personalizado' },
+      { id: 'practica',           label: 'Ejercicio libre' },
     ],
   },
   {
@@ -51,6 +54,7 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     steps: [
       { id: 'crear_turnos',    label: 'Asignar turnos' },
       { id: 'publicar_grilla', label: 'Publicar grilla' },
+      { id: 'practica',        label: 'Ejercicio libre' },
     ],
   },
   {
@@ -60,6 +64,7 @@ export const TRAINABLE_MODULES: TrainableModule[] = [
     steps: [
       { id: 'reg_presencia',   label: 'Registrar presencia' },
       { id: 'gestionar_aus',   label: 'Gestionar ausencia' },
+      { id: 'practica',        label: 'Ejercicio libre' },
     ],
   },
 ];
