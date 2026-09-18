@@ -32,6 +32,10 @@ import {
   buildOpsDualCoverageTurnoPatches,
   opsPositionMatches,
 } from '@/lib/operaciones/opsDualCoverageApply';
+import {
+  listOpsAdvCandidatesForVacancy,
+  listOpsExtCandidatesForVacancy,
+} from '@/lib/operaciones/opsExtAdvCandidates';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -211,9 +215,17 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
               return { ...sess, pending: { ...sess.pending, sec: next } };
             }
             if (sess.status === 'PENDING_DUAL') {
-              const newExt = sess.pendingExt && sess.pendingExt.sec > 0 ? { ...sess.pendingExt, sec: sess.pendingExt.sec - 1 } : sess.pendingExt;
-              const newAdv = sess.pendingAdv && sess.pendingAdv.sec > 0 ? { ...sess.pendingAdv, sec: sess.pendingAdv.sec - 1 } : sess.pendingAdv;
-              return { ...sess, pendingExt: newExt, pendingAdv: newAdv };
+              const tick = (slot: PendingSlot | null) =>
+                slot && slot.sec > 0 ? { ...slot, sec: slot.sec - 1 } : slot;
+              const newExt = tick(sess.pendingExt);
+              const newAdv = tick(sess.pendingAdv);
+              const sharedSec = Math.min(newExt?.sec ?? 0, newAdv?.sec ?? 0);
+              return {
+                ...sess,
+                pendingExt: newExt,
+                pendingAdv: newAdv,
+                awaitingPhone: sharedSec <= 0 ? true : sess.awaitingPhone,
+              };
             }
             return sess;
           });
@@ -331,7 +343,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   // Refs para siempre apuntar a la versión más reciente de las funciones de confirmación
   // y evitar closures stale en los callbacks de onSnapshot
   const confirmCandidateRef = useRef<() => Promise<void>>(async () => {});
-  const confirmDualRef = useRef<(role: 'ext' | 'adv') => Promise<void>>(async () => {});
+  const confirmDualTogetherRef = useRef<() => Promise<void>>(async () => {});
   const tid = s.empresaId;
   const absenceShift = s.absentShift;
   const step = STEPS[s.currentStep];
@@ -441,29 +453,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     }
   };
 
-  const candidatesExt = (logic.processedData || []).filter((sh: any) => {
-    if (!sh.isPresent || sh.isCompleted) return false;
-    if (sh.objectiveId !== absenceShift.objectiveId) return false;
-    if (!opsPositionMatches(sh.positionName, absenceShift.positionName)) return false;
-    if (sh.id === absenceShift.id) return false;
-    if (crossSessionBusy.has(sh.employeeId)) return false;
-    const shiftStartMs = sh.shiftDateObj ? toDate(sh.shiftDateObj).getTime() : 0;
-    return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
-  });
-  // ADV: turno que aún no empezó en el mismo objetivo/puesto, dentro de las próximas 12h.
-  // No se usa isSameDay porque el turno N cruza la medianoche (empieza el día siguiente).
-  const advWindowEnd = new Date(now.getTime() + 12 * 3600 * 1000);
-  const candidatesAdv = (logic.processedData || [])
-    .filter((sh: any) => {
-      const shStart = toDate(sh.shiftDateObj);
-      return !sh.isPresent && !sh.isCompleted && !sh.isAbsent && !sh.isUnassigned && !sh.isFranco
-        && sh.objectiveId === absenceShift.objectiveId
-        && opsPositionMatches(sh.positionName, absenceShift.positionName)
-        && !crossSessionBusy.has(sh.employeeId)
-        && shStart > now && shStart <= advWindowEnd;
-    })
-    .sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime())
-    .slice(0, 1);
+  const candidatesExt = listOpsExtCandidatesForVacancy(
+    logic.processedData || [],
+    absenceShift,
+    now,
+    crossSessionBusy,
+  );
+  const candidatesAdv = listOpsAdvCandidatesForVacancy(
+    logic.processedData || [],
+    absenceShift,
+    now,
+    crossSessionBusy,
+  );
 
   const allCandidates = byKey(step.key);
   const candidates = search.trim()
@@ -484,8 +485,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         handled = true;
         toast.info('El guardia aceptó — confirmando automáticamente');
         if (role === 'single') void confirmCandidateRef.current();
-        else if (role === 'ext') void confirmDualRef.current('ext');
-        else void confirmDualRef.current('adv');
+        else if (role === 'ext' || role === 'adv') void confirmDualTogetherRef.current();
       } else if (data.response === 'REJECTED') {
         handled = true;
         if (role === 'single') onUpd({ pending: null, awaitingPhone: false, status: 'SELECTING' });
@@ -703,48 +703,47 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     else onUpd({ status: 'FAILED' });
   };
 
-  const sendDual = async () => {
+  const startDualContact = () => {
     if (!s.selectedExtId || !s.selectedAdvId) return;
-    setLoading('dual');
-    try {
-      const extShift = candidatesExt.find((sh: any) => sh.id === s.selectedExtId || sh.employeeId === s.selectedExtId);
-      const advShift = candidatesAdv.find((sh: any) => sh.id === s.selectedAdvId || sh.employeeId === s.selectedAdvId);
-      const extEmpId = extShift?.employeeId || s.selectedExtId!;
-      const advEmpId = advShift?.employeeId || s.selectedAdvId!;
-      const [extRef, advRef] = await Promise.all([
-        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ employeeId: extEmpId, userId: extEmpId, type: 'RETENCION', title: 'Extensión de jornada', body: `Tu turno en ${[absenceShift.clientName, absenceShift.objectiveName, absenceShift.positionName].filter(Boolean).join(' · ') || absenceShift.objectiveName} se extiende hasta ${hiEnd}.`, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || null, positionName: absenceShift.positionName || null, clientName: absenceShift.clientName || null, shiftCode: absenceShift.code || null, shiftId: extShift?.id || null, protocolStep: 'RETENCION_EXT', read: false, createdAt: serverTimestamp() }, tid)),
-        addDoc(collection(db, 'user_notifications'), stampEmpresaId({ employeeId: advEmpId, userId: advEmpId, type: 'ADELANTO', title: 'Adelanto de turno', body: `Tu turno en ${[absenceShift.clientName, absenceShift.objectiveName, absenceShift.positionName].filter(Boolean).join(' · ') || absenceShift.objectiveName} fue adelantado.`, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName || null, positionName: absenceShift.positionName || null, clientName: absenceShift.clientName || null, shiftCode: absenceShift.code || null, shiftId: advShift?.id || null, protocolStep: 'RETENCION_ADV', read: false, createdAt: serverTimestamp() }, tid)),
-      ]);
-      onUpd({ status: 'PENDING_DUAL', pendingExt: { notifId: extRef.id, empId: extEmpId, sec: step.timeoutSec }, pendingAdv: { notifId: advRef.id, empId: advEmpId, sec: step.timeoutSec } });
-      listenNotif(extRef.id, 'ext');
-      listenNotif(advRef.id, 'adv');
-    } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
-    finally { setLoading(null); }
+    const extShift = candidatesExt.find((sh: any) => sh.id === s.selectedExtId || sh.employeeId === s.selectedExtId);
+    const advShift = candidatesAdv.find((sh: any) => sh.id === s.selectedAdvId || sh.employeeId === s.selectedAdvId);
+    const extEmpId = extShift?.employeeId || s.selectedExtId!;
+    const advEmpId = advShift?.employeeId || s.selectedAdvId!;
+    onUpd({
+      status: 'PENDING_DUAL',
+      awaitingPhone: false,
+      pendingExt: {
+        notifId: '',
+        empId: extEmpId,
+        sec: step.timeoutSec,
+        shiftId: extShift?.id,
+      },
+      pendingAdv: {
+        notifId: '',
+        empId: advEmpId,
+        sec: step.timeoutSec,
+        shiftId: advShift?.id,
+      },
+    });
   };
 
-  const confirmDual = async (role: 'ext' | 'adv') => {
-    const slot = role === 'ext' ? s.pendingExt : s.pendingAdv;
-    if (!slot) return;
-    setLoading('confirm_' + role);
+  const confirmDualTogether = async () => {
+    if (!s.pendingExt || !s.pendingAdv) return;
+    const nextExt = s.pendingExt.empId;
+    const nextAdv = s.pendingAdv.empId;
+    setLoading('confirm_dual');
     try {
-      const nextExt = role === 'ext' ? slot.empId : s.confirmedExt;
-      const nextAdv = role === 'adv' ? slot.empId : s.confirmedAdv;
-      const pendingPatch =
-        role === 'ext'
-          ? { confirmedExt: nextExt, pendingExt: null as PendingSlot | null }
-          : { confirmedAdv: nextAdv, pendingAdv: null as PendingSlot | null };
-
-      if (!nextExt || !nextAdv) {
-        onUpd(pendingPatch);
-        toast.message(`Confirmado ${role === 'ext' ? 'EXT' : 'ADV'} — falta la otra mitad`);
-        return;
-      }
-
       if (absenceShift.id) {
         const titularSnap = await getDoc(doc(db, 'turnos', absenceShift.id));
         if (titularSnap.exists() && isTitularAlreadyCovered(titularSnap.data() as Record<string, unknown>)) {
           toast.message('Esta ausencia ya tiene cobertura activa — no se duplica.');
-          onUpd({ status: 'CONFIRMED', ...pendingPatch, confirmedExt: nextExt, confirmedAdv: nextAdv });
+          onUpd({
+            status: 'CONFIRMED',
+            confirmedExt: nextExt,
+            confirmedAdv: nextAdv,
+            pendingExt: null,
+            pendingAdv: null,
+          });
           setTimeout(onClose, 1200);
           return;
         }
@@ -868,12 +867,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     }
   };
 
-  // Mantener ref siempre actualizado (evita closures stale en onSnapshot)
-  confirmDualRef.current = confirmDual;
+  confirmDualTogetherRef.current = confirmDualTogether;
 
-  const rejectDual = (role: 'ext' | 'adv') => {
-    if (role === 'ext') onUpd({ pendingExt: null, selectedExtId: null });
-    else onUpd({ pendingAdv: null, selectedAdvId: null });
+  const rejectDualTogether = () => {
+    onUpd({
+      status: 'SELECTING',
+      pendingExt: null,
+      pendingAdv: null,
+      awaitingPhone: false,
+      confirmedExt: null,
+      confirmedAdv: null,
+    });
   };
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -941,7 +945,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
   const renderDual = () => {
     const isPending = s.status === 'PENDING_DUAL';
-    const canNotify = !!s.selectedExtId && !!s.selectedAdvId && !isPending;
+    const canStart = !!s.selectedExtId && !!s.selectedAdvId && !isPending;
+    const dualSec = Math.min(s.pendingExt?.sec ?? step.timeoutSec, s.pendingAdv?.sec ?? step.timeoutSec);
+    const timedOut = isPending && (s.awaitingPhone || dualSec <= 0);
+    const pct = timedOut ? 0 : dualSec / step.timeoutSec;
+    const r = 32;
+    const circ = 2 * Math.PI * r;
+
+    const resolveCand = (role: 'ext' | 'adv', empId: string) => {
+      const pool = role === 'ext' ? candidatesExt : candidatesAdv;
+      return pool.find((sh: any) => sh.employeeId === empId) || { employeeId: empId, id: empId };
+    };
 
     const shiftSubtitle = (cand: any) => {
       const code = normBandCode(cand.code);
@@ -958,40 +972,36 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const name = cand.fullName || cand.employeeName || cand.name || '—';
       const phone = cand.phone || cand.celular || simPhone(empId);
       const sub = shiftSubtitle(cand);
-      const isConfirmedThis = role === 'ext' ? s.confirmedExt === empId : s.confirmedAdv === empId;
       const pendingSlot = role === 'ext' ? s.pendingExt : s.pendingAdv;
-      const isPendingThis = pendingSlot?.empId === empId;
+      const isPendingThis = isPending && pendingSlot?.empId === empId;
       const isSelected = role === 'ext' ? s.selectedExtId === (cand.id || empId) : s.selectedAdvId === (cand.id || empId);
-      const slotBusy = isPending && !isPendingThis && !isConfirmedThis;
+      const slotBusy = isPending && !isPendingThis;
 
-      if (isConfirmedThis) return (
-        <div className="flex items-center gap-2 p-2.5 rounded-xl border-2 border-emerald-400 bg-emerald-50">
-          <div className="w-7 h-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-black flex-shrink-0">✓</div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-bold text-emerald-800 truncate">{name}</div>
-            {sub && <div className="text-[10px] text-emerald-700 font-semibold truncate">{sub}</div>}
-            <div className="text-[10px] text-emerald-600">Confirmado</div>
+      if (isPendingThis) {
+        return (
+          <div className="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-400 bg-amber-50">
+            <div className="w-7 h-7 rounded-full bg-amber-200 flex items-center justify-center text-amber-900 text-[10px] font-black flex-shrink-0">
+              {role === 'ext' ? 'EXT' : 'ADV'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-bold text-amber-900 truncate">{name}</div>
+              {sub && <div className="text-[10px] font-semibold text-amber-800 truncate">{sub}</div>}
+              <div className="text-xs font-black font-mono text-amber-800">📱 {phone}</div>
+            </div>
           </div>
-        </div>
-      );
-
-      if (isPendingThis) return (
-        <div className="flex items-center gap-2 p-2.5 rounded-xl border-2 border-amber-400 bg-amber-50">
-          <div className="w-7 h-7 rounded-full bg-amber-400 flex items-center justify-center text-amber-900 text-[9px] font-black font-mono flex-shrink-0">{fmtCd(pendingSlot!.sec)}</div>
-          <div className="flex-1 min-w-0">
-            <div className="text-xs font-bold text-amber-900 truncate">{name}</div>
-            {sub && <div className="text-[10px] font-semibold text-amber-800 truncate">{sub}</div>}
-            <div className="text-[10px] text-amber-700">Notificación enviada</div>
-            <div className="text-xs font-black font-mono text-amber-800">📱 {phone}</div>
-          </div>
-        </div>
-      );
+        );
+      }
 
       return (
         <div
-          onClick={() => { if (slotBusy) return; const key = cand.id || empId; if (role === 'ext') onUpd({ selectedExtId: s.selectedExtId === key ? null : key }); else onUpd({ selectedAdvId: s.selectedAdvId === key ? null : key }); }}
-          style={{ opacity: slotBusy ? 0.3 : 1 }}
-          className={`flex items-center gap-2 p-2.5 rounded-xl border-2 cursor-pointer transition-all ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
+          onClick={() => {
+            if (isPending) return;
+            const key = cand.id || empId;
+            if (role === 'ext') onUpd({ selectedExtId: s.selectedExtId === key ? null : key });
+            else onUpd({ selectedAdvId: s.selectedAdvId === key ? null : key });
+          }}
+          style={{ opacity: slotBusy ? 0.35 : 1 }}
+          className={`flex items-center gap-2 p-2.5 rounded-xl border-2 transition-all ${isPending ? 'cursor-default' : 'cursor-pointer'} ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}
         >
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{isSelected ? '✓' : initials(name)}</div>
           <div className="flex-1 min-w-0">
@@ -1003,56 +1013,69 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       );
     };
 
+    const extEmpId = isPending ? s.pendingExt?.empId : null;
+    const advEmpId = isPending ? s.pendingAdv?.empId : null;
+
     return (
       <div className="flex flex-col gap-2.5">
-        <p className="text-xs text-slate-500 leading-snug">{isPending ? '⏳ Esperando respuesta de cada guardia' : 'Seleccioná uno de cada columna y notificá a ambos.'}</p>
+        <p className="text-xs text-slate-500 leading-snug">
+          {isPending
+            ? (timedOut ? '📞 Llamá a EXT y ADV — deben aceptar juntos' : 'Contacto telefónico · aceptación conjunta (sin push al portal)')
+            : 'Seleccioná EXT (cierra cuando arranca la vacante) y ADV (próximo turno).'}
+        </p>
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1.5 bg-violet-50 border border-violet-200 rounded-xl p-2">
             <div className="text-[9px] font-black text-violet-700 uppercase tracking-wider border-b border-violet-200 pb-1.5 mb-0.5">⟵ 1ª mitad · EXT</div>
-            {s.confirmedExt
-              ? <DualCard cand={candidatesExt.find((sh: any) => sh.employeeId === s.confirmedExt) || { id: s.confirmedExt, employeeId: s.confirmedExt }} role="ext" />
-              : s.pendingExt
-                ? <DualCard cand={candidatesExt.find((sh: any) => sh.employeeId === s.pendingExt!.empId) || { id: s.pendingExt.empId, employeeId: s.pendingExt.empId }} role="ext" />
-                : candidatesExt.length === 0
-                  ? <p className="text-[10px] text-slate-400 italic text-center py-2">Sin candidatos</p>
-                  : candidatesExt.map((c: any) => <DualCard key={c.id} cand={c} role="ext" />)}
+            {isPending && extEmpId
+              ? <DualCard cand={resolveCand('ext', extEmpId)} role="ext" />
+              : candidatesExt.length === 0
+                ? <p className="text-[10px] text-slate-400 italic text-center py-2">Sin candidatos (turno que cierra al inicio de la vacante)</p>
+                : candidatesExt.map((c: any) => <DualCard key={c.id} cand={c} role="ext" />)}
           </div>
           <div className="flex flex-col gap-1.5 bg-sky-50 border border-sky-200 rounded-xl p-2">
             <div className="text-[9px] font-black text-sky-700 uppercase tracking-wider border-b border-sky-200 pb-1.5 mb-0.5">2ª mitad · ADV ⟶</div>
-            {s.confirmedAdv
-              ? <DualCard cand={candidatesAdv.find((sh: any) => sh.employeeId === s.confirmedAdv) || { id: s.confirmedAdv, employeeId: s.confirmedAdv }} role="adv" />
-              : s.pendingAdv
-                ? <DualCard cand={candidatesAdv.find((sh: any) => sh.employeeId === s.pendingAdv!.empId) || { id: s.pendingAdv.empId, employeeId: s.pendingAdv.empId }} role="adv" />
-                : candidatesAdv.length === 0
-                  ? <p className="text-[10px] text-slate-400 italic text-center py-2">Sin candidatos</p>
-                  : candidatesAdv.map((c: any) => <DualCard key={c.id} cand={c} role="adv" />)}
+            {isPending && advEmpId
+              ? <DualCard cand={resolveCand('adv', advEmpId)} role="adv" />
+              : candidatesAdv.length === 0
+                ? <p className="text-[10px] text-slate-400 italic text-center py-2">Sin candidatos</p>
+                : candidatesAdv.map((c: any) => <DualCard key={c.id} cand={c} role="adv" />)}
           </div>
         </div>
-        {isPending && (s.pendingExt || s.pendingAdv) && (
-          <div className="bg-amber-50 border border-amber-300 rounded-xl p-3">
-            <div className="text-[9px] font-bold text-amber-800 uppercase tracking-wide mb-2">Resultado</div>
-            <div className="flex flex-col gap-2">
-              {s.pendingExt && !s.confirmedExt && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-black text-violet-700 w-7 shrink-0">EXT</span>
-                  <button onClick={() => confirmDual('ext')} disabled={!!loading} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg">✓ Acepta</button>
-                  <button onClick={() => rejectDual('ext')} disabled={!!loading} className="flex-1 py-2 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg">✗ Rechaza</button>
-                </div>
-              )}
-              {s.pendingAdv && !s.confirmedAdv && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[9px] font-black text-sky-700 w-7 shrink-0">ADV</span>
-                  <button onClick={() => confirmDual('adv')} disabled={!!loading} className="flex-1 py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-bold rounded-lg">✓ Acepta</button>
-                  <button onClick={() => rejectDual('adv')} disabled={!!loading} className="flex-1 py-2 bg-red-100 hover:bg-red-200 text-red-700 text-xs font-bold rounded-lg">✗ Rechaza</button>
-                </div>
-              )}
+        {isPending && s.pendingExt && s.pendingAdv && (
+          <div className="flex flex-col items-center gap-3 py-1">
+            <div className="relative w-20 h-20">
+              <svg viewBox="0 0 76 76" className="w-full h-full -rotate-90">
+                <circle cx="38" cy="38" r={r} fill="none" strokeWidth="5" stroke="currentColor" className="text-slate-100" />
+                <circle cx="38" cy="38" r={r} fill="none" strokeWidth="5"
+                  stroke={timedOut ? '#EF4444' : '#F59E0B'}
+                  strokeDasharray={circ.toFixed(1)} strokeDashoffset={(circ * (1 - pct)).toFixed(1)}
+                  strokeLinecap="round" />
+              </svg>
+              <div className="absolute inset-0 flex items-center justify-center">
+                {timedOut
+                  ? <Phone size={20} className="text-red-500" />
+                  : <span className="text-sm font-black font-mono text-slate-700">{fmtCd(dualSec)}</span>}
+              </div>
+            </div>
+            <div className={`text-xs font-semibold text-center leading-snug ${timedOut ? 'text-red-600' : 'text-slate-500'}`}>
+              {timedOut ? 'Sin respuesta en tiempo — confirmá por teléfono si ambos aceptan' : 'Tiempo de contacto · ambos deben aceptar'}
+            </div>
+            <div className="w-full flex flex-col gap-2">
+              <button onClick={() => void confirmDualTogether()} disabled={!!loading}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-2xl text-sm transition-colors shadow-sm">
+                {loading === 'confirm_dual' ? '...' : timedOut ? '✓ Ambos aceptan (teléfono)' : '✓ Ambos aceptan'}
+              </button>
+              <button onClick={rejectDualTogether} disabled={!!loading}
+                className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-2xl text-sm transition-colors">
+                ✗ No pueden / volver a elegir
+              </button>
             </div>
           </div>
         )}
         {!isPending && (
-          <button onClick={sendDual} disabled={!canNotify || !!loading}
-            className={`w-full py-3 font-black rounded-2xl text-sm transition-colors shadow-sm ${canNotify ? 'bg-violet-700 hover:bg-violet-800 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
-            {loading === 'dual' ? '...' : canNotify ? '⚡ Notificar a ambos simultáneamente' : s.selectedExtId ? 'Falta ADV →' : s.selectedAdvId ? '← Falta EXT' : 'Seleccioná uno de cada columna'}
+          <button onClick={startDualContact} disabled={!canStart || !!loading}
+            className={`w-full py-3 font-black rounded-2xl text-sm transition-colors shadow-sm ${canStart ? 'bg-violet-700 hover:bg-violet-800 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`}>
+            {canStart ? '📞 Iniciar contacto EXT + ADV' : s.selectedExtId ? 'Falta ADV →' : s.selectedAdvId ? '← Falta EXT' : 'Seleccioná uno de cada columna'}
           </button>
         )}
       </div>

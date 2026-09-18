@@ -2184,6 +2184,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
+                {coveringEmployeeName && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
+                        <UserCheck size={10} className="shrink-0 text-emerald-600"/>
+                        Cubre: {coveringEmployeeName}
+                    </div>
+                )}
                 {/* Franja retención */}
                 {(shift.isRetention || shift.manualRetentionType) && (
                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
@@ -2241,7 +2247,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                                 return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
                             }
                             if (isAbsentOperativelyCovered) {
-                                return null;
+                                return (
+                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold max-w-[200px] truncate" title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}>
+                                        <UserCheck size={11} className="shrink-0"/>
+                                        {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
+                                    </span>
+                                );
                             }
                             return (
                                 <div className="flex gap-1.5 items-center">
