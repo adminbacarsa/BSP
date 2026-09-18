@@ -54,15 +54,35 @@ export function TrainingCoachBubble() {
     setPos(loadPos() ?? defaultPos());
   }, []);
 
-  // Auto-expandir cuando cambia el módulo activo
-  const prevModuleKey = useRef<string | null>(null);
+  // Auto-expandir cuando cambia el módulo O el paso activo
+  const prevStepKey = useRef<string | null>(null);
   useEffect(() => {
     if (!session?.currentModuleKey) return;
-    if (session.currentModuleKey !== prevModuleKey.current) {
-      prevModuleKey.current = session.currentModuleKey;
+    const mod = TRAINABLE_MODULES.find(m => m.key === session.currentModuleKey);
+    if (!mod) return;
+    const completed = session.progress[session.currentModuleKey]?.stepsCompleted ?? [];
+    const activeStep = mod.steps.find(s => !completed.includes(s.id));
+    const key = `${session.currentModuleKey}::${activeStep?.id ?? 'done'}`;
+    if (key !== prevStepKey.current) {
+      prevStepKey.current = key;
       setMode('expanded');
     }
-  }, [session?.currentModuleKey]);
+  }, [session?.currentModuleKey, session?.progress]);
+
+  // Auto-minimizar cuando el usuario hace clic en el botón resaltado por el spotlight
+  useEffect(() => {
+    if (!session) return;
+    const step = getActiveCoachStep(session.currentModuleKey, session.progress);
+    if (!step?.highlightSelector || step.isPractice) return;
+    // Pequeño delay para que el DOM esté listo tras navegación
+    const t = setTimeout(() => {
+      const el = document.querySelector(step.highlightSelector!);
+      if (!el) return;
+      const handler = () => setMode('compact');
+      el.addEventListener('click', handler, { once: true });
+    }, 150);
+    return () => clearTimeout(t);
+  }, [session, router.pathname]);
 
   const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
