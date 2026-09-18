@@ -2106,7 +2106,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
-                {coveringEmployeeName && (
+                {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
                         Cubre: {coveringEmployeeName}
                     </p>
@@ -2130,14 +2130,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             return <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>;
                         }
                         if (isAbsentOperativelyCovered) {
-                            return (
-                                <span
-                                    className="text-[9px] px-2 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold max-w-[140px] truncate"
-                                    title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}
-                                >
-                                    {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
-                                </span>
-                            );
+                            return null;
                         }
                         return (
                             <div className="flex gap-1">
@@ -2184,9 +2177,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
-                {coveringEmployeeName && (
+                {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
-                        <UserCheck size={10} className="shrink-0 text-emerald-600"/>
                         Cubre: {coveringEmployeeName}
                     </div>
                 )}
@@ -2247,12 +2239,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                                 return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
                             }
                             if (isAbsentOperativelyCovered) {
-                                return (
-                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold max-w-[200px] truncate" title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}>
-                                        <UserCheck size={11} className="shrink-0"/>
-                                        {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
-                                    </span>
-                                );
+                                return null;
                             }
                             return (
                                 <div className="flex gap-1.5 items-center">
