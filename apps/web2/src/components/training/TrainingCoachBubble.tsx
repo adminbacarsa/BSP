@@ -164,31 +164,56 @@ export function TrainingCoachBubble() {
   const mod = TRAINABLE_MODULES.find(m => m.key === coachStep.moduleKey);
   const isOnTargetRoute = router.pathname.startsWith(coachStep.targetRoute);
 
+  // Spotlight: siempre activo si estamos en la ruta correcta, incluso con coach minimizado
+  const spotlight = isOnTargetRoute && coachStep.highlightSelector
+    ? <TrainingSpotlight selector={coachStep.highlightSelector} />
+    : null;
+
   const bubbleStyle: React.CSSProperties = pos
     ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' }
     : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' };
 
   if (collapsed) {
+    const modSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
+    const completedCount = (session?.progress[coachStep.moduleKey]?.stepsCompleted ?? []).length;
     return (
-      <button
-        onClick={() => setCollapsed(false)}
-        title="Abrir coach de capacitación"
-        style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 900 }}
-        className="flex flex-col items-center gap-1.5 bg-amber-400 hover:bg-amber-500 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors"
-      >
-        <GraduationCap size={16} />
-        <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-          Coach
-        </span>
-      </button>
+      <>
+        {spotlight}
+        <button
+          onClick={() => setCollapsed(false)}
+          title={`Coach: ${coachStep.title}`}
+          style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 900 }}
+          className="flex flex-col items-center gap-1 bg-amber-400 hover:bg-amber-500 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors"
+        >
+          <GraduationCap size={16} />
+          <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+            Coach
+          </span>
+          <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>
+            {completedCount}/{modSteps.length}
+          </span>
+          {/* Mini progress dots */}
+          <div className="flex flex-col gap-0.5 mt-0.5">
+            {modSteps.map((s, i) => {
+              const done = (session?.progress[coachStep.moduleKey]?.stepsCompleted ?? []).includes(s.stepId);
+              const active = s.stepId === coachStep.stepId;
+              return (
+                <span
+                  key={s.stepId}
+                  style={{ width: 6, height: 6, borderRadius: '50%', display: 'block' }}
+                  className={done ? 'bg-green-200' : active ? 'bg-white' : 'bg-amber-200/60'}
+                />
+              );
+            })}
+          </div>
+        </button>
+      </>
     );
   }
 
   return (
     <>
-    {isOnTargetRoute && coachStep.highlightSelector && (
-      <TrainingSpotlight selector={coachStep.highlightSelector} />
-    )}
+    {spotlight}
     <div style={bubbleStyle}>
       <div className="rounded-2xl shadow-xl border border-amber-200 dark:border-amber-800 bg-white dark:bg-slate-900 overflow-hidden">
 
