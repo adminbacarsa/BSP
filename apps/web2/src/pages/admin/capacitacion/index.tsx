@@ -2,7 +2,7 @@ import { useRouter } from 'next/router';
 import { useEffect, useState } from 'react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useTrainingDashboard } from '@/hooks/useTrainingDashboard';
-import { TRAINABLE_MODULES, TrainingSession, resetSession } from '@/lib/training/trainingSession';
+import { TRAINABLE_MODULES, TrainingSession, resetSession, cleanSessionData } from '@/lib/training/trainingSession';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import {
   GraduationCap, RefreshCw, CheckCircle2, Clock, Circle,
@@ -76,11 +76,12 @@ function StudentRow({ session, onReset }: { session: TrainingSession; onReset: (
   })();
 
   const handleReset = async () => {
-    if (!confirm(`¿Reiniciar sesión de ${session.userEmail}? Se perderá el progreso actual.`)) return;
+    if (!confirm(`¿Reiniciar sesión de ${session.userEmail}?\nSe eliminará el progreso Y todos los datos creados (clientes, SLAs, turnos, novedades).`)) return;
     setResetting(true);
     try {
+      await cleanSessionData(session.empresaId, session.startedAt);
       await resetSession(session.id, session.modulePlan);
-      toast.success(`Sesión de ${session.userEmail} reiniciada`);
+      toast.success(`Sesión de ${session.userEmail} reiniciada y datos limpiados`);
       onReset();
     } catch (e) {
       toast.error('Error al reiniciar la sesión');

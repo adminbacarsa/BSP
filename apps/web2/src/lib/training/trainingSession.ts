@@ -1,4 +1,7 @@
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  doc, getDoc, setDoc, updateDoc, serverTimestamp,
+  collection, query, where, getDocs, writeBatch, Timestamp, limit,
+} from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 // ── Módulos entrenables (en orden de recorrido) ──────────────────────────────
@@ -242,6 +245,55 @@ export async function uncompleteStep(params: {
   }
 
   await updateDoc(ref, updates);
+}
+
+/** Borra todos los datos creados durante la sesión de capacitación */
+export async function cleanSessionData(empresaId: string, sessionStartedAt: string): Promise<void> {
+  const startTs = (() => {
+    try {
+      const d = new Date(sessionStartedAt);
+      return isNaN(d.getTime()) ? null : Timestamp.fromDate(d);
+    } catch { return null; }
+  })();
+
+  const isAfterStart = (tsField: unknown): boolean => {
+    if (!tsField) return true; // sin fecha: borrar igual en empresa de capacitación
+    try {
+      const ts = tsField instanceof Timestamp
+        ? tsField
+        : Timestamp.fromDate(new Date(String(tsField)));
+      return startTs ? ts.seconds >= startTs.seconds : true;
+    } catch { return true; }
+  };
+
+  const COLECCIONES: Array<{ name: string; dateField: string }> = [
+    { name: 'clients',             dateField: 'createdAt' },
+    { name: 'servicios_sla',       dateField: 'createdAt' },
+    { name: 'turnos',              dateField: 'createdAt' },
+    { name: 'ausencias',           dateField: 'createdAt' },
+    { name: 'novedades',           dateField: 'createdAt' },
+    { name: 'planificacion_estados', dateField: 'publishedAt' },
+  ];
+
+  const batch = writeBatch(db);
+  let opCount = 0;
+
+  for (const col of COLECCIONES) {
+    const q = query(
+      collection(db, col.name),
+      where('empresaId', '==', empresaId),
+      limit(200),
+    );
+    const snap = await getDocs(q);
+    for (const d of snap.docs) {
+      if (isAfterStart(d.data()[col.dateField])) {
+        batch.delete(d.ref);
+        opCount++;
+      }
+    }
+  }
+
+  if (opCount > 0) await batch.commit();
 }
 
 /** Reinicia la sesión de un alumno (instructor) */

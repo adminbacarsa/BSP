@@ -80,35 +80,53 @@ export function TrainingCoachBubble() {
     }
   }, [session?.currentModuleKey, session?.progress]);
 
-  // Auto-minimizar al clic del botón principal y luego avanzar la cadena de highlights
+  // Auto-minimizar al clic del botón principal y luego avanzar la cadena de highlights.
+  // Usa un intervalo en lugar de un timeout único porque el elemento puede no estar en DOM
+  // todavía (ej: usuario aún no abrió el detalle del cliente ni la pestaña SEDES).
   useEffect(() => {
     if (!session) return;
     const step = getActiveCoachStep(session.currentModuleKey, session.progress);
     if (!step?.highlightSelector || step.isPractice) return;
 
     const chain = step.highlightChain ?? [];
+    let attached = false;
+    let stopped = false;
+    let removeListener: (() => void) | null = null;
 
-    const t = setTimeout(() => {
+    const tryAttach = () => {
+      if (stopped || attached) return;
+
+      let el: Element | null;
+      let handler: () => void;
+
       if (chainIdx === 0) {
-        // Escuchar el botón principal → compactar + avanzar cadena
-        const el = document.querySelector(step.highlightSelector!);
+        el = document.querySelector(step.highlightSelector!);
         if (!el) return;
-        const handler = () => { setMode('compact'); if (chain.length > 0) setChainIdx(1); };
-        el.addEventListener('click', handler, { once: true });
+        handler = () => { setMode('compact'); if (chain.length > 0) setChainIdx(1); };
       } else {
-        // Escuchar el elemento actual de la cadena → avanzar al siguiente
         const chainEl = chain[chainIdx - 1];
         if (!chainEl) return;
-        const el = document.querySelector(chainEl.selector);
+        el = document.querySelector(chainEl.selector);
         if (!el) return;
-        const handler = () => {
+        handler = () => {
           const nextIdx = chainIdx + 1;
           if (nextIdx <= chain.length) setChainIdx(nextIdx);
         };
-        el.addEventListener('click', handler, { once: true });
       }
-    }, 150);
-    return () => clearTimeout(t);
+
+      el.addEventListener('click', handler, { once: true });
+      removeListener = () => el!.removeEventListener('click', handler);
+      attached = true;
+    };
+
+    tryAttach();
+    const interval = setInterval(tryAttach, 400);
+
+    return () => {
+      stopped = true;
+      clearInterval(interval);
+      removeListener?.();
+    };
   }, [session, router.pathname, chainIdx]);
 
   const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
