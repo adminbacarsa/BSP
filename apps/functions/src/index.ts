@@ -838,14 +838,22 @@ async function runModoDemoForEmpresa(
     !!t.isSinCobertura;
   const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
 
-  // Hash determinístico: 60% puntual, 30% tarde, 10% ausente
+  // Comportamiento demo rotativo (no fijo por legajo): ~60% puntual, ~30% tarde, ~10% ausente.
+  // La semilla incluye día AR + franja de 6h + turno → cambian los ausentes entre días y bloques.
   const WINDOW_BEFORE_MS = 15 * 60 * 1000;
   const WINDOW_AFTER_MS = 5 * 60 * 1000;
   const LATE_DELAY_MS = 12 * 60 * 1000;
   type ShiftCat = 'puntual' | 'late' | 'absent';
-  const shiftCategory = (empId: string): ShiftCat => {
+  const argentinaDayKeyFromMs = (ms: number): string => {
+    const ar = new Date(ms - 3 * 60 * 60 * 1000);
+    return `${ar.getUTCFullYear()}-${String(ar.getUTCMonth() + 1).padStart(2, '0')}-${String(ar.getUTCDate()).padStart(2, '0')}`;
+  };
+  const shiftCategory = (empId: string, shiftId: string, startMs: number): ShiftCat => {
+    const dayStr = argentinaDayKeyFromMs(startMs);
+    const block = Math.floor(startMs / (6 * 3600000));
+    const seed = `${empresaId}|${dayStr}|b${block}|${shiftId}|${empId}`;
     let h = 0;
-    for (let i = 0; i < empId.length; i++) h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
+    for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) & 0xffffff;
     const m = h % 10;
     if (m === 0) return 'absent';
     if (m <= 3) return 'late';
@@ -859,7 +867,7 @@ async function runModoDemoForEmpresa(
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
     const empId = String(t.employeeId || '');
-    const cat = shiftCategory(empId);
+    const cat = shiftCategory(empId, doc.id, startMs);
     const oid = String(t.objectiveId || '');
     if (cat === 'absent') continue;
 
@@ -930,7 +938,7 @@ async function runModoDemoForEmpresa(
     const startMs = (t.startTime?.seconds ?? 0) * 1000;
     if (startMs > now.getTime() - ABSENT_MIN_MS) continue;
     const empId = String(t.employeeId || '');
-    if (shiftCategory(empId) !== 'absent') continue;
+    if (shiftCategory(empId, doc.id, startMs) !== 'absent') continue;
 
     batch.update(doc.ref, {
       isAbsent: true,

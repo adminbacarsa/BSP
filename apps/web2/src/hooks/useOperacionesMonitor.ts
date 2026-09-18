@@ -1077,6 +1077,96 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             isDescubierto: isVacancyDescubierto(v, now),
         }));
 
+        const cleanCoverName = (raw: unknown): string | null => {
+            const s = String(raw ?? '').replace(/^VACANTE:?\s*/i, '').trim();
+            if (!s) return null;
+            const cleaned = s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+            return cleaned || s;
+        };
+
+        const resolveCoveringNameForTitular = (titular: any): string | null => {
+            const fromField = String(titular.coveredByEmployeeName || titular.coveredBy || '').trim();
+            if (fromField) {
+                const cleaned = fromField.replace(/\s*\([^)]*\)\s*$/, '').trim();
+                return cleaned || fromField;
+            }
+            const eid = titular.coveredByEmployeeId;
+            if (eid && empMap.get(eid)) return String(empMap.get(eid));
+
+            const isLinkedCover = (x: any) =>
+                x.id !== titular.id
+                && !x.isAbsent
+                && !x.isUnassigned
+                && (
+                    x.absenceShiftId === titular.id
+                    || x.coveredShiftId === titular.id
+                    || (titular.employeeId && x.coversEmployeeId === titular.employeeId)
+                )
+                && (
+                    String(x.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+                    || x.resolvedBy === 'OPERACIONES'
+                    || !!x.coverageRedirectedTo
+                );
+
+            const linked = dedupedRealShifts.find(isLinkedCover);
+            const linkedName = cleanCoverName(linked?.employeeName);
+            if (linkedName) return linkedName;
+
+            const pkgId = titular.coveragePackageId;
+            if (pkgId) {
+                const siblings = dedupedRealShifts.filter(
+                    (r) => r.coveragePackageId === pkgId && r.id !== titular.id && !r.isAbsent && !r.isUnassigned,
+                );
+                const pkgNames = siblings
+                    .filter((r) =>
+                        r.coverageSegmentRole === 'EXTENSION'
+                        || r.coverageSegmentRole === 'EARLY_START'
+                        || String(r.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+                        || r.coversEmployeeId === titular.employeeId,
+                    )
+                    .map((r) => cleanCoverName(r.employeeName))
+                    .filter(Boolean) as string[];
+                const uniq = [...new Set(pkgNames)];
+                if (uniq.length === 1) return uniq[0];
+                if (uniq.length > 1) return uniq.join(' + ');
+            }
+
+            if (titular.shiftDateObj instanceof Date && titular.endDateObj instanceof Date) {
+                const slotCovers = dedupedRealShifts.filter((x) =>
+                    x.id !== titular.id
+                    && x.objectiveId === titular.objectiveId
+                    && !x.isAbsent
+                    && !x.isUnassigned
+                    && !x.isFranco
+                    && shiftCoversVacancySlot(x, titular.shiftDateObj, titular.endDateObj, titular.positionName),
+                );
+                const scored = slotCovers
+                    .map((x) => {
+                        let score = 0;
+                        if (isLinkedCover(x)) score += 100;
+                        if (String(x.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') score += 50;
+                        if (x.isPresent) score += 20;
+                        if (x.coversEmployeeId === titular.employeeId) score += 10;
+                        return { x, score };
+                    })
+                    .sort((a, b) => b.score - a.score);
+                const names = [...new Set(
+                    scored.map(({ x }) => cleanCoverName(x.employeeName)).filter(Boolean) as string[],
+                )];
+                if (names.length === 1) return names[0];
+                if (names.length > 1) return names.slice(0, 2).join(' + ');
+            }
+
+            return null;
+        };
+
+        visibleRealShifts.forEach((s) => {
+            if (!s.isAbsent) return;
+            if (!(s.operacionallyCovered || s.plannedOperativelyCovered || s.coverageStatus === 'COVERED')) return;
+            const name = resolveCoveringNameForTitular(s);
+            if (name) s.coveringDisplayName = name;
+        });
+
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
     }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
 

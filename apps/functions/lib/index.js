@@ -666,10 +666,17 @@ async function runModoDemoForEmpresa(db, empresaId) {
     const WINDOW_BEFORE_MS = 15 * 60 * 1000;
     const WINDOW_AFTER_MS = 5 * 60 * 1000;
     const LATE_DELAY_MS = 12 * 60 * 1000;
-    const shiftCategory = (empId) => {
+    const argentinaDayKeyFromMs = (ms) => {
+        const ar = new Date(ms - 3 * 60 * 60 * 1000);
+        return `${ar.getUTCFullYear()}-${String(ar.getUTCMonth() + 1).padStart(2, '0')}-${String(ar.getUTCDate()).padStart(2, '0')}`;
+    };
+    const shiftCategory = (empId, shiftId, startMs) => {
+        const dayStr = argentinaDayKeyFromMs(startMs);
+        const block = Math.floor(startMs / (6 * 3600000));
+        const seed = `${empresaId}|${dayStr}|b${block}|${shiftId}|${empId}`;
         let h = 0;
-        for (let i = 0; i < empId.length; i++)
-            h = (h * 31 + empId.charCodeAt(i)) & 0xFFFFFF;
+        for (let i = 0; i < seed.length; i++)
+            h = (h * 31 + seed.charCodeAt(i)) & 0xffffff;
         const m = h % 10;
         if (m === 0)
             return 'absent';
@@ -685,7 +692,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
         const empId = String(t.employeeId || '');
-        const cat = shiftCategory(empId);
+        const cat = shiftCategory(empId, doc.id, startMs);
         const oid = String(t.objectiveId || '');
         if (cat === 'absent')
             continue;
@@ -765,7 +772,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         if (startMs > now.getTime() - ABSENT_MIN_MS)
             continue;
         const empId = String(t.employeeId || '');
-        if (shiftCategory(empId) !== 'absent')
+        if (shiftCategory(empId, doc.id, startMs) !== 'absent')
             continue;
         batch.update(doc.ref, {
             isAbsent: true,
@@ -1085,7 +1092,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!caller.isPanelUser || !(0, backup_auth_util_1.isAdminBackupRole)(caller.sysRole || context.auth.token?.role)) {
         throw new functions.https.HttpsError('permission-denied', 'Solo administradores pueden crear usuarios de sistema.');
     }
-    const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas } = data;
+    const { email, password, firstName, lastName, role, empresaId: rawEmpresaId, allEmpresas: rawAllEmpresas, requiresTraining } = data;
     const roleNorm = (0, backup_auth_util_1.normalizeBackupRole)(role);
     const roleIsSuper = (0, backup_auth_util_1.isSuperAdminBackupRole)(roleNorm);
     const multiEmpresa = !roleIsSuper &&
@@ -1123,6 +1130,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
             role: roleNorm,
             empresaId: targetEmpresaId,
             ...(allEmpresas ? { allEmpresas: true } : {}),
+            ...(requiresTraining ? { requiresTraining: true } : {}),
             status: 'ACTIVE',
             createdAt: admin.firestore.FieldValue.serverTimestamp()
         });

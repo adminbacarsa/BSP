@@ -30,6 +30,7 @@ import { app, db, onSnapshotFresh } from '@/lib/firebase';
 import {
     absentShiftCoveragePatch,
     syncAusenciaCoberturaGestionada,
+    formatCoveringEmployeeLabel,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { getAuth } from 'firebase/auth';
 import {
@@ -2027,6 +2028,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
+    const isAbsentOperativelyCovered = !!(
+        shift.isAbsent && (shift.operacionallyCovered || shift.plannedOperativelyCovered || shift.coverageStatus === 'COVERED')
+    );
+    const coveringEmployeeName = isAbsentOperativelyCovered ? formatCoveringEmployeeLabel(shift) : null;
 
     // Badge de estado
     let badge = null;
@@ -2059,8 +2064,18 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;
     else if (shift.isPlannedLiberationRet) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>RET CONVOCABLE</span>;
     else if (shift.isConvocado && shift.isFuture) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>CONVOCADO</span>;
-    else if (shift.isAbsent)         badge = shift.operacionallyCovered || shift.plannedOperativelyCovered
-        ? <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5">AUSENTE <span className="bg-emerald-500 px-1 rounded text-[8px]">✓ cubierto</span></span>
+    else if (shift.isAbsent)         badge = isAbsentOperativelyCovered
+        ? (
+            <span
+                className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0 flex items-center gap-0.5 max-w-[min(100%,220px)]"
+                title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura registrada en CC'}
+            >
+                AUSENTE
+                <span className="bg-emerald-500 px-1 rounded text-[8px] truncate">
+                    ✓ cubierto{coveringEmployeeName ? ` · ${coveringEmployeeName}` : ''}
+                </span>
+            </span>
+        )
         : <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-700 text-white shrink-0">AUSENTE</span>;
     else if (shift.isResolvedByOps)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white shrink-0">OPS</span>;
 
@@ -2091,6 +2106,11 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
+                {coveringEmployeeName && (
+                    <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
+                        Cubre: {coveringEmployeeName}
+                    </p>
+                )}
             </div>
             <div className="flex gap-1 shrink-0">
                 {!shift.isUnassigned && (<button onClick={() => onOpenWA(shift)} className={`p-1.5 border rounded-lg hover:bg-emerald-100 transition-colors ${shift.phone ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-50 text-slate-400 border-slate-200'}`} title={shift.phone ? 'WhatsApp' : 'Sin teléfono'}><MessageCircle size={12}/></button>)}
@@ -2106,12 +2126,25 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     ? (() => {
                         const endMs = shift.endDateObj?.getTime?.() ?? 0;
                         const shiftEnded = endMs > 0 && Date.now() > endMs;
-                        return shiftEnded
-                            ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>
-                            : <div className="flex gap-1">
+                        if (shiftEnded) {
+                            return <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>;
+                        }
+                        if (isAbsentOperativelyCovered) {
+                            return (
+                                <span
+                                    className="text-[9px] px-2 py-1 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold max-w-[140px] truncate"
+                                    title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}
+                                >
+                                    {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
+                                </span>
+                            );
+                        }
+                        return (
+                            <div className="flex gap-1">
                                 <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>
                                 <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>
-                              </div>;
+                            </div>
+                        );
                       })()
                     : <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Confirmar ausencia"><AlertTriangle size={12}/></button>
                 )}
@@ -2151,6 +2184,12 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
+                {coveringEmployeeName && (
+                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
+                        <UserCheck size={10} className="shrink-0 text-emerald-600"/>
+                        Cubre: {coveringEmployeeName}
+                    </div>
+                )}
                 {/* Franja retención */}
                 {(shift.isRetention || shift.manualRetentionType) && (
                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
@@ -2204,12 +2243,23 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         ? (() => {
                             const endMs = shift.endDateObj?.getTime?.() ?? 0;
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
-                            return shiftEnded
-                                ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>
-                                : <div className="flex gap-1.5 items-center">
+                            if (shiftEnded) {
+                                return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
+                            }
+                            if (isAbsentOperativelyCovered) {
+                                return (
+                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold max-w-[200px] truncate" title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}>
+                                        <UserCheck size={11} className="shrink-0"/>
+                                        {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
+                                    </span>
+                                );
+                            }
+                            return (
+                                <div className="flex gap-1.5 items-center">
                                     <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>
                                     <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia"><XCircle size={11}/></button>
-                                  </div>;
+                                </div>
+                            );
                           })()
                         : <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>CONFIRMAR AUSENCIA</button>
                     )}

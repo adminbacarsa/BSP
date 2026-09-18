@@ -67,6 +67,19 @@ export async function syncAusenciaCoberturaGestionada(
   return n;
 }
 
+/** Nombre legible del guardia que cubrió (titular ausente / slot cubierto). */
+export function formatCoveringEmployeeLabel(
+  shift: Record<string, unknown> | null | undefined,
+): string | null {
+  if (!shift) return null;
+  const preset = String(shift.coveringDisplayName || '').trim();
+  if (preset) return preset;
+  const raw = String(shift.coveredByEmployeeName || shift.coveredBy || '').trim();
+  if (!raw) return null;
+  const cleaned = raw.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  return cleaned || raw;
+}
+
 /** Payload estándar para marcar el turno titular ausente/vacante como cubierto. */
 export function absentShiftCoveragePatch(opts: {
   coveredByEmployeeId?: string | null;
