@@ -19,6 +19,8 @@ export interface CoachStep {
   highlightSelector?: string;
   highlightChain?: ChainHighlight[];
   isPractice?: boolean;
+  /** true = el sistema no puede detectarlo automáticamente; habilita el botón manual */
+  manualComplete?: boolean;
 }
 
 export const COACH_STEPS: CoachStep[] = [
@@ -66,6 +68,7 @@ export const COACH_STEPS: CoachStep[] = [
   {
     moduleKey: 'RRHH',
     stepId: 'ver_empleado',
+    manualComplete: true,
     title: '¿Qué es un Legajo? Explorá uno',
     instruction:
       'El **legajo** es el expediente digital de cada guardia: sus datos personales, categoría CCT, objetivo asignado, vacaciones y más. ' +

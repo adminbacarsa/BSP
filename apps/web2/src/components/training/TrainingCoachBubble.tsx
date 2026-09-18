@@ -409,14 +409,17 @@ export function TrainingCoachBubble() {
 
         {/* Botones acción */}
         <div className="px-4 pb-4 pt-2 flex flex-col gap-2">
-          <button
-            onClick={handleComplete}
-            disabled={completing}
-            className={`w-full flex items-center justify-center gap-2 disabled:opacity-60 text-white text-xs font-bold py-2 px-4 rounded-xl transition-colors ${isPractice ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-green-500 hover:bg-green-600'}`}
-          >
-            {isPractice ? <Trophy size={13} /> : <CheckCircle2 size={13} />}
-            {completing ? 'Guardando…' : isPractice ? 'Completé el ejercicio' : 'Marcar paso como listo'}
-          </button>
+          {/* Botón manual: solo para práctica libre o pasos sin detección automática */}
+          {(isPractice || coachStep.manualComplete) && (
+            <button
+              onClick={handleComplete}
+              disabled={completing}
+              className={`w-full flex items-center justify-center gap-2 disabled:opacity-60 text-white text-xs font-bold py-2 px-4 rounded-xl transition-colors ${isPractice ? 'bg-indigo-500 hover:bg-indigo-600' : 'bg-green-500 hover:bg-green-600'}`}
+            >
+              {isPractice ? <Trophy size={13} /> : <CheckCircle2 size={13} />}
+              {completing ? 'Guardando…' : isPractice ? 'Completé el ejercicio' : 'Listo, exploré el legajo'}
+            </button>
+          )}
           {prevStepInfo && (
             <button
               onClick={handleBack}
@@ -429,8 +432,10 @@ export function TrainingCoachBubble() {
           )}
           <p className="text-center text-[10px] text-slate-400 dark:text-slate-500">
             {isPractice
-              ? 'Hacé el ejercicio libremente y avisá cuando terminés'
-              : 'También se detecta automáticamente al completar la acción'}
+              ? 'Hacé el ejercicio libremente — confirmá cuando terminés'
+              : coachStep.manualComplete
+                ? 'Explorá el legajo y confirmá cuando estés listo'
+                : '⚡ Se completa automáticamente al realizar la acción en la plataforma'}
           </p>
         </div>
       </div>
