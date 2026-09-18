@@ -46,6 +46,7 @@ export function TrainingCoachBubble() {
   const router = useRouter();
   const [mode, setMode] = useState<CoachMode>('expanded');
   const [completing, setCompleting] = useState(false);
+  const [chainIdx, setChainIdx] = useState(0);
 
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const dragData = useRef<{ startMX: number; startMY: number; origX: number; origY: number } | null>(null);
@@ -66,23 +67,40 @@ export function TrainingCoachBubble() {
     if (key !== prevStepKey.current) {
       prevStepKey.current = key;
       setMode('expanded');
+      setChainIdx(0);
     }
   }, [session?.currentModuleKey, session?.progress]);
 
-  // Auto-minimizar cuando el usuario hace clic en el botón resaltado por el spotlight
+  // Auto-minimizar al clic del botón principal y luego avanzar la cadena de highlights
   useEffect(() => {
     if (!session) return;
     const step = getActiveCoachStep(session.currentModuleKey, session.progress);
     if (!step?.highlightSelector || step.isPractice) return;
-    // Pequeño delay para que el DOM esté listo tras navegación
+
+    const chain = step.highlightChain ?? [];
+
     const t = setTimeout(() => {
-      const el = document.querySelector(step.highlightSelector!);
-      if (!el) return;
-      const handler = () => setMode('compact');
-      el.addEventListener('click', handler, { once: true });
+      if (chainIdx === 0) {
+        // Escuchar el botón principal → compactar + avanzar cadena
+        const el = document.querySelector(step.highlightSelector!);
+        if (!el) return;
+        const handler = () => { setMode('compact'); if (chain.length > 0) setChainIdx(1); };
+        el.addEventListener('click', handler, { once: true });
+      } else {
+        // Escuchar el elemento actual de la cadena → avanzar al siguiente
+        const chainEl = chain[chainIdx - 1];
+        if (!chainEl) return;
+        const el = document.querySelector(chainEl.selector);
+        if (!el) return;
+        const handler = () => {
+          const nextIdx = chainIdx + 1;
+          if (nextIdx <= chain.length) setChainIdx(nextIdx);
+        };
+        el.addEventListener('click', handler, { once: true });
+      }
     }, 150);
     return () => clearTimeout(t);
-  }, [session, router.pathname]);
+  }, [session, router.pathname, chainIdx]);
 
   const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
@@ -191,10 +209,12 @@ export function TrainingCoachBubble() {
   const completedCount = completedSteps.length;
   const isPractice = !!coachStep.isPractice;
 
-  // Spotlight: activo en cualquier modo cuando estamos en la ruta correcta (no en práctica)
-  const spotlight = !isPractice && isOnTargetRoute && coachStep.highlightSelector
-    ? <TrainingSpotlight selector={coachStep.highlightSelector} />
-    : null;
+  // Spotlight: usa la cadena si está activa, sino el selector principal
+  const chain = coachStep.highlightChain ?? [];
+  const activeSelector = !isPractice && isOnTargetRoute
+    ? (chainIdx > 0 && chain[chainIdx - 1] ? chain[chainIdx - 1].selector : coachStep.highlightSelector)
+    : undefined;
+  const spotlight = activeSelector ? <TrainingSpotlight selector={activeSelector} /> : null;
 
   // ── MODO TAB LATERAL ──────────────────────────────────────────────────────
   if (mode === 'side') {
@@ -266,11 +286,13 @@ export function TrainingCoachBubble() {
             </button>
           </div>
 
-          {/* Siguiente acción (1 línea clave) */}
+          {/* Siguiente acción: hint de cadena o primera línea de instrucción */}
           <div className="px-3 py-2 flex items-center gap-2">
             <ChevronRight size={12} className="text-amber-500 shrink-0" />
             <p className="text-[12px] text-slate-600 dark:text-slate-300 line-clamp-2 leading-snug flex-1">
-              {coachStep.instruction.split('\n')[0]}
+              {chainIdx > 0 && chain[chainIdx - 1]
+                ? chain[chainIdx - 1].hint
+                : coachStep.instruction.split('\n')[0]}
             </p>
             {!isOnTargetRoute && (
               <Link href={coachStep.targetRoute} className="shrink-0 text-[11px] font-semibold text-blue-500 hover:underline flex items-center gap-1">

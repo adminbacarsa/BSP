@@ -3,6 +3,11 @@
  * Cada entrada define qué mostrarle al alumno y en qué ruta debe estar.
  */
 
+export interface ChainHighlight {
+  selector: string;
+  hint: string;
+}
+
 export interface CoachStep {
   moduleKey: string;
   stepId: string;
@@ -12,6 +17,7 @@ export interface CoachStep {
   targetRoute: string;
   targetRouteLabel: string;
   highlightSelector?: string;
+  highlightChain?: ChainHighlight[];
   isPractice?: boolean;
 }
 
@@ -113,6 +119,11 @@ export const COACH_STEPS: CoachStep[] = [
     targetRoute: '/admin/servicios',
     targetRouteLabel: 'Servicios',
     highlightSelector: '[data-action="nuevo-servicio"]',
+    highlightChain: [
+      { selector: '[data-action="sla-form-cliente"]', hint: '→ Seleccioná el CLIENTE en el desplegable (el que creaste en el módulo CRM)' },
+      { selector: '[data-action="sla-form-objetivo"]', hint: '→ Seleccioná el OBJETIVO (sede) del cliente' },
+      { selector: '[data-action="sla-form-guardar"]', hint: '→ Clic en GUARDAR para crear el contrato' },
+    ],
   },
   {
     moduleKey: 'SERVICES',
