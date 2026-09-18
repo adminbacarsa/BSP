@@ -42,6 +42,7 @@ import {
     isHiddenFromOpsAlerts,
     isOrphanShiftNoiseNovedad,
     isStaleIaAutomationNovedad,
+    isNovedadOutsideCcMonitorScope,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
 import {
@@ -1688,14 +1689,24 @@ const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white',
 /** Auto-cierre solo en informativas cortas; al abrir VER no apurar al operador. */
 const AUTO_CLOSE_MS = 10000;
 
-const NovedadDetailPopup = ({ novedad, onClose, onAtender }: { novedad: any; onClose: () => void; onAtender: (n: any) => void }) => {
+const NovedadDetailPopup = ({
+    novedad,
+    processedData,
+    onClose,
+    onAtender,
+}: {
+    novedad: any;
+    processedData?: any[];
+    onClose: () => void;
+    onAtender: (n: any) => void;
+}) => {
     const isInfo = isInformationalNovedad(novedad);
     const autoMs = isInfo ? 0 : AUTO_CLOSE_MS;
     const [remaining, setRemaining] = React.useState(autoMs || AUTO_CLOSE_MS);
     const intervalRef = React.useRef<any>(null);
     const meta = TYPE_META[novedad?.type] ?? DEFAULT_META;
     const actor = novedadActorName(novedad);
-    const body = novedadBodyText(novedad) || novedadSubline(novedad);
+    const body = novedadBodyText(novedad) || novedadSubline(novedad, processedData);
 
     React.useEffect(() => {
         if (!novedad || !autoMs) {
@@ -2910,6 +2921,7 @@ export default function OperacionesPage() {
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
             if (isStaleIaAutomationNovedad(n, logic.processedData)) return false; // IA fuera de ventana CC
+            if (isNovedadOutsideCcMonitorScope(n, logic.processedData, logic.publishStatusMap, logic.servicesSLA)) return false;
             if (n.enGestion) return false; // otro operador (mapa) la está gestionando
 
             // TURA-extensión ya mergeada en el turno del guardia: no alertar como vacante
@@ -2957,7 +2969,7 @@ export default function OperacionesPage() {
             seen.add(key);
             return true;
         });
-    }, [empNovedades, logic.processedData]);
+    }, [empNovedades, logic.processedData, logic.publishStatusMap, logic.servicesSLA]);
 
     useEffect(() => {
         const since = Timestamp.fromDate(new Date(Date.now() - 48 * 3600 * 1000));
@@ -5541,7 +5553,7 @@ export default function OperacionesPage() {
                                   {items.map((n: any) => {
                                     const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
                                     const headline = novedadHeadline(n);
-                                    const sub = novedadSubline(n);
+                                    const sub = novedadSubline(n, logic.processedData);
                                     return (
                                       <div key={n.id} onClick={() => setDetailNovedad(n)} className={`px-3 py-2 flex items-center gap-2 border-l-4 ${meta.border} border-b border-slate-50 hover:bg-slate-50/60 transition-colors cursor-pointer`}>
                                         <div className="flex-1 min-w-0">
@@ -5719,7 +5731,7 @@ export default function OperacionesPage() {
                                             const tl: Record<string,string> = { AUSENCIA_CORTO_PLAZO:'URGENTE', AVISO_AUSENCIA_ANTICIPADA:'ANTIC', VACANTE_PROTOCOLO_COBERTURA:'PROT', AUSENCIA_AUTO:'AUS', AUSENCIA_OPERATIVA:'AUS', LLEGADA_TARDE:'TARDE', POSICION_SIN_RELEVO:'REL', RETENCION_LARGA:'REC', RELEVO_INMINENTE:'RELEVO', TURNO_COMPLETADO_AUTO:'FIN', COBERTURA_RESUELTA:'CUBIERTO' };
                                             const label = tl[n.type] || (n.type || '').replace(/_/g,' ').slice(0,8).toUpperCase();
                                             const headline = novedadHeadline(n);
-                                            const sub = novedadSubline(n);
+                                            const sub = novedadSubline(n, logic.processedData);
                                             return (
                                             <div key={n.id} className="px-3 py-2 border-b border-slate-50 text-[10px] flex items-center gap-2">
                                                 <span className={`text-[8px] font-black px-1 py-0.5 rounded shrink-0 ${n.type === 'COBERTURA_RESUELTA' ? 'bg-emerald-600 text-white' : 'bg-slate-700 text-white'}`}>{label}</span>
@@ -5908,7 +5920,7 @@ export default function OperacionesPage() {
                                             {items.map((n: any) => {
                                                 const ts = n.createdAt?.seconds ? new Date(n.createdAt.seconds * 1000) : null;
                                                 const headline = novedadHeadline(n);
-                                                const sub = novedadSubline(n);
+                                                const sub = novedadSubline(n, logic.processedData);
                                                 return (
                                                     <div key={n.id} className={`flex items-center gap-2 px-3 py-1.5 border-l-4 ${meta.border} bg-white border-b border-slate-50 hover:bg-slate-50/50 transition-colors`}>
                                                         <div className="flex-1 min-w-0">
@@ -6096,6 +6108,7 @@ export default function OperacionesPage() {
         {detailNovedad && (
             <NovedadDetailPopup
                 novedad={detailNovedad}
+                processedData={logic.processedData}
                 onClose={() => setDetailNovedad(null)}
                 onAtender={handleAtenderNovedad}
             />

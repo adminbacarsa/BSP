@@ -1,4 +1,37 @@
 import { isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
+import { isObjectiveEligibleForCcMonth } from '@/lib/operaciones/ccObjectiveEligibility';
+
+const TZ_AR = 'America/Argentina/Cordoba';
+
+function formatTimeRangeForAlert(start: Date | null | undefined, end: Date | null | undefined): string {
+    if (!(start instanceof Date) || Number.isNaN(start.getTime())) return '';
+    const fmt = (d: Date) =>
+        d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: TZ_AR });
+    if (end instanceof Date && !Number.isNaN(end.getTime()) && end.getTime() > start.getTime()) {
+        return `${fmt(start)} – ${fmt(end)}`;
+    }
+    return fmt(start);
+}
+
+function shiftSlotBrief(shift: any): string {
+    if (!shift) return '';
+    const code = String(shift.code || shift.shiftCode || '').trim().toUpperCase();
+    const pos = String(shift.positionName || '').trim();
+    const horario = formatTimeRangeForAlert(shift.shiftDateObj, shift.endDateObj);
+    return [code, pos, horario].filter(Boolean).join(' · ');
+}
+
+const ABSENCE_ALERT_TYPES = new Set([
+    'AUSENCIA_AUTO',
+    'AUSENCIA_OPERATIVA',
+    'RELEVO_NO_PRESENTADO',
+    'AUSENCIA_CORTO_PLAZO',
+]);
+
+const CC_SCOPE_NOISE_TYPES = new Set([
+    'CONVOCATORIA_ENVIADA',
+    'CONVOCATORIA_ESCALADA',
+]);
 
 /**
  * Normaliza campos de novedades para el panel Alertas / popup de detalle.
@@ -35,11 +68,31 @@ export function novedadHeadline(n: any): string {
 }
 
 /** Segunda línea: puesto / mensaje, sin repetir el nombre del headline. */
-export function novedadSubline(n: any): string {
+export function novedadSubline(n: any, processedData?: any[]): string {
     const body = novedadBodyText(n);
     const pos = String(n?.positionName || '').trim();
     const actor = novedadActorName(n);
     const type = String(n?.type || '');
+
+    if (ABSENCE_ALERT_TYPES.has(type)) {
+        const shiftId = String(n?.shiftId || '').trim();
+        const shift = shiftId ? (processedData || []).find((s: any) => s.id === shiftId) : null;
+        const slot = shift ? shiftSlotBrief(shift) : shiftSlotBrief({
+            code: n.shiftCode,
+            positionName: n.positionName,
+        });
+        let tail = body;
+        if (actor && tail.toLowerCase().startsWith(actor.toLowerCase())) {
+            tail = tail.slice(actor.length).replace(/^[\s·,:—\-–]+/, '').trim();
+        }
+        tail = tail.replace(/\s*\(MODO DEMO\)\s*$/i, '').replace(/\s*\(detectado[^)]*\)\s*$/i, '').trim();
+        if (!tail || /^no se presentó/i.test(tail) || tail === '—') {
+            tail = n.source === 'MODO_DEMO' || n.reportedBy === 'MODO_DEMO' ? 'No se presentó (demo)' : 'No se presentó';
+        }
+        if (slot) return `${slot} — ${tail}`;
+        if (pos && !tail.toLowerCase().includes(pos.toLowerCase())) return `${pos} · ${tail}`;
+        return tail || pos;
+    }
 
     if (type === 'COBERTURA_RESUELTA') {
         if (body) return body;
@@ -83,7 +136,48 @@ export const INFO_NOVEDAD_TYPES = new Set([
  */
 export const HIDDEN_FROM_OPS_ALERTS_TYPES = new Set([
     'TURNO_COMPLETADO_AUTO',
+    'CONVOCATORIA_ENVIADA',
 ]);
+
+/**
+ * Novedad fuera del CC: falta SLA vigente en el mes o cronograma publicado.
+ */
+export function isNovedadOutsideCcMonitorScope(
+    n: any,
+    processedData: any[],
+    publishStatusMap: Record<string, boolean>,
+    servicesSLA: any[] = [],
+    now: Date = new Date(),
+): boolean {
+    const objId = String(n?.objectiveId || '').trim();
+    if (!objId) return false;
+
+    const shiftId = String(n?.shiftId || '').trim();
+    if (shiftId && (processedData || []).some((s) => s.id === shiftId)) return false;
+
+    const visibleToday = (processedData || []).some(
+        (s) => String(s.objectiveId || '') === objId && isOpsShiftHoy(s, now),
+    );
+    if (visibleToday) return false;
+
+    if (isObjectiveEligibleForCcMonth(objId, now.getFullYear(), now.getMonth(), publishStatusMap, servicesSLA)) {
+        return false;
+    }
+
+    const type = String(n?.type || '');
+    if (CC_SCOPE_NOISE_TYPES.has(type)) return true;
+    if (type.startsWith('IA_ALERTA_')) return true;
+    if (ABSENCE_ALERT_TYPES.has(type)) return true;
+    if (
+        type === 'VACANTE_PROTOCOLO_COBERTURA' ||
+        type === 'VACANTE_OPERATIVA' ||
+        type === 'CONVOCATORIA_COBERTURA' ||
+        type === 'CONVOCATORIA_RETEN'
+    ) {
+        return true;
+    }
+    return false;
+}
 
 /** Ruido ligado a un turno: si el guardia ya no está presente, no alertar. */
 export const SHIFT_TIED_NOISE_TYPES = new Set([

@@ -8,6 +8,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
+import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -500,6 +501,21 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         const clientIds = new Set(objectives.map((o: any) => o.clientId).filter(Boolean));
         const filteredSLA = filterSlaRowsByEmpresa(servicesSLA, empresaId, scopeEmpresa, clientIds);
         const activeSlaMap = new Set(filteredSLA.map((s: any) => s.objectiveId));
+        const slaByObjective = new Map<string, any[]>();
+        filteredSLA.forEach((s: any) => {
+            const oid = String(s.objectiveId ?? '').trim();
+            if (!oid) return;
+            if (!slaByObjective.has(oid)) slaByObjective.set(oid, []);
+            slaByObjective.get(oid)!.push(s);
+        });
+        const viewYear = currentTime.getFullYear();
+        const viewMonthIndex0 = currentTime.getMonth();
+        const slaEnabledForMonth = new Set<string>();
+        for (const [oid, rows] of slaByObjective.entries()) {
+            if (planningMonthHasActiveSla(rows, viewYear, viewMonthIndex0)) {
+                slaEnabledForMonth.add(oid);
+            }
+        }
 
         const suppressedTuraIds = new Set<string>();
         const parentTuraExt = new Map<string, { turaId: string; endDateObj: Date; tura: any }>();
@@ -550,6 +566,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     shiftDate.getMonth() + 1,
                 );
                 if (!publishStatusMap[pubKey]) return null;
+                if (!slaEnabledForMonth.has(String(shift.objectiveId ?? '').trim())) return null;
             }
 
             let info = objMap.get(shift.objectiveId);
@@ -767,6 +784,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const nowYear = now.getFullYear();
             const nowMonth = now.getMonth() + 1;
             if (!publishStatusMap[planificacionPublishLookupKey(sla.objectiveId, nowYear, nowMonth)]) return;
+            if (!slaEnabledForMonth.has(String(sla.objectiveId ?? '').trim())) return;
 
             // Vacantes "virtuales" = huecos del SLA vs turnos reales. Si no hay ningún documento
             // en `turnos` para este objetivo hoy (p. ej. base vaciada o aún sin planificar),

@@ -36,6 +36,7 @@ const runAutoSchedule_1 = require("./scheduling/runAutoSchedule");
 const runAjustarCrono_1 = require("./scheduling/runAjustarCrono");
 const runEquilibrarCrono_1 = require("./scheduling/runEquilibrarCrono");
 const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
+const ccTurnoEligibility_1 = require("./ops/ccTurnoEligibility");
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
 const mobileAppHandlers_1 = require("./mobileApp/mobileAppHandlers");
@@ -653,10 +654,12 @@ async function runModoDemoForEmpresa(db, empresaId) {
         .where('startTime', '<=', windowEnd)
         .limit(600)
         .get();
+    const ccGate = new ccTurnoEligibility_1.CcObjectiveMonthGate();
     const batch = db.batch();
     let presencias = 0;
     let ausenciasDemo = 0;
     let batchOps = 0;
+    let skippedOutOfCc = 0;
     const isVacant = (t) => !t.employeeId ||
         t.employeeId === 'VACANTE' ||
         t.employeeId === 'SIN_COBERTURA' ||
@@ -688,6 +691,10 @@ async function runModoDemoForEmpresa(db, empresaId) {
         const t = doc.data();
         if (skipBase(t) || isVacant(t))
             continue;
+        if (!(await ccGate.isTurnoInCcScope(db, t))) {
+            skippedOutOfCc++;
+            continue;
+        }
         if (t.isAbsent || t.isPresent || t.isCompleted)
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
@@ -766,6 +773,10 @@ async function runModoDemoForEmpresa(db, empresaId) {
         const t = doc.data();
         if (skipBase(t) || isVacant(t))
             continue;
+        if (!(await ccGate.isTurnoInCcScope(db, t))) {
+            skippedOutOfCc++;
+            continue;
+        }
         if (t.isAbsent || t.isPresent || t.isCompleted)
             continue;
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
@@ -812,11 +823,12 @@ async function runModoDemoForEmpresa(db, empresaId) {
             source: 'MODO_DEMO',
             modoDemoAt: nowTs,
         }, { merge: true });
+        const shiftCodeDemo = String(t.code || '').trim().toUpperCase();
         batch.set(db.collection('novedades').doc(`demo_aus_${safeId}`), {
             type: 'AUSENCIA_AUTO',
             status: 'pending',
             title: 'Ausencia Automática (Demo)',
-            description: `${t.employeeName || 'Empleado'} no se presentó — ${t.objectiveName || ''} (MODO DEMO)`,
+            description: `${t.employeeName || 'Empleado'} no se presentó — ${shiftCodeDemo || '—'} ${horario2} · ${t.positionName || 'Puesto'} · ${t.objectiveName || ''} (MODO DEMO)`,
             shiftId: doc.id,
             clientId: t.clientId || null,
             objectiveId: t.objectiveId || null,
@@ -824,6 +836,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
             employeeId: empId || null,
             employeeName: t.employeeName || null,
             positionName: t.positionName || null,
+            shiftCode: shiftCodeDemo || null,
             empresaId,
             createdAt: nowTs,
             reportedBy: 'MODO_DEMO',
@@ -842,6 +855,9 @@ async function runModoDemoForEmpresa(db, empresaId) {
     }
     catch (e8) {
         console.warn('[modoDemoCron] simularRespuestas error:', e8?.message);
+    }
+    if (skippedOutOfCc > 0) {
+        console.log(`[modoDemoCron] ${empresaId}: omitidos ${skippedOutOfCc} turnos (sin SLA vigente o crono no publicado)`);
     }
     return { presencias, ausenciasDemo, convRespuestas };
 }
@@ -902,6 +918,11 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         return;
     const empresaId = String(after.empresaId || '').trim() || 'bacarsa';
     const db = admin.firestore();
+    const ccGate = new ccTurnoEligibility_1.CcObjectiveMonthGate();
+    if (!(await ccGate.isTurnoInCcScope(db, after))) {
+        console.log(`[onTurnoAbsenciaDetectada] Skip cascada: objetivo fuera de CC (SLA/crono) shift=${event.params.shiftId}`);
+        return;
+    }
     const empresaDoc = await db.doc(`empresas/${empresaId}`).get();
     if (!empresaDoc.exists)
         return;
@@ -2741,7 +2762,8 @@ exports.detectarAusencias = functions
                     clientId: shift.clientId || null,
                     empresaId: shiftEmpresaId(shift) || null,
                     positionName: shift.positionName || '',
-                    description: `${shift.employeeName || 'Empleado'} no se presentó al turno en ${shift.objectiveName || ''} (detectado a los ${Math.round(elapsedMin)} min).`,
+                    shiftCode: (shift.code || '').toUpperCase() || null,
+                    description: `${shift.employeeName || 'Empleado'} no se presentó — ${(shift.code || '').toUpperCase() || '—'} ${buildHorario()} · ${shift.positionName || 'Puesto'} · ${shift.objectiveName || ''} (T+${Math.round(elapsedMin)} min).`,
                     createdAt: now,
                     source: 'SYSTEM_SCHEDULER',
                 });
@@ -2808,7 +2830,9 @@ exports.gestionarVacantes = functions
             .where(admin.firestore.FieldPath.documentId(), 'in', chunk)
             .get();
         for (const d of pubSnap.docs) {
-            publishedPlanKeys.add(d.id);
+            const pub = d.data()?.publishedAt;
+            if (pub != null && pub !== '')
+                publishedPlanKeys.add(d.id);
         }
     }
     let sentToPlanning = 0;
