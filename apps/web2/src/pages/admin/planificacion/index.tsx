@@ -11085,7 +11085,7 @@ export default function PlanificacionPage() {
             </div>
             <div className={`flex flex-col animate-in fade-in select-none transition-all duration-300 ease-in-out min-h-0 ${cronoFullscreen ? 'fixed inset-0 z-[1100] bg-white dark:bg-slate-900 overflow-hidden p-1 space-y-1' : comparingSnapshot && selectedObjective ? 'h-[calc(100dvh-3.75rem)] overflow-hidden p-0.5 space-y-0.5' : selectedClient ? 'h-[calc(100dvh-5.5rem)] lg:h-[calc(100dvh-6.5rem)] overflow-hidden p-1 space-y-1.5' : 'p-2 space-y-4 h-[calc(100vh-220px)] lg:h-[calc(100vh-160px)]'}`} onMouseUp={handleMouseUp} onClick={() => setEmpPosPicker(null)}>
 
-                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-y-1.5 gap-x-2 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
+                <div className={`bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 flex flex-col gap-1 shrink-0 relative z-40 ${comparingSnapshot ? 'py-1 px-2 border-amber-200 bg-amber-50/40' : selectedClient ? 'py-1.5 px-2' : 'p-3'}`}>
                     {comparingSnapshot ? (
                         <div className="flex-1 flex flex-wrap items-center gap-1.5 min-w-0">
                             <span className="text-[10px] font-black text-slate-700 truncate max-w-[220px]" title={`${selectedClientLabel} · ${selectedObjectiveLabel}`}>
@@ -11130,8 +11130,9 @@ export default function PlanificacionPage() {
                         </div>
                     ) : (
                         <>
-                            <div className="grow shrink basis-[320px] min-w-0 flex items-center gap-1.5 flex-wrap">
-                            <div className="flex items-center gap-1.5 no-print">
+                            <div className="flex items-center gap-2 min-w-0 overflow-x-auto custom-scrollbar no-print">
+                            <div className="flex items-center gap-1.5 min-w-0 max-w-[min(100%,380px)] shrink overflow-x-auto overflow-y-hidden">
+                            <div className="flex items-center gap-1.5 no-print min-w-0">
                                 {selectedGrupo ? (
                                     /* MODO GRUPO: etiqueta del grupo + tabs por objetivo */
                                     <>
@@ -11218,7 +11219,7 @@ export default function PlanificacionPage() {
                                     /* Cliente seleccionado: etiqueta fija + objetivo con dropdown custom + X */
                                     <>
                                         {/* Cliente: fijo, solo se cambia con X */}
-                                        <span className="flex items-center gap-1.5 bg-slate-800 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide cursor-default select-none">
+                                        <span className="flex items-center gap-1.5 bg-slate-800 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide cursor-default select-none max-w-[140px] truncate shrink-0" title={clients.find(c => c.id === selectedClient)?.name || 'Cliente'}>
                                             {clients.find(c => c.id === selectedClient)?.name || 'Cliente'}
                                         </span>
                                         <ChevronRight size={12} className="text-slate-400"/>
@@ -11226,9 +11227,9 @@ export default function PlanificacionPage() {
                                         <div className="relative" onClick={e => e.stopPropagation()}>
                                             <button
                                                 onClick={() => setOpenDrop(d => d === 'objective' ? null : 'objective')}
-                                                className="flex items-center gap-1.5 bg-indigo-600 text-white px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-wide hover:bg-indigo-500 transition-colors"
+                                                className="flex items-center gap-1.5 bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-wide hover:bg-indigo-500 transition-colors max-w-[160px] min-w-0"
                                             >
-                                                {(clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || 'Objetivo'}
+                                                <span className="truncate">{(clients.find(c => c.id === selectedClient)?.objetivos || []).find((o: any) => (o.id || o.name) === selectedObjective)?.name || 'Objetivo'}</span>
                                                 <ChevronDown size={12}/>
                                             </button>
                                             {openDrop === 'objective' && (
@@ -11266,55 +11267,19 @@ export default function PlanificacionPage() {
                                     </>
                                 )}
                             </div>
-                            
-                            {/* CRONO: ALERTAS DE ESTADO DEL SERVICIO (V8.20) */}
-                            {isServiceLocked && (
-                                <div className={`flex-1 bg-rose-50 border-rose-200 border px-4 py-2 rounded-xl flex items-center gap-3 animate-in slide-in-from-top shadow-md`}>
-                                    <div className="p-2 bg-rose-100 rounded-lg text-rose-600 animate-pulse"><PowerOff size={20}/></div>
-                                    <div>
-                                        <p className="text-xs font-black text-rose-700 uppercase">{activeServiceStatus.msg}</p>
-                                        <p className="text-[10px] text-rose-600 font-medium">La planificación está bloqueada. No se pueden realizar cambios.</p>
-                                    </div>
-                                </div>
-                            )}
-
-                            {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
-                                <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-wrap no-print">
-                                    {backgroundSaveCount > 0 && (
-                                        <div className="flex items-center gap-2 bg-indigo-50 px-3 py-1.5 rounded-xl border border-indigo-200 shadow-sm">
-                                            <Loader2 size={14} className="animate-spin text-indigo-600 shrink-0"/>
-                                            <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wide">
-                                                Guardando en segundo plano{backgroundSaveCount > 1 ? ` (${backgroundSaveCount})` : ''}…
-                                            </span>
-                                        </div>
-                                    )}
-                                    {Object.keys(pendingChanges).length > 0 && (
-                                        <div className="flex items-center gap-2 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-lg">
-                                            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-widest hidden md:inline">Planificando como: {activeActorName}</span>
-                                            <div className="h-4 w-px bg-amber-200 mx-1 hidden md:block"></div>
-                                            <span className="text-xs font-black text-amber-700 px-1">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} cambios</span>
-                                            <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
-                                            <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
-                                            <button onClick={handleSaveAll} className="bg-amber-500 hover:bg-amber-600 text-white px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 shadow">
-                                                <Save size={14}/> GUARDAR
-                                            </button>
-                                        </div>
-                                    )}
-                                </div>
-                            )}
                             </div>
 
-                            <div className="flex flex-wrap items-center justify-end gap-2 min-w-0 ml-auto no-print shrink-0">
+                            <div className="flex items-center flex-nowrap justify-end gap-1 min-w-0 ml-auto no-print shrink-0">
                                 {/* CRONOGRAMAS — solo expandido */}
                                 {!toolbarCollapsed && (
                                     <button
                                         type="button"
                                         onClick={() => setShowCronogramasOverview(true)}
-                                        title="Ver estado de cronogramas de todos los objetivos"
-                                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[10px] font-black transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm"
+                                        title="Cronogramas — estado de todos los objetivos"
+                                        aria-label="Cronogramas"
+                                        className="p-2 rounded-xl transition-colors border bg-violet-50 text-violet-700 border-violet-200 hover:bg-violet-100 shadow-sm shrink-0"
                                     >
-                                        <Database size={12}/>
-                                        CRONOGRAMAS
+                                        <Database size={16}/>
                                     </button>
                                 )}
 
@@ -11398,8 +11363,23 @@ export default function PlanificacionPage() {
                                 )}
 
                                 {/* DIAGNÓSTICO ESTRUCTURA — compacto, toolbar derecho (no wrap 2ª fila) */}
-                                {selectedObjective && !isServiceLocked && (
-                                    <div className="relative hidden lg:block shrink-0">
+                                {selectedObjective && !isServiceLocked && (() => {
+                                    const posCount = (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
+                                        : positionStructure.length;
+                                    const paxCount = (selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
+                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
+                                        : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0);
+                                    const vendH = ((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas);
+                                    const estructuraTitle = [
+                                        'Estructura del servicio',
+                                        objectiveCronogramRules?.cronogramTypeLabel,
+                                        `${posCount} puesto(s)`,
+                                        `${paxCount} plazas`,
+                                        vendH > 0 ? `${vendH} h SLA` : null,
+                                    ].filter(Boolean).join(' · ');
+                                    return (
+                                    <div className="relative hidden md:block shrink-0">
                                         <button
                                             ref={diagnosticBtnRef}
                                             onClick={() => {
@@ -11410,46 +11390,26 @@ export default function PlanificacionPage() {
                                                     setShowDiagnostic(true);
                                                 }
                                             }}
-                                            className="flex px-2.5 py-1.5 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors"
+                                            title={estructuraTitle}
+                                            aria-label={estructuraTitle}
+                                            className="flex p-2 bg-slate-50 dark:bg-slate-700/60 border border-slate-200 dark:border-slate-600 rounded-xl items-center gap-1 animate-in fade-in shadow-sm hover:border-indigo-300 dark:hover:border-indigo-500 transition-colors shrink-0"
                                         >
-                                            <Activity size={12} className="text-emerald-500 animate-pulse shrink-0"/>
-                                            <div className="flex flex-col leading-none">
-                                                <span className="text-[8px] font-black text-slate-400 dark:text-slate-400 uppercase tracking-wider">Estructura</span>
-                                                <span className="text-[9px] font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1 whitespace-nowrap">
-                                                    {objectiveCronogramRules && (
-                                                        <>
-                                                            <span className="text-indigo-600 font-black max-w-[72px] truncate" title={objectiveCronogramRules.playbook.join('\n')}>
-                                                                {objectiveCronogramRules.cronogramTypeLabel}
-                                                            </span>
-                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                        </>
-                                                    )}
-                                                    {(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.length, 0)
-                                                        : positionStructure.length}P
-                                                    <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                    <span className="text-emerald-600 font-black">{(selectedGrupo && grupoUnifiedMode && Object.keys(grupoSlaMap).length > 0)
-                                                        ? Object.values(grupoSlaMap).reduce((s, st) => s + st.reduce((a: number, p: any) => a + (Number(p.qty) || 1), 0), 0)
-                                                        : positionStructure.reduce((acc, curr) => acc + (curr.qty || 1), 0)}Pax</span>
-                                                    {((selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas) > 0 && (
-                                                        <>
-                                                            <span className="text-slate-300 dark:text-slate-600">|</span>
-                                                            <span className="text-teal-600 font-black">{(selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas}h</span>
-                                                        </>
-                                                    )}
-                                                </span>
-                                            </div>
+                                            <Activity size={14} className="text-emerald-500 animate-pulse shrink-0"/>
+                                            <span className="text-[9px] font-black text-slate-700 dark:text-slate-200 tabular-nums">{posCount}P</span>
                                             <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showDiagnostic ? 'rotate-180' : ''}`}/>
                                         </button>
                                     </div>
-                                )}
+                                    );
+                                })()}
 
                                 {/* DIAGNÓSTICO COBERTURA — compacto, toolbar derecho */}
                                 {selectedObjective && !isServiceLocked && (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport) && (() => {
                                     const _rpt = (selectedGrupo && grupoUnifiedMode ? grupoGapReport : objectiveCoverageGapReport)!;
                                     const _ok = _rpt.worstDays.length === 0;
+                                    const gapCount = _rpt.daysPartial + _rpt.daysEmpty;
+                                    const coberturaTitle = `Cobertura del mes · ${_rpt.daysFull} días OK${gapCount > 0 ? ` · ${gapCount} con huecos` : ''}`;
                                     return (
-                                        <div className="relative hidden lg:block shrink-0">
+                                        <div className="relative hidden md:block shrink-0">
                                             <button
                                                 ref={coverageDiagnosticBtnRef}
                                                 onClick={() => {
@@ -11460,23 +11420,16 @@ export default function PlanificacionPage() {
                                                         setShowCoverageDiagnostic(true);
                                                     }
                                                 }}
-                                                className={`flex px-2.5 py-1.5 border rounded-xl items-center gap-1.5 animate-in fade-in shadow-sm transition-colors shrink-0 ${
+                                                title={coberturaTitle}
+                                                aria-label={coberturaTitle}
+                                                className={`flex p-2 border rounded-xl items-center gap-1 animate-in fade-in shadow-sm transition-colors shrink-0 ${
                                                     _ok ? 'bg-emerald-50 border-emerald-200 hover:border-emerald-300' : 'bg-rose-50 border-rose-200 hover:border-rose-300'
                                                 }`}
                                             >
-                                                <ShieldCheck size={12} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
-                                                <div className="flex flex-col leading-none">
-                                                    <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Cobertura</span>
-                                                    <span className="text-[9px] font-bold text-slate-700 flex items-center gap-1 whitespace-nowrap">
-                                                        <span className="text-emerald-600 font-black">{_rpt.daysFull}OK</span>
-                                                        {(_rpt.daysPartial + _rpt.daysEmpty) > 0 && (
-                                                            <>
-                                                                <span className="text-slate-300">|</span>
-                                                                <span className="text-rose-600 font-black">{_rpt.daysPartial + _rpt.daysEmpty}✗</span>
-                                                            </>
-                                                        )}
-                                                    </span>
-                                                </div>
+                                                <ShieldCheck size={14} className={_ok ? 'text-emerald-500 shrink-0' : 'text-rose-500 shrink-0'}/>
+                                                <span className={`text-[9px] font-black tabular-nums ${_ok ? 'text-emerald-700' : 'text-rose-700'}`}>
+                                                    {_rpt.daysFull}{gapCount > 0 ? `/${gapCount}` : ''}
+                                                </span>
                                                 <ChevronDown size={10} className={`text-slate-400 transition-transform shrink-0 ${showCoverageDiagnostic ? 'rotate-180' : ''}`}/>
                                             </button>
                                         </div>
@@ -11504,12 +11457,12 @@ export default function PlanificacionPage() {
                                                 <RefreshCw size={12} className={isRefreshingCrono ? 'animate-spin' : ''}/>
                                             </button>
                                             {published ? (
-                                                <span className="flex items-center gap-1 text-[9px] font-black text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-1 rounded-lg" title="Cronograma publicado">
-                                                    <CheckCircle size={10}/> PUB
+                                                <span className="flex items-center p-1.5 text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg shrink-0" title="Cronograma publicado">
+                                                    <CheckCircle size={14} aria-hidden/>
                                                 </span>
                                             ) : (
-                                                <span className="flex items-center gap-1 text-[9px] font-black text-slate-500 bg-slate-100 border border-slate-200 px-2 py-1 rounded-lg" title="Borrador">
-                                                    <Ghost size={10}/> BOR
+                                                <span className="flex items-center p-1.5 text-slate-500 bg-slate-100 border border-slate-200 rounded-lg shrink-0" title="Borrador (sin publicar)">
+                                                    <Ghost size={14} aria-hidden/>
                                                 </span>
                                             )}
                                             {canPublishPlanning && (!published || needsRepublish) && (
@@ -11520,20 +11473,18 @@ export default function PlanificacionPage() {
                                                     title={isSuperAdmin && (slaVendidas > 0 && Math.round(objectiveMonthSlaBaseHours) !== Math.round(slaVendidas) || (objectiveCoverageGapReport && objectiveCoverageGapReport.daysPartial + objectiveCoverageGapReport.daysEmpty > 0))
                                                         ? 'Super Admin: podés publicar aunque SLA o cobertura no coincidan'
                                                         : published ? 'Re-publicar cronograma' : 'Publicar cronograma'}
-                                                    className={`flex items-center gap-1 disabled:opacity-60 text-white px-2 py-1 rounded-lg text-[9px] font-black transition-colors shadow ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+                                                    className={`flex items-center justify-center disabled:opacity-60 text-white p-2 rounded-lg transition-colors shadow shrink-0 ${needsRepublish ? 'bg-amber-500 hover:bg-amber-600 animate-pulse' : 'bg-indigo-600 hover:bg-indigo-700'}`}
                                                 >
-                                                    {isPublishing ? <Loader2 size={10} className="animate-spin"/> : <CalendarCheck size={10}/>}
-                                                    {published ? 'RE-PUB' : 'PUBLICAR'}
+                                                    {isPublishing ? <Loader2 size={14} className="animate-spin"/> : <CalendarCheck size={14}/>}
                                                 </button>
                                             )}
                                             {published && canCorrectPlanning && (
                                                 <button
                                                     onClick={() => setCorrectionMode(v => !v)}
                                                     title="Modo Corrección: permite editar cronograma publicado sin FT/FF"
-                                                    className={`flex items-center gap-1 px-2 py-1 rounded-lg text-[9px] font-black transition-colors border ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
+                                                    className={`flex items-center justify-center p-2 rounded-lg transition-colors border shrink-0 ${correctionMode ? 'bg-rose-600 text-white border-rose-700 shadow-lg' : 'bg-white text-rose-600 border-rose-300 hover:bg-rose-50'}`}
                                                 >
-                                                    <ShieldAlert size={10}/>
-                                                    {correctionMode ? 'CORR ●' : 'CORR'}
+                                                    <ShieldAlert size={14}/>
                                                 </button>
                                             )}
                                             {published && isSuperAdmin && (
@@ -11553,7 +11504,14 @@ export default function PlanificacionPage() {
                                 <div className="w-px h-5 bg-slate-200 shrink-0 hidden sm:block" aria-hidden />
 
                                 {/* < MES > — siempre visible */}
-                                <div className="flex items-center bg-slate-100 rounded-xl p-1"><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={16} aria-hidden="true"/></button><span className={`px-3 font-black text-xs w-24 text-center capitalize ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', {month:'long'})}</span><button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={16} aria-hidden="true"/></button></div>
+                                <div
+                                    className="flex items-center bg-slate-100 rounded-xl p-0.5 shrink-0"
+                                    title={currentDate.toLocaleDateString('es-AR', { month: 'long', year: 'numeric' })}
+                                >
+                                    <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()-1)) setAutoGeneratedReady(false); }} aria-label="Mes anterior" className="p-1 hover:bg-white rounded-lg"><ChevronLeft size={14} aria-hidden="true"/></button>
+                                    <span className={`px-1.5 font-black text-[10px] w-11 text-center uppercase ${planningMonthTier === 'warm' ? 'text-amber-700' : ''}`}>{currentDate.toLocaleDateString('es-AR', { month: 'short' }).replace('.', '')}</span>
+                                    <button onClick={() => { if (goToPlanningMonth(currentDate.getFullYear(), currentDate.getMonth()+1)) setAutoGeneratedReady(false); }} aria-label="Mes siguiente" className="p-1 hover:bg-white rounded-lg"><ChevronRight size={14} aria-hidden="true"/></button>
+                                </div>
 
                                 <button
                                     onClick={applyPrevMonthTemplate}
@@ -11753,10 +11711,11 @@ export default function PlanificacionPage() {
                                 <button
                                     type="button"
                                     onClick={() => setForceShowAll(v => !v)}
-                                    title={forceShowAll ? 'Cerrar buscador de dotación' : `Buscar RET / franco / sin turno a ≤${nearbyKmRadius} km en el cronograma`}
-                                    className={`px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 border transition-colors ${forceShowAll ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
+                                    title={forceShowAll ? 'Cerrar buscador de dotación' : `Dotación — RET / franco / sin turno a ≤${nearbyKmRadius} km`}
+                                    aria-label="Dotación extendida"
+                                    className={`p-2 rounded-xl flex items-center border transition-colors shrink-0 ${forceShowAll ? 'bg-amber-100 border-amber-300 text-amber-800' : 'bg-white border-slate-200 text-slate-500 hover:bg-amber-50 hover:border-amber-200 hover:text-amber-700'}`}
                                 >
-                                    {forceShowAll ? <Eye size={14}/> : <EyeOff size={14}/>} Dotación
+                                    {forceShowAll ? <Eye size={16}/> : <EyeOff size={16}/>}
                                 </button>
 
 
@@ -11765,9 +11724,10 @@ export default function PlanificacionPage() {
                                     <button
                                         onClick={() => setShowVolantes(p => !p)}
                                         title={showVolantes ? 'Ocultar volantes sin turno' : 'Mostrar volantes disponibles para este objetivo'}
-                                        className={`px-2.5 py-2 rounded-xl border text-xs font-black uppercase flex items-center gap-1.5 transition-colors ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
+                                        aria-label="Volantes"
+                                        className={`p-2 rounded-xl border flex items-center transition-colors shrink-0 ${showVolantes ? 'bg-violet-100 border-violet-300 text-violet-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-violet-50 hover:border-violet-200 hover:text-violet-600'}`}
                                     >
-                                        <Shuffle size={13}/> VOL
+                                        <Shuffle size={16}/>
                                     </button>
                                 )}
 
@@ -11790,7 +11750,7 @@ export default function PlanificacionPage() {
                                 )}
 
                                 {/* ASIGNAR — siempre visible */}
-                                <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} className="bg-slate-900 text-white px-3 py-2 rounded-xl text-xs font-black uppercase flex items-center gap-2 hover:bg-slate-800 disabled:opacity-50"><UserPlus size={14}/> Asignar</button>
+                                <button onClick={() => { setAddSearchTerm(''); setShowAddModal(true); }} disabled={!selectedObjective || isServiceLocked} title="Asignar guardia al cronograma" aria-label="Asignar guardia" className="bg-slate-900 text-white p-2 rounded-xl flex items-center hover:bg-slate-800 disabled:opacity-50 shrink-0"><UserPlus size={16}/></button>
 
                                 {/* PANTALLA COMPLETA — siempre visible */}
                                 <button
@@ -11814,6 +11774,41 @@ export default function PlanificacionPage() {
                                     {toolbarCollapsed ? <ChevronsDown size={14}/> : <ChevronsUp size={14}/>}
                                 </button>
                             </div>
+                            </div>
+
+                            {isServiceLocked && (
+                                <div className="bg-rose-50 border border-rose-200 px-3 py-2 rounded-xl flex items-center gap-3 animate-in slide-in-from-top shadow-sm no-print">
+                                    <div className="p-1.5 bg-rose-100 rounded-lg text-rose-600 animate-pulse shrink-0"><PowerOff size={16}/></div>
+                                    <div className="min-w-0">
+                                        <p className="text-[10px] font-black text-rose-700 uppercase truncate">{activeServiceStatus.msg}</p>
+                                        <p className="text-[9px] text-rose-600 font-medium">Planificación bloqueada — sin cambios.</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {!isServiceLocked && (Object.keys(pendingChanges).length > 0 || backgroundSaveCount > 0) && (
+                                <div className="flex items-center gap-2 animate-in slide-in-from-top-2 flex-nowrap overflow-x-auto no-print">
+                                    {backgroundSaveCount > 0 && (
+                                        <div className="flex items-center gap-2 bg-indigo-50 px-2.5 py-1.5 rounded-xl border border-indigo-200 shadow-sm shrink-0">
+                                            <Loader2 size={14} className="animate-spin text-indigo-600 shrink-0"/>
+                                            <span className="text-[10px] font-black text-indigo-700 uppercase tracking-wide whitespace-nowrap">
+                                                Guardando{backgroundSaveCount > 1 ? ` (${backgroundSaveCount})` : ''}…
+                                            </span>
+                                        </div>
+                                    )}
+                                    {Object.keys(pendingChanges).length > 0 && (
+                                        <div className="flex items-center gap-1.5 bg-amber-50 p-1.5 rounded-xl border border-amber-200 shadow-sm shrink-0">
+                                            <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wide hidden lg:inline whitespace-nowrap">{activeActorName}</span>
+                                            <span className="text-xs font-black text-amber-700 px-1 whitespace-nowrap">{Object.values(pendingChanges).filter((v: any) => !v?._isAutoRotation && !v?._isAutoCondition).length || Object.keys(pendingChanges).length} camb.</span>
+                                            <button type="button" onClick={undoLastPending} title="Deshacer último cambio (Ctrl+Z)" className="p-1.5 hover:bg-amber-100 rounded-lg text-amber-600"><Undo size={16}/></button>
+                                            <button type="button" onClick={() => { if (confirm('¿Descartar todos los cambios pendientes?')) { setPendingChanges({}); clearUndoStack(); } }} title="Descartar todos los cambios" className="p-1.5 hover:bg-rose-100 rounded-lg text-rose-500"><X size={16}/></button>
+                                            <button onClick={handleSaveAll} title="Guardar cambios pendientes" className="bg-amber-500 hover:bg-amber-600 text-white p-2 rounded-lg text-xs font-black flex items-center shadow">
+                                                <Save size={14}/>
+                                            </button>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
