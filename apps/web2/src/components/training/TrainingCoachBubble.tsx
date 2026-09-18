@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/router';
 import {
   GraduationCap, ChevronRight, ChevronLeft, X, ExternalLink,
-  CheckCircle2, Lightbulb, ArrowRight,
+  CheckCircle2, Lightbulb, ArrowRight, Maximize2, Minimize2,
 } from 'lucide-react';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useTrainingSession } from '@/hooks/useTrainingSession';
@@ -14,6 +14,8 @@ import { TrainingSpotlight } from './TrainingSpotlight';
 
 const STORAGE_KEY = 'training-coach-pos';
 const BUBBLE_W = 320;
+
+type CoachMode = 'expanded' | 'compact' | 'side';
 
 function loadPos(): { x: number; y: number } | null {
   try { const s = sessionStorage.getItem(STORAGE_KEY); return s ? JSON.parse(s) : null; }
@@ -26,7 +28,6 @@ function defaultPos() {
   return { x: window.innerWidth - BUBBLE_W - 24, y: window.innerHeight - 420 };
 }
 
-/** Convierte **texto** en negrita y \n en saltos de línea */
 function renderInstruction(text: string): React.ReactNode {
   return text.split('\n').map((line, li) => {
     const parts = line.split(/(\*\*[^*]+\*\*)/g);
@@ -43,24 +44,31 @@ export function TrainingCoachBubble() {
   const { empresa } = useEmpresa();
   const { session } = useTrainingSession();
   const router = useRouter();
-  const [collapsed, setCollapsed] = useState(false);
+  const [mode, setMode] = useState<CoachMode>('expanded');
   const [completing, setCompleting] = useState(false);
 
-  // ── Drag ────────────────────────────────────────────────────────────────────
   const [pos, setPos] = useState<{ x: number; y: number } | null>(null);
   const dragData = useRef<{ startMX: number; startMY: number; origX: number; origY: number } | null>(null);
 
-  // Inicializar posición en el cliente
   useEffect(() => {
     setPos(loadPos() ?? defaultPos());
   }, []);
+
+  // Auto-expandir cuando cambia el módulo activo
+  const prevModuleKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (!session?.currentModuleKey) return;
+    if (session.currentModuleKey !== prevModuleKey.current) {
+      prevModuleKey.current = session.currentModuleKey;
+      setMode('expanded');
+    }
+  }, [session?.currentModuleKey]);
 
   const onHeaderMouseDown = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('button')) return;
     e.preventDefault();
     const cur = pos ?? defaultPos();
     dragData.current = { startMX: e.clientX, startMY: e.clientY, origX: cur.x, origY: cur.y };
-
     const onMove = (ev: MouseEvent) => {
       if (!dragData.current) return;
       const nx = Math.max(0, Math.min(window.innerWidth - BUBBLE_W, dragData.current.origX + ev.clientX - dragData.current.startMX));
@@ -77,7 +85,6 @@ export function TrainingCoachBubble() {
     document.addEventListener('mouseup', onUp);
   }, [pos]);
 
-  // Calcular coachStep antes de cualquier return condicional (reglas de hooks)
   const coachStep = session
     ? getActiveCoachStep(session.currentModuleKey, session.progress)
     : null;
@@ -86,7 +93,6 @@ export function TrainingCoachBubble() {
     ? COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey).map(s => s.stepId)
     : [];
 
-  // Calcula el paso anterior para permitir retroceder (incluye targetRoute para navegar)
   const prevStepInfo = session ? (() => {
     const { currentModuleKey, modulePlan, progress } = session;
     if (!currentModuleKey || !coachStep) return null;
@@ -141,13 +147,10 @@ export function TrainingCoachBubble() {
 
   if (!empresa?.isTrainingEmpresa || !session || session.status === 'completed') return null;
 
-  // Si no hay paso activo, el recorrido terminó
+  // Recorrido terminado
   if (!coachStep) {
-    const doneStyle: React.CSSProperties = pos
-      ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: 288 }
-      : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: 288 };
     return (
-      <div style={doneStyle}>
+      <div style={{ position: 'fixed', bottom: '1.5rem', right: '1.5rem', zIndex: 900, width: 288 }}>
         <div className="rounded-2xl shadow-xl border border-green-200 dark:border-green-800 bg-white dark:bg-slate-900 p-4 text-sm">
           <div className="flex items-center gap-2 text-green-600 dark:text-green-400 font-bold mb-1">
             <CheckCircle2 size={16} />
@@ -163,24 +166,22 @@ export function TrainingCoachBubble() {
 
   const mod = TRAINABLE_MODULES.find(m => m.key === coachStep.moduleKey);
   const isOnTargetRoute = router.pathname.startsWith(coachStep.targetRoute);
+  const modCoachSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
+  const completedSteps = session.progress[coachStep.moduleKey]?.stepsCompleted ?? [];
+  const completedCount = completedSteps.length;
 
-  // Spotlight: siempre activo si estamos en la ruta correcta, incluso con coach minimizado
+  // Spotlight: activo en cualquier modo cuando estamos en la ruta correcta
   const spotlight = isOnTargetRoute && coachStep.highlightSelector
     ? <TrainingSpotlight selector={coachStep.highlightSelector} />
     : null;
 
-  const bubbleStyle: React.CSSProperties = pos
-    ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' }
-    : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' };
-
-  if (collapsed) {
-    const modSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
-    const completedCount = (session?.progress[coachStep.moduleKey]?.stepsCompleted ?? []).length;
+  // ── MODO TAB LATERAL ──────────────────────────────────────────────────────
+  if (mode === 'side') {
     return (
       <>
         {spotlight}
         <button
-          onClick={() => setCollapsed(false)}
+          onClick={() => setMode('compact')}
           title={`Coach: ${coachStep.title}`}
           style={{ position: 'fixed', right: 0, top: '50%', transform: 'translateY(-50%)', zIndex: 900 }}
           className="flex flex-col items-center gap-1 bg-amber-400 hover:bg-amber-500 text-white shadow-lg rounded-l-xl px-2 py-4 transition-colors"
@@ -189,20 +190,14 @@ export function TrainingCoachBubble() {
           <span style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', fontSize: 10, fontWeight: 900, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
             Coach
           </span>
-          <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>
-            {completedCount}/{modSteps.length}
-          </span>
-          {/* Mini progress dots */}
+          <span style={{ fontSize: 9, fontWeight: 700, opacity: 0.85 }}>{completedCount}/{modCoachSteps.length}</span>
           <div className="flex flex-col gap-0.5 mt-0.5">
-            {modSteps.map((s, i) => {
-              const done = (session?.progress[coachStep.moduleKey]?.stepsCompleted ?? []).includes(s.stepId);
+            {modCoachSteps.map(s => {
+              const done = completedSteps.includes(s.stepId);
               const active = s.stepId === coachStep.stepId;
               return (
-                <span
-                  key={s.stepId}
-                  style={{ width: 6, height: 6, borderRadius: '50%', display: 'block' }}
-                  className={done ? 'bg-green-200' : active ? 'bg-white' : 'bg-amber-200/60'}
-                />
+                <span key={s.stepId} style={{ width: 6, height: 6, borderRadius: '50%', display: 'block' }}
+                  className={done ? 'bg-green-200' : active ? 'bg-white' : 'bg-amber-200/60'} />
               );
             })}
           </div>
@@ -210,6 +205,67 @@ export function TrainingCoachBubble() {
       </>
     );
   }
+
+  // ── MODO COMPACTO (barra inferior) ────────────────────────────────────────
+  if (mode === 'compact') {
+    return (
+      <>
+        {spotlight}
+        <div
+          style={{ position: 'fixed', bottom: '1rem', right: '1rem', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' }}
+          className="rounded-2xl shadow-xl border border-amber-300 dark:border-amber-700 bg-white dark:bg-slate-900 overflow-hidden"
+        >
+          {/* Barra compacta */}
+          <div className="flex items-center gap-2 px-3 py-2 bg-amber-400 text-white">
+            <GraduationCap size={14} className="shrink-0" />
+
+            {/* Dots de progreso */}
+            <div className="flex items-center gap-0.5">
+              {modCoachSteps.map(s => {
+                const done = completedSteps.includes(s.stepId);
+                const active = s.stepId === coachStep.stepId;
+                return (
+                  <span key={s.stepId}
+                    className={['w-2 h-2 rounded-full flex-shrink-0', done ? 'bg-green-200' : active ? 'bg-white' : 'bg-amber-200/60'].join(' ')}
+                  />
+                );
+              })}
+            </div>
+
+            {/* Título del paso actual truncado */}
+            <span className="flex-1 text-[11px] font-bold truncate">{coachStep.title}</span>
+
+            {/* Expandir */}
+            <button onClick={() => setMode('expanded')} className="p-1 rounded hover:bg-amber-500 transition-colors" title="Ver instrucciones completas">
+              <Maximize2 size={13} />
+            </button>
+            {/* Ocultar al lateral */}
+            <button onClick={() => setMode('side')} className="p-1 rounded hover:bg-amber-500 transition-colors" title="Ocultar coach">
+              <X size={13} />
+            </button>
+          </div>
+
+          {/* Siguiente acción (1 línea clave) */}
+          <div className="px-3 py-2 flex items-center gap-2">
+            <ChevronRight size={12} className="text-amber-500 shrink-0" />
+            <p className="text-[12px] text-slate-600 dark:text-slate-300 line-clamp-2 leading-snug flex-1">
+              {coachStep.instruction.split('\n')[0]}
+            </p>
+            {!isOnTargetRoute && (
+              <Link href={coachStep.targetRoute} className="shrink-0 text-[11px] font-semibold text-blue-500 hover:underline flex items-center gap-1">
+                Ir <ArrowRight size={10} />
+              </Link>
+            )}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  // ── MODO EXPANDIDO (completo) ─────────────────────────────────────────────
+  const bubbleStyle: React.CSSProperties = pos
+    ? { position: 'fixed', left: pos.x, top: pos.y, right: 'auto', bottom: 'auto', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' }
+    : { position: 'fixed', bottom: '6rem', right: '1rem', zIndex: 900, width: BUBBLE_W, maxWidth: 'calc(100vw - 2rem)' };
 
   return (
     <>
@@ -227,50 +283,52 @@ export function TrainingCoachBubble() {
             <div className="text-xs font-black uppercase tracking-wide opacity-80">Coach</div>
             <div className="text-sm font-bold truncate">{mod?.icon} {mod?.label}</div>
           </div>
+          {/* Compactar */}
           <button
-            onClick={() => setCollapsed(true)}
+            onClick={() => setMode('compact')}
             className="p-1 rounded-lg hover:bg-amber-500 transition-colors opacity-80 hover:opacity-100"
-            aria-label="Minimizar coach"
+            aria-label="Modo compacto"
+            title="Minimizar (seguir trabajando)"
+          >
+            <Minimize2 size={14} />
+          </button>
+          {/* Ocultar al lateral */}
+          <button
+            onClick={() => setMode('side')}
+            className="p-1 rounded-lg hover:bg-amber-500 transition-colors opacity-80 hover:opacity-100"
+            aria-label="Ocultar al costado"
+            title="Ocultar al costado"
           >
             <X size={14} />
           </button>
         </div>
 
-        {/* Progreso del módulo — tildes por paso */}
-        {mod && (() => {
-          const modCoachSteps = COACH_STEPS.filter(s => s.moduleKey === coachStep.moduleKey);
-          const completed = session?.progress[coachStep.moduleKey]?.stepsCompleted ?? [];
-          return (
-            <div className="px-4 pt-3 pb-1 flex items-center gap-1 flex-wrap">
-              {modCoachSteps.map((s, i) => {
-                const isDone = completed.includes(s.stepId);
-                const isActive = s.stepId === coachStep.stepId;
-                return (
-                  <React.Fragment key={s.stepId}>
-                    {i > 0 && <span className="text-slate-300 dark:text-slate-600 text-[9px]">—</span>}
-                    <span
-                      title={s.title}
-                      className={[
-                        'flex items-center gap-0.5 text-[10px] font-bold rounded-full px-1.5 py-0.5 transition-colors',
-                        isDone
-                          ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
-                          : isActive
-                          ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
-                          : 'text-slate-400 dark:text-slate-500',
-                      ].join(' ')}
-                    >
-                      {isDone ? '✓' : isActive ? '●' : '○'}
-                      <span className="hidden">{i + 1}</span>
-                    </span>
-                  </React.Fragment>
-                );
-              })}
-              <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500">
-                {completed.length}/{modCoachSteps.length}
-              </span>
-            </div>
-          );
-        })()}
+        {/* Progreso del módulo — tildes */}
+        <div className="px-4 pt-3 pb-1 flex items-center gap-1 flex-wrap">
+          {modCoachSteps.map((s, i) => {
+            const isDone = completedSteps.includes(s.stepId);
+            const isActive = s.stepId === coachStep.stepId;
+            return (
+              <React.Fragment key={s.stepId}>
+                {i > 0 && <span className="text-slate-300 dark:text-slate-600 text-[9px]">—</span>}
+                <span
+                  title={s.title}
+                  className={[
+                    'flex items-center gap-0.5 text-[10px] font-bold rounded-full px-1.5 py-0.5 transition-colors',
+                    isDone ? 'bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400'
+                    : isActive ? 'bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300'
+                    : 'text-slate-400 dark:text-slate-500',
+                  ].join(' ')}
+                >
+                  {isDone ? '✓' : isActive ? '●' : '○'}
+                </span>
+              </React.Fragment>
+            );
+          })}
+          <span className="ml-auto text-[10px] text-slate-400 dark:text-slate-500">
+            {completedCount}/{modCoachSteps.length}
+          </span>
+        </div>
 
         {/* Paso actual */}
         <div className="px-4 pt-1 pb-1">
