@@ -9,7 +9,7 @@ import {
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
     Phone, MessageCircle, Calendar, ChevronDown, ChevronRight, ChevronUp,
     Filter, Send, PlayCircle, EyeOff, X, Briefcase, UserX, CornerUpLeft,
-    MapPin, UserCheck, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
+    MapPin, Navigation, Users, ArrowLeftRight, BellRing, Bell, ChevronLeft, XCircle, Zap,
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -706,28 +706,22 @@ const CoverageModal = ({ isOpen, onClose, absenceShift, logic }: any) => {
     const objLat = absenceShift.lat || -31.4201;
     const objLng = absenceShift.lng || -64.1888;
 
-    // 1. RETENCIÓN: presentes en mismo objetivo y posición CUYO TURNO YA INICIÓ
-    // Fix: excluir guardias con turno futuro — solo quien está físicamente en el puesto ahora
-    const retencion = logic.processedData.filter((s: any) => {
-        if (!s.isPresent || s.isCompleted) return false;
-        if (s.objectiveId !== absenceShift.objectiveId) return false;
-        if (s.positionName !== absenceShift.positionName) return false;
-        if (s.id === absenceShift.id) return false;
-        const shiftStartMs = s.shiftDateObj ? toDate(s.shiftDateObj).getTime() : 0;
-        return shiftStartMs > 0 && now.getTime() >= shiftStartMs;
-    }).map((s: any) => ({
+    const retencion = listOpsExtCandidatesForVacancy(
+        logic.processedData,
+        absenceShift,
+        now,
+        new Set(),
+    ).map((s: any) => ({
         ...s,
         horasYaTrabajadas: Math.max(0, (now.getTime() - toDate(s.shiftDateObj).getTime()) / 3600000),
     }));
 
-    // 2. ADELANTO: solo el turno siguiente más próximo en el mismo objetivo/posición — HOY únicamente
-    const adelanto = logic.processedData.filter((s: any) =>
-        !s.isPresent && !s.isCompleted && !s.isAbsent && !s.isUnassigned && !s.isFranco &&
-        s.objectiveId === absenceShift.objectiveId &&
-        s.positionName === absenceShift.positionName &&
-        toDate(s.shiftDateObj) > now &&
-        isSameDay(toDate(s.shiftDateObj), now)  // â† solo HOY, no mañana
-    ).sort((a: any, b: any) => toDate(a.shiftDateObj).getTime() - toDate(b.shiftDateObj).getTime()).slice(0, 1);
+    const adelanto = listOpsAdvCandidatesForVacancy(
+        logic.processedData,
+        absenceShift,
+        now,
+        new Set(),
+    ).slice(0, 1);
 
     // Helper de experiencia: nivel usando experienciaObjetivos (mapa por objectiveId)
     const experienceLevel = (e: any): number => {
@@ -2190,12 +2184,6 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
-                {coveringEmployeeName && (
-                    <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
-                        <UserCheck size={10} className="shrink-0 text-emerald-600"/>
-                        Cubre: {coveringEmployeeName}
-                    </div>
-                )}
                 {/* Franja retención */}
                 {(shift.isRetention || shift.manualRetentionType) && (
                     <div className="flex items-center gap-1.5 text-[9px] font-bold text-orange-700 bg-orange-50 border border-orange-100 rounded-lg px-2.5 py-1 mb-1.5 ml-10">
@@ -2253,12 +2241,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                                 return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
                             }
                             if (isAbsentOperativelyCovered) {
-                                return (
-                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-[10px] font-bold max-w-[200px] truncate" title={coveringEmployeeName ? `Cubierto por ${coveringEmployeeName}` : 'Cobertura OK'}>
-                                        <UserCheck size={11} className="shrink-0"/>
-                                        {coveringEmployeeName ? `Cubre: ${coveringEmployeeName}` : '✓ Cubierto'}
-                                    </span>
-                                );
+                                return null;
                             }
                             return (
                                 <div className="flex gap-1.5 items-center">
