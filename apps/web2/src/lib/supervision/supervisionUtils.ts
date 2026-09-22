@@ -1,6 +1,7 @@
 import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { formatCoveringEmployeeLabel } from '@/lib/operaciones/syncAusenciaCobertura';
 
 export type SupervisionMainTab = 'TABLERO' | 'CC' | 'BANDEJA' | 'CAMPO';
 
@@ -109,6 +110,68 @@ export function rollupObjectiveCoverage(
     if (st === 'ALERTA') withIncidents += 1;
   }
   return { total: rows.length, withoutVacancies, withIncidents, critical };
+}
+
+/** Titular ausente con cobertura cerrada en CC (misma regla que Operaciones). */
+export function isShiftOperativelyCovered(shift: Record<string, unknown> | null | undefined): boolean {
+  if (!shift?.isAbsent) return false;
+  return !!(
+    shift.operacionallyCovered
+    || shift.plannedOperativelyCovered
+    || String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
+  );
+}
+
+/** Turno del guardia que reemplazó a un titular (convocatoria / ops). */
+export function isOpsReplacementShift(shift: Record<string, unknown> | null | undefined): boolean {
+  if (!shift || shift.isAbsent || shift.isUnassigned) return false;
+  if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return true;
+  if (shift.absenceShiftId || shift.coveredShiftId) return true;
+  if (shift.coversEmployeeId && shift.resolvedBy === 'OPERACIONES') return true;
+  return false;
+}
+
+export function resolveTitularNameForCoverageShift(
+  shift: Record<string, unknown>,
+  allShifts: Array<Record<string, unknown>>,
+): string | null {
+  const linkId = String(shift.absenceShiftId || shift.coveredShiftId || '').trim();
+  if (linkId) {
+    const titular = allShifts.find((x) => x.id === linkId);
+    const name = String(titular?.employeeName || '').trim();
+    if (name) return name;
+  }
+  const coversEmp = String(shift.coversEmployeeId || '').trim();
+  if (coversEmp) {
+    const titular = allShifts.find((x) => x.employeeId === coversEmp && x.isAbsent);
+    const name = String(titular?.employeeName || '').trim();
+    if (name) return name;
+  }
+  return null;
+}
+
+export function supervisionCoverageCellText(
+  shift: Record<string, unknown>,
+  allShifts: Array<Record<string, unknown>>,
+): string | null {
+  if (shift.isAbsent) {
+    if (isShiftOperativelyCovered(shift)) {
+      return formatCoveringEmployeeLabel(shift) || 'Cobertura registrada';
+    }
+    return null;
+  }
+  if (isOpsReplacementShift(shift)) {
+    const titular = resolveTitularNameForCoverageShift(shift, allShifts);
+    return titular ? `Reemplaza a ${titular}` : 'Cobertura CC';
+  }
+  if (
+    (shift.isExtended || shift.isEarlyStart || shift.isAdvanced)
+    && shift.coversEmployeeId
+  ) {
+    const titular = resolveTitularNameForCoverageShift(shift, allShifts);
+    if (titular) return `Ext/adel · ${titular}`;
+  }
+  return null;
 }
 
 export const COVERAGE_STATUS_STYLES: Record<'OK' | 'ALERTA' | 'CRITICO', { dot: string; bg: string; text: string; label: string }> = {

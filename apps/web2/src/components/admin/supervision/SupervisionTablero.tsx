@@ -2,7 +2,12 @@ import React, { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { RefreshCw, Users, AlertTriangle, UserX, Radio, X, Search, Phone, Clock, Calendar, ExternalLink, Plus } from 'lucide-react';
 import { useSupervisionTablero } from '@/hooks/useSupervisionTablero';
-import { COVERAGE_STATUS_STYLES } from '@/lib/supervision/supervisionUtils';
+import {
+  COVERAGE_STATUS_STYLES,
+  isOpsReplacementShift,
+  isShiftOperativelyCovered,
+  supervisionCoverageCellText,
+} from '@/lib/supervision/supervisionUtils';
 import { buildOperacionesHref, buildPlanificacionHref } from '@/lib/supervision/supervisionLinks';
 
 type StatusFilter = 'ALL' | 'CRITICO' | 'ALERTA' | 'OK';
@@ -21,12 +26,20 @@ type ShiftStatusInfo = { label: string; cls: string; prio: number };
 
 function shiftStatus(s: any): ShiftStatusInfo {
   if (s.isUnassigned) return { label: 'Vacante', cls: 'bg-rose-100 text-rose-700 border-rose-200', prio: 0 };
-  if (s.isAbsent) return { label: 'Ausente', cls: 'bg-rose-100 text-rose-700 border-rose-200', prio: 1 };
+  if (s.isAbsent) {
+    if (isShiftOperativelyCovered(s)) {
+      return { label: 'Ausente · cubierto', cls: 'bg-teal-50 text-teal-800 border-teal-200', prio: 1 };
+    }
+    return { label: 'Ausente', cls: 'bg-rose-100 text-rose-700 border-rose-200', prio: 1 };
+  }
   if (s.isPotentialAbsence) return { label: 'No llegó', cls: 'bg-amber-100 text-amber-700 border-amber-200', prio: 1 };
   if (s.isLateNotified || s.isLateUnnotified) return { label: 'Tarde', cls: 'bg-orange-100 text-orange-700 border-orange-200', prio: 2 };
   if (s.isAwaitingCoverageCheckIn || s.isConvocado) return { label: 'Convocado', cls: 'bg-indigo-100 text-indigo-700 border-indigo-200', prio: 3 };
   if (s.isImminent) return { label: 'Por iniciar', cls: 'bg-sky-100 text-sky-700 border-sky-200', prio: 3 };
   if (s.isRetention) return { label: 'Retención', cls: 'bg-violet-100 text-violet-700 border-violet-200', prio: 4 };
+  if (s.isPresent && isOpsReplacementShift(s)) {
+    return { label: 'En puesto · cobertura', cls: 'bg-indigo-100 text-indigo-800 border-indigo-200', prio: 4 };
+  }
   if (s.isPresent) return { label: 'En puesto', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200', prio: 5 };
   if (s.isFuture) return { label: 'Planificado', cls: 'bg-slate-100 text-slate-500 border-slate-200', prio: 6 };
   if (s.isCompleted) return { label: 'Finalizado', cls: 'bg-slate-100 text-slate-400 border-slate-200', prio: 7 };
@@ -231,7 +244,8 @@ export default function SupervisionTablero({
                       <tr className="text-[10px] font-black uppercase text-slate-400 tracking-wide">
                         <th className="py-2.5 pl-6 pr-2 w-[28%]">Puesto</th>
                         <th className="py-2.5 px-2">Vigilador</th>
-                        <th className="py-2.5 px-2 w-[14%]">Turno</th>
+                        <th className="py-2.5 px-2 w-[22%]">Cobertura</th>
+                        <th className="py-2.5 px-2 w-[10%]">Turno</th>
                         <th className="py-2.5 px-2 w-[14%]">Horario</th>
                         <th className="py-2.5 px-2 w-[10%] text-center">Ingreso</th>
                         <th className="py-2.5 pr-6 pl-2 w-[14%] text-right">Estado</th>
@@ -240,6 +254,7 @@ export default function SupervisionTablero({
                     <tbody>
                       {sortedShifts.map((s: any) => {
                         const stt = shiftStatus(s);
+                        const covText = supervisionCoverageCellText(s, sortedShifts);
                         const ingreso = tsToDate(s.realStartTime) || tsToDate(s.checkInTime);
                         const ingresoTarde = ingreso && s.shiftDateObj && (ingreso.getTime() - s.shiftDateObj.getTime()) / 60000 > 10;
                         return (
@@ -259,6 +274,24 @@ export default function SupervisionTablero({
                                     </a>
                                   )}
                                 </div>
+                              )}
+                            </td>
+                            <td className="py-3 px-2 text-xs font-bold leading-snug">
+                              {covText ? (
+                                <span
+                                  className={
+                                    s.isAbsent
+                                      ? 'text-teal-700 dark:text-teal-300'
+                                      : 'text-indigo-700 dark:text-indigo-300'
+                                  }
+                                  title={covText}
+                                >
+                                  {s.isAbsent ? `Cubierto por ${covText}` : covText}
+                                </span>
+                              ) : s.isAbsent ? (
+                                <span className="text-rose-500 font-medium">Sin cobertura</span>
+                              ) : (
+                                <span className="text-slate-300">—</span>
                               )}
                             </td>
                             <td className="py-3 px-2 text-xs font-black uppercase text-slate-600 dark:text-slate-300">{s.code || '—'}</td>
@@ -282,6 +315,7 @@ export default function SupervisionTablero({
                 <div className="lg:hidden overflow-y-auto divide-y divide-slate-100 dark:divide-slate-700/60">
                   {sortedShifts.map((s: any) => {
                     const stt = shiftStatus(s);
+                    const covText = supervisionCoverageCellText(s, sortedShifts);
                     const ingreso = tsToDate(s.realStartTime) || tsToDate(s.checkInTime);
                     const ingresoTarde = ingreso && s.shiftDateObj && (ingreso.getTime() - s.shiftDateObj.getTime()) / 60000 > 10;
                     return (
@@ -306,6 +340,14 @@ export default function SupervisionTablero({
                               </a>
                             )}
                           </div>
+                          {covText && (
+                            <p className={`text-[10px] font-bold mt-0.5 truncate ${s.isAbsent ? 'text-teal-700' : 'text-indigo-700'}`}>
+                              {s.isAbsent ? `Cubierto por ${covText}` : covText}
+                            </p>
+                          )}
+                          {s.isAbsent && !covText && (
+                            <p className="text-[10px] font-bold mt-0.5 text-rose-500">Sin cobertura</p>
+                          )}
                           {ingreso && (
                             <p className={`text-[10px] font-bold mt-0.5 ${ingresoTarde ? 'text-orange-600' : 'text-emerald-600'}`}>
                               Ingreso {fmtHora(ingreso)}{ingresoTarde ? ' (tarde)' : ''}
