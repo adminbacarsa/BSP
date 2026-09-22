@@ -195,11 +195,9 @@ Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al ab
 
 **Backend (Auto/Demo/vacantes):** `apps/functions/src/coverage/convocatoriasCobertura.ts` (`iniciarCascadaCobertura`, `crearConvocatoriaCobertura`, `resolverCobertura`, `simularRespuestasConvocatorias`), `coverageRetention.ts` (`applyAutoRetentionForAbsenceShift`), `eligibilityFilter.ts` (`CASCADE_ORDER`: RET, REF, ESC, EXTEND, ADVANCE, FT), `syncAusenciaCobertura.ts`. Triggers: **`onTurnoAbsenciaDetectada`**, cron **`gestionarVacantes`** (T-1h / vacante iniciada), **`modoDemoCron`**, scheduler **`checkConvocatoriaTimeouts`**.
 
-**Legacy — no usar en UI nueva:** `CoverageModal` embebido (sin montar) en `operaciones/index.tsx` y `map-view.tsx`. **No reactivar**; el protocolo vigente es **`CoverageSessionManager`**.
+**UI vigente:** solo **`CoverageSessionManager`** (no reintroducir modales legacy de cobertura en estas páginas).
 
 **Backlog Ops cobertura (actualizar este listado al cerrar tareas; commit en `main`):**
-
-- [ ] **Limpieza:** eliminar `CoverageModal` muerto de `index.tsx` y `map-view.tsx` (solo código inline, no JSX montado).
 - [ ] **Auto Ext+Adel:** cascada secuencial EXTEND → ADVANCE → alinear con **PENDING_DUAL** del Manual (dos convocatorias / aceptación conjunta).
 - [ ] **Callable Manual:** tipos **REF/ESC** nativos en `crearConvocatoriaCobertura` (hoy el front mapea REF/ESC → `RET` en `opsConvocatoriaCobertura.ts`).
 - [ ] **Fichaje convocado:** T−15…T+5 presente, T+6…T+30 “llegué tarde”, T+30 → AA; **`CONVOKED_FLEX`** en `requestCheckIn` / `registrarPresencia`.
