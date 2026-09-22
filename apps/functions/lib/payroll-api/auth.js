@@ -68,6 +68,10 @@ async function requireApiKey(req, res, requiredScope) {
         sendError(res, 403, 'missing_scope', `Esta API Key no tiene el scope ${requiredScope}.`);
         return false;
     }
+    if (integration.empresaId === 'capacitacion') {
+        sendError(res, 403, 'training_empresa_blocked', 'La empresa capacitacion no tiene acceso a la API de liquidación.');
+        return false;
+    }
     req.integration = integration;
     match.ref
         .update({ lastUsedAt: admin.firestore.FieldValue.serverTimestamp() })
