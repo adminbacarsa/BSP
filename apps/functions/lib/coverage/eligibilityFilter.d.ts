@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-export type CandidateType = 'RET' | 'VOLANTE' | 'SIN_TURNO_CON_EXP' | 'EXTEND' | 'ADVANCE' | 'SIN_TURNO' | 'FT';
+export type CandidateType = 'RET' | 'REF' | 'ESC' | 'EXTEND' | 'ADVANCE' | 'FT' | 'VOLANTE' | 'SIN_TURNO_CON_EXP' | 'SIN_TURNO';
 export interface EligibilityContext {
     objectiveId: string;
     clientId?: string;

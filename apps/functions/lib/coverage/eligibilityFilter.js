@@ -68,11 +68,10 @@ function deriveCandidateType(employee, objectiveId, todayShifts) {
 }
 exports.CASCADE_ORDER = [
     'RET',
-    'ADVANCE',
-    'VOLANTE',
-    'SIN_TURNO_CON_EXP',
+    'REF',
+    'ESC',
     'EXTEND',
-    'SIN_TURNO',
+    'ADVANCE',
     'FT',
 ];
 function nextCascadeStep(current) {

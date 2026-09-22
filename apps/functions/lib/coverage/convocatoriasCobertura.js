@@ -9,11 +9,14 @@ const functions = require("firebase-functions/v1");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
+const coverageRetention_1 = require("./coverageRetention");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
     const typeLabel = {
         RET: 'Retención (RET)',
+        REF: 'Refuerzo (REF)',
+        ESC: 'Escuela (ESC)',
         VOLANTE: 'Cobertura volante',
         SIN_TURNO_CON_EXP: 'Cobertura disponible',
         EXTEND: 'Extensión de jornada',
@@ -22,14 +25,39 @@ async function crearNotifConvocatoria(db, conv) {
         FT: 'Franco Trabajado (FT)',
         LLEGADA_TARDE: '¿Estás en camino?',
     };
+    const tz = 'America/Argentina/Buenos_Aires';
     const startDate = conv.startTime instanceof firestore_1.Timestamp
-        ? conv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
+        ? conv.startTime.toDate()
+        : null;
+    const endDate = conv.endTime instanceof firestore_1.Timestamp
+        ? conv.endTime.toDate()
+        : null;
+    const horaInicio = startDate
+        ? startDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
         : '--:--';
+    const horaFin = endDate
+        ? endDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
+        : '';
+    const fechaTurno = startDate
+        ? startDate.toLocaleDateString('es-AR', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            timeZone: tz,
+        })
+        : '';
+    const lugar = [conv.clientName, conv.objectiveName, conv.positionName]
+        .map((s) => String(s || '').trim())
+        .filter(Boolean)
+        .join(' · ');
+    const lugarTxt = lugar || 'objetivo / puesto';
+    const horarioTxt = horaFin ? `${horaInicio}–${horaFin}` : horaInicio;
+    const codigo = String(conv.shiftCode || '').trim();
     const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
     const title = isLlegadaTarde ? '⏰ ¿Estás en camino?' : `[${urgencyLabel}] Cobertura requerida`;
     const body = isLlegadaTarde
-        ? `Tu turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'el puesto'} comenzó a las ${startDate}. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
-        : `${typeLabel[conv.type]} en ${conv.objectiveName || 'el puesto'} — turno ${conv.shiftCode || ''} ${startDate}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
+        ? `Tu turno ${codigo} en ${lugarTxt} (${fechaTurno} ${horarioTxt}) ya comenzó. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
+        : `${typeLabel[conv.type]} en ${lugarTxt}. Turno ${codigo || '—'} · ${fechaTurno} ${horarioTxt}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
     await db.collection('user_notifications').add({
         uid: conv.candidateUid || null,
         employeeId: conv.candidateEmployeeId,
@@ -40,6 +68,13 @@ async function crearNotifConvocatoria(db, conv) {
         convocatoriaId: conv.id,
         shiftId: conv.shiftId,
         objectiveId: conv.objectiveId,
+        objectiveName: conv.objectiveName || null,
+        positionName: conv.positionName || null,
+        clientId: conv.clientId || null,
+        clientName: conv.clientName || null,
+        shiftCode: conv.shiftCode || null,
+        startTime: conv.startTime || null,
+        endTime: conv.endTime || null,
         read: false,
         readAt: null,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -105,6 +140,7 @@ async function avanzarCascada(db, conv, reason) {
         candidateUid: candidate.uid,
         extendShiftId: candidate.extendShiftId,
         advanceShiftId: candidate.advanceShiftId,
+        candidateShiftId: candidate.candidateShiftId,
         createdBy: 'AUTO',
     });
 }
@@ -122,9 +158,15 @@ async function crearConvocatoriaDoc(db, data) {
     const ref = await db.collection('convocatorias_cobertura').add(docData);
     await crearNotifConvocatoria(db, { ...docData, id: ref.id });
     const typeLabel = {
-        RET: 'RET', EXTEND: 'Extender jornada', ADVANCE: 'Adelantar turno',
-        FT: 'Franco Trabajado', VOLANTE: 'Volante',
-        SIN_TURNO: 'Sin turno', SIN_TURNO_CON_EXP: 'Sin turno (con exp.)',
+        RET: 'RET',
+        REF: 'Refuerzo',
+        ESC: 'Escuela',
+        EXTEND: 'Extender jornada',
+        ADVANCE: 'Adelantar turno',
+        FT: 'Franco Trabajado',
+        VOLANTE: 'Volante',
+        SIN_TURNO: 'Sin turno',
+        SIN_TURNO_CON_EXP: 'Sin turno (con exp.)',
     };
     await db.collection('novedades').add({
         type: 'CONVOCATORIA_ENVIADA',
@@ -271,6 +313,34 @@ async function findBestCandidate(db, conv, type) {
             alreadyConvocadoIds.add(String(c.candidateEmployeeId));
         }
     }
+    if (type === 'REF' || type === 'ESC') {
+        const want = type;
+        for (const d of todayShiftsSnap.docs) {
+            const t = d.data();
+            const code = String(t.code || '').toUpperCase();
+            if (code !== want)
+                continue;
+            if (t.isAbsent || !t.employeeId)
+                continue;
+            if (alreadyConvocadoIds.has(String(t.employeeId)))
+                continue;
+            const empSnap = await db.collection('empleados').doc(t.employeeId).get();
+            if (!empSnap.exists)
+                continue;
+            const emp = empSnap.data();
+            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET');
+            if (!check.eligible)
+                continue;
+            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, t.employeeId, emp);
+            return {
+                id: t.employeeId,
+                name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+                uid: uid || undefined,
+                candidateShiftId: d.id,
+            };
+        }
+        return null;
+    }
     for (const empDoc of empSnap.docs) {
         const emp = empDoc.data();
         const empId = empDoc.id;
@@ -280,7 +350,13 @@ async function findBestCandidate(db, conv, type) {
             const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET');
             if (check.eligible) {
                 const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                return { id: empId, name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId, uid: uid || undefined };
+                const retShiftId = retEmpIds.get(empId);
+                return {
+                    id: empId,
+                    name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,
+                    uid: uid || undefined,
+                    ...(retShiftId ? { candidateShiftId: retShiftId } : {}),
+                };
             }
         }
         if (type === 'VOLANTE') {
@@ -371,10 +447,52 @@ async function dispararBroadcastFT(db, conv) {
         await Promise.all(batch);
 }
 async function resolverCobertura(db, conv) {
+    const { absentShiftCoveragePatch, syncAusenciaCoberturaGestionada, isTitularAlreadyCovered, supersedeOpsCoveragesForAbsence, opsCoverageLinkFields, } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
+    const titularRef = db.collection('turnos').doc(conv.shiftId);
+    const convRef = db.collection('convocatorias_cobertura').doc(conv.id);
+    const claim = await db.runTransaction(async (tx) => {
+        const titularSnap = await tx.get(titularRef);
+        const titularData = titularSnap.data() || {};
+        if (isTitularAlreadyCovered(titularData)) {
+            if (String(titularData.coverageConvocatoriaId || '') === conv.id) {
+                return { ok: true, already: true, titular: titularData };
+            }
+            tx.update(convRef, {
+                status: 'CANCELLED',
+                cancelReason: 'ALREADY_COVERED',
+                cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+            });
+            return { ok: false, already: true, titular: titularData };
+        }
+        tx.update(titularRef, {
+            operacionallyCovered: true,
+            coverageStatus: 'COVERED',
+            coveredByEmployeeId: conv.candidateEmployeeId,
+            coveredByEmployeeName: conv.candidateEmployeeName,
+            coverageConvocatoriaId: conv.id,
+            coverageClaimedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { ok: true, already: false, titular: titularData };
+    });
+    if (!claim.ok) {
+        console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
+        return;
+    }
     const batch = db.batch();
+    await supersedeOpsCoveragesForAbsence(db, conv.shiftId, batch, {
+        supersededBy: conv.id,
+    });
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
         : conv.createdBy === 'AUTO' ? 'AUTO'
             : 'OPERACIONES';
+    const coverPatch = absentShiftCoveragePatch({
+        coveredByEmployeeId: conv.candidateEmployeeId,
+        coveredByEmployeeName: conv.candidateEmployeeName,
+        coverageType: conv.type,
+        resolvedBy,
+        isAbsence: true,
+    });
+    const linkFields = opsCoverageLinkFields(claim.titular, conv.shiftId);
     if (conv.type === 'EXTEND' && conv.extendShiftId) {
         const shiftRef = db.collection('turnos').doc(conv.extendShiftId);
         const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
@@ -384,10 +502,10 @@ async function resolverCobertura(db, conv) {
             extendedBy: 'CONVOCATORIA',
             extendedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
+            ...linkFields,
         });
         batch.update(db.collection('turnos').doc(conv.shiftId), {
-            coveredByEmployeeId: conv.candidateEmployeeId,
-            coveredByEmployeeName: conv.candidateEmployeeName,
+            ...coverPatch,
             coverageType: 'EXTEND',
             coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
             coverageConvocatoriaId: conv.id,
@@ -401,25 +519,114 @@ async function resolverCobertura(db, conv) {
             advancedBy: 'CONVOCATORIA',
             advancedAt: firestore_1.FieldValue.serverTimestamp(),
             resolvedBy,
+            ...linkFields,
         });
         batch.update(db.collection('turnos').doc(conv.shiftId), {
-            coveredByEmployeeId: conv.candidateEmployeeId,
-            coveredByEmployeeName: conv.candidateEmployeeName,
+            ...coverPatch,
             coverageType: 'ADVANCE',
             coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
             coverageConvocatoriaId: conv.id,
         });
     }
-    else if (conv.type === 'RET') {
-        const vacantRef = db.collection('turnos').doc(conv.shiftId);
-        batch.update(vacantRef, {
-            employeeId: conv.candidateEmployeeId,
-            employeeName: conv.candidateEmployeeName,
-            origin: 'OPERATIONS_COVERAGE',
-            resolvedBy,
-            isRetentionActivated: true,
-            retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+    else if (conv.type === 'REF' || conv.type === 'ESC') {
+        if (conv.candidateShiftId) {
+            batch.update(db.collection('turnos').doc(conv.candidateShiftId), {
+                coverageRedirectedTo: conv.objectiveId,
+                coverageRedirectedAt: firestore_1.FieldValue.serverTimestamp(),
+                resolvedBy,
+                ...linkFields,
+                assignedByConvocatoria: conv.id,
+                assignedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        batch.update(db.collection('turnos').doc(conv.shiftId), {
+            ...coverPatch,
+            coverageType: conv.type,
+            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+            coverageConvocatoriaId: conv.id,
         });
+    }
+    else if (conv.type === 'RET') {
+        if (conv.candidateShiftId) {
+            batch.update(db.collection('turnos').doc(conv.candidateShiftId), {
+                coverageRedirectedTo: conv.objectiveId,
+                coverageRedirectedAt: firestore_1.FieldValue.serverTimestamp(),
+                resolvedBy,
+                ...linkFields,
+                assignedByConvocatoria: conv.id,
+                assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                isRetentionActivated: true,
+                retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            batch.update(db.collection('turnos').doc(conv.shiftId), {
+                ...coverPatch,
+                coverageType: 'RET',
+                coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+                coverageConvocatoriaId: conv.id,
+                isRetentionActivated: true,
+                retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        else {
+            const vacantRef = db.collection('turnos').doc(conv.shiftId);
+            const vacantSnap = await vacantRef.get();
+            const vacant = vacantSnap.data() || {};
+            const isAbsenceDoc = vacant.isAbsent === true ||
+                String(vacant.status || '').toUpperCase() === 'ABSENT' ||
+                String(vacant.absenceType || '').toUpperCase() === 'AA';
+            if (isAbsenceDoc) {
+                batch.update(vacantRef, {
+                    ...absentShiftCoveragePatch({
+                        coveredByEmployeeId: conv.candidateEmployeeId,
+                        coveredByEmployeeName: conv.candidateEmployeeName,
+                        coverageType: 'RET',
+                        resolvedBy,
+                        isAbsence: true,
+                    }),
+                    isRetentionActivated: true,
+                    retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+                    coverageConvocatoriaId: conv.id,
+                    coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+                });
+                const covRef = db.collection('turnos').doc();
+                batch.set(covRef, {
+                    employeeId: conv.candidateEmployeeId,
+                    employeeName: conv.candidateEmployeeName,
+                    code: String(conv.shiftCode || vacant.code || 'T'),
+                    startTime: conv.startTime || vacant.startTime || null,
+                    endTime: conv.endTime || vacant.endTime || null,
+                    objectiveId: conv.objectiveId || vacant.objectiveId || null,
+                    objectiveName: conv.objectiveName || vacant.objectiveName || '',
+                    clientId: conv.clientId || vacant.clientId || null,
+                    empresaId: conv.empresaId || vacant.empresaId || null,
+                    positionName: vacant.positionName || null,
+                    status: 'PENDING',
+                    origin: 'OPERATIONS_COVERAGE',
+                    resolvedBy,
+                    isRetentionActivated: true,
+                    ...linkFields,
+                    assignedByConvocatoria: conv.id,
+                    assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                    createdAt: firestore_1.FieldValue.serverTimestamp(),
+                });
+            }
+            else {
+                batch.update(vacantRef, {
+                    employeeId: conv.candidateEmployeeId,
+                    employeeName: conv.candidateEmployeeName,
+                    origin: 'OPERATIONS_COVERAGE',
+                    isRetentionActivated: true,
+                    retentionActivatedAt: firestore_1.FieldValue.serverTimestamp(),
+                    ...absentShiftCoveragePatch({
+                        coveredByEmployeeId: conv.candidateEmployeeId,
+                        coveredByEmployeeName: conv.candidateEmployeeName,
+                        coverageType: 'RET',
+                        resolvedBy,
+                        isAbsence: false,
+                    }),
+                });
+            }
+        }
     }
     else if (conv.type === 'FT') {
         if (conv.ftShiftId) {
@@ -433,24 +640,86 @@ async function resolverCobertura(db, conv) {
                 realStartTime: conv.startTime,
                 realEndTime: conv.endTime || null,
                 resolvedBy,
-                coveredShiftId: conv.shiftId,
+                ...linkFields,
                 assignedByConvocatoria: conv.id,
                 assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                origin: 'OPERATIONS_COVERAGE',
+            });
+        }
+        batch.update(db.collection('turnos').doc(conv.shiftId), {
+            ...coverPatch,
+            coverageType: 'FT',
+            coverageConvocatoriaId: conv.id,
+            coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
+    else {
+        const titularRef = db.collection('turnos').doc(conv.shiftId);
+        const titularSnap = await titularRef.get();
+        const titular = titularSnap.data() || {};
+        const isAbsenceDoc = titular.isAbsent === true ||
+            String(titular.status || '').toUpperCase() === 'ABSENT' ||
+            String(titular.absenceType || '').toUpperCase() === 'AA';
+        if (isAbsenceDoc) {
+            batch.update(titularRef, {
+                ...absentShiftCoveragePatch({
+                    coveredByEmployeeId: conv.candidateEmployeeId,
+                    coveredByEmployeeName: conv.candidateEmployeeName,
+                    coverageType: conv.type,
+                    resolvedBy,
+                    isAbsence: true,
+                }),
+                coverageConvocatoriaId: conv.id,
+                coverageResolvedAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            const covRef = db.collection('turnos').doc();
+            batch.set(covRef, {
+                employeeId: conv.candidateEmployeeId,
+                employeeName: conv.candidateEmployeeName,
+                code: String(conv.shiftCode || titular.code || 'T'),
+                startTime: conv.startTime || titular.startTime || null,
+                endTime: conv.endTime || titular.endTime || null,
+                objectiveId: conv.objectiveId || titular.objectiveId || null,
+                objectiveName: conv.objectiveName || titular.objectiveName || '',
+                clientId: conv.clientId || titular.clientId || null,
+                empresaId: conv.empresaId || titular.empresaId || null,
+                positionName: titular.positionName || null,
+                status: 'PENDING',
+                origin: 'OPERATIONS_COVERAGE',
+                resolvedBy,
+                ...linkFields,
+                assignedByConvocatoria: conv.id,
+                assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+        }
+        else {
+            batch.update(titularRef, {
+                employeeId: conv.candidateEmployeeId,
+                employeeName: conv.candidateEmployeeName,
+                code: String(conv.shiftCode || 'M'),
+                origin: 'OPERATIONS_COVERAGE',
+                resolvedBy,
+                assignedByConvocatoria: conv.id,
+                assignedAt: firestore_1.FieldValue.serverTimestamp(),
+                ...absentShiftCoveragePatch({
+                    coveredByEmployeeId: conv.candidateEmployeeId,
+                    coveredByEmployeeName: conv.candidateEmployeeName,
+                    coverageType: conv.type,
+                    resolvedBy,
+                    isAbsence: false,
+                }),
             });
         }
     }
-    else {
-        const vacantRef = db.collection('turnos').doc(conv.shiftId);
-        batch.update(vacantRef, {
-            employeeId: conv.candidateEmployeeId,
-            employeeName: conv.candidateEmployeeName,
-            code: String(conv.shiftCode || 'M'),
-            origin: 'OPERATIONS_COVERAGE',
-            resolvedBy,
-            assignedByConvocatoria: conv.id,
-            assignedAt: firestore_1.FieldValue.serverTimestamp(),
-        });
-    }
+    await syncAusenciaCoberturaGestionada(db, {
+        shiftId: conv.shiftId,
+        coveredByEmployeeId: conv.candidateEmployeeId,
+        coveredByEmployeeName: conv.candidateEmployeeName,
+        coverageType: conv.type,
+        resolvedBy,
+        empresaId: conv.empresaId || null,
+    }, batch);
     const [pendingSnap, escalatedSnap] = await Promise.all([
         db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
         db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
@@ -494,7 +763,7 @@ exports.crearConvocatoriaCobertura = functions
         throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     }
     const db = admin.firestore();
-    const { shiftId, candidateEmployeeId, type, empresaId, advanceShiftId, extendShiftId, } = data;
+    const { shiftId, candidateEmployeeId, type, empresaId, advanceShiftId, extendShiftId, ftShiftId, } = data;
     if (!shiftId || !candidateEmployeeId || !type || !empresaId) {
         throw new functions.https.HttpsError('invalid-argument', 'shiftId, candidateEmployeeId, type y empresaId son requeridos.');
     }
@@ -535,6 +804,7 @@ exports.crearConvocatoriaCobertura = functions
         shiftId,
         objectiveId: String(shift.objectiveId || ''),
         objectiveName: String(shift.objectiveName || ''),
+        positionName: String(shift.positionName || ''),
         clientId: String(shift.clientId || ''),
         clientName: String(shift.clientName || ''),
         shiftCode: String(shift.code || ''),
@@ -548,6 +818,7 @@ exports.crearConvocatoriaCobertura = functions
         candidateUid: uid || undefined,
         ...(advanceShiftId ? { advanceShiftId } : {}),
         ...(extendShiftId ? { extendShiftId } : {}),
+        ...(ftShiftId ? { ftShiftId } : {}),
         createdBy: context.auth.uid,
         createdByName: callerName,
     });
@@ -727,49 +998,39 @@ exports.getCandidatosCobertura = functions
     });
     return { candidates: results };
 });
-async function asignarRETDirecto(db, baseConv, candidate, createdBy) {
-    const convId = db.collection('convocatorias_cobertura').doc().id;
-    const now = firestore_1.Timestamp.now();
-    const retConv = {
-        ...baseConv,
-        id: convId,
-        type: 'RET',
-        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('RET'),
-        candidateEmployeeId: candidate.id,
-        candidateEmployeeName: candidate.name,
-        candidateUid: candidate.uid ?? undefined,
-        status: 'ACCEPTED',
-        timeoutAt: now,
-        createdAt: now,
-        createdBy,
-        resolvedAt: now,
-    };
-    await db.collection('convocatorias_cobertura').doc(convId).set({
-        ...retConv,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-        resolvedAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    await resolverCobertura(db, retConv);
-    const startTime = retConv.startTime instanceof firestore_1.Timestamp
-        ? retConv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
-        : '--:--';
-    await db.collection('user_notifications').add({
-        uid: candidate.uid || null,
-        employeeId: candidate.id,
-        type: 'CONVOCATORIA_COBERTURA',
-        title: '⚡ Turno RET asignado',
-        body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${baseConv.objectiveName || 'el puesto'} desde las ${startTime}. Confirmá lectura.`,
-        empresaId: baseConv.empresaId,
-        convocatoriaId: convId,
-        shiftId: baseConv.shiftId,
-        objectiveId: baseConv.objectiveId,
-        isReadReceipt: true,
-        read: false,
-        readAt: null,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-}
 async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
+    const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
+    const titularSnap = await db.collection('turnos').doc(shift.id).get();
+    const titularData = (titularSnap.data() || {});
+    if (isTitularAlreadyCovered(titularData)) {
+        console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
+        return;
+    }
+    try {
+        const retention = await (0, coverageRetention_1.applyAutoRetentionForAbsenceShift)(db, shift.id, {
+            ...titularData,
+            objectiveId: shift.objectiveId,
+            objectiveName: shift.objectiveName,
+            positionName: shift.positionName,
+            employeeId: titularData.employeeId,
+            empresaId: shift.empresaId,
+            endTime: shift.endTime ?? titularData.endTime,
+        });
+        if (retention.applied) {
+            console.log(`[iniciarCascadaCobertura] retención ${retention.shiftId} (${retention.employeeName || ''}) → ausencia ${shift.id}`);
+        }
+    }
+    catch (e) {
+        console.warn('[iniciarCascadaCobertura] retención:', e?.message);
+    }
+    const priorCov = await db.collection('turnos')
+        .where('absenceShiftId', '==', shift.id)
+        .limit(20)
+        .get();
+    if (priorCov.docs.some((d) => isActiveOpsCoverageDoc(d.data()))) {
+        console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya hay OPERATIONS_COVERAGE activa`);
+        return;
+    }
     const existing = await db.collection('convocatorias_cobertura')
         .where('shiftId', '==', shift.id)
         .where('status', 'in', ['PENDING', 'ESCALATED'])
@@ -782,6 +1043,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         shiftId: shift.id,
         objectiveId: String(shift.objectiveId || ''),
         objectiveName: String(shift.objectiveName || ''),
+        positionName: String(shift.positionName || ''),
         clientId: String(shift.clientId || ''),
         clientName: String(shift.clientName || ''),
         shiftCode: String(shift.code || ''),
@@ -806,10 +1068,6 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         const candidate = await findBestCandidate(db, baseConvData, type);
         if (!candidate)
             continue;
-        if (type === 'RET') {
-            await asignarRETDirecto(db, baseConvData, candidate, createdBy);
-            return;
-        }
         await crearConvocatoriaDoc(db, {
             ...baseConvData,
             type,
@@ -817,6 +1075,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
             candidateEmployeeId: candidate.id,
             candidateEmployeeName: candidate.name,
             candidateUid: candidate.uid,
+            ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
             ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
             ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
             createdBy,
@@ -829,7 +1088,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         objectiveId: shift.objectiveId,
         objectiveName: shift.objectiveName || '',
         empresaId: shift.empresaId,
-        message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (MODO DEMO).`,
+        message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
         resolved: false,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });

@@ -929,6 +929,7 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
     const centroControlEnabled = empresaDoc.data()?.centroControlEnabled !== false;
     if (!centroControlEnabled)
         return;
+    const cascadeCreatedBy = String(after.absenceDetectedBy || '').toUpperCase() === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
     await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
         id: event.params.shiftId,
         objectiveId: String(after.objectiveId || ''),
@@ -940,7 +941,7 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         startTime: after.startTime,
         endTime: after.endTime,
         empresaId,
-    }, 'AUTO');
+    }, cascadeCreatedBy);
 });
 const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 exports.autoPresenciaYCierre = functions

@@ -1118,6 +1118,9 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
     const centroControlEnabled = empresaDoc.data()?.centroControlEnabled !== false;
     if (!centroControlEnabled) return;
 
+    const cascadeCreatedBy =
+      String(after.absenceDetectedBy || '').toUpperCase() === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
+
     await iniciarCascadaCobertura(db, {
       id: event.params.shiftId,
       objectiveId:    String(after.objectiveId   || ''),
@@ -1129,7 +1132,7 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       startTime: after.startTime,
       endTime:   after.endTime,
       empresaId,
-    }, 'AUTO');
+    }, cascadeCreatedBy);
   }
 );
 

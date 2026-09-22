@@ -10,6 +10,7 @@ import {
   getUrgency,
   findEmployeeUid,
 } from './eligibilityFilter';
+import { applyAutoRetentionForAbsenceShift } from './coverageRetention';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -43,6 +44,8 @@ export interface ConvocatoriaCoberturaDoc {
   advanceShiftId?: string;
   // Para FT: el turno franco del candidato que se convierte a FT
   ftShiftId?: string;
+  /** Turno REF/ESC del candidato en el objetivo (redirección). */
+  candidateShiftId?: string;
 
   // PENDING: esperando respuesta dentro del timeout
   // ESCALATED: timeout vencido, avanzamos al siguiente paso pero AÚN acepta respuesta
@@ -73,6 +76,8 @@ async function crearNotifConvocatoria(
 
   const typeLabel: Record<ConvocatoriaType, string> = {
     RET: 'Retención (RET)',
+    REF: 'Refuerzo (REF)',
+    ESC: 'Escuela (ESC)',
     VOLANTE: 'Cobertura volante',
     SIN_TURNO_CON_EXP: 'Cobertura disponible',
     EXTEND: 'Extensión de jornada',
@@ -219,6 +224,7 @@ async function avanzarCascada(
     candidateUid: candidate.uid,
     extendShiftId: candidate.extendShiftId,
     advanceShiftId: candidate.advanceShiftId,
+    candidateShiftId: candidate.candidateShiftId,
     createdBy: 'AUTO',
   });
 }
@@ -250,9 +256,15 @@ async function crearConvocatoriaDoc(
 
   // Novedad para ops — trazabilidad en Bitácora
   const typeLabel: Record<string, string> = {
-    RET: 'RET', EXTEND: 'Extender jornada', ADVANCE: 'Adelantar turno',
-    FT: 'Franco Trabajado', VOLANTE: 'Volante',
-    SIN_TURNO: 'Sin turno', SIN_TURNO_CON_EXP: 'Sin turno (con exp.)',
+    RET: 'RET',
+    REF: 'Refuerzo',
+    ESC: 'Escuela',
+    EXTEND: 'Extender jornada',
+    ADVANCE: 'Adelantar turno',
+    FT: 'Franco Trabajado',
+    VOLANTE: 'Volante',
+    SIN_TURNO: 'Sin turno',
+    SIN_TURNO_CON_EXP: 'Sin turno (con exp.)',
   };
   await db.collection('novedades').add({
     type: 'CONVOCATORIA_ENVIADA',
@@ -283,6 +295,7 @@ interface CandidateResult {
   uid?: string;
   extendShiftId?: string;
   advanceShiftId?: string;
+  candidateShiftId?: string;
 }
 
 async function findBestCandidate(
@@ -430,6 +443,30 @@ async function findBestCandidate(
     }
   }
 
+  if (type === 'REF' || type === 'ESC') {
+    const want = type;
+    for (const d of todayShiftsSnap.docs) {
+      const t = d.data();
+      const code = String(t.code || '').toUpperCase();
+      if (code !== want) continue;
+      if (t.isAbsent || !t.employeeId) continue;
+      if (alreadyConvocadoIds.has(String(t.employeeId))) continue;
+      const empSnap = await db.collection('empleados').doc(t.employeeId).get();
+      if (!empSnap.exists) continue;
+      const emp = empSnap.data()!;
+      const check = checkEligibility(emp, ctx, 'RET');
+      if (!check.eligible) continue;
+      const uid = await findEmployeeUid(db, t.employeeId, emp);
+      return {
+        id: t.employeeId,
+        name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
+        uid: uid || undefined,
+        candidateShiftId: d.id,
+      };
+    }
+    return null;
+  }
+
   for (const empDoc of empSnap.docs) {
     const emp = empDoc.data();
     const empId = empDoc.id;
@@ -439,7 +476,13 @@ async function findBestCandidate(
       const check = checkEligibility(emp, ctx, 'RET');
       if (check.eligible) {
         const uid = await findEmployeeUid(db, empId, emp);
-        return { id: empId, name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId, uid: uid || undefined };
+        const retShiftId = retEmpIds.get(empId);
+        return {
+          id: empId,
+          name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,
+          uid: uid || undefined,
+          ...(retShiftId ? { candidateShiftId: retShiftId } : {}),
+        };
       }
     }
 
@@ -639,7 +682,44 @@ async function resolverCobertura(
       coverageResolvedAt: FieldValue.serverTimestamp(),
       coverageConvocatoriaId: conv.id,
     });
+  } else if (conv.type === 'REF' || conv.type === 'ESC') {
+    if (conv.candidateShiftId) {
+      batch.update(db.collection('turnos').doc(conv.candidateShiftId), {
+        coverageRedirectedTo: conv.objectiveId,
+        coverageRedirectedAt: FieldValue.serverTimestamp(),
+        resolvedBy,
+        ...linkFields,
+        assignedByConvocatoria: conv.id,
+        assignedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    batch.update(db.collection('turnos').doc(conv.shiftId), {
+      ...coverPatch,
+      coverageType: conv.type,
+      coverageResolvedAt: FieldValue.serverTimestamp(),
+      coverageConvocatoriaId: conv.id,
+    });
   } else if (conv.type === 'RET') {
+    if (conv.candidateShiftId) {
+      batch.update(db.collection('turnos').doc(conv.candidateShiftId), {
+        coverageRedirectedTo: conv.objectiveId,
+        coverageRedirectedAt: FieldValue.serverTimestamp(),
+        resolvedBy,
+        ...linkFields,
+        assignedByConvocatoria: conv.id,
+        assignedAt: FieldValue.serverTimestamp(),
+        isRetentionActivated: true,
+        retentionActivatedAt: FieldValue.serverTimestamp(),
+      });
+      batch.update(db.collection('turnos').doc(conv.shiftId), {
+        ...coverPatch,
+        coverageType: 'RET',
+        coverageResolvedAt: FieldValue.serverTimestamp(),
+        coverageConvocatoriaId: conv.id,
+        isRetentionActivated: true,
+        retentionActivatedAt: FieldValue.serverTimestamp(),
+      });
+    } else {
     // RET sobre ausencia real: no pisar legajo del titular; crear cobertura aparte.
     const vacantRef = db.collection('turnos').doc(conv.shiftId);
     const vacantSnap = await vacantRef.get();
@@ -699,6 +779,7 @@ async function resolverCobertura(
           isAbsence: false,
         }),
       });
+    }
     }
   } else if (conv.type === 'FT') {
     if (conv.ftShiftId) {
@@ -1178,70 +1259,6 @@ export const getCandidatosCobertura = functions
     return { candidates: results };
   });
 
-// ─── Helper: asignación directa RET (obligatorio, sin flujo accept/reject) ───
-
-async function asignarRETDirecto(
-  db: admin.firestore.Firestore,
-  baseConv: ConvocatoriaCoberturaDoc,
-  candidate: { id: string; name: string; uid?: string | null },
-  createdBy: string,
-): Promise<void> {
-  const convId = db.collection('convocatorias_cobertura').doc().id;
-  const now = Timestamp.now();
-  const retConv: ConvocatoriaCoberturaDoc & { id: string } = {
-    ...baseConv,
-    id: convId,
-    type: 'RET',
-    cascadeStep: CASCADE_ORDER.indexOf('RET'),
-    candidateEmployeeId: candidate.id,
-    candidateEmployeeName: candidate.name,
-    candidateUid: candidate.uid ?? undefined,
-    status: 'ACCEPTED',
-    timeoutAt: now,
-    createdAt: now,
-    createdBy,
-    resolvedAt: now,
-  };
-
-  await db.collection('convocatorias_cobertura').doc(convId).set({
-    ...retConv,
-    createdAt: FieldValue.serverTimestamp(),
-    resolvedAt: FieldValue.serverTimestamp(),
-  });
-
-  await resolverCobertura(db, retConv);
-
-  const startTime = retConv.startTime instanceof Timestamp
-    ? retConv.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Buenos_Aires' })
-    : '--:--';
-  const lugar = [baseConv.clientName, baseConv.objectiveName, baseConv.positionName]
-    .map((s) => String(s || '').trim())
-    .filter(Boolean)
-    .join(' · ') || 'el puesto';
-  await db.collection('user_notifications').add({
-    uid: candidate.uid || null,
-    employeeId: candidate.id,
-    type: 'CONVOCATORIA_COBERTURA',
-    title: '⚡ Turno RET asignado',
-    body: `Fuiste asignado para cubrir turno ${baseConv.shiftCode || ''} en ${lugar} desde las ${startTime}. Confirmá lectura.`,
-    empresaId: baseConv.empresaId,
-    convocatoriaId: convId,
-    shiftId: baseConv.shiftId,
-    objectiveId: baseConv.objectiveId,
-    objectiveName: baseConv.objectiveName || null,
-    positionName: baseConv.positionName || null,
-    clientId: baseConv.clientId || null,
-    clientName: baseConv.clientName || null,
-    shiftCode: baseConv.shiftCode || null,
-    startTime: baseConv.startTime || null,
-    endTime: baseConv.endTime || null,
-    isReadReceipt: true,
-    read: false,
-    readAt: null,
-    createdAt: FieldValue.serverTimestamp(),
-  });
-}
-
 // ─── MODO DEMO: arrancar cascada desde step 0 para un turno ausente ──────────
 
 export interface ShiftDataForCascade {
@@ -1266,9 +1283,29 @@ export async function iniciarCascadaCobertura(
 
   // Idempotencia: si el titular ya está cubierto, no reabrir cascada (modo demo incluido).
   const titularSnap = await db.collection('turnos').doc(shift.id).get();
-  if (isTitularAlreadyCovered(titularSnap.data())) {
+  const titularData = (titularSnap.data() || {}) as Record<string, unknown>;
+  if (isTitularAlreadyCovered(titularData)) {
     console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
     return;
+  }
+
+  try {
+    const retention = await applyAutoRetentionForAbsenceShift(db, shift.id, {
+      ...titularData,
+      objectiveId: shift.objectiveId,
+      objectiveName: shift.objectiveName,
+      positionName: shift.positionName,
+      employeeId: titularData.employeeId,
+      empresaId: shift.empresaId,
+      endTime: shift.endTime ?? titularData.endTime,
+    });
+    if (retention.applied) {
+      console.log(
+        `[iniciarCascadaCobertura] retención ${retention.shiftId} (${retention.employeeName || ''}) → ausencia ${shift.id}`,
+      );
+    }
+  } catch (e) {
+    console.warn('[iniciarCascadaCobertura] retención:', (e as Error)?.message);
   }
 
   const priorCov = await db.collection('turnos')
@@ -1320,11 +1357,6 @@ export async function iniciarCascadaCobertura(
     const candidate = await findBestCandidate(db, baseConvData, type);
     if (!candidate) continue;
 
-    if (type === 'RET') {
-      await asignarRETDirecto(db, baseConvData, candidate, createdBy);
-      return;
-    }
-
     await crearConvocatoriaDoc(db, {
       ...baseConvData,
       type,
@@ -1332,6 +1364,7 @@ export async function iniciarCascadaCobertura(
       candidateEmployeeId: candidate.id,
       candidateEmployeeName: candidate.name,
       candidateUid: candidate.uid,
+      ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
       ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
       ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
       createdBy,
@@ -1346,7 +1379,7 @@ export async function iniciarCascadaCobertura(
     objectiveId: shift.objectiveId,
     objectiveName: shift.objectiveName || '',
     empresaId: shift.empresaId,
-    message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (MODO DEMO).`,
+    message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
     resolved: false,
     createdAt: FieldValue.serverTimestamp(),
   });

@@ -3,12 +3,14 @@ import { Timestamp } from 'firebase-admin/firestore';
 
 export type CandidateType =
   | 'RET'                // RET pasivo en objetivo (obligación)
-  | 'VOLANTE'            // Comodín explícito sin turno hoy
-  | 'SIN_TURNO_CON_EXP' // Sin turno, con experiencia en objetivo
-  | 'EXTEND'             // Extender jornada actual (8h → D12/N12)
-  | 'ADVANCE'            // Adelantar próximo turno de rotación
-  | 'SIN_TURNO'          // Sin turno, sin experiencia (pool frío)
-  | 'FT';                // Franco trabajado (broadcast múltiple, último recurso)
+  | 'REF'                // Refuerzo en objetivo
+  | 'ESC'                // Escuela en objetivo
+  | 'EXTEND'             // Extender jornada (costo extra)
+  | 'ADVANCE'            // Adelantar turno (costo extra)
+  | 'FT'                 // Franco trabajado (último recurso)
+  | 'VOLANTE'            // Legacy cascada / listados
+  | 'SIN_TURNO_CON_EXP'
+  | 'SIN_TURNO';
 
 export interface EligibilityContext {
   objectiveId: string;
@@ -107,13 +109,13 @@ export function deriveCandidateType(
   return 'SIN_TURNO';
 }
 
+/** Alineado al protocolo Manual Ops: interno → ext/adel → FT. */
 export const CASCADE_ORDER: CandidateType[] = [
   'RET',
-  'ADVANCE',
-  'VOLANTE',
-  'SIN_TURNO_CON_EXP',
+  'REF',
+  'ESC',
   'EXTEND',
-  'SIN_TURNO',
+  'ADVANCE',
   'FT',
 ];
 

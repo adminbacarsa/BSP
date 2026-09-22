@@ -8,6 +8,7 @@ export interface ConvocatoriaCoberturaDoc {
     shiftId: string;
     objectiveId: string;
     objectiveName?: string;
+    positionName?: string;
     clientId?: string;
     clientName?: string;
     shiftCode?: string;
@@ -23,6 +24,7 @@ export interface ConvocatoriaCoberturaDoc {
     extendShiftId?: string;
     advanceShiftId?: string;
     ftShiftId?: string;
+    candidateShiftId?: string;
     status: 'PENDING' | 'ESCALATED' | 'ACCEPTED' | 'REJECTED' | 'TIMEOUT' | 'CANCELLED';
     timeoutAt: Timestamp;
     createdAt: Timestamp;
@@ -40,6 +42,7 @@ export interface ShiftDataForCascade {
     id: string;
     objectiveId: string;
     objectiveName?: string;
+    positionName?: string;
     clientId?: string;
     clientName?: string;
     code?: string;
