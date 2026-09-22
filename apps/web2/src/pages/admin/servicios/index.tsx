@@ -1000,68 +1000,6 @@ export default function ServiciosSLAPage() {
     addToast('Puesto reactivado. Guardá el contrato para persistir.', 'success');
   };
 
-  const actorLabel = () => {
-    const currentUser = getAuth().currentUser;
-    return {
-      name: currentUser?.displayName || currentUser?.email || 'Sistema',
-      uid: currentUser?.uid || 'SYSTEM',
-    };
-  };
-
-  const bajaPosition = (id: string) => {
-    const pos = form.positions.find((p) => p.id === id);
-    if (!pos) return;
-    const today = new Date().toISOString().slice(0, 10);
-    const from = window.prompt(`Baja de «${pos.name}» desde (AAAA-MM-DD):`, today)?.trim();
-    if (!from || !/^\d{4}-\d{2}-\d{2}$/.test(from)) {
-      if (from) addToast('Fecha inválida (usá AAAA-MM-DD)', 'error');
-      return;
-    }
-    const reason = window.prompt('Motivo de baja del puesto:')?.trim();
-    if (!reason) return;
-    const actor = actorLabel();
-    setForm({
-      ...form,
-      positions: form.positions.map((p) =>
-        p.id === id
-          ? { ...p, status: 'INACTIVE', inactiveFrom: from, inactiveReason: reason, inactiveBy: actor.name }
-          : p,
-      ),
-      changeLog: appendSlaChangeLog(form.changeLog, {
-        action: 'BAJA_PUESTO',
-        detail: `Baja de ${pos.name} desde ${from}: ${reason}`,
-        positionId: pos.id,
-        positionName: pos.name,
-        byUid: actor.uid,
-        byName: actor.name,
-      }),
-    });
-    addToast('Puesto marcado de baja. Guardá el contrato para persistir.', 'success');
-  };
-
-  const reactivarPosition = (id: string) => {
-    const pos = form.positions.find((p) => p.id === id);
-    if (!pos) return;
-    const actor = actorLabel();
-    setForm({
-      ...form,
-      positions: form.positions.map((p) =>
-        p.id === id
-          ? { ...p, status: 'ACTIVE', inactiveFrom: undefined, inactiveReason: undefined, inactiveBy: undefined }
-          : p,
-      ),
-      changeLog: appendSlaChangeLog(form.changeLog, {
-        action: 'REACTIVAR_PUESTO',
-        detail: `Reactivó el puesto ${pos.name}`,
-        positionId: pos.id,
-        positionName: pos.name,
-        byUid: actor.uid,
-        byName: actor.name,
-      }),
-    });
-    addToast('Puesto reactivado. Guardá el contrato para persistir.', 'success');
-  };
-
   // ── Cobertura de dotación ──────────────────────────────────────────────
   const startEditCoverage = (empId: string) => {
     const existing = (form.positionAssignments || []).find(a => a.employeeId === empId);

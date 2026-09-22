@@ -191,7 +191,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 | Centro de Comando (lista) | `apps/web2/src/pages/admin/operaciones/index.tsx` |
 | Map view | `apps/web2/src/pages/admin/operaciones/map-view.tsx` |
 
-Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al abrir protocolo (`openCoverageProtocol`). Datos: **`useOperacionesMonitor`**. Libs: `apps/web2/src/lib/operaciones/coverageRetention.ts`, `coverageInternalCandidates.ts`, `opsConvocatoriaCobertura.ts`, `opsExtAdvCandidates.ts`, `syncAusenciaCobertura` (mirror front).
+Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al abrir protocolo (`openCoverageProtocol`). Datos: **`useOperacionesMonitor`**. Libs: `apps/web2/src/lib/operaciones/coverageRetention.ts`, `coverageInternalCandidates.ts`, `coverageGeo.ts` (distancia domicilio→objetivo, **15 km** default, ampliación **30 km**, ETA auto ~30 km/h), `opsConvocatoriaCobertura.ts`, `opsExtAdvCandidates.ts`, `syncAusenciaCobertura` (mirror front).
 
 **Backend (Auto/Demo/vacantes):** `apps/functions/src/coverage/convocatoriasCobertura.ts` (`iniciarCascadaCobertura`, `crearConvocatoriaCobertura`, `resolverCobertura`, `simularRespuestasConvocatorias`), `coverageRetention.ts` (`applyAutoRetentionForAbsenceShift`), `eligibilityFilter.ts` (`CASCADE_ORDER`: RET, REF, ESC, EXTEND, ADVANCE, FT), `syncAusenciaCobertura.ts`. Triggers: **`onTurnoAbsenciaDetectada`**, cron **`gestionarVacantes`** (T-1h / vacante iniciada), **`modoDemoCron`**, scheduler **`checkConvocatoriaTimeouts`**.
 

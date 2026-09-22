@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useRef } from 'react';
 import {
   X, ChevronRight, Phone, SkipForward, CheckCircle,
-  AlertTriangle, Users, Clock, Minimize2, Search,
+  AlertTriangle, Users, Clock, Minimize2, Search, Navigation, MapPin,
 } from 'lucide-react';
 import {
   collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot, getDoc,
@@ -43,6 +43,17 @@ import {
   convocatoriaTypeForInternalKind,
   invokeCrearConvocatoriaCobertura,
 } from '@/lib/operaciones/opsConvocatoriaCobertura';
+import {
+  COVERAGE_AUTO_SPEED_KMH,
+  COVERAGE_RADIUS_EXTENDED_KM,
+  COVERAGE_RADIUS_PRIMARY_KM,
+  countBeyondPrimaryWithinExtended,
+  coverageGeoForEmployee,
+  filterByCoverageRadius,
+  formatCoverageDistanceLine,
+  sortByDistanceAsc,
+  type CoverageGeoFields,
+} from '@/lib/operaciones/coverageGeo';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -119,6 +130,37 @@ const isSameDay = (d1: any, d2: any) => toDate(d1).toLocaleDateString('en-CA') =
 const simPhone = (id: string) => { const n = parseInt(id.replace(/\D/g, '')) || 1; return `+54 9 351 ${String(n * 1317 % 10000).padStart(4, '0')}-${String(n * 7531 % 10000).padStart(4, '0')}`; };
 const initials = (name: string) => (name || '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
 const normBandCode = (c: unknown) => String(c || '').trim().toUpperCase();
+
+type WithGeo = CoverageGeoFields;
+
+const CoverageDistanceLine = ({ geo }: { geo: WithGeo }) => {
+  if (!geo.hasGeo || geo.distanceKm == null) {
+    return (
+      <span className="text-[10px] font-semibold text-amber-600 flex items-center gap-1">
+        <MapPin size={10} className="shrink-0" />
+        Sin ubicación GPS en legajo
+      </span>
+    );
+  }
+  if (geo.distanceKm < 0.05) {
+    return (
+      <span className="text-[10px] font-bold text-emerald-600 flex items-center gap-1">
+        <Navigation size={10} className="shrink-0" />
+        En objetivo (presente)
+      </span>
+    );
+  }
+  const overPrimary =
+    geo.distanceKm > COVERAGE_RADIUS_PRIMARY_KM && geo.distanceKm <= COVERAGE_RADIUS_EXTENDED_KM;
+  return (
+    <span
+      className={`text-[10px] font-semibold flex items-center gap-1 ${overPrimary ? 'text-orange-600' : 'text-slate-500'}`}
+    >
+      <Navigation size={10} className="shrink-0" />
+      {formatCoverageDistanceLine(geo)}
+    </span>
+  );
+};
 
 const resolveCoverageShiftForEmployee = (
   processedData: any[],
@@ -351,6 +393,8 @@ interface PanelProps {
 function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinimize, unsubRefs }: PanelProps) {
   const [loading, setLoading] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
+  /** 15 km (default CCT) → ampliar a 30 km si no hay candidatos cercanos. */
+  const [distanceTierKm, setDistanceTierKm] = React.useState<15 | 30>(COVERAGE_RADIUS_PRIMARY_KM);
   // Refs para siempre apuntar a la versión más reciente de las funciones de confirmación
   // y evitar closures stale en los callbacks de onSnapshot
   const confirmCandidateRef = useRef<() => Promise<void>>(async () => {});
@@ -364,6 +408,43 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const hiEnd = fmtTime(absenceShift.endDateObj);
   const bandCode = absenceShift.code || '';
   const bandLabel = BAND_LABEL[bandCode] || bandCode;
+
+  React.useEffect(() => {
+    setDistanceTierKm(COVERAGE_RADIUS_PRIMARY_KM);
+  }, [s.currentStep, step.key]);
+
+  const empById = React.useMemo(() => {
+    const m = new Map<string, Record<string, unknown>>();
+    for (const e of logic.employees || []) {
+      m.set(String(e.id || ''), e);
+    }
+    return m;
+  }, [logic.employees]);
+
+  const attachShiftGeo = React.useCallback(
+    (row: Record<string, unknown>) => {
+      const eid = String(row.employeeId || '').trim();
+      const emp = eid ? empById.get(eid) : undefined;
+      return {
+        ...row,
+        ...coverageGeoForEmployee(absenceShift, emp, row),
+      };
+    },
+    [absenceShift, empById],
+  );
+
+  const attachInternalGeo = React.useCallback(
+    (c: InternalCoverageCandidate): InternalCoverageCandidate & WithGeo => ({
+      ...c,
+      ...coverageGeoForEmployee(absenceShift, empById.get(c.employeeId), c.shiftRow as Record<string, unknown>),
+    }),
+    [absenceShift, empById],
+  );
+
+  const applyDistanceTier = React.useCallback(
+    <T extends WithGeo>(list: T[]) => filterByCoverageRadius(sortByDistanceAsc(list), distanceTierKm),
+    [distanceTierKm],
+  );
 
   // ── Candidatos ─────────────────────────────────────────────────────────────
 
@@ -380,39 +461,47 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       ].filter(Boolean) as string[])
   );
 
-  const internalGroups = buildInternalCoverageCandidates(
+  const internalGroupsRaw = buildInternalCoverageCandidates(
     logic.processedData || [],
     logic.employees || [],
     absenceShift,
     now,
     crossSessionBusy,
   );
+  const internalGroups = {
+    ret: sortByDistanceAsc(internalGroupsRaw.ret.map(attachInternalGeo)),
+    ref: sortByDistanceAsc(internalGroupsRaw.ref.map(attachInternalGeo)),
+    esc: sortByDistanceAsc(internalGroupsRaw.esc.map(attachInternalGeo)),
+  };
 
-  const ftCandidates = step.key === 'FT'
+  const ftCandidatesRaw = step.key === 'FT'
     ? collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
       .filter((sh: any) => !crossSessionBusy.has(sh.employeeId))
       .map((sh: any) => {
-        const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
-        return {
+        const emp = empById.get(String(sh.employeeId || ''));
+        return attachShiftGeo({
           ...sh,
-          fullName: sh.employeeName || emp?.fullName || emp?.name || '',
-          phone: sh.phone || emp?.phone || emp?.celular || '',
-        };
+          fullName: sh.employeeName || (emp as any)?.fullName || (emp as any)?.name || '',
+          phone: sh.phone || (emp as any)?.phone || (emp as any)?.celular || '',
+        });
       })
     : [];
 
-  const candidatesExt = listOpsExtCandidatesForVacancy(
+  const candidatesExtRaw = listOpsExtCandidatesForVacancy(
     logic.processedData || [],
     absenceShift,
     now,
     crossSessionBusy,
-  );
-  const candidatesAdv = listOpsAdvCandidatesForVacancy(
+  ).map((sh: any) => attachShiftGeo(sh));
+  const candidatesAdvRaw = listOpsAdvCandidatesForVacancy(
     logic.processedData || [],
     absenceShift,
     now,
     crossSessionBusy,
-  );
+  ).map((sh: any) => attachShiftGeo(sh));
+
+  const candidatesExt = applyDistanceTier(candidatesExtRaw);
+  const candidatesAdv = applyDistanceTier(candidatesAdvRaw);
 
   const filterInternal = (list: InternalCoverageCandidate[]) => {
     if (!search.trim()) return list;
@@ -421,17 +510,80 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   };
 
   const internalFiltered = {
-    ret: filterInternal(internalGroups.ret),
-    ref: filterInternal(internalGroups.ref),
-    esc: filterInternal(internalGroups.esc),
+    ret: applyDistanceTier(filterInternal(internalGroups.ret)),
+    ref: applyDistanceTier(filterInternal(internalGroups.ref)),
+    esc: applyDistanceTier(filterInternal(internalGroups.esc)),
   };
   const internalCount =
-    internalGroups.ret.length + internalGroups.ref.length + internalGroups.esc.length;
+    internalFiltered.ret.length + internalFiltered.ref.length + internalFiltered.esc.length;
+  const internalCountAllGeo = internalGroups.ret.length + internalGroups.ref.length + internalGroups.esc.length;
+  const internalExtendedOnlyCount = countBeyondPrimaryWithinExtended([
+    ...internalGroups.ret,
+    ...internalGroups.ref,
+    ...internalGroups.esc,
+  ]);
 
+  const ftAfterTier = applyDistanceTier(ftCandidatesRaw);
   const ftFiltered = search.trim()
-    ? ftCandidates.filter((c: any) =>
+    ? ftAfterTier.filter((c: any) =>
       (c.fullName || c.employeeName || '').toLowerCase().includes(search.trim().toLowerCase()))
-    : ftCandidates;
+    : ftAfterTier;
+  const ftExtendedOnlyCount = countBeyondPrimaryWithinExtended(ftCandidatesRaw);
+
+  const renderDistanceTierBanner = (extendedOnlyCount: number, visibleCount: number) => {
+    if (distanceTierKm === COVERAGE_RADIUS_EXTENDED_KM) {
+      return (
+        <div className="mb-3 flex items-center justify-between gap-2 p-2.5 rounded-xl border border-orange-200 bg-orange-50">
+          <span className="text-[10px] font-bold text-orange-800 leading-snug">
+            Radio ampliado: hasta {COVERAGE_RADIUS_EXTENDED_KM} km (referencia auto ~{COVERAGE_AUTO_SPEED_KMH} km/h)
+          </span>
+          <button
+            type="button"
+            onClick={() => setDistanceTierKm(COVERAGE_RADIUS_PRIMARY_KM)}
+            className="text-[10px] font-black text-orange-700 underline shrink-0"
+          >
+            Volver a {COVERAGE_RADIUS_PRIMARY_KM} km
+          </button>
+        </div>
+      );
+    }
+    if (visibleCount === 0 && extendedOnlyCount > 0) {
+      return (
+        <div className="mb-3 p-3 rounded-xl border border-amber-200 bg-amber-50 text-center">
+          <p className="text-[11px] font-bold text-amber-900">
+            Nadie a ≤{COVERAGE_RADIUS_PRIMARY_KM} km del objetivo
+          </p>
+          <p className="text-[10px] text-amber-800/90 mt-1">
+            Hay {extendedOnlyCount} guardia(s) entre {COVERAGE_RADIUS_PRIMARY_KM} y {COVERAGE_RADIUS_EXTENDED_KM} km (tiempo en auto estimado).
+          </p>
+          <button
+            type="button"
+            onClick={() => setDistanceTierKm(COVERAGE_RADIUS_EXTENDED_KM)}
+            className="mt-2 px-3 py-2 bg-amber-600 hover:bg-amber-700 text-white text-xs font-black rounded-xl transition-colors"
+          >
+            Ver hasta {COVERAGE_RADIUS_EXTENDED_KM} km
+          </button>
+        </div>
+      );
+    }
+    if (extendedOnlyCount > 0) {
+      return (
+        <button
+          type="button"
+          onClick={() => setDistanceTierKm(COVERAGE_RADIUS_EXTENDED_KM)}
+          className="mb-2 w-full text-[10px] font-bold text-slate-500 hover:text-indigo-600 underline text-left"
+        >
+          Ampliar radio a {COVERAGE_RADIUS_EXTENDED_KM} km (+{extendedOnlyCount} fuera de {COVERAGE_RADIUS_PRIMARY_KM} km)
+        </button>
+      );
+    }
+    return (
+      <div className="mb-2 text-[10px] text-slate-400 flex items-center gap-1">
+        <Navigation size={10} />
+        Distancia domicilio → objetivo · traslado estimado en auto
+      </div>
+    );
+  };
 
   // ── Acciones ────────────────────────────────────────────────────────────────
   const listenConvocatoria = (convocatoriaId: string, role: 'single' | 'ext' | 'adv') => {
@@ -977,6 +1129,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             <div className="flex-1 min-w-0">
               <div className="text-xs font-bold text-amber-900 truncate">{name}</div>
               {sub && <div className="text-[10px] font-semibold text-amber-800 truncate">{sub}</div>}
+              <CoverageDistanceLine geo={cand as WithGeo} />
               <div className="text-xs font-black font-mono text-amber-800">📱 {phone}</div>
             </div>
           </div>
@@ -998,6 +1151,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           <div className="flex-1 min-w-0">
             <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>{name}</div>
             {sub && <div className="text-[10px] font-semibold text-slate-600 truncate">{sub}</div>}
+            <CoverageDistanceLine geo={cand as WithGeo} />
             <div className="text-xs font-mono text-slate-600">📱 {phone}</div>
           </div>
         </div>
@@ -1007,6 +1161,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     const extEmpId = isPending ? s.pendingExt?.empId : null;
     const advEmpId = isPending ? s.pendingAdv?.empId : null;
 
+    const dualExtendedOnly = countBeyondPrimaryWithinExtended([
+      ...candidatesExtRaw,
+      ...candidatesAdvRaw,
+    ]);
+
     return (
       <div className="flex flex-col gap-2.5">
         <p className="text-xs text-slate-500 leading-snug">
@@ -1014,6 +1173,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             ? (timedOut ? '📞 Llamá a EXT y ADV — deben aceptar juntos' : 'Contacto telefónico · aceptación conjunta (sin push al portal)')
             : 'Seleccioná EXT (cierra cuando arranca la vacante) y ADV (próximo turno).'}
         </p>
+        {renderDistanceTierBanner(dualExtendedOnly, candidatesExt.length + candidatesAdv.length)}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col gap-1.5 bg-violet-50 border border-violet-200 rounded-xl p-2">
             <div className="text-[9px] font-black text-violet-700 uppercase tracking-wider border-b border-violet-200 pb-1.5 mb-0.5">⟵ 1ª mitad · EXT</div>
@@ -1098,6 +1258,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   </div>
                   <div className={`text-[10px] font-bold mt-0.5 ${c.knowsObjective ? 'text-indigo-600' : 'text-amber-600'}`}>
                     {c.knowsObjective ? `Conoce: ${c.knowledgeLabel}` : 'Sin historial en objetivo'}
+                  </div>
+                  <div className="mt-0.5">
+                    <CoverageDistanceLine geo={c as InternalCoverageCandidate & WithGeo} />
                   </div>
                   <div className="text-[11px] font-mono text-slate-500 mt-0.5">{phone}</div>
                 </div>
@@ -1223,7 +1386,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               : step.isDual
                 ? renderDual()
                 : step.key === 'INTERNO'
-                  ? internalCount === 0
+                  ? internalCountAllGeo === 0
                     ? (
                       <div className="flex flex-col items-center gap-3 py-8 text-center">
                         <Users size={36} className="text-slate-200" />
@@ -1235,8 +1398,20 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                         )}
                       </div>
                     )
+                    : internalCount === 0
+                      ? (
+                        <div>
+                          {renderDistanceTierBanner(internalExtendedOnlyCount, 0)}
+                          <div className="flex flex-col items-center gap-2 py-6 text-center text-xs text-slate-500">
+                            {distanceTierKm === COVERAGE_RADIUS_EXTENDED_KM
+                              ? `Ningún candidato interno dentro de ${COVERAGE_RADIUS_EXTENDED_KM} km.`
+                              : 'Ampliá el radio o pasá a Ext + Adel.'}
+                          </div>
+                        </div>
+                      )
                     : (
                       <div>
+                        {renderDistanceTierBanner(internalExtendedOnlyCount, internalCount)}
                         {internalCount > 6 && (
                           <div className="relative mb-2">
                             <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
@@ -1254,16 +1429,28 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                         {renderInternalBlock('ESC — escuela', 'text-sky-700', internalFiltered.esc)}
                       </div>
                     )
-                  : step.key === 'FT' && ftFiltered.length === 0
+                  : step.key === 'FT' && ftCandidatesRaw.length === 0
                     ? (
                       <div className="flex flex-col items-center gap-3 py-8 text-center">
                         <Users size={36} className="text-slate-200" />
                         <div className="text-sm font-bold text-slate-400">Sin francos disponibles</div>
                       </div>
                     )
+                    : step.key === 'FT' && ftFiltered.length === 0
+                      ? (
+                        <div>
+                          {renderDistanceTierBanner(ftExtendedOnlyCount, 0)}
+                          <div className="py-6 text-center text-xs text-slate-500">
+                            {distanceTierKm === COVERAGE_RADIUS_EXTENDED_KM
+                              ? `Sin francos dentro de ${COVERAGE_RADIUS_EXTENDED_KM} km del objetivo.`
+                              : 'No hay francos a ≤15 km — ampliá el radio si corresponde.'}
+                          </div>
+                        </div>
+                      )
                     : step.key === 'FT'
                       ? (
                         <div className="flex flex-col gap-2">
+                          {renderDistanceTierBanner(ftExtendedOnlyCount, ftFiltered.length)}
                           {ftFiltered.map((c: any) => {
                             const empId = c.employeeId || c.id;
                             const name = c.fullName || c.employeeName || '—';
@@ -1274,7 +1461,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                                 <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black">{initials(name)}</div>
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-bold truncate">{name}</div>
-                                  <div className="text-[11px] font-mono text-slate-500">{phone}</div>
+                                  <CoverageDistanceLine geo={c as WithGeo} />
+                                  <div className="text-[11px] font-mono text-slate-500 mt-0.5">{phone}</div>
                                 </div>
                                 <button
                                   onClick={() => void sendNotification({
