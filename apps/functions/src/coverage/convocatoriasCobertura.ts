@@ -867,6 +867,7 @@ export const crearConvocatoriaCobertura = functions
       empresaId,
       advanceShiftId,
       extendShiftId,
+      ftShiftId,
     } = data as {
       shiftId: string;
       candidateEmployeeId: string;
@@ -874,6 +875,7 @@ export const crearConvocatoriaCobertura = functions
       empresaId: string;
       advanceShiftId?: string;
       extendShiftId?: string;
+      ftShiftId?: string;
     };
 
     if (!shiftId || !candidateEmployeeId || !type || !empresaId) {
@@ -941,6 +943,7 @@ export const crearConvocatoriaCobertura = functions
       candidateUid: uid || undefined,
       ...(advanceShiftId ? { advanceShiftId } : {}),
       ...(extendShiftId ? { extendShiftId } : {}),
+      ...(ftShiftId ? { ftShiftId } : {}),
       createdBy: context.auth.uid,
       createdByName: callerName,
     });

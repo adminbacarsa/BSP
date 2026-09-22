@@ -39,6 +39,10 @@ import {
   type InternalCoverageKind,
 } from '@/lib/operaciones/coverageInternalCandidates';
 import { applyAutoRetentionForGap } from '@/lib/operaciones/coverageRetention';
+import {
+  convocatoriaTypeForInternalKind,
+  invokeCrearConvocatoriaCobertura,
+} from '@/lib/operaciones/opsConvocatoriaCobertura';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
@@ -50,6 +54,8 @@ export interface PendingSlot {
   sec: number;
   shiftId?: string;
   coverageKind?: InternalCoverageKind;
+  /** Convocatoria en app guardia (reemplaza user_notifications). */
+  convocatoriaId?: string;
 }
 
 export type SessionStatus = 'SELECTING' | 'PENDING' | 'PENDING_DUAL' | 'CONFIRMED' | 'FAILED';
@@ -428,23 +434,29 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     : ftCandidates;
 
   // ── Acciones ────────────────────────────────────────────────────────────────
-  const listenNotif = (notifId: string, role: 'single' | 'ext' | 'adv') => {
-    if (unsubRefs[`${s.id}_${role}`]) unsubRefs[`${s.id}_${role}`]();
+  const listenConvocatoria = (convocatoriaId: string, role: 'single' | 'ext' | 'adv') => {
+    const key = `${s.id}_${role}`;
+    if (unsubRefs[key]) unsubRefs[key]();
     let handled = false;
-    unsubRefs[`${s.id}_${role}`] = onSnapshot(doc(db, 'user_notifications', notifId), snap => {
+    unsubRefs[key] = onSnapshot(doc(db, 'convocatorias_cobertura', convocatoriaId), (snap) => {
       const data = snap.data();
       if (!data || handled) return;
-      if (data.response === 'ACCEPTED') {
+      const st = String(data.status || '');
+      if (st === 'ACCEPTED') {
         handled = true;
-        toast.info('El guardia aceptó — confirmando automáticamente');
-        if (role === 'single') void confirmCandidateRef.current();
-        else if (role === 'ext' || role === 'adv') void confirmDualTogetherRef.current();
-      } else if (data.response === 'REJECTED') {
+        toast.success('El guardia aceptó en la app — cobertura registrada');
+        if (role === 'single') {
+          onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
+          setTimeout(onClose, 2000);
+        } else if (role === 'ext' || role === 'adv') {
+          void confirmDualTogetherRef.current();
+        }
+      } else if (st === 'REJECTED' || st === 'TIMEOUT' || st === 'CANCELLED') {
         handled = true;
+        toast.info(st === 'REJECTED' ? 'El guardia rechazó la convocatoria' : 'Convocatoria cerrada sin aceptación');
         if (role === 'single') onUpd({ pending: null, awaitingPhone: false, status: 'SELECTING' });
         else if (role === 'ext') onUpd({ pendingExt: null });
         else onUpd({ pendingAdv: null });
-        toast.info('El guardia rechazó la notificación');
       }
     });
   };
@@ -453,28 +465,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     const internal = cand as InternalCoverageCandidate;
     const empId = String(internal.employeeId || (cand as any).employeeId || (cand as any).id || '').trim();
     const coverageKind = internal.coverageKind as InternalCoverageKind | undefined;
-    const kindLabel = coverageKind || step.key;
     setLoading('notif_' + empId);
     try {
-      const ref = await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-        employeeId: empId,
-        userId: empId,
-        type: 'CONVOCATORIA_COBERTURA',
-        title: `Cobertura ${kindLabel} · ${absenceShift.objectiveName || 'objetivo'}`,
-        body: `Cubrir ${hiStart}–${hiEnd} en ${[absenceShift.positionName, absenceShift.objectiveName].filter(Boolean).join(' · ')}.`,
-        objectiveId: absenceShift.objectiveId,
-        objectiveName: absenceShift.objectiveName || null,
-        positionName: absenceShift.positionName || null,
-        clientId: absenceShift.clientId || null,
-        clientName: absenceShift.clientName || null,
-        shiftCode: absenceShift.code || null,
-        shiftId: absenceShift.id || null,
-        startTime: absenceShift.shiftDateObj || null,
-        endTime: absenceEnd || null,
-        protocolStep: coverageKind || step.key,
-        read: false,
-        createdAt: serverTimestamp(),
-      }, tid));
       const turnoId =
         internal.id && String(internal.id) !== empId
           ? String(internal.id)
@@ -486,18 +478,35 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             logic.rawShifts,
             coverageKind,
           )?.id;
+
+      let callableType: 'RET' | 'FT' = 'RET';
+      if (step.key === 'FT') callableType = 'FT';
+      else if (step.key === 'INTERNO' && coverageKind) {
+        callableType = convocatoriaTypeForInternalKind(coverageKind);
+      }
+
+      const { convocatoriaId, shiftId: titularShiftId } = await invokeCrearConvocatoriaCobertura({
+        absenceShift,
+        candidateEmployeeId: empId,
+        type: callableType,
+        empresaId: tid,
+        ...(callableType === 'FT' && turnoId ? { ftShiftId: turnoId } : {}),
+      });
+
       onUpd({
         status: 'PENDING',
         pending: {
-          notifId: ref.id,
+          notifId: convocatoriaId,
+          convocatoriaId,
           empId,
           sec: step.timeoutSec,
-          shiftId: turnoId || undefined,
+          shiftId: turnoId || titularShiftId,
           coverageKind,
         },
         awaitingPhone: false,
       });
-      listenNotif(ref.id, 'single');
+      listenConvocatoria(convocatoriaId, 'single');
+      toast.success('Convocatoria enviada a la app del guardia');
     } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
     finally { setLoading(null); }
   };
@@ -884,7 +893,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           </div>
         </div>
         <div className={`text-xs font-semibold text-center leading-snug ${timedOut ? 'text-red-600' : 'text-slate-500'}`}>
-          {timedOut ? 'Sin respuesta — llamar directamente' : 'Notificación enviada · esperando respuesta'}
+          {timedOut
+            ? 'Sin respuesta en app — llamar directamente'
+            : s.pending?.convocatoriaId
+              ? 'Convocatoria en app · esperando Acepto/Rechazo'
+              : 'Notificación enviada · esperando respuesta'}
         </div>
 
         {/* Tarjeta del candidato */}
@@ -906,10 +919,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
         {/* Acciones */}
         <div className="w-full flex flex-col gap-2">
-          <button onClick={confirmCandidate} disabled={!!loading}
+          {(timedOut || !s.pending?.convocatoriaId) && (
+          <button onClick={() => void confirmCandidate()} disabled={!!loading}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-2xl text-sm transition-colors shadow-sm">
-            {loading === 'confirm' ? '...' : timedOut ? '✓ Acepta por teléfono' : '✓ Acepta'}
+            {loading === 'confirm' ? '...' : timedOut ? '✓ Acepta por teléfono (manual)' : '✓ Acepta'}
           </button>
+          )}
           <button onClick={rejectCandidate}
             className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-2xl text-sm transition-colors">
             {timedOut ? '✗ No contesta / No puede' : '✗ Rechaza'} — siguiente
