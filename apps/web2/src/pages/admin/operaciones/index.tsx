@@ -63,6 +63,7 @@ import {
     CoverageSessionManager,
     type CoverageSession,
     createSession,
+    bootstrapCoverageSession,
 } from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -2744,19 +2745,27 @@ export default function OperacionesPage() {
     // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
     const [interruptData, setInterruptData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
-    /** Protocolo CCT (mismo panel que map-view): Sin turno → RET → ESC/REF → Ext+ADV → FT. */
+    /** Protocolo: retención auto → RET/REF/ESC → Ext+ADV → FT. */
     const [coverageSessions, setCoverageSessions] = useState<CoverageSession[]>([]);
     const [activeCoverageId, setActiveCoverageId] = useState<string | null>(null);
     const openCoverageProtocol = (shift: any) => {
         if (!shift) return;
+        const tid = String(shift.empresaId || empresaId || '').trim();
         setCoverageSessions((prev) => {
             const existing = prev.find((s) => s.absentShift?.id === shift?.id);
             if (existing) {
                 setActiveCoverageId(existing.id);
                 return prev.map((s) => (s.id === existing.id ? { ...s, minimized: false } : s));
             }
-            const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
+            const newSess = createSession(shift, tid);
             setActiveCoverageId(newSess.id);
+            void bootstrapCoverageSession(shift, logic.processedData || [], tid).then((patch) => {
+                if (patch.retentionEmployeeName || patch.autoRetentionApplied) {
+                    setCoverageSessions((p) =>
+                        p.map((s) => (s.id === newSess.id ? { ...s, ...patch } : s)),
+                    );
+                }
+            });
             return [...prev, newSess];
         });
     };

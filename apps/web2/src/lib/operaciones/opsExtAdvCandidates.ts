@@ -1,5 +1,3 @@
-import { opsPositionMatches } from '@/lib/operaciones/opsDualCoverageApply';
-
 const EXT_JOIN_TOLERANCE_MS = 20 * 60 * 1000;
 
 const toDate = (d: unknown): Date => {
@@ -47,7 +45,6 @@ export function listOpsExtCandidatesForVacancy(
   const rows = (processedData || []).filter((sh: any) => {
     if (!sh.isPresent || sh.isCompleted || sh.isAbsent) return false;
     if (sh.objectiveId !== absenceShift.objectiveId) return false;
-    if (!opsPositionMatches(sh.positionName, absenceShift.positionName)) return false;
     if (sh.id === absenceShift.id) return false;
     if (crossSessionBusy.has(sh.employeeId)) return false;
     if (sh.isVirtual === true) return false;
@@ -67,7 +64,7 @@ export function listOpsExtCandidatesForVacancy(
   );
 }
 
-/** ADV: próximo turno planificado en el mismo puesto (hasta 12 h), aún no iniciado. */
+/** ADV: próximo turno en el mismo objetivo (hasta 12 h), aún no iniciado — puede ser otro puesto. */
 export function listOpsAdvCandidatesForVacancy(
   processedData: any[],
   absenceShift: any,
@@ -85,7 +82,6 @@ export function listOpsAdvCandidatesForVacancy(
         && !sh.isUnassigned
         && !sh.isFranco
         && sh.objectiveId === absenceShift.objectiveId
-        && opsPositionMatches(sh.positionName, absenceShift.positionName)
         && !crossSessionBusy.has(sh.employeeId)
         && shStart > now
         && shStart <= advWindowEnd

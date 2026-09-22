@@ -24,10 +24,7 @@ import {
   supersedeOpsCoveragesForAbsence,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
-import {
-  buildEmployeesAssignedToday,
-  collectFrancoShiftRowsToday,
-} from '@/lib/operaciones/coverageAssignedToday';
+import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
 import {
   buildOpsDualCoverageTurnoPatches,
   opsPositionMatches,
@@ -36,12 +33,24 @@ import {
   listOpsAdvCandidatesForVacancy,
   listOpsExtCandidatesForVacancy,
 } from '@/lib/operaciones/opsExtAdvCandidates';
+import {
+  buildInternalCoverageCandidates,
+  type InternalCoverageCandidate,
+  type InternalCoverageKind,
+} from '@/lib/operaciones/coverageInternalCandidates';
+import { applyAutoRetentionForGap } from '@/lib/operaciones/coverageRetention';
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type StepKey = 'SIN_TURNO' | 'RET_PASIVO' | 'ESC' | 'RETENCION' | 'FT';
+export type StepKey = 'INTERNO' | 'RETENCION' | 'FT';
 
-export interface PendingSlot { notifId: string; empId: string; sec: number; shiftId?: string; }
+export interface PendingSlot {
+  notifId: string;
+  empId: string;
+  sec: number;
+  shiftId?: string;
+  coverageKind?: InternalCoverageKind;
+}
 
 export type SessionStatus = 'SELECTING' | 'PENDING' | 'PENDING_DUAL' | 'CONFIRMED' | 'FAILED';
 
@@ -60,6 +69,9 @@ export interface CoverageSession {
   selectedExtId: string | null;
   selectedAdvId: string | null;
   minimized: boolean;
+  retentionShiftId?: string | null;
+  retentionEmployeeName?: string | null;
+  autoRetentionApplied?: boolean;
 }
 
 export type SessionAction =
@@ -81,11 +93,9 @@ export type SessionAction =
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
 const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }[] = [
-  { key: 'SIN_TURNO',  label: 'Sin turno',       icon: '1', mandatory: true,  timeoutSec: 60,  desc: 'Sin ninguna asignación hoy (ni turno ni franco)' },
-  { key: 'RET_PASIVO', label: 'Ret. Pasiva',      icon: '2', mandatory: true,  timeoutSec: 180, desc: 'Empleados en stand-by (código RET)' },
-  { key: 'ESC',        label: 'ESC / REF',        icon: '3', mandatory: true,  timeoutSec: 60,  desc: 'Empleados en escuela o refuerzo redirigibles' },
-  { key: 'RETENCION',  label: 'Ext. 12h',         icon: '4', mandatory: false, timeoutSec: 60,  isDual: true, desc: 'Extender turno actual (EXT) + adelantar próximo (ADV)' },
-  { key: 'FT',         label: 'Franco Trabajado', icon: '5', mandatory: false, timeoutSec: 180, desc: 'Empleados con franco planificado hoy' },
+  { key: 'INTERNO', label: 'RET · REF · ESC', icon: '1', mandatory: true, timeoutSec: 180, desc: 'Plantel del objetivo — prioridad RET, luego REF y ESC' },
+  { key: 'RETENCION', label: 'Ext + Adel', icon: '2', mandatory: false, timeoutSec: 60, isDual: true, desc: 'Extensión + adelanto (costo extra). Solo gente del objetivo' },
+  { key: 'FT', label: 'Franco Trabajado', icon: '3', mandatory: false, timeoutSec: 180, desc: 'Último recurso' },
 ];
 
 const BAND_LABEL: Record<string, string> = {
@@ -104,45 +114,13 @@ const simPhone = (id: string) => { const n = parseInt(id.replace(/\D/g, '')) || 
 const initials = (name: string) => (name || '?').split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase();
 const normBandCode = (c: unknown) => String(c || '').trim().toUpperCase();
 
-/** Una fila por empleado (evita duplicados ESC/REF del mismo guardia). */
-const dedupeShiftsByEmployee = (rows: any[]): any[] => {
-  const byEmp = new Map<string, any>();
-  for (const sh of rows) {
-    const eid = String(sh.employeeId || '').trim();
-    if (!eid) continue;
-    const prev = byEmp.get(eid);
-    if (!prev) {
-      byEmp.set(eid, sh);
-      continue;
-    }
-    const prefer = (a: any, b: any) => {
-      if (a.isPresent && !a.isCompleted && !(b.isPresent && !b.isCompleted)) return a;
-      if (b.isPresent && !b.isCompleted && !(a.isPresent && !a.isCompleted)) return b;
-      if (!a.isVirtual && b.isVirtual) return a;
-      if (a.isVirtual && !b.isVirtual) return b;
-      return a;
-    };
-    byEmp.set(eid, prefer(prev, sh));
-  }
-  return [...byEmp.values()];
-};
-
-const escRefBandMatchesVacancy = (escShift: any, vacancyCode: string, now: Date): boolean => {
-  if (escShift.isPresent && !escShift.isCompleted) return true;
-  const vac = normBandCode(vacancyCode);
-  const escBand = normBandCode(escShift.deploymentBand || escShift.coversBandCode || '');
-  if (vac && escBand && vac === escBand) return true;
-  const end = toDate(escShift.endDateObj);
-  if (end.getTime() <= now.getTime() && vac && escBand && vac === escBand) return true;
-  return false;
-};
-
 const resolveCoverageShiftForEmployee = (
   processedData: any[],
   employeeId: string,
   stepKey: StepKey,
   now: Date,
   rawShifts?: any[],
+  internalKind?: InternalCoverageKind,
 ): any | null => {
   const eid = String(employeeId || '').trim();
   if (!eid) return null;
@@ -153,17 +131,41 @@ const resolveCoverageShiftForEmployee = (
   const todayRows = (processedData || []).filter(
     (sh: any) => String(sh.employeeId || '').trim() === eid && isSameDay(sh.shiftDateObj, now),
   );
-  if (stepKey === 'RET_PASIVO') {
-    return todayRows.find((sh: any) => normBandCode(sh.code) === 'RET' && !sh.isAbsent && sh.isVirtual !== true) || null;
-  }
-  if (stepKey === 'ESC') {
-    return todayRows.find((sh: any) => {
-      const code = normBandCode(sh.code);
-      return (code === 'ESC' || code === 'REF') && !sh.isAbsent && sh.isVirtual !== true;
-    }) || null;
+  if (stepKey === 'INTERNO' && internalKind) {
+    return (
+      todayRows.find((sh: any) => normBandCode(sh.code) === internalKind && !sh.isAbsent && sh.isVirtual !== true)
+      || null
+    );
   }
   return null;
 };
+
+/** Retención automática + metadatos en sesión al abrir protocolo. */
+export async function bootstrapCoverageSession(
+  absentShift: any,
+  processedData: unknown[],
+  empresaId: string,
+): Promise<Partial<CoverageSession>> {
+  const tid = String(empresaId || absentShift?.empresaId || '').trim();
+  if (!tid || !absentShift) return {};
+  try {
+    const result = await applyAutoRetentionForGap(db, absentShift, processedData, tid);
+    if (result.pick) {
+      if (result.applied) {
+        toast.info(`${result.pick.employeeName} retenido en puesto (último en fichar)`);
+      }
+      return {
+        retentionShiftId: result.pick.shiftId,
+        retentionEmployeeName: result.pick.employeeName,
+        autoRetentionApplied: result.applied,
+      };
+    }
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    toast.error('No se pudo aplicar retención automática: ' + msg);
+  }
+  return {};
+}
 
 export function createSession(absentShift: any, empresaId: string): CoverageSession {
   return {
@@ -181,6 +183,9 @@ export function createSession(absentShift: any, empresaId: string): CoverageSess
     selectedExtId: null,
     selectedAdvId: null,
     minimized: false,
+    retentionShiftId: null,
+    retentionEmployeeName: null,
+    autoRetentionApplied: false,
   };
 }
 
@@ -369,89 +374,26 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       ].filter(Boolean) as string[])
   );
 
-  /**
-   * Sin turno = sin NINGUNA celda de malla hoy (ni M/T/N, ni F/FF/FP, ni RET/ESC/REF, ni V/L…).
-   * Los de franco van al paso FT, no acá.
-   */
-  const assignedAnyTodayIds = buildEmployeesAssignedToday(
-    logic.rawShifts,
-    logic.processedData,
+  const internalGroups = buildInternalCoverageCandidates(
+    logic.processedData || [],
+    logic.employees || [],
+    absenceShift,
     now,
+    crossSessionBusy,
   );
 
-  // Empleados con afinidad al objetivo ausente (trabajaron allí hoy o tienen turno allí)
-  const objectiveAffinity = new Set<string>(
-    (logic.processedData || [])
-      .filter((sh: any) => sh.objectiveId === absenceShift.objectiveId)
-      .map((sh: any) => sh.employeeId)
-  );
-
-  const byKey = (key: StepKey): any[] => {
-    switch (key) {
-      case 'SIN_TURNO':
-        return (logic.employees || [])
-          .filter((e: any) => {
-            const id = String(e.id || '').trim();
-            if (!id || id === absenceShift.employeeId) return false;
-            if (assignedAnyTodayIds.has(id)) return false;
-            if (crossSessionBusy.has(id)) return false;
-            return true;
-          })
-          .map((e: any) => ({
-            ...e,
-            fullName: e.firstName ? `${e.firstName} ${e.lastName || ''}`.trim() : e.name || e.fullName || '',
-            phone: e.phone || e.celular || '',
-            hasAffinity: objectiveAffinity.has(e.id),
-          }))
-          .sort((a: any, b: any) => (b.hasAffinity ? 1 : 0) - (a.hasAffinity ? 1 : 0));
-      case 'RET_PASIVO':
-        return dedupeShiftsByEmployee(
-          (logic.processedData || []).filter((sh: any) =>
-            normBandCode(sh.code) === 'RET'
-            && isSameDay(sh.shiftDateObj, now)
-            && !sh.isAbsent
-            && sh.employeeId !== absenceShift.employeeId
-            && !crossSessionBusy.has(sh.employeeId)
-            && sh.isVirtual !== true,
-          ),
-        ).map((sh: any) => ({
+  const ftCandidates = step.key === 'FT'
+    ? collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
+      .filter((sh: any) => !crossSessionBusy.has(sh.employeeId))
+      .map((sh: any) => {
+        const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
+        return {
           ...sh,
-          fullName: sh.employeeName,
-          hasAffinity: objectiveAffinity.has(sh.employeeId),
-        }));
-      case 'ESC':
-        return dedupeShiftsByEmployee(
-          (logic.processedData || []).filter((sh: any) => {
-            const code = normBandCode(sh.code);
-            if (code !== 'ESC' && code !== 'REF') return false;
-            if (!isSameDay(sh.shiftDateObj, now)) return false;
-            if (sh.isAbsent) return false;
-            if (sh.employeeId === absenceShift.employeeId) return false;
-            if (crossSessionBusy.has(sh.employeeId)) return false;
-            if (sh.isVirtual === true) return false;
-            return escRefBandMatchesVacancy(sh, bandCode, now);
-          }),
-        ).map((sh: any) => ({
-          ...sh,
-          fullName: sh.employeeName,
-          hasAffinity: objectiveAffinity.has(sh.employeeId),
-        }));
-      case 'RETENCION':
-        return [];
-      case 'FT':
-        return collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
-          .filter((sh: any) => !crossSessionBusy.has(sh.employeeId))
-          .map((sh: any) => {
-            const emp = (logic.employees || []).find((e: any) => e.id === sh.employeeId);
-            return {
-              ...sh,
-              fullName: sh.employeeName || emp?.fullName || emp?.name || '',
-              phone: sh.phone || emp?.phone || emp?.celular || '',
-              hasAffinity: objectiveAffinity.has(sh.employeeId),
-            };
-          });
-    }
-  };
+          fullName: sh.employeeName || emp?.fullName || emp?.name || '',
+          phone: sh.phone || emp?.phone || emp?.celular || '',
+        };
+      })
+    : [];
 
   const candidatesExt = listOpsExtCandidatesForVacancy(
     logic.processedData || [],
@@ -466,13 +408,24 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     crossSessionBusy,
   );
 
-  const allCandidates = byKey(step.key);
-  const candidates = search.trim()
-    ? allCandidates.filter((c: any) => {
-        const name = (c.fullName || c.employeeName || c.name || '').toLowerCase();
-        return name.includes(search.trim().toLowerCase());
-      })
-    : allCandidates;
+  const filterInternal = (list: InternalCoverageCandidate[]) => {
+    if (!search.trim()) return list;
+    const q = search.trim().toLowerCase();
+    return list.filter((c) => c.fullName.toLowerCase().includes(q));
+  };
+
+  const internalFiltered = {
+    ret: filterInternal(internalGroups.ret),
+    ref: filterInternal(internalGroups.ref),
+    esc: filterInternal(internalGroups.esc),
+  };
+  const internalCount =
+    internalGroups.ret.length + internalGroups.ref.length + internalGroups.esc.length;
+
+  const ftFiltered = search.trim()
+    ? ftCandidates.filter((c: any) =>
+      (c.fullName || c.employeeName || '').toLowerCase().includes(search.trim().toLowerCase()))
+    : ftCandidates;
 
   // ── Acciones ────────────────────────────────────────────────────────────────
   const listenNotif = (notifId: string, role: 'single' | 'ext' | 'adv') => {
@@ -496,16 +449,19 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     });
   };
 
-  const sendNotification = async (cand: any) => {
-    const empId = cand.employeeId || cand.id;
+  const sendNotification = async (cand: InternalCoverageCandidate | Record<string, unknown>) => {
+    const internal = cand as InternalCoverageCandidate;
+    const empId = String(internal.employeeId || (cand as any).employeeId || (cand as any).id || '').trim();
+    const coverageKind = internal.coverageKind as InternalCoverageKind | undefined;
+    const kindLabel = coverageKind || step.key;
     setLoading('notif_' + empId);
     try {
       const ref = await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
         employeeId: empId,
-        userId: empId,   // legacy compat
+        userId: empId,
         type: 'CONVOCATORIA_COBERTURA',
-        title: `Protocolo de cobertura · ${step.label}`,
-        body: `Se te solicita cubrir ${absenceShift.code || 'turno'} en ${[absenceShift.clientName, absenceShift.objectiveName, absenceShift.positionName].filter(Boolean).join(' · ') || 'el puesto'} (${hiStart}–${hiEnd}).`,
+        title: `Cobertura ${kindLabel} · ${absenceShift.objectiveName || 'objetivo'}`,
+        body: `Cubrir ${hiStart}–${hiEnd} en ${[absenceShift.positionName, absenceShift.objectiveName].filter(Boolean).join(' · ')}.`,
         objectiveId: absenceShift.objectiveId,
         objectiveName: absenceShift.objectiveName || null,
         positionName: absenceShift.positionName || null,
@@ -515,17 +471,30 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         shiftId: absenceShift.id || null,
         startTime: absenceShift.shiftDateObj || null,
         endTime: absenceEnd || null,
-        protocolStep: step.key,
+        protocolStep: coverageKind || step.key,
         read: false,
         createdAt: serverTimestamp(),
       }, tid));
       const turnoId =
-        cand.id && String(cand.id) !== String(empId)
-          ? String(cand.id)
-          : resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts)?.id;
+        internal.id && String(internal.id) !== empId
+          ? String(internal.id)
+          : resolveCoverageShiftForEmployee(
+            logic.processedData || [],
+            empId,
+            step.key,
+            now,
+            logic.rawShifts,
+            coverageKind,
+          )?.id;
       onUpd({
         status: 'PENDING',
-        pending: { notifId: ref.id, empId, sec: step.timeoutSec, shiftId: turnoId || undefined },
+        pending: {
+          notifId: ref.id,
+          empId,
+          sec: step.timeoutSec,
+          shiftId: turnoId || undefined,
+          coverageKind,
+        },
         awaitingPhone: false,
       });
       listenNotif(ref.id, 'single');
@@ -540,7 +509,14 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       (s.pending.shiftId
         ? (logic.processedData || []).find((sh: any) => sh.id === s.pending!.shiftId)
         : null)
-      || resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts);
+      || resolveCoverageShiftForEmployee(
+        logic.processedData || [],
+        empId,
+        step.key,
+        now,
+        logic.rawShifts,
+        s.pending?.coverageKind,
+      );
     const empRow = (logic.employees || []).find((e: any) => e.id === empId);
     const cand = coverageShift || empRow || (logic.processedData || []).find((sh: any) => sh.employeeId === empId);
     if (!cand) return;
@@ -576,24 +552,26 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         || (empRow ? `${empRow.firstName || ''} ${empRow.lastName || ''}`.trim() : '')
         || 'Guardia';
 
-      let shiftId: string | null = null;
-      if (step.key === 'SIN_TURNO') {
-        shiftId = null;
-      } else {
-        shiftId = String(s.pending.shiftId || coverageShift?.id || '').trim() || null;
-        if (!shiftId || shiftId === empId) {
-          const resolved = resolveCoverageShiftForEmployee(logic.processedData || [], empId, step.key, now, logic.rawShifts);
-          shiftId = resolved?.id ? String(resolved.id) : null;
-        }
-        if (!shiftId) {
-          toast.error('No se encontró el turno de hoy del guardia en la malla. Recargá operaciones.');
-          return;
-        }
-        const turnoSnap = await getDoc(doc(db, 'turnos', shiftId));
-        if (!turnoSnap.exists()) {
-          toast.error('El turno del guardia ya no existe en Firestore. Recargá operaciones e intentá de nuevo.');
-          return;
-        }
+      let shiftId: string | null = String(s.pending.shiftId || coverageShift?.id || '').trim() || null;
+      if (!shiftId || shiftId === empId) {
+        const resolved = resolveCoverageShiftForEmployee(
+          logic.processedData || [],
+          empId,
+          step.key,
+          now,
+          logic.rawShifts,
+          s.pending.coverageKind,
+        );
+        shiftId = resolved?.id ? String(resolved.id) : null;
+      }
+      if (!shiftId) {
+        toast.error('No se encontró el turno de hoy del guardia en la malla. Recargá operaciones.');
+        return;
+      }
+      const turnoSnap = await getDoc(doc(db, 'turnos', shiftId));
+      if (!turnoSnap.exists()) {
+        toast.error('El turno del guardia ya no existe en Firestore. Recargá operaciones e intentá de nuevo.');
+        return;
       }
       const linkFields = opsCoverageLinkFields(
         {
@@ -616,10 +594,14 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         );
       };
 
-      if (step.key === 'SIN_TURNO') {
-        const newRef = doc(collection(db, 'turnos'));
-        batch.set(newRef, stampEmpresaId({ employeeId: empId, employeeName: displayName, clientId: absenceShift.clientId, clientName: absenceShift.clientName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, positionName: absenceShift.positionName, code: absenceShift.code || 'T', startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)), endTime: Timestamp.fromDate(absenceEnd), status: 'PENDING', origin: 'OPERATIONS_COVERAGE', resolvedBy: 'OPERACIONES', ...linkFields, createdAt: serverTimestamp() }, tid));
-        markCovered('SIN_TURNO');
+      if (step.key === 'INTERNO') {
+        const ct = s.pending.coverageKind || 'RET';
+        batch.update(doc(db, 'turnos', shiftId!), {
+          coverageRedirectedTo: absenceShift.objectiveId,
+          coverageRedirectedAt: serverTimestamp(),
+          resolvedBy: 'OPERACIONES',
+        });
+        markCovered(ct);
         if (absenceShift.id) {
           await syncAusenciaCoberturaGestionada(
             db,
@@ -627,32 +609,26 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               shiftId: absenceShift.id,
               coveredByEmployeeId: empId,
               coveredByEmployeeName: displayName,
-              coverageType: 'SIN_TURNO',
+              coverageType: ct,
               empresaId: tid || null,
             },
             batch,
           );
         }
         await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'COBERTURA_ASIGNADA', title: 'Cobertura asignada', status: 'pending', employeeId: empId, employeeName: displayName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId: newRef.id, description: `${displayName} asignado a cubrir vacante en ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
-      } else if (step.key === 'RET_PASIVO' || step.key === 'ESC') {
-        batch.update(doc(db, 'turnos', shiftId!), { coverageRedirectedTo: absenceShift.objectiveId, coverageRedirectedAt: serverTimestamp(), resolvedBy: 'OPERACIONES' });
-        markCovered(step.key);
-        if (absenceShift.id) {
-          await syncAusenciaCoberturaGestionada(
-            db,
-            {
-              shiftId: absenceShift.id,
-              coveredByEmployeeId: empId,
-              coveredByEmployeeName: displayName,
-              coverageType: step.key,
-              empresaId: tid || null,
-            },
-            batch,
-          );
-        }
-        await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'CONVOCATORIA_COBERTURA', title: `Cobertura ${step.label}`, status: 'pending', employeeId: empId, employeeName: displayName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId, description: `${displayName} redirigido a cobertura en ${absenceShift.objectiveName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'CONVOCATORIA_COBERTURA',
+          title: `Cobertura ${ct}`,
+          status: 'pending',
+          employeeId: empId,
+          employeeName: displayName,
+          objectiveId: absenceShift.objectiveId,
+          objectiveName: absenceShift.objectiveName,
+          shiftId,
+          description: `${displayName} (${ct}) convocado a cubrir ${hiStart}–${hiEnd} en ${absenceShift.objectiveName}`,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+        }, tid));
       } else if (step.key === 'FT') {
         batch.update(doc(db, 'turnos', shiftId!), {
           isFranco: false,
@@ -1082,6 +1058,49 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     );
   };
 
+  const renderInternalBlock = (
+    title: string,
+    badgeClass: string,
+    list: InternalCoverageCandidate[],
+  ) => {
+    if (!list.length) return null;
+    return (
+      <div className="mb-3">
+        <div className={`text-[10px] font-black uppercase tracking-wide mb-1.5 px-1 ${badgeClass}`}>{title}</div>
+        <div className="flex flex-col gap-2">
+          {list.map((c) => {
+            const phone = c.phone || simPhone(c.employeeId);
+            const isNotifying = loading === 'notif_' + c.employeeId;
+            return (
+              <div key={`${c.coverageKind}_${c.id}`} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
+                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-[10px] font-black text-slate-600 shrink-0">
+                  {c.coverageKind}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold text-slate-800 truncate">{c.fullName}</div>
+                  <div className="text-[10px] text-slate-500 truncate">
+                    {c.positionName ? `${c.positionName} · ` : ''}{c.code}
+                  </div>
+                  <div className={`text-[10px] font-bold mt-0.5 ${c.knowsObjective ? 'text-indigo-600' : 'text-amber-600'}`}>
+                    {c.knowsObjective ? `Conoce: ${c.knowledgeLabel}` : 'Sin historial en objetivo'}
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-500 mt-0.5">{phone}</div>
+                </div>
+                <button
+                  onClick={() => void sendNotification(c)}
+                  disabled={!!loading || s.status !== 'SELECTING'}
+                  className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold rounded-xl whitespace-nowrap transition-colors shrink-0"
+                >
+                  {isNotifying ? '⏳' : 'Convocar'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
   // ─── Panel layout ──────────────────────────────────────────────────────────
   return (
     <div className="fixed bottom-10 right-4 z-[9000] w-[420px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 5rem)' }}>
@@ -1135,6 +1154,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-3.5">
+        {s.retentionEmployeeName && (
+          <div className="mb-3 p-3 rounded-xl border border-orange-200 bg-orange-50 text-orange-900">
+            <div className="text-[9px] font-black uppercase tracking-wide text-orange-700">Retención en puesto</div>
+            <div className="text-sm font-bold mt-0.5">{s.retentionEmployeeName}</div>
+            <div className="text-[10px] text-orange-800/80 mt-0.5">Último en fichar · sostiene el puesto hasta cobertura</div>
+          </div>
+        )}
         {s.status === 'CONFIRMED' && (
           <div className="flex flex-col items-center gap-3 py-8">
             <CheckCircle size={48} className="text-emerald-500" />
@@ -1159,6 +1185,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                 <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Paso {s.currentStep + 1} de {STEPS.length}</div>
                 <div className="text-base font-black text-slate-800 leading-tight mt-0.5">{step.label}</div>
                 <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{step.desc}</div>
+                {step.key === 'RETENCION' && (
+                  <div className="inline-flex items-center gap-1 mt-1 text-[9px] font-black text-violet-700 bg-violet-50 border border-violet-200 rounded-full px-2 py-0.5">
+                    Costo extra · solo plantel del objetivo
+                  </div>
+                )}
                 {step.mandatory && (
                   <div className="inline-flex items-center gap-1 mt-1 text-[9px] font-black text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">
                     <Clock size={9} /> Obligatorio CCT
@@ -1176,80 +1207,81 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               ? renderPending()
               : step.isDual
                 ? renderDual()
-                : candidates.length === 0 && allCandidates.length === 0
-                  ? (
-                    <div className="flex flex-col items-center gap-3 py-8 text-center">
-                      <Users size={36} className="text-slate-200" />
-                      <div className="text-sm font-bold text-slate-400">Sin candidatos disponibles</div>
-                      <p className="text-xs text-slate-400 max-w-[200px]">No hay empleados que cumplan los criterios de este paso.</p>
-                      {s.currentStep < STEPS.length - 1 && (
-                        <button onClick={skipStep} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition-colors">
-                          <SkipForward size={13} /> Siguiente paso
-                        </button>
-                      )}
-                    </div>
-                  )
-                  : (
-                    <div className="flex flex-col gap-2">
-                      {/* Búsqueda — solo cuando hay más de 5 candidatos */}
-                      {step.key === 'SIN_TURNO' && allCandidates.length > 5 && (
-                        <div className="relative">
-                          <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                          <input
-                            type="text"
-                            placeholder={`Buscar entre ${allCandidates.length} candidatos...`}
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                            className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:border-indigo-400 focus:bg-white transition-colors"
-                          />
-                        </div>
-                      )}
-                      {/* Contador y aviso de afinidad */}
-                      {(step.key === 'SIN_TURNO' || step.key === 'FT' || step.key === 'RET_PASIVO' || step.key === 'ESC') && (
-                        <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                          <span className="font-bold">
-                            {candidates.length}{search ? ` de ${allCandidates.length}` : ''}
-                            {step.key === 'SIN_TURNO' ? ' sin ninguna asignación hoy' : ' candidatos'}
-                          </span>
-                          {allCandidates.some((c: any) => c.hasAffinity) && (
-                            <span className="text-indigo-500 font-bold">· 🎯 conoce el objetivo</span>
-                          )}
-                        </div>
-                      )}
-
-                      {/* Lista */}
-                      {candidates.length === 0 && search && (
-                        <div className="text-center py-4 text-xs text-slate-400">Sin resultados para "{search}"</div>
-                      )}
-                      {candidates.map((c: any) => {
-                        const empId = c.employeeId || c.id;
-                        const name = c.fullName || c.employeeName || c.name || '—';
-                        const phone = c.phone || c.celular || simPhone(empId);
-                        const isNotifying = loading === 'notif_' + empId;
-                        return (
-                          <div key={c.id || empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white hover:border-slate-300 transition-colors">
-                            <div className="relative shrink-0">
-                              <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black text-slate-600">{initials(name)}</div>
-                              {c.hasAffinity && (
-                                <div className="absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full bg-indigo-500 border-2 border-white flex items-center justify-center text-[8px]">🎯</div>
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="text-sm font-bold text-slate-800 truncate leading-tight">{name}</div>
-                              <div className="text-sm font-black font-mono text-slate-600 mt-0.5">📱 {phone}</div>
-                            </div>
-                            <button
-                              onClick={() => sendNotification(c)}
-                              disabled={!!loading || s.status !== 'SELECTING'}
-                              className="px-3 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 text-white text-xs font-bold rounded-xl whitespace-nowrap transition-colors shrink-0"
-                            >
-                              {isNotifying ? <span className="flex items-center gap-1">⏳</span> : 'Notificar'}
-                            </button>
+                : step.key === 'INTERNO'
+                  ? internalCount === 0
+                    ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <Users size={36} className="text-slate-200" />
+                        <div className="text-sm font-bold text-slate-400">Sin RET / REF / ESC en el objetivo</div>
+                        {s.currentStep < STEPS.length - 1 && (
+                          <button onClick={skipStep} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition-colors">
+                            <SkipForward size={13} /> Ext + Adel
+                          </button>
+                        )}
+                      </div>
+                    )
+                    : (
+                      <div>
+                        {internalCount > 6 && (
+                          <div className="relative mb-2">
+                            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                            <input
+                              type="text"
+                              placeholder="Buscar guardia..."
+                              value={search}
+                              onChange={(e) => setSearch(e.target.value)}
+                              className="w-full pl-8 pr-3 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50 focus:outline-none focus:border-indigo-400 focus:bg-white transition-colors"
+                            />
                           </div>
-                        );
-                      })}
-                    </div>
-                  )
+                        )}
+                        {renderInternalBlock('RET — stand-by (prioridad)', 'text-violet-700', internalFiltered.ret)}
+                        {renderInternalBlock('REF — refuerzo', 'text-emerald-700', internalFiltered.ref)}
+                        {renderInternalBlock('ESC — escuela', 'text-sky-700', internalFiltered.esc)}
+                      </div>
+                    )
+                  : step.key === 'FT' && ftFiltered.length === 0
+                    ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <Users size={36} className="text-slate-200" />
+                        <div className="text-sm font-bold text-slate-400">Sin francos disponibles</div>
+                      </div>
+                    )
+                    : step.key === 'FT'
+                      ? (
+                        <div className="flex flex-col gap-2">
+                          {ftFiltered.map((c: any) => {
+                            const empId = c.employeeId || c.id;
+                            const name = c.fullName || c.employeeName || '—';
+                            const phone = c.phone || simPhone(empId);
+                            const isNotifying = loading === 'notif_' + empId;
+                            return (
+                              <div key={c.id || empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white">
+                                <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black">{initials(name)}</div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="text-sm font-bold truncate">{name}</div>
+                                  <div className="text-[11px] font-mono text-slate-500">{phone}</div>
+                                </div>
+                                <button
+                                  onClick={() => void sendNotification({
+                                    employeeId: empId,
+                                    id: c.id,
+                                    fullName: name,
+                                    phone,
+                                    coverageKind: undefined,
+                                    code: 'FT',
+                                    shiftRow: c,
+                                  } as InternalCoverageCandidate)}
+                                  disabled={!!loading || s.status !== 'SELECTING'}
+                                  className="px-3 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl shrink-0"
+                                >
+                                  {isNotifying ? '⏳' : 'Convocar'}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )
+                      : null
             }
           </div>
         )}

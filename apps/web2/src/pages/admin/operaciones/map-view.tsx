@@ -40,7 +40,12 @@ import {
     isNovedadOutsideCcMonitorScope,
     COBERTURA_RESUELTA_META,
 } from '@/lib/operaciones/novedadAlertDisplay';
-import { CoverageSessionManager, CoverageSession, createSession } from '@/components/operaciones/CoverageSessionManager';
+import {
+  CoverageSessionManager,
+  CoverageSession,
+  createSession,
+  bootstrapCoverageSession,
+} from '@/components/operaciones/CoverageSessionManager';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-screen w-screen flex items-center justify-center bg-slate-900 text-slate-400 font-mono">CARGANDO MAPA TÁCTICO...</div>, ssr: false });
 
@@ -1301,9 +1306,15 @@ export default function TacticalMapView() {
     const openCoverageProtocol = (shift: any) => {
         const existing = coverageSessions.find(s => s.absentShift?.id === shift?.id);
         if (existing) { setActiveCoverageId(existing.id); setCoverageSessions(prev => prev.map(s => s.id === existing.id ? { ...s, minimized: false } : s)); return; }
-        const newSess = createSession(shift, String(shift.empresaId || empresaId || '').trim());
+        const tid = String(shift.empresaId || empresaId || '').trim();
+        const newSess = createSession(shift, tid);
         setCoverageSessions(prev => [...prev, newSess]);
         setActiveCoverageId(newSess.id);
+        void bootstrapCoverageSession(shift, logic.processedData || [], tid).then((patch) => {
+            if (patch.retentionEmployeeName || patch.autoRetentionApplied) {
+                setCoverageSessions((p) => p.map((s) => (s.id === newSess.id ? { ...s, ...patch } : s)));
+            }
+        });
     };
     const updateCoverageSession = (id: string, fn: (s: CoverageSession) => CoverageSession) => setCoverageSessions(prev => prev.map(s => s.id === id ? fn(s) : s));
     const closeCoverageSession = (id: string) => { setCoverageSessions(prev => prev.filter(s => s.id !== id)); setActiveCoverageId(prev => prev === id ? (coverageSessions.find(s => s.id !== id)?.id ?? null) : prev); };
