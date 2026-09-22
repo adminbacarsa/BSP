@@ -1,0 +1,617 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Control Directivo — Grupo Bacar · Agosto 2026</title>
+  <style>
+    :root {
+      --bg: #0f172a; --bg-2: #111827; --card: #1e293b; --stroke: #334155;
+      --text: #f1f5f9; --muted: #94a3b8; --indigo: #6366f1; --indigo-2: #818cf8;
+      --emerald: #34d399; --amber: #fbbf24; --rose: #fb7185; --sky: #38bdf8;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { background: var(--bg); color: var(--text); font-family: "Segoe UI", Inter, system-ui, sans-serif; min-height: 100%; }
+    body { padding: 28px 28px 64px; }
+    .wrap { max-width: 1400px; margin: 0 auto; }
+    .wrap.wide { max-width: 1680px; }
+    header.top {
+      background: linear-gradient(135deg, #1e293b 0%, #172554 100%);
+      border: 1px solid #334155; border-radius: 24px;
+      padding: 24px 28px; box-shadow: 0 12px 40px rgba(0,0,0,.35); margin-bottom: 18px;
+    }
+    .kicker { color: var(--indigo-2); font-size: 12px; letter-spacing: .18em; text-transform: uppercase; font-weight: 650; }
+    h1 { font-size: 32px; font-weight: 800; letter-spacing: -.04em; margin-top: 4px; background: linear-gradient(90deg, #f1f5f9, #a5b4fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    h2 { font-size: 18px; font-weight: 700; letter-spacing: -.02em; margin: 8px 0 12px; }
+    h3 { font-size: 13px; font-weight: 650; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; margin-bottom: 8px; }
+    .sub { color: var(--muted); font-size: 14px; line-height: 1.45; margin-top: 8px; max-width: 720px; }
+    .badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .badge {
+      font-size: 11px; font-weight: 600; padding: 4px 10px; border-radius: 999px;
+      background: rgba(99,102,241,.15); border: 1px solid rgba(99,102,241,.35); color: #c7d2fe;
+    }
+    .tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 18px; }
+    .tab {
+      border: 1px solid var(--stroke); background: rgba(15,23,42,.6); color: var(--muted);
+      border-radius: 999px; padding: 8px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
+    }
+    .tab:hover { background: #1e293b; color: var(--text); }
+    .tab.on { background: var(--indigo); color: #fff; border-color: var(--indigo); box-shadow: 0 4px 14px rgba(99,102,241,.4); }
+    .panel { display: none; }
+    .panel.on { display: block; }
+    .grid { display: grid; gap: 14px; }
+    .g4 { grid-template-columns: repeat(4, 1fr); }
+    .g5 { grid-template-columns: repeat(5, 1fr); }
+    .g3 { grid-template-columns: repeat(3, 1fr); }
+    .g2 { grid-template-columns: 1fr 1fr; }
+    .card {
+      background: var(--card); border: 1px solid var(--stroke); border-radius: 20px;
+      padding: 16px 18px; box-shadow: 0 8px 20px rgba(0,0,0,.18);
+    }
+    .stat .v { font-size: 26px; font-weight: 700; letter-spacing: -.03em; }
+    .stat .l { margin-top: 4px; font-size: 12px; color: var(--muted); line-height: 1.35; }
+    .stat.hero .v { font-size: 30px; }
+    .has-tip { position: relative; cursor: help; z-index: 1; }
+    .has-tip:hover, .has-tip:focus-within { z-index: 40; }
+    .tip-mark { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 6px; border-radius: 99px; border: 1px solid #64748b; color: #94a3b8; font-size: 10px; font-weight: 700; }
+    .tip { display: none; position: absolute; left: 10px; right: 10px; top: calc(100% + 8px); z-index: 50; background: #0b1220; border: 1px solid #6366f1; border-radius: 14px; padding: 10px 12px; font-size: 12px; line-height: 1.45; color: #e2e8f0; box-shadow: 0 12px 28px rgba(0,0,0,.45); }
+    .tip b { color: #a5b4fc; font-weight: 650; }
+    .has-tip:hover .tip, .has-tip:focus-within .tip { display: block; }
+    .warn { color: var(--amber); }
+    .danger { color: var(--rose); }
+    .ok { color: var(--emerald); }
+    .info { color: var(--sky); }
+    .callout { border-radius: 20px; padding: 14px 16px; font-size: 14px; line-height: 1.5; margin: 14px 0; }
+    .callout.info { background: #0b1c33; border: 1px solid #1e3a5f; color: #bfdbfe; }
+    .callout.warn { background: #1c1408; border: 1px solid #78350f; color: #fde68a; }
+    details.glosario { margin-bottom: 14px; }
+    details.glosario > summary { list-style: none; cursor: pointer; display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 700; user-select: none; }
+    details.glosario > summary::-webkit-details-marker { display: none; }
+    .glosario .lead { color: var(--muted); font-size: 13px; line-height: 1.5; margin: 12px 0; }
+    .hbar { display: grid; grid-template-columns: minmax(120px, 200px) 1fr 110px; gap: 8px; align-items: center; margin: 6px 0; font-size: 13px; }
+    .hbar .track { height: 12px; background: #0f172a; border-radius: 99px; overflow: hidden; }
+    .hbar .fill { height: 100%; border-radius: 99px; transition: width .4s ease; }
+    .hbar .val { text-align: right; color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+    .pie-wrap { display: grid; grid-template-columns: minmax(150px, 190px) 1fr; gap: 14px 18px; align-items: center; }
+    .pie-chart { width: 100%; max-width: 190px; height: auto; display: block; margin: 0 auto; filter: drop-shadow(0 4px 12px rgba(0,0,0,.35)); }
+    .pie-center { font-size: 10px; fill: #94a3b8; font-weight: 600; }
+    .pie-center-v { font-size: 14px; fill: #f1f5f9; font-weight: 700; }
+    .share-grid { display: grid; grid-template-columns: 1fr; gap: 6px; font-size: 12px; }
+    .share-item { display: flex; gap: 8px; line-height: 1.35; color: var(--muted); align-items: flex-start; }
+    .share-item i { width: 10px; height: 10px; border-radius: 99px; flex-shrink: 0; margin-top: 4px; }
+    .share-item b { color: var(--text); font-weight: 650; }
+    .gauge-wrap { display: flex; flex-direction: column; align-items: center; padding: 8px 0; }
+    .gauge-svg { width: 100%; max-width: 220px; height: auto; }
+    .gauge-val { font-size: 28px; font-weight: 800; text-align: center; margin-top: -8px; }
+    .gauge-lbl { font-size: 12px; color: var(--muted); text-align: center; }
+    .stack-bar { display: flex; height: 36px; border-radius: 12px; overflow: hidden; margin: 12px 0; box-shadow: inset 0 2px 6px rgba(0,0,0,.25); }
+    .stack-seg { display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: #fff; min-width: 2px; transition: flex .4s; }
+    .stack-legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; color: var(--muted); }
+    .stack-legend span { display: flex; align-items: center; gap: 6px; }
+    .stack-legend i { width: 10px; height: 10px; border-radius: 3px; }
+    .area-chart { width: 100%; height: 120px; display: block; }
+    .ind-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+    .ind-card { background: #0f172a; border: 1px solid var(--stroke); border-radius: 16px; padding: 12px 14px; }
+    .ind-card .iv { font-size: 20px; font-weight: 700; }
+    .ind-card .il { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .ind-card .im { font-size: 10px; color: #64748b; margin-top: 4px; }
+    .sub-panel { border-left: 4px solid var(--indigo); margin-bottom: 18px; }
+    .sub-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+    .sub-head .mk { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--indigo-2); font-weight: 650; }
+    .sub-head h2 { margin: 4px 0 0; }
+    .sub-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 14px; }
+    .mini-kpi { background: #0f172a; border-radius: 14px; padding: 10px 12px; border: 1px solid #334155; }
+    .mini-kpi .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .mini-kpi .l { font-size: 10px; color: var(--muted); margin-top: 2px; text-transform: uppercase; letter-spacing: .04em; }
+    .btn-link {
+      display: inline-flex; align-items: center; gap: 6px; text-decoration: none;
+      border: 1px solid var(--stroke); background: #0f172a; color: var(--indigo-2);
+      border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 600;
+    }
+    .btn-link:hover { border-color: var(--indigo); background: #1e1b4b; }
+    .mod-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+    .mod-card { display: block; text-decoration: none; color: inherit; background: var(--card); border: 1px solid var(--stroke); border-radius: 20px; padding: 18px 20px; box-shadow: 0 8px 20px rgba(0,0,0,.18); transition: border-color .15s, transform .15s; }
+    .mod-card:hover { border-color: var(--indigo); transform: translateY(-2px); box-shadow: 0 12px 28px rgba(99,102,241,.25); }
+    .mod-card .mk { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--indigo-2); font-weight: 650; }
+    .mod-card .ttl { font-size: 17px; font-weight: 700; margin: 6px 0 10px; }
+    .mod-card .kv { font-size: 22px; font-weight: 700; color: var(--emerald); }
+    .mod-card .kl { font-size: 12px; color: var(--muted); margin-top: 4px; }
+    .mod-card .go { margin-top: 12px; font-size: 12px; color: var(--indigo-2); font-weight: 600; }
+    table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #334155; }
+    th { color: var(--muted); font-weight: 650; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tbody tr:hover { background: #243044; }
+    .pill { display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 600; background: #0f172a; border: 1px solid var(--stroke); color: var(--muted); }
+    .pill.ok { color: var(--emerald); border-color: #065f46; }
+    .pill.warn { color: var(--amber); border-color: #78350f; }
+    .pill.danger { color: var(--rose); border-color: #881337; }
+    .alert-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+    .chip { font-size: 11px; padding: 4px 10px; border-radius: 999px; background: #0f172a; border: 1px solid var(--stroke); }
+    .chip.warn { border-color: #78350f; color: #fde68a; }
+    .muted { color: var(--muted); font-size: 12px; line-height: 1.45; }
+    .nav-drive {
+      display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px;
+      border-top: 1px solid rgba(51,65,85,.6);
+    }
+    .nav-drive a {
+      text-decoration: none; font-size: 11px; font-weight: 600; padding: 5px 10px;
+      border-radius: 999px; border: 1px solid var(--stroke); color: var(--muted);
+      background: rgba(15,23,42,.5);
+    }
+    .nav-drive a:hover { color: var(--text); border-color: var(--indigo-2); }
+    .nav-drive a.on { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+    .foot { margin-top: 22px; color: #64748b; font-size: 12px; line-height: 1.5; }
+    @media (max-width: 1100px) { .g4, .g5, .sub-kpis { grid-template-columns: 1fr 1fr; } .g3 { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .g4, .g5, .g3, .g2, .sub-kpis { grid-template-columns: 1fr; } body { padding: 16px; } h1 { font-size: 24px; } .pie-wrap { grid-template-columns: 1fr; } .hbar { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="kicker" id="kicker">Grupo Bacar</div>
+      <h1 id="titulo">Control Directivo</h1>
+      <p class="sub" id="subline">Panel madre de indicadores operativos y financieros · corte estático · Agosto 2026</p>
+      <div class="badge-row" id="badges"></div>
+      <nav class="nav-drive" id="nav-drive" aria-label="Tableros"></nav>
+      <div class="tabs" id="tabs"></div>
+    </header>
+    <section class="panel on" id="resumen"></section>
+    <section class="panel" id="operacion"></section>
+    <section class="panel" id="cruce"></section>
+    <section class="panel" id="unidades"></section>
+    <section class="panel" id="modulos"></section>
+    <p class="foot" id="footline">Snapshot estático generado desde tools/*/_docs.json.</p>
+  </div>
+  <script>
+    const R = %%ROLLUP%%;
+    const CHART_COLORS = ["#6366f1", "#34d399", "#fbbf24", "#fb7185", "#38bdf8", "#a78bfa", "#f472b6", "#2dd4bf", "#64748b", "#fcd34d"];
+    const P = R.pnl;
+    const M = R.modulos;
+
+    function fmtPeso(n) {
+      const sign = n < 0 ? "-" : "";
+      const a = Math.abs(n);
+      if (a >= 1e6) return sign + "$ " + (a / 1e6).toLocaleString("es-AR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + " M";
+      return sign + "$ " + a.toLocaleString("es-AR", { maximumFractionDigits: 0 });
+    }
+    function fmtFull(n) {
+      const sign = n < 0 ? "-" : "";
+      return sign + "$ " + Math.abs(n).toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+    function fmtVal(n, u) {
+      if (u === "h") return n.toLocaleString("es-AR", { maximumFractionDigits: 0 }) + " h";
+      if (u === "x") return "× " + n.toFixed(3);
+      if (u === "$") return fmtPeso(n);
+      return String(n);
+    }
+    function pct(n, d) { return d ? ((n / d) * 100).toFixed(1) + "%" : "—"; }
+    function pctRatio(r) { return (r * 100).toFixed(1) + "%"; }
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c]));
+    }
+    function shortLabel(s, n) { return s.length > (n || 36) ? s.slice(0, n - 2) + "…" : s; }
+    function fmtFecha(iso) {
+      if (!iso) return "—";
+      const [y, m, d] = iso.split("-");
+      return d + "/" + m + "/" + y;
+    }
+
+    function stat(v, l, cls, hint, hero) {
+      return `<div class="card stat${hero ? " hero" : ""}${hint ? " has-tip" : ""}"${hint ? ` tabindex="0"` : ""}><div class="v ${cls || ""}">${v}</div><div class="l">${l}${hint ? ` <span class="tip-mark">i</span>` : ""}</div>${hint ? `<div class="tip" role="tooltip">${hint}</div>` : ""}</div>`;
+    }
+
+    function hbars(items, max, color) {
+      return items.map(([label, val]) => {
+        const w = max ? Math.max(4, (Math.abs(val) / max) * 100) : 0;
+        const col = val < 0 ? "#fb7185" : color;
+        return `<div class="hbar"><div>${esc(label)}</div><div class="track"><div class="fill" style="width:${w}%;background:${col}"></div></div><div class="val">${fmtPeso(val)}</div></div>`;
+      }).join("");
+    }
+
+    function pieChart(items, total, topN, opts) {
+      opts = opts || {};
+      const getVal = x => x.valor != null ? x.valor : (x.val || x.net || 0);
+      const getLabel = x => x.label || x.cuenta || "";
+      const fmtValFn = opts.fmtVal || (v => fmtPeso(v));
+      const pos = (items || []).map(x => ({ val: getVal(x), label: getLabel(x) })).filter(x => x.val > 0).sort((a, b) => b.val - a.val);
+      if (!pos.length || !total) return `<p class="muted">Sin datos.</p>`;
+      const top = pos.slice(0, topN || 8);
+      const restVal = pos.slice(topN || 8).reduce((a, x) => a + x.val, 0);
+      const segs = top.map((x, i) => ({
+        label: shortLabel(x.label, 40),
+        val: x.val,
+        pct: (x.val / total) * 100,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+      }));
+      if (restVal > 0) segs.push({ label: `Otros (${pos.length - top.length})`, val: restVal, pct: (restVal / total) * 100, color: CHART_COLORS[8] });
+      const cx = 50, cy = 50, r = 46, ri = 28;
+      let ang = -Math.PI / 2;
+      const slices = segs.map(s => {
+        const sweep = (s.pct / 100) * Math.PI * 2;
+        const a0 = ang, a1 = ang + sweep; ang = a1;
+        const large = sweep > Math.PI ? 1 : 0;
+        const x1 = cx + r * Math.cos(a0), y1 = cy + r * Math.sin(a0);
+        const x2 = cx + r * Math.cos(a1), y2 = cy + r * Math.sin(a1);
+        const x3 = cx + ri * Math.cos(a1), y3 = cy + ri * Math.sin(a1);
+        const x4 = cx + ri * Math.cos(a0), y4 = cy + ri * Math.sin(a0);
+        const d = `M ${x1} ${y1} A ${r} ${r} 0 ${large} 1 ${x2} ${y2} L ${x3} ${y3} A ${ri} ${ri} 0 ${large} 0 ${x4} ${y4} Z`;
+        return { ...s, d };
+      });
+      return `<div class="pie-wrap">
+        <svg viewBox="0 0 100 100" class="pie-chart" role="img">
+          ${slices.map(s => `<path d="${s.d}" fill="${s.color}" stroke="#0f172a" stroke-width="0.5"><title>${esc(s.label)}: ${s.pct.toFixed(1)}%</title></path>`).join("")}
+          <text x="${cx}" y="${cy - 2}" text-anchor="middle" class="pie-center">${esc(opts.centerText || "Top")}</text>
+          <text x="${cx}" y="${cy + 11}" text-anchor="middle" class="pie-center-v">${segs[0] ? segs[0].pct.toFixed(0) + "%" : "—"}</text>
+        </svg>
+        <div class="share-grid">${segs.map(s => `<div class="share-item"><i style="background:${s.color}"></i><span><b>${esc(s.label)}</b> · ${s.pct.toFixed(1)}% · ${fmtValFn(s.val)}</span></div>`).join("")}</div>
+      </div>`;
+    }
+
+    function gauge(pctVal, label, color, warnAt) {
+      const p = Math.min(1, Math.max(0, pctVal));
+      const col = p >= (warnAt || 0.65) ? "#fb7185" : color;
+      const arcPath = "M 30 95 A 70 70 0 0 1 170 95";
+      const arcLen = Math.PI * 70;
+      const filled = (p * arcLen).toFixed(2);
+      return `<div class="gauge-wrap">
+        <svg viewBox="0 0 200 110" class="gauge-svg">
+          <path d="${arcPath}" fill="none" stroke="#0f172a" stroke-width="14" stroke-linecap="round"/>
+          <path d="${arcPath}" fill="none" stroke="${col}" stroke-width="14" stroke-linecap="round"
+            pathLength="${arcLen.toFixed(2)}"
+            stroke-dasharray="${filled} ${arcLen.toFixed(2)}"/>
+        </svg>
+        <div class="gauge-val ${p >= (warnAt || 0.65) ? "danger" : ""}">${(p * 100).toFixed(1)}%</div>
+        <div class="gauge-lbl">${esc(label)}</div>
+      </div>`;
+    }
+
+    function stackBar(segs, total) {
+      const t = total || segs.reduce((a, s) => a + Math.abs(s.valor), 0);
+      return `<div class="stack-bar">${segs.map(s => {
+        const w = t ? (Math.abs(s.valor) / t * 100) : 0;
+        return w >= 0.5 ? `<div class="stack-seg" style="flex:${w};background:${s.color}" title="${esc(s.label)}: ${fmtPeso(s.valor)}">${w >= 8 ? s.label.split(" ")[0] : ""}</div>` : "";
+      }).join("")}</div>
+      <div class="stack-legend">${segs.map(s => `<span><i style="background:${s.color}"></i>${esc(s.label)} · ${pct(s.valor, t)} · ${fmtPeso(s.valor)}</span>`).join("")}</div>`;
+    }
+
+    function areaChart(serie, color) {
+      if (!serie || !serie.length) return `<p class="muted">Sin serie diaria.</p>`;
+      const vals = serie.map(s => s.neto);
+      const max = Math.max(...vals, 1);
+      const min = Math.min(...vals, 0);
+      const w = 400, h = 100, pad = 4;
+      const pts = serie.map((s, i) => {
+        const x = pad + (i / Math.max(serie.length - 1, 1)) * (w - pad * 2);
+        const y = h - pad - ((s.neto - min) / (max - min || 1)) * (h - pad * 2);
+        return `${x},${y}`;
+      }).join(" ");
+      const fill = `M ${pad},${h - pad} L ${pts.split(" ").join(" L ")} L ${w - pad},${h - pad} Z`;
+      return `<svg viewBox="0 0 ${w} ${h}" class="area-chart" preserveAspectRatio="none">
+        <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${color}" stop-opacity=".45"/><stop offset="100%" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+        <path d="${fill}" fill="url(#ag)"/>
+        <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="2"/>
+      </svg>
+      <p class="muted">${serie.length} días · pico ${fmtPeso(Math.max(...vals))} · mín ${fmtPeso(Math.min(...vals))}</p>`;
+    }
+
+    document.getElementById("kicker").textContent = R.empresa + " · Panel madre";
+    document.getElementById("titulo").textContent = R.titulo || "Control Directivo";
+    document.getElementById("subline").textContent = R.periodo + " · Snapshot " + (R.generado || "").slice(0, 10) + " · 5 módulos operativos";
+    document.getElementById("badges").innerHTML = [
+      `<span class="badge">${R.subPaneles.length} sub-paneles</span>`,
+      `<span class="badge">${R.linkModo === "drive" ? "Google Drive" : "Modo local"}</span>`,
+      `<span class="badge">${M.mano_obra.n} legajos MOB</span>`,
+      `<span class="badge">${M.facturas.nClientes} clientes facturados</span>`,
+    ].join("");
+
+    if (R.navLinks && R.navLinks.length) {
+      document.getElementById("nav-drive").innerHTML = R.navLinks.map(n =>
+        `<a href="${esc(n.href)}" target="_blank" rel="noopener"${n.id === "control_directivo" ? ` class="on"` : ""}>${esc(n.label)}</a>`
+      ).join("");
+    }
+
+    document.getElementById("footline").textContent = R.linkModo === "drive"
+      ? "Links configurados para Google Drive (drive-links.json). Cada tablero abre en pestaña nueva con su URL de preview."
+      : "Links relativos para lab local (python -m http.server). Para Drive: configurá drive-links.json, rebuild y resubí index.html.";
+
+    const TABS = [["resumen", "Resumen ejecutivo"], ["unidades", "Unidades de negocio"], ["operacion", "Operación por módulo"], ["cruce", "Cruce y reconciliación"], ["modulos", "Acceso a tableros"]];
+    document.getElementById("tabs").innerHTML = TABS.map(([id, l], i) =>
+      `<button class="tab${i === 0 ? " on" : ""}" data-tab="${id}">${l}</button>`
+    ).join("");
+    document.getElementById("tabs").addEventListener("click", (e) => {
+      const b = e.target.closest(".tab");
+      if (!b) return;
+      document.querySelectorAll(".tab").forEach(x => x.classList.toggle("on", x === b));
+      document.querySelectorAll(".panel").forEach(x => x.classList.toggle("on", x.id === b.dataset.tab));
+      document.querySelector(".wrap").classList.toggle("wide", b.dataset.tab === "operacion");
+    });
+
+    function renderResumen() {
+      const compTotal = P.ventasContables;
+      document.getElementById("resumen").innerHTML = `
+        <details class="card glosario">
+          <summary>Control Directivo — lectura del mes</summary>
+          <p class="lead">Panel madre que consolida ${esc(R.periodo)}: ingresos (contable + CAE + cobranzas), costo laboral, compras y margen de referencia. Los sub-paneles en <b>Operación</b> traen el detalle de cada tablero hijo. Próxima etapa: indicadores programados en COSP.</p>
+        </details>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(P.ventasContables), "Ventas contables", "ok", `<b>Base imponible</b> · reporte 272<br>${fmtFull(P.ventasContables)}`, true)}
+          ${stat(fmtPeso(P.costoLaboral), "Costo laboral", "danger", `<b>Empleador</b> · ${M.mano_obra.n} legajos<br>${pctRatio(P.mobSobreVentas)} s/ ventas`, true)}
+          ${stat(fmtPeso(P.comprasImputadas), "Compras", "warn", `<b>Imputado agosto</b> · ${M.compras.nProv} proveedores<br>${pctRatio(P.comprasSobreVentas)} s/ ventas`, true)}
+          ${stat(fmtPeso(P.margenBrutoRef), "Margen bruto ref.", P.margenBrutoRef >= 0 ? "ok" : "danger", `<b>Ventas − MOB − compras</b><br>${pctRatio(P.margenSobreVentas)} s/ ventas`, true)}
+        </div>
+        <div class="grid g4" style="margin-bottom:14px">
+          ${stat(fmtPeso(P.facturasNetas), "Facturas CAE", "info", `FC − NC · ${M.facturas.n} comp.<br>Δ vs contable: ${fmtPeso(P.deltaFacturasVentas)}`)}
+          ${stat(fmtPeso(P.cobranzas), "Cobranzas", "info", `Recibos · gap ${fmtPeso(M.ventas_cobranzas.gapCobroVenta)}`)}
+          ${stat(pctRatio(P.mobSobreVentas), "MOB / ventas", "danger", "Principal palanca de margen")}
+          ${stat(pctRatio(M.facturas.concTop5Clientes || 0), "Top 5 clientes", (M.facturas.concTop5Clientes || 0) > 0.5 ? "warn" : "ok", "Concentración facturación AFIP")}
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Composición del ingreso vs costos (sobre ventas contables)</h2>
+          ${stackBar([
+            { label: "Costo laboral", valor: P.costoLaboral, color: "#fb7185" },
+            { label: "Compras", valor: P.comprasImputadas, color: "#fbbf24" },
+            { label: "Margen bruto ref.", valor: Math.max(P.margenBrutoRef, 0), color: "#6366f1" },
+          ], P.ventasContables)}
+        </div>
+        <div class="grid g3" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Tres lecturas del ingreso</h2>
+            ${pieChart(R.ingresos.map(x => ({ label: x.label, valor: x.valor })), Math.max(...R.ingresos.map(x => x.valor)), 3, { centerText: "Ingreso", fmtVal: fmtPeso })}
+          </div>
+          <div class="card">
+            <h2>Ventas por rubro</h2>
+            ${pieChart(M.ventas_cobranzas.topRubros, M.ventas_cobranzas.ventas, 6, { centerText: "Rubro" })}
+          </div>
+          <div class="card">
+            <h2>MOB por centro de costo</h2>
+            ${pieChart(M.mano_obra.topCentros, M.mano_obra.costo, 6, { centerText: "CC" })}
+          </div>
+        </div>
+        <div class="grid g2" style="margin-bottom:14px">
+          <div class="card">
+            <h2>Indicadores de gestión</h2>
+            <div class="ind-grid">
+              ${(R.indicadores || []).map(ind => {
+                const v = ind.fmt === "pct" ? pctRatio(ind.valor) : fmtPeso(ind.valor);
+                return `<div class="ind-card"><div class="iv ${ind.estado || ""}">${v}</div><div class="il">${esc(ind.label)}</div><div class="im">${esc(ind.meta || "")}</div></div>`;
+              }).join("")}
+            </div>
+          </div>
+          <div class="card">
+            <h2>Relación costo / venta</h2>
+            <div class="grid g2">
+              ${gauge(P.mobSobreVentas, "MOB sobre ventas", "#fb7185", 0.65)}
+              ${gauge(P.comprasSobreVentas, "Compras sobre ventas", "#fbbf24", 0.2)}
+            </div>
+          </div>
+        </div>
+        <div class="grid g2">
+          <div class="card">
+            <h2>Facturación diaria (CAE)</h2>
+            ${areaChart(M.facturas.serieDiaria, "#38bdf8")}
+          </div>
+          <div class="card">
+            <h2>Cobranzas por canal</h2>
+            ${pieChart(M.ventas_cobranzas.topCanales, M.ventas_cobranzas.cobranzas, 6, { centerText: "Canal" })}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderOperacion() {
+      document.getElementById("operacion").innerHTML = `
+        <div class="callout info">Sub-paneles operativos: resumen de cada tablero hijo con KPIs, tortas y ranking. Para drill-down completo, usá el botón <b>Abrir tablero</b>.</div>
+        ${R.subPaneles.map(sp => `
+          <div class="card sub-panel" style="border-left-color:${sp.color}">
+            <div class="sub-head">
+              <div>
+                <div class="mk">${esc(sp.kicker)}</div>
+                <h2>${esc(sp.titulo)}</h2>
+                <p class="muted">${esc(sp.nota || "")}</p>
+              </div>
+              <a class="btn-link" href="${esc(sp.href)}" target="_blank" rel="noopener">Abrir tablero →</a>
+            </div>
+            <div class="sub-kpis">
+              ${sp.kpis.map(k => `<div class="mini-kpi"><div class="v">${fmtVal(k.v, k.u)}</div><div class="l">${esc(k.l)}</div></div>`).join("")}
+            </div>
+            <div class="grid g2">
+              <div>
+                <h3>${esc(sp.chartLabel)}</h3>
+                ${pieChart(sp.chartItems, sp.chartTotal, 6, { centerText: "Top", fmtVal: sp.id === "camioneros" ? v => v.toLocaleString("es-AR") + " h" : fmtPeso })}
+              </div>
+              <div>
+                ${sp.secChartLabel ? `<h3>${esc(sp.secChartLabel)}</h3>${pieChart(sp.secChartItems, sp.secChartTotal, 6)}` : ""}
+                ${sp.serie ? `<h3 style="margin-top:${sp.secChartLabel ? "14px" : "0"}">Curva diaria neto</h3>${areaChart(sp.serie, sp.color)}` : ""}
+                ${sp.alertas ? `
+                  <h3 style="margin-top:14px">Alertas operativas</h3>
+                  <div class="alert-chips">
+                    <span class="chip warn">${sp.alertas.altoExtra} con extra ≥60%</span>
+                    <span class="chip warn">${sp.alertas.sobre200h} sobre 200 h reloj</span>
+                    <span class="chip">${sp.alertas.licenciasJ} días lic. jornada</span>
+                  </div>
+                  ${sp.mix ? `<p class="muted" style="margin-top:8px">Mix reloj: ${sp.mix.normales}% normales · ${sp.mix.h50}% al 50% · ${sp.mix.h100}% al 100%</p>` : ""}
+                ` : ""}
+              </div>
+            </div>
+          </div>
+        `).join("")}
+      `;
+    }
+
+    function renderCruce() {
+      const rows = [
+        { concepto: "Ventas / ingresos", modulo: "Ventas y cobranzas", monto: P.ventasContables, corte: M.ventas_cobranzas.tipoCorte, detalle: "BASE IMPONIBLE reporte 272", n: M.ventas_cobranzas.n + " renglones" },
+        { concepto: "Facturas netas", modulo: "Facturas electrónicas", monto: P.facturasNetas, corte: M.facturas.tipoCorte, detalle: fmtFecha(M.facturas.periodoDesde) + " – " + fmtFecha(M.facturas.periodoHasta), n: M.facturas.n + " comp. · " + M.facturas.nClientes + " cli." },
+        { concepto: "Cobranzas", modulo: "Ventas y cobranzas", monto: P.cobranzas, corte: "recibos_contables", detalle: "Bancos, caja, cheques", n: M.ventas_cobranzas.nCanales + " canales" },
+        { concepto: "Alta CxC", modulo: "Ventas y cobranzas", monto: M.ventas_cobranzas.cxcAlta, corte: "efecto_contable", detalle: "Deuda clientes ↑", n: "—" },
+        { concepto: "Compras", modulo: "Compras", monto: P.comprasImputadas, corte: M.compras.tipoCorte, detalle: "FC/ND − NC imputado", n: M.compras.nComp + " comp." },
+        { concepto: "Costo laboral", modulo: "Mano de obra", monto: P.costoLaboral, corte: M.mano_obra.tipoCorte, detalle: "int__costo_laboral", n: M.mano_obra.n + " legajos" },
+      ];
+      if (M.camioneros) rows.push({ concepto: "ICE Camioneros", modulo: "Transporte", monto: null, ice: M.camioneros.iceEq, corte: M.camioneros.tipoCorte, detalle: M.camioneros.periodo, n: M.camioneros.n + " legajos" });
+
+      document.getElementById("cruce").innerHTML = `
+        <div class="callout warn"><b>Criterios distintos:</b> no esperes que ventas contables = facturas CAE = cobranzas. Este panel documenta las diferencias; el cierre oficial es contabilidad.</div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Matriz de fuentes</h2>
+          <div style="overflow:auto"><table>
+            <thead><tr><th>Concepto</th><th>Módulo</th><th class="num">Monto</th><th>Criterio</th><th>Detalle</th><th>Universo</th></tr></thead>
+            <tbody>${rows.map(r => `<tr>
+              <td><b>${esc(r.concepto)}</b></td><td>${esc(r.modulo)}</td>
+              <td class="num">${r.monto != null ? fmtFull(r.monto) : (r.ice != null ? r.ice.toLocaleString("es-AR") + " h ICE" : "—")}</td>
+              <td><span class="pill">${esc(r.corte)}</span></td>
+              <td class="muted">${esc(r.detalle)}</td><td class="muted">${esc(r.n)}</td>
+            </tr>`).join("")}</tbody>
+          </table></div>
+        </div>
+        <div class="grid g2">
+          <div class="card">
+            <h2>Variaciones clave</h2>
+            <table><tbody>
+              <tr><td>Facturas − ventas</td><td class="num warn">${fmtFull(P.deltaFacturasVentas)}</td><td>${pct(P.deltaFacturasVentas, P.ventasContables)}</td></tr>
+              <tr><td>Cobranzas − ventas</td><td class="num info">${fmtFull(M.ventas_cobranzas.gapCobroVenta)}</td><td>${pct(M.ventas_cobranzas.gapCobroVenta, P.ventasContables)}</td></tr>
+              <tr><td>MOB / ventas</td><td class="num danger">${pctRatio(P.mobSobreVentas)}</td><td>${fmtFull(P.costoLaboral)}</td></tr>
+              <tr><td>Margen ref. / ventas</td><td class="num ok">${pctRatio(P.margenSobreVentas)}</td><td>${fmtFull(P.margenBrutoRef)}</td></tr>
+            </tbody></table>
+          </div>
+          <div class="card">
+            <h2>P&amp;L referencia</h2>
+            ${hbars([["+ Ventas", P.ventasContables], ["− MOB", -P.costoLaboral], ["− Compras", -P.comprasImputadas], ["= Margen", P.margenBrutoRef]], P.ventasContables, "#818cf8")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderUnidades() {
+      const U = R.unidadesNegocio;
+      if (!U || !U.unidades) {
+        document.getElementById("unidades").innerHTML = `<p class="muted">Sin datos de unidades.</p>`;
+        return;
+      }
+      const ops = U.unidades.filter(u => u.operativa !== false && u.id !== "sin_asignar" && u.ventas > 0);
+      const maxV = Math.max(...ops.map(u => u.ventas), 1);
+      const oh = U.overhead;
+      const rows = U.unidades.map(u => {
+        const mp = u.margenPct != null ? pctRatio(u.margenPct) : "—";
+        const mdp = u.margenDirectoPct != null ? pctRatio(u.margenDirectoPct) : null;
+        const mobOp = u.mobOperativo != null ? u.mobOperativo : u.mob;
+        const compOp = u.comprasOperativas != null ? u.comprasOperativas : (u.comprasDirectas || 0);
+        const gastosProp = u.gastosPropios != null ? u.gastosPropios : (mobOp + compOp);
+        const gastoCorp = u.gastoCorporativo != null ? u.gastoCorporativo : (u.costoCorporativo || 0);
+        const gastosPct = u.ventas ? pctRatio(gastosProp / u.ventas) : "—";
+        const cls = (u.margenPct != null && u.margenPct >= 0.08) ? "ok" : ((u.margenPct != null && u.margenPct < 0) ? "danger" : "warn");
+        const pesoCorp = oh && oh.pesosMob && oh.pesosMob[u.id] != null ? oh.pesosMob[u.id] : null;
+        const gastosDet = [
+          `MOB ${fmtPeso(mobOp)}`,
+          `compras ${fmtPeso(compOp)}`,
+        ].join(" · ");
+        const corpDet = [
+          pesoCorp != null ? pctRatio(pesoCorp) + " cobertura" : "",
+          u.mobOverhead ? `MOB ${fmtPeso(u.mobOverhead)}` : "",
+          u.comprasOverheadCorp ? `comp. ${fmtPeso(u.comprasOverheadCorp)}` : "",
+        ].filter(Boolean).join(" · ");
+        return `<tr>
+          <td><span style="display:inline-block;width:10px;height:10px;border-radius:99px;background:${u.color};margin-right:8px"></span><b>${esc(u.nombre)}</b></td>
+          <td class="num">${fmtFull(u.ventas)}</td>
+          <td class="num">${fmtFull(gastosProp)}<br><span class="muted">${gastosPct} s/ventas · ${gastosDet}</span></td>
+          <td class="num">${fmtFull(gastoCorp)}${corpDet ? `<br><span class="muted">${corpDet}</span>` : ""}</td>
+          <td class="num ${cls}"><b>${fmtFull(u.margen)}</b><br><span class="muted">${mp}${mdp ? ` · directo ${mdp}` : ""}</span></td>
+        </tr>`;
+      }).join("");
+
+      const cards = ops.map(u => `
+        <div class="card" style="margin-bottom:14px;border-left:4px solid ${u.color}">
+          <h2>${esc(u.nombre)}</h2>
+          <div class="grid g4" style="margin-bottom:10px">
+            ${stat(fmtPeso(u.ventas), "Ventas contables", "ok")}
+            ${stat(fmtPeso(u.gastosPropios != null ? u.gastosPropios : ((u.mobOperativo || u.mob) + (u.comprasOperativas || u.comprasDirectas || 0))), "Gastos propios", "danger")}
+            ${stat(fmtPeso(u.gastoCorporativo || u.costoCorporativo || 0), "Gasto corp.", "muted")}
+            ${stat(u.margenPct != null ? pctRatio(u.margenPct) : "—", "Margen bruto ref.", u.margen >= 0 ? "ok" : "danger")}
+          </div>
+          ${hbars([
+            ["Ventas", u.ventas],
+            ["Gastos propios", u.gastosPropios != null ? u.gastosPropios : ((u.mobOperativo || u.mob) + (u.comprasOperativas || u.comprasDirectas || 0))],
+            ["Gasto corp.", u.gastoCorporativo || u.costoCorporativo || 0],
+            ["Margen", u.margen],
+          ], maxV, u.color)}
+          <details style="margin-top:10px"><summary class="muted" style="cursor:pointer">Detalle imputación</summary>
+            <p class="muted" style="margin:8px 0"><b>Ventas:</b> ${(u.detalleVentas || []).map(x => esc(shortLabel(x.label, 30)) + " " + fmtPeso(x.valor)).join(" · ") || "—"}</p>
+            <p class="muted"><b>MOB:</b> ${(u.detalleMob || []).slice(0, 4).map(x => esc(shortLabel(x.label, 28)) + " " + fmtPeso(x.valor)).join(" · ") || "—"}</p>
+            <p class="muted"><b>Compras:</b> ${(u.detalleCompras || []).slice(0, 6).map(x => esc(shortLabel(x.label, 28)) + " " + fmtPeso(x.valor)).join(" · ") || "—"}</p>
+          </details>
+        </div>
+      `).join("");
+
+      const ohBlock = oh ? `<div class="callout info" style="margin-bottom:14px;border-color:#475569">
+          <b>Gasto corporativo prorrateado (columna Gasto corp.)</b><br>
+          Pool MOB estructura ${fmtPeso(oh.mobTotal)} · Pool compras estructura ${fmtPeso(oh.comprasTotal)} · Total ${fmtPeso((oh.mobTotal || 0) + (oh.comprasTotal || 0))}<br>
+          <span class="muted">${esc(oh.criterioLabel || "")}</span><br>
+          ${oh.pesosMob ? "<b>Pesos por cobertura:</b> " + Object.entries(oh.pesosMob).filter(([,p]) => p > 0).map(([id,p]) => {
+            const un = (U.unidades || []).find(x => x.id === id);
+            return (un ? esc(un.nombre) : id) + " " + pctRatio(p);
+          }).join(" · ") : ""}
+        </div>` : "";
+
+      document.getElementById("unidades").innerHTML = `
+        <div class="callout info">
+          <b>Rentabilidad por unidad de negocio (referencia ${esc(R.periodo)})</b><br>
+          Ventas = rubro contable · <b>Gastos propios</b> = MOB directo + compras de la UN (todo lo imputado a esa unidad, sin corp.) · <b>Gasto corp.</b> = estructura repartida 50/30/15/5.
+          Facturación CAE no se imputa acá (criterio distinto). ${U.transporte ? "Transporte Camioneros: " + U.transporte.iceEq.toLocaleString("es-AR") + " h ICE." : ""}
+          <a href="listado-imputacion.html" style="margin-left:8px">Editor imputación UN →</a>
+        </div>
+        ${ohBlock}
+        <div class="card" style="margin-bottom:14px">
+          <h2>Comparativo P&amp;L por unidad</h2>
+          <div style="overflow:auto"><table>
+            <thead><tr>
+              <th>Unidad</th><th class="num">Ventas</th><th class="num">Gastos propios</th><th class="num">Gasto corp.</th><th class="num">Margen ref.</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+          </table></div>
+          <p class="muted" style="margin-top:10px">${esc(U.metodo.compras)}${U.metodo.overhead ? "<br>" + esc(U.metodo.overhead) : ""}</p>
+        </div>
+        <div class="card" style="margin-bottom:14px">
+          <h2>Participación ventas por unidad</h2>
+          ${pieChart(ops.map(u => ({ label: u.nombre, valor: u.ventas })), ops.reduce((a, u) => a + u.ventas, 0), 6, { centerText: "Ventas" })}
+        </div>
+        ${cards}
+      `;
+    }
+
+    function renderModulos() {
+      document.getElementById("modulos").innerHTML = `
+        <p class="sub" style="margin-bottom:14px">Tableros autónomos (HTML estático). Mantener la estructura de carpetas al copiar a Drive o red compartida.</p>
+        <div class="mod-grid">${R.links.map(l => `
+          <a class="mod-card" href="${esc(l.href)}" target="_blank" rel="noopener">
+            <div class="mk">${esc(l.kicker)}</div>
+            <div class="ttl">${esc(l.label)}</div>
+            <div class="kv">${esc(l.kpi)}</div>
+            <div class="kl">${esc(l.kpiLabel)} · ${esc(R.periodo)}</div>
+            <div class="go">Abrir tablero →</div>
+          </a>`).join("")}
+        </div>
+        <div class="card" style="margin-top:18px">
+          <h2>Control Directivo — mapa de tableros</h2>
+          <table>
+            <thead><tr><th>Tablero</th><th>Ruta relativa</th><th>Puerto local</th></tr></thead>
+            <tbody>
+              <tr><td><b>Control Directivo</b></td><td><code>tools/reporting-general/</code></td><td><b>8770</b></td></tr>
+              <tr><td>Ventas y cobranzas</td><td><code>../ventas-cobranzas/</code></td><td>8768</td></tr>
+              <tr><td>Facturas electrónicas</td><td><code>../facturas-electronicas/</code></td><td>8766</td></tr>
+              <tr><td>Compras</td><td><code>../compras/</code></td><td>8767</td></tr>
+              <tr><td>Costo laboral</td><td><code>../mano-de-obra/</code></td><td>8769</td></tr>
+              <tr><td>Camioneros ICE</td><td><code>../novedades-camioneros/</code></td><td>8765</td></tr>
+            </tbody>
+          </table>
+        </div>
+      `;
+    }
+
+    renderResumen();
+    renderUnidades();
+    renderOperacion();
+    renderCruce();
+    renderModulos();
+  </script>
+</body>
+</html>

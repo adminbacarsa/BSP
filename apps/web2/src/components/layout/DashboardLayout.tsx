@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, Clock
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, GraduationCap, Lock
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -18,6 +18,8 @@ import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
+import { useTrainingSession } from '@/hooks/useTrainingSession';
+import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -38,7 +40,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/cotizador'))       return 'Cotizador';
   if (pathname.startsWith('/admin/analisis'))        return 'Análisis';
   if (pathname.startsWith('/admin/supervision'))     return 'Supervisión';
-  if (pathname.startsWith('/admin/kpis'))            return 'KPIs';
+  if (pathname.startsWith('/admin/capacitacion'))    return 'Capacitación';
   return null;
 }
 
@@ -302,6 +304,24 @@ function DashboardHeader({ isSidebarOpen, onToggleSidebar, onLogout }: { isSideb
   );
 }
 
+// ─── TRAINING BANNER + PROGRESS ───────────────────────────────────────────────
+function TrainingBanner({ empresa }: { empresa: import('@/context/EmpresaContext').Empresa | null }) {
+  const { session } = useTrainingSession();
+  if (!empresa?.isTrainingEmpresa) return null;
+  return (
+    <>
+      <div className="flex items-center gap-2 px-4 py-2 border-b text-sm font-medium shrink-0"
+        style={{ backgroundColor: 'rgba(251,191,36,0.15)', borderColor: 'rgba(251,191,36,0.4)' }}>
+        <FlaskConical size={15} className="shrink-0 text-amber-500" />
+        <span className="text-amber-700 dark:text-amber-300">
+          Modo Capacitación — empresa sandbox. Los datos de práctica no afectan producción.
+        </span>
+      </div>
+      {session && <TrainingProgressPanel session={session} />}
+    </>
+  );
+}
+
 // ─── INNER LAYOUT ─────────────────────────────────────────────────────────────
 function LayoutInner({ children }: { children: React.ReactNode }) {
   const [isPinned, setIsPinned]       = useState(false);
@@ -314,6 +334,19 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const isEmulatorMode = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
   const { compactSidebar } = usePageHeader();
   const { empresa, empresaId } = useEmpresa();
+  const isTraining = !!empresa?.isTrainingEmpresa;
+  const { session: trainingSession } = useTrainingSession();
+  // Módulos desbloqueados: completados + el módulo activo actual
+  const trainingUnlocked = React.useMemo(() => {
+    if (!isTraining || !trainingSession) return null;
+    const s = new Set<string>();
+    for (const key of (trainingSession.modulePlan || [])) {
+      s.add(key);
+      if (trainingSession.progress[key]?.status !== 'completed') break;
+    }
+    return s;
+  }, [isTraining, trainingSession]);
+  const isModuleLocked = (moduleKey: string) => !!trainingUnlocked && !trainingUnlocked.has(moduleKey);
   const mainScrollRef = useRef<HTMLElement>(null);
   const [pendientesCount, setPendientesCount] = useState(0);
   const [rfzPlanifCount, setRfzPlanifCount] = useState(0);
@@ -423,7 +456,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
     const q = query(
       collection(db, 'novedades'),
       where('empresaId', '==', empresaId),
-      where('type', '==', 'VACANTE_OPERATIVA'),
+      where('type', 'in', ['VACANTE_OPERATIVA', 'AUSENCIA_AUTO', 'LLEGADA_TARDE', 'VACANTE_PROTOCOLO_COBERTURA']),
       where('status', '==', 'pending'),
     );
     const unsub = onSnapshotFresh(q, snap => {
@@ -574,10 +607,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {(canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING')) && (
             <Link href="/admin/operaciones" prefetch={false} title="Centro Control"
-              className={`${getLinkHoverClass('/admin/operaciones')} relative`}
+              className={`${getLinkHoverClass('/admin/operaciones')} relative${isModuleLocked('OPERATIONS') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/operaciones', true)}>
               <Radio size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Centro Control</span>}
+              {isTraining && isModuleLocked('OPERATIONS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {opsTaskCount > 0 && (
                 <button
                   type="button"
@@ -599,10 +633,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
           {canReadModule('PLANNING') && (
             <Link href="/admin/planificacion" prefetch={false} title="Planificador"
-              className={`${getLinkHoverClass('/admin/planificacion')} relative`}
+              className={`${getLinkHoverClass('/admin/planificacion')} relative${isModuleLocked('PLANNING') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/planificacion')}>
               <Calendar size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Planificador</span>}
+              {isTraining && isModuleLocked('PLANNING') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {(rfzPlanifCount + rfzEstructuralCount) > 0 && (
                 <button
                   type="button"
@@ -623,7 +658,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {showAutoLabNav && (
+          {showAutoLabNav && !isTraining && (
             <Link href="/admin/planificacion/auto-lab" prefetch={false} title="Auto Lab — casos de planificación"
               className={getLinkHoverClass('/admin/planificacion/auto-lab')}
               style={getLinkStyle('/admin/planificacion/auto-lab')}>
@@ -646,18 +681,20 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               {!sidebarOpen && <div className="h-2" />}
               {canReadModule('CLIENTS') && (
                 <Link href="/admin/crm" prefetch={false} title="CRM Clientes"
-                  className={getLinkHoverClass('/admin/crm')}
+                  className={`${getLinkHoverClass('/admin/crm')}${isModuleLocked('CLIENTS') ? ' opacity-40 pointer-events-none' : ''}`}
                   style={getLinkStyle('/admin/crm')}>
                   <Briefcase size={18} className="shrink-0" />
-                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">CRM Clientes</span>}
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">CRM Clientes</span>}
+                  {isTraining && isModuleLocked('CLIENTS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
                 </Link>
               )}
               {(canReadModule('SERVICES') || canReadModule('CLIENTS')) && (
                 <Link href="/admin/servicios" prefetch={false} title="Servicios"
-                  className={`${getLinkHoverClass('/admin/servicios')} relative`}
+                  className={`${getLinkHoverClass('/admin/servicios')} relative${isModuleLocked('SERVICES') ? ' opacity-40 pointer-events-none' : ''}`}
                   style={getLinkStyle('/admin/servicios')}>
                   <ShieldCheck size={18} className="shrink-0" />
                   {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Servicios</span>}
+                  {isTraining && isModuleLocked('SERVICES') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
                   {serviciosTaskCount > 0 && (
                     <span className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-amber-500 text-white text-[9px] font-black rounded-full flex items-center justify-center`}>
                       {serviciosTaskCount > 99 ? '99+' : serviciosTaskCount}
@@ -669,45 +706,31 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           )}
 
           {canReadModule('REPORTS') && (
-            <>
-              <Link href="/admin/reportes" prefetch={false} title="Reportes"
-                className={getLinkHoverClass('/admin/reportes')}
-                style={getLinkStyle('/admin/reportes')}>
-                <BarChart3 size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Reportes</span>}
-              </Link>
-              <Link href="/admin/reportes/marcaciones" prefetch={false} title="Marcaciones CC — mapeo e importación"
-                className={getLinkHoverClass('/admin/reportes/marcaciones')}
-                style={getLinkStyle('/admin/reportes/marcaciones')}>
-                <Clock size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Marcaciones CC</span>}
-              </Link>
-            </>
+            <Link href="/admin/reportes" prefetch={false} title="Reportes"
+              className={`${getLinkHoverClass('/admin/reportes')}${isModuleLocked('REPORTS') ? ' opacity-40 pointer-events-none' : ''}`}
+              style={getLinkStyle('/admin/reportes')}>
+              <BarChart3 size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">Reportes</span>}
+              {isTraining && isModuleLocked('REPORTS') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
+            </Link>
           )}
 
-          {canReadModule('ANALYSIS') && (
-            <>
+          {canReadModule('ANALYSIS') && !isTraining && (
             <Link href="/admin/analisis" prefetch={false} title="Análisis"
               className={getLinkHoverClass('/admin/analisis')}
               style={getLinkStyle('/admin/analisis')}>
               <TrendingUp size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Análisis</span>}
             </Link>
-            <Link href="/admin/kpis" prefetch={false} title="KPIs Ejecutivo"
-              className={getLinkHoverClass('/admin/kpis')}
-              style={getLinkStyle('/admin/kpis')}>
-              <BarChart3 size={18} className="shrink-0" />
-              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">KPIs</span>}
-            </Link>
-            </>
           )}
 
           {canReadModule('RRHH') && (
             <Link href="/admin/rrhh" prefetch={false} title="RRHH"
-              className={`${getLinkHoverClass('/admin/rrhh')} relative`}
+              className={`${getLinkHoverClass('/admin/rrhh')} relative${isModuleLocked('RRHH') ? ' opacity-40 pointer-events-none' : ''}`}
               style={getLinkStyle('/admin/rrhh')}>
               <Users size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">RRHH</span>}
+              {isTraining && isModuleLocked('RRHH') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
               {rfzEstructuralCount > 0 && (
                 <button
                   type="button"
@@ -727,7 +750,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('SUPERVISION') && (
+          {canReadModule('SUPERVISION') && !isTraining && (
             <Link href="/admin/supervision" prefetch={false} title="Supervisión"
               className={`${getLinkHoverClass('/admin/supervision')} relative`}
               style={getLinkStyle('/admin/supervision')}>
@@ -741,6 +764,22 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
+          {empresa?.isTrainingEmpresa && (
+            <>
+              {sidebarOpen && (
+                <div className="px-3 py-1.5 text-[9px] font-black uppercase tracking-widest mt-2 animate-in fade-in"
+                  style={{ color: 'var(--sb-section)' }}>Capacitación</div>
+              )}
+              {!sidebarOpen && <div className="h-2" />}
+              <Link href="/admin/capacitacion" prefetch={false} title="Vista Instructor"
+                className={getLinkHoverClass('/admin/capacitacion')}
+                style={getLinkStyle('/admin/capacitacion')}>
+                <GraduationCap size={18} className="shrink-0" />
+                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Vista Instructor</span>}
+              </Link>
+            </>
+          )}
+
           {(canReadModule('CONFIG') || canReadModule('API_KEYS')) && (
             <>
               {sidebarOpen && (
@@ -748,24 +787,30 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
                   style={{ color: 'var(--sb-section)' }}>Sistema</div>
               )}
               {!sidebarOpen && <div className="h-2" />}
-              <Link href="/admin/liquidaciones" prefetch={false} title="Liquidaciones"
-                className={getLinkHoverClass('/admin/liquidaciones')}
-                style={getLinkStyle('/admin/liquidaciones')}>
-                <ClipboardList size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Liquidaciones</span>}
-              </Link>
-              <Link href="/admin/configuracion" prefetch={false} title="Configuración"
-                className={getLinkHoverClass('/admin/configuracion')}
-                style={getLinkStyle('/admin/configuracion')}>
-                <Settings size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Configuración</span>}
-              </Link>
-              <Link href="/admin/guia" prefetch={false} title="Guía"
-                className={getLinkHoverClass('/admin/guia')}
-                style={getLinkStyle('/admin/guia')}>
-                <BookOpen size={18} className="shrink-0" />
-                {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
-              </Link>
+              {!isTraining && (
+                <Link href="/admin/liquidaciones" prefetch={false} title="Liquidaciones"
+                  className={getLinkHoverClass('/admin/liquidaciones')}
+                  style={getLinkStyle('/admin/liquidaciones')}>
+                  <ClipboardList size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Liquidaciones</span>}
+                </Link>
+              )}
+              {!isTraining && (
+                <Link href="/admin/configuracion" prefetch={false} title="Configuración"
+                  className={getLinkHoverClass('/admin/configuracion')}
+                  style={getLinkStyle('/admin/configuracion')}>
+                  <Settings size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Configuración</span>}
+                </Link>
+              )}
+              {!isTraining && (
+                <Link href="/admin/guia" prefetch={false} title="Guía"
+                  className={getLinkHoverClass('/admin/guia')}
+                  style={getLinkStyle('/admin/guia')}>
+                  <BookOpen size={18} className="shrink-0" />
+                  {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Guía interactiva</span>}
+                </Link>
+              )}
             </>
           )}
         </nav>
@@ -798,11 +843,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
           <div className={'absolute top-0 left-1/2 -translate-x-1/2 z-50 transition-opacity duration-300 ' + (topbarVisible ? 'opacity-0' : 'opacity-60')}>
             <div className="w-12 h-1 rounded-b-full bg-slate-500/60" />
           </div>
-          <main ref={mainScrollRef} className="h-full overflow-y-auto min-h-0">{children}</main>
+          <main ref={mainScrollRef} className="h-full overflow-y-auto min-h-0">
+            <TrainingBanner empresa={empresa} />
+            {children}
+          </main>
         </div>
       ) : (
         <div className={'flex-1 transition-all duration-300 ease-in-out ' + (isPinned ? 'lg:ml-64' : 'lg:ml-16') + ' min-w-0'}>
           <DashboardHeader isSidebarOpen={sidebarOpen} onToggleSidebar={() => setIsPinned(p => !p)} onLogout={handleLogout} />
+          <TrainingBanner empresa={empresa} />
           {/* Supervisión usa su propia bottom nav en mobile */}
           <main ref={compactSidebar ? undefined : mainScrollRef} className={'overflow-x-hidden ' + (isSupervisionApp ? 'p-0 pb-0' : 'p-3 sm:p-5 lg:p-8 pb-24 lg:pb-8')}>
             {children}

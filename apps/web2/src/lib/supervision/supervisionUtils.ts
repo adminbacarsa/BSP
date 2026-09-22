@@ -2,7 +2,38 @@ import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-export type SupervisionMainTab = 'TABLERO' | 'BANDEJA' | 'NOVEDADES' | 'MAS';
+export type SupervisionMainTab = 'TABLERO' | 'CC' | 'BANDEJA' | 'CAMPO';
+
+/** Sub-secciones del tab Campo (libro, rondas, consignas). */
+export type SupervisionCampoSection = 'NOVEDADES' | 'VISITAS' | 'CONSIGNAS';
+
+/** Tabs legacy — migración desde localStorage. */
+export type SupervisionMainTabLegacy = SupervisionMainTab | 'NOVEDADES' | 'MAS';
+
+export function normalizeSupervisionMainTab(tab: string | null | undefined): SupervisionMainTab {
+  if (tab === 'NOVEDADES' || tab === 'MAS') return 'CAMPO';
+  if (tab === 'TABLERO' || tab === 'CC' || tab === 'BANDEJA' || tab === 'CAMPO') return tab;
+  return 'TABLERO';
+}
+
+/** Inicio/fin del día calendario Argentina (YYYY-MM-DD). */
+export function dayBoundsAr(ymd: string): { start: Date; end: Date } {
+  const start = new Date(`${ymd}T00:00:00-03:00`);
+  const end = new Date(`${ymd}T23:59:59.999-03:00`);
+  return { start, end };
+}
+
+export function formatYmdDisplayAr(ymd: string): string {
+  const d = new Date(`${ymd}T12:00:00-03:00`);
+  if (Number.isNaN(d.getTime())) return ymd;
+  return d.toLocaleDateString('es-AR', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+export function legacyMainTabToCampoSection(tab: string | null | undefined): SupervisionCampoSection | null {
+  if (tab === 'NOVEDADES') return 'NOVEDADES';
+  if (tab === 'MAS') return 'VISITAS';
+  return null;
+}
 
 export type UrgencyLevel = 'HOY' | 'MANANA' | 'NORMAL';
 
@@ -45,19 +76,44 @@ export function pendingHoursLabel(hours: number | null): string | null {
   return `Hace ${hours} h`;
 }
 
+/**
+ * Semáforo supervisión por objetivo (cobertura operativa, no RRHH puro).
+ * CRÍTICO = hueco sin cubrir (vacante/descubierto). Ausente con puesto cubierto → ATENCIÓN.
+ */
 export function objectiveCoverageStatus(stats: {
   vacantes: number;
   ausentes: number;
   alertas: number;
 }): 'OK' | 'ALERTA' | 'CRITICO' {
-  if (stats.vacantes > 0 || stats.ausentes > 0) return 'CRITICO';
-  if (stats.alertas > 0) return 'ALERTA';
+  if (stats.vacantes > 0) return 'CRITICO';
+  if (stats.ausentes > 0 || stats.alertas > 0) return 'ALERTA';
   return 'OK';
+}
+
+/** Agregado por objetivo (informes CC / PDF). "Cubierto" = sin vacantes; ausencias = incidencia. */
+export function rollupObjectiveCoverage(
+  rows: Array<{ vacantes: number; ausentes?: number; alertas?: number }>,
+): { total: number; withoutVacancies: number; withIncidents: number; critical: number } {
+  let withoutVacancies = 0;
+  let withIncidents = 0;
+  let critical = 0;
+  for (const r of rows) {
+    const stats = {
+      vacantes: r.vacantes,
+      ausentes: r.ausentes ?? 0,
+      alertas: r.alertas ?? 0,
+    };
+    const st = objectiveCoverageStatus(stats);
+    if (st === 'CRITICO') critical += 1;
+    else withoutVacancies += 1;
+    if (st === 'ALERTA') withIncidents += 1;
+  }
+  return { total: rows.length, withoutVacancies, withIncidents, critical };
 }
 
 export const COVERAGE_STATUS_STYLES: Record<'OK' | 'ALERTA' | 'CRITICO', { dot: string; bg: string; text: string; label: string }> = {
   OK: { dot: 'bg-emerald-500', bg: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700', label: 'Cubierto' },
-  ALERTA: { dot: 'bg-amber-500', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'Atención' },
+  ALERTA: { dot: 'bg-amber-500', bg: 'bg-amber-50 border-amber-200', text: 'text-amber-700', label: 'Incidencia' },
   CRITICO: { dot: 'bg-rose-500', bg: 'bg-rose-50 border-rose-200', text: 'text-rose-700', label: 'Crítico' },
 };
 
@@ -126,4 +182,30 @@ export function filterSolicitudesByObjectives<T extends { objectiveId: string }>
   if (!objectiveIds.length) return [];
   const scope = new Set(objectiveIds);
   return items.filter(s => scope.has(s.objectiveId));
+}
+
+const MAX_RFZ_RANGO_DIAS = 31;
+
+/** Lista inclusive YYYY-MM-DD desde `from` hasta `to` (mismo día si to vacío). */
+export function listYmdDatesInclusive(from: string, to?: string): string[] {
+  const start = String(from || '').trim().slice(0, 10);
+  if (!start) return [];
+  const endRaw = String(to || '').trim().slice(0, 10);
+  const end = endRaw && endRaw >= start ? endRaw : start;
+  const out: string[] = [];
+  const cur = new Date(`${start}T12:00:00`);
+  const last = new Date(`${end}T12:00:00`);
+  if (Number.isNaN(cur.getTime()) || Number.isNaN(last.getTime())) return [start];
+  while (cur <= last) {
+    out.push(cur.toLocaleDateString('en-CA'));
+    cur.setDate(cur.getDate() + 1);
+    if (out.length > MAX_RFZ_RANGO_DIAS) break;
+  }
+  return out;
+}
+
+export function formatYmdAr(ymd: string): string {
+  const [y, m, d] = String(ymd || '').slice(0, 10).split('-');
+  if (!y || !m || !d) return ymd;
+  return `${d}/${m}/${y}`;
 }

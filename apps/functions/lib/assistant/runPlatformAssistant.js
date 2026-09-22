@@ -132,6 +132,17 @@ function serverTodayCordobaYsMmDd() {
     const d = parts.find((p) => p.type === 'day')?.value;
     return y && m && d ? `${y}-${m}-${d}` : new Date().toISOString().slice(0, 10);
 }
+function serverNowCordobaHhMm() {
+    const parts = new Intl.DateTimeFormat('es-AR', {
+        timeZone: 'America/Argentina/Cordoba',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+    }).formatToParts(new Date());
+    const h = parts.find((p) => p.type === 'hour')?.value ?? '';
+    const mn = parts.find((p) => p.type === 'minute')?.value ?? '';
+    return h && mn ? `${h}:${mn}` : '';
+}
 function normalizeClientTodayYsMmDd(raw) {
     const s = String(raw ?? '').trim();
     return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
@@ -190,18 +201,19 @@ function buildSystemPrompt(profile, pathname, moduleKey, referenceYsMmDd, toolsE
         '',
         `HERRAMIENTAS servidor (solo si el cliente mostró empresa válida + permiso):`,
         toolsEnabled
-            ? `Activadas sólo lectura Firestore de la empresa actual: los hechos concretos de la empresa vienen únicamente de esas consultas (y del bloque de métricas precalculadas en el prompt). Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd} cuando el usuario no precise otra fecha.`
+            ? `Activadas — lectura Firestore + herramientas de acción (proponer_*, activar_modo_demo, ejecutar_*). Hechos concretos de la empresa vienen de esas consultas. Interpretá «hoy» como fechaReferenciaCliente=${referenceYsMmDd}. REGLA CRÍTICA: cuando el usuario pide una acción que tiene tool disponible (proponer_confirmar_presencia, activar_modo_demo, desactivar_modo_demo, estado_modo_demo, proponer_registrar_ausencia, proponer_cerrar_turno, proponer_cubrir_ausencia, proponer_extender_jornada, proponer_crear_turno_refuerzo, ejecutar_auto_presencia_cierre, proponer_planificar_objetivo_mes), LLAMÁ AL TOOL — NUNCA respondas diciendo que ya lo ejecutaste sin haberlo llamado realmente.`
             : 'Desactivadas (portal cliente sin datos ajenos, o falta empresa en sesión para superusuarios sin contexto — orientá sólo UI).',
         '',
         `Contexto servidor (verificado por backend):`,
         `- Perfil efectivo: ${profile.summaryLabel} (${profile.persona})`,
         `- Ruta navegador (orientativa): "${pathname}"`,
         `- fechaReferenciaCliente (hoy): "${referenceYsMmDd}"`,
+        `- horaActualServidor AR: "${serverNowCordobaHhMm()}" — usá esto para distinguir turnos pasados, en curso y próximos. «Próximos» = startTime > ahora. «En curso» = ya inició y no terminó. «Pasados» = endTime < ahora.`,
         ...(moduleKey ? [`- moduleKey cliente (orientativo): "${moduleKey}"`] : []),
         '',
         personaModuleBlurb(profile.persona, profile.readableModuleKeys, moduleKey || undefined),
         '',
-        `Reglas: No inventés convocatorias APIs internas nuevas ni prometés ejecutar cambios sobre datos.`,
+        `Reglas: No inventes datos ni nombres de tools que no existen. Si pedís algo para lo que no tenés tool disponible, decilo claramente sin fingir que lo ejecutaste.`,
         `Si falta información o el usuario necesita soporte urgente ante fallo técnico, sugerís contactar a operaciones/IT.`,
     ].join('\n');
 }
@@ -366,7 +378,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         generationConfig: { maxOutputTokens: 8192, temperature: 0.35 },
         ...(toolsEnabled
             ? {
-                tools: [{ functionDeclarations: assistantToolDeclarations_1.ASSISTANT_FUNCTION_DECLARATIONS }],
+                tools: [{ functionDeclarations: (0, assistantToolDeclarations_1.getFilteredDeclarations)(toolCtx.readableModuleKeys) }],
                 toolConfig: { functionCallingConfig: { mode: generative_ai_1.FunctionCallingMode.AUTO } },
             }
             : {}),
@@ -381,6 +393,7 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         throw new functions.https.HttpsError('failed-precondition', mapGeminiErrorToHint(e));
     }
     let rounds = 0;
+    let capturedActionProposal = null;
     while (toolsEnabled && rounds < assistantToolDeclarations_1.ASSISTANT_TOOL_ROUNDS_MAX) {
         rounds++;
         let calls = [];
@@ -395,10 +408,14 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
         const responseParts = await Promise.all(calls.map(async (fc) => {
             const args = (fc.args ?? {});
             const out = await (0, assistantDataTools_1.dispatchAssistantToolCall)(toolCtx, fc.name, args);
+            if (!capturedActionProposal && out.accion_propuesta && typeof out.accion_propuesta === 'object') {
+                capturedActionProposal = out.accion_propuesta;
+            }
+            const { accion_propuesta: _ap, ...outForGemini } = out;
             return {
                 functionResponse: {
                     name: fc.name,
-                    response: out,
+                    response: outForGemini,
                 },
             };
         }));
@@ -450,6 +467,10 @@ async function runGeminiAssistantChat(genAI, systemInstruction, toolsEnabled, hi
     if (!reply) {
         throw new functions.https.HttpsError('failed-precondition', 'El modelo no devolvió texto. Probá de nuevo en un momento o formulá más corto.');
     }
-    return { reply: reply.slice(0, 8000) };
+    const finalReply = reply.slice(0, 8000);
+    if (capturedActionProposal) {
+        return { reply: `${finalReply}<!--COSP_ACTION:${JSON.stringify(capturedActionProposal)}-->` };
+    }
+    return { reply: finalReply };
 }
 //# sourceMappingURL=runPlatformAssistant.js.map

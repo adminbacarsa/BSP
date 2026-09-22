@@ -23,7 +23,7 @@ const config: ExpoConfig = {
   },
   ios: {
     supportsTablet: true,
-    bundleIdentifier: 'com.grupobacar.cosp.guardia',
+    bundleIdentifier: 'com.cosp.guardia',
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
         'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',
@@ -34,8 +34,8 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: 'com.grupobacar.cosp.guardia',
-    googleServicesFile: './google-services.json',
+    package: 'com.cosp.guardia',
+    googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     permissions: [
       'ACCESS_COARSE_LOCATION',
       'ACCESS_FINE_LOCATION',
@@ -48,7 +48,9 @@ const config: ExpoConfig = {
     ...(useEmulator ? { usesCleartextTraffic: true } : {}),
     adaptiveIcon: {
       foregroundImage: './assets/android-icon-foreground.png',
-      backgroundColor: '#312e81',
+      backgroundImage: './assets/android-icon-background.png',
+      backgroundColor: '#8B1A1A',
+      monochromeImage: './assets/android-icon-monochrome.png',
     },
     intentFilters: [
       {
@@ -97,8 +99,8 @@ const config: ExpoConfig = {
     [
       'expo-notifications',
       {
-        icon: './assets/android-icon-foreground.png',
-        color: '#312e81',
+        icon: './assets/android-icon-monochrome.png',
+        color: '#D32F2F',
         defaultChannel: 'default',
         sounds: [],
       },

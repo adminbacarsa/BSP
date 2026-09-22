@@ -13,19 +13,25 @@ import PlatformHealthTab from '@/components/admin/config/PlatformHealthTab';
 import PlanningRulesTab from '@/components/admin/config/PlanningRulesTab';
 import MobileAppTab from '@/components/admin/config/MobileAppTab';
 import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
 import { PageShell, PageHeader, TabBar } from '@/components/ui';
 
 export default function ConfigPage() {
     const [activeTab, setActiveTab] = useState<'GENERAL' | 'MOBILE' | 'PLANNING' | 'USERS' | 'ROLES' | 'EMPRESAS' | 'BACKUP' | 'ASSISTANT' | 'HEALTH'>('GENERAL');
     const router = useRouter();
     const { loading, canReadModule, isSuperAdmin } = useAuth();
+    const { empresa } = useEmpresa();
 
     useEffect(() => {
         if (loading) return;
         if (!canReadModule('CONFIG')) {
             router.replace('/admin/dashboard');
+            return;
         }
-    }, [loading, canReadModule, router]);
+        if (empresa?.isTrainingEmpresa) {
+            router.replace('/admin');
+        }
+    }, [loading, canReadModule, empresa, router]);
 
     if (loading) {
         return (

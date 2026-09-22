@@ -87,6 +87,12 @@ export async function resolveAssistantUser(
     };
   }
 
+  // Si el claim ya certifica SuperAdmin, no hay que buscar en client_users ni empleados
+  if (isSuperAdminRole(claimRole)) {
+    const authSuper = await tryResolveSuperAdminFromAuth(uid, claimRole);
+    if (authSuper) return authSuper;
+  }
+
   const clientSnap = await db.collection('client_users').where('uid', '==', uid).limit(1).get();
   if (!clientSnap.empty) {
     const d = clientSnap.docs[0].data();

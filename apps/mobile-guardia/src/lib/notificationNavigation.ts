@@ -20,6 +20,16 @@ export const EMPLOYEE_ALERT_TYPES = new Set([
   'LLEGADA_TARDE',
   'SWAP_REQUEST',
   'SYSTEM_TEST',
+  'CONVOCATORIA_COBERTURA',
+  'RETENCION',
+  'ADELANTO',
+]);
+
+/** Tipos de cobertura que requieren respuesta Aceptar / Rechazar. */
+export const COVERAGE_RESPONSE_TYPES = new Set([
+  'CONVOCATORIA_COBERTURA',
+  'RETENCION',
+  'ADELANTO',
 ]);
 
 /** Cambios de malla que requieren acuse de lectura del colaborador. */
@@ -53,6 +63,8 @@ const AGENDA_TYPES = new Set([
 ]);
 
 const HOY_TYPES = new Set(['RETENCION_AUTO', 'RETENCION_DETECTADA', 'LLEGADA_TARDE']);
+
+const COBERTURA_TYPES = new Set(['CONVOCATORIA_COBERTURA', 'RETENCION', 'ADELANTO']);
 
 const EVENTOS_TYPES = new Set(['CONVOCATORIA_EVENTO', 'EVENTO_CONFIRMADO']);
 
@@ -104,6 +116,9 @@ export function routeFromNotificationData(data: Record<string, unknown> | undefi
     .trim()
     .toUpperCase();
 
+  if (COBERTURA_TYPES.has(type)) {
+    return '/(tabs)/alertas';
+  }
   if (EVENTOS_TYPES.has(type)) {
     return '/eventos';
   }
@@ -157,6 +172,7 @@ export function notificationActionLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
+  if (COBERTURA_TYPES.has(t)) return 'Ver alerta';
   if (EVENTOS_TYPES.has(t)) return 'Ver convocatoria';
   if (t === 'SWAP_REQUEST') return 'Ver permutas';
   if (AGENDA_TYPES.has(t)) return 'Ver agenda';
@@ -168,6 +184,7 @@ export function notificationDomainLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
+  if (COBERTURA_TYPES.has(t)) return 'Cobertura';
   if (EVENTOS_TYPES.has(t)) return 'Eventos';
   if (t === 'SWAP_REQUEST') return 'Permutas';
   if (AGENDA_TYPES.has(t)) return 'Planificación';

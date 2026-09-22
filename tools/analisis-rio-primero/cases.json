@@ -1,0 +1,59 @@
+{
+  "rio-primero": {
+    "id": "rio-primero",
+    "titulo": "Hospital Santa Rosa — Río Primero",
+    "objetivo": "SP - Hospital Ramon Bautista Mestre",
+    "periodo": "Agosto 2026",
+    "xlsx": "c:\\Users\\Mauro\\Downloads\\Reporte de Horas.xlsx",
+    "out": "informe-rio-primero.html",
+    "plan_mode": "weekend",
+    "plan_lun_sab": { "M": 2, "T": 1, "N": 1, "hs_dia": 32 },
+    "plan_dom": { "M": 1, "T": 1, "N": 1, "hs_dia": 24 },
+    "domingos": [2, 9, 16, 23, 30],
+    "horas_plan_pdf": 952,
+    "horas_facturadas": 960,
+    "horas_teoricas_param": 1488,
+    "parametro_label": "Parámetro SLA (2×24×31)",
+    "plan_leyenda": "lun–sáb: 2M 1T 1N · dom: 1M 1T 1N",
+    "facturacion": {
+      "facturado": 960,
+      "plan_operativo": 952,
+      "parametro_cargado": 1488,
+      "gap_parametro": 528,
+      "gap_plan": 8
+    },
+    "resumen": [
+      "“2 vigiladores por turno × 24 hs” en facturación implica 1.488 h/mes — no coincide ni con lo facturado (960 h) ni con las fichadas corregidas.",
+      "Las 960 h facturadas vs 952 h plan operativo → brecha SLA − operativo = +8 h.",
+      "Fichadas corregidas: olvido cierre >10 h o 0 h → 8 h nominal por turno."
+    ]
+  },
+  "san-roque": {
+    "id": "san-roque",
+    "titulo": "Hospital San Roque Nuevo",
+    "objetivo": "SP - Hospital San Roque Nuevo",
+    "periodo": "Agosto 2026",
+    "xlsx": "c:\\Users\\Mauro\\Downloads\\Reporte de Horas (1).xlsx",
+    "out": "informe-san-roque.html",
+    "plan_mode": "uniform",
+    "plan_diario": { "M": 4, "T": 4, "N": 4, "hs_dia": 96 },
+    "domingos": [],
+    "horas_plan_pdf": 2976,
+    "horas_facturadas": 2928,
+    "horas_teoricas_param": 2976,
+    "parametro_label": "Contrato (4 puestos × 24 × 31)",
+    "plan_leyenda": "4 puestos 24 h: 4M · 4T · 4N = 96 h/día (Rondín, Playa, Hall, Salud Mental)",
+    "facturacion": {
+      "principal": 2184,
+      "principal_teorico": 2232,
+      "refuerzo": 744,
+      "gap_principal": 48
+    },
+    "resumen": [
+      "Facturación combinada: 2.928 h (Principal 2.184 h + Refuerzo 744 h). Parámetro contrato: 2.976 h (31 × 24 × 4 puestos).",
+      "Brecha SLA − operativo = 2.928 − 2.976 = −48 h. Gap interno planilla principal: 48 h (2.184 vs 2.232 teóricas).",
+      "Cronograma real: 4 puestos × 3 bandas = 12 turnos/día × 8 h = 96 h/día → 2.976 h contrato.",
+      "Fichadas corregidas: olvido cierre >10 h o 0 h → 8 h nominal (misma regla que Río Primero)."
+    ]
+  }
+}

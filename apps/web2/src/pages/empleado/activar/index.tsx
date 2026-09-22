@@ -33,7 +33,7 @@ function getOrCreateDeviceId(): string {
 /** Intent Android: abre la app si está instalada; si no, no rompe la página. */
 function buildAndroidIntentUrl(token: string): string {
   const schemePath = `empleado/activar?t=${encodeURIComponent(token)}`;
-  return `intent://${schemePath}#Intent;scheme=cosp-guardia;package=com.grupobacar.cosp.guardia;end`;
+  return `intent://${schemePath}#Intent;scheme=cosp-guardia;package=com.cosp.guardia;end`;
 }
 
 export default function ActivarDispositivoPage() {

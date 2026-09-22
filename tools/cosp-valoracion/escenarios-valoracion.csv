@@ -1,0 +1,24 @@
+Escenario,PM_usado,Factor_IA,PM_efectivo,Contingencia_pct,PM_final,USD_PM,Valor_USD,TC_ARS_ref,Valor_ARS_ref,Calendario_meses_2FTE,Notas
+Conservador interno AR,113,1.00,113,15,129.95,4000,519800,1200,623760000,29,Sin beneficio IA — auditoria pesimista
+Base interno AR,150,0.75,112.5,10,123.75,5000,618750,1200,742500000,24,Equipo propio 2 FTE + IA 25% ahorro codigo
+Agresivo interno AR,113,0.75,84.75,5,88.99,5000,444950,1200,533940000,18,Solo si mobile acotado y deuda controlada
+Base consultora LATAM,150,0.75,112.5,10,123.75,10000,1237500,1200,1485000000,24,Benchmark reemplazo mercado regional
+Conservador consultora LATAM,172,1.00,172,15,197.8,8000,1582400,1200,1898880000,35,Peor caso desde cero sin IA
+Agresivo consultora LATAM,113,0.75,84.75,5,88.99,12000,1067880,1200,1281456000,18,Equipo muy senior alcance congelado
+Referencia agencia US/EU,150,1.00,150,10,165,24000,3960000,1200,4752000000,30,No aplica costo Bacar — techo mercado
+
+Resumen ejecutivo (usar fila Base interno AR),,,,,,,,,,,
+Valor reemplazo recomendado presentacion,USD 620000 - USD 750000,,,,,,,,,Rango base ±20% mobile/deuda
+Valor reemplazo consultora LATAM,USD 1.0M - USD 1.3M,,,,,,,,,Para comparar outsource
+Tiempo reconstruccion 2 FTE + IA,24 meses (base) a 36 meses (conservador),,,,,,,,,,
+Mantenimiento anual post go-live,18% sobre valor reemplazo,,,,,,,,,USD 111k - 135k/año escenario base interno
+
+Costos operativos anuales (no incluidos en reemplazo),Item,USD_min,USD_max,,,,,,,,
+Infraestructura,Firebase hosting functions,500,3000,,,,,,,,
+APIs,Gemini y notificaciones,1000,5000,,,,,,,,
+Mobile,Stores certificados MDM,500,2000,,,,,,,,
+Implementacion,Nuevo tenant onboarding,15000,40000,por cliente,,,,,,,
+
+Formula Excel sugerida — PM_final,=PM_base*Factor_IA*(1+Contingencia_pct/100),,,,,,,,,,
+Formula Excel — Valor USD,=PM_final*USD_PM,,,,,,,,,,
+Formula Excel — Valor ARS,=Valor_USD*TC_ARS_ref,,,,,,,,,,

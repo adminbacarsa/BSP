@@ -51,6 +51,8 @@ import {
   cctBolsaHsPerGuard,
 } from '@/lib/analisis/analisisUniverso';
 import { buildBolsaRealista, threeMonthLookback } from '@/lib/analisis/analisisBolsa';
+import { buildPlantelVacacionesCapacidad } from '@/lib/analisis/analisisVacacionesCapacidad';
+import { sumPlantelLiquidationHours } from '@/lib/analisis/analisisLiquidacionHours';
 import {
   TrendingUp, Users, Clock, Activity, AlertTriangle, CheckCircle,
   Loader2, BarChart3, Target, ChevronLeft, ChevronRight,
@@ -1188,6 +1190,22 @@ export default function AnalisisPage() {
     [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
   );
 
+  const vacacionesCapacidad = useMemo(() => {
+    const y = periodRange.start.getFullYear();
+    const m0 = periodRange.start.getMonth();
+    const consumo = informe.hsLiquidadas > 0 ? informe.hsLiquidadas : informe.hsPlanificadas;
+    return buildPlantelVacacionesCapacidad({
+      employees,
+      ausencias: allAusencias,
+      turnosPeriodo: turnos,
+      year: y,
+      monthIndex0: m0,
+      bolsaInicialHs: bolsaRealista.bolsaInicial,
+      hsConsumoTecho: consumo,
+      tiposNovedad,
+    });
+  }, [employees, allAusencias, turnos, periodKey, bolsaRealista.bolsaInicial, informe.hsLiquidadas, informe.hsPlanificadas, tiposNovedad]);
+
   const informeSeriesMeta = useMemo(() => {
     const bucket = chooseInformeSeriesBucket(periodRange.daysCount);
     const buckets = iterateInformeBuckets(periodRange.start, periodRange.end, bucket);
@@ -1204,7 +1222,7 @@ export default function AnalisisPage() {
         );
       });
     }
-    return buildInformeSeries({
+    const series = buildInformeSeries({
       turnos,
       buckets: informeSeriesMeta.buckets,
       bucket: informeSeriesMeta.bucket,
@@ -1212,6 +1230,14 @@ export default function AnalisisPage() {
       hoursOf: (t) => calcPlanificadorShiftHours(t),
       extraHoursOf: (t) => shiftCoverageExtensionExtraHours(t),
       isPlannedCoverage: (t) => isPlanificadorPlannedHoursShift(t) && !isProformaVacancyShift(t),
+    });
+    // Realizadas del gráfico = hs liquidadas por bucket (mismo motor que Liquidación)
+    return series.map((row) => {
+      const b = informeSeriesMeta.buckets.find((x) => x.key === row.key);
+      if (!b) return row;
+      const slice = filterTurnosInRange(turnos, b.start, b.end);
+      const liq = sumPlantelLiquidationHours(slice);
+      return { ...row, Realizadas: liq.horasReales };
     });
   }, [turnos, vigenteServices, informeSeriesMeta]);
 
@@ -2053,7 +2079,9 @@ export default function AnalisisPage() {
       ['Dotación activa', informe.dotacionActiva],
       ['Horas vendidas (SLA)', informe.hsVendidas],
       ['Horas planificadas', informe.hsPlanificadas],
-      ['Horas realizadas', informe.hsRealizadas],
+      ['Horas liquidadas', informe.hsLiquidadas],
+      ['Liquidadas cobertura', informe.hsLiquidadasCobertura],
+      ['Liquidadas fuera (RET/REF/ESC)', informe.hsLiquidadasDespliegue],
       ['Bolsa inicial hs', informe.bolsaInicial],
       ['Bolsa modo', informe.bolsaModo === 'sin_indice' ? 'Techo 200×N (sin índice)' : 'Capacidad realista'],
       ['Bolsa techo 200×N', informe.bolsaTecho],
@@ -2061,6 +2089,10 @@ export default function AnalisisPage() {
       ['Hs efectivas / guardia', informe.bolsaHsEfectivasGuardia],
       ['Ventana índice', informe.bolsaLookbackLabel],
       ['Bolsa disponible', informe.bolsaDisponible],
+      ['V pendiente anual hs', vacacionesCapacidad.pendienteHs],
+      ['V dosis óptima / mes hs', vacacionesCapacidad.dosisOptimaMensualHs],
+      ['V soporte sin extras hs', vacacionesCapacidad.soporteSinExtrasHs],
+      ['V gap extras forzadas hs', vacacionesCapacidad.gapExtrasForzadasHs],
       ['Cobertura plan %', informe.coberturaPlanPct],
       ['Cobertura efectiva %', informe.coberturaEfectivaPct],
       ['Desvío extras (hs)', informe.desvioExtras],
@@ -2326,7 +2358,7 @@ export default function AnalisisPage() {
                   : 'Legajos activos'
               }/>
             <KpiCard icon={Clock} color="#4f46e5" label="Hs vendidas (SLA)" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs"
-              subtext={loadTurnos ? 'Cargando malla…' : `Plan ${informe.hsPlanificadas.toLocaleString('es-AR')} · real ${informe.hsRealizadas.toLocaleString('es-AR')} · vac ${informe.hsVacante.toLocaleString('es-AR')}`}/>
+              subtext={loadTurnos ? 'Cargando malla…' : `Plan ${informe.hsPlanificadas.toLocaleString('es-AR')} · liq. ${informe.hsLiquidadas.toLocaleString('es-AR')} · vac ${informe.hsVacante.toLocaleString('es-AR')}`}/>
           </div>
 
           {!loadTurnos && deploymentStatsTotal > 0 && (
@@ -2376,7 +2408,7 @@ export default function AnalisisPage() {
                 </span>
                 <span className="text-slate-300 dark:text-slate-600">·</span>
                 <span className="font-black text-emerald-600 tabular-nums">
-                  {informe.hsRealizadas.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Real</span>
+                  {informe.hsLiquidadas.toLocaleString('es-AR')} <span className="font-bold text-slate-400 uppercase text-[9px]">Liq.</span>
                 </span>
                 <span className="text-slate-300 dark:text-slate-600">·</span>
                 <span className={`font-black tabular-nums ${informe.hsVacante > 0 ? 'text-amber-600' : 'text-slate-600 dark:text-slate-300'}`}>
@@ -2799,12 +2831,13 @@ export default function AnalisisPage() {
           {activeTab === 'financiera' && (
             <div className="space-y-4">
               <p className="text-[11px] text-slate-500 dark:text-slate-400 max-w-3xl leading-relaxed rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-900/40 px-4 py-3">
-                <strong className="text-slate-700 dark:text-slate-200">Solo horas.</strong> Consumo hs-hombre, novedades CCT y eficiencia SLA — sin importes, tarifas ni liquidación. Para pesos usá el módulo de Liquidaciones.
+                <strong className="text-slate-700 dark:text-slate-200">Solo horas.</strong> Consumo hs-hombre y novedades CCT (V/L/E/… = <strong>hs muertas pagadas</strong>, no productivas).
+                Las <strong>hs liquidadas / trabajadas</strong> del legajo viven en Informe (mismo motor que Reportes → Liquidación). Acá no se liquidan pesos.
               </p>
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
-                  <strong>hs plan</strong> (cobertura de malla) + <strong>horas sumadas</strong> (novedades V/L/E/ART/AA/PG + FT + extra/ops + francos F/FF y RET/REF/ESC no usados).
+                  <strong>hs plan</strong> (cobertura de malla) + <strong>horas sumadas</strong> (novedades V/L/E/ART/AA/PG = muertas pagadas + FT + extra/ops + francos F/FF y RET/REF/ESC no usados).
                   El SLA no incluye esas horas extra. Si el RET se usó el mismo día (M/T/N), no se duplica.
                   Las novedades se atribuyen al puesto (malla / historial / legajo).
                   Sin precios. Pirámide empresa → cliente → objetivo.
@@ -2855,18 +2888,19 @@ export default function AnalisisPage() {
 
               <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
                 {([
-                  { k: 'V Vacaciones', v: finNovCode(fin.novedades, 'V'), c: '#7c3aed' },
-                  { k: 'E Enfermedad', v: finNovCode(fin.novedades, 'E'), c: '#dc2626' },
-                  { k: 'L Licencia', v: finNovCode(fin.novedades, 'L'), c: '#0891b2' },
-                  { k: 'ART', v: finNovCode(fin.novedades, 'A'), c: '#d97706' },
-                  { k: 'AA Injust.', v: finNovCode(fin.novedades, 'AA'), c: '#64748b' },
-                  { k: 'PG Gremial', v: finNovCode(fin.novedades, 'PG'), c: '#0f766e' },
-                  { k: 'SUS Suspensión', v: finNovCode(fin.novedades, 'SUS'), c: '#be123c' },
-                  { k: 'EV Evento', v: fin.hsEv, c: '#ca8a04' },
+                  { k: 'V Vacaciones', v: finNovCode(fin.novedades, 'V'), c: '#7c3aed', hint: 'Muerta pagada' },
+                  { k: 'E Enfermedad', v: finNovCode(fin.novedades, 'E'), c: '#dc2626', hint: 'Muerta pagada' },
+                  { k: 'L Licencia', v: finNovCode(fin.novedades, 'L'), c: '#0891b2', hint: 'Muerta pagada' },
+                  { k: 'ART', v: finNovCode(fin.novedades, 'A'), c: '#d97706', hint: 'Muerta pagada' },
+                  { k: 'AA Injust.', v: finNovCode(fin.novedades, 'AA'), c: '#64748b', hint: 'Sin goce' },
+                  { k: 'PG Gremial', v: finNovCode(fin.novedades, 'PG'), c: '#0f766e', hint: 'Muerta pagada' },
+                  { k: 'SUS Suspensión', v: finNovCode(fin.novedades, 'SUS'), c: '#be123c', hint: 'Disciplina' },
+                  { k: 'EV Evento', v: fin.hsEv, c: '#ca8a04', hint: 'Extra' },
                 ]).map((n) => (
                   <div key={n.k} className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 shadow-sm">
                     <p className="text-[9px] font-black uppercase text-slate-400">{n.k}</p>
                     <p className="text-lg font-black" style={{ color: n.c }}>{fmtFinHs(n.v)} <span className="text-[10px] font-bold text-slate-400">hs</span></p>
+                    <p className="text-[9px] text-slate-400 font-medium mt-0.5">{n.hint}</p>
                   </div>
                 ))}
               </div>
@@ -3173,11 +3207,12 @@ export default function AnalisisPage() {
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-2xl leading-relaxed">
-                  Lectura gerencial de <strong>{periodRange.labelShort}</strong>: vendido, plan, fichado y ausentismo real.
+                  Lectura gerencial de <strong>{periodRange.labelShort}</strong>: vendido, plan, <strong>hs liquidadas</strong> (mismo motor que Reportes) y ausentismo.
                   {informe.bolsaModo === 'sin_indice'
                     ? ` Bolsa = techo 200×N sin índice (${informe.bolsaLookbackLabel || '3 meses previos'} sin historial de ausencias). No es capacidad realista.`
                     : ` La bolsa no es plantel × 200 como promedio: 200 hs es el techo. Capacidad = techo × (1 − índice ${informe.bolsaLookbackLabel || '3m'}).`}
                   {' '}Jornada de referencia (viabilidad) = {CCT_HS_MENSUAL} hs; no se mezcla con el techo 200.
+                  {' '}Vacaciones: dosis óptima {vacacionesCapacidad.dosisOptimaMensualHs.toLocaleString('es-AR')} hs/mes · soporte sin extras {vacacionesCapacidad.soporteSinExtrasHs.toLocaleString('es-AR')} hs.
                 </p>
                 <div className="flex items-center gap-2 flex-wrap">
                   <button
@@ -3193,15 +3228,33 @@ export default function AnalisisPage() {
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Users} color="#0891b2" label="Dotación activa" value={informe.dotacionActiva} subtext="Legajos activos"/>
                 <KpiCard icon={Target} color="#4f46e5" label="Horas vendidas" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs" subtext="SLA / contrato"/>
-                <KpiCard icon={Clock} color="#6366f1" label="Horas planificadas" value={informe.hsPlanificadas.toLocaleString('es-AR')} unit="hs" subtext="Malla crono"/>
-                <KpiCard icon={CheckCircle} color="#059669" label="Horas realizadas" value={informe.hsRealizadas.toLocaleString('es-AR')} unit="hs"
-                  subtext={informe.hsPendientesFichada > 0 ? `${informe.hsPendientesFichada.toLocaleString('es-AR')} hs sin fichar` : 'Presencia / cierre'}/>
+                <KpiCard icon={Clock} color="#6366f1" label="Plan comprometido" value={informe.hsPlanificadas.toLocaleString('es-AR')} unit="hs" subtext="Malla publicada"/>
+                <KpiCard icon={CheckCircle} color="#059669" label="Hs liquidadas" value={informe.hsLiquidadas.toLocaleString('es-AR')} unit="hs"
+                  subtext={informe.hsLiquidadas > 0
+                    ? `Cob. ${informe.hsLiquidadasCobertura.toLocaleString('es-AR')} · fuera ${informe.hsLiquidadasDespliegue.toLocaleString('es-AR')}`
+                    : (informe.hsPendientesFichada > 0 ? `${informe.hsPendientesFichada.toLocaleString('es-AR')} hs sin reloj` : 'Misma regla que Liquidación')}/>
                 <KpiCard icon={Wallet} color="#7c3aed" label="Bolsa disponible" value={informe.bolsaDisponible.toLocaleString('es-AR')} unit="hs"
                   subtext={`Inicial ${informe.bolsaInicial.toLocaleString('es-AR')} · techo ${informe.bolsaTecho.toLocaleString('es-AR')} · índice 3m ${informe.bolsaIndicePct}% · ${informe.bolsaHsEfectivasGuardia} hs/g`}/>
                 <KpiCard icon={Activity} color={informe.coberturaEfectivaPct >= 95 ? '#059669' : informe.coberturaEfectivaPct >= 85 ? '#d97706' : '#dc2626'}
-                  label="Cobertura operativa" value={`${informe.coberturaEfectivaPct}%`}
-                  subtext={`Plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
+                  label="Cumplimiento real" value={`${informe.coberturaEfectivaPct}%`}
+                  subtext={`Cobertura plan ${informe.coberturaPlanPct}% · extras ${informe.desvioExtras.toLocaleString('es-AR')} hs`}
                   alert={informe.coberturaEfectivaPct < 90}/>
+              </div>
+
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+                <KpiCard icon={Calendar} color="#7c3aed" label="V pendiente año" value={vacacionesCapacidad.pendienteHs.toLocaleString('es-AR')} unit="hs"
+                  subtext={`${vacacionesCapacidad.pendienteDias} d · derecho ${vacacionesCapacidad.derechoAnualDias} d`}/>
+                <KpiCard icon={Target} color="#0284c7" label="Dosis óptima / mes" value={vacacionesCapacidad.dosisOptimaMensualHs.toLocaleString('es-AR')} unit="hs"
+                  subtext={`~${vacacionesCapacidad.dosisOptimaMensualDias} d · ${vacacionesCapacidad.mesesRestantesAnio} meses resto`}/>
+                <KpiCard icon={Shield} color="#059669" label="Soporte V sin extras" value={vacacionesCapacidad.soporteSinExtrasHs.toLocaleString('es-AR')} unit="hs"
+                  subtext={`Holgura bajo techo ${vacacionesCapacidad.techoMensualHs}`}/>
+                <KpiCard icon={AlertTriangle} color={vacacionesCapacidad.gapExtrasForzadasHs > 0 ? '#dc2626' : '#059669'} label="Gap extras por V" value={vacacionesCapacidad.gapExtrasForzadasHs.toLocaleString('es-AR')} unit="hs"
+                  subtext={`V mes ${vacacionesCapacidad.vacMesHs.toLocaleString('es-AR')} hs · jornada ~${vacacionesCapacidad.jornadaPromedioHs}h`}
+                  alert={vacacionesCapacidad.gapExtrasForzadasHs > 8}/>
+                <div className="rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 shadow-sm col-span-2 md:col-span-3 lg:col-span-1 flex flex-col justify-center">
+                  <p className="text-[9px] font-black uppercase text-slate-400 mb-1">Lectura V / bolsa</p>
+                  <p className="text-[11px] text-slate-600 dark:text-slate-300 leading-snug">{vacacionesCapacidad.conclusion}</p>
+                </div>
               </div>
 
               {activeTab === 'informe' && !loadTurnos && informeSeries.length > 0 && (
@@ -3214,7 +3267,7 @@ export default function AnalisisPage() {
                     <LegendRow items={[
                       { color: '#4f46e5', label: 'Vendidas' },
                       { color: '#0284c7', label: 'Planificadas' },
-                      { color: '#059669', label: 'Realizadas' },
+                      { color: '#059669', label: 'Liquidadas' },
                       { color: '#ea580c', label: 'Extras / FT' },
                       { color: '#f59e0b', label: 'Vacante' },
                     ]}/>
@@ -3272,7 +3325,7 @@ export default function AnalisisPage() {
                             {informeSeriesMeta.bucket !== 'hour' && (
                               <Area type="monotone" dataKey="Vendidas" name="Vendidas" stroke="#4f46e5" strokeWidth={2} fill="url(#infVend)" />
                             )}
-                            <Area type="monotone" dataKey="Realizadas" name="Realizadas" stroke="#059669" strokeWidth={2} fill="url(#infReal)" />
+                            <Area type="monotone" dataKey="Realizadas" name="Liquidadas" stroke="#059669" strokeWidth={2} fill="url(#infReal)" />
                             <Line type="monotone" dataKey="Plan" name="Planificadas" stroke="#0284c7" strokeWidth={3} dot={{ r: 3, fill: '#0284c7', strokeWidth: 0 }} />
                             <Line type="monotone" dataKey="Extras" name="Extras / FT" stroke="#ea580c" strokeWidth={2} dot={false} />
                             <Line type="monotone" dataKey="Vacante" name="Vacante" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" dot={false} />
@@ -3283,7 +3336,7 @@ export default function AnalisisPage() {
                               <Line type="monotone" dataKey="Vendidas" name="Vendidas" stroke="#4f46e5" strokeWidth={2.5} dot={{ r: 3, fill: '#4f46e5', strokeWidth: 0 }} />
                             )}
                             <Line type="monotone" dataKey="Plan" name="Planificadas" stroke="#0284c7" strokeWidth={3} dot={{ r: 3.5, fill: '#0284c7', strokeWidth: 0 }} />
-                            <Line type="monotone" dataKey="Realizadas" name="Realizadas" stroke="#059669" strokeWidth={2.5} dot={{ r: 3, fill: '#059669', strokeWidth: 0 }} />
+                            <Line type="monotone" dataKey="Realizadas" name="Liquidadas" stroke="#059669" strokeWidth={2.5} dot={{ r: 3, fill: '#059669', strokeWidth: 0 }} />
                             <Line type="monotone" dataKey="Extras" name="Extras / FT" stroke="#ea580c" strokeWidth={2} dot={false} />
                             <Line type="monotone" dataKey="Vacante" name="Vacante" stroke="#f59e0b" strokeWidth={2} strokeDasharray="5 3" dot={false} />
                           </>

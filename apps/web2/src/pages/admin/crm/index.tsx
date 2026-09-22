@@ -150,6 +150,7 @@ import { slaFootprintFromServices, summarizeCrmCommercial, type CrmSlaFootprint 
 import { coalescePlannedTurnosForCell, coalescePlannedCellBillableHours } from '@/lib/planificacion/planningTurnoCoalesce';
 import {
   applyRefuerzoHorasVendidasToGrids,
+  applyRefuerzoHorasVendidasToPositionGrids,
   applyRefuerzoHorasVendidasToBreakdown,
   countEstructuralesEnRango,
   solicitudIdsBilledInRange,
@@ -1252,21 +1253,21 @@ export default function CRMPage() {
     const err = e as { code?: string; message?: string };
     const msg = callableErrorText(e);
     if (err.code === 'functions/unauthenticated' || /sesión|iniciar sesión/i.test(msg)) {
-      toast.error('Sesión expirada. Cerrá sesión y volvé a entrar, luego probá AFIP de nuevo.');
+      toast.error('Sesión expirada. Cerrá sesión y volvé a entrar, luego probá ARCA de nuevo.');
     } else if (err.code === 'functions/permission-denied') {
-      toast.error(msg || 'No tenés permiso para consultar AFIP.');
+      toast.error(msg || 'No tenés permiso para consultar ARCA.');
     } else if (err.code === 'functions/not-found') {
       toast.error(
         msg ||
-          'CUIT no encontrado en el padrón AFIP. Si en ARCA web sí aparece, activá certificado de producción en Configuración → Empresas.',
+          'CUIT no encontrado en el padrón ARCA. Si en ARCA web sí aparece, activá certificado de producción en Configuración → Empresas.',
         { duration: 16_000 },
       );
     } else if (err.code === 'functions/failed-precondition' || /401|certificado afip|AFIP rechazó|no configurado/i.test(msg)) {
       const hint = /no configurado/i.test(msg)
         ? ' Cargá el certificado en Configuración → Empresas (empresa activa).'
         : '';
-      toast.error((msg || 'Error de certificado o ambiente AFIP.') + hint, { duration: 14000 });
-    } else toast.error(msg || 'Error al consultar AFIP');
+      toast.error((msg || 'Error de certificado o ambiente ARCA.') + hint, { duration: 14000 });
+    } else toast.error(msg || 'Error al consultar ARCA');
   };
 
   const handleAfipLookup = async (target: 'new' | 'edit' | 'client') => {
@@ -1275,9 +1276,55 @@ export default function CRMPage() {
       return;
     }
     if (!empresaId?.trim()) {
-      toast.error('Seleccioná una empresa en el panel antes de consultar AFIP.');
+      toast.error('Seleccioná una empresa en el panel antes de consultar ARCA.');
       return;
     }
+
+    // Modo capacitación: simular lookup AFIP sin llamar al servicio real
+    if ((empresa as any)?.isTrainingEmpresa) {
+      const fakeData: AfipClientLookupResult = {
+        taxId: '20-12345678-9',
+        legalName: 'Empresa de Seguridad Demo Sociedad Anónima',
+        name: 'Demo SA',
+        address: 'Av. Colón 1234',
+        city: 'Córdoba',
+        state: 'Córdoba',
+        postalCode: 'X5000AAA',
+        ivaStatus: 'Responsable Inscripto',
+        tipoPersona: 'JURIDICA',
+        estadoClave: 'ACTIVO',
+        actividadPrincipal: '80.300 - Enseñanza de formación y capacitación laboral',
+        afipImpuestos: 'IVA - Responsable Inscripto, Impuesto a las Ganancias - Inscripto',
+      };
+      if (target === 'new') {
+        setAfipLookupLoading('new');
+        await new Promise(r => setTimeout(r, 700));
+        setNewClientForm((f) => mergeAfipIntoClientForm(f, fakeData));
+        toast.success('Datos cargados desde ARCA (modo capacitación)');
+        setAfipLookupLoading(null);
+        return;
+      }
+      if (!selectedClient?.id || !selectedClientWritable) return;
+      setAfipLookupLoading(target);
+      await new Promise(r => setTimeout(r, 700));
+      try {
+        const fresh = await assertClientWritable(selectedClient.id, selectedClient.name);
+        const base = target === 'edit' ? { ...fresh, ...infoForm } : fresh;
+        const patch = mergeAfipIntoClientRecord(base, fakeData);
+        const { id: _id, collection: _col, ...patchClean } = patch as Record<string, unknown>;
+        await updateClientForEmpresa(fresh.id, patchClean, empresaId, migracionCompleta, tenantAccess);
+        setSelectedClient({ ...fresh, ...patch });
+        setInfoForm({ ...fresh, ...patch });
+        setIsEditingInfo(false);
+        toast.success('Ficha actualizada desde ARCA (modo capacitación)');
+      } catch (e: unknown) {
+        toast.error('Error al guardar la ficha');
+      } finally {
+        setAfipLookupLoading(null);
+      }
+      return;
+    }
+
     const taxId = target === 'new'
       ? newClientForm.taxId
       : target === 'edit'
@@ -1294,7 +1341,7 @@ export default function CRMPage() {
       try {
         const data = await lookupClientByCuitFromAfip(taxId, empresaId);
         setNewClientForm((f) => mergeAfipIntoClientForm(f, data));
-        toast.success(`Datos cargados desde AFIP: ${data.legalName}`);
+        toast.success(`Datos cargados desde ARCA: ${data.legalName}`);
         if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
       } catch (e: unknown) {
         afipLookupErrorToast(e);
@@ -1321,7 +1368,7 @@ export default function CRMPage() {
       setSelectedClient({ ...fresh, ...patch });
       setInfoForm({ ...fresh, ...patch });
       setIsEditingInfo(false);
-      toast.success(`Ficha actualizada desde AFIP: ${data.legalName}`);
+      toast.success(`Ficha actualizada desde ARCA: ${data.legalName}`);
       if (data.afipWarning) toast.warning(data.afipWarning, { duration: 14_000 });
     } catch (e: unknown) {
       afipLookupErrorToast(e);
@@ -1658,7 +1705,7 @@ export default function CRMPage() {
     if (payload.lng !== null && Number.isNaN(payload.lng)) return toast.error('Longitud inválida');
 
     if (editingObjectiveIndex !== null && editingObjectiveIndex >= 0) objetivos[editingObjectiveIndex] = { ...objetivos[editingObjectiveIndex], ...payload };
-    else objetivos.push({ id: String(Date.now()), ...payload });
+    else objetivos.push({ id: String(Date.now()), createdAt: new Date().toISOString(), ...payload });
 
     try {
       await updateClientForEmpresa(selectedClient.id, { objetivos }, empresaId, migracionCompleta, tenantAccess);
@@ -1947,6 +1994,7 @@ export default function CRMPage() {
       const plannedCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
 
       turnosEnriched.forEach((t) => {
+        if (t.isDeleted === true) return;
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return;
         const code = String((t.code || t.type || '')).trim().toUpperCase();
@@ -2112,7 +2160,8 @@ export default function CRMPage() {
         slaCodeHoursHintByObjective,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
-      const positionGrids = buildProformaPositionGrids({
+      const positionGrids = applyRefuerzoHorasVendidasToPositionGrids(
+        buildProformaPositionGrids({
         turnos,
         empMeta,
         clientId: selectedClient.id,
@@ -2125,7 +2174,10 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
-      });
+      }),
+        solicitudesRefuerzo,
+        { start, end },
+      );
       const vigenteSlas = pickVigenteSlasForPeriod(servicesForProforma, start, end, selectedClient.id);
       const slaHoursByObjectiveId: Record<string, number> = {};
       for (const srv of vigenteSlas) {
@@ -2347,6 +2399,7 @@ export default function CRMPage() {
           action={
             <button
               onClick={() => setNewClientOpen(true)}
+              data-action="nuevo-cliente"
               className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase transition-colors"
             >
               <Plus size={13} /> Cliente
@@ -2784,10 +2837,10 @@ export default function CRMPage() {
                             disabled={!selectedClientWritable || afipLookupLoading === 'client'}
                             onClick={() => void handleAfipLookup('client')}
                             className="font-black text-[10px] uppercase px-4 py-2 rounded-xl border border-violet-200 text-violet-700 hover:bg-violet-50 flex items-center gap-1.5 disabled:opacity-40"
-                            title="Consultar AFIP y guardar en la ficha del cliente"
+                            title="Consultar ARCA y guardar en la ficha del cliente"
                           >
                             {afipLookupLoading === 'client' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                            Actualizar desde AFIP
+                            Actualizar desde ARCA
                           </button>
                         )}
                         <button
@@ -2828,10 +2881,10 @@ export default function CRMPage() {
                                     disabled={!selectedClientWritable || afipLookupLoading === 'edit'}
                                     onClick={() => void handleAfipLookup('edit')}
                                     className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
-                                    title="Consultar AFIP y guardar en la ficha"
+                                    title="Consultar ARCA y guardar en la ficha"
                                   >
                                     {afipLookupLoading === 'edit' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                                    AFIP y guardar
+                                    ARCA y guardar
                                   </button>
                                 </div>
                               </div>
@@ -2930,7 +2983,7 @@ export default function CRMPage() {
                               <div className="grid grid-cols-2 divide-x divide-slate-100">
                                 {selectedClient.tipoPersona ? (
                                   <div className="px-4 py-3">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Tipo (AFIP)</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Tipo (ARCA)</p>
                                     <p className="font-black text-slate-800">
                                       {selectedClient.tipoPersona === 'FISICA' ? 'Persona física' : selectedClient.tipoPersona === 'JURIDICA' ? 'Persona jurídica' : selectedClient.tipoPersona}
                                     </p>
@@ -2938,7 +2991,7 @@ export default function CRMPage() {
                                 ) : <div className="px-4 py-3" />}
                                 {selectedClient.estadoClave ? (
                                   <div className="px-4 py-3">
-                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado clave (AFIP)</p>
+                                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Estado clave (ARCA)</p>
                                     <p className="font-black text-slate-800">{selectedClient.estadoClave}</p>
                                   </div>
                                 ) : null}
@@ -2946,13 +2999,13 @@ export default function CRMPage() {
                             )}
                             {selectedClient.actividadPrincipal ? (
                               <div className="px-4 py-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Actividad principal (AFIP)</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Actividad principal (ARCA)</p>
                                 <p className="font-bold text-slate-700 text-sm leading-snug">{selectedClient.actividadPrincipal}</p>
                               </div>
                             ) : null}
                             {selectedClient.afipImpuestos ? (
                               <div className="px-4 py-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impuestos (AFIP)</p>
+                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Impuestos (ARCA)</p>
                                 <p className="font-bold text-slate-600 text-xs leading-relaxed">{selectedClient.afipImpuestos}</p>
                               </div>
                             ) : null}
@@ -3626,6 +3679,7 @@ export default function CRMPage() {
                           setEditingObjectiveIndex(editingObjectiveIndex === -1 ? null : -1);
                         }}
                         className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-colors"
+                        data-action="nueva-sede"
                       >
                         <Plus size={13} /> Nueva Sede
                       </button>
@@ -3637,6 +3691,7 @@ export default function CRMPage() {
                         <p className="text-[10px] font-black text-indigo-500 uppercase tracking-wider">Nueva sede</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <input
+                            data-action="crm-sede-nombre"
                             className="borderw-full p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                             placeholder="Nombre de la sede"
                             value={objectiveForm.name}
@@ -3644,12 +3699,14 @@ export default function CRMPage() {
                           />
                           <div className="flex gap-2">
                             <input
+                              data-action="crm-sede-direccion"
                               className="borderflex-1 p-3 rounded-xl font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" style={{ backgroundColor: 'var(--surf2)', borderColor: 'var(--border)', color: 'var(--txt)' }}
                               placeholder="Dirección completa"
                               value={objectiveForm.address}
                               onChange={(e) => setObjectiveForm({ ...objectiveForm, address: e.target.value })}
                             />
                             <button
+                              data-action="crm-sede-geolocalize"
                               onClick={handleGeocodeSede}
                               disabled={isGeocodingSede}
                               title="Geolocalizar por dirección o coordenadas"
@@ -3704,7 +3761,7 @@ export default function CRMPage() {
                           </div>
                         </label>
                         <div className="flex gap-2 pt-1">
-                          <button onClick={handleSaveObjective} className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">
+                          <button onClick={handleSaveObjective} data-action="guardar-sede" className="bg-emerald-500 hover:bg-emerald-600 text-white px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">
                             Guardar
                           </button>
                           <button onClick={resetObjectiveForm} className="bg-white hover:bg-slate-50 border border-slate-200 px-6 py-2 rounded-xl font-black uppercase text-xs transition-colors">
@@ -4017,12 +4074,12 @@ export default function CRMPage() {
             <div className="space-y-3">
               <div>
                 <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Nombre comercial *</label>
-                <input className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Ej: Empresa SA" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} />
+                <input data-action="crm-nuevo-nombre" className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Ej: Empresa SA" value={newClientForm.name} onChange={(e) => setNewClientForm({ ...newClientForm, name: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Razón social</label>
-                  <input className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Razón social" value={newClientForm.legalName} onChange={(e) => setNewClientForm({ ...newClientForm, legalName: e.target.value })} />
+                  <input data-action="crm-nuevo-razonsocial" className="w-full p-3 rounded-xl border border-slate-200 bg-slate-50 font-bold text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400" placeholder="Razón social" value={newClientForm.legalName} onChange={(e) => setNewClientForm({ ...newClientForm, legalName: e.target.value })} />
                 </div>
                 <div>
                   <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">CUIT</label>
@@ -4033,10 +4090,11 @@ export default function CRMPage() {
                       disabled={afipLookupLoading === 'new'}
                       onClick={() => void handleAfipLookup('new')}
                       className="shrink-0 px-3 py-2 rounded-xl border border-indigo-200 text-indigo-600 hover:bg-indigo-50 text-[10px] font-black uppercase flex items-center gap-1 disabled:opacity-40"
-                      title="Consultar padrón AFIP"
+                      data-action="crm-nuevo-arca"
+                      title="Consultar padrón ARCA"
                     >
                       {afipLookupLoading === 'new' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                      AFIP
+                      ARCA
                     </button>
                   </div>
                 </div>
@@ -4076,7 +4134,7 @@ export default function CRMPage() {
             </div>
             <div className="flex gap-3 mt-6">
               <button onClick={() => setNewClientOpen(false)} className="flex-1 py-3 rounded-xl border border-slate-200 text-slate-500 font-black text-[10px] uppercase hover:bg-slate-50 transition-colors">Cancelar</button>
-              <button onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-black text-[10px] uppercase hover:bg-indigo-700 transition-colors disabled:opacity-40">
+              <button data-action="crm-nuevo-crear" onClick={handleCreateClient} disabled={savingNewClient} className="flex-1 py-3 rounded-xl bg-indigo-600 text-white font-black text-[10px] uppercase hover:bg-indigo-700 transition-colors disabled:opacity-40">
                 {savingNewClient ? 'Creando...' : 'Crear Cliente'}
               </button>
             </div>

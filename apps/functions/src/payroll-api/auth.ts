@@ -127,6 +127,11 @@ export async function requireApiKey(
         return false;
     }
 
+    if (integration.empresaId === 'capacitacion') {
+        sendError(res, 403, 'training_empresa_blocked', 'La empresa capacitacion no tiene acceso a la API de liquidación.');
+        return false;
+    }
+
     req.integration = integration;
 
     // Auditoría: registrar el hit. No bloqueante.

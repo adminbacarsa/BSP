@@ -1,6 +1,6 @@
 export type FichajeTipo = 'CHECK_IN' | 'CHECK_OUT';
 export type FichajeStatus = 'PENDING' | 'APPLIED' | 'REJECTED';
-export type FichajeSource = 'PORTAL_GPS' | 'MANUAL_RADIO' | 'MANUAL_PHONE' | 'OPERATIONS';
+export type FichajeSource = 'PORTAL_GPS' | 'MANUAL_RADIO' | 'MANUAL_PHONE' | 'OPERATIONS' | 'VIGI' | 'DEMO';
 
 export interface PortalCheckInInput {
   shiftId: string;
