@@ -314,6 +314,10 @@ async function applyCoverage(db, batch, params) {
             coverageConvocatoriaId: params.convocatoriaId || null,
         });
     }
+    if (closeMode === 'FULL') {
+        const { releaseRetentionForAbsenceShift } = await Promise.resolve().then(() => require('./coverageRetention'));
+        await releaseRetentionForAbsenceShift(db, titularId, params.resolvedBy || 'COVERAGE');
+    }
     return covDocId;
 }
 //# sourceMappingURL=syncAusenciaCobertura.js.map

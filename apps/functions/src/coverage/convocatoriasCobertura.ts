@@ -10,7 +10,6 @@ import {
   getUrgency,
   findEmployeeUid,
 } from './eligibilityFilter';
-import { applyAutoRetentionForAbsenceShift } from './coverageRetention';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -1352,25 +1351,6 @@ export async function iniciarCascadaCobertura(
   if (isTitularAlreadyCovered(titularData)) {
     console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
     return;
-  }
-
-  try {
-    const retention = await applyAutoRetentionForAbsenceShift(db, shift.id, {
-      ...titularData,
-      objectiveId: shift.objectiveId,
-      objectiveName: shift.objectiveName,
-      positionName: shift.positionName,
-      employeeId: titularData.employeeId,
-      empresaId: shift.empresaId,
-      endTime: shift.endTime ?? titularData.endTime,
-    });
-    if (retention.applied) {
-      console.log(
-        `[iniciarCascadaCobertura] retención ${retention.shiftId} (${retention.employeeName || ''}) → ausencia ${shift.id}`,
-      );
-    }
-  } catch (e) {
-    console.warn('[iniciarCascadaCobertura] retención:', (e as Error)?.message);
   }
 
   const priorCov = await db.collection('turnos')

@@ -399,5 +399,10 @@ export async function applyCoverage(
     );
   }
 
+  if (closeMode === 'FULL') {
+    const { releaseRetentionForAbsenceShift } = await import('./coverageRetention');
+    await releaseRetentionForAbsenceShift(db, titularId, params.resolvedBy || 'COVERAGE');
+  }
+
   return covDocId;
 }

@@ -10,7 +10,6 @@ const functions = require("firebase-functions/v1");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
-const coverageRetention_1 = require("./coverageRetention");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -1035,23 +1034,6 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
     if (isTitularAlreadyCovered(titularData)) {
         console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
         return;
-    }
-    try {
-        const retention = await (0, coverageRetention_1.applyAutoRetentionForAbsenceShift)(db, shift.id, {
-            ...titularData,
-            objectiveId: shift.objectiveId,
-            objectiveName: shift.objectiveName,
-            positionName: shift.positionName,
-            employeeId: titularData.employeeId,
-            empresaId: shift.empresaId,
-            endTime: shift.endTime ?? titularData.endTime,
-        });
-        if (retention.applied) {
-            console.log(`[iniciarCascadaCobertura] retención ${retention.shiftId} (${retention.employeeName || ''}) → ausencia ${shift.id}`);
-        }
-    }
-    catch (e) {
-        console.warn('[iniciarCascadaCobertura] retención:', e?.message);
     }
     const priorCov = await db.collection('turnos')
         .where('absenceShiftId', '==', shift.id)
