@@ -17,6 +17,7 @@ export {
   isOperationsCoverageShift,
   parsePendingCheckins,
   validateCheckInDistance,
+  resolveAdjustedStartTime,
 } from './checkIn/portalCheckIn';
 export type {
   PendingCheckInItem,
