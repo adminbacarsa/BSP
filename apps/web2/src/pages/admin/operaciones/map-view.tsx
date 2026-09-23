@@ -26,7 +26,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
 };
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
-import { WorkedDayOffModal as WorkedDayOffModalPro } from '@/components/operaciones/OperationalModals';
+import { WorkedDayOffModal as WorkedDayOffModalPro, AttendanceModal } from '@/components/operaciones/OperationalModals';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
 import {
     novedadActorName,
@@ -482,8 +482,6 @@ const CheckOutModal = ({ isOpen, onClose, onConfirm, employeeName, shift }: any)
         </div>
     );
 };
-const AttendanceModal = ({ isOpen, onClose, shift, onMarkAbsent }: any) => { if (!isOpen) return null; return (<div className="fixed inset-0 z-[9000] bg-black/60 flex items-center justify-center p-4"><div className="bg-white w-full max-w-sm rounded-2xl shadow-xl p-6 text-center"><AlertTriangle size={48} className="mx-auto text-amber-500 mb-4"/><h3 className="font-bold text-lg mb-2">Confirmar Ausencia</h3><p className="text-sm text-slate-500 mb-6">¿{shift?.employeeName} no se presentó?</p><button onClick={() => onMarkAbsent(shift)} className="w-full py-3 bg-rose-600 text-white rounded-xl font-bold mb-2">MARCAR AUSENTE</button><button onClick={onClose} className="text-sm text-slate-400">Cancelar</button></div></div>); };
-
 // ── NOVEDAD DETAIL POPUP ─────────────────────────────────────────────────────
 const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',  bg: 'bg-rose-600',   text: 'text-white', border: 'border-rose-500' },
