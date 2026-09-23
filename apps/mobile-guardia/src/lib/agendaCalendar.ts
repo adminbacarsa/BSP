@@ -116,9 +116,21 @@ export function isAgendaAbsentShift(s: Shift): boolean {
   return isAbsentLikeShift(s as unknown as Record<string, unknown>);
 }
 
+/** Retención activa: presente, no completado, esperando relevo (no es “ya trabajado”). */
+export function isAgendaRetentionShift(s: Shift): boolean {
+  const raw = s as Shift & { isRetention?: boolean };
+  return (
+    raw.isRetention === true &&
+    s.isPresent === true &&
+    s.isCompleted !== true &&
+    !isAgendaAbsentShift(s)
+  );
+}
+
 /** Turno de trabajo ya cumplido (presente, completado o horario pasado). */
 export function isAgendaWorkedShift(s: Shift, now = new Date()): boolean {
   if (isAgendaAbsentShift(s)) return false;
+  if (isAgendaRetentionShift(s)) return false;
   if (s.isFranco && !s.isFrancoTrabajado && !isOpsCoverageShift(s)) return false;
   if (s.isPresent === true || s.isCompleted === true) return true;
   const status = String(s.status || '').toUpperCase();

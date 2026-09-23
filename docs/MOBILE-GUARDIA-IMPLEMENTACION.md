@@ -34,8 +34,8 @@
 
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
 **Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
-**Última actualización:** 2026-09-08  
-**Última tarea completada:** F0-01 verificación cuenta desarrollador Play
+**Última actualización:** 2026-09-23  
+**Última tarea completada:** Flujos CC portal — Punto 1 Retenido (hero + Agenda)
 
 ---
 

@@ -18,6 +18,7 @@ import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import {
   heroShift,
+  isActiveRetentionShift,
   isShiftInProgress,
   shiftStartsToday,
   pickTodayAbsentShift,
@@ -27,6 +28,7 @@ import { appRoutes } from '../../src/lib/appRoutes';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
+import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
 import {
@@ -136,13 +138,16 @@ function HoyScreenContent() {
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
   const isOpsHero =
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  const isRetentionHero = isActiveRetentionShift(mainShift);
   const heroSectionLabel = todayAbsentShift
     ? 'Ausente'
-    : isOpsHero
-      ? 'Turno asignado'
-      : heroInProgress
-        ? 'Turno actual'
-        : 'Próximo turno';
+    : isRetentionHero
+      ? 'Retenido'
+      : isOpsHero
+        ? 'Turno asignado'
+        : heroInProgress
+          ? 'Turno actual'
+          : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
@@ -186,11 +191,13 @@ function HoyScreenContent() {
   const heroSub =
     todayAbsentShift
       ? 'Hoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés tiempo hasta las 24:00 de hoy.'
-      : mainShift?.isFranco
-        ? 'Día de descanso programado'
-        : mainShift
-          ? formatHeroTimeRange(mainShift)
-          : 'No hay turnos en el mes actual';
+      : isRetentionHero
+        ? `Estás retenido en ${placement.objective} · esperá al relevo`
+        : mainShift?.isFranco
+          ? 'Día de descanso programado'
+          : mainShift
+            ? formatHeroTimeRange(mainShift)
+            : 'No hay turnos en el mes actual';
 
   const mainShiftEv =
     mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
@@ -266,6 +273,10 @@ function HoyScreenContent() {
               onAccept={(sol) => void onResponderConvocatoria(sol, true)}
               onReject={(sol) => void onResponderConvocatoria(sol, false)}
             />
+          ) : null}
+
+          {isRetentionHero && mainShift ? (
+            <RetentionBanner objectiveName={placement.objective} />
           ) : null}
 
           {loading ? (

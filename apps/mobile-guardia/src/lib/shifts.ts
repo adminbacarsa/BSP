@@ -16,6 +16,18 @@ function dateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Retenido presente: sigue siendo hero aunque haya pasado endTime (espera relevo). */
+export function isActiveRetentionShift(shift: Shift | null | undefined): boolean {
+  if (!shift) return false;
+  const raw = shift as Shift & { isRetention?: boolean };
+  return (
+    raw.isRetention === true &&
+    shift.isPresent === true &&
+    shift.isCompleted !== true &&
+    !isAbsentLikeShift(shift as unknown as Record<string, unknown>)
+  );
+}
+
 export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | undefined {
   const sorted = sortShiftsByStart(shifts);
   const startOfDay = new Date(now);
@@ -28,8 +40,9 @@ export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | un
     const start = toDate(s.startTime);
     const end = toDate(s.endTime);
     if (!start || start < startOfDay || start > endOfDay) return false;
-    // Al llegar a la hora de fin, ya no es el hero de hoy (pasa al próximo).
-    if (end && end.getTime() <= now.getTime()) return false;
+    // Al llegar a la hora de fin, ya no es el hero de hoy (pasa al próximo),
+    // salvo retención activa: el vigilador sigue en puesto esperando relevo.
+    if (end && end.getTime() <= now.getTime() && !isActiveRetentionShift(s)) return false;
     return true;
   });
 }
