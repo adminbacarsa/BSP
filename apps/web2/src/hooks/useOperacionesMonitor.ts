@@ -9,12 +9,6 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
-import {
-  assessCoveragePackageStatus,
-  computePlannedOperativelyCovered,
-  isAbsentTitularCoverageClosed,
-  toPlanningShiftSlice,
-} from '@/lib/cosp/coverageSemantics';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -152,7 +146,7 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'ACTIVOS':
             return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention;
         case 'RETENIDOS':
-            return s.isRetention || s.isPendingRetention;
+            return s.isRetention;
         case 'VACANTES':
             return isActionableOpsVacancy(s);
         case 'AUSENTES':
@@ -196,35 +190,23 @@ const findTimeGaps = (shifts: any[], baseDate: Date) => {
 };
 
 // HELPER: SLOT COVERAGE (EL VERDADERO MOTOR V124)
-/** Mínimo de superposición slot↔turno para contar cobertura en Ops (p. ej. M 07–14 vs SLA 07–15). */
-const OPS_SLOT_COVERAGE_MIN_RATIO = 0.85;
-
-const slotOverlapMs = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
-    let tStart = slotStart.getTime();
-    let tEnd = slotEnd.getTime();
+const checkSlotCoverage = (slotStart: Date, slotEnd: Date, shifts: any[]) => {
+    let tStart = slotStart.getTime(); let tEnd = slotEnd.getTime();
     if (tEnd <= tStart) tEnd += 86400000;
-    const duration = tEnd - tStart;
-    let covered = 0;
+    const duration = tEnd - tStart; let covered = 0;
     shifts.forEach(s => {
-        let sStart = s.shiftDateObj.getTime();
-        let sEnd = s.endDateObj.getTime();
+        let sStart = s.shiftDateObj.getTime(); let sEnd = s.endDateObj.getTime();
         if (sEnd <= sStart) sEnd += 86400000;
-        const overlapStart = Math.max(tStart, sStart);
+        
+        // Alineación inteligente: Si el turno cubre el rango, suma.
+        // No forzamos dias, solo superposición de timestamps.
+        const overlapStart = Math.max(tStart, sStart); 
         const overlapEnd = Math.min(tEnd, sEnd);
-        if (overlapEnd > overlapStart) covered += overlapEnd - overlapStart;
+        
+        if (overlapEnd > overlapStart) covered += (overlapEnd - overlapStart);
     });
-    return { duration, covered };
-};
-
-const checkSlotCoverage = (
-    slotStart: Date,
-    slotEnd: Date,
-    shifts: any[],
-    minRatio = OPS_SLOT_COVERAGE_MIN_RATIO,
-) => {
-    const { duration, covered } = slotOverlapMs(slotStart, slotEnd, shifts);
-    if (duration <= 0) return false;
-    return covered / duration >= minRatio;
+    // Tolerancia 90% cubierto
+    return (covered / duration) > 0.90;
 };
 
 /** Ventana efectiva para cobertura split planificada (ext/adel con tramo horario). */
@@ -258,27 +240,16 @@ const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyP
     return checkSlotCoverage(slotStart, slotEnd, [proxy]);
 };
 
-/** Ausente/titular cuyo tramo coincide con el slot SLA (sin exigir que “cubra”). */
-const shiftOverlapsVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string) => {
-    if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
-    if (!s.shiftDateObj || !s.endDateObj) return false;
-    return checkSlotCoverage(slotStart, slotEnd, [s]);
+const assessPlannedPackageStatus = (rows: any[]): 'COVERED' | 'PARTIAL' | 'NONE' => {
+    if (!rows.length) return 'NONE';
+    const hasExt = rows.some(r => r.coverageSegmentRole === 'EXTENSION');
+    const hasAdel = rows.some(r => r.coverageSegmentRole === 'EARLY_START');
+    if (!hasExt || !hasAdel) return 'PARTIAL';
+    const explicit = rows.find(r => r.coverageStatus === 'COVERED' || r.coverageStatus === 'PARTIAL')?.coverageStatus;
+    if (explicit === 'COVERED') return 'COVERED';
+    if (explicit === 'PARTIAL') return 'PARTIAL';
+    return 'COVERED';
 };
-
-const isAbsentMarkedCovered = (s: any) => isAbsentTitularCoverageClosed(s);
-
-const countCoveringShiftsOnSlot = (
-    shifts: any[],
-    objectiveId: string,
-    positionName: string,
-    slotStart: Date,
-    slotEnd: Date,
-) => shifts.filter((cover: any) =>
-    !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
-    !cover.isFranco &&
-    cover.objectiveId === objectiveId &&
-    shiftCoversVacancySlot(cover, slotStart, slotEnd, positionName),
-).length;
 
 const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
 
@@ -328,7 +299,8 @@ const countPresentOnSlot = (
 ) => shifts.filter(s =>
     s.isPresent && !s.isCompleted &&
     s.objectiveId === objectiveId &&
-    shiftCoversVacancySlot(s, slotStart, slotEnd, positionName),
+    normPosName(s.positionName) === normPosName(positionName) &&
+    checkSlotCoverage(slotStart, slotEnd, [s]),
 ).length;
 
 export const useOperacionesMonitor = (forcedClientId?: string | null) => {
@@ -677,7 +649,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
             const isPlannedLiberationRet = String(shift.code || '').toUpperCase() === 'RET'
                 && (shift.coverageSegmentRole === 'LIBERATED' || !!shift.liberationReason);
-            const plannedOperativelyCovered = computePlannedOperativelyCovered(shift);
+            const plannedOperativelyCovered = !!shift.operacionallyCovered
+                || (shift.coverageStatus === 'COVERED' && (shift.coverageSegmentRole === 'TARGET' || isAbsent))
+                || (!!shift.coveredBy && shift.coverageStatus === 'COVERED' && (isAbsent || shift.coverageSegmentRole === 'TARGET'));
             const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
             const isConvocado = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
                 (isEarlyStart || isPlannedLiberationRet || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
@@ -880,26 +854,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         if (start && end) {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
 
-                            const coveredFromPlan = posShifts.filter((s: any) =>
-                                shiftCoversVacancySlot(s, start, end, pos.name),
-                            ).length;
-                            const presentOnSlot = allPosShifts.filter((s: any) =>
-                                s.isPresent && !s.isCompleted && shiftCoversVacancySlot(s, start, end, pos.name),
-                            ).length;
-                            const coveredCount = Math.max(coveredFromPlan, presentOnSlot);
+                            // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
+                            const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
+                            // Capacidad requerida según SLA (quantity del puesto)
                             const requiredCount = pos.quantity || 1;
-                            let missing = Math.max(0, requiredCount - coveredCount);
+                            const missing = Math.max(0, requiredCount - coveredCount);
 
-                            // Hueco por ausencia: la fila AUSENTES ya representa el caso; no duplicar en VAC.
-                            if (slotVacancyOrigin === 'ABSENCE' && missing > 0) {
-                                const absNeedingCover = allPosShifts.filter((s: any) =>
-                                    (s.isAbsent || s.isPotentialAbsence) && !s.isCompleted &&
-                                    shiftOverlapsVacancySlot(s, start, end, pos.name) &&
-                                    !isAbsentMarkedCovered(s),
-                                );
-                                if (absNeedingCover.length >= missing) missing = 0;
-                            }
-
+                            // Generar una tarjeta de vacante por cada puesto faltante
                             for (let i = 0; i < missing; i++) {
                                 virtualVacancies.push({
                                     id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
@@ -996,11 +957,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             ).length;
                             const deficit = Math.max(0, guardQty - coveredOnSlot);
                             const pkgStatus = refShift.coveragePackageId
-                                ? assessCoveragePackageStatus(
-                                    allPosShifts
-                                        .filter((s: any) => s.coveragePackageId === refShift.coveragePackageId)
-                                        .map((s: any) => toPlanningShiftSlice(s)),
-                                )
+                                ? assessPlannedPackageStatus(allPosShifts.filter((s: any) => s.coveragePackageId === refShift.coveragePackageId))
                                 : 'NONE';
                             if (pkgStatus === 'COVERED') return;
                             for (let i = 0; i < deficit; i++) {
@@ -1089,17 +1046,18 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Cobertura (plan + presentes) suficiente → planning ya asignó
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
-            const coveringCount = countCoveringShiftsOnSlot(
-                dedupedRealShifts,
-                s.objectiveId,
-                s.positionName,
-                s.shiftDateObj,
-                s.endDateObj,
-            );
+            const coveringCount = dedupedRealShifts.filter(cover =>
+                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isFranco &&
+                cover.objectiveId === s.objectiveId &&
+                shiftCoversVacancySlot(cover, s.shiftDateObj, s.endDateObj, s.positionName)
+            ).length;
             if (coveringCount >= cap) suppressedDevuelto.add(s.id);
         });
         const visibleRealShifts = dedupedRealShifts.filter(s => !suppressedDevuelto.has(s.id));
 
+        // ── Suprimir vacantes virtuales solo si están CUBIERTAS (no suprimir por ausencias)
+        // Un ausente sigue generando una vacante — la posición necesita cobertura
         const filteredVirtualVacancies = virtualVacancies.filter(v => {
             if (!v.shiftDateObj || !v.endDateObj) return true;
             // Auto-expirar: slot de un día anterior que ya terminó → no mostrar
@@ -1122,24 +1080,15 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Suprimir si ya existe el doc autosinc_ SIN COBERTURA para este slot
             if (dedupedRealShifts.some(s => s.isSinCobertura && sameSlot(s))) return false;
             if (dedupedRealShifts.some(s => s.isOperationalVacancy && sameSlot(s))) return false;
+            // Suprimir si hay guardias plan O presentes suficientes para el slot
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
-            const coveringCount = countCoveringShiftsOnSlot(
-                dedupedRealShifts,
-                v.objectiveId,
-                v.positionName,
-                v.shiftDateObj,
-                v.endDateObj,
-            );
+            const coveringCount = dedupedRealShifts.filter((cover: any) =>
+                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isFranco &&
+                cover.objectiveId === v.objectiveId &&
+                shiftCoversVacancySlot(cover, v.shiftDateObj, v.endDateObj, v.positionName)
+            ).length;
             if (coveringCount >= cap) return false;
-            if (v.vacancyOrigin === 'ABSENCE' && v.shiftDateObj && v.endDateObj) {
-                const absNeeding = dedupedRealShifts.filter((s: any) =>
-                    (s.isAbsent || s.isPotentialAbsence) && !s.isCompleted &&
-                    shiftOverlapsVacancySlot(s, v.shiftDateObj, v.endDateObj, v.positionName) &&
-                    !isAbsentMarkedCovered(s),
-                );
-                const missing = Math.max(0, cap - coveringCount);
-                if (absNeeding.length >= missing && missing > 0) return false;
-            }
             return true;
         }).map(v => ({
             ...v,
@@ -1230,28 +1179,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         };
 
         visibleRealShifts.forEach((s) => {
-            if (!s.isAbsent && !s.isPotentialAbsence) return;
-            if (!isAbsentMarkedCovered(s) && s.shiftDateObj instanceof Date && s.endDateObj instanceof Date) {
-                const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
-                const onSlot = countCoveringShiftsOnSlot(
-                    dedupedRealShifts,
-                    s.objectiveId,
-                    s.positionName,
-                    s.shiftDateObj,
-                    s.endDateObj,
-                );
-                const presentOnSlot = countPresentOnSlot(
-                    dedupedRealShifts,
-                    s.objectiveId,
-                    s.positionName,
-                    s.shiftDateObj,
-                    s.endDateObj,
-                );
-                if (onSlot >= cap || presentOnSlot >= cap) {
-                    s.operacionallyCovered = true;
-                }
-            }
-            if (!isAbsentMarkedCovered(s)) return;
+            if (!s.isAbsent) return;
+            if (!(s.operacionallyCovered || s.plannedOperativelyCovered || s.coverageStatus === 'COVERED')) return;
             const name = resolveCoveringNameForTitular(s);
             if (name) s.coveringDisplayName = name;
         });
