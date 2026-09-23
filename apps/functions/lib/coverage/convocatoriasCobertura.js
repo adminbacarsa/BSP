@@ -467,6 +467,16 @@ async function resolverCobertura(db, conv) {
     const { syncAusenciaCoberturaGestionada, isTitularAlreadyCovered, applyCoverage, CoverageApplyError, } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
     const titularRef = db.collection('turnos').doc(conv.shiftId);
     const convRef = db.collection('convocatorias_cobertura').doc(conv.id);
+    const claimAgeMs = (claimAt) => {
+        if (!claimAt)
+            return null;
+        const ts = claimAt;
+        if (typeof ts.toMillis === 'function')
+            return Date.now() - ts.toMillis();
+        if (typeof ts.seconds === 'number')
+            return Date.now() - ts.seconds * 1000;
+        return null;
+    };
     const claim = await db.runTransaction(async (tx) => {
         const titularSnap = await tx.get(titularRef);
         const titularData = titularSnap.data() || {};
@@ -474,33 +484,47 @@ async function resolverCobertura(db, conv) {
         if (isTitularAlreadyCovered(titularData)) {
             if (String(titularData.coverageConvocatoriaId || '') === conv.id
                 || claimConv === conv.id) {
-                return { ok: true, already: true, titular: titularData };
+                return { ok: true, already: true, titular: titularData, heldClaim: false };
             }
             tx.update(convRef, {
                 status: 'CANCELLED',
                 cancelReason: 'ALREADY_COVERED',
                 cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            return { ok: false, already: true, titular: titularData };
+            return { ok: false, already: true, titular: titularData, heldClaim: false };
         }
         if (claimConv && claimConv !== conv.id) {
-            tx.update(convRef, {
-                status: 'CANCELLED',
-                cancelReason: 'CLAIM_HELD_BY_OTHER_CONVOCATORIA',
-                cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
-            });
-            return { ok: false, already: true, titular: titularData };
+            const age = claimAgeMs(titularData.coverageClaimAt);
+            if (age !== null && age < 2 * 60 * 1000) {
+                tx.update(convRef, {
+                    status: 'CANCELLED',
+                    cancelReason: 'CLAIM_HELD_BY_OTHER_CONVOCATORIA',
+                    cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+                return { ok: false, already: true, titular: titularData, heldClaim: false };
+            }
         }
         tx.update(titularRef, {
             coverageClaimConvocatoriaId: conv.id,
             coverageClaimAt: admin.firestore.FieldValue.serverTimestamp(),
         });
-        return { ok: true, already: false, titular: titularData };
+        return { ok: true, already: false, titular: titularData, heldClaim: true };
     });
     if (!claim.ok) {
         console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
         return;
     }
+    const claimHeld = !!claim.heldClaim && !claim.already;
+    const releaseClaim = async () => {
+        if (!claimHeld)
+            return;
+        try {
+            await titularRef.update({ coverageClaimConvocatoriaId: firestore_1.FieldValue.delete() });
+        }
+        catch (err) {
+            console.warn('[resolverCobertura] release claim:', err.message);
+        }
+    };
     const batch = db.batch();
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
         : conv.createdBy === 'AUTO' ? 'AUTO'
@@ -589,72 +613,76 @@ async function resolverCobertura(db, conv) {
                 titularCloseMode: 'FULL',
             });
         }
+        if (titularCloseMode === 'FULL') {
+            await syncAusenciaCoberturaGestionada(db, {
+                shiftId: conv.shiftId,
+                coveredByEmployeeId: conv.candidateEmployeeId,
+                coveredByEmployeeName: conv.candidateEmployeeName,
+                coverageType: rrhhCoverageType,
+                resolvedBy,
+                empresaId: conv.empresaId || null,
+            }, batch);
+        }
+        const [pendingSnap, escalatedSnap] = await Promise.all([
+            db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
+            db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
+        ]);
+        for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
+            if (d.id !== conv.id) {
+                batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
+            }
+        }
+        const novedadRef = db.collection('novedades').doc();
+        const typeLabel = {
+            RET: 'RET activado',
+            REF: 'Refuerzo (REF)',
+            ESC: 'Escuela (ESC)',
+            EXTEND: 'Jornada extendida',
+            ADVANCE: 'Turno adelantado',
+            FT: 'Franco Trabajado',
+            VOLANTE: 'Cobertura volante',
+            SIN_TURNO: 'Guardia disponible',
+            SIN_TURNO_CON_EXP: 'Guardia con experiencia',
+        };
+        batch.set(novedadRef, {
+            type: 'COBERTURA_RESUELTA',
+            shiftId: conv.shiftId,
+            objectiveId: conv.objectiveId,
+            objectiveName: conv.objectiveName || '',
+            clientId: conv.clientId || null,
+            empresaId: conv.empresaId,
+            title: 'Cobertura resuelta',
+            message: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
+            description: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
+            coverageType: conv.type,
+            candidateEmployeeId: conv.candidateEmployeeId,
+            candidateEmployeeName: conv.candidateEmployeeName,
+            employeeId: conv.candidateEmployeeId,
+            employeeName: conv.candidateEmployeeName,
+            status: 'unread',
+            resolved: false,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        await batch.commit();
     }
     catch (e) {
         if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
             console.warn(`[resolverCobertura] ALREADY_COVERED conv=${conv.id} shift=${conv.shiftId}: ${e.message}`);
-            batch.update(convRef, {
+            const errBatch = db.batch();
+            errBatch.update(convRef, {
                 status: 'CANCELLED',
                 cancelReason: 'ALREADY_COVERED',
                 cancelledAt: firestore_1.FieldValue.serverTimestamp(),
             });
-            batch.update(titularRef, { coverageClaimConvocatoriaId: null });
-            await batch.commit();
+            await errBatch.commit();
             return;
         }
+        console.error(`[resolverCobertura] error conv=${conv.id}:`, e.message);
         throw e;
     }
-    if (titularCloseMode === 'FULL') {
-        await syncAusenciaCoberturaGestionada(db, {
-            shiftId: conv.shiftId,
-            coveredByEmployeeId: conv.candidateEmployeeId,
-            coveredByEmployeeName: conv.candidateEmployeeName,
-            coverageType: rrhhCoverageType,
-            resolvedBy,
-            empresaId: conv.empresaId || null,
-        }, batch);
+    finally {
+        await releaseClaim();
     }
-    const [pendingSnap, escalatedSnap] = await Promise.all([
-        db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
-        db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
-    ]);
-    for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
-        if (d.id !== conv.id) {
-            batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
-        }
-    }
-    const novedadRef = db.collection('novedades').doc();
-    const typeLabel = {
-        RET: 'RET activado',
-        REF: 'Refuerzo (REF)',
-        ESC: 'Escuela (ESC)',
-        EXTEND: 'Jornada extendida',
-        ADVANCE: 'Turno adelantado',
-        FT: 'Franco Trabajado',
-        VOLANTE: 'Cobertura volante',
-        SIN_TURNO: 'Guardia disponible',
-        SIN_TURNO_CON_EXP: 'Guardia con experiencia',
-    };
-    batch.set(novedadRef, {
-        type: 'COBERTURA_RESUELTA',
-        shiftId: conv.shiftId,
-        objectiveId: conv.objectiveId,
-        objectiveName: conv.objectiveName || '',
-        clientId: conv.clientId || null,
-        empresaId: conv.empresaId,
-        title: 'Cobertura resuelta',
-        message: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
-        description: `${typeLabel[conv.type] || conv.type}: ${conv.candidateEmployeeName} cubre turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}`,
-        coverageType: conv.type,
-        candidateEmployeeId: conv.candidateEmployeeId,
-        candidateEmployeeName: conv.candidateEmployeeName,
-        employeeId: conv.candidateEmployeeId,
-        employeeName: conv.candidateEmployeeName,
-        status: 'unread',
-        resolved: false,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
-    await batch.commit();
 }
 exports.crearConvocatoriaCobertura = functions
     .runWith({ timeoutSeconds: 60, memory: '256MB' })

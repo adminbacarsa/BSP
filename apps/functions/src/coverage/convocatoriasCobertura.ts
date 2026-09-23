@@ -619,6 +619,14 @@ async function resolverCobertura(
   const titularRef = db.collection('turnos').doc(conv.shiftId);
   const convRef = db.collection('convocatorias_cobertura').doc(conv.id);
 
+  const claimAgeMs = (claimAt: unknown): number | null => {
+    if (!claimAt) return null;
+    const ts = claimAt as { toMillis?: () => number; seconds?: number };
+    if (typeof ts.toMillis === 'function') return Date.now() - ts.toMillis();
+    if (typeof ts.seconds === 'number') return Date.now() - ts.seconds * 1000;
+    return null;
+  };
+
   const claim = await db.runTransaction(async (tx) => {
     const titularSnap = await tx.get(titularRef);
     const titularData = titularSnap.data() || {};
@@ -628,34 +636,47 @@ async function resolverCobertura(
         String(titularData.coverageConvocatoriaId || '') === conv.id
         || claimConv === conv.id
       ) {
-        return { ok: true, already: true, titular: titularData };
+        return { ok: true, already: true, titular: titularData, heldClaim: false };
       }
       tx.update(convRef, {
         status: 'CANCELLED',
         cancelReason: 'ALREADY_COVERED',
         cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      return { ok: false, already: true, titular: titularData };
+      return { ok: false, already: true, titular: titularData, heldClaim: false };
     }
     if (claimConv && claimConv !== conv.id) {
-      tx.update(convRef, {
-        status: 'CANCELLED',
-        cancelReason: 'CLAIM_HELD_BY_OTHER_CONVOCATORIA',
-        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
-      });
-      return { ok: false, already: true, titular: titularData };
+      const age = claimAgeMs(titularData.coverageClaimAt);
+      if (age !== null && age < 2 * 60 * 1000) {
+        tx.update(convRef, {
+          status: 'CANCELLED',
+          cancelReason: 'CLAIM_HELD_BY_OTHER_CONVOCATORIA',
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+        return { ok: false, already: true, titular: titularData, heldClaim: false };
+      }
     }
     tx.update(titularRef, {
       coverageClaimConvocatoriaId: conv.id,
       coverageClaimAt: admin.firestore.FieldValue.serverTimestamp(),
     });
-    return { ok: true, already: false, titular: titularData };
+    return { ok: true, already: false, titular: titularData, heldClaim: true };
   });
 
   if (!claim.ok) {
     console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
     return;
   }
+
+  const claimHeld = !!claim.heldClaim && !claim.already;
+  const releaseClaim = async () => {
+    if (!claimHeld) return;
+    try {
+      await titularRef.update({ coverageClaimConvocatoriaId: FieldValue.delete() });
+    } catch (err) {
+      console.warn('[resolverCobertura] release claim:', (err as Error).message);
+    }
+  };
 
   const batch = db.batch();
 
@@ -755,24 +776,8 @@ async function resolverCobertura(
         titularCloseMode: 'FULL',
       });
     }
-  } catch (e) {
-    if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
-      console.warn(
-        `[resolverCobertura] ALREADY_COVERED conv=${conv.id} shift=${conv.shiftId}: ${e.message}`,
-      );
-      batch.update(convRef, {
-        status: 'CANCELLED',
-        cancelReason: 'ALREADY_COVERED',
-        cancelledAt: FieldValue.serverTimestamp(),
-      });
-      batch.update(titularRef, { coverageClaimConvocatoriaId: null });
-      await batch.commit();
-      return;
-    }
-    throw e;
-  }
 
-  if (titularCloseMode === 'FULL') {
+    if (titularCloseMode === 'FULL') {
     await syncAusenciaCoberturaGestionada(
       db,
       {
@@ -833,7 +838,26 @@ async function resolverCobertura(
     createdAt: FieldValue.serverTimestamp(),
   });
 
-  await batch.commit();
+    await batch.commit();
+  } catch (e) {
+    if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
+      console.warn(
+        `[resolverCobertura] ALREADY_COVERED conv=${conv.id} shift=${conv.shiftId}: ${e.message}`,
+      );
+      const errBatch = db.batch();
+      errBatch.update(convRef, {
+        status: 'CANCELLED',
+        cancelReason: 'ALREADY_COVERED',
+        cancelledAt: FieldValue.serverTimestamp(),
+      });
+      await errBatch.commit();
+      return;
+    }
+    console.error(`[resolverCobertura] error conv=${conv.id}:`, (e as Error).message);
+    throw e;
+  } finally {
+    await releaseClaim();
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
