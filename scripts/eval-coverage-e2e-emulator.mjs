@@ -30,7 +30,15 @@ const {
   syncAusenciaCoberturaGestionada,
 } = requireFn('./lib/coverage/syncAusenciaCobertura.js');
 
-const { resolverCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const { resolverCobertura, iniciarCascadaCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const {
+  retainOutgoingForGap,
+  releaseRetentionForAbsenceShift,
+  RETENTION_MAX_TOTAL_MS,
+} = requireFn('./lib/coverage/coverageRetention.js');
+const { isEmpresaManualMode } = requireFn('./lib/ops/opsManualMode.js');
+const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletarTurnosCore.js');
+const { positionHasContinuityFromSlaDoc } = requireFn('./lib/coverage/positionHasContinuity.js');
 
 const results = [];
 
@@ -192,9 +200,46 @@ async function writeConvAndResolve(fields) {
   return ref.id;
 }
 
+async function seedSla(objectiveId, clientId, mode) {
+  const slaId = `${objectiveId}_sla`;
+  const basePos = {
+    name: 'Puesto 1',
+    quantity: 1,
+    activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+    coverageType: mode === '24h' ? '24hs' : 'custom',
+  };
+  const positions =
+    mode === '24h'
+      ? [{
+          ...basePos,
+          allowedShiftTypes: [
+            { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+            { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+          ],
+        }]
+      : [{
+          ...basePos,
+          allowedShiftTypes: [{ code: 'M', startTime: '08:00', endTime: '15:00', hours: 8 }],
+        }];
+  await db.collection('servicios_sla').doc(slaId).set({
+    objectiveId,
+    clientId,
+    status: 'active',
+    positions,
+  });
+  return slaId;
+}
+
+const autoCompleteCtx = {
+  isEnabled: () => true,
+  shiftEmpresaId: (s) => String(s.empresaId || ''),
+  sameTenantShift: () => true,
+  getEmployeeTokens: async () => [],
+};
+
 async function run() {
   if (!(await pingEmulator())) {
-    for (let i = 1; i <= 10; i++) {
+    for (let i = 1; i <= 17; i++) {
       report(i, false, 'Emulador Firestore :8080 no responde');
     }
     process.exitCode = 1;
@@ -445,7 +490,12 @@ async function run() {
         isPresent: true,
         isCompleted: false,
       });
-      await db.collection('turnos').doc(s.advSourceId).update({ isCompleted: false });
+      const advStart = Timestamp.fromMillis(Date.now() + 45 * 60 * 1000);
+      await db.collection('turnos').doc(s.advSourceId).update({
+        isCompleted: false,
+        startTime: advStart,
+        endTime: Timestamp.fromMillis(advStart.toMillis() + 8 * 3600000),
+      });
       await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empExt, 'Guardia EXT');
       await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empAdv, 'Guardia ADV');
 
@@ -570,6 +620,235 @@ async function run() {
           ? `1 ops_cov + conv ${cancelled[0].cancelReason}`
           : `ops=${ops.length} convs=${JSON.stringify(statuses)}`,
       );
+    }
+
+    // Caso 11 — sin continuidad SLA → cierre SIN_CONTINUIDAD_SLA
+    {
+      const prefix = `${runId}_c11`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSla(objectiveId, `${prefix}_cli`, 'partial');
+      const shiftId = `${prefix}_saliente`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId,
+        clientId: `${prefix}_cli`,
+        positionName: 'Puesto 1',
+        employeeId: `${prefix}_e1`,
+        employeeName: 'Saliente',
+        code: 'M',
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+        startTime: tsAt(2026, 9, 23, 8, 0),
+        endTime: tsAt(2026, 9, 23, 15, 0),
+      });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 15, 10));
+      const data = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok =
+        data?.status === 'COMPLETED'
+        && data?.completionReason === 'SIN_CONTINUIDAD_SLA'
+        && data?.isRetention !== true;
+      report(11, ok, ok ? 'COMPLETED sin retención' : `st=${data?.status} ret=${data?.isRetention} r=${data?.completionReason}`);
+    }
+
+    // Caso 12 — 24h: saliente M presente, entrante T ausente → 1 retención
+    {
+      const prefix = `${runId}_c12`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const salId = `${prefix}_m`;
+      const entId = `${prefix}_t`;
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eM`,
+          employeeName: 'Saliente M', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 55),
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          employeeName: 'Entrante T', code: 'T', status: 'ABSENT', isAbsent: true,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      const r = await retainOutgoingForGap(db, { id: entId, ...(await db.collection('turnos').doc(entId).get()).data() }, { sendPush: false });
+      const nov = await db.collection('novedades').where('absenceShiftId', '==', entId).where('type', '==', 'RETENCION_AUSENCIA_RELEVO').get();
+      const sal = (await db.collection('turnos').doc(salId).get()).data();
+      const ok = r.applied && sal?.isRetention === true && nov.size === 1;
+      report(12, ok, ok ? 'retenido saliente M + 1 novedad' : `applied=${r.applied} nov=${nov.size}`);
+    }
+
+    // Caso 13 — 2 pax: A 06:50, B 06:58 → retiene B
+    {
+      const prefix = `${runId}_c13`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      const entId = `${prefix}_ent`;
+      const aId = `${prefix}_a`;
+      const bId = `${prefix}_b`;
+      await db.batch()
+        .set(db.collection('turnos').doc(aId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eA`, employeeName: 'A',
+          code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 50),
+        })
+        .set(db.collection('turnos').doc(bId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eB`, employeeName: 'B',
+          code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 58),
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`, employeeName: 'Entrante',
+          code: 'T', isAbsent: true, status: 'ABSENT',
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      const r = await retainOutgoingForGap(db, { id: entId, ...(await db.collection('turnos').doc(entId).get()).data() }, { sendPush: false });
+      const b = (await db.collection('turnos').doc(bId).get()).data();
+      const a = (await db.collection('turnos').doc(aId).get()).data();
+      const ok = r.applied && b?.isRetention === true && a?.isRetention !== true;
+      report(13, ok, ok ? 'retenido B (último fichaje)' : `bRet=${b?.isRetention} aRet=${a?.isRetention}`);
+    }
+
+    // Caso 14 — compañero en medio de turno largo NO retenido
+    {
+      const prefix = `${runId}_c14`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      const longId = `${prefix}_long`;
+      const entId = `${prefix}_ent`;
+      await db.batch()
+        .set(db.collection('turnos').doc(longId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eL`, employeeName: 'Largo',
+          code: 'D12', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 8, 0), endTime: tsAt(2026, 9, 23, 20, 0),
+          checkInTime: tsAt(2026, 9, 23, 7, 55),
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          code: 'T', isAbsent: true, status: 'ABSENT',
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      const r = await retainOutgoingForGap(db, { id: entId, ...(await db.collection('turnos').doc(entId).get()).data() }, { sendPush: false });
+      const long = (await db.collection('turnos').doc(longId).get()).data();
+      const ok = !r.applied && long?.isRetention !== true;
+      report(14, ok, ok ? 'sin retención compañero en turno' : `applied=${r.applied} longRet=${long?.isRetention}`);
+    }
+
+    // Caso 15 — Manual: retención sí, cascada no
+    {
+      const prefix = `${runId}_c15`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      await db.collection('sesiones_operador').add({
+        empresaId,
+        status: 'ACTIVO',
+        operatorId: 'op_test',
+        operatorName: 'Operador Test',
+        startTime: Timestamp.now(),
+        role: 'PILOTO',
+      });
+      const salId = `${prefix}_m`;
+      const entId = `${prefix}_t`;
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eM`,
+          employeeName: 'Saliente M', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 55),
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          employeeName: 'Entrante T', code: 'T', status: 'ABSENT', isAbsent: true,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      const entData = (await db.collection('turnos').doc(entId).get()).data();
+      const manual = await isEmpresaManualMode(db, empresaId);
+      await retainOutgoingForGap(db, { id: entId, ...entData }, { sendPush: false });
+      if (!manual) {
+        await iniciarCascadaCobertura(db, {
+          id: entId,
+          empresaId,
+          objectiveId,
+          objectiveName: 'Obj',
+          positionName: 'Puesto 1',
+          startTime: entData.startTime,
+          endTime: entData.endTime,
+        }, 'AUTO');
+      }
+      const convs = await db.collection('convocatorias_cobertura').where('shiftId', '==', entId).get();
+      const retained = await db.collection('turnos').where('retentionAbsenceShiftId', '==', entId).get();
+      const ok = manual && retained.size >= 1 && convs.size === 0;
+      report(15, ok, ok ? 'Manual: retención sin convocatorias' : `manual=${manual} ret=${retained.size} conv=${convs.size}`);
+    }
+
+    // Caso 16 — applyCoverage FULL libera retenido
+    {
+      const prefix = `${runId}_c16`;
+      const s = await seedBase(prefix);
+      await db.collection('turnos').doc(s.retSourceId).update({
+        isPresent: true,
+        isCompleted: false,
+        startTime: tsAt(2026, 9, 22, 23, 0),
+        endTime: tsAt(2026, 9, 23, 7, 0),
+        checkInTime: tsAt(2026, 9, 23, 6, 55),
+      });
+      await retainOutgoingForGap(db, { id: s.titularId, ...s.titular, isAbsent: true }, { sendPush: false });
+      const batch = db.batch();
+      await applyCoverage(db, batch, {
+        titularShiftId: s.titularId,
+        titularShift: { id: s.titularId, ...s.titular, isAbsent: true },
+        candidateEmployeeId: s.empRet,
+        candidateEmployeeName: 'Guardia RET',
+        sourceShiftId: s.retSourceId,
+        coverageType: 'RET',
+        resolvedBy: 'AUTO',
+        empresaId: s.empresaId,
+        titularCloseMode: 'FULL',
+      });
+      await batch.commit();
+      const ret = (await db.collection('turnos').doc(s.retSourceId).get()).data();
+      const ok = ret?.isRetention === false || ret?.isRetention !== true;
+      report(16, ok, ok ? 'retenido liberado tras FULL' : `isRet=${ret?.isRetention}`);
+    }
+
+    // Caso 17 — tope 12h con continuidad → novedad, no cierre
+    {
+      const prefix = `${runId}_c17`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const shiftId = `${prefix}_ret12`;
+      const endPlan = tsAt(2026, 9, 23, 15, 0);
+      const checkIn = Timestamp.fromMillis(endPlan.toMillis() - RETENTION_MAX_TOTAL_MS - 60000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId,
+        positionName: 'Puesto 1',
+        employeeId: `${prefix}_e1`,
+        employeeName: 'Retenido 12h',
+        code: 'M',
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+        isRetention: true,
+        autoRetentionAt: endPlan,
+        checkInTime: checkIn,
+        startTime: Timestamp.fromMillis(checkIn.toMillis() - 4 * 3600000),
+        endTime: endPlan,
+      });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 16, 0));
+      const data = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'RETENCION_TOPE_12H').get();
+      const slaDoc = (await db.collection('servicios_sla').doc(`${objectiveId}_sla`).get()).data();
+      const cont = positionHasContinuityFromSlaDoc(slaDoc, 'Puesto 1', new Date(data.endTime.toMillis()));
+      const ok = cont && data?.status === 'PRESENT' && nov.size >= 1;
+      report(17, ok, ok ? 'sigue retenido + RETENCION_TOPE_12H' : `st=${data?.status} nov=${nov.size} cont=${cont}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
