@@ -80,7 +80,7 @@ function HoyScreenContent() {
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
-  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } =
+  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival, lateEtaByShiftId } =
     useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
@@ -103,6 +103,7 @@ function HoyScreenContent() {
   );
   const {
     coberturaPendientes,
+    llegadaTardePendientes,
     busyId: coberturaBusyId,
     responder: responderCobertura,
   } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
@@ -122,6 +123,21 @@ function HoyScreenContent() {
   async function onResponderCobertura(c: ConvocatoriaCobertura, acepta: boolean) {
     const result = await responderCobertura(c.id, acepta ? 'ACCEPTED' : 'REJECTED');
     Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+  }
+
+  async function onSiVoyLlegadaTarde(c: ConvocatoriaCobertura, etaMinutes: number) {
+    const result = await responderCobertura(c.id, 'ACCEPTED', { etaMinutes });
+    Alert.alert(
+      result.ok ? 'Listo' : 'Error',
+      result.ok ? `Avisaste que llegás en ${etaMinutes} min` : result.message,
+    );
+  }
+
+  async function onNoVoyLlegadaTarde(c: ConvocatoriaCobertura) {
+    const result = await responderCobertura(c.id, 'REJECTED', {
+      rejectionReason: 'No voy',
+    });
+    Alert.alert(result.ok ? 'Listo' : 'Error', result.ok ? 'Marcado como no voy' : result.message);
   }
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
@@ -153,7 +169,14 @@ function HoyScreenContent() {
   const placement = resolveShiftPlacement(todayAbsentShift || mainShift, objectivesMap);
   const objective = placement.objectiveLocation;
   const labRelaxedCheckIn = isEmulatorMode() && objective?.allowRemoteCheckIn === true;
-  const timing = mainShift ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn }) : null;
+  const etaOverride =
+    mainShift && lateEtaByShiftId[mainShift.id] != null ? lateEtaByShiftId[mainShift.id] : null;
+  const timing = mainShift
+    ? getCheckInTiming(mainShift, now, {
+        relaxWindow: labRelaxedCheckIn,
+        etaMinutesOverride: etaOverride,
+      })
+    : null;
   const heroInProgress = !!mainShift && isShiftInProgress(mainShift, now);
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
   const isOpsHero =
@@ -188,10 +211,12 @@ function HoyScreenContent() {
     !!mainShift &&
     !mainShift.isFranco &&
     !isOpsHero &&
-    timing?.lateWindow &&
+    !isRetentionHero &&
+    !!timing?.canNotifyLate &&
     !hasPendingRequest &&
     !isConfirmed &&
-    !mainShift.lateArrivalAt;
+    !mainShift.lateArrivalAt &&
+    !(mainShift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed;
 
   async function onCheckIn() {
     if (!mainShift) return;
@@ -204,8 +229,33 @@ function HoyScreenContent() {
 
   async function onLate() {
     if (!mainShift) return;
-    const result = await notifyLateArrival(mainShift.id);
-    Alert.alert('Llegada tarde', result.message);
+    Alert.alert('Voy a llegar tarde', '¿Cuántos minutos de demora estimás?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: '15 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 15).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+      {
+        text: '30 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 30).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+      {
+        text: '60 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 60).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+    ]);
   }
 
   const heroSub =
@@ -298,6 +348,15 @@ function HoyScreenContent() {
             />
           ) : null}
 
+          {llegadaTardePendientes.length > 0 ? (
+            <LlegadaTardeVenisBanner
+              convocatorias={llegadaTardePendientes}
+              busyId={coberturaBusyId}
+              onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
+              onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
+            />
+          ) : null}
+
           {portalFeatures.viewEvents && convocatoriasPendientes.length > 0 ? (
             <ConvocatoriasBanner
               convocatorias={convocatoriasPendientes}
@@ -378,7 +437,7 @@ function HoyScreenContent() {
                     ) : null}
                     {portalFeatures.checkIn && canLate ? (
                       <CommandButton
-                        label="Avisar llegada tarde"
+                        label="Voy a llegar tarde"
                         variant="ghost"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onLate}

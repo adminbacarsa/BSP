@@ -45,6 +45,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC-P3 ¿Venís?** ✅ LLEGADA_TARDE con demora 15/30/60 + etaMinutes en payload.
 - **CC-P2 Cobertura** ✅ convocatorias_cobertura en Hoy + callable + deep link push.
 - **CC-P1 Retenido** ✅ hero no desaparece tras endTime; tarjeta «esperá al relevo»; Agenda «Retenido».
 - **F1-14** ✅ activación mail→app.
@@ -101,6 +102,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK
+2026-09-23 | CC-P4 Aviso tarde | Botón «Voy a llegar tarde» T−60…T+5 + demora 15/30/60 (etaMinutes); UI «te esperan hasta HH:MM»
 2026-09-23 | CC-P3 ¿Venís? | Tarjeta LLEGADA_TARDE: Sí voy (15/30/60 + etaMinutes) / No voy → responderConvocatoriaCobertura
 2026-09-23 | CC-P2 Cobertura | Escucha convocatorias_cobertura PENDING/ESCALATED; banner Acepto/No puedo → responderConvocatoriaCobertura; push CONVOCATORIA_COBERTURA → Hoy
 2026-09-23 | CC-P1 Retenido | pickTodayShiftAny/hero: isRetention+presente+!completado sigue hero tras endTime; RetentionBanner en Hoy; AgendaShiftCard «Retenido» (no «ya trabajado»)
