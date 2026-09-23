@@ -6,6 +6,8 @@ const firestore_1 = require("firebase-admin/firestore");
 const sanitizeId_1 = require("./sanitizeId");
 const registrarPresencia_1 = require("./registrarPresencia");
 Object.defineProperty(exports, "registrarPresencia", { enumerable: true, get: function () { return registrarPresencia_1.registrarPresencia; } });
+const checkInWindow_1 = require("./checkInWindow");
+const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 async function processPortalCheckIn(db, input) {
     const { shiftId, empId, coords, recordedAt, idempotencyKey, source = 'PORTAL_GPS' } = input;
     const shiftRef = db.collection('turnos').doc(shiftId);
@@ -16,6 +18,16 @@ async function processPortalCheckIn(db, input) {
     const shiftData = shiftDoc.data();
     if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
         throw new Error('SHIFT_ABSENT');
+    }
+    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {
+        throw new Error('TRACE_REGISTRATION_SHIFT');
+    }
+    const recordedMs = recordedAt ? new Date(recordedAt).getTime() : Date.now();
+    const windowEval = (0, checkInWindow_1.evaluateServerCheckInWindow)(shiftData, recordedMs, {
+        source: 'PORTAL_GPS',
+    });
+    if (!windowEval.allowed) {
+        throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
     }
     if (shiftData.isPresent === true || shiftData.status === 'PRESENT') {
         return { success: true, fichajeId: '', alreadyApplied: true };

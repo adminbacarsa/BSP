@@ -1,5 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { evaluateServerCheckInWindow } from './checkInWindow';
+import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -207,6 +209,9 @@ export async function registrarPresencia(
   if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
     throw new Error('SHIFT_ABSENT');
   }
+  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {
+    throw new Error('TRACE_REGISTRATION_SHIFT');
+  }
 
   if (shiftData.isPresent === true || shiftData.status === 'PRESENT') {
     return { success: true, alreadyPresent: true, relieved: null };
@@ -214,17 +219,34 @@ export async function registrarPresencia(
 
   const empId = String(input.empId || shiftData.employeeId || '').trim();
   const nowTs = Timestamp.now();
-  const nowMs = nowTs.toMillis();
+  const recordedMs = recordedAt ? new Date(recordedAt).getTime() : nowTs.toMillis();
+  const nowMs = recordedMs;
   const now = FieldValue.serverTimestamp();
+
+  const windowEval = evaluateServerCheckInWindow(shiftData as Record<string, unknown>, nowMs, {
+    source,
+  });
+  if (!windowEval.allowed) {
+    throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
+  }
 
   const scheduledStartTs = shiftData.startTime ?? null;
   const isEarlyStart = shiftData.isEarlyStart === true;
-  const realStartTime = isEarlyStart
-    ? shiftData.adjustedStartTime || scheduledStartTs || now
-    : scheduledStartTs || now;
-
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-  const isLate = scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000;
+  const isLate = (windowEval.lateMinutes ?? 0) > 0
+    || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
+
+  let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
+  if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
+    realStartTime = nowTs;
+  } else if (windowEval.usePlannedStart && scheduledStartTs) {
+    realStartTime = scheduledStartTs;
+  } else {
+    realStartTime = Timestamp.fromMillis(nowMs);
+  }
+  if (isEarlyStart && shiftData.adjustedStartTime) {
+    realStartTime = shiftData.adjustedStartTime;
+  }
 
   const incomingPatch: Record<string, unknown> = {
     isPresent: true,
@@ -235,10 +257,11 @@ export async function registrarPresencia(
     checkInCoords: coords || null,
     checkInRecordedAt: recordedAt || null,
     isLate,
+    lateMinutes: windowEval.lateMinutes ?? (isLate && scheduledStartMs ? Math.round((nowMs - scheduledStartMs) / 60000) : 0),
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,
-    lateArrivalAt: isLate ? now : null,
+    lateArrivalAt: isLate && !shiftData.lateArrivalAt ? now : shiftData.lateArrivalAt ?? null,
     presenciaSource: source,
     presenciaAt: now,
   };

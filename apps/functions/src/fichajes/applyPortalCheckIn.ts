@@ -2,6 +2,8 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { PortalCheckInInput, PortalCheckInResult } from './fichajesTypes';
 import { fichajeDocIdFromKey } from './sanitizeId';
 import { registrarPresencia } from './registrarPresencia';
+import { evaluateServerCheckInWindow } from './checkInWindow';
+import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 /**
  * Registra fichaje CHECK_IN idempotente y consolida en el documento turno
@@ -22,6 +24,17 @@ export async function processPortalCheckIn(
 
   if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
     throw new Error('SHIFT_ABSENT');
+  }
+  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {
+    throw new Error('TRACE_REGISTRATION_SHIFT');
+  }
+
+  const recordedMs = recordedAt ? new Date(recordedAt).getTime() : Date.now();
+  const windowEval = evaluateServerCheckInWindow(shiftData as Record<string, unknown>, recordedMs, {
+    source: 'PORTAL_GPS',
+  });
+  if (!windowEval.allowed) {
+    throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
   }
 
   if (shiftData.isPresent === true || shiftData.status === 'PRESENT') {
