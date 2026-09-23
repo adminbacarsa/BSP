@@ -619,12 +619,15 @@ async function resolverCobertura(
   const titularRef = db.collection('turnos').doc(conv.shiftId);
   const convRef = db.collection('convocatorias_cobertura').doc(conv.id);
 
-  // Claim atómico: 1 ausencia → 1 cobertura. Evita N OPERATIONS_COVERAGE en demo/carrera.
   const claim = await db.runTransaction(async (tx) => {
     const titularSnap = await tx.get(titularRef);
     const titularData = titularSnap.data() || {};
+    const claimConv = String(titularData.coverageClaimConvocatoriaId || '').trim();
     if (isTitularAlreadyCovered(titularData)) {
-      if (String(titularData.coverageConvocatoriaId || '') === conv.id) {
+      if (
+        String(titularData.coverageConvocatoriaId || '') === conv.id
+        || claimConv === conv.id
+      ) {
         return { ok: true, already: true, titular: titularData };
       }
       tx.update(convRef, {
@@ -634,6 +637,18 @@ async function resolverCobertura(
       });
       return { ok: false, already: true, titular: titularData };
     }
+    if (claimConv && claimConv !== conv.id) {
+      tx.update(convRef, {
+        status: 'CANCELLED',
+        cancelReason: 'CLAIM_HELD_BY_OTHER_CONVOCATORIA',
+        cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { ok: false, already: true, titular: titularData };
+    }
+    tx.update(titularRef, {
+      coverageClaimConvocatoriaId: conv.id,
+      coverageClaimAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
     return { ok: true, already: false, titular: titularData };
   });
 
@@ -654,20 +669,22 @@ async function resolverCobertura(
   let titularCloseMode: 'FULL' | 'PARTIAL' = 'FULL';
   let rrhhCoverageType = convTypeToCoverageType(String(conv.type));
 
+  const {
+    dualExtAdvSegmentTimestamps,
+    titularAnchorFromShift,
+    extensionEndTimestamp,
+    adjustedStartTimestamp,
+    resolveCoverageBandCode: resolveBand,
+  } = await import('./coverageExtAdvSegments');
+
   try {
     if (conv.type === 'EXTEND' && conv.extendShiftId) {
-      const newCode = String(conv.shiftCode || 'M').toUpperCase().startsWith('N') ? 'N12' : 'D12';
-      batch.update(db.collection('turnos').doc(conv.extendShiftId), {
-        code: newCode,
-        endTime: conv.endTime ?? titularData.endTime ?? null,
-        isExtended: true,
-        extendedBy: 'CONVOCATORIA',
-        extendedAt: FieldValue.serverTimestamp(),
-        resolvedBy,
-      });
+      const anchor = titularAnchorFromShift(titularData);
+      const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
+      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
       const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'EXTEND');
       titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
-      rrhhCoverageType = 'EXTEND';
+      rrhhCoverageType = dualOk ? 'RETENCION' : 'EXTEND';
       await applyCoverage(db, batch, {
         titularShiftId: conv.shiftId,
         titularShift: titularData,
@@ -677,27 +694,23 @@ async function resolverCobertura(
         coverageType: 'EXTEND',
         resolvedBy: resolvedBy as 'OPERACIONES' | 'AUTO' | 'MODO_DEMO',
         empresaId,
-        startTime: conv.startTime,
-        endTime: conv.endTime,
         code: conv.shiftCode,
         objectiveId: conv.objectiveId,
         objectiveName: conv.objectiveName,
         clientId: conv.clientId,
         convocatoriaId: conv.id,
         titularCloseMode,
+        covSegmentStart: seg.extCov.start,
+        covSegmentEnd: seg.extCov.end,
+        extensionEndTime: extensionEndTimestamp(anchor, seg.extCov.extensionEndHm),
       });
     } else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
-      batch.update(db.collection('turnos').doc(conv.advanceShiftId), {
-        startTime: conv.startTime,
-        isEarlyStart: true,
-        adjustedStartTime: conv.startTime,
-        advancedBy: 'CONVOCATORIA',
-        advancedAt: FieldValue.serverTimestamp(),
-        resolvedBy,
-      });
+      const anchor = titularAnchorFromShift(titularData);
+      const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
+      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
       const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'ADVANCE');
       titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
-      rrhhCoverageType = 'ADVANCE';
+      rrhhCoverageType = dualOk ? 'RETENCION' : 'ADVANCE';
       await applyCoverage(db, batch, {
         titularShiftId: conv.shiftId,
         titularShift: titularData,
@@ -707,14 +720,15 @@ async function resolverCobertura(
         coverageType: 'ADVANCE',
         resolvedBy: resolvedBy as 'OPERACIONES' | 'AUTO' | 'MODO_DEMO',
         empresaId,
-        startTime: conv.startTime,
-        endTime: conv.endTime,
         code: conv.shiftCode,
         objectiveId: conv.objectiveId,
         objectiveName: conv.objectiveName,
         clientId: conv.clientId,
         convocatoriaId: conv.id,
         titularCloseMode,
+        covSegmentStart: seg.advCov.start,
+        covSegmentEnd: seg.advCov.end,
+        adjustedStartTime: adjustedStartTimestamp(anchor, seg.advCov.adjustedStartHm),
       });
     } else {
       const sourceShiftId =
@@ -743,7 +757,16 @@ async function resolverCobertura(
     }
   } catch (e) {
     if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
-      console.log(`[resolverCobertura] skip ${conv.id}: ${e.message}`);
+      console.warn(
+        `[resolverCobertura] ALREADY_COVERED conv=${conv.id} shift=${conv.shiftId}: ${e.message}`,
+      );
+      batch.update(convRef, {
+        status: 'CANCELLED',
+        cancelReason: 'ALREADY_COVERED',
+        cancelledAt: FieldValue.serverTimestamp(),
+      });
+      batch.update(titularRef, { coverageClaimConvocatoriaId: null });
+      await batch.commit();
       return;
     }
     throw e;
@@ -780,9 +803,15 @@ async function resolverCobertura(
   // Novedad para ops — aparece en Bitácora
   const novedadRef = db.collection('novedades').doc();
   const typeLabel: Record<string, string> = {
-    RET: 'RET activado', EXTEND: 'Jornada extendida', ADVANCE: 'Turno adelantado',
-    FT: 'Franco Trabajado', VOLANTE: 'Cobertura volante',
-    SIN_TURNO: 'Guardia disponible', SIN_TURNO_CON_EXP: 'Guardia con experiencia',
+    RET: 'RET activado',
+    REF: 'Refuerzo (REF)',
+    ESC: 'Escuela (ESC)',
+    EXTEND: 'Jornada extendida',
+    ADVANCE: 'Turno adelantado',
+    FT: 'Franco Trabajado',
+    VOLANTE: 'Cobertura volante',
+    SIN_TURNO: 'Guardia disponible',
+    SIN_TURNO_CON_EXP: 'Guardia con experiencia',
   };
   batch.set(novedadRef, {
     type: 'COBERTURA_RESUELTA',

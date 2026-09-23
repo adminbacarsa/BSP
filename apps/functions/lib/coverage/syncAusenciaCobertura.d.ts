@@ -22,6 +22,7 @@ export declare function absentShiftCoveragePatch(opts: {
     resolvedBy?: string;
     titularStatus?: 'COVERED' | 'PARTIAL';
 }): Record<string, unknown>;
+export declare function isDualSiblingOpsCoverage(existingType: string, incomingType: string): boolean;
 export declare function isTitularAlreadyCovered(data: Record<string, any> | undefined | null): boolean;
 export declare function buildOpsCoverageDocId(titularShiftId: string, employeeId: string): string;
 export declare function clearSourceCoverageUsedPatch(): Record<string, unknown>;
@@ -30,6 +31,8 @@ export declare function sourceShiftCoverageUsedPatch(opts: {
     coverageDocId: string;
     resolvedBy: CoverageResolvedBy;
     isRet: boolean;
+    coversEmployeeName?: string | null;
+    coversObjectiveName?: string | null;
 }): Record<string, unknown>;
 export declare function isActiveOpsCoverageDoc(data: Record<string, any> | undefined | null): boolean;
 export declare function supersedeOpsCoveragesForAbsence(db: admin.firestore.Firestore, absenceShiftId: string, batch: admin.firestore.WriteBatch, opts?: {
@@ -58,5 +61,10 @@ export type ApplyCoverageParams = {
     titularCloseMode?: 'FULL' | 'PARTIAL' | 'NONE';
     convocatoriaId?: string;
     allowReplace?: boolean;
+    covSegmentStart?: admin.firestore.Timestamp | null;
+    covSegmentEnd?: admin.firestore.Timestamp | null;
+    extensionEndTime?: admin.firestore.Timestamp | null;
+    adjustedStartTime?: admin.firestore.Timestamp | null;
+    coveredByLabel?: string | null;
 };
 export declare function applyCoverage(db: admin.firestore.Firestore, batch: admin.firestore.WriteBatch, params: ApplyCoverageParams): Promise<string>;

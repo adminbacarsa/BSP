@@ -50,10 +50,11 @@ export function isTitularOpsCoverageClosed(
 ): boolean {
   if (!data) return false;
   const st = String(data.coverageStatus || '').toUpperCase();
-  if (st === 'PLANNED') return false;
+  if (st === 'PLANNED' || st === 'PARTIAL') return false;
   if (data.operacionallyCovered === true) return true;
   if (st === 'COVERED') return true;
-  if (String(data.coverageDocId || '').trim()) return true;
+  const covId = String(data.coverageDocId || '').trim();
+  if (covId && (data.operacionallyCovered === true || st === 'COVERED')) return true;
   return false;
 }
 

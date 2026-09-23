@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 
 export type SyncAusenciaCoberturaParams = {
   shiftId: string;
@@ -90,14 +91,18 @@ export function absentShiftCoveragePatch(opts: {
   return patch;
 }
 
-/** Criterio demo/prod: 1 ausencia ya cubierta no debe reabrir cascada ni crear otra cobertura. */
-export function isTitularAlreadyCovered(
-  data: Record<string, any> | undefined | null,
-): boolean {
+export function isDualSiblingOpsCoverage(existingType: string, incomingType: string): boolean {
+  const a = String(existingType || '').toUpperCase();
+  const b = String(incomingType || '').toUpperCase();
+  return (a === 'EXTEND' && b === 'ADVANCE') || (a === 'ADVANCE' && b === 'EXTEND');
+}
+
+export function isTitularAlreadyCovered(data: Record<string, any> | undefined | null): boolean {
   if (!data) return false;
-  const covId = String(data.coverageDocId || '').trim();
-  if (data.operacionallyCovered === true && covId) return true;
-  if (String(data.coverageStatus || '').toUpperCase() === 'COVERED' && covId) return true;
+  const st = String(data.coverageStatus || '').toUpperCase();
+  if (st === 'PARTIAL' || st === 'PLANNED') return false;
+  if (data.operacionallyCovered === true) return true;
+  if (st === 'COVERED') return true;
   return false;
 }
 
@@ -120,6 +125,8 @@ export function sourceShiftCoverageUsedPatch(opts: {
   coverageDocId: string;
   resolvedBy: CoverageResolvedBy;
   isRet: boolean;
+  coversEmployeeName?: string | null;
+  coversObjectiveName?: string | null;
 }): Record<string, unknown> {
   const patch: Record<string, unknown> = {
     coverageUsed: true,
@@ -127,6 +134,8 @@ export function sourceShiftCoverageUsedPatch(opts: {
     coverageDocId: opts.coverageDocId,
     coverageUsedAt: admin.firestore.FieldValue.serverTimestamp(),
     coverageUsedBy: opts.resolvedBy,
+    coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
+    coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
   };
   if (opts.isRet) {
     patch.isRetentionActivated = true;
@@ -228,6 +237,11 @@ export type ApplyCoverageParams = {
   titularCloseMode?: 'FULL' | 'PARTIAL' | 'NONE';
   convocatoriaId?: string;
   allowReplace?: boolean;
+  covSegmentStart?: admin.firestore.Timestamp | null;
+  covSegmentEnd?: admin.firestore.Timestamp | null;
+  extensionEndTime?: admin.firestore.Timestamp | null;
+  adjustedStartTime?: admin.firestore.Timestamp | null;
+  coveredByLabel?: string | null;
 };
 
 /** Escritura única de cobertura (espejo web2). */
@@ -249,15 +263,18 @@ export async function applyCoverage(
   const empresaId = String(params.empresaId || titular.empresaId || '').trim();
   const covDocId = buildOpsCoverageDocId(titularId, params.candidateEmployeeId);
 
+  const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
   const existingCovId = String(titular.coverageDocId || '').trim();
   if (existingCovId && !params.allowReplace && existingCovId !== covDocId) {
     const exSnap = await db.collection('turnos').doc(existingCovId).get();
     if (exSnap.exists && isActiveOpsCoverageDoc(exSnap.data())) {
-      throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
+      const exCt = String(exSnap.data()?.coverageType || '').toUpperCase();
+      if (!isDualSiblingOpsCoverage(exCt, ctEarly)) {
+        throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
+      }
     }
   }
 
-  const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
   const dualLeg = ctEarly === 'EXTEND' || ctEarly === 'ADVANCE';
   await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
     keepDocId: covDocId,
@@ -266,24 +283,55 @@ export async function applyCoverage(
   });
 
   const linkFields = opsCoverageLinkFields(titular, titularId);
-  const bandCode = String(params.code || titular.code || 'T').trim();
-  const startTs = params.startTime ?? (titular.startTime as admin.firestore.Timestamp) ?? null;
-  const endTs = params.endTime ?? (titular.endTime as admin.firestore.Timestamp) ?? null;
+  let bandCode: string;
+  try {
+    bandCode = resolveCoverageBandCode({
+      code: params.code || (titular.code as string),
+      startTime: titular.startTime,
+    });
+  } catch {
+    throw new CoverageApplyError('INVALID_CODE', 'Falta código de banda del titular');
+  }
+  const startTs =
+    params.covSegmentStart
+    ?? params.startTime
+    ?? (titular.startTime as admin.firestore.Timestamp)
+    ?? null;
+  const endTs =
+    params.covSegmentEnd
+    ?? params.endTime
+    ?? (titular.endTime as admin.firestore.Timestamp)
+    ?? null;
   const posName = params.positionName || titular.positionName || null;
-  const ct = String(params.coverageType || 'COBERTURA').toUpperCase();
+  const ct = ctEarly;
   const isRet = ct === 'RET';
 
   const sourceId = String(params.sourceShiftId || '').trim();
-  if (sourceId && sourceId !== params.candidateEmployeeId) {
-    batch.update(
-      db.collection('turnos').doc(sourceId),
-      sourceShiftCoverageUsedPatch({
-        titularShiftId: titularId,
-        coverageDocId: covDocId,
-        resolvedBy: params.resolvedBy,
-        isRet,
-      }),
-    );
+  if (sourceId) {
+    const usedBase = sourceShiftCoverageUsedPatch({
+      titularShiftId: titularId,
+      coverageDocId: covDocId,
+      resolvedBy: params.resolvedBy,
+      isRet,
+      coversEmployeeName: (titular.employeeName as string) || null,
+      coversObjectiveName: (titular.objectiveName as string) || null,
+    });
+    if (ct === 'EXTEND' && params.extensionEndTime) {
+      batch.update(db.collection('turnos').doc(sourceId), {
+        ...usedBase,
+        isExtended: true,
+        adjustedEndTime: params.extensionEndTime,
+        extensionEndTime: params.extensionEndTime,
+      });
+    } else if (ct === 'ADVANCE' && params.adjustedStartTime) {
+      batch.update(db.collection('turnos').doc(sourceId), {
+        ...usedBase,
+        isEarlyStart: true,
+        adjustedStartTime: params.adjustedStartTime,
+      });
+    } else {
+      batch.update(db.collection('turnos').doc(sourceId), usedBase);
+    }
   }
 
   batch.set(
@@ -308,7 +356,7 @@ export async function applyCoverage(
       ...linkFields,
       sourceShiftId: sourceId || null,
       isPresent: false,
-      isAwaitingCoverageCheckIn: true,
+      isAwaitingCoverageCheckIn: ct !== 'EXTEND',
       coverageSuperseded: false,
       empresaId: empresaId || null,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -321,17 +369,25 @@ export async function applyCoverage(
   if (closeMode !== 'NONE') {
     const isAbsence =
       titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+    const titularName =
+      closeMode === 'FULL' && params.coveredByLabel
+        ? params.coveredByLabel
+        : params.candidateEmployeeName;
     batch.update(
       db.collection('turnos').doc(titularId),
-      absentShiftCoveragePatch({
-        coveredByEmployeeId: params.candidateEmployeeId,
-        coveredByEmployeeName: params.candidateEmployeeName,
-        coverageType: ct,
-        coverageDocId: covDocId,
-        resolvedBy: params.resolvedBy,
-        titularStatus: closeMode === 'PARTIAL' ? 'PARTIAL' : 'COVERED',
-        isAbsence,
-      }),
+      {
+        ...absentShiftCoveragePatch({
+          coveredByEmployeeId: params.candidateEmployeeId,
+          coveredByEmployeeName: titularName,
+          coverageType: closeMode === 'FULL' && params.coveredByLabel ? 'RETENCION' : ct,
+          coverageDocId: covDocId,
+          resolvedBy: params.resolvedBy,
+          titularStatus: closeMode === 'PARTIAL' ? 'PARTIAL' : 'COVERED',
+          isAbsence,
+        }),
+        coverageClaimConvocatoriaId: null,
+        coverageConvocatoriaId: params.convocatoriaId || null,
+      },
     );
   }
 
