@@ -1173,6 +1173,46 @@ async function run() {
       const r = await revertirAusenciaShift(db, { shiftId });
       report(28, r.success === false && r.reason === 'PAST_T60', r.reason === 'PAST_T60' ? 'rechazada T+70' : `r=${r.reason}`);
     }
+
+    // Caso 29 — isEarlyStart ADV: fichada adjustedStart −10 → presente, realStart = adjusted
+    {
+      const prefix = `${runId}_c29`;
+      const shiftId = `${prefix}_sh`;
+      const planned = tsAt(2026, 9, 24, 14, 0);
+      const adjusted = tsAt(2026, 9, 24, 10, 0);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'ADV',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: planned, endTime: tsAt(2026, 9, 24, 22, 0), status: 'PENDING',
+        isEarlyStart: true, adjustedStartTime: adjusted,
+      });
+      const recordedAt = new Date(adjusted.toMillis() - 10 * 60 * 1000).toISOString();
+      await registrarPresencia(db, { shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e`, recordedAt });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const realMs = sh?.realStartTime?.toMillis?.() ?? 0;
+      const ok = sh?.isPresent && realMs === adjusted.toMillis();
+      report(29, ok, ok ? 'ADV earlyStart −10 presente' : `present=${sh?.isPresent} real=${realMs} adj=${adjusted.toMillis()}`);
+    }
+
+    // Caso 30 — aviso sin eta: T+40 rechazada (ventana cierra T+30)
+    {
+      const prefix = `${runId}_c30`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 24, 11, 0);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: tsAt(2026, 9, 24, 19, 0), status: 'PENDING',
+        lateArrivalAt: Timestamp.fromMillis(start.toMillis() + 5 * 60 * 1000),
+      });
+      const nowMs = start.toMillis() + 40 * 60 * 1000;
+      const win = evaluateServerCheckInWindow(
+        (await db.collection('turnos').doc(shiftId).get()).data(),
+        nowMs,
+        { source: 'PORTAL_GPS' },
+      );
+      report(30, win.allowed === false && win.rejectCode === 'TOO_LATE', win.rejectCode === 'TOO_LATE' ? 'T+40 rechazada sin eta' : `allowed=${win.allowed} code=${win.rejectCode}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;
