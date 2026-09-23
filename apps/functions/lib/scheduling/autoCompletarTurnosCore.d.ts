@@ -10,5 +10,7 @@ export type AutoCompletePassResult = {
     completed: number;
     alertedNoRelief: number;
 };
+export declare function isValidReliefForOutgoing(incoming: FirebaseFirestore.DocumentData, outgoingEndMs: number): boolean;
+export declare function isReliefPresent(incoming: FirebaseFirestore.DocumentData): boolean;
 export declare function runAutoCompletarTurnosPass(db: Firestore, ctx: AutoCompleteContext, now?: Timestamp): Promise<AutoCompletePassResult>;
 export { loadPositionHasContinuity };

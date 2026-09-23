@@ -1,14 +1,62 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.loadPositionHasContinuity = void 0;
+exports.isValidReliefForOutgoing = isValidReliefForOutgoing;
+exports.isReliefPresent = isReliefPresent;
 exports.runAutoCompletarTurnosPass = runAutoCompletarTurnosPass;
 const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("../coverage/positionHasContinuity");
 Object.defineProperty(exports, "loadPositionHasContinuity", { enumerable: true, get: function () { return positionHasContinuity_1.loadPositionHasContinuity; } });
 const coverageRetention_1 = require("../coverage/coverageRetention");
-const RELIEF_WINDOW_MS = 2 * 60 * 60 * 1000;
+const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
+const RELEVO_ALIGN_MS = 30 * 60 * 1000;
+function shiftEndMs(data) {
+    return data.endTime?.toMillis?.() ?? 0;
+}
+function shiftStartMs(data) {
+    return data.startTime?.toMillis?.() ?? 0;
+}
+function checkInMs(data) {
+    const real = data.realStartTime?.toMillis?.();
+    if (real)
+        return real;
+    const ci = data.checkInTime?.toMillis?.();
+    if (ci)
+        return ci;
+    const pres = data.presenciaAt?.toMillis?.();
+    if (pres)
+        return pres;
+    return shiftStartMs(data);
+}
+function isValidReliefForOutgoing(incoming, outgoingEndMs) {
+    const st = shiftStartMs(incoming);
+    if (!st)
+        return false;
+    if (st < outgoingEndMs - RELEVO_ALIGN_MS)
+        return false;
+    if (st > outgoingEndMs + RELEVO_WINDOW_AFTER_MS)
+        return false;
+    return true;
+}
+function isReliefPresent(incoming) {
+    if (incoming.isCompleted === true)
+        return false;
+    const st = String(incoming.status || '').toUpperCase();
+    return st === 'PRESENT' && incoming.isPresent !== false;
+}
+function isReliefPending(incoming) {
+    if (!incoming.employeeId || incoming.employeeId === 'VACANTE')
+        return false;
+    if (incoming.isUnassigned === true)
+        return false;
+    const st = String(incoming.status || '').toUpperCase();
+    return st === 'PENDING' || st === 'PLAN' || st === '' || !st;
+}
+function isReliefAbsent(incoming) {
+    return incoming.isAbsent === true || String(incoming.status || '').toUpperCase() === 'ABSENT';
+}
 function shiftEndDate(data) {
-    const ms = data.endTime?.toMillis?.() ?? 0;
+    const ms = shiftEndMs(data);
     return ms ? new Date(ms) : null;
 }
 async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.now()) {
@@ -22,10 +70,10 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
     if (snap.empty)
         return { completed: 0, alertedNoRelief: 0 };
     const completeBatch = db.batch();
-    const auditBatch = db.batch();
     let completed = 0;
     let alertedNoRelief = 0;
     const slaCache = new Map();
+    const reliefIncomingClaimed = new Set();
     async function hasContinuity(shift) {
         const oid = String(shift.objectiveId || '');
         const end = shiftEndDate(shift);
@@ -43,16 +91,16 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         const sla = slaCache.get(oid);
         return (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla || undefined, shift.positionName || '', end);
     }
-    for (const docSnap of snap.docs) {
+    const outgoingDocs = [...snap.docs].sort((a, b) => checkInMs(a.data()) - checkInMs(b.data()));
+    for (const docSnap of outgoingDocs) {
         const shift = docSnap.data();
         if (!ctx.isEnabled(shift.empresaId))
             continue;
         if ((shift.status || '') === 'INTERRUPTED')
             continue;
-        const endTimeMs = shift.endTime?.toMillis?.() ?? 0;
+        const endTimeMs = shiftEndMs(shift);
         if (!endTimeMs)
             continue;
-        const endDate = new Date(endTimeMs);
         const continuous = await hasContinuity(shift);
         if (shift.isRetention === true) {
             const manualExtended = shift.manualRetentionType === 'extended' && Number(shift.manualRetentionHours || 0) > 0;
@@ -111,8 +159,8 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             }
             continue;
         }
-        const windowStart = firestore_1.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
-        const windowEnd = firestore_1.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
+        const windowStart = firestore_1.Timestamp.fromMillis(endTimeMs - RELEVO_WINDOW_AFTER_MS);
+        const windowEnd = firestore_1.Timestamp.fromMillis(endTimeMs + RELEVO_WINDOW_AFTER_MS);
         const relieveSnap = await db
             .collection('turnos')
             .where('objectiveId', '==', shift.objectiveId)
@@ -122,23 +170,21 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             .get();
         const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id && ctx.sameTenantShift(shift, d.data()));
         const relievePresent = relieveDocs.find((d) => {
-            const s = d.data().status || '';
-            return s === 'PRESENT' || s === 'COMPLETED';
+            if (reliefIncomingClaimed.has(d.id))
+                return false;
+            const data = d.data();
+            return isReliefPresent(data) && isValidReliefForOutgoing(data, endTimeMs);
         });
         const relievePending = relieveDocs.find((d) => {
             const data = d.data();
-            if (!data.employeeId || data.employeeId === 'VACANTE')
-                return false;
-            if (data.isUnassigned === true)
-                return false;
-            const s = data.status || '';
-            return s === 'PENDING' || s === 'PLAN' || s === '' || !s;
+            return isReliefPending(data) && isValidReliefForOutgoing(data, endTimeMs);
         });
         const relieveAbsent = relieveDocs.find((d) => {
             const data = d.data();
-            return data.isAbsent === true || data.status === 'ABSENT';
+            return isReliefAbsent(data) && isValidReliefForOutgoing(data, endTimeMs);
         });
         if (relievePresent) {
+            reliefIncomingClaimed.add(relievePresent.id);
             const relData = relievePresent.data();
             const relCheckMs = relData.realStartTime?.toMillis?.() ??
                 relData.checkInTime?.toMillis?.() ??
@@ -175,12 +221,22 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
                     id: relieveAbsent.id,
                 }, { sendPush: true, reportedBy: 'AUTO' });
             }
-            else if (!shift.isRetention) {
-                completeBatch.update(docSnap.ref, {
-                    isRetention: true,
-                    retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending?.data().employeeName || 'relevo'}`,
-                    autoRetentionAt: firestore_1.Timestamp.fromMillis(Math.max(nowMs, endTimeMs)),
-                });
+            else if (relievePending) {
+                const pendingId = relievePending.id;
+                const pendingData = relievePending.data();
+                if (!shift.isRetention) {
+                    completeBatch.update(docSnap.ref, {
+                        isRetention: true,
+                        retentionReason: `RELEVO_NO_PRESENTADO: ${pendingData.employeeName || 'relevo'} no se presentó`,
+                        retentionAbsenceShiftId: pendingId,
+                        autoRetentionAt: firestore_1.Timestamp.fromMillis(Math.max(nowMs, endTimeMs)),
+                    });
+                }
+                else if (!shift.retentionAbsenceShiftId) {
+                    completeBatch.update(docSnap.ref, {
+                        retentionAbsenceShiftId: pendingId,
+                    });
+                }
             }
             alertedNoRelief++;
         }
@@ -208,7 +264,6 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         }
     }
     await completeBatch.commit();
-    await auditBatch.commit();
     return { completed, alertedNoRelief };
 }
 //# sourceMappingURL=autoCompletarTurnosCore.js.map
