@@ -165,7 +165,9 @@ export function sourceShiftCoverageUsedPatch(opts: {
     coverageUsed: true,
     coverageUsedForShiftId: opts.titularShiftId,
     coverageDocId: opts.coverageDocId,
-    coverageUsedAt: serverTimestamp(),
+    coverageUsedAt: typeof process !== 'undefined' && process.env.NEXT_PUBLIC_USE_EMULATOR === 'true'
+      ? Timestamp.now()
+      : serverTimestamp(),
     coverageUsedBy: opts.resolvedBy,
     coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
     coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
@@ -332,7 +334,10 @@ export async function applyCoverage(
         isPresent: false,
         isAwaitingCoverageCheckIn: ct !== 'EXTEND',
         coverageSuperseded: false,
-        createdAt: serverTimestamp(),
+        ...(ct === 'EXTEND' || ct === 'ADVANCE' ? { coverageHoursOnSource: true } : {}),
+        createdAt: typeof process !== 'undefined' && process.env.NEXT_PUBLIC_USE_EMULATOR === 'true'
+          ? Timestamp.now()
+          : serverTimestamp(),
         ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
       },
       empresaId,

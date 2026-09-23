@@ -138,6 +138,27 @@ export function isOpsReplacementShift(shift: Record<string, unknown> | null | un
 }
 
 /** Estado RRHH alineado con turno titular (ausencias.coberturaEstado). */
+/** ops_cov EXT/ADV: trazabilidad; las horas del tramo van en el turno source (isExtended / isEarlyStart). */
+export function isOpsCoverageHoursOnSourceDoc(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data) return false;
+  if (data.coverageHoursOnSource === true) return true;
+  const ct = String(data.coverageType || '').toUpperCase();
+  if (String(data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' && (ct === 'EXTEND' || ct === 'ADVANCE')) {
+    return true;
+  }
+  return false;
+}
+
+/** ops_cov que suman horas en plan / extracto / liquidación / análisis. */
+export function opsCoverageDocCountsBillableHours(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!isActiveOpsCoverageDoc(data)) return false;
+  return !isOpsCoverageHoursOnSourceDoc(data);
+}
+
 /** Doc activo de cobertura CC (no superseded / cancelado). */
 export function isActiveOpsCoverageDoc(data: Record<string, unknown> | null | undefined): boolean {
   if (!data) return false;

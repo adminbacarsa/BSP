@@ -14,6 +14,12 @@ exports.opsCoverageLinkFields = opsCoverageLinkFields;
 exports.applyCoverage = applyCoverage;
 const admin = require("firebase-admin");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
+function coverageServerTime() {
+    if (process.env.FIRESTORE_EMULATOR_HOST) {
+        return admin.firestore.Timestamp.now();
+    }
+    return admin.firestore.FieldValue.serverTimestamp();
+}
 async function syncAusenciaCoberturaGestionada(db, params, batch) {
     const shiftId = String(params.shiftId || '').trim();
     if (!shiftId)
@@ -55,7 +61,7 @@ function absentShiftCoveragePatch(opts) {
     const patch = {
         resolvedBy: opts.resolvedBy || 'OPERACIONES',
         coverageType: opts.coverageType || 'COBERTURA',
-        coveredAt: admin.firestore.FieldValue.serverTimestamp(),
+        coveredAt: coverageServerTime(),
         coveredByEmployeeId: opts.coveredByEmployeeId || null,
         coveredByEmployeeName: opts.coveredByEmployeeName || null,
         operacionallyCovered: titularSt === 'COVERED',
@@ -109,7 +115,7 @@ function sourceShiftCoverageUsedPatch(opts) {
         coverageUsed: true,
         coverageUsedForShiftId: opts.titularShiftId,
         coverageDocId: opts.coverageDocId,
-        coverageUsedAt: admin.firestore.FieldValue.serverTimestamp(),
+        coverageUsedAt: coverageServerTime(),
         coverageUsedBy: opts.resolvedBy,
         coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
         coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
@@ -283,8 +289,9 @@ async function applyCoverage(db, batch, params) {
         isPresent: false,
         isAwaitingCoverageCheckIn: ct !== 'EXTEND',
         coverageSuperseded: false,
+        ...(ct === 'EXTEND' || ct === 'ADVANCE' ? { coverageHoursOnSource: true } : {}),
         empresaId: empresaId || null,
-        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        createdAt: coverageServerTime(),
         ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     }, { merge: true });
     const closeMode = params.titularCloseMode ?? 'FULL';

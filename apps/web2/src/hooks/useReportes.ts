@@ -793,6 +793,13 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const st = (d.status || '').toLowerCase();
             if (st.includes('cancel') || st.includes('delet')) return;
             if (d.type === 'NOVEDAD') return;
+            if (
+                d.coverageHoursOnSource === true
+                || (String(d.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+                    && ['EXTEND', 'ADVANCE'].includes(String(d.coverageType || '').toUpperCase()))
+            ) {
+                return;
+            }
 
             const rawCode = (d.code || '').trim().toUpperCase();
             const isFT = isFrancoTrabajadoShift(d);

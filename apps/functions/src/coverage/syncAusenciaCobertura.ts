@@ -1,6 +1,13 @@
 import * as admin from 'firebase-admin';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 
+function coverageServerTime(): admin.firestore.Timestamp | admin.firestore.FieldValue {
+  if (process.env.FIRESTORE_EMULATOR_HOST) {
+    return admin.firestore.Timestamp.now();
+  }
+  return admin.firestore.FieldValue.serverTimestamp();
+}
+
 export type SyncAusenciaCoberturaParams = {
   shiftId: string;
   coveredByEmployeeId?: string | null;
@@ -71,7 +78,7 @@ export function absentShiftCoveragePatch(opts: {
   const patch: Record<string, unknown> = {
     resolvedBy: opts.resolvedBy || 'OPERACIONES',
     coverageType: opts.coverageType || 'COBERTURA',
-    coveredAt: admin.firestore.FieldValue.serverTimestamp(),
+    coveredAt: coverageServerTime(),
     coveredByEmployeeId: opts.coveredByEmployeeId || null,
     coveredByEmployeeName: opts.coveredByEmployeeName || null,
     operacionallyCovered: titularSt === 'COVERED',
@@ -132,7 +139,7 @@ export function sourceShiftCoverageUsedPatch(opts: {
     coverageUsed: true,
     coverageUsedForShiftId: opts.titularShiftId,
     coverageDocId: opts.coverageDocId,
-    coverageUsedAt: admin.firestore.FieldValue.serverTimestamp(),
+    coverageUsedAt: coverageServerTime(),
     coverageUsedBy: opts.resolvedBy,
     coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
     coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
@@ -358,8 +365,9 @@ export async function applyCoverage(
       isPresent: false,
       isAwaitingCoverageCheckIn: ct !== 'EXTEND',
       coverageSuperseded: false,
+      ...(ct === 'EXTEND' || ct === 'ADVANCE' ? { coverageHoursOnSource: true } : {}),
       empresaId: empresaId || null,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: coverageServerTime(),
       ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     },
     { merge: true },

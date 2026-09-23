@@ -43,6 +43,13 @@ export function fichadaAnchorDate(t: any): Date | null {
  */
 export function fichadaHoursForShift(t: any): number {
   if (!isShiftFichado(t)) return 0;
+  if (
+    t?.coverageHoursOnSource === true
+    || (String(t?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+      && ['EXTEND', 'ADVANCE'].includes(String(t?.coverageType || '').toUpperCase()))
+  ) {
+    return 0;
+  }
   const code = String((t.code || t.type || '')).trim().toUpperCase();
   if (!isFichadaWorkingShiftCode(code)) return 0;
   if (FICHADA_SHIFT_HOURS[code]) return FICHADA_SHIFT_HOURS[code];

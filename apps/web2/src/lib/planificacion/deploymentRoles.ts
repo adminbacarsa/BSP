@@ -178,6 +178,9 @@ export function shiftCountsForEmployeeCronoHours(shift: {
     code?: unknown;
     type?: unknown;
     hours?: unknown;
+    origin?: unknown;
+    coverageHoursOnSource?: unknown;
+    coverageType?: unknown;
     deploymentBand?: unknown;
     isDeleted?: boolean;
     isRefuerzo?: boolean;
@@ -186,6 +189,11 @@ export function shiftCountsForEmployeeCronoHours(shift: {
     deploymentRole?: unknown;
 } | null | undefined): boolean {
     if (!shift || shift.isDeleted) return false;
+    if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') {
+        if (shift.coverageHoursOnSource === true) return false;
+        const ct = String(shift.coverageType || '').toUpperCase();
+        if (ct === 'EXTEND' || ct === 'ADVANCE') return false;
+    }
     if (isDeploymentOrPoolShift(shift)) return false;
     const code = String(shift.code || '').toUpperCase();
     const nonWork = new Set(['F', 'FF', 'FP', 'FT', 'V', 'L', 'A', 'E', 'AA', 'PG', 'SUS', 'SGS', 'EV']);

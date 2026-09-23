@@ -378,6 +378,13 @@ export function isOperationalOriginShiftLite(t: any): boolean {
 
 export function coverageHoursFromShift(t: any): number {
   if (!t) return JORNADA_DEFAULT_HS;
+  if (
+    t.coverageHoursOnSource === true
+    || (String(t.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
+      && ['EXTEND', 'ADVANCE'].includes(String(t.coverageType || '').toUpperCase()))
+  ) {
+    return 0;
+  }
   const code = String(t.code || t.shiftCode || '').toUpperCase();
   const isLeave = LEAVE_CODES.has(code);
   const stored = Number(t.hours);

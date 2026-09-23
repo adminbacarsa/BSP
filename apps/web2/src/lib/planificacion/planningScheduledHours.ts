@@ -1,5 +1,6 @@
 import { normalizePlanningPositionName, PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
 import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
+import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
 
 const SHIFT_HOURS_LOOKUP: Record<string, number> = {
@@ -182,6 +183,7 @@ export function calcPlanningBillableShiftHours(
   slaHoursHint?: Record<string, number>,
 ): number {
   if (!shift) return 0;
+  if (isOpsCoverageHoursOnSourceDoc(shift)) return 0;
   const code = String(shift.code || shift.type || '').toUpperCase();
   if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
 
