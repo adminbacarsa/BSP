@@ -117,7 +117,9 @@ export function routeFromNotificationData(data: Record<string, unknown> | undefi
     .toUpperCase();
 
   if (COBERTURA_TYPES.has(type)) {
-    return '/(tabs)/alertas';
+    const convId = String(data.convocatoriaId ?? data.convId ?? data.id ?? '').trim();
+    if (convId) return `/(tabs)?focus=cobertura&convocatoriaId=${encodeURIComponent(convId)}`;
+    return '/(tabs)?focus=cobertura';
   }
   if (EVENTOS_TYPES.has(type)) {
     return '/eventos';
@@ -172,7 +174,7 @@ export function notificationActionLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
-  if (COBERTURA_TYPES.has(t)) return 'Ver alerta';
+  if (COBERTURA_TYPES.has(t)) return 'Ver convocatoria';
   if (EVENTOS_TYPES.has(t)) return 'Ver convocatoria';
   if (t === 'SWAP_REQUEST') return 'Ver permutas';
   if (AGENDA_TYPES.has(t)) return 'Ver agenda';

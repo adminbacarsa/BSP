@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { getCheckInTiming, isOperationsCoverageShift } from './portalCheckIn';
+import {
+  getCheckInTiming,
+  isCoverageHoursOnSourceShift,
+  isOperationsCoverageShift,
+  validateCheckInDistance,
+} from './portalCheckIn';
 import type { Shift } from '@cosp/portal-types';
+import { isShiftVisibleToEmployee } from '../shifts/employeeShiftVisibility';
 
-function shift(partial: Partial<Shift> & Pick<Shift, 'id'>): Shift {
+function shift(partial: Partial<Shift> & Pick<Shift, 'id'> & Record<string, unknown>): Shift {
   return partial as Shift;
 }
 
-describe('getCheckInTiming — cobertura ops vs turno normal', () => {
+describe('getCheckInTiming — ventanas CC', () => {
   const now = new Date('2026-09-14T18:00:00-03:00');
 
   it('detecta OPERATIONS_COVERAGE', () => {
@@ -14,7 +20,7 @@ describe('getCheckInTiming — cobertura ops vs turno normal', () => {
     expect(isOperationsCoverageShift({ origin: 'PLANIFICADOR' })).toBe(false);
   });
 
-  it('turno normal: fuera de ventana ±15/−5 no puede fichar', () => {
+  it('normal: demasiado temprano (antes de T−60) no ficha ni avisa', () => {
     const s = shift({
       id: 'n1',
       origin: 'PLANIFICADOR',
@@ -22,31 +28,203 @@ describe('getCheckInTiming — cobertura ops vs turno normal', () => {
       endTime: new Date('2026-09-15T04:00:00-03:00'),
     });
     const t = getCheckInTiming(s, now);
+    expect(t.diffMinutes).toBe(120);
     expect(t.canCheckIn).toBe(false);
     expect(t.tooEarly).toBe(true);
+    expect(t.canNotifyLate).toBe(false);
   });
 
-  it('cobertura ops: puede fichar antes del inicio si el turno no terminó', () => {
+  it('normal: dentro de T−15 puede fichar', () => {
+    const start = new Date('2026-09-14T18:10:00-03:00');
     const s = shift({
-      id: 'c1',
-      origin: 'OPERATIONS_COVERAGE',
-      startTime: new Date('2026-09-14T20:00:00-03:00'),
-      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      id: 'n2',
+      startTime: start,
+      endTime: new Date('2026-09-15T02:10:00-03:00'),
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.diffMinutes).toBe(10);
+    expect(t.canCheckIn).toBe(true);
+    expect(t.canNotifyLate).toBe(true);
+  });
+
+  it('aviso previo: canNotifyLate de T−60 a T+5 (no solo post T+5)', () => {
+    const s = shift({
+      id: 'late-pre',
+      startTime: new Date('2026-09-14T18:45:00-03:00'),
+      endTime: new Date('2026-09-15T02:45:00-03:00'),
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.diffMinutes).toBe(45);
+    expect(t.canCheckIn).toBe(false);
+    expect(t.canNotifyLate).toBe(true);
+    expect(t.lateWindow).toBe(true);
+  });
+
+  it('con lateArrivalAt + etaMinutes: canCheckIn hasta min(inicio+eta, T+60)', () => {
+    const start = new Date('2026-09-14T17:50:00-03:00');
+    const s = shift({
+      id: 'late-eta',
+      startTime: start,
+      endTime: new Date('2026-09-15T01:50:00-03:00'),
+      lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
+      etaMinutes: 30,
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
-    expect(t.tooEarly).toBe(false);
-    expect(t.lateWindow).toBe(false);
+    expect(t.canNotifyLate).toBe(false);
+    expect(t.checkInDeadline?.getTime()).toBe(start.getTime() + 30 * 60_000);
   });
 
-  it('cobertura ops: no puede fichar si el turno ya terminó', () => {
+  it('con lateArrivalConfirmed sin eta: ventana hasta T+30', () => {
+    const start = new Date('2026-09-14T17:40:00-03:00');
     const s = shift({
-      id: 'c2',
+      id: 'late-30',
+      startTime: start,
+      endTime: new Date('2026-09-15T01:40:00-03:00'),
+      lateArrivalConfirmed: true,
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(true);
+    const after = getCheckInTiming(s, new Date('2026-09-14T18:15:00-03:00'));
+    expect(after.canCheckIn).toBe(false);
+  });
+
+  it('OPERATIONS_COVERAGE: desde inicio−15 hasta max(createdAt, inicio)+60', () => {
+    const start = new Date('2026-09-14T20:00:00-03:00');
+    const created = new Date('2026-09-14T17:30:00-03:00');
+    const s = shift({
+      id: 'ops1',
       origin: 'OPERATIONS_COVERAGE',
-      startTime: new Date('2026-09-14T08:00:00-03:00'),
-      endTime: new Date('2026-09-14T16:00:00-03:00'),
+      startTime: start,
+      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      createdAt: created,
+    });
+    const early = getCheckInTiming(s, now);
+    expect(early.canCheckIn).toBe(false);
+    expect(early.tooEarly).toBe(true);
+
+    const inWin = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
+    expect(inWin.canCheckIn).toBe(true);
+    expect(inWin.checkInDeadline?.getTime()).toBe(start.getTime() + 60 * 60_000);
+
+    const late = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
+    expect(late.canCheckIn).toBe(false);
+  });
+
+  it('OPERATIONS_COVERAGE: si createdAt > start, el tope usa createdAt+60', () => {
+    const start = new Date('2026-09-14T17:00:00-03:00');
+    const created = new Date('2026-09-14T17:30:00-03:00');
+    const s = shift({
+      id: 'ops2',
+      origin: 'OPERATIONS_COVERAGE',
+      startTime: start,
+      endTime: new Date('2026-09-15T01:00:00-03:00'),
+      createdAt: created,
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(true);
+    expect(t.checkInDeadline?.getTime()).toBe(created.getTime() + 60 * 60_000);
+  });
+
+  it('ADV (isEarlyStart): adjustedStartTime −15 … +60', () => {
+    const start = new Date('2026-09-14T20:00:00-03:00');
+    const s = shift({
+      id: 'adv1',
+      startTime: start,
+      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      isEarlyStart: true,
+      adjustedStartTime: '18:00',
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(true);
+    const deadline = t.checkInDeadline!;
+    expect(deadline.toISOString()).toBe(new Date('2026-09-14T19:00:00-03:00').toISOString());
+  });
+
+  it('ADV: si no llegó al adelanto, igual puede fichar en ventana propia T−15…T+5', () => {
+    // Adelanto 14:00 (ventana cierra 15:00); turno propio 20:00.
+    // now = 19:50 → fuera del adelanto, dentro de T−15 del propio.
+    const s = shift({
+      id: 'adv-own',
+      startTime: new Date('2026-09-14T20:00:00-03:00'),
+      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      isEarlyStart: true,
+      adjustedStartTime: '14:00',
+    });
+    const atOwnWindow = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
+    expect(atOwnWindow.canCheckIn).toBe(true);
+    expect(atOwnWindow.canNotifyLate).toBe(true);
+
+    // Entre fin adelanto y apertura propia, pero dentro de T−60: no ficha, sí puede avisar.
+    const between = getCheckInTiming(s, new Date('2026-09-14T19:20:00-03:00'));
+    expect(between.canCheckIn).toBe(false);
+    expect(between.canNotifyLate).toBe(true);
+  });
+
+  it('ADV + lateArrivalAt: ventana propia extendida por eta sigue habilitada', () => {
+    const start = new Date('2026-09-14T17:50:00-03:00');
+    const s = shift({
+      id: 'adv-late',
+      startTime: start,
+      endTime: new Date('2026-09-15T01:50:00-03:00'),
+      isEarlyStart: true,
+      adjustedStartTime: '12:00',
+      lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
+      etaMinutes: 30,
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(true);
+  });
+
+  it('coverageHoursOnSource: no fichable (registro EXT/ADV)', () => {
+    const s = shift({
+      id: 'reg1',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageHoursOnSource: true,
+      startTime: new Date('2026-09-14T18:00:00-03:00'),
+      endTime: new Date('2026-09-15T02:00:00-03:00'),
+      createdAt: new Date('2026-09-14T17:00:00-03:00'),
+    });
+    expect(isCoverageHoursOnSourceShift(s)).toBe(true);
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(false);
+    expect(t.canNotifyLate).toBe(false);
+    expect(isShiftVisibleToEmployee(s as never, new Set(['any']))).toBe(false);
+  });
+
+  it('ausente: no puede fichar', () => {
+    const s = shift({
+      id: 'abs1',
+      startTime: new Date('2026-09-14T18:00:00-03:00'),
+      endTime: new Date('2026-09-15T02:00:00-03:00'),
+      isAbsent: true,
+      status: 'ABSENT',
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(false);
+    expect(t.canNotifyLate).toBe(false);
+  });
+});
+
+describe('validateCheckInDistance — GPS CC', () => {
+  it('permite fichar si el objetivo no tiene coordenadas', () => {
+    const r = validateCheckInDistance({ lat: 0, lng: 0, name: 'Sin GPS' }, null);
+    expect(r.ok).toBe(true);
+  });
+
+  it('permite con allowRemoteCheckIn', () => {
+    const r = validateCheckInDistance(
+      { lat: -31.4, lng: -64.2, name: 'Remoto', allowRemoteCheckIn: true },
+      null,
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it('bloquea fuera del radio', () => {
+    const r = validateCheckInDistance(
+      { lat: -31.4, lng: -64.2, name: 'Planta' },
+      { latitude: -31.5, longitude: -64.3 },
+    );
+    expect(r.ok).toBe(false);
   });
 });

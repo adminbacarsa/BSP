@@ -3,6 +3,7 @@ import { formatDateAr, formatTimeAr, isEvShift, resolveEvShiftDisplay } from '@c
 import type { Evento, ObjectiveLocation, Shift } from '@cosp/portal-types';
 import {
   isAgendaAbsentShift,
+  isAgendaRetentionShift,
   isAgendaWorkedShift,
   isOpsCoverageShift,
 } from '../../lib/agendaCalendar';
@@ -21,7 +22,8 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
   const { palette } = useTheme();
   const isOps = isOpsCoverageShift(item);
   const isAbsent = isAgendaAbsentShift(item);
-  const isWorked = !isAbsent && isAgendaWorkedShift(item);
+  const isRetention = !isAbsent && isAgendaRetentionShift(item);
+  const isWorked = !isAbsent && !isRetention && isAgendaWorkedShift(item);
   const isFranco = !!item.isFranco && !isOps && !item.isFrancoTrabajado && !isAbsent;
   const isFt = !!item.isFrancoTrabajado || String(item.code || '').toUpperCase() === 'FT';
   const ev = resolveEvShiftDisplay(item, eventosMap);
@@ -30,23 +32,27 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
 
   const codeLabel = isAbsent
     ? 'AA'
-    : isFranco
-      ? 'F'
-      : isFt
-        ? 'FT'
-        : isEv
-          ? 'EV'
-          : String(item.code || 'T').toUpperCase();
+    : isRetention
+      ? 'RET'
+      : isFranco
+        ? 'F'
+        : isFt
+          ? 'FT'
+          : isEv
+            ? 'EV'
+            : String(item.code || 'T').toUpperCase();
 
   const title = isAbsent
     ? 'Ausente'
-    : isOps
-      ? 'Cobertura'
-      : isFranco
-        ? 'Franco'
-        : isFt
-          ? 'Franco trabajado'
-          : ev?.nombre || placement.objective;
+    : isRetention
+      ? 'Retenido'
+      : isOps
+        ? 'Cobertura'
+        : isFranco
+          ? 'Franco'
+          : isFt
+            ? 'Franco trabajado'
+            : ev?.nombre || placement.objective;
 
   const timeLine = isFranco
     ? formatDateAr(item.startTime)
@@ -56,23 +62,27 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
 
   const metaLine = isAbsent
     ? `${placement.line} · no corresponde asistir`
-    : isOps
-      ? `Turno asignado · ${placement.line}`
-      : isFranco
-        ? 'Día libre programado'
-        : isWorked
-          ? `${placement.line} · ya trabajado`
-          : placement.line;
+    : isRetention
+      ? `${placement.line} · esperá al relevo`
+      : isOps
+        ? `Turno asignado · ${placement.line}`
+        : isFranco
+          ? 'Día libre programado'
+          : isWorked
+            ? `${placement.line} · ya trabajado`
+            : placement.line;
 
   const accentColor = isAbsent
     ? '#b45309'
-    : isOps
+    : isRetention
       ? '#ea580c'
-      : isWorked
-        ? '#64748b'
-        : isEv
-          ? palette.warning
-          : palette.primary;
+      : isOps
+        ? '#ea580c'
+        : isWorked
+          ? '#64748b'
+          : isEv
+            ? palette.warning
+            : palette.primary;
 
   return (
     <View
@@ -82,18 +92,22 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
         {
           backgroundColor: isAbsent
             ? 'rgba(180, 83, 9, 0.08)'
-            : isEv
-              ? palette.inputBg
-              : palette.card,
+            : isRetention
+              ? 'rgba(234, 88, 12, 0.08)'
+              : isEv
+                ? palette.inputBg
+                : palette.card,
           borderColor: isAbsent
             ? '#f59e0b'
-            : isOps
+            : isRetention
               ? '#fdba74'
-              : isWorked
-                ? '#cbd5e1'
-                : isEv
-                  ? palette.warning
-                  : palette.cardBorder,
+              : isOps
+                ? '#fdba74'
+                : isWorked
+                  ? '#cbd5e1'
+                  : isEv
+                    ? palette.warning
+                    : palette.cardBorder,
           opacity: isWorked && !isAbsent ? 0.92 : 1,
         },
       ]}
@@ -136,6 +150,10 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
       {isAbsent ? (
         <View style={styles.badgeAbsent}>
           <Text style={styles.badgeAbsentText}>Ausente</Text>
+        </View>
+      ) : isRetention ? (
+        <View style={styles.badgeRetention}>
+          <Text style={styles.badgeRetentionText}>Retenido</Text>
         </View>
       ) : item.isPresent || isWorked ? (
         <View style={styles.badgeOk}>
@@ -254,6 +272,15 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffedd5',
   },
   badgeOpsText: { fontWeight: '800', fontSize: 11, color: '#c2410c' },
+  badgeRetention: {
+    alignSelf: 'center',
+    marginRight: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: radius.pill,
+    backgroundColor: '#ffedd5',
+  },
+  badgeRetentionText: { fontWeight: '800', fontSize: 11, color: '#c2410c' },
   badgeFranco: {
     alignSelf: 'center',
     marginRight: 12,

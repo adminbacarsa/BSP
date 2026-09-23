@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getCheckInTiming,
@@ -16,8 +16,10 @@ import { useEmpresaBranding } from '../../src/hooks/useEmpresaBranding';
 import { useEventosPortal } from '../../src/hooks/useEventosPortal';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
+import { useConvocatoriasCobertura } from '../../src/hooks/useConvocatoriasCobertura';
 import {
   heroShift,
+  isActiveRetentionShift,
   isShiftInProgress,
   shiftStartsToday,
   pickTodayAbsentShift,
@@ -27,6 +29,9 @@ import { appRoutes } from '../../src/lib/appRoutes';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
+import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
+import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
+import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
 import {
@@ -43,6 +48,7 @@ import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useClockNow } from '../../src/hooks/useClockNow';
 import { useTheme } from '../../src/theme/ThemeContext';
 import type { SolicitudEvento } from '@cosp/portal-types';
+import type { ConvocatoriaCobertura } from '../../src/lib/convocatoriasCobertura';
 import Constants from 'expo-constants';
 
 export default function HoyScreen() {
@@ -56,6 +62,7 @@ export default function HoyScreen() {
 function HoyScreenContent() {
   const router = useRouter();
   const navigation = useNavigation();
+  const params = useLocalSearchParams<{ focus?: string; convocatoriaId?: string }>();
   const { palette } = useTheme();
   const { isCompact, contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
@@ -73,7 +80,7 @@ function HoyScreenContent() {
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
-  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival } =
+  const { pendingCount, pendingShiftIds, busyShiftId, requestCheckInForShift, notifyLateArrival, lateEtaByShiftId } =
     useCheckIn();
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
@@ -94,12 +101,43 @@ function HoyScreenContent() {
     displayName,
     { isPreviewMode },
   );
+  const {
+    coberturaPendientes,
+    llegadaTardePendientes,
+    busyId: coberturaBusyId,
+    responder: responderCobertura,
+  } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
   const { eventosMap } = useEventosMap(employee?.empresaId);
   const { unreadCount } = usePortalInbox(user, previewEmpDocId);
+
+  const focusCobertura =
+    String(params.focus || '').toLowerCase() === 'cobertura' ||
+    !!String(params.convocatoriaId || '').trim();
+  const highlightConvocatoriaId = String(params.convocatoriaId || '').trim() || null;
 
   async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
     Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+  }
+
+  async function onResponderCobertura(c: ConvocatoriaCobertura, acepta: boolean) {
+    const result = await responderCobertura(c.id, acepta ? 'ACCEPTED' : 'REJECTED');
+    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+  }
+
+  async function onSiVoyLlegadaTarde(c: ConvocatoriaCobertura, etaMinutes: number) {
+    const result = await responderCobertura(c.id, 'ACCEPTED', { etaMinutes });
+    Alert.alert(
+      result.ok ? 'Listo' : 'Error',
+      result.ok ? `Avisaste que llegás en ${etaMinutes} min` : result.message,
+    );
+  }
+
+  async function onNoVoyLlegadaTarde(c: ConvocatoriaCobertura) {
+    const result = await responderCobertura(c.id, 'REJECTED', {
+      rejectionReason: 'No voy',
+    });
+    Alert.alert(result.ok ? 'Listo' : 'Error', result.ok ? 'Marcado como no voy' : result.message);
   }
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
@@ -131,26 +169,50 @@ function HoyScreenContent() {
   const placement = resolveShiftPlacement(todayAbsentShift || mainShift, objectivesMap);
   const objective = placement.objectiveLocation;
   const labRelaxedCheckIn = isEmulatorMode() && objective?.allowRemoteCheckIn === true;
-  const timing = mainShift ? getCheckInTiming(mainShift, now, { relaxWindow: labRelaxedCheckIn }) : null;
+  const etaOverride =
+    mainShift && lateEtaByShiftId[mainShift.id] != null ? lateEtaByShiftId[mainShift.id] : null;
+  const timing = mainShift
+    ? getCheckInTiming(mainShift, now, {
+        relaxWindow: labRelaxedCheckIn,
+        etaMinutesOverride: etaOverride,
+      })
+    : null;
   const heroInProgress = !!mainShift && isShiftInProgress(mainShift, now);
   const isHeroToday = !!mainShift && shiftStartsToday(mainShift, now);
   const isOpsHero =
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  const isRetentionHero = isActiveRetentionShift(mainShift);
   const heroSectionLabel = todayAbsentShift
     ? 'Ausente'
-    : isOpsHero
-      ? 'Turno asignado'
-      : heroInProgress
-        ? 'Turno actual'
-        : 'Próximo turno';
+    : isRetentionHero
+      ? 'Retenido'
+      : isOpsHero
+        ? 'Turno asignado'
+        : heroInProgress
+          ? 'Turno actual'
+          : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
     !!mainShift && (mainShift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress');
   const hasPendingRequest = !!mainShift?.checkInRequestedAt && !isConfirmed;
-  const checkInStatusView = resolveCheckInUiStatus(mainShift, timing, {
-    offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
-  });
+  const hasLocalLateEta = !!mainShift && lateEtaByShiftId[mainShift.id] != null;
+  const checkInStatusView = resolveCheckInUiStatus(
+    mainShift
+      ? ({
+          ...mainShift,
+          ...(hasLocalLateEta && !mainShift.lateArrivalAt
+            ? { lateArrivalAt: new Date().toISOString(), etaMinutes: lateEtaByShiftId[mainShift.id] }
+            : hasLocalLateEta
+              ? { etaMinutes: lateEtaByShiftId[mainShift.id] }
+              : {}),
+        } as typeof mainShift)
+      : mainShift,
+    timing,
+    {
+      offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
+    },
+  );
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
@@ -163,10 +225,13 @@ function HoyScreenContent() {
     !!mainShift &&
     !mainShift.isFranco &&
     !isOpsHero &&
-    timing?.lateWindow &&
+    !isRetentionHero &&
+    !!timing?.canNotifyLate &&
     !hasPendingRequest &&
     !isConfirmed &&
-    !mainShift.lateArrivalAt;
+    !mainShift.lateArrivalAt &&
+    !(mainShift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed &&
+    !hasLocalLateEta;
 
   async function onCheckIn() {
     if (!mainShift) return;
@@ -179,18 +244,45 @@ function HoyScreenContent() {
 
   async function onLate() {
     if (!mainShift) return;
-    const result = await notifyLateArrival(mainShift.id);
-    Alert.alert('Llegada tarde', result.message);
+    Alert.alert('Voy a llegar tarde', '¿Cuántos minutos de demora estimás?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: '15 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 15).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+      {
+        text: '30 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 30).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+      {
+        text: '60 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 60).then((result) =>
+            Alert.alert('Llegada tarde', result.message),
+          );
+        },
+      },
+    ]);
   }
 
   const heroSub =
     todayAbsentShift
       ? 'Hoy estuviste ausente. Recordá presentar el certificado a RRHH — tenés tiempo hasta las 24:00 de hoy.'
-      : mainShift?.isFranco
-        ? 'Día de descanso programado'
-        : mainShift
-          ? formatHeroTimeRange(mainShift)
-          : 'No hay turnos en el mes actual';
+      : isRetentionHero
+        ? `Estás retenido en ${placement.objective} · esperá al relevo`
+        : mainShift?.isFranco
+          ? 'Día de descanso programado'
+          : mainShift
+            ? formatHeroTimeRange(mainShift)
+            : 'No hay turnos en el mes actual';
 
   const mainShiftEv =
     mainShift && !mainShift.isFranco ? resolveEvShiftDisplay(mainShift, eventosMap) : null;
@@ -259,6 +351,27 @@ function HoyScreenContent() {
             </Pressable>
           ) : null}
 
+          {coberturaPendientes.length > 0 ? (
+            <CoberturaConvocatoriasBanner
+              convocatorias={coberturaPendientes}
+              busyId={coberturaBusyId}
+              highlightedId={
+                focusCobertura ? highlightConvocatoriaId || coberturaPendientes[0]?.id : null
+              }
+              onAccept={(c) => void onResponderCobertura(c, true)}
+              onReject={(c) => void onResponderCobertura(c, false)}
+            />
+          ) : null}
+
+          {llegadaTardePendientes.length > 0 ? (
+            <LlegadaTardeVenisBanner
+              convocatorias={llegadaTardePendientes}
+              busyId={coberturaBusyId}
+              onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
+              onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
+            />
+          ) : null}
+
           {portalFeatures.viewEvents && convocatoriasPendientes.length > 0 ? (
             <ConvocatoriasBanner
               convocatorias={convocatoriasPendientes}
@@ -266,6 +379,10 @@ function HoyScreenContent() {
               onAccept={(sol) => void onResponderConvocatoria(sol, true)}
               onReject={(sol) => void onResponderConvocatoria(sol, false)}
             />
+          ) : null}
+
+          {isRetentionHero && mainShift ? (
+            <RetentionBanner objectiveName={placement.objective} />
           ) : null}
 
           {loading ? (
@@ -324,24 +441,24 @@ function HoyScreenContent() {
               }
               footer={
                 todayAbsentShift ? null : (
-                <View style={styles.heroActions}>
-                  {portalFeatures.checkIn && canCheckIn ? (
-                    <CommandButton
-                      label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
-                      variant="success"
-                      loading={busyShiftId === mainShift?.id}
-                      onPress={onCheckIn}
-                    />
-                  ) : null}
-                  {portalFeatures.checkIn && canLate ? (
-                    <CommandButton
-                      label="Avisar llegada tarde"
-                      variant="ghost"
-                      loading={busyShiftId === mainShift?.id}
-                      onPress={onLate}
-                    />
-                  ) : null}
-                </View>
+                  <View style={styles.heroActions}>
+                    {portalFeatures.checkIn && canCheckIn ? (
+                      <CommandButton
+                        label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
+                        variant="success"
+                        loading={busyShiftId === mainShift?.id}
+                        onPress={onCheckIn}
+                      />
+                    ) : null}
+                    {portalFeatures.checkIn && canLate ? (
+                      <CommandButton
+                        label="Voy a llegar tarde"
+                        variant="ghost"
+                        loading={busyShiftId === mainShift?.id}
+                        onPress={onLate}
+                      />
+                    ) : null}
+                  </View>
                 )
               }
             />

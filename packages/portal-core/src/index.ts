@@ -15,8 +15,10 @@ export {
   flushPendingCheckins,
   getCheckInTiming,
   isOperationsCoverageShift,
+  isCoverageHoursOnSourceShift,
   parsePendingCheckins,
   validateCheckInDistance,
+  resolveAdjustedStartTime,
 } from './checkIn/portalCheckIn';
 export type {
   PendingCheckInItem,

@@ -34,8 +34,8 @@
 
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
 **Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
-**Última actualización:** 2026-09-08  
-**Última tarea completada:** F0-01 verificación cuenta desarrollador Play
+**Última actualización:** 2026-09-23  
+**Última tarea completada:** Flujos CC portal — P1…P5 (retenido, cobertura, ¿Venís?, aviso tarde, ventanas)
 
 ---
 
@@ -45,6 +45,11 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC-P5 Ventanas** ✅ portalCheckIn + tests (normal/late/ops/ADV/GPS).
+- **CC-P4 Aviso tarde** ✅ «Voy a llegar tarde» T−60…T+5 con eta 15/30/60.
+- **CC-P3 ¿Venís?** ✅ LLEGADA_TARDE con demora 15/30/60 + etaMinutes en payload.
+- **CC-P2 Cobertura** ✅ convocatorias_cobertura en Hoy + callable + deep link push.
+- **CC-P1 Retenido** ✅ hero no desaparece tras endTime; tarjeta «esperá al relevo»; Agenda «Retenido».
 - **F1-14** ✅ activación mail→app.
 - **F5-09** ✅ responsive 3 tamaños (OTA agenda+alertas).
 - **F0-01** ✅ Play Console cuenta personal Mauro **verificada** (crear apps habilitado).
@@ -98,6 +103,12 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC-fix ADV+registro | ADV = ventana adelanto OR propia (T−15/tarde); ops_cov coverageHoursOnSource ocultos (no hero/Agenda/fichada); 16 tests
+2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK
+2026-09-23 | CC-P4 Aviso tarde | Botón «Voy a llegar tarde» T−60…T+5 + demora 15/30/60 (etaMinutes); UI «te esperan hasta HH:MM»
+2026-09-23 | CC-P3 ¿Venís? | Tarjeta LLEGADA_TARDE: Sí voy (15/30/60 + etaMinutes) / No voy → responderConvocatoriaCobertura
+2026-09-23 | CC-P2 Cobertura | Escucha convocatorias_cobertura PENDING/ESCALATED; banner Acepto/No puedo → responderConvocatoriaCobertura; push CONVOCATORIA_COBERTURA → Hoy
+2026-09-23 | CC-P1 Retenido | pickTodayShiftAny/hero: isRetention+presente+!completado sigue hero tras endTime; RetentionBanner en Hoy; AgendaShiftCard «Retenido» (no «ya trabajado»)
 2026-09-08 | F6-01 link | Internal Testing invite: https://play.google.com/apps/internaltest/4701606202645789130
 2026-09-08 | Package OK | Firebase Android `com.cosp.guardia` + google-services + EAS secret; AAB production nuevo en curso
 2026-09-08 | Package | Android/iOS id → `com.cosp.guardia` (sin grupobacar); falta Firebase app + google-services + AAB nuevo

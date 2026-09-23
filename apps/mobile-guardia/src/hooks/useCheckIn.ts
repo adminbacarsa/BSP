@@ -28,6 +28,8 @@ export function useCheckIn() {
   const [pendingCount, setPendingCount] = useState(0);
   const [pendingShiftIds, setPendingShiftIds] = useState<string[]>([]);
   const [busyShiftId, setBusyShiftId] = useState<string | null>(null);
+  /** ETA local hasta que Firestore refleje etaMinutes del backend. */
+  const [lateEtaByShiftId, setLateEtaByShiftId] = useState<Record<string, number>>({});
 
   const refreshPendingCount = useCallback(async () => {
     const list = await loadPendingCheckins();
@@ -103,8 +105,14 @@ export function useCheckIn() {
           shift.objectiveName,
         );
         const remoteAllowed = objective?.allowRemoteCheckIn === true;
+        const hasCoords =
+          !!objective &&
+          objective.lat != null &&
+          objective.lng != null &&
+          Number(objective.lat) !== 0 &&
+          Number(objective.lng) !== 0;
         let coords: { latitude: number; longitude: number } | null = null;
-        if (!remoteAllowed) {
+        if (!remoteAllowed && hasCoords) {
           coords = await getCurrentCoords();
         } else {
           try {
@@ -142,12 +150,13 @@ export function useCheckIn() {
     [invokeCheckIn, refreshPendingCount],
   );
 
-  const notifyLateArrival = useCallback(async (shiftId: string) => {
+  const notifyLateArrival = useCallback(async (shiftId: string, etaMinutes: number) => {
     setBusyShiftId(shiftId);
     try {
       const { notificarLlegadaTarde } = getPortalCallables();
-      await notificarLlegadaTarde({ shiftId });
-      return { ok: true as const, message: 'Llegada tarde notificada' };
+      await notificarLlegadaTarde({ shiftId, etaMinutes });
+      setLateEtaByShiftId((prev) => ({ ...prev, [shiftId]: etaMinutes }));
+      return { ok: true as const, message: `Llegada tarde avisada · demora ${etaMinutes} min` };
     } catch (e) {
       return { ok: false as const, message: mapPortalCallableError(e) };
     } finally {
@@ -159,6 +168,7 @@ export function useCheckIn() {
     pendingCount,
     pendingShiftIds,
     busyShiftId,
+    lateEtaByShiftId,
     requestCheckInForShift,
     notifyLateArrival,
     flushQueue,

@@ -1,5 +1,6 @@
 import { toDate } from '../utils/dates';
 import { isAbsentLikeShift } from './isAbsentLikeShift';
+import { isCoverageHoursOnSourceShift } from '../checkIn/portalCheckIn';
 
 export type EmployeeShiftVisibilityInput = {
   draft?: boolean | null;
@@ -18,6 +19,7 @@ export type EmployeeShiftVisibilityInput = {
   objectiveId?: string | null;
   startTime?: unknown;
   eventoId?: string | null;
+  coverageHoursOnSource?: boolean | null;
   [key: string]: unknown;
 };
 
@@ -79,6 +81,11 @@ export function isShiftVisibleToEmployee(
 ): boolean {
   // Ausente / cubierto: el titular no ve ese turno como fichable (la cobertura es otro doc).
   if (isAbsentLikeShift(shift as Record<string, unknown>)) {
+    return false;
+  }
+
+  // ops_cov EXT/ADV de registro: horas en el turno propio; no hero ni fichada.
+  if (isCoverageHoursOnSourceShift(shift)) {
     return false;
   }
 

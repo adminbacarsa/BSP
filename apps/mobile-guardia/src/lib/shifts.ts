@@ -1,5 +1,5 @@
 import type { Shift } from '@cosp/portal-types';
-import { toDate, isAbsentLikeShift } from '@cosp/portal-core';
+import { toDate, isAbsentLikeShift, isCoverageHoursOnSourceShift } from '@cosp/portal-core';
 
 export function sortShiftsByStart(shifts: Shift[]): Shift[] {
   return [...shifts].sort((a, b) => {
@@ -16,6 +16,25 @@ function dateKey(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/** Retenido presente: sigue siendo hero aunque haya pasado endTime (espera relevo). */
+export function isActiveRetentionShift(shift: Shift | null | undefined): boolean {
+  if (!shift) return false;
+  const raw = shift as Shift & { isRetention?: boolean };
+  return (
+    raw.isRetention === true &&
+    shift.isPresent === true &&
+    shift.isCompleted !== true &&
+    !isAbsentLikeShift(shift as unknown as Record<string, unknown>)
+  );
+}
+
+function isHeroCandidate(s: Shift): boolean {
+  if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
+  // Registro EXT/ADV: no es hero ni fichable.
+  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
+  return true;
+}
+
 export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | undefined {
   const sorted = sortShiftsByStart(shifts);
   const startOfDay = new Date(now);
@@ -24,12 +43,13 @@ export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | un
   endOfDay.setHours(23, 59, 59, 999);
 
   return sorted.find((s) => {
-    if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
+    if (!isHeroCandidate(s)) return false;
     const start = toDate(s.startTime);
     const end = toDate(s.endTime);
     if (!start || start < startOfDay || start > endOfDay) return false;
-    // Al llegar a la hora de fin, ya no es el hero de hoy (pasa al próximo).
-    if (end && end.getTime() <= now.getTime()) return false;
+    // Al llegar a la hora de fin, ya no es el hero de hoy (pasa al próximo),
+    // salvo retención activa: el vigilador sigue en puesto esperando relevo.
+    if (end && end.getTime() <= now.getTime() && !isActiveRetentionShift(s)) return false;
     return true;
   });
 }
@@ -44,7 +64,7 @@ export function pickNextShift(shifts: Shift[], now = new Date()): Shift | undefi
   const sorted = sortShiftsByStart(shifts);
   const t = now.getTime();
   return sorted.find((s) => {
-    if (s.isFranco || isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
+    if (s.isFranco || !isHeroCandidate(s)) return false;
     const start = toDate(s.startTime);
     return !!start && start.getTime() > t;
   });

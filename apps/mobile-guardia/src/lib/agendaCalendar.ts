@@ -1,5 +1,10 @@
 import type { Shift } from '@cosp/portal-types';
-import { isAbsentLikeShift, isOperationsCoverageShift, toDate } from '@cosp/portal-core';
+import {
+  isAbsentLikeShift,
+  isCoverageHoursOnSourceShift,
+  isOperationsCoverageShift,
+  toDate,
+} from '@cosp/portal-core';
 
 export type AgendaViewMode = 'day' | 'week' | 'month';
 
@@ -76,6 +81,8 @@ export function shiftDateKey(shift: Shift): string | null {
 export function groupShiftsByDateKey(shifts: Shift[]): Record<string, Shift[]> {
   const map: Record<string, Shift[]> = {};
   for (const s of shifts) {
+    // Registro EXT/ADV: no aparece como turno fichable en Agenda.
+    if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) continue;
     const key = shiftDateKey(s);
     if (!key) continue;
     if (!map[key]) map[key] = [];
@@ -109,16 +116,37 @@ export type MonthCell = {
 };
 
 export function isOpsCoverageShift(s: Shift): boolean {
+  // Registro EXT/ADV: no se trata como cobertura fichable en Agenda.
+  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
   return isOperationsCoverageShift(s);
+}
+
+/** Turnos que la Agenda muestra como trabajo/cobertura fichable (excluye registro EXT/ADV). */
+export function isAgendaFichableShift(s: Shift): boolean {
+  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
+  if (isAgendaAbsentShift(s)) return false;
+  return true;
 }
 
 export function isAgendaAbsentShift(s: Shift): boolean {
   return isAbsentLikeShift(s as unknown as Record<string, unknown>);
 }
 
+/** Retención activa: presente, no completado, esperando relevo (no es “ya trabajado”). */
+export function isAgendaRetentionShift(s: Shift): boolean {
+  const raw = s as Shift & { isRetention?: boolean };
+  return (
+    raw.isRetention === true &&
+    s.isPresent === true &&
+    s.isCompleted !== true &&
+    !isAgendaAbsentShift(s)
+  );
+}
+
 /** Turno de trabajo ya cumplido (presente, completado o horario pasado). */
 export function isAgendaWorkedShift(s: Shift, now = new Date()): boolean {
   if (isAgendaAbsentShift(s)) return false;
+  if (isAgendaRetentionShift(s)) return false;
   if (s.isFranco && !s.isFrancoTrabajado && !isOpsCoverageShift(s)) return false;
   if (s.isPresent === true || s.isCompleted === true) return true;
   const status = String(s.status || '').toUpperCase();
