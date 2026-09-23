@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import {
   collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot, getDoc,
+  getDocs, limit, query, where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
@@ -38,7 +39,7 @@ import {
   type InternalCoverageCandidate,
   type InternalCoverageKind,
 } from '@/lib/operaciones/coverageInternalCandidates';
-import { applyAutoRetentionForGap, pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
+import { pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
 import {
   convocatoriaTypeForInternalKind,
   invokeCrearConvocatoriaCobertura,
@@ -189,29 +190,43 @@ const resolveCoverageShiftForEmployee = (
   return null;
 };
 
-/** Retención automática + metadatos en sesión al abrir protocolo. */
+/** Solo lectura: retenido existente (backend) o candidato saliente para UI — sin escribir Firestore. */
 export async function bootstrapCoverageSession(
   absentShift: any,
   processedData: unknown[],
-  empresaId: string,
+  _empresaId: string,
 ): Promise<Partial<CoverageSession>> {
-  const tid = String(empresaId || absentShift?.empresaId || '').trim();
-  if (!tid || !absentShift) return {};
+  if (!absentShift) return {};
+  const absenceShiftId = String(absentShift.id || '').trim();
   try {
-    const result = await applyAutoRetentionForGap(db, absentShift, processedData, tid);
-    if (result.pick) {
-      if (result.applied) {
-        toast.info(`${result.pick.employeeName} retenido en puesto (último en fichar)`);
+    if (absenceShiftId) {
+      const retainedQ = query(
+        collection(db, 'turnos'),
+        where('retentionAbsenceShiftId', '==', absenceShiftId),
+        where('isRetention', '==', true),
+        limit(1),
+      );
+      const retainedSnap = await getDocs(retainedQ);
+      if (!retainedSnap.empty) {
+        const d = retainedSnap.docs[0].data();
+        return {
+          retentionShiftId: retainedSnap.docs[0].id,
+          retentionEmployeeName: String(d.employeeName || 'Guardia'),
+          autoRetentionApplied: false,
+        };
       }
+    }
+    const pick = pickRetentionShiftForGap(processedData, absentShift);
+    if (pick) {
       return {
-        retentionShiftId: result.pick.shiftId,
-        retentionEmployeeName: result.pick.employeeName,
-        autoRetentionApplied: result.applied,
+        retentionShiftId: pick.shiftId,
+        retentionEmployeeName: pick.employeeName,
+        autoRetentionApplied: false,
       };
     }
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : String(e);
-    toast.error('No se pudo aplicar retención automática: ' + msg);
+    console.warn('[bootstrapCoverageSession]', msg);
   }
   return {};
 }

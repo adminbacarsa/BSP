@@ -144,7 +144,7 @@ export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
         case 'PLAN':
             return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet && !s.isPassiveRetStandby;
         case 'ACTIVOS':
-            return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention;
+            return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention && !s.isPendingClose;
         case 'RETENIDOS':
             return s.isRetention;
         case 'VACANTES':
@@ -667,16 +667,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isAwaitingCoverageCheckIn = isConvocado && minutesUntilStart <= 15;
             if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
             let retentionMinutes = 0;
-            // isRetention: por tiempo (pasó el horario) O por campo Firestore (retenido manualmente/automáticamente)
-            const isRetentionByTime  = isPresent && !isCompleted && effectiveEndDateObj && currentTime > effectiveEndDateObj;
-            // isRetentionByField: solo mostrar RECARGO si el turno ya terminó O si el operador
-            // lo retuvo manualmente Y el turno ya pasó. Si el turno aún está vigente, el badge
-            // se mostrará como "ATENCIÓN" pero no como retención activa hasta que pase el endTime.
             const shiftEnded = effectiveEndDateObj ? currentTime > effectiveEndDateObj : false;
-            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true && shiftEnded;
+            const isPendingClose =
+                isPresent && !isCompleted && shift.isRetention !== true && !!shiftEnded;
+            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true;
             const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
-            const isRetention = isRetentionByTime || isRetentionByField;
-            if (isRetentionByTime && effectiveEndDateObj) {
+            const isRetention = isRetentionByField;
+            if (isRetentionByField && effectiveEndDateObj && shiftEnded) {
                 retentionMinutes = Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000);
             } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
                 retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
@@ -740,7 +737,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
                 isLateNotified, isLateUnnotified, minutesRemainingLate,
-                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isFranco, isImminent, isFuture,
+                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isPendingClose, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,
                 hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,

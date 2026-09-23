@@ -1343,7 +1343,7 @@ export default function TacticalMapView() {
                                                 <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                     {s.employeeName || 'Desconocido'}
                                                     <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.manualRetentionType ? 'bg-amber-100 text-amber-700' : s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                        {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? 'RECARGO AUTO' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                        {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? 'RECARGO' : s.isPendingClose ? 'CIERRE PENDIENTE' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
