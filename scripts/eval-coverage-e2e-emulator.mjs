@@ -39,6 +39,12 @@ const {
 const { isEmpresaManualMode } = requireFn('./lib/ops/opsManualMode.js');
 const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletarTurnosCore.js');
 const { positionHasContinuityFromSlaDoc } = requireFn('./lib/coverage/positionHasContinuity.js');
+const { skipAbsencePipelineForShift } = requireFn('./lib/coverage/coverageTraceShift.js');
+const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
+const { evaluateServerCheckInWindow } = requireFn('./lib/fichajes/checkInWindow.js');
+const { revertirAusenciaShift } = requireFn('./lib/attendance/revertirAusencia.js');
+const { runConvocadoAbsentPass } = requireFn('./lib/attendance/convocadoAbsentPass.js');
+const { registrarPresencia } = requireFn('./lib/fichajes/registrarPresencia.js');
 
 const results = [];
 
@@ -986,6 +992,186 @@ async function run() {
       const sal = (await db.collection('turnos').doc(salId).get()).data();
       const ok = sal?.status === 'COMPLETED' && sal?.completionReason === 'SIN_CONTINUIDAD_SLA';
       report(20, ok, ok ? 'COMPLETED banda excluida' : `st=${sal?.status} r=${sal?.completionReason}`);
+    }
+
+    // Caso 21 — ops_cov EXT registro T+40 sin fichar → no AA (pipeline excluido)
+    {
+      const prefix = `${runId}_c21`;
+      const base = await seedBase(prefix);
+      const batch = db.batch();
+      await applyCoverage(db, batch, {
+        titularShiftId: base.titularId,
+        titularShift: { id: base.titularId, ...base.titular, objectiveId: base.objectiveId, empresaId: base.empresaId },
+        candidateEmployeeId: base.empExt,
+        candidateEmployeeName: 'Ext',
+        sourceShiftId: base.extSourceId,
+        coverageType: 'EXTEND',
+        resolvedBy: 'AUTO',
+        empresaId: base.empresaId,
+        titularCloseMode: 'FULL',
+      });
+      await batch.commit();
+      const traceId = buildOpsCoverageDocId(base.titularId, base.empExt);
+      const startPast = Timestamp.fromMillis(Date.now() - 40 * 60 * 1000);
+      await db.collection('turnos').doc(traceId).update({ startTime: startPast, isPresent: false, status: 'PENDING' });
+      const trace = (await db.collection('turnos').doc(traceId).get()).data();
+      const skip = skipAbsencePipelineForShift(trace);
+      if (!skip) await markShiftAbsent(db, traceId, { reason: 'AUTO_T30', by: 'E2E' });
+      const after = (await db.collection('turnos').doc(traceId).get()).data();
+      const ok = skip === true && after?.isAbsent !== true;
+      report(21, ok, ok ? 'EXT registro sin AA' : `skip=${skip} absent=${after?.isAbsent}`);
+    }
+
+    // Caso 22 — No voy → AA + RRHH + 1 novedad
+    {
+      const prefix = `${runId}_c22`;
+      const shiftId = `${prefix}_sh`;
+      const empresaId = `${prefix}_emp`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId, employeeId: `${prefix}_e`, employeeName: 'Titular',
+        objectiveId: `${prefix}_obj`, clientId: `${prefix}_cli`, positionName: 'Puesto 1', code: 'M',
+        startTime: tsAt(2026, 9, 23, 8, 0), endTime: tsAt(2026, 9, 23, 16, 0), status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'LLEGADA_TARDE_RECHAZADA', by: 'E2E' });
+      const aus = await db.collection('ausencias').where('shiftId', '==', shiftId).get();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'AUSENCIA_AUTO').get();
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = sh?.isAbsent && aus.size === 1 && aus.docs[0].data()?.type === 'No Presentacion'
+        && aus.docs[0].data()?.origin === 'LLEGADA_TARDE_RECHAZADA' && nov.size === 1;
+      report(22, ok, ok ? 'AA + RRHH + 1 novedad' : `aus=${aus.size} nov=${nov.size}`);
+    }
+
+    // Caso 23 — aviso eta 30: T+20 sin AA; T+31 ETA_VENCIDA
+    {
+      const prefix = `${runId}_c23`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 23, 10, 0);
+      const etaAt = Timestamp.fromMillis(start.toMillis() + 30 * 60 * 1000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: tsAt(2026, 9, 23, 18, 0), status: 'PENDING',
+        lateArrivalAt: Timestamp.now(), lateArrivalEtaMinutes: 30, lateArrivalEtaAt: etaAt,
+      });
+      const t20 = Timestamp.fromMillis(start.toMillis() + 20 * 60 * 1000);
+      const deadline = Math.min(etaAt.toMillis(), start.toMillis() + 60 * 60 * 1000);
+      const ok20 = t20.toMillis() < deadline;
+      const t31 = Timestamp.fromMillis(start.toMillis() + 31 * 60 * 1000);
+      if (t31.toMillis() >= deadline) {
+        await markShiftAbsent(db, shiftId, { reason: 'ETA_VENCIDA', by: 'E2E' });
+      }
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = ok20 && sh?.isAbsent && sh?.absenceDetectedBy === 'ETA_VENCIDA';
+      report(23, ok, ok ? 'T+20 ok; T+31 ETA_VENCIDA' : `abs=${sh?.isAbsent} by=${sh?.absenceDetectedBy}`);
+    }
+
+    // Caso 24 — fichada T+18 con aviso → presente, realStartTime llegada, lateMinutes 18
+    {
+      const prefix = `${runId}_c24`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 24, 8, 0);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: tsAt(2026, 9, 24, 16, 0), status: 'PENDING',
+        lateArrivalAt: Timestamp.fromMillis(start.toMillis() + 5 * 60 * 1000),
+        lateArrivalEtaMinutes: 30,
+        lateArrivalEtaAt: Timestamp.fromMillis(start.toMillis() + 30 * 60 * 1000),
+      });
+      const recordedAt = new Date(start.toMillis() + 18 * 60 * 1000).toISOString();
+      await registrarPresencia(db, {
+        shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e`, recordedAt,
+      });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const realMs = sh?.realStartTime?.toMillis?.() ?? 0;
+      const ok = sh?.isPresent && Math.abs(realMs - (start.toMillis() + 18 * 60 * 1000)) < 5000
+        && (sh?.lateMinutes === 18 || sh?.isLate === true);
+      report(24, ok, ok ? 'presente + realStart + late 18' : `late=${sh?.lateMinutes} real=${realMs}`);
+    }
+
+    // Caso 25 — T+10 sin aviso → rechazada ventana
+    {
+      const prefix = `${runId}_c25`;
+      const start = tsAt(2026, 9, 24, 9, 0);
+      const shiftId = `${prefix}_sh`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: tsAt(2026, 9, 24, 17, 0), status: 'PENDING',
+      });
+      const nowMs = start.toMillis() + 10 * 60 * 1000;
+      const win = evaluateServerCheckInWindow(
+        (await db.collection('turnos').doc(shiftId).get()).data(),
+        nowMs,
+        { source: 'PORTAL_GPS' },
+      );
+      report(25, win.allowed === false, win.allowed === false ? 'rechazada ventana T+10' : `allowed=${win.allowed}`);
+    }
+
+    // Caso 26 — RET convocado sin fichar → CONVOCADO_NO_LLEGO + relanzar (Auto)
+    {
+      const prefix = `${runId}_c26`;
+      const titularId = `${prefix}_tit`;
+      const covId = `${prefix}_cov`;
+      const empresaId = `${prefix}_emp`;
+      const objectiveId = `${prefix}_obj`;
+      const created = Timestamp.fromMillis(Date.now() - 70 * 60 * 1000);
+      const start = Timestamp.fromMillis(Date.now() - 65 * 60 * 1000);
+      await db.batch()
+        .set(db.collection('turnos').doc(titularId), {
+          empresaId, objectiveId, positionName: 'P1', employeeId: `${prefix}_eT`, employeeName: 'Titular',
+          code: 'M',           startTime: start, endTime: Timestamp.fromMillis(Date.now() + 5 * 3600000),
+          isAbsent: true, status: 'ABSENT', absenceType: 'AA',
+        })
+        .set(db.collection('turnos').doc(covId), {
+          empresaId, objectiveId, positionName: 'P1', employeeId: `${prefix}_eR`, employeeName: 'RET cov',
+          code: 'RET', origin: 'OPERATIONS_COVERAGE', coverageType: 'RET',
+          absenceShiftId: titularId, startTime: start, endTime: Timestamp.fromMillis(Date.now() + 5 * 3600000),
+          createdAt: created, status: 'PENDING', isPresent: false,
+        })
+        .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true }, { merge: true })
+        .commit();
+      await runConvocadoAbsentPass(db, Timestamp.now());
+      const cov = (await db.collection('turnos').doc(covId).get()).data();
+      const convs = await db.collection('convocatorias_cobertura').where('shiftId', '==', titularId).limit(3).get();
+      const ok = cov?.isAbsent === true && cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO';
+      report(26, ok, ok ? 'CONVOCADO_NO_LLEGO + cascada' : `abs=${cov?.isAbsent} conv=${convs.size}`);
+    }
+
+    // Caso 27 — revertir T+45 sin cobertura
+    {
+      const prefix = `${runId}_c27`;
+      const shiftId = `${prefix}_sh`;
+      const start = Timestamp.fromMillis(Date.now() - 45 * 60 * 1000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: Timestamp.fromMillis(Date.now() + 4 * 3600000),
+        isAbsent: true, status: 'ABSENT', absenceType: 'AA', absenceDetectedAt: Timestamp.now(),
+      });
+      await db.collection('ausencias').add({
+        shiftId, employeeId: `${prefix}_e`, type: 'No Presentacion', status: 'Confirmada', origin: 'AUTO_T30',
+      });
+      const r = await revertirAusenciaShift(db, { shiftId, cancelCoverage: false });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const aus = await db.collection('ausencias').where('shiftId', '==', shiftId).get();
+      const ok = r.success && sh?.isPresent && aus.docs[0]?.data()?.status === 'Anulada';
+      report(27, ok, ok ? 'revertida T+45' : `success=${r.success} st=${sh?.status}`);
+    }
+
+    // Caso 28 — revertir T+70 rechazada
+    {
+      const prefix = `${runId}_c28`;
+      const shiftId = `${prefix}_sh`;
+      const start = Timestamp.fromMillis(Date.now() - 70 * 60 * 1000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'T',
+        objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+        startTime: start, endTime: Timestamp.fromMillis(Date.now() + 2 * 3600000),
+        isAbsent: true, status: 'ABSENT',
+      });
+      const r = await revertirAusenciaShift(db, { shiftId });
+      report(28, r.success === false && r.reason === 'PAST_T60', r.reason === 'PAST_T60' ? 'rechazada T+70' : `r=${r.reason}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
