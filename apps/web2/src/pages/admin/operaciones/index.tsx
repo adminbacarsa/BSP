@@ -3309,69 +3309,51 @@ export default function OperacionesPage() {
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
 
     // Revertir ausencia incorrecta (bug sistema o error del operador)
-    const handleRevertAbsence = async (shift: any) => {
-        if (!confirm(`Â¿Revertir la ausencia de ${shift.employeeName}?\nSe limpiará el flag de ausencia. Usá esto solo si fue un error.`)) return;
+    const handleRevertAbsence = async (shift: any, opts?: { cancelCoverage?: boolean }) => {
+        const cancelCoverage = opts?.cancelCoverage === true;
+        const msg = cancelCoverage
+            ? `¿Revertir ausencia de ${shift.employeeName} y cancelar la cobertura en curso?`
+            : `¿Revertir la ausencia de ${shift.employeeName}?\nSi hay cobertura activa sin cancelar, el servidor puede rechazar la reversión.`;
+        if (!confirm(msg)) return;
         try {
-            await updateDocForEmpresa('turnos', shift.id, {
-                isAbsent:          false,
-                absenceType:       null,
-                absenceDetectedAt: null,
-                absenceDetectedBy: null,
-                status:            'PENDING',
-                absenceRevertedAt: serverTimestamp(),
-                absenceRevertedBy: 'OPERACIONES',
-            }, empresaId, migracionCompleta);
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'revertirAusencia');
+            await fn({ shiftId: shift.id, cancelCoverage });
             toast.success(`Ausencia de ${shift.employeeName} revertida.`);
-        } catch (e: any) { toast.error('Error: ' + (e?.message || String(e))); }
+        } catch (e: any) {
+            const code = e?.code || '';
+            if (String(code).includes('deadline-exceeded')) {
+                toast.error('No se puede revertir después de T+60.');
+            } else if (String(code).includes('failed-precondition')) {
+                toast.error('Hay cobertura en curso. Revertí con «cancelar cobertura» o dejá el titular ausente.');
+            } else {
+                toast.error('Error: ' + (e?.message || String(e)));
+            }
+        }
     };
     const handleDeclareAbsentT5 = async (shift: any) => {
-        const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-        const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
-        const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
-        const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
-        await updateDocForEmpresa('turnos', shift.id, {
-            status: 'ABSENT', isAbsent: true,
-            absenceType: 'MANUAL_OPS',
-            absenceConfirmedBy: 'OPERACIONES',
-            absenceConfirmedAt: serverTimestamp(),
-        }, empresaId, migracionCompleta);
-        await addDoc(collection(db, 'ausencias'), stampEmpresaId({
-            employeeId: shift.employeeId, employeeName: shift.employeeName,
-            clientId: shift.clientId || null, type: 'NO_PRESENTACION',
-            startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd),
-            status: 'Pendiente',
-            reason: `No presentación en turno — ${shift.objectiveName} (${shift.positionName})`,
-            hasCertificate: false, createdAt: serverTimestamp(),
-            origin: 'OPERACIONES', shiftId: shift.id,
-        }, shiftEmpresaId));
-        if (shift.employeeId) {
-            await addDoc(collection(db, 'user_notifications'), stampEmpresaId({
-                userId: shift.employeeId, type: 'AUSENCIA_DECLARADA',
-                title: 'Ausencia registrada',
-                read: false,
-                body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`,
-                objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp(),
-            }, shiftEmpresaId));
-        }
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({
-            type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5',
-            status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName,
-            clientId: shift.clientId || null, objectiveId: shift.objectiveId || null,
-            shiftId: shift.id, objectiveName: shift.objectiveName || '',
-            positionName: shift.positionName || '',
-            description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName} (${formatTimeRange(shift.shiftDateObj, shift.endDateObj)})`,
-            createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
-        }, shiftEmpresaId));
-        setCoverageData({ isOpen: true, shift });
-        toast.success(`Ausencia de ${shift.employeeName} registrada. Iniciando protocolo de cobertura.`);
-    };
-    const handleLateArrival = async (shift: any, etaTime: string) => {
         try {
-            await updateDocForEmpresa('turnos', shift.id, {
-                lateArrivalAt: serverTimestamp(),
-                lateETA: etaTime,
-            }, empresaId, migracionCompleta);
-            toast.info(`Llegada tarde de ${shift.employeeName} registrada. ETA: ${etaTime}`);
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
+            await fn({ shiftId: shift.id });
+            setCoverageData({ isOpen: true, shift });
+            toast.success(`Ausencia de ${shift.employeeName} registrada. Iniciando protocolo de cobertura.`);
+        } catch (e: any) {
+            toast.error('Error al marcar ausencia: ' + (e?.message || String(e)));
+        }
+    };
+    const handleLateArrival = async (shift: any, etaTime: string, etaMinutes?: number) => {
+        try {
+            let minutes = etaMinutes;
+            if (minutes == null && etaTime && shift.shiftDateObj) {
+                const base = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
+                const [h, m] = etaTime.split(':').map(Number);
+                const eta = new Date(base);
+                eta.setHours(h, m, 0, 0);
+                if (eta.getTime() < base.getTime()) eta.setDate(eta.getDate() + 1);
+                minutes = Math.max(1, Math.round((eta.getTime() - base.getTime()) / 60000));
+            }
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'notificarLlegadaTarde');
+            await fn({ shiftId: shift.id, etaMinutes: minutes ?? 30 });
+            toast.info(`Llegada tarde de ${shift.employeeName} registrada${minutes ? ` (+${minutes} min)` : ''}.`);
         } catch (e: any) {
             toast.error('Error: ' + (e?.message || String(e)));
         }
