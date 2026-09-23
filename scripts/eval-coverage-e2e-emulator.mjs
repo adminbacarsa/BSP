@@ -230,6 +230,29 @@ async function seedSla(objectiveId, clientId, mode) {
   return slaId;
 }
 
+async function seedSlaExcludeBand(objectiveId, clientId, dateStr, bandCode) {
+  const slaId = `${objectiveId}_sla`;
+  await db.collection('servicios_sla').doc(slaId).set({
+    objectiveId,
+    clientId,
+    status: 'active',
+    startDate: '2026-01-01',
+    endDate: '2027-12-31',
+    positions: [{
+      name: 'Puesto 1',
+      quantity: 1,
+      activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+      coverageType: '24hs',
+      excludedShiftDates: { [dateStr]: [bandCode] },
+      allowedShiftTypes: [
+        { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+        { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+      ],
+    }],
+  });
+  return slaId;
+}
+
 const autoCompleteCtx = {
   isEnabled: () => true,
   shiftEmpresaId: (s) => String(s.empresaId || ''),
@@ -239,7 +262,7 @@ const autoCompleteCtx = {
 
 async function run() {
   if (!(await pingEmulator())) {
-    for (let i = 1; i <= 17; i++) {
+    for (let i = 1; i <= 20; i++) {
       report(i, false, 'Emulador Firestore :8080 no responde');
     }
     process.exitCode = 1;
@@ -849,6 +872,120 @@ async function run() {
       const cont = positionHasContinuityFromSlaDoc(slaDoc, 'Puesto 1', new Date(data.endTime.toMillis()));
       const ok = cont && data?.status === 'PRESENT' && nov.size >= 1;
       report(17, ok, ok ? 'sigue retenido + RETENCION_TOPE_12H' : `st=${data?.status} nov=${nov.size} cont=${cont}`);
+    }
+
+    // Caso 18 — 2 pax: compañero 1h antes no cierra al saliente; relevo no llega → retención
+    {
+      const prefix = `${runId}_c18`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const salId = `${prefix}_sal`;
+      const compId = `${prefix}_comp`;
+      const relId = `${prefix}_rel_pending`;
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eS`,
+          employeeName: 'Saliente', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 50),
+        })
+        .set(db.collection('turnos').doc(compId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eC`,
+          employeeName: 'Compañero', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 14, 0), endTime: tsAt(2026, 9, 23, 22, 0),
+          checkInTime: tsAt(2026, 9, 23, 13, 55),
+        })
+        .set(db.collection('turnos').doc(relId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eR`,
+          employeeName: 'Relevo T', code: 'T', status: 'PENDING', isPresent: false,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 15, 10));
+      const sal = (await db.collection('turnos').doc(salId).get()).data();
+      const ok = sal?.status === 'PRESENT' && sal?.isRetention === true && sal?.isCompleted !== true;
+      report(18, ok, ok ? 'saliente retenido (compañero no relevo)' : `st=${sal?.status} ret=${sal?.isRetention}`);
+    }
+
+    // Caso 19 — RELEVO_NO_PRESENTADO vinculado → ausente relevo → adopt → FULL libera
+    {
+      const prefix = `${runId}_c19`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const salId = `${prefix}_sal`;
+      const entId = `${prefix}_ent`;
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eS`,
+          employeeName: 'Saliente', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 55),
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          employeeName: 'Entrante', code: 'T', status: 'PENDING', isPresent: false,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 15, 10));
+      await db.collection('turnos').doc(entId).update({ status: 'ABSENT', isAbsent: true });
+      const entData = (await db.collection('turnos').doc(entId).get()).data();
+      await retainOutgoingForGap(db, { id: entId, ...entData }, { sendPush: false });
+      const retained = (await db.collection('turnos').where('objectiveId', '==', objectiveId).where('isRetention', '==', true).get()).docs;
+      const salBefore = (await db.collection('turnos').doc(salId).get()).data();
+      const covRetId = `${prefix}_cov_ret`;
+      await db.collection('turnos').doc(covRetId).set({
+        empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eCov`,
+        employeeName: 'Cobertura', code: 'RET', status: 'PRESENT', isPresent: true,
+        startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+      });
+      const batch = db.batch();
+      await applyCoverage(db, batch, {
+        titularShiftId: entId,
+        titularShift: { id: entId, ...entData, isAbsent: true, objectiveId, positionName: 'Puesto 1', empresaId },
+        candidateEmployeeId: `${prefix}_eCov`,
+        candidateEmployeeName: 'Cobertura',
+        sourceShiftId: covRetId,
+        coverageType: 'RET',
+        resolvedBy: 'AUTO',
+        empresaId,
+        titularCloseMode: 'FULL',
+      });
+      await batch.commit();
+      const salAfter = (await db.collection('turnos').doc(salId).get()).data();
+      const ok =
+        retained.length === 1
+        && salBefore?.retentionAbsenceShiftId === entId
+        && (salAfter?.isRetention === false || salAfter?.isRetention !== true);
+      report(19, ok, ok ? '1 retenido vinculado + liberado tras FULL' : `ret=${retained.length} link=${salBefore?.retentionAbsenceShiftId}`);
+    }
+
+    // Caso 20 — banda T excluida ese día → sin continuidad → cierre
+    {
+      const prefix = `${runId}_c20`;
+      const objectiveId = `${prefix}_obj`;
+      const dateStr = '2026-09-23';
+      await seedSlaExcludeBand(objectiveId, `${prefix}_cli`, dateStr, 'T');
+      const salId = `${prefix}_sal`;
+      await db.collection('turnos').doc(salId).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId,
+        positionName: 'Puesto 1',
+        employeeId: `${prefix}_e1`,
+        employeeName: 'Saliente',
+        code: 'M',
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+        startTime: tsAt(2026, 9, 23, 7, 0),
+        endTime: tsAt(2026, 9, 23, 15, 0),
+      });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 15, 10));
+      const sal = (await db.collection('turnos').doc(salId).get()).data();
+      const ok = sal?.status === 'COMPLETED' && sal?.completionReason === 'SIN_CONTINUIDAD_SLA';
+      report(20, ok, ok ? 'COMPLETED banda excluida' : `st=${sal?.status} r=${sal?.completionReason}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
