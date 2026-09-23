@@ -99,11 +99,16 @@ export function resolveCheckInUiStatus(
     };
   }
 
-  if (shift.lateArrivalAt) {
+  if (shift.lateArrivalAt || (shift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed) {
+    const deadline = timing?.checkInDeadline;
+    const until =
+      deadline != null
+        ? formatTimeAr(deadline)
+        : undefined;
     return {
       status: 'late_notified',
-      title: 'Llegada tarde avisada',
-      subtitle: 'Operaciones fue notificado',
+      title: until ? `Llegada tarde avisada · te esperan hasta ${until}` : 'Llegada tarde avisada',
+      subtitle: until ? 'Ventana de fichada extendida' : 'Operaciones fue notificado',
       tone: 'info',
     };
   }
@@ -114,16 +119,20 @@ export function resolveCheckInUiStatus(
     return {
       status: 'too_early',
       title: 'Aún no podés fichar',
-      subtitle: 'Disponible desde 15 min antes del inicio',
+      subtitle: timing.canNotifyLate
+        ? 'Disponible desde 15 min antes · podés avisar llegada tarde'
+        : 'Disponible desde 15 min antes del inicio',
       tone: 'neutral',
     };
   }
 
-  if (timing?.lateWindow) {
+  if (timing?.lateWindow && !timing.canCheckIn) {
     return {
       status: 'late_window',
-      title: 'Fuera de ventana de fichada',
-      subtitle: 'Podés avisar llegada tarde si venís en camino',
+      title: timing.canNotifyLate ? 'Podés avisar llegada tarde' : 'Fuera de ventana de fichada',
+      subtitle: timing.canNotifyLate
+        ? 'Indicá demora de 15, 30 o 60 min'
+        : 'Contactá a operaciones si hace falta',
       tone: 'warning',
     };
   }
@@ -132,9 +141,11 @@ export function resolveCheckInUiStatus(
     return {
       status: 'ready',
       title: isOpsCoverage ? 'Cobertura: listo para fichar' : 'Listo para fichar',
-      subtitle: isOpsCoverage
-        ? 'Al llegar al objetivo, marcá presente con GPS'
-        : 'Usá el botón con GPS en el puesto',
+      subtitle: timing.checkInDeadline
+        ? `Fichá hasta las ${formatTimeAr(timing.checkInDeadline)}`
+        : isOpsCoverage
+          ? 'Al llegar al objetivo, marcá presente con GPS'
+          : 'Usá el botón con GPS en el puesto',
       tone: 'info',
     };
   }
