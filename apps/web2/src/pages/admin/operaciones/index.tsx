@@ -1939,6 +1939,7 @@ export default function OperacionesPage() {
     };
     const [checkoutData, setCheckoutData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     const [attendanceData, setAttendanceData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
+    const [revertAbsenceChoice, setRevertAbsenceChoice] = useState<{ isOpen: boolean; shift: any | null }>({ isOpen: false, shift: null });
     const [handoverData, setHandoverData] = useState<{isOpen: boolean, shift: any}>({isOpen: false, shift: null});
     // Guard contra race condition: IDs relevados en esta sesión excluidos de futuros activeGuards
     const recentlyRelievedRef = useRef<Set<string>>(new Set());
@@ -3308,13 +3309,7 @@ export default function OperacionesPage() {
     };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };
 
-    // Revertir ausencia incorrecta (bug sistema o error del operador)
-    const handleRevertAbsence = async (shift: any, opts?: { cancelCoverage?: boolean }) => {
-        const cancelCoverage = opts?.cancelCoverage === true;
-        const msg = cancelCoverage
-            ? `¿Revertir ausencia de ${shift.employeeName} y cancelar la cobertura en curso?`
-            : `¿Revertir la ausencia de ${shift.employeeName}?\nSi hay cobertura activa sin cancelar, el servidor puede rechazar la reversión.`;
-        if (!confirm(msg)) return;
+    const executeRevertAbsence = async (shift: any, cancelCoverage: boolean) => {
         try {
             const fn = httpsCallable(getFunctions(app, 'us-central1'), 'revertirAusencia');
             await fn({ shiftId: shift.id, cancelCoverage });
@@ -3324,11 +3319,40 @@ export default function OperacionesPage() {
             if (String(code).includes('deadline-exceeded')) {
                 toast.error('No se puede revertir después de T+60.');
             } else if (String(code).includes('failed-precondition')) {
-                toast.error('Hay cobertura en curso. Revertí con «cancelar cobertura» o dejá el titular ausente.');
+                toast.error('No se pudo revertir. Revisá cobertura activa o convocatorias.');
             } else {
                 toast.error('Error: ' + (e?.message || String(e)));
             }
         }
+    };
+
+    const handleRevertAbsence = async (shift: any) => {
+        const covDoc = String(shift.coverageDocId || '').trim();
+        const covSt = String(shift.coverageStatus || '').toUpperCase();
+        let pendingConv = false;
+        try {
+            const qs = await getDocs(query(
+                collection(db, 'convocatorias_cobertura'),
+                where('shiftId', '==', shift.id),
+                limit(15),
+            ));
+            pendingConv = qs.docs.some((d) => {
+                const st = String(d.data().status || '').toUpperCase();
+                return st === 'PENDING' || st === 'ESCALATED';
+            });
+        } catch { /* emulador sin índice */ }
+        const inProgress =
+            !!covDoc
+            || pendingConv
+            || covSt === 'COVERED'
+            || covSt === 'PARTIAL'
+            || shift.operacionallyCovered === true;
+        if (inProgress) {
+            setRevertAbsenceChoice({ isOpen: true, shift });
+            return;
+        }
+        if (!confirm(`¿Revertir la ausencia de ${shift.employeeName}?`)) return;
+        await executeRevertAbsence(shift, false);
     };
     const handleDeclareAbsentT5 = async (shift: any) => {
         try {
@@ -5132,6 +5156,45 @@ export default function OperacionesPage() {
                 employeeName={checkoutData.shift?.employeeName}
                 shift={checkoutData.shift}
             />
+            {revertAbsenceChoice.isOpen && revertAbsenceChoice.shift && (
+                <div className="fixed inset-0 z-[9100] bg-slate-900/80 flex items-center justify-center p-4">
+                    <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl p-6 border border-slate-200">
+                        <h3 className="font-bold text-lg text-slate-900 mb-1">Revertir ausencia</h3>
+                        <p className="text-sm text-slate-600 mb-4">
+                            {revertAbsenceChoice.shift.employeeName} tiene cobertura o convocatorias activas.
+                            ¿Qué hacemos?
+                        </p>
+                        <button
+                            type="button"
+                            onClick={async () => {
+                                const s = revertAbsenceChoice.shift;
+                                setRevertAbsenceChoice({ isOpen: false, shift: null });
+                                await executeRevertAbsence(s, true);
+                            }}
+                            className="w-full py-3 mb-2 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700"
+                        >
+                            Cancelar cobertura y revertir
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => {
+                                setRevertAbsenceChoice({ isOpen: false, shift: null });
+                                toast.info(`${revertAbsenceChoice.shift?.employeeName || 'Titular'} permanece ausente (AA).`);
+                            }}
+                            className="w-full py-3 mb-2 bg-slate-100 text-slate-800 font-bold rounded-xl hover:bg-slate-200"
+                        >
+                            Dejar AA
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setRevertAbsenceChoice({ isOpen: false, shift: null })}
+                            className="w-full py-2 text-xs text-slate-400 hover:text-slate-600"
+                        >
+                            Cerrar
+                        </button>
+                    </div>
+                </div>
+            )}
             <AttendanceModal
                 isOpen={attendanceData.isOpen}
                 onClose={() => setAttendanceData({isOpen:false, shift:null})}
