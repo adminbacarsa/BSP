@@ -43,13 +43,26 @@ type ShiftTimingFields = Shift & {
   lateArrivalEtaMinutes?: number;
   isEarlyStart?: boolean;
   isAdvanced?: boolean;
+  isExtended?: boolean;
   adjustedStartTime?: unknown;
   createdAt?: unknown;
+  coverageHoursOnSource?: boolean;
 };
 
 /** Cobertura urgente creada desde Operaciones (hueco por ausencia). */
 export function isOperationsCoverageShift(shift: Pick<Shift, 'origin'> | null | undefined): boolean {
   return String(shift?.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+}
+
+/**
+ * ops_cov EXTEND/ADVANCE de registro: las horas viven en el turno propio
+ * (isExtended / isEarlyStart). No se ficha ni es hero.
+ */
+export function isCoverageHoursOnSourceShift(
+  shift: (Pick<Shift, 'origin'> & { coverageHoursOnSource?: boolean }) | null | undefined,
+): boolean {
+  if (!shift || shift.coverageHoursOnSource !== true) return false;
+  return isOperationsCoverageShift(shift);
 }
 
 function readEtaMinutes(shift: ShiftTimingFields, override?: number | null): number | null {
@@ -101,12 +114,52 @@ function inWindow(now: Date, open: Date, close: Date): boolean {
   return t >= open.getTime() && t <= close.getTime();
 }
 
+/** Ventana propia del turno (T−15…T+5 o extendida por llegada tarde). */
+function ownShiftWindowTiming(
+  s: ShiftTimingFields,
+  start: Date,
+  now: Date,
+  options?: CheckInTimingOptions,
+): CheckInTiming {
+  const diffMinutes = minutesBetween(start, now);
+  const eta = readEtaMinutes(s, options?.etaMinutesOverride);
+  const lateFlag = hasLateArrivalFlag(s);
+
+  if (lateFlag) {
+    const extensionMin = eta != null ? Math.min(eta, 60) : 30;
+    const open = new Date(start.getTime() - 15 * 60_000);
+    const close = new Date(start.getTime() + extensionMin * 60_000);
+    const canCheckIn = inWindow(now, open, close);
+    return {
+      diffMinutes,
+      canCheckIn,
+      canNotifyLate: false,
+      lateWindow: false,
+      tooEarly: now.getTime() < open.getTime(),
+      checkInDeadline: close,
+    };
+  }
+
+  const canCheckIn = diffMinutes <= 15 && diffMinutes >= -5;
+  const canNotifyLate = diffMinutes <= 60 && diffMinutes >= -5;
+  const tooEarly = diffMinutes > 15;
+  return {
+    diffMinutes,
+    canCheckIn,
+    canNotifyLate,
+    lateWindow: canNotifyLate,
+    tooEarly: tooEarly && !canCheckIn,
+    checkInDeadline: canCheckIn ? new Date(start.getTime() + 5 * 60_000) : null,
+  };
+}
+
 /**
  * Ventanas CC (portal):
  * - Normal: T−15…T+5
  * - Aviso tarde (lateArrivalAt / confirmed): hasta min(inicio+eta, T+60); sin eta → T+30
- * - OPERATIONS_COVERAGE: inicio−15 … max(createdAt, inicio)+60
- * - ADV (isEarlyStart): adjustedStart−15 … adjustedStart+60
+ * - OPERATIONS_COVERAGE (no registro): inicio−15 … max(createdAt, inicio)+60
+ * - ADV (isEarlyStart): ventana adelanto OR ventana propia (normal/tarde)
+ * - coverageHoursOnSource: no fichable (registro EXT/ADV)
  * - Ausente: no ficha
  */
 export function getCheckInTiming(
@@ -131,6 +184,11 @@ export function getCheckInTiming(
     return empty;
   }
 
+  // Registro EXT/ADV: no se ficha (el presente va al turno propio).
+  if (isCoverageHoursOnSourceShift(s)) {
+    return empty;
+  }
+
   if (s.isFranco && !s.isFrancoTrabajado && !isOperationsCoverageShift(s)) {
     return empty;
   }
@@ -152,24 +210,30 @@ export function getCheckInTiming(
     };
   }
 
-  // ADV / adelanto: ventana centrada en adjustedStartTime
+  // ADV / adelanto: ventana del adelanto O la del turno propio (normal / llegada tarde).
+  // AA solo si no llega a su horario propio — el adelanto es opcional.
   if (isEarlyStartShift(s) && start) {
     const adj = resolveAdjustedStartTime(s, start) ?? start;
-    const open = new Date(adj.getTime() - 15 * 60_000);
-    const close = new Date(adj.getTime() + 60 * 60_000);
-    const canCheckIn = inWindow(now, open, close);
-    const tooEarly = now.getTime() < open.getTime();
+    const earlyOpen = new Date(adj.getTime() - 15 * 60_000);
+    const earlyClose = new Date(adj.getTime() + 60 * 60_000);
+    const inEarly = inWindow(now, earlyOpen, earlyClose);
+    const own = ownShiftWindowTiming(s, start, now, options);
+    const canCheckIn = inEarly || own.canCheckIn;
+    const deadlines: number[] = [];
+    if (inEarly) deadlines.push(earlyClose.getTime());
+    if (own.canCheckIn && own.checkInDeadline) deadlines.push(own.checkInDeadline.getTime());
+    const earliestOpen = Math.min(earlyOpen.getTime(), start.getTime() - 15 * 60_000);
     return {
-      diffMinutes: minutesBetween(adj, now),
+      diffMinutes: inEarly ? minutesBetween(adj, now) : own.diffMinutes,
       canCheckIn,
-      canNotifyLate: false,
-      lateWindow: false,
-      tooEarly,
-      checkInDeadline: close,
+      canNotifyLate: own.canNotifyLate,
+      lateWindow: own.lateWindow,
+      tooEarly: !canCheckIn && now.getTime() < earliestOpen,
+      checkInDeadline: deadlines.length > 0 ? new Date(Math.max(...deadlines)) : own.checkInDeadline ?? null,
     };
   }
 
-  // Cobertura ops: inicio−15 … max(createdAt, inicio)+60
+  // Cobertura ops (urgencia real): inicio−15 … max(createdAt, inicio)+60
   if (isOperationsCoverageShift(s) && start) {
     const created = toDate(s.createdAt as never);
     const anchor = created && created.getTime() > start.getTime() ? created : start;
@@ -191,40 +255,7 @@ export function getCheckInTiming(
     return empty;
   }
 
-  const eta = readEtaMinutes(s, options?.etaMinutesOverride);
-  const lateFlag = hasLateArrivalFlag(s);
-
-  // Con aviso / confirmación de llegada tarde: ventana extendida
-  if (lateFlag) {
-    const extensionMin = eta != null ? Math.min(eta, 60) : 30;
-    const open = new Date(start.getTime() - 15 * 60_000);
-    const close = new Date(start.getTime() + extensionMin * 60_000);
-    const canCheckIn = inWindow(now, open, close);
-    const tooEarly = now.getTime() < open.getTime();
-    return {
-      diffMinutes,
-      canCheckIn,
-      canNotifyLate: false,
-      lateWindow: false,
-      tooEarly,
-      checkInDeadline: close,
-    };
-  }
-
-  // Normal: T−15…T+5
-  const canCheckIn = diffMinutes <= 15 && diffMinutes >= -5;
-  // Aviso previo: T−60…T+5
-  const canNotifyLate = diffMinutes <= 60 && diffMinutes >= -5;
-  const tooEarly = diffMinutes > 15;
-
-  return {
-    diffMinutes,
-    canCheckIn,
-    canNotifyLate,
-    lateWindow: canNotifyLate,
-    tooEarly: tooEarly && !canCheckIn,
-    checkInDeadline: canCheckIn ? new Date(start.getTime() + 5 * 60_000) : null,
-  };
+  return ownShiftWindowTiming(s, start, now, options);
 }
 
 /**

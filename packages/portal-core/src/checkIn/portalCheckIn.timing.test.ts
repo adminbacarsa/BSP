@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { getCheckInTiming, isOperationsCoverageShift, validateCheckInDistance } from './portalCheckIn';
+import {
+  getCheckInTiming,
+  isCoverageHoursOnSourceShift,
+  isOperationsCoverageShift,
+  validateCheckInDistance,
+} from './portalCheckIn';
 import type { Shift } from '@cosp/portal-types';
+import { isShiftVisibleToEmployee } from '../shifts/employeeShiftVisibility';
 
 function shift(partial: Partial<Shift> & Pick<Shift, 'id'> & Record<string, unknown>): Shift {
   return partial as Shift;
@@ -63,7 +69,6 @@ describe('getCheckInTiming — ventanas CC', () => {
       lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
       etaMinutes: 30,
     });
-    // now = 18:00 → 10 min after start, within +30
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
     expect(t.canNotifyLate).toBe(false);
@@ -78,7 +83,6 @@ describe('getCheckInTiming — ventanas CC', () => {
       endTime: new Date('2026-09-15T01:40:00-03:00'),
       lateArrivalConfirmed: true,
     });
-    // now 18:00 = +20 → ok; would fail at +31
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
     const after = getCheckInTiming(s, new Date('2026-09-14T18:15:00-03:00'));
@@ -95,14 +99,12 @@ describe('getCheckInTiming — ventanas CC', () => {
       endTime: new Date('2026-09-15T04:00:00-03:00'),
       createdAt: created,
     });
-    // now 18:00: open = 19:45 → too early
     const early = getCheckInTiming(s, now);
     expect(early.canCheckIn).toBe(false);
     expect(early.tooEarly).toBe(true);
 
     const inWin = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
     expect(inWin.canCheckIn).toBe(true);
-    // close = max(created, start)+60 = start+60 = 21:00
     expect(inWin.checkInDeadline?.getTime()).toBe(start.getTime() + 60 * 60_000);
 
     const late = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
@@ -120,7 +122,6 @@ describe('getCheckInTiming — ventanas CC', () => {
       createdAt: created,
     });
     const t = getCheckInTiming(s, now);
-    // close = 17:30+60 = 18:30 → now 18:00 ok
     expect(t.canCheckIn).toBe(true);
     expect(t.checkInDeadline?.getTime()).toBe(created.getTime() + 60 * 60_000);
   });
@@ -137,8 +138,58 @@ describe('getCheckInTiming — ventanas CC', () => {
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
     const deadline = t.checkInDeadline!;
-    // 18:00 AR + 60 min = 19:00 AR
     expect(deadline.toISOString()).toBe(new Date('2026-09-14T19:00:00-03:00').toISOString());
+  });
+
+  it('ADV: si no llegó al adelanto, igual puede fichar en ventana propia T−15…T+5', () => {
+    // Adelanto 14:00 (ventana cierra 15:00); turno propio 20:00.
+    // now = 19:50 → fuera del adelanto, dentro de T−15 del propio.
+    const s = shift({
+      id: 'adv-own',
+      startTime: new Date('2026-09-14T20:00:00-03:00'),
+      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      isEarlyStart: true,
+      adjustedStartTime: '14:00',
+    });
+    const atOwnWindow = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
+    expect(atOwnWindow.canCheckIn).toBe(true);
+    expect(atOwnWindow.canNotifyLate).toBe(true);
+
+    // Entre fin adelanto y apertura propia, pero dentro de T−60: no ficha, sí puede avisar.
+    const between = getCheckInTiming(s, new Date('2026-09-14T19:20:00-03:00'));
+    expect(between.canCheckIn).toBe(false);
+    expect(between.canNotifyLate).toBe(true);
+  });
+
+  it('ADV + lateArrivalAt: ventana propia extendida por eta sigue habilitada', () => {
+    const start = new Date('2026-09-14T17:50:00-03:00');
+    const s = shift({
+      id: 'adv-late',
+      startTime: start,
+      endTime: new Date('2026-09-15T01:50:00-03:00'),
+      isEarlyStart: true,
+      adjustedStartTime: '12:00',
+      lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
+      etaMinutes: 30,
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(true);
+  });
+
+  it('coverageHoursOnSource: no fichable (registro EXT/ADV)', () => {
+    const s = shift({
+      id: 'reg1',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageHoursOnSource: true,
+      startTime: new Date('2026-09-14T18:00:00-03:00'),
+      endTime: new Date('2026-09-15T02:00:00-03:00'),
+      createdAt: new Date('2026-09-14T17:00:00-03:00'),
+    });
+    expect(isCoverageHoursOnSourceShift(s)).toBe(true);
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(false);
+    expect(t.canNotifyLate).toBe(false);
+    expect(isShiftVisibleToEmployee(s as never, new Set(['any']))).toBe(false);
   });
 
   it('ausente: no puede fichar', () => {

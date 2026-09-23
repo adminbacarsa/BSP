@@ -103,6 +103,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC-fix ADV+registro | ADV = ventana adelanto OR propia (T−15/tarde); ops_cov coverageHoursOnSource ocultos (no hero/Agenda/fichada); 16 tests
 2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK
 2026-09-23 | CC-P4 Aviso tarde | Botón «Voy a llegar tarde» T−60…T+5 + demora 15/30/60 (etaMinutes); UI «te esperan hasta HH:MM»
 2026-09-23 | CC-P3 ¿Venís? | Tarjeta LLEGADA_TARDE: Sí voy (15/30/60 + etaMinutes) / No voy → responderConvocatoriaCobertura

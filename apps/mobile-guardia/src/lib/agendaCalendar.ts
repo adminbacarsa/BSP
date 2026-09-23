@@ -1,5 +1,10 @@
 import type { Shift } from '@cosp/portal-types';
-import { isAbsentLikeShift, isOperationsCoverageShift, toDate } from '@cosp/portal-core';
+import {
+  isAbsentLikeShift,
+  isCoverageHoursOnSourceShift,
+  isOperationsCoverageShift,
+  toDate,
+} from '@cosp/portal-core';
 
 export type AgendaViewMode = 'day' | 'week' | 'month';
 
@@ -76,6 +81,8 @@ export function shiftDateKey(shift: Shift): string | null {
 export function groupShiftsByDateKey(shifts: Shift[]): Record<string, Shift[]> {
   const map: Record<string, Shift[]> = {};
   for (const s of shifts) {
+    // Registro EXT/ADV: no aparece como turno fichable en Agenda.
+    if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) continue;
     const key = shiftDateKey(s);
     if (!key) continue;
     if (!map[key]) map[key] = [];
@@ -109,7 +116,16 @@ export type MonthCell = {
 };
 
 export function isOpsCoverageShift(s: Shift): boolean {
+  // Registro EXT/ADV: no se trata como cobertura fichable en Agenda.
+  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
   return isOperationsCoverageShift(s);
+}
+
+/** Turnos que la Agenda muestra como trabajo/cobertura fichable (excluye registro EXT/ADV). */
+export function isAgendaFichableShift(s: Shift): boolean {
+  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
+  if (isAgendaAbsentShift(s)) return false;
+  return true;
 }
 
 export function isAgendaAbsentShift(s: Shift): boolean {

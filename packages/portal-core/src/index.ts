@@ -15,6 +15,7 @@ export {
   flushPendingCheckins,
   getCheckInTiming,
   isOperationsCoverageShift,
+  isCoverageHoursOnSourceShift,
   parsePendingCheckins,
   validateCheckInDistance,
   resolveAdjustedStartTime,
