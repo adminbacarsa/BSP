@@ -39,6 +39,36 @@ function weekdayLetter(d) {
     };
     return map[en] || 'L';
 }
+function slaVigenteEnFecha(slaDoc, dateStr) {
+    const start = String(slaDoc.startDate || '').trim();
+    const end = String(slaDoc.endDate || '').trim();
+    if (start && dateStr < start)
+        return false;
+    if (end && dateStr > end)
+        return false;
+    return true;
+}
+function findRawPosition(slaDoc, positionName) {
+    const positions = slaDoc.positions || [];
+    const target = normPos(positionName);
+    for (const p of positions) {
+        if (posMatch(p.name, positionName))
+            return p;
+        if (target && normPos(p.name) === target)
+            return p;
+    }
+    return null;
+}
+function isBandExcludedOnDate(pos, dateStr, bandCode) {
+    if (!pos)
+        return false;
+    const map = pos.excludedShiftDates;
+    const codes = map?.[dateStr];
+    if (!codes?.length)
+        return false;
+    const u = String(bandCode || '').toUpperCase();
+    return codes.some((c) => String(c || '').toUpperCase() === u);
+}
 function hmToMsOnDay(anchor, hm) {
     const [h, m] = String(hm || '0:0').split(':').map((x) => parseInt(x, 10) || 0);
     const parts = new Intl.DateTimeFormat('en-CA', {
@@ -59,10 +89,13 @@ function hmToMsOnDay(anchor, hm) {
 function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
     if (!slaDoc)
         return false;
+    const dateStr = ymdInTz(shiftEndTime);
+    if (!slaVigenteEnFecha(slaDoc, dateStr))
+        return false;
+    const rawPos = findRawPosition(slaDoc, positionName);
     const sla = (0, types_1.normalizarSlaDeFirestore)({ ...slaDoc, id: slaDoc.id || 'sla' });
     const needs = (0, s1_leer_sla_1.leerSlaYDerivarCobertura)(sla);
     const endMs = shiftEndTime.getTime();
-    const dateStr = ymdInTz(shiftEndTime);
     const dayLetter = weekdayLetter(shiftEndTime);
     for (const need of needs) {
         if (!posMatch(need.puestoName, positionName))
@@ -70,6 +103,8 @@ function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
         if (need.excludedDates?.includes(dateStr))
             continue;
         if (!need.diasSemana.includes(dayLetter))
+            continue;
+        if (isBandExcludedOnDate(rawPos, dateStr, need.banda))
             continue;
         const startMs = hmToMsOnDay(shiftEndTime, need.horaInicio);
         const diff = Math.abs(startMs - endMs);
