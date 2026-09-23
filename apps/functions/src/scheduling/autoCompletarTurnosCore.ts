@@ -5,6 +5,7 @@ import {
   positionHasContinuityFromSlaDoc,
 } from '../coverage/positionHasContinuity';
 import { retainOutgoingForGap, totalShiftMs, RETENTION_MAX_TOTAL_MS } from '../coverage/coverageRetention';
+import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
@@ -123,6 +124,7 @@ export async function runAutoCompletarTurnosPass(
   for (const docSnap of outgoingDocs) {
     const shift = docSnap.data();
     if (!ctx.isEnabled(shift.empresaId)) continue;
+    if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) continue;
     if ((shift.status || '') === 'INTERRUPTED') continue;
 
     const endTimeMs = shiftEndMs(shift);
@@ -199,7 +201,10 @@ export async function runAutoCompletarTurnosPass(
       .get();
 
     const relieveDocs = relieveSnap.docs.filter(
-      (d) => d.id !== docSnap.id && ctx.sameTenantShift(shift, d.data()),
+      (d) =>
+        d.id !== docSnap.id
+        && ctx.sameTenantShift(shift, d.data())
+        && !isOpsCoverageHoursOnSourceDoc(d.data() as Record<string, unknown>),
     );
 
     const relievePresent = relieveDocs.find((d) => {

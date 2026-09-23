@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { positionHasContinuityFromSlaDoc } from './positionHasContinuity';
+import { skipAbsencePipelineForShift } from './coverageTraceShift';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = 12 * 60 * 60 * 1000;
@@ -74,6 +75,10 @@ export async function retainOutgoingForGap(
   titularShift: Record<string, unknown> & { id?: string },
   opts: RetainOutgoingOpts = {},
 ): Promise<RetainOutgoingResult> {
+  if (skipAbsencePipelineForShift(titularShift)) {
+    return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'TRACE_REGISTRATION_SHIFT' };
+  }
+
   const absenceShiftId = String(titularShift.id || '').trim();
   const objectiveId = String(titularShift.objectiveId || '').trim();
   const positionName = titularShift.positionName;

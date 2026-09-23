@@ -9,6 +9,7 @@ import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa,
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
+import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -537,6 +538,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (!shift.shiftDateObj) return null;
             if (shift.draft === true) return null;
             if (suppressedTuraIds.has(shift.id)) return null;
+            if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) return null;
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
             // Si es una ausencia, mantener en processedData para tracking RRHH
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;

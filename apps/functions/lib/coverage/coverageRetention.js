@@ -9,6 +9,7 @@ exports.applyAutoRetentionForAbsenceShift = applyAutoRetentionForAbsenceShift;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("./positionHasContinuity");
+const coverageTraceShift_1 = require("./coverageTraceShift");
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = 12 * 60 * 60 * 1000;
 exports.RETENTION_MAX_TOTAL_MS = RETENTION_MAX_TOTAL_MS;
@@ -62,6 +63,9 @@ async function employeePushTokens(db, employeeId) {
         .filter((t) => typeof t === 'string' && t.length > 10);
 }
 async function retainOutgoingForGap(db, titularShift, opts = {}) {
+    if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(titularShift)) {
+        return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'TRACE_REGISTRATION_SHIFT' };
+    }
     const absenceShiftId = String(titularShift.id || '').trim();
     const objectiveId = String(titularShift.objectiveId || '').trim();
     const positionName = titularShift.positionName;

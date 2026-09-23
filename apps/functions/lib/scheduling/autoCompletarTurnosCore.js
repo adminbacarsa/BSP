@@ -8,6 +8,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("../coverage/positionHasContinuity");
 Object.defineProperty(exports, "loadPositionHasContinuity", { enumerable: true, get: function () { return positionHasContinuity_1.loadPositionHasContinuity; } });
 const coverageRetention_1 = require("../coverage/coverageRetention");
+const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
 function shiftEndMs(data) {
@@ -96,6 +97,8 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         const shift = docSnap.data();
         if (!ctx.isEnabled(shift.empresaId))
             continue;
+        if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shift))
+            continue;
         if ((shift.status || '') === 'INTERRUPTED')
             continue;
         const endTimeMs = shiftEndMs(shift);
@@ -168,7 +171,9 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             .where('startTime', '>=', windowStart)
             .where('startTime', '<=', windowEnd)
             .get();
-        const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id && ctx.sameTenantShift(shift, d.data()));
+        const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id
+            && ctx.sameTenantShift(shift, d.data())
+            && !(0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(d.data()));
         const relievePresent = relieveDocs.find((d) => {
             if (reliefIncomingClaimed.has(d.id))
                 return false;

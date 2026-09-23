@@ -25,6 +25,11 @@ import {
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
+import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
+import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
+import { markShiftAbsent } from './attendance/markShiftAbsent';
+import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
+import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
 import { isEmpresaManualMode } from './ops/opsManualMode';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
@@ -1104,6 +1109,7 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
     if (before.isAbsent === after.isAbsent || !after.isAbsent) return;
     // Ignorar borradores y turnos virtuales
     if (after.draft || after.isVirtual) return;
+    if (skipAbsencePipelineForShift(after as Record<string, unknown>)) return;
 
     // Fallback 'bacarsa' para turnos legacy sin empresaId (mismo patrón que centroControlGuard)
     const empresaId: string = String(after.empresaId || '').trim() || 'bacarsa';
@@ -1558,11 +1564,55 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
                 'Tu turno fue registrado como ausencia. Contactá al operador para gestionar tu ingreso.',
             );
         }
+        if (msg === 'TRACE_REGISTRATION_SHIFT') {
+            throw new functions.https.HttpsError(
+                'failed-precondition',
+                'Este turno es de registro de cobertura; fichá tu turno principal.',
+            );
+        }
+        if (msg === 'TOO_EARLY' || msg === 'TOO_LATE' || msg === 'CHECKIN_WINDOW') {
+            throw new functions.https.HttpsError('failed-precondition', 'Fuera de la ventana de fichada permitida.');
+        }
         if (msg === 'TURNO_NOT_FOUND') {
             throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
         }
         throw new functions.https.HttpsError('internal', msg || 'Error al registrar fichaje.');
     }
+});
+
+export const marcarAusenciaOperaciones = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  const db = admin.firestore();
+  const r = await markShiftAbsent(db, shiftId, {
+    reason: 'MANUAL_OPS',
+    by: context.auth.uid,
+  });
+  return { success: r.applied || r.alreadyAbsent === true, ...r };
+});
+
+export const revertirAusencia = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  const db = admin.firestore();
+  const r = await revertirAusenciaShift(db, {
+    shiftId,
+    cancelCoverage: data?.cancelCoverage === true,
+    operatorUid: context.auth.uid,
+  });
+  if (!r.success) {
+    const code = r.reason === 'PAST_T60' ? 'deadline-exceeded'
+      : r.reason === 'COVERAGE_IN_PROGRESS' ? 'failed-precondition'
+      : 'not-found';
+    throw new functions.https.HttpsError(code, r.reason || 'REVERT_FAILED');
+  }
+  return { success: true };
 });
 
 /**
@@ -1699,26 +1749,52 @@ export const reportarAusencia = functions.https.onCall(async (data, context) => 
 export const notificarLlegadaTarde = functions.https.onCall(async (data, context) => {
     if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
 
-    const { shiftId } = data;
+    const { shiftId, etaMinutes: etaRaw } = data;
     if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
 
     const db = admin.firestore();
     const now = admin.firestore.FieldValue.serverTimestamp();
+    const nowTs = admin.firestore.Timestamp.now();
 
     try {
         const shiftRef = db.collection('turnos').doc(shiftId);
         const shiftSnap = await shiftRef.get();
         if (!shiftSnap.exists) throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
 
-        const shiftData = shiftSnap.data() as any;
+        const shiftData = shiftSnap.data() as Record<string, unknown>;
 
         const cc = await loadCentroControlState(db);
-        if (!cc.isEnabled(shiftData.empresaId)) {
+        if (!cc.isEnabled(String(shiftData.empresaId || ''))) {
             return { success: true, skipped: 'centro_control_off' };
         }
 
+        if (skipAbsencePipelineForShift(shiftData)) {
+            return { success: true, skipped: 'trace_registration' };
+        }
+
+        const startMs = (shiftData.startTime as admin.firestore.Timestamp | undefined)?.toMillis?.() ?? 0;
+        const diffMin = startMs ? (nowTs.toMillis() - startMs) / 60000 : 999;
+        if (diffMin < -60 || diffMin > 5) {
+            throw new functions.https.HttpsError(
+              'failed-precondition',
+              'Aviso de llegada tarde solo entre T−60 y T+5 minutos.',
+            );
+        }
+
+        const etaMinutes = Number.isFinite(Number(etaRaw)) ? Math.max(1, Math.floor(Number(etaRaw))) : 30;
+        if (etaMinutes > 60) {
+            await markShiftAbsent(db, shiftId, { reason: 'AVISO_MAYOR_60', by: context.auth.uid });
+            return { success: true, markedAbsent: true, reason: 'AVISO_MAYOR_60' };
+        }
+
+        const etaAt = startMs > 0
+          ? admin.firestore.Timestamp.fromMillis(startMs + etaMinutes * 60 * 1000)
+          : nowTs;
+
         await shiftRef.update({
             lateArrivalAt: now,
+            lateArrivalEtaMinutes: etaMinutes,
+            lateArrivalEtaAt: etaAt,
             checkInStatus: 'LATE_PENDING',
         });
 
@@ -2666,6 +2742,7 @@ export const detectarAusencias = functions
       if (!cc.isEnabled(s.empresaId)) continue;
       if (cc.isDemo(s.empresaId)) continue; // Demo genera sus propios eventos
       if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
+      if (skipAbsencePipelineForShift(s as Record<string, unknown>)) continue;
       if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
       if (SKIP_STATUSES.has(s.status || '')) continue;
@@ -2761,6 +2838,7 @@ export const detectarAusencias = functions
       if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
       // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
+      if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
       if (SKIP_STATUSES.has(shift.status || '')) continue;
       if (shift.isPresent === true || shift.isCompleted === true) continue;
       if (shift.isUnassigned === true) continue;         // vacante → no es ausencia
@@ -2784,6 +2862,62 @@ export const detectarAusencias = functions
       }
 
       const elapsedMin = (nowMs - startMs) / 60000;
+
+      const tryMarkAbsent = async (reason: Parameters<typeof markShiftAbsent>[2]['reason']) => {
+        const r = await markShiftAbsent(db, docSnap.id, { reason, by: 'SYSTEM_SCHEDULER' });
+        if (!r.applied) return false;
+        absents++;
+        const tokens = await getEmployeeTokens(db, shift.employeeId);
+        if (tokens.length > 0) {
+          const startStr = shift.startTime?.toDate
+            ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
+            : '';
+          try {
+            await admin.messaging().sendEachForMulticast({
+              tokens,
+              notification: {
+                title: '⚠️ Ausencia registrada',
+                body: `No se registró tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
+              },
+              webpush: {
+                notification: {
+                  title: '⚠️ Ausencia registrada',
+                  body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). Ingresá al portal si estás presente.`,
+                  icon: '/icons/icon-192x192.png',
+                  requireInteraction: true,
+                },
+                fcmOptions: { link: '/empleado/dashboard' },
+              },
+            });
+          } catch (e) {
+            console.warn(`[detectarAusencias] Push error para ${shift.employeeId}:`, e);
+          }
+        }
+        await db.collection('audit_logs').add({
+          action: 'AUTO_MARK_ABSENT',
+          actorName: 'Sistema (Scheduler)',
+          actorUid: 'SYSTEM',
+          module: 'OPERACIONES',
+          shiftId: docSnap.id,
+          details: `Ausencia automática (${reason}): ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
+          timestamp: now,
+        });
+        return true;
+      };
+
+      if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
+        const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
+        const capMs = startMs + 60 * 60 * 1000;
+        const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;
+        if (nowMs >= deadlineMs && !shift.absenceDetectedAt) {
+          if (shift.notifiedAbsent === true) continue;
+          if (shift.isReten === true || shift.origin === 'RETEN') continue;
+          const endMsCheck = shift.endTime?.toMillis?.() ?? 0;
+          if (endMsCheck > 0 && endMsCheck > nowMs + 6 * 60 * 60 * 1000) continue;
+          await tryMarkAbsent('ETA_VENCIDA');
+        }
+        continue;
+      }
 
       // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
       if (elapsedMin >= 30) {
@@ -2814,144 +2948,18 @@ export const detectarAusencias = functions
           }
           continue;
         }
-        // Guardia con aviso de llegada tarde: no marcar ausente automÃ¡ticamente
-        if (shift.lateArrivalAt) continue;
-        // Caso 2: operador registrÃ³ aviso anticipado → no marcar AA
         if (shift.notifiedAbsent === true) continue;
-        // Retenes no se auto-detectan como ausentes — son convocados urgentes
         if (shift.isReten === true || shift.origin === 'RETEN') continue;
-        // Fix timezone: no marcar AA si el turno termina en el futuro LEJANO
-        // (evita marcar turnos nocturnos 11 PM - 7 AM a las pocas horas de iniciados)
         const endMs = shift.endTime?.toMillis?.() ?? 0;
-        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue; // turno termina en >6h → saltear
+        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue;
 
-        // 1. Marcar ABSENT AA
-        await docSnap.ref.update({
-          status: 'ABSENT',
-          isAbsent: true,
-          absenceType: 'AA',
-          absenceDetectedAt: now,
-          absenceDetectedBy: 'SYSTEM_SCHEDULER',
-        });
-
-        // 2. Retención + cascada: onTurnoAbsenciaDetectada (isAbsent → true)
-
-        // 3. Push al empleado ausente (si tiene token)
-        const tokens = await getEmployeeTokens(db, shift.employeeId);
-        if (tokens.length > 0) {
-          const startStr = shift.startTime?.toDate
-            ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
-            : '';
-          try {
-            await admin.messaging().sendEachForMulticast({
-              tokens,
-              notification: {
-                title: '⚠️ Ausencia registrada',
-                body: `No se registrÃ³ tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
-              },
-              webpush: {
-                notification: {
-                  title: '⚠️ Ausencia registrada',
-                  body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). IngresÃ¡ al portal si estÃ¡s presente.`,
-                  icon: '/icons/icon-192x192.png',
-                  requireInteraction: true,
-                },
-                fcmOptions: { link: '/empleado/dashboard' },
-              },
-            });
-          } catch (e) {
-            console.warn(`[detectarAusencias] Push error para ${shift.employeeId}:`, e);
-          }
-        }
-
-        // 3. Registro en colección 'ausencias' — fecha en AR (UTC-3)
-        // Turno nocturno 23hs: en UTC son las 02hs del día siguiente → restar 3h para obtener fecha local
-        const arDate = new Date(startMs - 3 * 60 * 60 * 1000);
-        const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate.getUTCDate()).padStart(2, '0')}`;
-        const ausenciaExistsSnap = await db.collection('ausencias')
-          .where('shiftId', '==', docSnap.id)
-          .limit(1).get();
-        // Helper local para el horario del turno
-        const buildHorario = () => {
-          const st = shift.startTime?.toDate ? shift.startTime.toDate() : new Date(startMs);
-          const et = shift.endTime?.toMillis ? new Date(shift.endTime.toMillis()) : null;
-          const fmtT = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-          return et ? `${fmtT(st)} - ${fmtT(et)}` : fmtT(st);
-        };
-        if (!ausenciaExistsSnap.empty) {
-          // Corregir fecha si fue guardada con UTC en lugar de UTC-3 (turnos nocturnos)
-          const existingAbs = ausenciaExistsSnap.docs[0];
-          const existingData = existingAbs.data();
-          if (existingData.startDate !== dateStr || existingData.endDate !== dateStr) {
-            const horario = buildHorario();
-            await existingAbs.ref.update({
-              startDate: dateStr,
-              endDate: dateStr,
-              reason: `No presentacion al turno ${horario} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
-            });
-            console.log(`[detectarAusencias] Fecha corregida: ${existingData.startDate} → ${dateStr} para turno ${docSnap.id}`);
-          }
-        } else {
-          await db.collection('ausencias').add({
-            employeeId: shift.employeeId,
-            employeeName: shift.employeeName || '',
-            startDate: dateStr,
-            endDate: dateStr,
-            type: 'No Presentacion',
-            absenceType: 'AA',
-            origin: 'AUTO_T30',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            shiftCode: (shift.code || '').toUpperCase() || null,
-            reason: `No presentacion al turno ${buildHorario()} - ${shift.objectiveName || ''} (${shift.positionName || ''})`,
-            status: 'Confirmada',
-            hasCertificate: false,
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
-        }
-
-        // 4. Novedad para operaciones (solo una por turno)
-        const existsSnap = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'AUSENCIA_AUTO')
-          .limit(1).get();
-        if (existsSnap.empty) {
-          await db.collection('novedades').add({
-            type: 'AUSENCIA_AUTO',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            employeeId: shift.employeeId,
-            employeeName: shift.employeeName || '',
-            objectiveId: shift.objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            positionName: shift.positionName || '',
-            shiftCode: (shift.code || '').toUpperCase() || null,
-            description: `${shift.employeeName || 'Empleado'} no se presentó — ${(shift.code || '').toUpperCase() || '—'} ${buildHorario()} · ${shift.positionName || 'Puesto'} · ${shift.objectiveName || ''} (T+${Math.round(elapsedMin)} min).`,
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
-        }
-
-        // 4. Audit log
-        await db.collection('audit_logs').add({
-          action: 'AUTO_MARK_ABSENT',
-          actorName: 'Sistema (Scheduler)',
-          actorUid: 'SYSTEM',
-          module: 'OPERACIONES',
-          shiftId: docSnap.id,
-          details: `Ausencia automÃ¡tica: ${shift.employeeName || ''} — ${shift.objectiveName || ''} (${Math.round(elapsedMin)} min)`,
-          timestamp: now,
-        });
-
-        absents++;
+        await tryMarkAbsent('AUTO_T30');
       }
+    }
+
+    const convocados = await runConvocadoAbsentPass(db, now);
+    if (convocados > 0) {
+      console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
     }
 
     console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
@@ -3024,6 +3032,7 @@ export const gestionarVacantes = functions
       if (!cc.isEnabled(shift.empresaId)) continue;
       // Ignorar borradores de planificación (draft flag)
       if (shift.draft === true) continue;
+      if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
       // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)
@@ -3714,6 +3723,24 @@ export const releaseInvalidRetentions = functions.https.onCall(async (data, cont
   const db = admin.firestore();
   const dryRun = data?.dryRun !== false;
   const result = await releaseInvalidRetentionsRun(db, {
+    empresaId: data?.empresaId ? String(data.empresaId) : undefined,
+    dryRun,
+  });
+  return { dryRun, count: result.rows.length, rows: result.rows };
+});
+
+export const releaseTraceAbsences = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const role = String(context.auth.token.role ?? '');
+  const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+  if (!allowed.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo admin.');
+  }
+  const db = admin.firestore();
+  const dryRun = data?.dryRun !== false;
+  const result = await releaseTraceAbsencesRun(db, {
     empresaId: data?.empresaId ? String(data.empresaId) : undefined,
     dryRun,
   });
