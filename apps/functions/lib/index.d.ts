@@ -31,6 +31,8 @@ export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Ru
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
+export declare const marcarAusenciaOperaciones: functions.HttpsFunction & functions.Runnable<any>;
+export declare const revertirAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
@@ -99,6 +101,7 @@ export declare const processEmpresaMigrateJob: import("firebase-functions/core")
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const releaseInvalidRetentions: functions.HttpsFunction & functions.Runnable<any>;
+export declare const releaseTraceAbsences: functions.HttpsFunction & functions.Runnable<any>;
 export declare const tagTurnosArchiveTier: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledBackup: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const updateBackupSchedule: import("firebase-functions/v2/https").CallableFunction<any, Promise<admin.firestore.DocumentData>, unknown>;
