@@ -119,7 +119,8 @@ export async function retainOutgoingForGap(
       const en = endMs(data);
       if (!en) return false;
       if (Math.abs(en - gapStartMs) > GAP_ALIGN_MS) return false;
-      if (data.isRetention === true && data.retentionAbsenceShiftId !== absenceShiftId) return false;
+      const linked = String(data.retentionAbsenceShiftId || '').trim();
+      if (data.isRetention === true && linked && linked !== absenceShiftId) return false;
       return true;
     })
     .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
@@ -137,18 +138,27 @@ export async function retainOutgoingForGap(
   for (const pick of toRetain) {
     const retEnd = endMs(pick.data);
     const autoAt = Timestamp.fromMillis(Math.max(nowMs, retEnd || nowMs));
-    await db.collection('turnos').doc(pick.id).update({
-      isRetention: true,
-      retentionReason: 'AUSENCIA_RELEVO',
-      retentionKind: 'AUSENCIA_RELEVO',
-      retentionAbsenceShiftId: absenceShiftId,
-      autoRetentionAt: autoAt,
-      ...(retEnd ? { retentionEndTime: Timestamp.fromMillis(retEnd) } : {}),
-    });
+    const adopt =
+      pick.data.isRetention === true && !String(pick.data.retentionAbsenceShiftId || '').trim();
+    if (adopt) {
+      await db.collection('turnos').doc(pick.id).update({
+        retentionAbsenceShiftId: absenceShiftId,
+        retentionKind: pick.data.retentionKind || 'AUSENCIA_RELEVO',
+      });
+    } else {
+      await db.collection('turnos').doc(pick.id).update({
+        isRetention: true,
+        retentionReason: 'AUSENCIA_RELEVO',
+        retentionKind: 'AUSENCIA_RELEVO',
+        retentionAbsenceShiftId: absenceShiftId,
+        autoRetentionAt: autoAt,
+        ...(retEnd ? { retentionEndTime: Timestamp.fromMillis(retEnd) } : {}),
+      });
+    }
     retainedIds.push(pick.id);
     retainedNames.push(String(pick.data.employeeName || ''));
 
-    if (opts.sendPush !== false) {
+    if (opts.sendPush !== false && !adopt) {
       const tokens = await employeePushTokens(db, String(pick.data.employeeId || ''));
       if (tokens.length > 0) {
         await admin
@@ -175,7 +185,7 @@ export async function retainOutgoingForGap(
     .where('type', '==', 'RETENCION_AUSENCIA_RELEVO')
     .limit(1)
     .get();
-  if (priorNov.empty && retainedIds.length) {
+  if (priorNov.empty && retainedIds.length && !toRetain[0].data.isRetention) {
     await db.collection('novedades').add({
       type: 'RETENCION_AUSENCIA_RELEVO',
       status: 'pending',
