@@ -45,6 +45,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC-P2 Cobertura** ✅ convocatorias_cobertura en Hoy + callable + deep link push.
 - **CC-P1 Retenido** ✅ hero no desaparece tras endTime; tarjeta «esperá al relevo»; Agenda «Retenido».
 - **F1-14** ✅ activación mail→app.
 - **F5-09** ✅ responsive 3 tamaños (OTA agenda+alertas).
@@ -100,6 +101,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC-P3 ¿Venís? | Tarjeta LLEGADA_TARDE: Sí voy (15/30/60 + etaMinutes) / No voy → responderConvocatoriaCobertura
 2026-09-23 | CC-P2 Cobertura | Escucha convocatorias_cobertura PENDING/ESCALATED; banner Acepto/No puedo → responderConvocatoriaCobertura; push CONVOCATORIA_COBERTURA → Hoy
 2026-09-23 | CC-P1 Retenido | pickTodayShiftAny/hero: isRetention+presente+!completado sigue hero tras endTime; RetentionBanner en Hoy; AgendaShiftCard «Retenido» (no «ya trabajado»)
 2026-09-08 | F6-01 link | Internal Testing invite: https://play.google.com/apps/internaltest/4701606202645789130

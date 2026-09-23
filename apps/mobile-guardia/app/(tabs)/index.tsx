@@ -30,6 +30,7 @@ import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
+import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
