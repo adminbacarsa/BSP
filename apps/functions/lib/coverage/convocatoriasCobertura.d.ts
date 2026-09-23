@@ -34,6 +34,9 @@ export interface ConvocatoriaCoberturaDoc {
     rejectionReason?: string;
     resolvedAt?: Timestamp;
 }
+export declare function resolverCobertura(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc & {
+    id: string;
+}): Promise<void>;
 export declare const crearConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
 export declare const responderConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
 export declare const cancelarConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;

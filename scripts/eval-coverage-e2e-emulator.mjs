@@ -30,6 +30,8 @@ const {
   syncAusenciaCoberturaGestionada,
 } = requireFn('./lib/coverage/syncAusenciaCobertura.js');
 
+const { resolverCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+
 const results = [];
 
 function report(caseId, ok, detail) {
@@ -151,12 +153,48 @@ async function seedBase(prefix) {
     empExt,
     empAdv,
     titular,
+    ausDocId: `${prefix}_aus`,
   };
+}
+
+async function seedEmpleadoMinimal(empresaId, objectiveId, employeeId, name) {
+  await db.collection('empleados').doc(employeeId).set({
+    empresaId,
+    status: 'ACTIVE',
+    name,
+    experienciaObjetivos: { [objectiveId]: true },
+  });
+}
+
+function baseConvFields(s) {
+  return {
+    empresaId: s.empresaId,
+    shiftId: s.titularId,
+    objectiveId: s.objectiveId,
+    objectiveName: 'Obj Test',
+    clientId: s.clientId,
+    shiftCode: 'M',
+    startTime: s.titular.startTime,
+    endTime: s.titular.endTime,
+    urgency: 'NORMAL',
+    cascadeStep: 3,
+    createdBy: 'AUTO',
+    timeoutAt: Timestamp.now(),
+    createdAt: Timestamp.now(),
+  };
+}
+
+async function writeConvAndResolve(fields) {
+  const ref = db.collection('convocatorias_cobertura').doc();
+  const doc = { ...fields, status: 'ACCEPTED', respondedAt: Timestamp.now() };
+  await ref.set(doc);
+  await resolverCobertura(db, { id: ref.id, ...doc });
+  return ref.id;
 }
 
 async function run() {
   if (!(await pingEmulator())) {
-    for (let i = 1; i <= 8; i++) {
+    for (let i = 1; i <= 10; i++) {
       report(i, false, 'Emulador Firestore :8080 no responde');
     }
     process.exitCode = 1;
@@ -398,6 +436,140 @@ async function run() {
         && ops.every((d) => d.coverageHoursOnSource === true)
         && traceHours === 0;
       report(8, ok, ok ? 'COVERED + 2 trace ops_cov + 0h en ops_cov' : `ops=${ops.length} traceH=${traceHours} st=${tit?.coverageStatus}`);
+    }
+
+    // Caso 9 — resolverCobertura: EXTEND → PARTIAL + ADVANCE PENDING → COVERED dual
+    {
+      const s = await seedBase(`${runId}_c9`);
+      await db.collection('turnos').doc(s.extSourceId).update({
+        isPresent: true,
+        isCompleted: false,
+      });
+      await db.collection('turnos').doc(s.advSourceId).update({ isCompleted: false });
+      await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empExt, 'Guardia EXT');
+      await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empAdv, 'Guardia ADV');
+
+      const extConvId = await writeConvAndResolve({
+        ...baseConvFields(s),
+        type: 'EXTEND',
+        candidateEmployeeId: s.empExt,
+        candidateEmployeeName: 'Guardia EXT',
+        extendShiftId: s.extSourceId,
+      });
+
+      const titPartial = (await db.collection('turnos').doc(s.titularId).get()).data();
+      const advPendingSnap = await db.collection('convocatorias_cobertura')
+        .where('shiftId', '==', s.titularId)
+        .where('type', '==', 'ADVANCE')
+        .where('status', '==', 'PENDING')
+        .limit(1)
+        .get();
+
+      if (titPartial?.coverageStatus !== 'PARTIAL' || advPendingSnap.empty) {
+        report(
+          9,
+          false,
+          `tras EXT: st=${titPartial?.coverageStatus} advPending=${advPendingSnap.size}`,
+        );
+      } else {
+        const advDoc = advPendingSnap.docs[0];
+        const advData = advDoc.data();
+        await advDoc.ref.update({ status: 'ACCEPTED', respondedAt: Timestamp.now() });
+        await resolverCobertura(db, {
+          id: advDoc.id,
+          ...advData,
+          status: 'ACCEPTED',
+        });
+
+        const tit = (await db.collection('turnos').doc(s.titularId).get()).data();
+        const ops = (await db.collection('turnos').where('absenceShiftId', '==', s.titularId).get()).docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((d) => d.coverageSuperseded !== true);
+        const aus = (await db.collection('ausencias').doc(s.ausDocId).get()).data();
+        const extConv = (await db.collection('convocatorias_cobertura').doc(extConvId).get()).data();
+        const ok =
+          tit?.coverageStatus === 'COVERED'
+          && ops.length === 2
+          && ops.every((d) => d.coverageHoursOnSource === true)
+          && aus?.coberturaEstado === 'GESTIONADA'
+          && extConv?.status === 'ACCEPTED';
+        report(
+          9,
+          ok,
+          ok
+            ? 'resolver EXT→PARTIAL+ADV PENDING→COVERED + 2 ops trace + RRHH GESTIONADA'
+            : `st=${tit?.coverageStatus} ops=${ops.length} aus=${aus?.coberturaEstado}`,
+        );
+      }
+    }
+
+    // Caso 10 — dos RET aceptados en paralelo → 1 cobertura, otra conv CANCELLED
+    {
+      const prefix = `${runId}_c10`;
+      const s = await seedBase(prefix);
+      const empRet2 = `${prefix}_e_ret2`;
+      const retSource2 = `${prefix}_ret_src2`;
+      await db.collection('turnos').doc(retSource2).set({
+        employeeId: empRet2,
+        employeeName: 'Guardia RET 2',
+        code: 'RET',
+        objectiveId: s.objectiveId,
+        clientId: s.clientId,
+        empresaId: s.empresaId,
+        startTime: tsAt(2026, 9, 23, 7, 0),
+        endTime: tsAt(2026, 9, 23, 15, 0),
+      });
+
+      const convBase = baseConvFields(s);
+      const mkRetConv = async (empId, name, shiftId) => {
+        const ref = db.collection('convocatorias_cobertura').doc();
+        const doc = {
+          ...convBase,
+          type: 'RET',
+          cascadeStep: 0,
+          candidateEmployeeId: empId,
+          candidateEmployeeName: name,
+          candidateShiftId: shiftId,
+          status: 'ACCEPTED',
+          respondedAt: Timestamp.now(),
+        };
+        await ref.set(doc);
+        return { id: ref.id, ...doc };
+      };
+
+      const c1 = await mkRetConv(s.empRet, 'Guardia RET', s.retSourceId);
+      const c2 = await mkRetConv(empRet2, 'Guardia RET 2', retSource2);
+
+      await Promise.all([
+        resolverCobertura(db, c1),
+        resolverCobertura(db, c2),
+      ]);
+
+      const ops = (await db.collection('turnos').where('absenceShiftId', '==', s.titularId).get()).docs
+        .filter((d) => d.data().coverageSuperseded !== true && d.data().status !== 'CANCELLED');
+      const convSnaps = await Promise.all([
+        db.collection('convocatorias_cobertura').doc(c1.id).get(),
+        db.collection('convocatorias_cobertura').doc(c2.id).get(),
+      ]);
+      const statuses = convSnaps.map((snap) => ({
+        id: snap.id,
+        status: snap.data()?.status,
+        cancelReason: snap.data()?.cancelReason,
+      }));
+      const cancelled = statuses.filter((x) => x.status === 'CANCELLED');
+      const ok =
+        ops.length === 1
+        && cancelled.length === 1
+        && ['ALREADY_COVERED', 'CLAIM_HELD_BY_OTHER_CONVOCATORIA'].includes(
+          cancelled[0].cancelReason || '',
+        );
+      report(
+        10,
+        ok,
+        ok
+          ? `1 ops_cov + conv ${cancelled[0].cancelReason}`
+          : `ops=${ops.length} convs=${JSON.stringify(statuses)}`,
+      );
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

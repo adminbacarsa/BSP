@@ -583,6 +583,13 @@ async function dispararBroadcastFT(
 
 // ─── Helper: resolver cobertura cuando un guardia acepta ─────────────────────
 
+function dualSiblingConvType(type: string): 'EXTEND' | 'ADVANCE' | null {
+  const u = String(type || '').toUpperCase();
+  if (u === 'EXTEND') return 'ADVANCE';
+  if (u === 'ADVANCE') return 'EXTEND';
+  return null;
+}
+
 async function extAdvSiblingAccepted(
   db: admin.firestore.Firestore,
   absenceShiftId: string,
@@ -599,13 +606,123 @@ async function extAdvSiblingAccepted(
   return !snap.empty;
 }
 
+async function hasActiveConvocatoriaForType(
+  db: admin.firestore.Firestore,
+  shiftId: string,
+  convType: 'EXTEND' | 'ADVANCE',
+): Promise<boolean> {
+  const [pending, escalated] = await Promise.all([
+    db.collection('convocatorias_cobertura')
+      .where('shiftId', '==', shiftId)
+      .where('type', '==', convType)
+      .where('status', '==', 'PENDING')
+      .limit(1)
+      .get(),
+    db.collection('convocatorias_cobertura')
+      .where('shiftId', '==', shiftId)
+      .where('type', '==', convType)
+      .where('status', '==', 'ESCALATED')
+      .limit(1)
+      .get(),
+  ]);
+  return !pending.empty || !escalated.empty;
+}
+
+/** Tras aceptar una pata EXT/ADV con titular PARTIAL: convocar la pata faltante si no hay activa. */
+async function ensureMissingDualLegConvocatoria(
+  db: admin.firestore.Firestore,
+  conv: ConvocatoriaCoberturaDoc & { id: string },
+): Promise<void> {
+  const missing = dualSiblingConvType(conv.type);
+  if (!missing) return;
+
+  const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
+  const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
+  if (st !== 'PARTIAL') return;
+
+  const siblingAccepted = await extAdvSiblingAccepted(
+    db,
+    conv.shiftId,
+    conv.type as 'EXTEND' | 'ADVANCE',
+  );
+  if (siblingAccepted) return;
+
+  if (await hasActiveConvocatoriaForType(db, conv.shiftId, missing)) return;
+
+  const candidate = await findBestCandidate(db, conv, missing);
+  if (!candidate) {
+    await db.collection('novedades').add({
+      type: 'VACANTE_PARCIAL',
+      shiftId: conv.shiftId,
+      objectiveId: conv.objectiveId,
+      objectiveName: conv.objectiveName || '',
+      empresaId: conv.empresaId,
+      message: `Cobertura parcial: falta pata ${missing} y no hay candidato disponible en ${conv.objectiveName || 'objetivo'}.`,
+      coverageType: missing,
+      resolved: false,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+    return;
+  }
+
+  const {
+    extendShiftId: _prevExt,
+    advanceShiftId: _prevAdv,
+    candidateShiftId: _prevCand,
+    ...convWithoutLegIds
+  } = conv;
+
+  await crearConvocatoriaDoc(db, {
+    ...convWithoutLegIds,
+    type: missing,
+    cascadeStep: CASCADE_ORDER.indexOf(missing),
+    candidateEmployeeId: candidate.id,
+    candidateEmployeeName: candidate.name,
+    ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
+    ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
+    ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
+    ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
+    createdBy: conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO',
+  });
+}
+
+async function avanzarCascadaOrPartialVacante(
+  db: admin.firestore.Firestore,
+  conv: ConvocatoriaCoberturaDoc & { id: string },
+  reason: 'REJECTED' | 'TIMEOUT',
+): Promise<void> {
+  if (conv.type === 'EXTEND' || conv.type === 'ADVANCE') {
+    const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
+    if (st === 'PARTIAL') {
+      await db.collection('novedades').add({
+        type: 'VACANTE_PARCIAL',
+        shiftId: conv.shiftId,
+        objectiveId: conv.objectiveId,
+        objectiveName: conv.objectiveName || '',
+        empresaId: conv.empresaId,
+        title: 'Cobertura parcial incompleta',
+        message: `${conv.candidateEmployeeName} ${reason === 'REJECTED' ? 'rechazó' : 'no respondió'} la pata ${conv.type}. El titular sigue PARTIAL — falta completar EXT+ADV.`,
+        coverageType: conv.type,
+        candidateEmployeeId: conv.candidateEmployeeId,
+        candidateEmployeeName: conv.candidateEmployeeName,
+        status: 'unread',
+        resolved: false,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      return;
+    }
+  }
+  await avanzarCascada(db, conv, reason);
+}
+
 function convTypeToCoverageType(type: string): string {
   const u = String(type || '').toUpperCase();
   if (u === 'VOLANTE' || u.startsWith('SIN_TURNO')) return 'SIN_TURNO';
   return u;
 }
 
-async function resolverCobertura(
+export async function resolverCobertura(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc & { id: string },
 ): Promise<void> {
@@ -799,10 +916,15 @@ async function resolverCobertura(
     db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
   ]);
 
+  const siblingKeepType =
+    titularCloseMode === 'PARTIAL' ? dualSiblingConvType(String(conv.type)) : null;
+
   for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
-    if (d.id !== conv.id) {
-      batch.update(d.ref, { status: 'CANCELLED', cancelledAt: FieldValue.serverTimestamp() });
+    if (d.id === conv.id) continue;
+    if (siblingKeepType && String(d.data().type || '').toUpperCase() === siblingKeepType) {
+      continue;
     }
+    batch.update(d.ref, { status: 'CANCELLED', cancelledAt: FieldValue.serverTimestamp() });
   }
 
   // Novedad para ops — aparece en Bitácora
@@ -839,6 +961,13 @@ async function resolverCobertura(
   });
 
     await batch.commit();
+
+    if (
+      titularCloseMode === 'PARTIAL'
+      && (conv.type === 'EXTEND' || conv.type === 'ADVANCE')
+    ) {
+      await ensureMissingDualLegConvocatoria(db, conv);
+    }
   } catch (e) {
     if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
       console.warn(
@@ -1058,7 +1187,7 @@ export const responderConvocatoriaCobertura = functions
         resolved: false,
         createdAt: FieldValue.serverTimestamp(),
       });
-      await avanzarCascada(db, { ...conv, id: convocatoriaId }, 'REJECTED');
+      await avanzarCascadaOrPartialVacante(db, { ...conv, id: convocatoriaId }, 'REJECTED');
     }
 
     return { success: true };
@@ -1353,7 +1482,7 @@ export async function simularRespuestasConvocatorias(
         await resolverCobertura(db, { ...conv, id: convDoc.id });
       } else {
         await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
-        await avanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+        await avanzarCascadaOrPartialVacante(db, { ...conv, id: convDoc.id }, 'REJECTED');
       }
       respondidas++;
     } catch (e) {
@@ -1403,7 +1532,7 @@ export const checkConvocatoriaTimeouts = onSchedule(
         } else {
           // Cascada regular: ESCALATED sigue activa, avanzar al siguiente paso
           await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
-          await avanzarCascada(db, { ...conv, id: d.id }, 'TIMEOUT');
+          await avanzarCascadaOrPartialVacante(db, { ...conv, id: d.id }, 'TIMEOUT');
         }
       } catch (e) {
         console.error(`[checkConvocatoriaTimeouts] Error en ${d.id}:`, (e as Error).message);

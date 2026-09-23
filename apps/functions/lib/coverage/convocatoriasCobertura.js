@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = void 0;
+exports.resolverCobertura = resolverCobertura;
 exports.iniciarCascadaCobertura = iniciarCascadaCobertura;
 exports.simularRespuestasConvocatorias = simularRespuestasConvocatorias;
 exports.crearConvocatoriaLlegadaTarde = crearConvocatoriaLlegadaTarde;
@@ -446,6 +447,14 @@ async function dispararBroadcastFT(db, conv) {
     if (batch.length > 0)
         await Promise.all(batch);
 }
+function dualSiblingConvType(type) {
+    const u = String(type || '').toUpperCase();
+    if (u === 'EXTEND')
+        return 'ADVANCE';
+    if (u === 'ADVANCE')
+        return 'EXTEND';
+    return null;
+}
 async function extAdvSiblingAccepted(db, absenceShiftId, current) {
     const other = current === 'EXTEND' ? 'ADVANCE' : 'EXTEND';
     const snap = await db
@@ -456,6 +465,90 @@ async function extAdvSiblingAccepted(db, absenceShiftId, current) {
         .limit(1)
         .get();
     return !snap.empty;
+}
+async function hasActiveConvocatoriaForType(db, shiftId, convType) {
+    const [pending, escalated] = await Promise.all([
+        db.collection('convocatorias_cobertura')
+            .where('shiftId', '==', shiftId)
+            .where('type', '==', convType)
+            .where('status', '==', 'PENDING')
+            .limit(1)
+            .get(),
+        db.collection('convocatorias_cobertura')
+            .where('shiftId', '==', shiftId)
+            .where('type', '==', convType)
+            .where('status', '==', 'ESCALATED')
+            .limit(1)
+            .get(),
+    ]);
+    return !pending.empty || !escalated.empty;
+}
+async function ensureMissingDualLegConvocatoria(db, conv) {
+    const missing = dualSiblingConvType(conv.type);
+    if (!missing)
+        return;
+    const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
+    if (st !== 'PARTIAL')
+        return;
+    const siblingAccepted = await extAdvSiblingAccepted(db, conv.shiftId, conv.type);
+    if (siblingAccepted)
+        return;
+    if (await hasActiveConvocatoriaForType(db, conv.shiftId, missing))
+        return;
+    const candidate = await findBestCandidate(db, conv, missing);
+    if (!candidate) {
+        await db.collection('novedades').add({
+            type: 'VACANTE_PARCIAL',
+            shiftId: conv.shiftId,
+            objectiveId: conv.objectiveId,
+            objectiveName: conv.objectiveName || '',
+            empresaId: conv.empresaId,
+            message: `Cobertura parcial: falta pata ${missing} y no hay candidato disponible en ${conv.objectiveName || 'objetivo'}.`,
+            coverageType: missing,
+            resolved: false,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+        return;
+    }
+    const { extendShiftId: _prevExt, advanceShiftId: _prevAdv, candidateShiftId: _prevCand, ...convWithoutLegIds } = conv;
+    await crearConvocatoriaDoc(db, {
+        ...convWithoutLegIds,
+        type: missing,
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(missing),
+        candidateEmployeeId: candidate.id,
+        candidateEmployeeName: candidate.name,
+        ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
+        ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
+        ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
+        ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
+        createdBy: conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO',
+    });
+}
+async function avanzarCascadaOrPartialVacante(db, conv, reason) {
+    if (conv.type === 'EXTEND' || conv.type === 'ADVANCE') {
+        const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
+        const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
+        if (st === 'PARTIAL') {
+            await db.collection('novedades').add({
+                type: 'VACANTE_PARCIAL',
+                shiftId: conv.shiftId,
+                objectiveId: conv.objectiveId,
+                objectiveName: conv.objectiveName || '',
+                empresaId: conv.empresaId,
+                title: 'Cobertura parcial incompleta',
+                message: `${conv.candidateEmployeeName} ${reason === 'REJECTED' ? 'rechazó' : 'no respondió'} la pata ${conv.type}. El titular sigue PARTIAL — falta completar EXT+ADV.`,
+                coverageType: conv.type,
+                candidateEmployeeId: conv.candidateEmployeeId,
+                candidateEmployeeName: conv.candidateEmployeeName,
+                status: 'unread',
+                resolved: false,
+                createdAt: firestore_1.FieldValue.serverTimestamp(),
+            });
+            return;
+        }
+    }
+    await avanzarCascada(db, conv, reason);
 }
 function convTypeToCoverageType(type) {
     const u = String(type || '').toUpperCase();
@@ -627,10 +720,14 @@ async function resolverCobertura(db, conv) {
             db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
             db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
         ]);
+        const siblingKeepType = titularCloseMode === 'PARTIAL' ? dualSiblingConvType(String(conv.type)) : null;
         for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
-            if (d.id !== conv.id) {
-                batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
+            if (d.id === conv.id)
+                continue;
+            if (siblingKeepType && String(d.data().type || '').toUpperCase() === siblingKeepType) {
+                continue;
             }
+            batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
         }
         const novedadRef = db.collection('novedades').doc();
         const typeLabel = {
@@ -664,6 +761,10 @@ async function resolverCobertura(db, conv) {
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         await batch.commit();
+        if (titularCloseMode === 'PARTIAL'
+            && (conv.type === 'EXTEND' || conv.type === 'ADVANCE')) {
+            await ensureMissingDualLegConvocatoria(db, conv);
+        }
     }
     catch (e) {
         if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
@@ -823,7 +924,7 @@ exports.responderConvocatoriaCobertura = functions
             resolved: false,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
-        await avanzarCascada(db, { ...conv, id: convocatoriaId }, 'REJECTED');
+        await avanzarCascadaOrPartialVacante(db, { ...conv, id: convocatoriaId }, 'REJECTED');
     }
     return { success: true };
 });
@@ -1046,7 +1147,7 @@ async function simularRespuestasConvocatorias(db, empresaId) {
             }
             else {
                 await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
-                await avanzarCascada(db, { ...conv, id: convDoc.id }, 'REJECTED');
+                await avanzarCascadaOrPartialVacante(db, { ...conv, id: convDoc.id }, 'REJECTED');
             }
             respondidas++;
         }
@@ -1086,7 +1187,7 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
             }
             else {
                 await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
-                await avanzarCascada(db, { ...conv, id: d.id }, 'TIMEOUT');
+                await avanzarCascadaOrPartialVacante(db, { ...conv, id: d.id }, 'TIMEOUT');
             }
         }
         catch (e) {
