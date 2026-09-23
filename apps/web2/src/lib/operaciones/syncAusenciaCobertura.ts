@@ -1,13 +1,20 @@
 import {
   collection,
+  doc,
+  getDoc,
   query,
   where,
   getDocs,
   limit,
+  Timestamp,
   type Firestore,
   type WriteBatch,
 } from 'firebase/firestore';
 import { serverTimestamp } from 'firebase/firestore';
+import { isActiveOpsCoverageDoc, isTitularCoverageAssigned } from '@/lib/cosp/coverageSemantics';
+
+export { isActiveOpsCoverageDoc } from '@/lib/cosp/coverageSemantics';
+import { stampEmpresaId } from '@/lib/multiempresa';
 
 export type SyncAusenciaCoberturaParams = {
   shiftId: string;
@@ -112,21 +119,113 @@ export function absentShiftCoveragePatch(opts: {
 
 /** Criterio demo/prod: 1 ausencia ya cubierta no debe generar otra cobertura activa. */
 export function isTitularAlreadyCovered(data: Record<string, unknown> | null | undefined): boolean {
-  if (!data) return false;
-  if (data.operacionallyCovered === true) return true;
-  if (String(data.coverageStatus || '').toUpperCase() === 'COVERED') return true;
-  if (data.coveredByEmployeeId) return true;
-  if (data.coveredByEmployeeName) return true;
-  return false;
+  return isTitularCoverageAssigned(data);
 }
 
-export function isActiveOpsCoverageDoc(data: Record<string, unknown> | null | undefined): boolean {
-  if (!data) return false;
-  if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
-  if (data.coverageSuperseded === true) return false;
-  if (String(data.status || '').toUpperCase() === 'CANCELLED') return false;
-  if (data.isDeleted === true) return false;
-  return true;
+const toTimestamp = (val: unknown): Timestamp | null => {
+  if (!val) return null;
+  if (val instanceof Timestamp) return val;
+  if (val instanceof Date) return Timestamp.fromDate(val);
+  if (typeof val === 'object' && val !== null && 'seconds' in val) {
+    return Timestamp.fromMillis((val as { seconds: number }).seconds * 1000);
+  }
+  return null;
+};
+
+/**
+ * Asegura turno visible en Plan/Ops/Supervisión para el guardia que cubre:
+ * - Mismo objetivo: actualiza turno existente con origin OPERATIONS_COVERAGE.
+ * - Otro objetivo / sin tramo en malla: crea doc `ops_cov_{ausencia}_{legajo}` en el objetivo del hueco.
+ */
+export async function materializeOpsCoverageShift(
+  db: Firestore,
+  batch: WriteBatch,
+  opts: {
+    titularShift: Record<string, unknown> & { id: string };
+    candidateEmployeeId: string;
+    candidateEmployeeName: string;
+    candidateShiftId?: string | null;
+    coverageType: string;
+    empresaId: string;
+    keepDocId?: string | null;
+  },
+): Promise<string> {
+  const absenceId = String(opts.titularShift.id || '').trim();
+  const empresaId = String(opts.empresaId || opts.titularShift.empresaId || '').trim();
+  const titularObj = String(opts.titularShift.objectiveId || '').trim();
+  const linkFields = opsCoverageLinkFields(
+    {
+      employeeId: opts.titularShift.employeeId,
+      employeeName: opts.titularShift.employeeName,
+    },
+    absenceId,
+  );
+
+  const deterministicId = absenceId
+    ? `ops_cov_${absenceId}_${opts.candidateEmployeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128)
+    : '';
+  const covDocId = opts.keepDocId || deterministicId || doc(collection(db, 'turnos')).id;
+
+  const startTs =
+    toTimestamp(opts.titularShift.startTime)
+    ?? (opts.titularShift.shiftDateObj instanceof Date
+      ? Timestamp.fromDate(opts.titularShift.shiftDateObj)
+      : null);
+  const endTs =
+    toTimestamp(opts.titularShift.endTime)
+    ?? (opts.titularShift.endDateObj instanceof Date
+      ? Timestamp.fromDate(opts.titularShift.endDateObj)
+      : null);
+
+  const candId = String(opts.candidateShiftId || '').trim();
+  if (candId && candId !== opts.candidateEmployeeId) {
+    const candSnap = await getDoc(doc(db, 'turnos', candId));
+    if (candSnap.exists()) {
+      const cd = candSnap.data() as Record<string, unknown>;
+      const sameObjective = String(cd.objectiveId || '').trim() === titularObj;
+      if (sameObjective && String(cd.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') {
+        batch.update(doc(db, 'turnos', candId), {
+          origin: 'OPERATIONS_COVERAGE',
+          resolvedBy: 'OPERACIONES',
+          coverageType: opts.coverageType,
+          coversPositionName: opts.titularShift.positionName || cd.positionName || null,
+          ...linkFields,
+          assignedAt: serverTimestamp(),
+        });
+        return candId;
+      }
+    }
+  }
+
+  batch.set(
+    doc(db, 'turnos', covDocId),
+    stampEmpresaId(
+      {
+        employeeId: opts.candidateEmployeeId,
+        employeeName: opts.candidateEmployeeName,
+        clientId: opts.titularShift.clientId || null,
+        clientName: opts.titularShift.clientName || null,
+        objectiveId: opts.titularShift.objectiveId || null,
+        objectiveName: opts.titularShift.objectiveName || '',
+        positionName: opts.titularShift.positionName || null,
+        coversPositionName: opts.titularShift.positionName || null,
+        code: opts.titularShift.code || 'T',
+        type: opts.titularShift.code || 'T',
+        startTime: startTs,
+        endTime: endTs,
+        status: 'PENDING',
+        origin: 'OPERATIONS_COVERAGE',
+        resolvedBy: 'OPERACIONES',
+        coverageType: opts.coverageType,
+        ...linkFields,
+        isAwaitingCoverageCheckIn: true,
+        createdAt: serverTimestamp(),
+      },
+      empresaId,
+    ),
+    { merge: true },
+  );
+  return covDocId;
 }
 
 /** Vínculo titular ↔ cobertura para tooltip Plan ("cubre: NOMBRE"). */

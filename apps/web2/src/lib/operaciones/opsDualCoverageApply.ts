@@ -4,6 +4,10 @@ import {
   type OperationalGapCloseInput,
 } from '@/lib/planificacion/operationalGapCoverage';
 import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
+import {
+  cospPositionMatches,
+  normalizeCospPositionName,
+} from '@/lib/cosp/coverageSemantics';
 
 const toDate = (d: unknown): Date => {
   if (!d) return new Date();
@@ -19,21 +23,10 @@ const fmtHHmm = (d: unknown): string => {
   return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
 };
 
-export const normOpsPosName = (n: unknown): string =>
-  String(n ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
+export const normOpsPosName = normalizeCospPositionName;
 
-export function opsPositionMatches(a: unknown, b: unknown): boolean {
-  const na = normOpsPosName(a);
-  const nb = normOpsPosName(b);
-  if (!na || !nb) return false;
-  if (na === nb) return true;
-  if (na.endsWith(nb) || nb.endsWith(na)) return true;
-  return false;
-}
+/** @deprecated Alias — usar `cospPositionMatches` desde `@/lib/cosp/coverageSemantics`. */
+export const opsPositionMatches = cospPositionMatches;
 
 export function positionStructureFromServices(
   servicesSLA: unknown[],

@@ -22,6 +22,7 @@ import {
   isTitularAlreadyCovered,
   opsCoverageLinkFields,
   supersedeOpsCoveragesForAbsence,
+  materializeOpsCoverageShift,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
 import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
@@ -38,7 +39,7 @@ import {
   type InternalCoverageCandidate,
   type InternalCoverageKind,
 } from '@/lib/operaciones/coverageInternalCandidates';
-import { applyAutoRetentionForGap } from '@/lib/operaciones/coverageRetention';
+import { applyAutoRetentionForGap, pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
 import {
   convocatoriaTypeForInternalKind,
   invokeCrearConvocatoriaCobertura,
@@ -409,6 +410,28 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const bandCode = absenceShift.code || '';
   const bandLabel = BAND_LABEL[bandCode] || bandCode;
 
+  const liveRetentionPick = React.useMemo(
+    () => pickRetentionShiftForGap(logic.processedData || [], absenceShift),
+    [logic.processedData, absenceShift],
+  );
+
+  React.useEffect(() => {
+    if (!liveRetentionPick && (s.retentionEmployeeName || s.retentionShiftId)) {
+      onUpd({ retentionShiftId: null, retentionEmployeeName: null });
+      return;
+    }
+    if (
+      liveRetentionPick
+      && (liveRetentionPick.shiftId !== s.retentionShiftId
+        || liveRetentionPick.employeeName !== s.retentionEmployeeName)
+    ) {
+      onUpd({
+        retentionShiftId: liveRetentionPick.shiftId,
+        retentionEmployeeName: liveRetentionPick.employeeName,
+      });
+    }
+  }, [liveRetentionPick, s.retentionShiftId, s.retentionEmployeeName, onUpd]);
+
   React.useEffect(() => {
     setDistanceTierKm(COVERAGE_RADIUS_PRIMARY_KM);
   }, [s.currentStep, step.key]);
@@ -757,11 +780,27 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       if (step.key === 'INTERNO') {
         const ct = s.pending.coverageKind || 'RET';
-        batch.update(doc(db, 'turnos', shiftId!), {
-          coverageRedirectedTo: absenceShift.objectiveId,
-          coverageRedirectedAt: serverTimestamp(),
-          resolvedBy: 'OPERACIONES',
+        const coverDocId = await materializeOpsCoverageShift(db, batch, {
+          titularShift: { ...absenceShift, id: String(absenceShift.id) },
+          candidateEmployeeId: empId,
+          candidateEmployeeName: displayName,
+          candidateShiftId: shiftId,
+          coverageType: ct,
+          empresaId: tid,
         });
+        const candSnap = shiftId ? await getDoc(doc(db, 'turnos', shiftId)) : null;
+        const candObj = candSnap?.exists()
+          ? String(candSnap.data()?.objectiveId || '').trim()
+          : '';
+        const titObj = String(absenceShift.objectiveId || '').trim();
+        if (shiftId && candObj && titObj && candObj !== titObj) {
+          batch.update(doc(db, 'turnos', shiftId), {
+            coverageRedirectedTo: absenceShift.objectiveId,
+            coverageRedirectedAt: serverTimestamp(),
+            resolvedBy: 'OPERACIONES',
+            ...linkFields,
+          });
+        }
         markCovered(ct);
         if (absenceShift.id) {
           await syncAusenciaCoberturaGestionada(
@@ -785,7 +824,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           employeeName: displayName,
           objectiveId: absenceShift.objectiveId,
           objectiveName: absenceShift.objectiveName,
-          shiftId,
+          shiftId: coverDocId,
           description: `${displayName} (${ct}) convocado a cubrir ${hiStart}–${hiEnd} en ${absenceShift.objectiveName}`,
           createdAt: serverTimestamp(),
           reportedBy: 'OPERACIONES',
@@ -1332,11 +1371,13 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-3.5">
-        {s.retentionEmployeeName && (
+        {liveRetentionPick && (
           <div className="mb-3 p-3 rounded-xl border border-orange-200 bg-orange-50 text-orange-900">
             <div className="text-[9px] font-black uppercase tracking-wide text-orange-700">Retención en puesto</div>
-            <div className="text-sm font-bold mt-0.5">{s.retentionEmployeeName}</div>
-            <div className="text-[10px] text-orange-800/80 mt-0.5">Último en fichar · sostiene el puesto hasta cobertura</div>
+            <div className="text-sm font-bold mt-0.5">{liveRetentionPick.employeeName}</div>
+            <div className="text-[10px] text-orange-800/80 mt-0.5">
+              Último en fichar en este puesto · visible en pestaña RET hasta relevo
+            </div>
           </div>
         )}
         {s.status === 'CONFIRMED' && (

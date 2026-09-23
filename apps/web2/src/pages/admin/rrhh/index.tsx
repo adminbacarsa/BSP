@@ -31,6 +31,7 @@ import {
 } from 'lucide-react';
 import CorreccionesTab from '@/components/admin/rrhh/CorreccionesTab';
 import AusenciasTab from '@/components/admin/rrhh/AusenciasTab';
+import { useAbsenceTurnoCoverage } from '@/hooks/useAbsenceTurnoCoverage';
 import { TiposNovedadTab } from '@/components/admin/rrhh/TiposNovedadTab';
 import ExperienciaObjetivosPanel from '@/components/admin/employees/ExperienciaObjetivosPanel';
 import { SearchableSelect } from '@/components/ui/SearchableSelect';
@@ -351,6 +352,7 @@ export default function EmployeesPage() {
   const [allObjectives, setAllObjectives] = useState<any[]>([]);
   const [agreements, setAgreements] = useState<ExtendedAgreement[]>([]);
   const [absences, setAbsences] = useState<Absence[]>([]);
+  const { alignedAbsences, loadingShifts: loadingAbsenceShiftCoverage } = useAbsenceTurnoCoverage(absences);
   const [filteredAbsences, setFilteredAbsences] = useState<Absence[]>([]);
   const [absenceSearchTerm, setAbsenceSearchTerm] = useState('');
   const [absenceTypeFilter, setAbsenceTypeFilter] = useState('');
@@ -693,7 +695,7 @@ export default function EmployeesPage() {
   };
   useEffect(() => {
     const term = absenceSearchTerm.toLowerCase();
-    setFilteredAbsences(absences.filter(a => {
+    setFilteredAbsences(alignedAbsences.filter(a => {
       const name = a.employeeName || '';
       let searchableName = name;
       if (!name && a.employeeId) { const emp = employees.find(e => e.id === a.employeeId); if (emp) searchableName = `${emp.lastName} ${emp.firstName}`; }
@@ -713,7 +715,7 @@ export default function EmployeesPage() {
       return matchesSearch && matchesType && matchesStatus && matchesDate;
     }));
     setSelectedAbsenceIds(new Set());
-  }, [absenceSearchTerm, absenceTypeFilter, absenceStatusFilter, absencePeriodFilter, absenceDateFilterMode, absenceCalendarMonth, absenceSelectedDays, absences, employees]);
+  }, [absenceSearchTerm, absenceTypeFilter, absenceStatusFilter, absencePeriodFilter, absenceDateFilterMode, absenceCalendarMonth, absenceSelectedDays, alignedAbsences, employees]);
   useEffect(() => { if (form.laborAgreement) { const selectedAgreement = agreements.find(a => a.name === form.laborAgreement); setAvailableCategories(selectedAgreement?.categories?.length ? selectedAgreement.categories : ['General']); } else { setAvailableCategories([]); } }, [form.laborAgreement, agreements]);
   
   useEffect(() => { if (selectedEmp && holidays.length > 0) { calculateStats(selectedEmp.id!, selectedEmp.laborAgreement || '', selectedEmp.cycleStartDay || 26); } }, [currentDate, selectedEmp, holidays, agreements]);
@@ -3078,6 +3080,7 @@ export default function EmployeesPage() {
                     handleOpenAbsenceModal={handleOpenAbsenceModal}
                     handleDeleteAbsence={handleDeleteAbsence}
                     novedadTypeLabels={activeNovedadLabels}
+                    loadingShiftCoverage={loadingAbsenceShiftCoverage}
                 />
             )}
         </div>

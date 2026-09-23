@@ -65,6 +65,7 @@ import {
     createSession,
     bootstrapCoverageSession,
 } from '@/components/operaciones/CoverageSessionManager';
+import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -1236,9 +1237,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const refuerzoLabel = getRefuerzoLabel(shift);
     const avatarLabel = getGuardAvatarLabel(shift, name);
     const avatarClass = getGuardAvatarClass(shift);
-    const isAbsentOperativelyCovered = !!(
-        shift.isAbsent && (shift.operacionallyCovered || shift.plannedOperativelyCovered || shift.coverageStatus === 'COVERED')
-    );
+    const isAbsentOperativelyCovered = isShiftOperativelyCovered(shift);
     const coveringEmployeeName = isAbsentOperativelyCovered ? formatCoveringEmployeeLabel(shift) : null;
 
     // Badge de estado
@@ -1260,7 +1259,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         else if (vOrigin === 'INTERRUPTION') badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-700 text-white shrink-0">RETIRO ANTICIP.</span>;
         else badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-rose-600 text-white shrink-0">SIN CUBRIR</span>;
     }
-    else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-yellow-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ATENCIÓN: relevo pendiente</span>;
+    else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>RET. EN PUESTO</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
     else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO AUTO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
@@ -3585,7 +3584,7 @@ export default function OperacionesPage() {
             const obj = map.get(key)!;
             obj.total++;
             obj.shifts.push(s);
-            if (s.isRetention)                               obj.retention++;
+            if (s.isRetention || s.isPendingRetention)       obj.retention++;
             else if (s.isPresent && !s.isCompleted)          obj.active++;
             else if (s.isAbsent || s.isPotentialAbsence)   { obj.absent++;  if (!obj.criticalShift) obj.criticalShift = s; }
             else if (isActionableOpsVacancy(s))            { obj.vacant++;  if (!obj.criticalShift) obj.criticalShift = s; }
@@ -3628,7 +3627,7 @@ export default function OperacionesPage() {
             const ev = map.get(key)!;
             ev.total++;
             ev.shifts.push(s);
-            if (s.isRetention)                              ev.retention++;
+            if (s.isRetention || s.isPendingRetention)     ev.retention++;
             else if (s.isPresent && !s.isCompleted)        ev.active++;
             else if (s.isAbsent || s.isPotentialAbsence) { ev.absent++; if (!ev.criticalShift) ev.criticalShift = s; }
             else if (isActionableOpsVacancy(s))           { ev.vacant++; if (!ev.criticalShift) ev.criticalShift = s; }

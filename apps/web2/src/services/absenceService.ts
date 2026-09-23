@@ -28,7 +28,11 @@ export interface Absence {
   clientId?: string;
   source?: string;
   ajusteCronoId?: string;
+  shiftId?: string;
   coberturaEstado?: 'PENDIENTE' | 'GESTIONADA' | 'VACANTE';
+  coveredByEmployeeId?: string;
+  coveredByEmployeeName?: string;
+  coverageType?: string;
 }
 
 const toDateStr = (val: unknown): string => toCalendarDateStr(val) || '';

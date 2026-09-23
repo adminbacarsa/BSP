@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
-import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, isActionableOpsVacancy } from '@/hooks/useOperacionesMonitor';
 import { objectiveCoverageStatus } from '@/lib/supervision/supervisionUtils';
+import { isAbsentTitularCoverageClosed } from '@/lib/cosp/coverageSemantics';
 
 export type ObjectiveLiveSummary = {
   objectiveId: string;
@@ -17,6 +18,16 @@ export type ObjectiveLiveSummary = {
 
 const isSameDay = (d1: Date, d2: Date) =>
   d1.toLocaleDateString('en-CA') === d2.toLocaleDateString('en-CA');
+
+/** Incidencia de ausencia accionable (espejo Ops: no RET; titular ya cubierto no suma). */
+function isActionableSupervisionAbsent(s: any): boolean {
+  if (s.isFranco) return false;
+  if (s.isRetention || s.isPendingRetention || s.origin === 'RETEN' || s.isReten) return false;
+  if (String(s.code || '').toUpperCase() === 'RET') return false;
+  if (!s.isAbsent && !s.isPotentialAbsence) return false;
+  if (isAbsentTitularCoverageClosed(s)) return false;
+  return true;
+}
 
 export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectives: boolean) {
   const monitor = useOperacionesMonitor();
@@ -44,6 +55,7 @@ export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectiv
   }, [scopedShifts, monitor.now]);
 
   const objectiveSummaries = useMemo((): ObjectiveLiveSummary[] => {
+    const now = monitor.now;
     const map = new Map<string, ObjectiveLiveSummary>();
     todayShifts.forEach((s: any) => {
       if (s.isFranco) return;
@@ -64,8 +76,8 @@ export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectiv
       }
       const row = map.get(oid)!;
       if (s.isPresent && !s.isCompleted) row.activos += 1;
-      if (s.isUnassigned) row.vacantes += 1;
-      if (s.isAbsent || s.isPotentialAbsence) row.ausentes += 1;
+      if (isActionableOpsVacancy(s, now)) row.vacantes += 1;
+      if (isActionableSupervisionAbsent(s)) row.ausentes += 1;
       if (s.isLateNotified || s.isLateUnnotified) row.alertas += 1;
       if ((s.isFuture || s.isRRHHPlanned) && !s.isUnassigned) row.planificados += 1;
     });
@@ -76,15 +88,18 @@ export function useSupervisionTablero(objectiveIds: string[], canViewAllObjectiv
         if (rank[a.status] !== rank[b.status]) return rank[a.status] - rank[b.status];
         return a.objectiveName.localeCompare(b.objectiveName, 'es');
       });
-  }, [todayShifts]);
+  }, [todayShifts, monitor.now]);
 
-  const totals = useMemo(() => ({
+  const totals = useMemo(() => {
+    const now = monitor.now;
+    return {
     activos: todayShifts.filter((s: any) => s.isPresent && !s.isCompleted && !s.isFranco).length,
-    vacantes: todayShifts.filter((s: any) => s.isUnassigned && !s.isFranco).length,
-    ausentes: todayShifts.filter((s: any) => (s.isAbsent || s.isPotentialAbsence) && !s.isFranco).length,
+    vacantes: todayShifts.filter((s: any) => isActionableOpsVacancy(s, now) && !s.isFranco).length,
+    ausentes: todayShifts.filter((s: any) => isActionableSupervisionAbsent(s)).length,
     alertas: todayShifts.filter((s: any) => (s.isLateNotified || s.isLateUnnotified) && !s.isFranco && !s.isAbsent).length,
     objetivos: objectiveSummaries.length,
-  }), [todayShifts, objectiveSummaries.length]);
+  };
+  }, [todayShifts, objectiveSummaries.length, monitor.now]);
 
   return {
     ...monitor,

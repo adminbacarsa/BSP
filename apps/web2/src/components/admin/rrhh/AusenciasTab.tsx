@@ -100,6 +100,7 @@ export interface AusenciasTabProps {
   handleOpenAbsenceModal: (a?: Absence) => void;
   handleDeleteAbsence: (id: string) => void;
   novedadTypeLabels?: string[];
+  loadingShiftCoverage?: boolean;
 }
 
 export default function AusenciasTab({
@@ -131,6 +132,7 @@ export default function AusenciasTab({
   handleOpenAbsenceModal,
   handleDeleteAbsence,
   novedadTypeLabels,
+  loadingShiftCoverage,
 }: AusenciasTabProps) {
   const typeOptions = (novedadTypeLabels && novedadTypeLabels.length > 0)
     ? novedadTypeLabels
@@ -181,6 +183,12 @@ export default function AusenciasTab({
 
   return (
     <div className="flex-1 bg-white dark:bg-slate-800 rounded-xl border dark:border-slate-700 p-4 overflow-hidden flex flex-col min-h-0">
+      {loadingShiftCoverage && (
+        <p className="text-[10px] font-bold uppercase text-indigo-600 dark:text-indigo-400 mb-2 shrink-0 flex items-center gap-1">
+          <Clock size={12} className="animate-pulse" />
+          Sincronizando cobertura con turnos…
+        </p>
+      )}
       <div className="flex flex-wrap items-center gap-2 mb-2 shrink-0">
         <div className="flex items-center gap-2 bg-slate-50 dark:bg-slate-900 px-3 py-1.5 rounded-xl border dark:border-slate-700 flex-1 min-w-[160px] max-w-xs">
           <Search size={15} className="text-slate-400 shrink-0" />

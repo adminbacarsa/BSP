@@ -2,6 +2,8 @@ import { Timestamp } from 'firebase/firestore';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { formatCoveringEmployeeLabel } from '@/lib/operaciones/syncAusenciaCobertura';
+export { isShiftOperativelyCovered, isOpsReplacementShift } from '@/lib/cosp/coverageSemantics';
+import { isShiftOperativelyCovered, isOpsReplacementShift } from '@/lib/cosp/coverageSemantics';
 
 export type SupervisionMainTab = 'TABLERO' | 'CC' | 'BANDEJA' | 'CAMPO';
 
@@ -110,25 +112,6 @@ export function rollupObjectiveCoverage(
     if (st === 'ALERTA') withIncidents += 1;
   }
   return { total: rows.length, withoutVacancies, withIncidents, critical };
-}
-
-/** Titular ausente con cobertura cerrada en CC (misma regla que Operaciones). */
-export function isShiftOperativelyCovered(shift: Record<string, unknown> | null | undefined): boolean {
-  if (!shift?.isAbsent) return false;
-  return !!(
-    shift.operacionallyCovered
-    || shift.plannedOperativelyCovered
-    || String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
-  );
-}
-
-/** Turno del guardia que reemplazó a un titular (convocatoria / ops). */
-export function isOpsReplacementShift(shift: Record<string, unknown> | null | undefined): boolean {
-  if (!shift || shift.isAbsent || shift.isUnassigned) return false;
-  if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return true;
-  if (shift.absenceShiftId || shift.coveredShiftId) return true;
-  if (shift.coversEmployeeId && shift.resolvedBy === 'OPERACIONES') return true;
-  return false;
 }
 
 export function resolveTitularNameForCoverageShift(
