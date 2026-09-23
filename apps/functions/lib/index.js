@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createClientPortalAccess = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseInvalidRetentions = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -16,6 +16,9 @@ const empresa_migrate_service_1 = require("./backup/empresa-migrate.service");
 const backup_auth_util_1 = require("./backup/backup-auth.util");
 const main_1 = require("./main");
 const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
+const coverageRetention_1 = require("./coverage/coverageRetention");
+const opsManualMode_1 = require("./ops/opsManualMode");
+const autoCompletarTurnosCore_1 = require("./scheduling/autoCompletarTurnosCore");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
 const data_management_service_1 = require("./data-management/data-management.service");
@@ -930,6 +933,21 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
     if (!centroControlEnabled)
         return;
     const cascadeCreatedBy = String(after.absenceDetectedBy || '').toUpperCase() === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
+    const titularRecord = { id: event.params.shiftId, ...after };
+    try {
+        await (0, coverageRetention_1.retainOutgoingForGap)(db, titularRecord, {
+            sendPush: true,
+            reportedBy: cascadeCreatedBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO',
+        });
+    }
+    catch (e) {
+        console.warn('[onTurnoAbsenciaDetectada] retención:', e?.message);
+    }
+    const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await (0, opsManualMode_1.isEmpresaManualMode)(db, empresaId));
+    if (manual) {
+        console.log(`[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`);
+        return;
+    }
     await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
         id: event.params.shiftId,
         objectiveId: String(after.objectiveId || ''),
@@ -2128,283 +2146,13 @@ exports.autoCompletarTurnos = functions
         return null;
     }
     const now = admin.firestore.Timestamp.now();
-    const nowMs = now.toMillis();
-    const cutoff = admin.firestore.Timestamp.fromMillis(nowMs - 5 * 60 * 1000);
-    const RELIEF_WINDOW_MS = 2 * 60 * 60 * 1000;
-    const snap = await db.collection('turnos')
-        .where('status', '==', 'PRESENT')
-        .where('endTime', '<=', cutoff)
-        .get();
-    if (snap.empty)
-        return null;
-    const completeBatch = db.batch();
-    const auditBatch = db.batch();
-    let completed = 0;
-    let alertedNoRelief = 0;
-    for (const docSnap of snap.docs) {
-        const shift = docSnap.data();
-        if (!cc.isEnabled(shift.empresaId))
-            continue;
-        if ((shift.status || '') === 'INTERRUPTED')
-            continue;
-        if (shift.isRetention === true) {
-            const autoRetentionMs = shift.autoRetentionAt?.toMillis?.() ?? 0;
-            if (!autoRetentionMs) {
-                const endMs2 = shift.endTime?.toMillis?.() ?? 0;
-                if (!endMs2)
-                    continue;
-                const minutesSinceEnd = (nowMs - endMs2) / 60000;
-                if (minutesSinceEnd < 360)
-                    continue;
-            }
-            else {
-                const minutesInRetention = (nowMs - autoRetentionMs) / 60000;
-                if (minutesInRetention < 120)
-                    continue;
-            }
-            completeBatch.update(docSnap.ref, {
-                status: 'COMPLETED',
-                isCompleted: true,
-                isPresent: false,
-                completedAt: now,
-                completedBy: 'Sistema',
-                completionReason: 'AUTO_END_CF_RETENTION_TIMEOUT',
-            });
-            completed++;
-            continue;
-        }
-        const endTimeMs = shift.endTime?.toMillis?.() ?? 0;
-        if (!endTimeMs)
-            continue;
-        const windowStart = admin.firestore.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
-        const windowEnd = admin.firestore.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
-        const relieveSnap = await db.collection('turnos')
-            .where('objectiveId', '==', shift.objectiveId)
-            .where('positionName', '==', shift.positionName)
-            .where('startTime', '>=', windowStart)
-            .where('startTime', '<=', windowEnd)
-            .get();
-        const relieveDocs = relieveSnap.docs.filter(d => d.id !== docSnap.id && sameTenantShift(shift, d.data()));
-        const relievePresent = relieveDocs.find(d => {
-            const s = d.data().status || '';
-            return s === 'PRESENT' || s === 'COMPLETED';
-        });
-        const relievePending = relieveDocs.find(d => {
-            const data = d.data();
-            if (!data.employeeId || data.employeeId === 'VACANTE')
-                return false;
-            if (data.isUnassigned === true)
-                return false;
-            const s = data.status || '';
-            return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
-        });
-        const relieveAbsent = relieveDocs.find(d => {
-            const data = d.data();
-            return data.isAbsent === true || data.status === 'ABSENT';
-        });
-        if (relievePresent) {
-            completeBatch.update(docSnap.ref, {
-                status: 'COMPLETED',
-                isCompleted: true,
-                realEndTime: now,
-                autoCompletedAt: now,
-                autoCompletedBy: 'SYSTEM_SCHEDULER',
-                autoCloseReason: 'RELEVO_PRESENTE',
-            });
-            const logRef = db.collection('audit_logs').doc();
-            auditBatch.set(logRef, {
-                action: 'AUTO_COMPLETE_SHIFT',
-                actorName: 'Sistema (Scheduler)',
-                actorUid: 'SYSTEM',
-                module: 'OPERACIONES',
-                shiftId: docSnap.id,
-                details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-                timestamp: now,
-            });
-            completed++;
-        }
-        else if (relievePending) {
-            if (!shift.isRetention || !shift.autoRetentionAt) {
-                completeBatch.update(docSnap.ref, {
-                    isRetention: true,
-                    retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
-                    autoRetentionAt: now,
-                });
-            }
-            const retTokensB = await getEmployeeTokens(db, shift.employeeId);
-            if (retTokensB.length > 0) {
-                await admin.messaging().sendEachForMulticast({
-                    tokens: retTokensB,
-                    notification: {
-                        title: '⏰ Quedaste en retención',
-                        body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
-                    },
-                    webpush: {
-                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                        fcmOptions: { link: '/empleado/dashboard' },
-                    },
-                }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
-            }
-            const existingB = await db.collection('novedades')
-                .where('shiftId', '==', docSnap.id)
-                .where('type', '==', 'RETENCION_SIN_RELEVO')
-                .limit(1).get();
-            if (existingB.empty) {
-                const novRef = db.collection('novedades').doc();
-                auditBatch.set(novRef, {
-                    type: 'RETENCION_SIN_RELEVO',
-                    status: 'PENDIENTE',
-                    shiftId: docSnap.id,
-                    reliefShiftId: relievePending.id,
-                    objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName || '',
-                    clientId: shift.clientId || null,
-                    empresaId: shiftEmpresaId(shift) || null,
-                    employeeName: shift.employeeName || '',
-                    reliefEmployeeName: relievePending.data().employeeName || '',
-                    positionName: shift.positionName || '',
-                    description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
-                    createdAt: now,
-                    source: 'SYSTEM_SCHEDULER',
-                });
-                alertedNoRelief++;
-            }
-        }
-        else if (relieveAbsent) {
-            if (!shift.isRetention || !shift.autoRetentionAt) {
-                completeBatch.update(docSnap.ref, {
-                    isRetention: true,
-                    retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
-                    autoRetentionAt: now,
-                });
-            }
-            const retTokensB2 = await getEmployeeTokens(db, shift.employeeId);
-            if (retTokensB2.length > 0) {
-                await admin.messaging().sendEachForMulticast({
-                    tokens: retTokensB2,
-                    notification: {
-                        title: '⏰ Quedaste en retención',
-                        body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
-                    },
-                    webpush: {
-                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                        fcmOptions: { link: '/empleado/dashboard' },
-                    },
-                }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
-            }
-            const existing = await db.collection('novedades')
-                .where('shiftId', '==', docSnap.id)
-                .where('type', '==', 'RETENCION_SIN_RELEVO')
-                .limit(1).get();
-            if (existing.empty) {
-                const novRef = db.collection('novedades').doc();
-                auditBatch.set(novRef, {
-                    type: 'RETENCION_SIN_RELEVO',
-                    status: 'PENDIENTE',
-                    shiftId: docSnap.id,
-                    objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName || '',
-                    clientId: shift.clientId || null,
-                    empresaId: shiftEmpresaId(shift) || null,
-                    employeeName: shift.employeeName || '',
-                    positionName: shift.positionName || '',
-                    description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
-                    createdAt: now,
-                    source: 'SYSTEM_SCHEDULER',
-                });
-                alertedNoRelief++;
-            }
-        }
-        else {
-            const empId = shiftEmpresaId(shift);
-            let requiresContinuousCoverage = false;
-            try {
-                const slaSnap = await db.collection('servicios_sla')
-                    .where('objectiveId', '==', shift.objectiveId)
-                    .where('status', '==', 'active')
-                    .limit(1).get();
-                if (!slaSnap.empty) {
-                    const slaData = slaSnap.docs[0].data();
-                    const positions = slaData.positions || [];
-                    const posName = (shift.positionName || '').trim().toLowerCase();
-                    const matchedPos = positions.find((p) => (p.name || '').trim().toLowerCase() === posName);
-                    requiresContinuousCoverage = Array.isArray(matchedPos?.allowedShiftTypes) && matchedPos.allowedShiftTypes.length > 0;
-                }
-            }
-            catch (e) {
-                console.warn('[autoCompletarTurnos] Error checking SLA:', e);
-            }
-            if (requiresContinuousCoverage) {
-                if (!shift.isRetention || !shift.autoRetentionAt) {
-                    completeBatch.update(docSnap.ref, {
-                        isRetention: true,
-                        retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
-                        autoRetentionAt: now,
-                    });
-                }
-                const retTokensC = await getEmployeeTokens(db, shift.employeeId);
-                if (retTokensC.length > 0) {
-                    await admin.messaging().sendEachForMulticast({
-                        tokens: retTokensC,
-                        notification: {
-                            title: '⏰ Quedaste retenido',
-                            body: `Permanecé en ${shift.objectiveName || 'el puesto'} hasta nuevo aviso. No hay relevo registrado.`,
-                        },
-                        webpush: {
-                            notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                            fcmOptions: { link: '/empleado/dashboard' },
-                        },
-                    }).catch(e => console.warn('[autoCompletarTurnos] Push retención C2 error:', e));
-                }
-                const existingC = await db.collection('novedades')
-                    .where('shiftId', '==', docSnap.id)
-                    .where('type', '==', 'RETENCION_SIN_RELEVO')
-                    .limit(1).get();
-                if (existingC.empty) {
-                    const novRef = db.collection('novedades').doc();
-                    auditBatch.set(novRef, {
-                        type: 'RETENCION_SIN_RELEVO',
-                        status: 'PENDIENTE',
-                        shiftId: docSnap.id,
-                        objectiveId: shift.objectiveId,
-                        objectiveName: shift.objectiveName || '',
-                        clientId: shift.clientId || null,
-                        empresaId: empId || null,
-                        employeeName: shift.employeeName || '',
-                        positionName: shift.positionName || '',
-                        description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — puesto 24HS sin relevo registrado.`,
-                        createdAt: now,
-                        source: 'SYSTEM_SCHEDULER',
-                    });
-                    alertedNoRelief++;
-                }
-            }
-            else {
-                completeBatch.update(docSnap.ref, {
-                    status: 'COMPLETED',
-                    isCompleted: true,
-                    realEndTime: now,
-                    autoCompletedAt: now,
-                    autoCompletedBy: 'SYSTEM_SCHEDULER',
-                    autoCloseReason: 'SIN_RELEVO_CUSTOM',
-                });
-                const logRef = db.collection('audit_logs').doc();
-                auditBatch.set(logRef, {
-                    action: 'AUTO_COMPLETE_SHIFT',
-                    actorName: 'Sistema (Scheduler)',
-                    actorUid: 'SYSTEM',
-                    module: 'OPERACIONES',
-                    shiftId: docSnap.id,
-                    details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-                    timestamp: now,
-                });
-                completed++;
-            }
-        }
-    }
-    await completeBatch.commit();
-    await auditBatch.commit();
-    console.log(`[autoCompletarTurnos] Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
+    const pass = await (0, autoCompletarTurnosCore_1.runAutoCompletarTurnosPass)(db, {
+        isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
+        shiftEmpresaId,
+        sameTenantShift,
+        getEmployeeTokens,
+    }, now);
+    console.log(`[autoCompletarTurnos] Completados: ${pass.completed} | Alertas sin relevo: ${pass.alertedNoRelief}`);
     return null;
 });
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
@@ -2613,70 +2361,6 @@ exports.detectarAusencias = functions
                 absenceDetectedAt: now,
                 absenceDetectedBy: 'SYSTEM_SCHEDULER',
             });
-            const objectiveId = shift.objectiveId || '';
-            const positionName = (shift.positionName || '').trim().toLowerCase();
-            const empId = shiftEmpresaId(shift);
-            if (objectiveId && positionName && empId) {
-                try {
-                    const presentSnap = await db.collection('turnos')
-                        .where('empresaId', '==', empId)
-                        .where('objectiveId', '==', objectiveId)
-                        .where('isPresent', '==', true)
-                        .where('isCompleted', '==', false)
-                        .get();
-                    const toRetain = presentSnap.docs.filter(d => {
-                        const dat = d.data();
-                        return (dat.positionName || '').trim().toLowerCase() === positionName
-                            && dat.employeeId !== shift.employeeId;
-                    });
-                    for (const retDoc of toRetain) {
-                        const retData = retDoc.data();
-                        if (!retData.isRetention) {
-                            const retEndMs = retData.endTime?.toMillis?.() ?? 0;
-                            const retentionAt = retEndMs > nowMs
-                                ? admin.firestore.Timestamp.fromMillis(retEndMs)
-                                : now;
-                            await retDoc.ref.update({
-                                isRetention: true,
-                                retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
-                                autoRetentionAt: retentionAt,
-                            });
-                            const retTokens = await getEmployeeTokens(db, retData.employeeId);
-                            if (retTokens.length > 0) {
-                                await admin.messaging().sendEachForMulticast({
-                                    tokens: retTokens,
-                                    notification: {
-                                        title: '⏰ Quedaste en retención',
-                                        body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
-                                    },
-                                    webpush: {
-                                        notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                                        fcmOptions: { link: '/empleado/dashboard' },
-                                    },
-                                }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
-                            }
-                            await db.collection('novedades').add({
-                                type: 'RETENCION_POR_AUSENCIA',
-                                status: 'PENDIENTE',
-                                empresaId: empId,
-                                objectiveId,
-                                objectiveName: shift.objectiveName || '',
-                                positionName: shift.positionName || '',
-                                employeeId: retData.employeeId,
-                                employeeName: retData.employeeName || '',
-                                absentEmployeeId: shift.employeeId,
-                                absentEmployeeName: shift.employeeName || '',
-                                description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente — ${shift.objectiveName} Â· ${shift.positionName} — por ausencia de ${shift.employeeName}`,
-                                createdAt: now,
-                                source: 'SYSTEM_SCHEDULER',
-                            });
-                        }
-                    }
-                }
-                catch (e) {
-                    console.warn('[detectarAusencias] Error en retenciÃ³n automÃ¡tica:', e);
-                }
-            }
             const tokens = await getEmployeeTokens(db, shift.employeeId);
             if (tokens.length > 0) {
                 const startStr = shift.startTime?.toDate
@@ -2907,18 +2591,23 @@ exports.gestionarVacantes = functions
                 timestamp: now,
             });
             sentToProtocol++;
-            await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
-                id: docSnap.id,
-                empresaId: shiftEmpresaId(shift) || 'bacarsa',
-                objectiveId: String(shift.objectiveId || ''),
-                objectiveName: String(shift.objectiveName || ''),
-                positionName: String(shift.positionName || ''),
-                clientId: String(shift.clientId || ''),
-                clientName: String(shift.clientName || ''),
-                code: String(shift.code || ''),
-                startTime: shift.startTime,
-                endTime: shift.endTime,
-            }, 'AUTO');
+            {
+                const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
+                if (!(await (0, opsManualMode_1.isEmpresaManualMode)(db, vacEmpresa))) {
+                    await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
+                        id: docSnap.id,
+                        empresaId: vacEmpresa,
+                        objectiveId: String(shift.objectiveId || ''),
+                        objectiveName: String(shift.objectiveName || ''),
+                        positionName: String(shift.positionName || ''),
+                        clientId: String(shift.clientId || ''),
+                        clientName: String(shift.clientName || ''),
+                        code: String(shift.code || ''),
+                        startTime: shift.startTime,
+                        endTime: shift.endTime,
+                    }, 'AUTO');
+                }
+            }
             continue;
         }
         if (minutesUntil <= 60 && !shift.vacanteProtocoloAt) {
@@ -2957,18 +2646,23 @@ exports.gestionarVacantes = functions
                 timestamp: now,
             });
             sentToProtocol++;
-            await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
-                id: docSnap.id,
-                empresaId: shiftEmpresaId(shift) || 'bacarsa',
-                objectiveId: String(shift.objectiveId || ''),
-                objectiveName: String(shift.objectiveName || ''),
-                positionName: String(shift.positionName || ''),
-                clientId: String(shift.clientId || ''),
-                clientName: String(shift.clientName || ''),
-                code: String(shift.code || ''),
-                startTime: shift.startTime,
-                endTime: shift.endTime,
-            }, 'AUTO');
+            {
+                const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
+                if (!(await (0, opsManualMode_1.isEmpresaManualMode)(db, vacEmpresa))) {
+                    await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
+                        id: docSnap.id,
+                        empresaId: vacEmpresa,
+                        objectiveId: String(shift.objectiveId || ''),
+                        objectiveName: String(shift.objectiveName || ''),
+                        positionName: String(shift.positionName || ''),
+                        clientId: String(shift.clientId || ''),
+                        clientName: String(shift.clientName || ''),
+                        code: String(shift.code || ''),
+                        startTime: shift.startTime,
+                        endTime: shift.endTime,
+                    }, 'AUTO');
+                }
+            }
         }
         else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {
             await docSnap.ref.update({
@@ -3414,6 +3108,23 @@ exports.scheduledTagTurnosArchiveTier = (0, scheduler_1.onSchedule)({
 }, async () => {
     const { tagTurnosArchiveTier } = await Promise.resolve().then(() => require('./ops/tagTurnosArchiveTier'));
     await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
+});
+exports.releaseInvalidRetentions = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const role = String(context.auth.token.role ?? '');
+    const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+    if (!allowed.includes(role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo admin.');
+    }
+    const db = admin.firestore();
+    const dryRun = data?.dryRun !== false;
+    const result = await (0, coverageRetention_1.releaseInvalidRetentionsRun)(db, {
+        empresaId: data?.empresaId ? String(data.empresaId) : undefined,
+        dryRun,
+    });
+    return { dryRun, count: result.rows.length, rows: result.rows };
 });
 exports.tagTurnosArchiveTier = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
