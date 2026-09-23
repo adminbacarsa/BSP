@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { useNavigation, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   getCheckInTiming,
@@ -16,6 +16,7 @@ import { useEmpresaBranding } from '../../src/hooks/useEmpresaBranding';
 import { useEventosPortal } from '../../src/hooks/useEventosPortal';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
+import { useConvocatoriasCobertura } from '../../src/hooks/useConvocatoriasCobertura';
 import {
   heroShift,
   isActiveRetentionShift,
@@ -28,6 +29,7 @@ import { appRoutes } from '../../src/lib/appRoutes';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
+import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
@@ -45,6 +47,7 @@ import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useClockNow } from '../../src/hooks/useClockNow';
 import { useTheme } from '../../src/theme/ThemeContext';
 import type { SolicitudEvento } from '@cosp/portal-types';
+import type { ConvocatoriaCobertura } from '../../src/lib/convocatoriasCobertura';
 import Constants from 'expo-constants';
 
 export default function HoyScreen() {
@@ -58,6 +61,7 @@ export default function HoyScreen() {
 function HoyScreenContent() {
   const router = useRouter();
   const navigation = useNavigation();
+  const params = useLocalSearchParams<{ focus?: string; convocatoriaId?: string }>();
   const { palette } = useTheme();
   const { isCompact, contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
@@ -96,11 +100,26 @@ function HoyScreenContent() {
     displayName,
     { isPreviewMode },
   );
+  const {
+    coberturaPendientes,
+    busyId: coberturaBusyId,
+    responder: responderCobertura,
+  } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
   const { eventosMap } = useEventosMap(employee?.empresaId);
   const { unreadCount } = usePortalInbox(user, previewEmpDocId);
 
+  const focusCobertura =
+    String(params.focus || '').toLowerCase() === 'cobertura' ||
+    !!String(params.convocatoriaId || '').trim();
+  const highlightConvocatoriaId = String(params.convocatoriaId || '').trim() || null;
+
   async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
+    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+  }
+
+  async function onResponderCobertura(c: ConvocatoriaCobertura, acepta: boolean) {
+    const result = await responderCobertura(c.id, acepta ? 'ACCEPTED' : 'REJECTED');
     Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
   }
 
@@ -266,6 +285,18 @@ function HoyScreenContent() {
             </Pressable>
           ) : null}
 
+          {coberturaPendientes.length > 0 ? (
+            <CoberturaConvocatoriasBanner
+              convocatorias={coberturaPendientes}
+              busyId={coberturaBusyId}
+              highlightedId={
+                focusCobertura ? highlightConvocatoriaId || coberturaPendientes[0]?.id : null
+              }
+              onAccept={(c) => void onResponderCobertura(c, true)}
+              onReject={(c) => void onResponderCobertura(c, false)}
+            />
+          ) : null}
+
           {portalFeatures.viewEvents && convocatoriasPendientes.length > 0 ? (
             <ConvocatoriasBanner
               convocatorias={convocatoriasPendientes}
@@ -335,24 +366,24 @@ function HoyScreenContent() {
               }
               footer={
                 todayAbsentShift ? null : (
-                <View style={styles.heroActions}>
-                  {portalFeatures.checkIn && canCheckIn ? (
-                    <CommandButton
-                      label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
-                      variant="success"
-                      loading={busyShiftId === mainShift?.id}
-                      onPress={onCheckIn}
-                    />
-                  ) : null}
-                  {portalFeatures.checkIn && canLate ? (
-                    <CommandButton
-                      label="Avisar llegada tarde"
-                      variant="ghost"
-                      loading={busyShiftId === mainShift?.id}
-                      onPress={onLate}
-                    />
-                  ) : null}
-                </View>
+                  <View style={styles.heroActions}>
+                    {portalFeatures.checkIn && canCheckIn ? (
+                      <CommandButton
+                        label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
+                        variant="success"
+                        loading={busyShiftId === mainShift?.id}
+                        onPress={onCheckIn}
+                      />
+                    ) : null}
+                    {portalFeatures.checkIn && canLate ? (
+                      <CommandButton
+                        label="Avisar llegada tarde"
+                        variant="ghost"
+                        loading={busyShiftId === mainShift?.id}
+                        onPress={onLate}
+                      />
+                    ) : null}
+                  </View>
                 )
               }
             />

@@ -4,6 +4,7 @@ export const PORTAL_CALLABLES = {
   requestCheckIn: 'requestCheckIn',
   reportarAusencia: 'reportarAusencia',
   notificarLlegadaTarde: 'notificarLlegadaTarde',
+  responderConvocatoriaCobertura: 'responderConvocatoriaCobertura',
   getSwapCandidates: 'getSwapCandidates',
   getSwapPeople: 'getSwapPeople',
   createSwapRequest: 'createSwapRequest',

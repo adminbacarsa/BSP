@@ -13,10 +13,19 @@ export function createPortalCallables(functions: Functions) {
       PORTAL_CALLABLES.activateAndSetPassword,
     ),
     requestCheckIn: httpsCallable<RequestCheckInRequest, unknown>(functions, PORTAL_CALLABLES.requestCheckIn),
-    notificarLlegadaTarde: httpsCallable<{ shiftId: string }, unknown>(
+    notificarLlegadaTarde: httpsCallable<{ shiftId: string; etaMinutes?: number }, unknown>(
       functions,
       PORTAL_CALLABLES.notificarLlegadaTarde,
     ),
+    responderConvocatoriaCobertura: httpsCallable<
+      {
+        convocatoriaId: string;
+        response: 'ACCEPTED' | 'REJECTED';
+        rejectionReason?: string;
+        etaMinutes?: number;
+      },
+      { success?: boolean }
+    >(functions, PORTAL_CALLABLES.responderConvocatoriaCobertura),
     deleteMyTokens: httpsCallable<void, unknown>(functions, PORTAL_CALLABLES.deleteMyTokens),
     sendTestNotification: httpsCallable<{ title?: string; body?: string; type?: string }, unknown>(
       functions,
