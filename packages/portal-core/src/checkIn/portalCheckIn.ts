@@ -73,9 +73,23 @@ export function getCheckInTiming(
     return { diffMinutes, canCheckIn, lateWindow, tooEarly };
   }
 
+  const startMs = start?.getTime() ?? 0;
+  const nowMs = now.getTime();
+  let windowEndMs = startMs + 5 * 60 * 1000;
+  if (shift.lateArrivalAt || (shift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed) {
+    const etaAt = toDate((shift as { lateArrivalEtaAt?: unknown }).lateArrivalEtaAt);
+    const cap = startMs + 60 * 60 * 1000;
+    windowEndMs = etaAt?.getTime()
+      ? Math.min(etaAt.getTime(), cap)
+      : startMs + 30 * 60 * 1000;
+  }
+
   const canCheckIn =
-    diffMinutes !== null && diffMinutes <= 15 && diffMinutes >= -5 && !shift.isFranco;
-  const lateWindow = diffMinutes !== null && diffMinutes < -5 && diffMinutes >= -120;
+    diffMinutes !== null
+    && nowMs >= startMs - 15 * 60 * 1000
+    && nowMs <= windowEndMs
+    && !shift.isFranco;
+  const lateWindow = diffMinutes !== null && diffMinutes < -5 && nowMs <= windowEndMs;
   const tooEarly = diffMinutes !== null && diffMinutes > 15;
   return { diffMinutes, canCheckIn, lateWindow, tooEarly };
 }

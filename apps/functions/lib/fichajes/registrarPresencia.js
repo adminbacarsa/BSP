@@ -162,14 +162,17 @@ async function registrarPresencia(db, input) {
     if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
         realStartTime = nowTs;
     }
+    else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+        realStartTime =
+            windowEval.usePlannedStart
+                ? shiftData.adjustedStartTime
+                : firestore_1.Timestamp.fromMillis(nowMs);
+    }
     else if (windowEval.usePlannedStart && scheduledStartTs) {
         realStartTime = scheduledStartTs;
     }
     else {
         realStartTime = firestore_1.Timestamp.fromMillis(nowMs);
-    }
-    if (isEarlyStart && shiftData.adjustedStartTime) {
-        realStartTime = shiftData.adjustedStartTime;
     }
     const incomingPatch = {
         isPresent: true,

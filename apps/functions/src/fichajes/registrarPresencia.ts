@@ -231,7 +231,6 @@ export async function registrarPresencia(
   }
 
   const scheduledStartTs = shiftData.startTime ?? null;
-  const isEarlyStart = shiftData.isEarlyStart === true;
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
   const isLate = (windowEval.lateMinutes ?? 0) > 0
     || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
@@ -239,13 +238,15 @@ export async function registrarPresencia(
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
     realStartTime = nowTs;
+  } else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+    realStartTime =
+      windowEval.usePlannedStart
+        ? shiftData.adjustedStartTime
+        : Timestamp.fromMillis(nowMs);
   } else if (windowEval.usePlannedStart && scheduledStartTs) {
     realStartTime = scheduledStartTs;
   } else {
     realStartTime = Timestamp.fromMillis(nowMs);
-  }
-  if (isEarlyStart && shiftData.adjustedStartTime) {
-    realStartTime = shiftData.adjustedStartTime;
   }
 
   const incomingPatch: Record<string, unknown> = {

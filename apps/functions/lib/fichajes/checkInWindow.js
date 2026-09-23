@@ -14,18 +14,38 @@ function createdMs(shift) {
         ?? startMs(shift));
 }
 function adjustedStartMs(shift) {
-    return (shift.adjustedStartTime?.toMillis?.()
-        ?? (shift.segmentFromTime && startMs(shift) ? startMs(shift) : 0)
-        ?? startMs(shift));
+    const adj = shift.adjustedStartTime?.toMillis?.() ?? 0;
+    if (adj > 0)
+        return adj;
+    return startMs(shift);
 }
 function lateEtaDeadlineMs(shift, plannedStartMs) {
     const etaAt = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
-    const cap = plannedStartMs + 60 * 60 * 1000;
+    const cap60 = plannedStartMs + 60 * 60 * 1000;
     if (etaAt > 0)
-        return Math.min(etaAt, cap);
-    if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt)
-        return cap;
+        return Math.min(etaAt, cap60);
+    if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
+        return plannedStartMs + 30 * 60 * 1000;
+    }
     return plannedStartMs + 5 * 60 * 1000;
+}
+function finishAllowed(anchorStartMs, nowMs, useAdjustedStart) {
+    const onTimeEnd = anchorStartMs + 5 * 60 * 1000;
+    if (nowMs <= onTimeEnd) {
+        return {
+            allowed: true,
+            usePlannedStart: true,
+            useAdjustedStart,
+            lateMinutes: 0,
+        };
+    }
+    const lateMinutes = Math.max(0, Math.round((nowMs - anchorStartMs) / 60000));
+    return {
+        allowed: true,
+        usePlannedStart: false,
+        useAdjustedStart,
+        lateMinutes,
+    };
 }
 function evaluateServerCheckInWindow(shift, nowMs, opts) {
     if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
@@ -35,7 +55,11 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
         return { allowed: false, rejectCode: 'TRACE_REGISTRATION' };
     }
     const source = String(opts?.source || '').toUpperCase();
-    if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
+    if (source === 'OPERATIONS'
+        || source === 'VIGI'
+        || source === 'DEMO'
+        || source === 'MANUAL_RADIO'
+        || source === 'MANUAL_PHONE') {
         return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
     }
     const origin = String(shift.origin || '').toUpperCase();
@@ -46,39 +70,39 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
         return { allowed: false, rejectCode: 'SHIFT_ENDED' };
     if (!plannedStart)
         return { allowed: false, rejectCode: 'TOO_EARLY' };
-    let windowStart = plannedStart - 15 * 60 * 1000;
-    let windowEnd = plannedStart + 5 * 60 * 1000;
-    if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
-        windowEnd = lateEtaDeadlineMs(shift, plannedStart);
-    }
     if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
         const gapStart = plannedStart;
-        windowStart = gapStart - 15 * 60 * 1000;
-        windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-    }
-    if (ct === 'ADVANCE' || shift.coverageType === 'ADVANCE') {
-        const advStart = adjustedStartMs(shift) || plannedStart;
-        const advEnd = advStart + 60 * 60 * 1000;
-        const ownStart = opts?.ownShiftWindowMs ?? plannedStart;
-        const ownWinStart = ownStart - 15 * 60 * 1000;
-        const ownWinEnd = ownStart + 5 * 60 * 1000;
-        const inAdv = nowMs >= advStart - 15 * 60 * 1000 && nowMs <= advEnd;
-        const inOwn = nowMs >= ownWinStart && nowMs <= ownWinEnd;
-        if (!inAdv && !inOwn) {
-            return { allowed: false, rejectCode: nowMs < advStart - 15 * 60 * 1000 ? 'TOO_EARLY' : 'TOO_LATE' };
-        }
-    }
-    else {
+        const windowStart = gapStart - 15 * 60 * 1000;
+        const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
         if (nowMs < windowStart)
             return { allowed: false, rejectCode: 'TOO_EARLY' };
         if (nowMs > windowEnd)
             return { allowed: false, rejectCode: 'TOO_LATE' };
+        return finishAllowed(gapStart, nowMs, false);
     }
-    const onTimeEnd = plannedStart + 5 * 60 * 1000;
-    if (nowMs <= onTimeEnd) {
-        return { allowed: true, usePlannedStart: true, lateMinutes: 0 };
+    if (shift.isEarlyStart === true) {
+        const advStart = adjustedStartMs(shift);
+        const advWinStart = advStart - 15 * 60 * 1000;
+        const advWinEnd = advStart + 60 * 60 * 1000;
+        const ownWinStart = plannedStart - 15 * 60 * 1000;
+        const ownWinEnd = lateEtaDeadlineMs(shift, plannedStart);
+        const inAdv = nowMs >= advWinStart && nowMs <= advWinEnd;
+        const inOwn = nowMs >= ownWinStart && nowMs <= ownWinEnd;
+        if (!inAdv && !inOwn) {
+            const tooEarly = nowMs < advWinStart && nowMs < ownWinStart;
+            return { allowed: false, rejectCode: tooEarly ? 'TOO_EARLY' : 'TOO_LATE' };
+        }
+        if (inAdv) {
+            return finishAllowed(advStart, nowMs, true);
+        }
+        return finishAllowed(plannedStart, nowMs, false);
     }
-    const lateMinutes = Math.max(0, Math.round((nowMs - plannedStart) / 60000));
-    return { allowed: true, usePlannedStart: false, lateMinutes };
+    const windowStart = plannedStart - 15 * 60 * 1000;
+    const windowEnd = lateEtaDeadlineMs(shift, plannedStart);
+    if (nowMs < windowStart)
+        return { allowed: false, rejectCode: 'TOO_EARLY' };
+    if (nowMs > windowEnd)
+        return { allowed: false, rejectCode: 'TOO_LATE' };
+    return finishAllowed(plannedStart, nowMs, false);
 }
 //# sourceMappingURL=checkInWindow.js.map
