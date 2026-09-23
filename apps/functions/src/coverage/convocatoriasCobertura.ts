@@ -1,5 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { markShiftAbsent } from '../attendance/markShiftAbsent';
+import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import {
@@ -1109,10 +1111,11 @@ export const responderConvocatoriaCobertura = functions
     }
     const db = admin.firestore();
 
-    const { convocatoriaId, response, rejectionReason } = data as {
+    const { convocatoriaId, response, rejectionReason, etaMinutes } = data as {
       convocatoriaId: string;
       response: 'ACCEPTED' | 'REJECTED';
       rejectionReason?: string;
+      etaMinutes?: number;
     };
 
     if (!convocatoriaId || !response) {
@@ -1143,21 +1146,27 @@ export const responderConvocatoriaCobertura = functions
     const now = Timestamp.now();
 
     if (conv.type === 'LLEGADA_TARDE') {
-      // Caso especial: el guardia tardío confirma si viene o no
+      const shiftSnap = await db.collection('turnos').doc(conv.shiftId).get();
+      const shiftData = (shiftSnap.data() || {}) as Record<string, unknown>;
+      if (skipAbsencePipelineForShift(shiftData)) {
+        return { success: true, skipped: 'trace_registration' };
+      }
+      const startMs = (shiftData.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (response === 'ACCEPTED') {
         await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
+        const eta = Number.isFinite(Number(etaMinutes)) ? Math.max(1, Math.floor(Number(etaMinutes))) : 30;
+        const etaAt = startMs > 0 ? Timestamp.fromMillis(startMs + eta * 60 * 1000) : now;
         await db.collection('turnos').doc(conv.shiftId).update({
           lateArrivalConfirmed: true,
           lateArrivalConfirmedAt: now,
+          lateArrivalEtaMinutes: eta,
+          lateArrivalEtaAt: etaAt,
         });
       } else {
         await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
-        // No viene → marcar ausente → onTurnoAbsenciaDetectada dispara cascade
-        await db.collection('turnos').doc(conv.shiftId).update({
-          isAbsent: true,
-          status: 'ABSENT',
-          absenceType: 'AA',
-          absenceDetectedBy: 'LLEGADA_TARDE_RECHAZADA',
+        await markShiftAbsent(db, conv.shiftId, {
+          reason: 'LLEGADA_TARDE_RECHAZADA',
+          by: context.auth.uid,
         });
       }
       return { success: true };
@@ -1500,15 +1509,15 @@ export const checkConvocatoriaTimeouts = onSchedule(
       const conv = d.data() as ConvocatoriaCoberturaDoc;
       try {
         if (conv.type === 'LLEGADA_TARDE') {
-          // Guardia no confirmó que viene → marcar ausente → trigger cascade
           await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
-          await db.collection('turnos').doc(conv.shiftId).update({
-            isAbsent: true,
-            status: 'ABSENT',
-            absenceType: 'AA',
-            absenceDetectedBy: 'LLEGADA_TARDE_TIMEOUT',
-          });
-          console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → isAbsent=true en ${conv.shiftId}`);
+          const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
+          if (!skipAbsencePipelineForShift(sh as Record<string, unknown>)) {
+            await markShiftAbsent(db, conv.shiftId, {
+              reason: 'LLEGADA_TARDE_TIMEOUT',
+              by: 'SYSTEM_SCHEDULER',
+            });
+          }
+          console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → ausente ${conv.shiftId}`);
         } else {
           // Cascada regular: ESCALATED sigue activa, avanzar al siguiente paso
           await d.ref.update({ status: 'ESCALATED', escalatedAt: now });

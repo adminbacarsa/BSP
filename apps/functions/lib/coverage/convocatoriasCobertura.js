@@ -7,6 +7,8 @@ exports.simularRespuestasConvocatorias = simularRespuestasConvocatorias;
 exports.crearConvocatoriaLlegadaTarde = crearConvocatoriaLlegadaTarde;
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
+const markShiftAbsent_1 = require("../attendance/markShiftAbsent");
+const coverageTraceShift_1 = require("./coverageTraceShift");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
@@ -860,7 +862,7 @@ exports.responderConvocatoriaCobertura = functions
         throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     }
     const db = admin.firestore();
-    const { convocatoriaId, response, rejectionReason } = data;
+    const { convocatoriaId, response, rejectionReason, etaMinutes } = data;
     if (!convocatoriaId || !response) {
         throw new functions.https.HttpsError('invalid-argument', 'convocatoriaId y response son requeridos.');
     }
@@ -881,20 +883,28 @@ exports.responderConvocatoriaCobertura = functions
     }
     const now = firestore_1.Timestamp.now();
     if (conv.type === 'LLEGADA_TARDE') {
+        const shiftSnap = await db.collection('turnos').doc(conv.shiftId).get();
+        const shiftData = (shiftSnap.data() || {});
+        if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(shiftData)) {
+            return { success: true, skipped: 'trace_registration' };
+        }
+        const startMs = shiftData.startTime?.toMillis?.() ?? 0;
         if (response === 'ACCEPTED') {
             await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
+            const eta = Number.isFinite(Number(etaMinutes)) ? Math.max(1, Math.floor(Number(etaMinutes))) : 30;
+            const etaAt = startMs > 0 ? firestore_1.Timestamp.fromMillis(startMs + eta * 60 * 1000) : now;
             await db.collection('turnos').doc(conv.shiftId).update({
                 lateArrivalConfirmed: true,
                 lateArrivalConfirmedAt: now,
+                lateArrivalEtaMinutes: eta,
+                lateArrivalEtaAt: etaAt,
             });
         }
         else {
             await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
-            await db.collection('turnos').doc(conv.shiftId).update({
-                isAbsent: true,
-                status: 'ABSENT',
-                absenceType: 'AA',
-                absenceDetectedBy: 'LLEGADA_TARDE_RECHAZADA',
+            await (0, markShiftAbsent_1.markShiftAbsent)(db, conv.shiftId, {
+                reason: 'LLEGADA_TARDE_RECHAZADA',
+                by: context.auth.uid,
             });
         }
         return { success: true };
@@ -1159,13 +1169,14 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
         try {
             if (conv.type === 'LLEGADA_TARDE') {
                 await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
-                await db.collection('turnos').doc(conv.shiftId).update({
-                    isAbsent: true,
-                    status: 'ABSENT',
-                    absenceType: 'AA',
-                    absenceDetectedBy: 'LLEGADA_TARDE_TIMEOUT',
-                });
-                console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → isAbsent=true en ${conv.shiftId}`);
+                const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
+                if (!(0, coverageTraceShift_1.skipAbsencePipelineForShift)(sh)) {
+                    await (0, markShiftAbsent_1.markShiftAbsent)(db, conv.shiftId, {
+                        reason: 'LLEGADA_TARDE_TIMEOUT',
+                        by: 'SYSTEM_SCHEDULER',
+                    });
+                }
+                console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → ausente ${conv.shiftId}`);
             }
             else {
                 await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
