@@ -45,6 +45,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC-P1 Retenido** ✅ hero no desaparece tras endTime; tarjeta «esperá al relevo»; Agenda «Retenido».
 - **F1-14** ✅ activación mail→app.
 - **F5-09** ✅ responsive 3 tamaños (OTA agenda+alertas).
 - **F0-01** ✅ Play Console cuenta personal Mauro **verificada** (crear apps habilitado).
@@ -55,6 +56,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
+| **CC-P2..P5** | Convocatorias cobertura, ¿Venís?, aviso tarde T−60, ventanas fichada | Portal móvil |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
 | **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
 | Device-block 2º celular | Opcional confirmar | F1 |
@@ -98,6 +100,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC-P2 Cobertura | Escucha convocatorias_cobertura PENDING/ESCALATED; banner Acepto/No puedo → responderConvocatoriaCobertura; push CONVOCATORIA_COBERTURA → Hoy
+2026-09-23 | CC-P1 Retenido | pickTodayShiftAny/hero: isRetention+presente+!completado sigue hero tras endTime; RetentionBanner en Hoy; AgendaShiftCard «Retenido» (no «ya trabajado»)
 2026-09-08 | F6-01 link | Internal Testing invite: https://play.google.com/apps/internaltest/4701606202645789130
 2026-09-08 | Package OK | Firebase Android `com.cosp.guardia` + google-services + EAS secret; AAB production nuevo en curso
 2026-09-08 | Package | Android/iOS id → `com.cosp.guardia` (sin grupobacar); falta Firebase app + google-services + AAB nuevo
