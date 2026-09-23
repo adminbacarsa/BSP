@@ -196,9 +196,23 @@ function HoyScreenContent() {
   const isConfirmed =
     !!mainShift && (mainShift.isPresent || rawStatus === 'PRESENT' || rawStatus === 'InProgress');
   const hasPendingRequest = !!mainShift?.checkInRequestedAt && !isConfirmed;
-  const checkInStatusView = resolveCheckInUiStatus(mainShift, timing, {
-    offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
-  });
+  const hasLocalLateEta = !!mainShift && lateEtaByShiftId[mainShift.id] != null;
+  const checkInStatusView = resolveCheckInUiStatus(
+    mainShift
+      ? ({
+          ...mainShift,
+          ...(hasLocalLateEta && !mainShift.lateArrivalAt
+            ? { lateArrivalAt: new Date().toISOString(), etaMinutes: lateEtaByShiftId[mainShift.id] }
+            : hasLocalLateEta
+              ? { etaMinutes: lateEtaByShiftId[mainShift.id] }
+              : {}),
+        } as typeof mainShift)
+      : mainShift,
+    timing,
+    {
+      offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
+    },
+  );
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
@@ -216,7 +230,8 @@ function HoyScreenContent() {
     !hasPendingRequest &&
     !isConfirmed &&
     !mainShift.lateArrivalAt &&
-    !(mainShift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed;
+    !(mainShift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed &&
+    !hasLocalLateEta;
 
   async function onCheckIn() {
     if (!mainShift) return;
