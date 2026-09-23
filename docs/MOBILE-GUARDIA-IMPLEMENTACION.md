@@ -35,7 +35,7 @@
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
 **Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
 **Última actualización:** 2026-09-23  
-**Última tarea completada:** Flujos CC portal — Punto 1 Retenido (hero + Agenda)
+**Última tarea completada:** Flujos CC portal — P1…P5 (retenido, cobertura, ¿Venís?, aviso tarde, ventanas)
 
 ---
 
@@ -45,6 +45,8 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC-P5 Ventanas** ✅ portalCheckIn + tests (normal/late/ops/ADV/GPS).
+- **CC-P4 Aviso tarde** ✅ «Voy a llegar tarde» T−60…T+5 con eta 15/30/60.
 - **CC-P3 ¿Venís?** ✅ LLEGADA_TARDE con demora 15/30/60 + etaMinutes en payload.
 - **CC-P2 Cobertura** ✅ convocatorias_cobertura en Hoy + callable + deep link push.
 - **CC-P1 Retenido** ✅ hero no desaparece tras endTime; tarjeta «esperá al relevo»; Agenda «Retenido».
@@ -58,7 +60,6 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **CC-P2..P5** | Convocatorias cobertura, ¿Venís?, aviso tarde T−60, ventanas fichada | Portal móvil |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
 | **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
 | Device-block 2º celular | Opcional confirmar | F1 |
