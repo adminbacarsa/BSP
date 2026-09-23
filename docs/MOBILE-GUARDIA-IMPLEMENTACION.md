@@ -35,7 +35,7 @@
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
 **Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
 **Última actualización:** 2026-09-23  
-**Última tarea completada:** Flujos CC portal — P1…P5 (retenido, cobertura, ¿Venís?, aviso tarde, ventanas)
+**Última tarea completada:** Flujos CC en `main` (74a54f78) — vitest 16/16; OTA preview = Notebook (sin EXPO_TOKEN en cloud)
 
 ---
 
@@ -45,6 +45,8 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **CC en main** ✅ merge `74a54f78` (retenido, convocatorias, ¿Venís?, ventanas, ADV∪propia, ocultar registro EXT/ADV). Backend prod: `etaMinutes`, ventanas server, rechazo TRACE.
+- **Vitest portal-core** ✅ 16/16 en `main@74a54f78`.
 - **CC-P5 Ventanas** ✅ portalCheckIn + tests (normal/late/ops/ADV/GPS).
 - **CC-P4 Aviso tarde** ✅ «Voy a llegar tarde» T−60…T+5 con eta 15/30/60.
 - **CC-P3 ¿Venís?** ✅ LLEGADA_TARDE con demora 15/30/60 + etaMinutes en payload.
@@ -60,9 +62,37 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
+| **OTA preview** | Desde Notebook: `cd apps/mobile-guardia && npm run update:preview` (cloud agent sin EXPO_TOKEN) | Mobile |
+| **SA checklist CC** | Validar en teléfono Pruebas SA (sección abajo) | Mobile |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
 | **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
-| Device-block 2º celular | Opcional confirmar | F1 |
+
+### Checklist Pruebas SA — flujos CC (teléfono, canal preview)
+
+> Build **preview** (APK/canal preview). Backend prod ya valida ventanas + `etaMinutes`.  
+> Anotar en bitácora cualquier mensaje de error del servidor (`TOO_EARLY` / `TOO_LATE` / `TRACE_REGISTRATION`).
+
+| # | Caso | Pasos | Esperado | OK |
+|---|------|-------|----------|----|
+| 1 | **Retenido** | CC retiene al guardia (presente, `isRetention`, sin completar). Abrir **Hoy** y **Agenda**. | Hoy: tarjeta «Estás retenido en {objetivo} · esperá al relevo» (sin contador). Agenda: etiqueta **Retenido** (no «ya trabajado»). Sigue hero aunque pasó `endTime`. | ⬜ |
+| 2 | **Convocatoria cobertura** | Cascada RET/REF/ESC/FT/EXT/ADV → push o tarjeta en Hoy. | Tipo + objetivo + horario + countdown. **Acepto** / **No puedo** → `responderConvocatoriaCobertura`. Al aceptar, hero = turno `OPERATIONS_COVERAGE` con límite de fichada (~1 h). | ⬜ |
+| 3 | **¿Venís? (T+0)** | Sin fichada a inicio → convocatoria `LLEGADA_TARDE`. | Tarjeta **¿Venís?** · **Sí voy** (15/30/60) / **No voy**. Sí voy manda `etaMinutes`. No voy → ausente. | ⬜ |
+| 4 | **Voy a llegar tarde** | En ventana T−60…T+5, botón en Hoy. | Pedir demora 15/30/60 → `notificarLlegadaTarde({ shiftId, etaMinutes })`. Estado «Llegada tarde avisada · te esperan hasta HH:MM». | ⬜ |
+| 5a | **Fichada normal** | T−15…T+5 en puesto (GPS). | Presente OK. Fuera de radio → bloqueo (salvo sin coords / `allowRemoteCheckIn`). | ⬜ |
+| 5b | **Fichada con aviso tarde** | Tras avisar con eta. | Puede fichar hasta `min(inicio+eta, T+60)`; sin eta hasta T+30. | ⬜ |
+| 5c | **Fichada cobertura** | Tras aceptar convocatoria (no registro). | Ventana: inicio−15 … max(createdAt, inicio)+60. | ⬜ |
+| 5d | **Fichada adelanto (ADV)** | Turno propio con `isEarlyStart`. | Puede fichar en ventana del adelanto **o** en la propia (T−15…T+5 / tarde). | ⬜ |
+| 6 | **Sin turnos registro EXT/ADV** | Tras EXT/ADV del CC. | No aparecen ops_cov con `coverageHoursOnSource` como hero ni en Agenda. Presente se marca en el turno propio (`isExtended` / `isEarlyStart`). Intento de fichar registro → error `TRACE_REGISTRATION` (si aplica). | ⬜ |
+
+**Errores servidor a anotar** (toast / Alert / log Functions):
+
+| Código | Cuándo suele aparecer |
+|--------|------------------------|
+| `TOO_EARLY` | Fichada antes de la ventana permitida |
+| `TOO_LATE` | Fichada después del tope (normal / eta / cobertura) |
+| `TRACE_REGISTRATION` | Intento de fichar ops_cov de registro (EXT/ADV) |
+
+---
 
 ### Aplazado / descartado (no bloquea APK Android)
 
@@ -103,6 +133,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-23 | CC main+vitest | main@74a54f78; vitest portalCheckIn 16/16 OK; OTA preview no publicada desde cloud (EXPO_TOKEN omitido) → Notebook: npm run update:preview
 2026-09-23 | CC-fix ADV+registro | ADV = ventana adelanto OR propia (T−15/tarde); ops_cov coverageHoursOnSource ocultos (no hero/Agenda/fichada); 16 tests
 2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK
 2026-09-23 | CC-P4 Aviso tarde | Botón «Voy a llegar tarde» T−60…T+5 + demora 15/30/60 (etaMinutes); UI «te esperan hasta HH:MM»
