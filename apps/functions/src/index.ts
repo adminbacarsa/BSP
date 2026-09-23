@@ -24,6 +24,10 @@ import {
 } from './backup/backup-auth.util';
 import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
+import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
+import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
+import { isEmpresaManualMode } from './ops/opsManualMode';
+import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -1120,6 +1124,24 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
 
     const cascadeCreatedBy =
       String(after.absenceDetectedBy || '').toUpperCase() === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
+
+    const titularRecord = { id: event.params.shiftId, ...after };
+    try {
+      await retainOutgoingForGap(db, titularRecord, {
+        sendPush: true,
+        reportedBy: cascadeCreatedBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO',
+      });
+    } catch (e) {
+      console.warn('[onTurnoAbsenciaDetectada] retención:', (e as Error)?.message);
+    }
+
+    const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await isEmpresaManualMode(db, empresaId));
+    if (manual) {
+      console.log(
+        `[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`,
+      );
+      return;
+    }
 
     await iniciarCascadaCobertura(db, {
       id: event.params.shiftId,
@@ -2572,319 +2594,13 @@ export const autoCompletarTurnos = functions
       return null;
     }
     const now = admin.firestore.Timestamp.now();
-    const nowMs = now.toMillis();
-
-    // Turnos PRESENT cuyo endTime pasÃ³ hace al menos 5 minutos
-    const cutoff = admin.firestore.Timestamp.fromMillis(nowMs - 5 * 60 * 1000);
-    // Ventana para buscar relevo: startTime dentro de Â±2h del endTime del turno saliente
-    const RELIEF_WINDOW_MS = 2 * 60 * 60 * 1000;
-
-    const snap = await db.collection('turnos')
-      .where('status', '==', 'PRESENT')
-      .where('endTime', '<=', cutoff)
-      .get();
-
-    if (snap.empty) return null;
-
-    const completeBatch  = db.batch();
-    const auditBatch     = db.batch();
-    let completed = 0;
-    let alertedNoRelief = 0;
-
-    for (const docSnap of snap.docs) {
-      const shift = docSnap.data();
-
-      if (!cc.isEnabled(shift.empresaId)) continue;
-      if ((shift.status || '') === 'INTERRUPTED') continue;
-
-      // Retenciones automáticas (autoRetentionAt existe): cerrar si llevan >2h sin cambio
-      // Retenciones manuales del operador (sin autoRetentionAt): nunca tocar
-      if (shift.isRetention === true) {
-        const autoRetentionMs = shift.autoRetentionAt?.toMillis?.() ?? 0;
-        if (!autoRetentionMs) {
-          // Retención manual del operador (sin autoRetentionAt).
-          // Usar endTime como referencia: si el turno lleva >6h vencido → cerrar.
-          const endMs2 = shift.endTime?.toMillis?.() ?? 0;
-          if (!endMs2) continue;
-          const minutesSinceEnd = (nowMs - endMs2) / 60000;
-          if (minutesSinceEnd < 360) continue; // <6h → respetar decisión del operador
-          // >6h sin resolver → auto-cerrar igual que timeout de CF
-        } else {
-          const minutesInRetention = (nowMs - autoRetentionMs) / 60000;
-          if (minutesInRetention < 120) continue; // <2h → esperar más
-        }
-        // >2h de retención automática o >6h de retención manual → auto-cerrar
-        completeBatch.update(docSnap.ref, {
-          status: 'COMPLETED',
-          isCompleted: true,
-          isPresent: false,
-          completedAt: now,
-          completedBy: 'Sistema',
-          completionReason: 'AUTO_END_CF_RETENTION_TIMEOUT',
-        });
-        completed++;
-        continue;
-      }
-
-      const endTimeMs: number = shift.endTime?.toMillis?.() ?? 0;
-      if (!endTimeMs) continue;
-
-      // Buscar turnos entrantes en el mismo objetivo + posiciÃ³n
-      // cuyo startTime estÃ© dentro de Â±2h del endTime del turno saliente
-      const windowStart = admin.firestore.Timestamp.fromMillis(endTimeMs - RELIEF_WINDOW_MS);
-      const windowEnd   = admin.firestore.Timestamp.fromMillis(endTimeMs + RELIEF_WINDOW_MS);
-
-      const relieveSnap = await db.collection('turnos')
-        .where('objectiveId',  '==', shift.objectiveId)
-        .where('positionName', '==', shift.positionName)
-        .where('startTime', '>=', windowStart)
-        .where('startTime', '<=', windowEnd)
-        .get();
-
-      // Filtrar el turno propio y exigir mismo tenant cuando el turno saliente estÃ¡ etiquetado
-      const relieveDocs = relieveSnap.docs.filter(d =>
-        d.id !== docSnap.id && sameTenantShift(shift, d.data()),
-      );
-
-      const relievePresent = relieveDocs.find(d => {
-        const s = d.data().status || '';
-        return s === 'PRESENT' || s === 'COMPLETED';
-      });
-      // Solo contar como relevo pendiente un turno con empleado REAL asignado.
-      // Las vacantes (employeeId === 'VACANTE' / isUnassigned) no son relevos vÃ¡lidos —
-      // si se cuentan, el turno saliente nunca se cierra y queda como retenido indefinidamente.
-      const relievePending = relieveDocs.find(d => {
-        const data = d.data();
-        if (!data.employeeId || data.employeeId === 'VACANTE') return false;
-        if (data.isUnassigned === true) return false;
-        const s = data.status || '';
-        return s === 'PENDING' || s === 'PLAN' || s === '' || (!s);
-      });
-
-      // Relevo ausente: retén convocado que no se presentó (status ABSENT)
-      const relieveAbsent = relieveDocs.find(d => {
-        const data = d.data();
-        return data.isAbsent === true || data.status === 'ABSENT';
-      });
-
-      if (relievePresent) {
-        // CASO A: El relevo ya estÃ¡ presente — safety net, cerrar el turno saliente
-        completeBatch.update(docSnap.ref, {
-          status: 'COMPLETED',
-          isCompleted: true,
-          realEndTime: now,
-          autoCompletedAt: now,
-          autoCompletedBy: 'SYSTEM_SCHEDULER',
-          autoCloseReason: 'RELEVO_PRESENTE',
-        });
-        const logRef = db.collection('audit_logs').doc();
-        auditBatch.set(logRef, {
-          action: 'AUTO_COMPLETE_SHIFT',
-          actorName: 'Sistema (Scheduler)',
-          actorUid: 'SYSTEM',
-          module: 'OPERACIONES',
-          shiftId: docSnap.id,
-          details: `Turno cerrado por relevo entrante ya presente: ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-          timestamp: now,
-        });
-        completed++;
-
-      } else if (relievePending) {
-        // CASO B: Relevo programado pero no llegÃ³ → retener al guardia + push + novedad
-        // Poner en retención (o asegurar autoRetentionAt si ya fue marcado manualmente sin él)
-        if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
-            isRetention: true,
-            retentionReason: `RELEVO_NO_PRESENTADO: ${relievePending.data().employeeName || 'relevo'} no se presentó`,
-            autoRetentionAt: now,
-          });
-        }
-        // Push al guardia retenido
-        const retTokensB = await getEmployeeTokens(db, shift.employeeId as string);
-        if (retTokensB.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            tokens: retTokensB,
-            notification: {
-              title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relievePending.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
-            },
-            webpush: {
-              notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-              fcmOptions: { link: '/empleado/dashboard' },
-            },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B error:', e));
-        }
-        // Novedad para operaciones (una sola vez)
-        const existingB = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'RETENCION_SIN_RELEVO')
-          .limit(1).get();
-        if (existingB.empty) {
-          const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
-            type: 'RETENCION_SIN_RELEVO',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            reliefShiftId: relievePending.id,
-            objectiveId: shift.objectiveId,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            employeeName: shift.employeeName || '',
-            reliefEmployeeName: relievePending.data().employeeName || '',
-            positionName: shift.positionName || '',
-            description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
-          alertedNoRelief++;
-        }
-
-      } else if (relieveAbsent) {
-        // CASO B2: El relevo fue convocado (retén) pero no se presentó y fue marcado ausente
-        // → Retención forzada + push + novedad
-        if (!shift.isRetention || !shift.autoRetentionAt) {
-          completeBatch.update(docSnap.ref, {
-            isRetention: true,
-            retentionReason: `RELEVO_AUSENTE: ${relieveAbsent.data().employeeName || 'relevo'} no se presentó`,
-            autoRetentionAt: now,
-          });
-        }
-        // Push al guardia retenido
-        const retTokensB2 = await getEmployeeTokens(db, shift.employeeId as string);
-        if (retTokensB2.length > 0) {
-          await admin.messaging().sendEachForMulticast({
-            tokens: retTokensB2,
-            notification: {
-              title: '⏰ Quedaste en retención',
-              body: `Tu relevo (${relieveAbsent.data().employeeName || 'el guardia'}) no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé hasta aviso de Operaciones.`,
-            },
-            webpush: {
-              notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-              fcmOptions: { link: '/empleado/dashboard' },
-            },
-          }).catch(e => console.warn('[autoCompletarTurnos] Push retención B2 error:', e));
-        }
-        const existing = await db.collection('novedades')
-          .where('shiftId', '==', docSnap.id)
-          .where('type', '==', 'RETENCION_SIN_RELEVO')
-          .limit(1).get();
-        if (existing.empty) {
-          const novRef = db.collection('novedades').doc();
-          auditBatch.set(novRef, {
-            type: 'RETENCION_SIN_RELEVO',
-            status: 'PENDIENTE',
-            shiftId: docSnap.id,
-            objectiveId: shift.objectiveId,
-            objectiveName: shift.objectiveName || '',
-            clientId: shift.clientId || null,
-            empresaId: shiftEmpresaId(shift) || null,
-            employeeName: shift.employeeName || '',
-            positionName: shift.positionName || '',
-            description: `⚠️ RETENCIÓN FORZADA: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — su relevo no se presentó. Requiere cobertura urgente.`,
-            createdAt: now,
-            source: 'SYSTEM_SCHEDULER',
-          });
-          alertedNoRelief++;
-        }
-
-      } else {
-        // CASO C: Sin ningún relevo registrado.
-        // Verificar si el puesto requiere cobertura continua (24HS) consultando el SLA.
-        // Si es 24HS (tiene allowedShiftTypes con slots M/T/N) → retener al guardia.
-        // Si es CUSTOM/parcial (sin slots de rotación) → cerrar el turno.
-        const empId = shiftEmpresaId(shift);
-        let requiresContinuousCoverage = false;
-        try {
-          const slaSnap = await db.collection('servicios_sla')
-            .where('objectiveId', '==', shift.objectiveId)
-            .where('status', '==', 'active')
-            .limit(1).get();
-          if (!slaSnap.empty) {
-            const slaData = slaSnap.docs[0].data();
-            const positions: any[] = slaData.positions || [];
-            const posName = (shift.positionName || '').trim().toLowerCase();
-            const matchedPos = positions.find((p: any) => (p.name || '').trim().toLowerCase() === posName);
-            // Puesto con allowedShiftTypes definidos → rotación 24h → cobertura continua
-            requiresContinuousCoverage = Array.isArray(matchedPos?.allowedShiftTypes) && matchedPos.allowedShiftTypes.length > 0;
-          }
-        } catch (e) {
-          console.warn('[autoCompletarTurnos] Error checking SLA:', e);
-        }
-
-        if (requiresContinuousCoverage) {
-          // CASO C2: Puesto 24HS sin relevo → retener al guardia + push
-          if (!shift.isRetention || !shift.autoRetentionAt) {
-            completeBatch.update(docSnap.ref, {
-              isRetention: true,
-              retentionReason: 'SIN_RELEVO_24H: puesto con cobertura continua requerida',
-              autoRetentionAt: now,
-            });
-          }
-          const retTokensC = await getEmployeeTokens(db, shift.employeeId as string);
-          if (retTokensC.length > 0) {
-            await admin.messaging().sendEachForMulticast({
-              tokens: retTokensC,
-              notification: {
-                title: '⏰ Quedaste retenido',
-                body: `Permanecé en ${shift.objectiveName || 'el puesto'} hasta nuevo aviso. No hay relevo registrado.`,
-              },
-              webpush: {
-                notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                fcmOptions: { link: '/empleado/dashboard' },
-              },
-            }).catch(e => console.warn('[autoCompletarTurnos] Push retención C2 error:', e));
-          }
-          const existingC = await db.collection('novedades')
-            .where('shiftId', '==', docSnap.id)
-            .where('type', '==', 'RETENCION_SIN_RELEVO')
-            .limit(1).get();
-          if (existingC.empty) {
-            const novRef = db.collection('novedades').doc();
-            auditBatch.set(novRef, {
-              type: 'RETENCION_SIN_RELEVO',
-              status: 'PENDIENTE',
-              shiftId: docSnap.id,
-              objectiveId: shift.objectiveId,
-              objectiveName: shift.objectiveName || '',
-              clientId: shift.clientId || null,
-              empresaId: empId || null,
-              employeeName: shift.employeeName || '',
-              positionName: shift.positionName || '',
-              description: `⏰ RETENCIÓN: ${shift.employeeName || ''} en ${shift.objectiveName || ''} (${shift.positionName || ''}) — puesto 24HS sin relevo registrado.`,
-              createdAt: now,
-              source: 'SYSTEM_SCHEDULER',
-            });
-            alertedNoRelief++;
-          }
-        } else {
-          // CASO C: Puesto CUSTOM/parcial sin continuidad → cerrar turno automáticamente
-          completeBatch.update(docSnap.ref, {
-            status: 'COMPLETED',
-            isCompleted: true,
-            realEndTime: now,
-            autoCompletedAt: now,
-            autoCompletedBy: 'SYSTEM_SCHEDULER',
-            autoCloseReason: 'SIN_RELEVO_CUSTOM',
-          });
-          const logRef = db.collection('audit_logs').doc();
-          auditBatch.set(logRef, {
-            action: 'AUTO_COMPLETE_SHIFT',
-            actorName: 'Sistema (Scheduler)',
-            actorUid: 'SYSTEM',
-            module: 'OPERACIONES',
-            shiftId: docSnap.id,
-            details: `Turno finalizado (puesto CUSTOM sin relevo): ${shift.employeeName || ''} — ${shift.objectiveName || ''}`,
-            timestamp: now,
-          });
-          completed++;
-        }
-      }
-    }
-
-    await completeBatch.commit();
-    await auditBatch.commit();
-    console.log(`[autoCompletarTurnos] Completados: ${completed} | Alertas sin relevo: ${alertedNoRelief}`);
+    const pass = await runAutoCompletarTurnosPass(db, {
+      isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
+      shiftEmpresaId,
+      sameTenantShift,
+      getEmployeeTokens,
+    }, now);
+    console.log(`[autoCompletarTurnos] Completados: ${pass.completed} | Alertas sin relevo: ${pass.alertedNoRelief}`);
     return null;
   });
 
@@ -3118,76 +2834,7 @@ export const detectarAusencias = functions
           absenceDetectedBy: 'SYSTEM_SCHEDULER',
         });
 
-        // 2. Retención automÃ¡tica: si hay un guardia presente en el mismo puesto, retenerlo
-        const objectiveId   = shift.objectiveId   || '';
-        const positionName  = (shift.positionName || '').trim().toLowerCase();
-        const empId         = shiftEmpresaId(shift);
-        if (objectiveId && positionName && empId) {
-          try {
-            const presentSnap = await db.collection('turnos')
-              .where('empresaId', '==', empId)
-              .where('objectiveId', '==', objectiveId)
-              .where('isPresent', '==', true)
-              .where('isCompleted', '==', false)
-              .get();
-            const toRetain = presentSnap.docs.filter(d => {
-              const dat = d.data();
-              return (dat.positionName || '').trim().toLowerCase() === positionName
-                && dat.employeeId !== shift.employeeId;
-            });
-            for (const retDoc of toRetain) {
-              const retData = retDoc.data();
-              // Marcar como en retenciÃ³n si no lo estÃ¡ ya
-              if (!retData.isRetention) {
-                // Si el guardia a retener aún tiene turno activo, el timer de 2h debe arrancar
-                // desde su hora de fin planificada (no desde ahora), para que el auto-cierre
-                // se dispare correctamente a los 2h DESPUÉS de que termine su propio turno.
-                const retEndMs = retData.endTime?.toMillis?.() ?? 0;
-                const retentionAt = retEndMs > nowMs
-                  ? admin.firestore.Timestamp.fromMillis(retEndMs)
-                  : now;
-                await retDoc.ref.update({
-                  isRetention:     true,
-                  retentionReason: `AUSENCIA_AA: ${shift.employeeName || 'guardia'} no se presentó`,
-                  autoRetentionAt: retentionAt,
-                });
-                // Push al guardia retenido
-                const retTokens = await getEmployeeTokens(db, retData.employeeId);
-                if (retTokens.length > 0) {
-                  await admin.messaging().sendEachForMulticast({
-                    tokens: retTokens,
-                    notification: {
-                      title: '⏰ Quedaste en retención',
-                      body: `${shift.employeeName || 'El guardia siguiente'} no se presentó en ${shift.objectiveName || 'el puesto'}. Permanecé en el puesto hasta aviso de Operaciones.`,
-                    },
-                    webpush: {
-                      notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                      fcmOptions: { link: '/empleado/dashboard' },
-                    },
-                  }).catch(e => console.warn('[detectarAusencias] Push retención error:', e));
-                }
-                // Novedad para operaciones
-                await db.collection('novedades').add({
-                  type: 'RETENCION_POR_AUSENCIA',
-                  status: 'PENDIENTE',
-                  empresaId: empId,
-                  objectiveId,
-                  objectiveName:        shift.objectiveName || '',
-                  positionName:         shift.positionName  || '',
-                  employeeId:           retData.employeeId,
-                  employeeName:         retData.employeeName || '',
-                  absentEmployeeId:     shift.employeeId,
-                  absentEmployeeName:   shift.employeeName  || '',
-                  description: `${retData.employeeName || 'Guardia'} retenido automÃ¡ticamente — ${shift.objectiveName} Â· ${shift.positionName} — por ausencia de ${shift.employeeName}`,
-                  createdAt: now,
-                  source: 'SYSTEM_SCHEDULER',
-                });
-              }
-            }
-          } catch (e) {
-            console.warn('[detectarAusencias] Error en retenciÃ³n automÃ¡tica:', e);
-          }
-        }
+        // 2. Retención + cascada: onTurnoAbsenciaDetectada (isAbsent → true)
 
         // 3. Push al empleado ausente (si tiene token)
         const tokens = await getEmployeeTokens(db, shift.employeeId);
@@ -3440,19 +3087,23 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
-        // Disparar cascade automática para la vacante ya iniciada
-        await iniciarCascadaCobertura(db, {
-          id: docSnap.id,
-          empresaId: shiftEmpresaId(shift) || 'bacarsa',
-          objectiveId: String(shift.objectiveId || ''),
-          objectiveName: String(shift.objectiveName || ''),
-          positionName: String(shift.positionName || ''),
-          clientId: String(shift.clientId || ''),
-          clientName: String(shift.clientName || ''),
-          code: String(shift.code || ''),
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-        }, 'AUTO');
+        {
+          const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
+          if (!(await isEmpresaManualMode(db, vacEmpresa))) {
+            await iniciarCascadaCobertura(db, {
+              id: docSnap.id,
+              empresaId: vacEmpresa,
+              objectiveId: String(shift.objectiveId || ''),
+              objectiveName: String(shift.objectiveName || ''),
+              positionName: String(shift.positionName || ''),
+              clientId: String(shift.clientId || ''),
+              clientName: String(shift.clientName || ''),
+              code: String(shift.code || ''),
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+            }, 'AUTO');
+          }
+        }
         continue;
       }
 
@@ -3497,19 +3148,23 @@ export const gestionarVacantes = functions
         });
 
         sentToProtocol++;
-        // Disparar cascade automática para la vacante a T-1h
-        await iniciarCascadaCobertura(db, {
-          id: docSnap.id,
-          empresaId: shiftEmpresaId(shift) || 'bacarsa',
-          objectiveId: String(shift.objectiveId || ''),
-          objectiveName: String(shift.objectiveName || ''),
-          positionName: String(shift.positionName || ''),
-          clientId: String(shift.clientId || ''),
-          clientName: String(shift.clientName || ''),
-          code: String(shift.code || ''),
-          startTime: shift.startTime,
-          endTime: shift.endTime,
-        }, 'AUTO');
+        {
+          const vacEmpresa = shiftEmpresaId(shift) || 'bacarsa';
+          if (!(await isEmpresaManualMode(db, vacEmpresa))) {
+            await iniciarCascadaCobertura(db, {
+              id: docSnap.id,
+              empresaId: vacEmpresa,
+              objectiveId: String(shift.objectiveId || ''),
+              objectiveName: String(shift.objectiveName || ''),
+              positionName: String(shift.positionName || ''),
+              clientId: String(shift.clientId || ''),
+              clientName: String(shift.clientName || ''),
+              code: String(shift.code || ''),
+              startTime: shift.startTime,
+              endTime: shift.endTime,
+            }, 'AUTO');
+          }
+        }
 
       // ── T-3h: Devolver a Planificación ────────────────────────────
       } else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {
@@ -4046,6 +3701,24 @@ export const scheduledTagTurnosArchiveTier = onScheduleV2(
     await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
   },
 );
+
+export const releaseInvalidRetentions = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const role = String(context.auth.token.role ?? '');
+  const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+  if (!allowed.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo admin.');
+  }
+  const db = admin.firestore();
+  const dryRun = data?.dryRun !== false;
+  const result = await releaseInvalidRetentionsRun(db, {
+    empresaId: data?.empresaId ? String(data.empresaId) : undefined,
+    dryRun,
+  });
+  return { dryRun, count: result.rows.length, rows: result.rows };
+});
 
 export const tagTurnosArchiveTier = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
