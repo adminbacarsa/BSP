@@ -65,6 +65,7 @@ import {
     createSession,
     bootstrapCoverageSession,
 } from '@/components/operaciones/CoverageSessionManager';
+import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -445,131 +446,6 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
 };
 
 const normPosName = (n: unknown) => String(n ?? '').trim().toLowerCase();
-
-const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
-    const { empresaId, empresa } = useEmpresa();
-    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
-    if (!isOpen || !shift) return null;
-    const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
-    const isAlone = colleagues.length === 0;
-    const handleLog = async () => {
-        try {
-            await updateDocForEmpresa('turnos', shift.id, { realEndTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
-            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', status: 'pending', shiftId: shift.id, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, description: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-            // Bitácora
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'BAJA_CUBIERTA', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `${shift.employeeName} – baja anticipada (puesto cubierto) en ${shift.objectiveName || ''}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
-            toast.success("Baja registrada. Puesto cubierto.");
-            onClose();
-        } catch (e: any) { toast.error('Error al registrar baja: ' + (e?.message || e?.code || String(e))); }
-    };
-    const handleProtocol = async () => {
-        try {
-            await updateDocForEmpresa('turnos', shift.id, { status: 'INTERRUPTED', realEndTime: serverTimestamp() }, empresaId, migracionCompleta);
-            const endTs = shift.endDateObj ? Timestamp.fromDate(shift.endDateObj instanceof Date ? shift.endDateObj : new Date(shift.endDateObj)) : null;
-            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-            const vacancyPayload: any = stampEmpresaId({
-                clientId: shift.clientId, clientName: shift.clientName,
-                objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
-                positionName: shift.positionName,
-                employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)',
-                vacancyBand: (shift.positionName || 'PUESTO').toUpperCase(),
-                startTime: serverTimestamp(),
-                scheduleDate: new Date().toISOString().slice(0, 10),
-                status: 'UNCOVERED_REPORTED', isUnassigned: true, isPresent: false, isReported: true,
-                origin: 'INTERRUPTION', originRef: shift.id,
-                causedByEmployeeId: shift.employeeId, causedByEmployeeName: shift.employeeName,
-                createdAt: serverTimestamp(),
-            }, shiftEmpresaId);
-            if (endTs) vacancyPayload.endTime = endTs;
-            const newRef = await addDoc(collection(db, 'turnos'), vacancyPayload);
-            onVacancyCreated({ ...vacancyPayload, id: newRef.id, isUnassigned: true });
-            // Ausencia por retiro anticipado → RRHH
-            const _shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj || Date.now());
-            const _dateStr = `${_shiftDate.getFullYear()}-${String(_shiftDate.getMonth()+1).padStart(2,'0')}-${String(_shiftDate.getDate()).padStart(2,'0')}`;
-            addDoc(collection(db, 'ausencias'), stampEmpresaId({
-                employeeId: shift.employeeId, employeeName: shift.employeeName || '',
-                startDate: _dateStr, endDate: _dateStr,
-                type: 'Retiro Anticipado', absenceType: 'AA',
-                origin: 'INTERRUPTION', shiftId: shift.id,
-                objectiveId: shift.objectiveId || null, objectiveName: shift.objectiveName || null,
-                positionName: shift.positionName || null,
-                reason: `Retiro anticipado — ${shift.objectiveName || ''} (${shift.positionName || ''})`,
-                status: 'Confirmada', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES',
-            }, shiftEmpresaId)).catch(() => {});
-            // Bitácora
-            {
-                const _actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
-                addDoc(collection(db, 'audit_logs'), stampEmpresaId({
-                    action: 'BAJA_PROTOCOLO', module: 'OPERACIONES', actorName: _actor,
-                    timestamp: serverTimestamp(), employeeId: shift.employeeId,
-                    employeeName: shift.employeeName, objectiveId: shift.objectiveId,
-                    objectiveName: shift.objectiveName, shiftId: shift.id,
-                    details: `${shift.employeeName} – baja anticipada (protocolo vacante) en ${shift.objectiveName || ''}.`,
-                }, String(shift.empresaId || empresaId || '').trim())).catch(() => {});
-            }
-        } catch (e: any) { toast.error('Error al iniciar protocolo: ' + (e?.message || e?.code || String(e))); }
-    };
-    return (
-        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
-                {/* Header con avatar */}
-                <div className={`p-4 text-white flex justify-between items-start ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}>
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
-                            {(shift.employeeName || '?')[0].toUpperCase()}
-                        </div>
-                        <div>
-                            <p className="font-black text-base leading-tight">{shift.employeeName}</p>
-                            <p className="text-xs font-semibold opacity-80 mt-0.5">Baja Anticipada</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
-                </div>
-                {/* Chips contextuales */}
-                <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
-                        <MapPin size={9}/> {shift.objectiveName || '—'}
-                    </span>
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
-                        <Shield size={9}/> {shift.positionName || '—'}
-                    </span>
-                </div>
-                <div className="px-4 pb-5">
-                    <div className={`p-3 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}>
-                        <p className={`font-black text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}>
-                            {isAlone ? 'GUARDIA SOLO EN EL OBJETIVO' : `HAY ${colleagues.length} COMPAÑEROS`}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                            {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'}
-                        </p>
-                    </div>
-                    {isAlone ? (
-                        <button onClick={handleProtocol}
-                            className="w-full py-3.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors text-sm">
-                            INICIAR PROTOCOLO DE COBERTURA
-                        </button>
-                    ) : (
-                        <button onClick={handleLog}
-                            className="w-full py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition-colors text-sm">
-                            REGISTRAR NOVEDAD (CUBIERTO)
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 const RetentionModal = ({ isOpen, onClose, retainedShift }: any) => {
     if (!isOpen || !retainedShift) return null;
@@ -5209,7 +5085,7 @@ export default function OperacionesPage() {
                 recentlyRelievedIds={recentlyRelievedRef.current}
                 onRelieved={(id: string) => { recentlyRelievedRef.current.add(id); setHandoverData({isOpen:false, shift:null}); }}
             />
-            <InterruptModal
+            <EarlyWithdrawModal
                 isOpen={interruptData.isOpen}
                 onClose={() => setInterruptData({isOpen:false, shift:null})}
                 shift={interruptData.shift}

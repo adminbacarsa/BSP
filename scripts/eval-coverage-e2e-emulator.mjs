@@ -45,6 +45,11 @@ const { evaluateServerCheckInWindow } = requireFn('./lib/fichajes/checkInWindow.
 const { revertirAusenciaShift } = requireFn('./lib/attendance/revertirAusencia.js');
 const { runConvocadoAbsentPass } = requireFn('./lib/attendance/convocadoAbsentPass.js');
 const { registrarPresencia } = requireFn('./lib/fichajes/registrarPresencia.js');
+const { resolveEarlyWithdrawReplacePolicy } = requireFn('./lib/coverage/earlyWithdrawPolicy.js');
+const { processEarlyWithdrawal } = requireFn('./lib/coverage/earlyWithdrawalCore.js');
+const { escalarVacanteSinCobertura } = requireFn('./lib/coverage/escalarVacanteSinCobertura.js');
+const { handlePublishedShiftModifiedWithin12h } = requireFn('./lib/coverage/shiftModificationWithin12h.js');
+const { advanceSlaUnplannedGap } = requireFn('./lib/coverage/slaUnplannedGapPass.js');
 
 const results = [];
 
@@ -1212,6 +1217,229 @@ async function run() {
         { source: 'PORTAL_GPS' },
       );
       report(30, win.allowed === false && win.rejectCode === 'TOO_LATE', win.rejectCode === 'TOO_LATE' ? 'T+40 rechazada sin eta' : `allowed=${win.allowed} code=${win.rejectCode}`);
+    }
+
+    // Caso 31 — política retiro <2 h con compañeros → NO_REPLACE
+    {
+      const p = resolveEarlyWithdrawReplacePolicy({
+        hoursLeft: 1.5,
+        colleaguesPresent: 2,
+        reemplazarRetiro2a3h: null,
+        isAutoMode: false,
+      });
+      report(31, p === 'NO_REPLACE', `policy=${p}`);
+    }
+
+    // Caso 32 — retiro anticipado >3 h crea remanente
+    {
+      const prefix = `${runId}_c32`;
+      const shiftId = `${prefix}_sh`;
+      const now = Date.now();
+      const start = Timestamp.fromMillis(now - 4 * 3600000);
+      const end = Timestamp.fromMillis(now + 5 * 3600000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        employeeName: 'Titular',
+        objectiveId: `${prefix}_obj`,
+        objectiveName: 'Obj',
+        positionName: 'Puesto 1',
+        code: 'M',
+        startTime: start,
+        endTime: end,
+        isPresent: true,
+        status: 'PRESENT',
+      });
+      await db.collection('servicios_sla').add({
+        objectiveId: `${prefix}_obj`,
+        status: 'active',
+        positions: [{ name: 'Puesto 1', reemplazarRetiro2a3h: true }],
+      });
+      const r = await processEarlyWithdrawal(db, {
+        shiftId,
+        reason: 'ENFERMEDAD',
+        resolvedBy: 'OPERACIONES',
+      });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      report(
+        32,
+        r.ok && r.remainderShiftId && sh?.isCompleted === true,
+        r.ok ? `rem=${r.remainderShiftId}` : r.error,
+      );
+    }
+
+    // Caso 33 — escalar vacante sin cobertura marca isSinCobertura
+    {
+      const prefix = `${runId}_c33`;
+      const vacId = `${prefix}_vac`;
+      await db.collection('turnos').doc(vacId).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId: `${prefix}_obj`,
+        objectiveName: 'Obj',
+        positionName: 'P1',
+        employeeId: 'VACANTE',
+        startTime: Timestamp.fromMillis(Date.now() + 3600000),
+        endTime: Timestamp.fromMillis(Date.now() + 9 * 3600000),
+        isUnassigned: true,
+      });
+      await db.collection('system_users').doc(`${prefix}_sup`).set({
+        objetivosAsignados: [`${prefix}_obj`],
+        role: 'supervisor',
+      });
+      const esc = await escalarVacanteSinCobertura(db, {
+        shiftId: vacId,
+        empresaId: `${prefix}_emp`,
+        objectiveId: `${prefix}_obj`,
+        attemptRetention: false,
+      });
+      const vac = (await db.collection('turnos').doc(vacId).get()).data();
+      const nov = await db.collection('novedades').doc(`escalada_${vacId}`).get();
+      report(
+        33,
+        esc.escalated && vac?.isSinCobertura === true && nov.exists,
+        `esc=${esc.escalated} sup=${esc.supervisorsNotified}`,
+      );
+    }
+
+    // Caso 34 — turno publicado modificado <12 h + cobertura huérfana
+    {
+      const prefix = `${runId}_c34`;
+      const shiftId = `${prefix}_tit`;
+      const covId = `ops_cov_${shiftId}_covEmp`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+      const obj = `${prefix}_obj`;
+      const newStart = Timestamp.fromMillis(Date.now() + 6 * 3600000);
+      const d = new Date(newStart.toMillis());
+      const planKey = `${obj}_${d.getFullYear()}_${d.getMonth() + 1}`;
+      await db.collection('planificacion_estados').doc(planKey).set({ publishedAt: Timestamp.now() });
+      const before = {
+        employeeId: `${prefix}_e`,
+        objectiveId: obj,
+        objectiveName: 'Obj',
+        empresaId: `${prefix}_emp`,
+        startTime: Timestamp.fromMillis(newStart.toMillis() + 3600000),
+        endTime: Timestamp.fromMillis(newStart.toMillis() + 9 * 3600000),
+        code: 'M',
+        draft: false,
+        coverageDocId: covId,
+      };
+      const after = { ...before, startTime: newStart };
+      await db.collection('turnos').doc(covId).set({
+        origin: 'OPERATIONS_COVERAGE',
+        absenceShiftId: shiftId,
+        employeeId: 'covEmp',
+        status: 'PENDING',
+      });
+      const h = await handlePublishedShiftModifiedWithin12h(db, before, after, shiftId);
+      const modNov = await db.collection('novedades').doc(`mod12h_${shiftId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100)}_${newStart.toMillis()}`).get();
+      const cov = (await db.collection('turnos').doc(covId).get()).data();
+      report(
+        34,
+        h.notified && modNov.exists && cov?.coverageOrphaned === true,
+        `notif=${h.notified} orphan=${cov?.coverageOrphaned}`,
+      );
+    }
+
+    // Caso 35 — hueco SLA sin plan: fases planificación y CC
+    {
+      const prefix = `${runId}_c35`;
+      const gapId = `${prefix}_gap`;
+      const gapStart = Timestamp.fromMillis(Date.now() + 20 * 3600000);
+      const gapEnd = Timestamp.fromMillis(Date.now() + 28 * 3600000);
+      await db.collection('sla_huecos_sin_plan').doc(gapId).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId: `${prefix}_obj`,
+        objectiveName: 'Obj',
+        positionName: 'P1',
+        gapStart,
+        gapEnd,
+        status: 'OPEN',
+      });
+      const p1 = await advanceSlaUnplannedGap(db, {
+        id: gapId,
+        empresaId: `${prefix}_emp`,
+        objectiveId: `${prefix}_obj`,
+        positionName: 'P1',
+        gapStart,
+        gapEnd,
+      });
+      const planNov = await db.collection('novedades').doc(`sla_gap_plan_${gapId}`).get();
+      const gapStart2 = Timestamp.fromMillis(Date.now() + 8 * 3600000);
+      await db.collection('sla_huecos_sin_plan').doc(`${gapId}_2`).set({
+        empresaId: `${prefix}_emp`,
+        objectiveId: `${prefix}_obj`,
+        positionName: 'P1',
+        gapStart: gapStart2,
+        gapEnd: Timestamp.fromMillis(Date.now() + 16 * 3600000),
+        status: 'OPEN',
+      });
+      const p2 = await advanceSlaUnplannedGap(
+        db,
+        {
+          id: `${gapId}_2`,
+          empresaId: `${prefix}_emp`,
+          objectiveId: `${prefix}_obj`,
+          positionName: 'P1',
+          gapStart: gapStart2,
+          gapEnd: Timestamp.fromMillis(Date.now() + 16 * 3600000),
+        },
+        Timestamp.now(),
+      );
+      report(
+        35,
+        p1.phase === 'PLANNING_INBOX' && planNov.exists && p2.phase === 'CC_VACANCY' && !!p2.shiftId,
+        `p1=${p1.phase} p2=${p2.phase}`,
+      );
+    }
+
+    // Caso 36 — FT applyCoverage (titular vacante + franco fuente)
+    {
+      const prefix = `${runId}_c36`;
+      const titularId = `${prefix}_tit`;
+      const francoId = `${prefix}_fr`;
+      const empId = `${prefix}_ft`;
+      const start = Timestamp.fromMillis(Date.now() + 2 * 3600000);
+      const end = Timestamp.fromMillis(Date.now() + 10 * 3600000);
+      await db.batch()
+        .set(db.collection('turnos').doc(titularId), {
+          empresaId: `${prefix}_emp`,
+          objectiveId: `${prefix}_obj`,
+          objectiveName: 'Obj',
+          positionName: 'P1',
+          employeeId: 'VACANTE',
+          employeeName: 'VACANTE',
+          code: 'M',
+          startTime: start,
+          endTime: end,
+          isUnassigned: true,
+          isAbsent: true,
+          status: 'ABSENT',
+        })
+        .set(db.collection('turnos').doc(francoId), {
+          empresaId: `${prefix}_emp`,
+          employeeId: empId,
+          employeeName: 'Franco FT',
+          code: 'F',
+          isFranco: true,
+          startTime: start,
+          endTime: end,
+        })
+        .commit();
+      const batch = db.batch();
+      const covDocId = await applyCoverage(db, batch, {
+        titularShiftId: titularId,
+        candidateEmployeeId: empId,
+        candidateEmployeeName: 'Franco FT',
+        sourceShiftId: francoId,
+        coverageType: 'FT',
+        resolvedBy: 'OPERACIONES',
+        empresaId: `${prefix}_emp`,
+        startTime: start,
+        endTime: end,
+        code: 'FT',
+      });
+      await batch.commit();
+      const cov = (await db.collection('turnos').doc(covDocId).get()).data();
+      report(36, cov?.coverageType === 'FT' && cov?.origin === 'OPERATIONS_COVERAGE', `cov=${covDocId}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

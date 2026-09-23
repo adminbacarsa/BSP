@@ -7,6 +7,7 @@ const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys"
 const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
 const updateLiquidacionOnTurnoComplete_1 = require("../liquidacion/updateLiquidacionOnTurnoComplete");
 const shiftNotifDigest_1 = require("./shiftNotifDigest");
+const shiftModificationWithin12h_1 = require("../coverage/shiftModificationWithin12h");
 function formatDate(ts) {
     if (!ts)
         return '';
@@ -338,6 +339,14 @@ exports.onTurnoWrite = functions
         && after.employeeId && after.employeeId !== 'VACANTE') {
         await markSolicitudAsignada(db, after.solicitudRefuerzoId, change.after.id, after.employeeId);
         return;
+    }
+    if (before && after) {
+        try {
+            await (0, shiftModificationWithin12h_1.handlePublishedShiftModifiedWithin12h)(db, before, after, change.after.id);
+        }
+        catch (e) {
+            console.warn('[onTurnoWrite] mod <12h:', e);
+        }
     }
     let eventType;
     const employeeId = (after || before)?.employeeId;

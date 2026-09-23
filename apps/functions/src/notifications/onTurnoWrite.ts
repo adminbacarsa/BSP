@@ -4,6 +4,7 @@ import { ymCordobaParts, planificacionEstadoLookupDocIds } from '../assistant/pl
 import { checkLlegadaTardeReiterada } from '../ausencias/llegadaTardeUtils';
 import { updateLiquidacionOnTurnoComplete } from '../liquidacion/updateLiquidacionOnTurnoComplete';
 import { enqueueShiftNotifDigest, type DigestEventType } from './shiftNotifDigest';
+import { handlePublishedShiftModifiedWithin12h } from '../coverage/shiftModificationWithin12h';
 
 function formatDate(ts: any): string {
   if (!ts) return '';
@@ -379,6 +380,19 @@ export const onTurnoWrite = functions
         && after.employeeId && after.employeeId !== 'VACANTE') {
       await markSolicitudAsignada(db, after.solicitudRefuerzoId, change.after.id, after.employeeId);
       return;
+    }
+
+    if (before && after) {
+      try {
+        await handlePublishedShiftModifiedWithin12h(
+          db,
+          before as Record<string, unknown>,
+          after as Record<string, unknown>,
+          change.after.id,
+        );
+      } catch (e) {
+        console.warn('[onTurnoWrite] mod <12h:', e);
+      }
     }
 
     // Determinar tipo de evento

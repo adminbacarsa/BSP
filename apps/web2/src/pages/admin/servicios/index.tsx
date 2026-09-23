@@ -4803,6 +4803,30 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                             <option value="F">Solo femenino</option>
                         </select>
                     </div>
+                    <div className="rounded-2xl border border-indigo-100 dark:border-indigo-900 bg-indigo-50/80 dark:bg-indigo-950/30 p-4 space-y-2">
+                        <p className="text-[10px] font-black uppercase text-indigo-700 dark:text-indigo-300">Retiro anticipado (2–3 h restantes)</p>
+                        <select
+                            className="w-full p-3 bg-white dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white"
+                            value={
+                                positionForm.reemplazarRetiro2a3h === true
+                                    ? 'yes'
+                                    : positionForm.reemplazarRetiro2a3h === false
+                                      ? 'no'
+                                      : 'operator'
+                            }
+                            onChange={(e) => {
+                                const v = e.target.value;
+                                setPositionForm({
+                                    ...positionForm,
+                                    reemplazarRetiro2a3h: v === 'yes' ? true : v === 'no' ? false : undefined,
+                                });
+                            }}
+                        >
+                            <option value="operator">Sin regla — decide operador (Auto reemplaza)</option>
+                            <option value="yes">Reemplazar siempre (2–3 h)</option>
+                            <option value="no">No reemplazar (2–3 h)</option>
+                        </select>
+                    </div>
 
                     {positionForm.coverageType === '24hs' && (
                         <div className="bg-sky-50 dark:bg-sky-950/30 border border-sky-100 dark:border-sky-800 rounded-xl p-4 space-y-3">

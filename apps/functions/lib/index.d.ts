@@ -100,6 +100,7 @@ export declare const processEmpresaMigrateJob: import("firebase-functions/core")
 }>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
 export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const processEarlyWithdrawalCallable: functions.HttpsFunction & functions.Runnable<any>;
 export declare const releaseInvalidRetentions: functions.HttpsFunction & functions.Runnable<any>;
 export declare const releaseTraceAbsences: functions.HttpsFunction & functions.Runnable<any>;
 export declare const tagTurnosArchiveTier: functions.HttpsFunction & functions.Runnable<any>;

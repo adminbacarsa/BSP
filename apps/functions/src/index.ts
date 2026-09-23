@@ -33,6 +33,8 @@ import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
 import { isEmpresaManualMode } from './ops/opsManualMode';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
+import { processEarlyWithdrawal } from './coverage/earlyWithdrawalCore';
+import { runSlaUnplannedGapPass } from './coverage/slaUnplannedGapPass';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -3221,6 +3223,13 @@ export const gestionarVacantes = functions
 
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
 
+    try {
+      const slaGaps = await runSlaUnplannedGapPass(db, { limit: 30 });
+      if (slaGaps) console.log(`[gestionarVacantes] Huecos SLA sin plan: ${slaGaps} procesados`);
+    } catch (e) {
+      console.warn('[gestionarVacantes] slaUnplannedGapPass:', e);
+    }
+
     // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
     // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
     // se cierra automáticamente como "sin cobertura confirmada".
@@ -3710,6 +3719,44 @@ export const scheduledTagTurnosArchiveTier = onScheduleV2(
     await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
   },
 );
+
+export const processEarlyWithdrawalCallable = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const db = admin.firestore();
+  const shiftId = String(data?.shiftId || '').trim();
+  if (!shiftId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Falta shiftId.');
+  }
+  const reason = String(data?.reason || 'OPERATIVO').toUpperCase() as import('./coverage/earlyWithdrawPolicy').EarlyWithdrawReason;
+  const allowedReasons = new Set(['ENFERMEDAD', 'ABANDONO', 'FAMILIAR', 'OPERATIVO', 'AUTORIZADO']);
+  if (!allowedReasons.has(reason)) {
+    throw new functions.https.HttpsError('invalid-argument', 'Motivo inválido.');
+  }
+  const operatorReplaceChoice =
+    typeof data?.operatorReplaceChoice === 'boolean' ? data.operatorReplaceChoice : null;
+  const resolvedBy = data?.resolvedBy === 'AUTO' ? 'AUTO' : 'OPERACIONES';
+  const actorUid = context.auth.uid;
+  const actorName =
+    String(context.auth.token.name || context.auth.token.email || 'Operador').split('@')[0];
+
+  const result = await processEarlyWithdrawal(db, {
+    shiftId,
+    reason,
+    operatorReplaceChoice,
+    resolvedBy,
+    actorUid,
+    actorName,
+  });
+  if (result.error === 'OPERATOR_CHOICE_REQUIRED') {
+    return { ...result, needsOperatorChoice: true };
+  }
+  if (!result.ok) {
+    throw new functions.https.HttpsError('failed-precondition', result.error || 'ERROR');
+  }
+  return result;
+});
 
 export const releaseInvalidRetentions = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {

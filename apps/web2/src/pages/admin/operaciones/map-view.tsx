@@ -27,6 +27,7 @@ const registrarBitacora = async (action: string, details: string, extra?: { obje
 import { Radio, Filter, Search, Building2, Shield, Clock, Siren, CheckCircle, LogOut, AlertTriangle, Phone, MessageCircle, Calendar, Send, PlayCircle, EyeOff, Briefcase, X, UserCheck, Navigation, ChevronUp, ChevronDown, MapPin, BellRing, UserX, Users, XCircle, CornerUpLeft, Timer, AlarmClock, Loader2 } from 'lucide-react';
 import { openWhatsApp, waMensaje } from '@/lib/whatsapp';
 import { WorkedDayOffModal as WorkedDayOffModalPro, AttendanceModal } from '@/components/operaciones/OperationalModals';
+import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
 import { WAComposeModal } from '@/components/common/WAComposeModal';
 import {
     novedadActorName,
@@ -206,71 +207,6 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         </div>
     );
 };
-
-const InterruptModal = ({ isOpen, onClose, shift, logic, onVacancyCreated }: any) => {
-    const { empresaId, empresa } = useEmpresa();
-    const migracionCompleta = !!(empresa as any)?.migracionCompleta;
-    if (!isOpen || !shift) return null;
-    const colleagues = logic.processedData.filter((s:any) => s.objectiveId === shift.objectiveId && s.id !== shift.id && (s.isPresent || s.status === 'PRESENT') && !s.isCompleted);
-    const isAlone = colleagues.length === 0;
-    const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-    const handleLog = async () => {
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'BAJA_CUBIERTA', shiftId: shift.id, details: 'Retiro anticipado. Puesto cubierto por dotación.', createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-        await updateDocForEmpresa('turnos', shift.id, { checkOutTime: serverTimestamp(), status: 'COMPLETED', comments: 'Baja anticipada (Cubierto)' }, empresaId, migracionCompleta);
-        toast.success("Baja registrada. Puesto cubierto."); onClose();
-    };
-    const handleProtocol = async () => {
-        await updateDocForEmpresa('turnos', shift.id, { status: 'INTERRUPTED', checkOutTime: serverTimestamp() }, empresaId, migracionCompleta);
-        const newRef = await addDoc(collection(db, 'turnos'), stampEmpresaId({ clientId: shift.clientId, clientName: shift.clientName, objectiveId: shift.objectiveId, objectiveName: shift.objectiveName, positionName: shift.positionName, startTime: serverTimestamp(), employeeId: 'VACANTE', employeeName: 'VACANTE (BAJA)', isUnassigned: true, isPresent: false, origin: 'INTERRUPTION', originRef: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
-        onVacancyCreated({ ...shift, id: newRef.id, isUnassigned: true });
-    };
-    return (
-        <div className="fixed inset-0 z-[9000] bg-slate-900/80 flex items-center justify-center p-4 animate-in fade-in">
-            <div className="bg-white w-full max-w-md rounded-2xl shadow-xl overflow-hidden">
-                <div className={`p-4 text-white flex justify-between items-start ${isAlone ? 'bg-purple-600' : 'bg-emerald-600'}`}>
-                    <div className="flex items-center gap-3">
-                        <div className="w-12 h-12 rounded-full bg-white/20 flex items-center justify-center font-black text-lg shrink-0">
-                            {(shift.employeeName || '?')[0].toUpperCase()}
-                        </div>
-                        <div>
-                            <p className="font-black text-base leading-tight">{shift.employeeName}</p>
-                            <p className="text-xs font-semibold opacity-80 mt-0.5">Baja Anticipada</p>
-                        </div>
-                    </div>
-                    <button onClick={onClose} className="p-1 hover:bg-white/20 rounded-lg transition-colors"><X size={18}/></button>
-                </div>
-                <div className="px-4 pt-3 pb-2 flex flex-wrap gap-1.5">
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-full">
-                        <MapPin size={9}/> {shift.objectiveName || '—'}
-                    </span>
-                    <span className="flex items-center gap-1 text-[10px] font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full">
-                        <Shield size={9}/> {shift.positionName || '—'}
-                    </span>
-                </div>
-                <div className="p-4">
-                    <div className={`p-4 rounded-xl border mb-4 ${isAlone ? 'bg-purple-50 border-purple-100' : 'bg-emerald-50 border-emerald-100'}`}>
-                        <h4 className={`font-bold text-sm mb-1 ${isAlone ? 'text-purple-800' : 'text-emerald-800'}`}>
-                            {isAlone ? '⚠️ GUARDIA SOLO EN EL OBJETIVO' : `✅ HAY ${colleagues.length} COMPAÑEROS`}
-                        </h4>
-                        <p className="text-xs text-slate-500">
-                            {isAlone ? 'El puesto quedará descubierto. Se requiere activar protocolo.' : 'El puesto puede ser cubierto por la dotación actual.'}
-                        </p>
-                    </div>
-                    {isAlone ? (
-                        <button onClick={handleProtocol} className="w-full py-3.5 bg-purple-600 text-white font-black rounded-xl hover:bg-purple-700 transition-colors animate-pulse shadow-lg shadow-purple-200">
-                            INICIAR PROTOCOLO DE COBERTURA
-                        </button>
-                    ) : (
-                        <button onClick={handleLog} className="w-full py-3.5 bg-emerald-600 text-white font-black rounded-xl hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200">
-                            REGISTRAR NOVEDAD (CUBIERTO)
-                        </button>
-                    )}
-                </div>
-            </div>
-        </div>
-    );
-};
-
 
 const AbsenceDecisionModal = ({ isOpen, onClose, shift, onDeclareAbsent, onLateArrival, onOpenWA }: any) => {
     const [view, setView] = React.useState<'decision' | 'late'>('decision');
@@ -1460,7 +1396,7 @@ export default function TacticalMapView() {
                 recentlyRelievedIds={recentlyRelievedRef.current}
                 onRelieved={(id: string) => { recentlyRelievedRef.current.add(id); setHandoverData({isOpen:false, shift:null}); }}
             />
-            <InterruptModal
+            <EarlyWithdrawModal
                 isOpen={interruptData.isOpen}
                 onClose={() => setInterruptData({isOpen:false, shift:null})}
                 shift={interruptData.shift}

@@ -65,6 +65,8 @@ export interface ServicePosition {
   inactiveFrom?: string;
   inactiveReason?: string;
   inactiveBy?: string;
+  /** Retiro anticipado 2–3 h restantes: true = reemplazar; false = no; undefined = decide operador (Auto reemplaza). */
+  reemplazarRetiro2a3h?: boolean;
 }
 
 export type SlaChangeAction =

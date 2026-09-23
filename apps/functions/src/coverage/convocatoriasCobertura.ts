@@ -12,6 +12,7 @@ import {
   getUrgency,
   findEmployeeUid,
 } from './eligibilityFilter';
+import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -160,16 +161,15 @@ async function avanzarCascada(
   if (conv.type === 'LLEGADA_TARDE') return;
   const nextType = nextCascadeStep(conv.type as CandidateType);
   if (!nextType) {
-    // Cascada agotada: notificar a ops
-    await db.collection('novedades').add({
-      type: 'VACANTE_SIN_COBERTURA',
+    await escalarVacanteSinCobertura(db, {
       shiftId: conv.shiftId,
+      empresaId: conv.empresaId,
       objectiveId: conv.objectiveId,
       objectiveName: conv.objectiveName || '',
-      empresaId: conv.empresaId,
-      message: `Cascada de cobertura agotada para turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}. Sin candidatos disponibles.`,
-      resolved: false,
-      createdAt: FieldValue.serverTimestamp(),
+      positionName: conv.positionName || '',
+      message: `Cascada agotada para turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}. Sin candidatos disponibles.`,
+      attemptRetention: true,
+      source: 'CASCADE_EXHAUSTED',
     });
     return;
   }
@@ -1426,16 +1426,15 @@ export async function iniciarCascadaCobertura(
     return;
   }
 
-  // Sin candidatos en ningún paso
-  await db.collection('novedades').add({
-    type: 'VACANTE_SIN_COBERTURA',
+  await escalarVacanteSinCobertura(db, {
     shiftId: shift.id,
+    empresaId: shift.empresaId,
     objectiveId: shift.objectiveId,
     objectiveName: shift.objectiveName || '',
-    empresaId: shift.empresaId,
+    positionName: shift.positionName || '',
     message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
-    resolved: false,
-    createdAt: FieldValue.serverTimestamp(),
+    attemptRetention: true,
+    source: 'INICIAR_CASCADA',
   });
 }
 

@@ -12,6 +12,7 @@ const coverageTraceShift_1 = require("./coverageTraceShift");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
+const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -87,15 +88,15 @@ async function avanzarCascada(db, conv, reason) {
         return;
     const nextType = (0, eligibilityFilter_1.nextCascadeStep)(conv.type);
     if (!nextType) {
-        await db.collection('novedades').add({
-            type: 'VACANTE_SIN_COBERTURA',
+        await (0, escalarVacanteSinCobertura_1.escalarVacanteSinCobertura)(db, {
             shiftId: conv.shiftId,
+            empresaId: conv.empresaId,
             objectiveId: conv.objectiveId,
             objectiveName: conv.objectiveName || '',
-            empresaId: conv.empresaId,
-            message: `Cascada de cobertura agotada para turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}. Sin candidatos disponibles.`,
-            resolved: false,
-            createdAt: firestore_1.FieldValue.serverTimestamp(),
+            positionName: conv.positionName || '',
+            message: `Cascada agotada para turno ${conv.shiftCode || ''} en ${conv.objectiveName || 'objetivo'}. Sin candidatos disponibles.`,
+            attemptRetention: true,
+            source: 'CASCADE_EXHAUSTED',
         });
         return;
     }
@@ -1104,15 +1105,15 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         });
         return;
     }
-    await db.collection('novedades').add({
-        type: 'VACANTE_SIN_COBERTURA',
+    await (0, escalarVacanteSinCobertura_1.escalarVacanteSinCobertura)(db, {
         shiftId: shift.id,
+        empresaId: shift.empresaId,
         objectiveId: shift.objectiveId,
         objectiveName: shift.objectiveName || '',
-        empresaId: shift.empresaId,
+        positionName: shift.positionName || '',
         message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
-        resolved: false,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
+        attemptRetention: true,
+        source: 'INICIAR_CASCADA',
     });
 }
 async function simularRespuestasConvocatorias(db, empresaId) {
