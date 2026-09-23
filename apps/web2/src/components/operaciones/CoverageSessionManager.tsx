@@ -27,10 +27,8 @@ import {
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
 import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
-import {
-  buildOpsDualCoverageTurnoPatches,
-  opsPositionMatches,
-} from '@/lib/operaciones/opsDualCoverageApply';
+import { opsPositionMatches } from '@/lib/operaciones/opsDualCoverageApply';
+import { computeDualExtAdvPlan } from '@/lib/operaciones/coverageExtAdvSegments';
 import {
   listOpsAdvCandidatesForVacancy,
   listOpsExtCandidatesForVacancy,
@@ -912,50 +910,78 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         }
       }
 
-      const { patchesByDocId, coveredByLabel } = buildOpsDualCoverageTurnoPatches({
+      const extSh = candidatesExt.find((x: any) => x.employeeId === nextExt);
+      const advSh = candidatesAdv.find((x: any) => x.employeeId === nextAdv);
+      const dualPlan = computeDualExtAdvPlan({
         absenceShift,
         extEmpId: nextExt,
         advEmpId: nextAdv,
-        processedData: logic.processedData || [],
-        rawShifts: logic.rawShifts,
-        employees: logic.employees || [],
+        extShift: extSh,
+        advShift: advSh,
         servicesSLA: logic.servicesSLA || [],
+        employees: logic.employees || [],
       });
 
       const batch = writeBatch(db);
-      if (absenceShift.id) {
-        await supersedeOpsCoveragesForAbsence(db, absenceShift.id, batch, {
-          supersededBy: `SESSION_DUAL_${s.id}`,
-        });
-        const isAbsence = !!(absenceShift.isAbsent || absenceShift.isPotentialAbsence || absenceShift.absenceType);
-        batch.update(
-          doc(db, 'turnos', absenceShift.id),
-          absentShiftCoveragePatch({
-            coveredByEmployeeId: nextExt,
-            coveredByEmployeeName: coveredByLabel,
-            coverageType: 'RETENCION',
-            isAbsence,
-          }),
-        );
-        await syncAusenciaCoberturaGestionada(
-          db,
-          {
-            shiftId: absenceShift.id,
-            coveredByEmployeeId: nextExt,
-            coveredByEmployeeName: coveredByLabel,
-            coverageType: 'RETENCION',
-            empresaId: tid || null,
-          },
-          batch,
-        );
+      if (!absenceShift.id) {
+        toast.error('Falta turno titular de la ausencia.');
+        return;
       }
-      patchesByDocId.forEach((patch, docId) => {
-        batch.update(doc(db, 'turnos', docId), patch);
+      const extSourceId = extSh?.id || s.pendingExt?.shiftId;
+      const advSourceId = advSh?.id || s.pendingAdv?.shiftId;
+      if (!extSourceId || !advSourceId) {
+        toast.error('No se encontraron turnos EXT/ADV en la malla.');
+        return;
+      }
+
+      await applyCoverage(db, batch, {
+        titularShiftId: String(absenceShift.id),
+        titularShift: { ...absenceShift, id: String(absenceShift.id) },
+        candidateEmployeeId: nextExt,
+        candidateEmployeeName: extSh?.employeeName || 'EXT',
+        sourceShiftId: extSourceId,
+        coverageType: 'EXTEND',
+        resolvedBy: 'OPERACIONES',
+        empresaId: tid,
+        code: dualPlan.bandCode,
+        covSegmentStart: dualPlan.extCovStart,
+        covSegmentEnd: dualPlan.extCovEnd,
+        extensionEndTime: dualPlan.extCovEnd,
+        titularCloseMode: 'PARTIAL',
       });
+
+      await applyCoverage(db, batch, {
+        titularShiftId: String(absenceShift.id),
+        titularShift: { ...absenceShift, id: String(absenceShift.id) },
+        candidateEmployeeId: nextAdv,
+        candidateEmployeeName: advSh?.employeeName || 'ADV',
+        sourceShiftId: advSourceId,
+        coverageType: 'ADVANCE',
+        resolvedBy: 'OPERACIONES',
+        empresaId: tid,
+        code: dualPlan.bandCode,
+        covSegmentStart: dualPlan.advCovStart,
+        covSegmentEnd: dualPlan.advCovEnd,
+        adjustedStartTime: dualPlan.advCovStart,
+        titularCloseMode: 'FULL',
+        coveredByLabel: dualPlan.coveredByLabel,
+      });
+
+      await syncAusenciaCoberturaGestionada(
+        db,
+        {
+          shiftId: absenceShift.id,
+          coveredByEmployeeId: nextExt,
+          coveredByEmployeeName: dualPlan.coveredByLabel,
+          coverageType: 'RETENCION',
+          empresaId: tid || null,
+          resolvedBy: 'OPERACIONES',
+        },
+        batch,
+      );
+
       await batch.commit();
 
-      const extSh = candidatesExt.find((x: any) => x.employeeId === nextExt);
-      const advSh = candidatesAdv.find((x: any) => x.employeeId === nextAdv);
       await addDoc(
         collection(db, 'novedades'),
         stampEmpresaId(
@@ -964,11 +990,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             title: 'Cobertura EXT + ADV',
             status: 'pending',
             employeeId: nextExt,
-            employeeName: coveredByLabel,
+            employeeName: dualPlan.coveredByLabel,
             objectiveId: absenceShift.objectiveId,
             objectiveName: absenceShift.objectiveName,
             shiftId: absenceShift.id || extSh?.id || null,
-            description: `Split ${coveredByLabel} · ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`,
+            description: `Split ${dualPlan.coveredByLabel} · ${absenceShift.objectiveName} (${hiStart}–${hiEnd})`,
             createdAt: serverTimestamp(),
             reportedBy: 'OPERACIONES',
           },
