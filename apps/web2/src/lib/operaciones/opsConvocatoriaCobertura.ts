@@ -10,7 +10,7 @@ import { db, functions } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import type { InternalCoverageKind } from '@/lib/operaciones/coverageInternalCandidates';
 
-export type OpsConvocatoriaCallableType = 'RET' | 'EXTEND' | 'ADVANCE' | 'FT';
+export type OpsConvocatoriaCallableType = 'RET' | 'REF' | 'ESC' | 'EXTEND' | 'ADVANCE' | 'FT';
 
 const toDate = (d: unknown): Date => {
   if (!d) return new Date();
@@ -61,10 +61,11 @@ export async function ensureRealAbsenceShiftId(
   return newRef.id;
 }
 
-/** REF/ESC se convocan como RET hasta tipos dedicados en backend. */
 export function convocatoriaTypeForInternalKind(
   kind: InternalCoverageKind,
 ): OpsConvocatoriaCallableType {
+  if (kind === 'REF') return 'REF';
+  if (kind === 'ESC') return 'ESC';
   return 'RET';
 }
 
@@ -73,6 +74,7 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   candidateEmployeeId: string;
   type: OpsConvocatoriaCallableType;
   empresaId: string;
+  candidateShiftId?: string;
   extendShiftId?: string;
   advanceShiftId?: string;
   ftShiftId?: string;
@@ -86,6 +88,7 @@ export async function invokeCrearConvocatoriaCobertura(params: {
     type: params.type,
     empresaId,
   };
+  if (params.candidateShiftId) payload.candidateShiftId = params.candidateShiftId;
   if (params.extendShiftId) payload.extendShiftId = params.extendShiftId;
   if (params.advanceShiftId) payload.advanceShiftId = params.advanceShiftId;
   if (params.ftShiftId) payload.ftShiftId = params.ftShiftId;

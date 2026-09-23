@@ -10,5 +10,6 @@ export function isPassiveRetStandbyShift(shift: any): boolean {
   if (shift.resolvedBy === 'OPERACIONES' && shift.origin === 'OPERATIONS_COVERAGE') return false;
   if (shift.coverageRedirectedTo) return false;
   if (shift.isRetention === true) return false;
+  if (shift.coverageUsed === true) return false;
   return true;
 }

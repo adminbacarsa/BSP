@@ -44,14 +44,30 @@ export function cospPositionMatches(a: unknown, b: unknown): boolean {
  * Cobertura asignada o confirmada sobre el **titular** (doc turno o ausencia vinculada).
  * Usar en: grilla plan (punto teal), RRHH badge, supresión VAC por ausencia, Supervisión.
  */
+/** Cierre operativo (Ops/RRHH), no asignación solo planificada. */
+export function isTitularOpsCoverageClosed(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data) return false;
+  const st = String(data.coverageStatus || '').toUpperCase();
+  if (st === 'PLANNED') return false;
+  if (data.operacionallyCovered === true) return true;
+  if (st === 'COVERED') return true;
+  if (String(data.coverageDocId || '').trim()) return true;
+  return false;
+}
+
+/**
+ * Cobertura asignada o confirmada sobre el titular (Plan teal / tooltip).
+ * `PLANNED` y `coveredBy*` sueltos sin cierre Ops no cuentan como cubierto operativo.
+ */
 export function isTitularCoverageAssigned(
   data: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!data) return false;
-  if (data.operacionallyCovered === true) return true;
-  if (String(data.coverageStatus || '').toUpperCase() === 'COVERED') return true;
-  if (String(data.coveredByEmployeeId || '').trim()) return true;
-  if (String(data.coveredByEmployeeName || data.coveredBy || '').trim()) return true;
+  if (isTitularOpsCoverageClosed(data)) return true;
+  const st = String(data.coverageStatus || '').toUpperCase();
+  if (st === 'PLANNED') return true;
   if (computePlannedOperativelyCovered(data)) return true;
   return false;
 }
@@ -92,7 +108,7 @@ export function isAbsentTitularCoverageClosed(
     || shift.isPotentialAbsence === true
     || String(shift.status || '').toUpperCase() === 'ABSENT';
   if (!absent) return false;
-  if (isTitularCoverageAssigned(shift)) return true;
+  if (isTitularOpsCoverageClosed(shift)) return true;
   if (shift.plannedOperativelyCovered === true) return true;
   if (packageRows?.length && assessSplitPackageStatus(packageRows) === 'COVERED') return true;
   const pkgId = String(shift.coveragePackageId || '').trim();

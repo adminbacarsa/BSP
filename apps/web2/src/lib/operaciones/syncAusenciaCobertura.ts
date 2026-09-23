@@ -87,23 +87,38 @@ export function formatCoveringEmployeeLabel(
   return cleaned || raw;
 }
 
+export type CoverageResolvedBy = 'OPERACIONES' | 'AUTO' | 'MODO_DEMO';
+
+export class CoverageApplyError extends Error {
+  code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 /** Payload estándar para marcar el turno titular ausente/vacante como cubierto. */
 export function absentShiftCoveragePatch(opts: {
   coveredByEmployeeId?: string | null;
   coveredByEmployeeName?: string | null;
   coverageType?: string;
+  coverageDocId?: string | null;
+  resolvedBy?: CoverageResolvedBy | string;
+  titularStatus?: 'COVERED' | 'PARTIAL';
   /** Vacante pura: status COVERED. Ausencia: mantener isAbsent, no pisar status ABSENT. */
   isAbsence?: boolean;
 }): Record<string, unknown> {
+  const titularSt = opts.titularStatus || 'COVERED';
   const patch: Record<string, unknown> = {
-    resolvedBy: 'OPERACIONES',
+    resolvedBy: opts.resolvedBy || 'OPERACIONES',
     coverageType: opts.coverageType || 'COBERTURA',
     coveredAt: serverTimestamp(),
     coveredByEmployeeId: opts.coveredByEmployeeId || null,
     coveredByEmployeeName: opts.coveredByEmployeeName || null,
-    operacionallyCovered: true,
-    coverageStatus: 'COVERED',
+    operacionallyCovered: titularSt === 'COVERED',
+    coverageStatus: titularSt,
   };
+  if (opts.coverageDocId) patch.coverageDocId = opts.coverageDocId;
   if (!opts.isAbsence) {
     patch.status = 'COVERED';
   } else {
@@ -117,9 +132,47 @@ export function absentShiftCoveragePatch(opts: {
   return patch;
 }
 
-/** Criterio demo/prod: 1 ausencia ya cubierta no debe generar otra cobertura activa. */
+/** Idempotencia Ops: titular con doc de cobertura activo. */
 export function isTitularAlreadyCovered(data: Record<string, unknown> | null | undefined): boolean {
-  return isTitularCoverageAssigned(data);
+  if (!data) return false;
+  const covId = String(data.coverageDocId || '').trim();
+  if (data.operacionallyCovered === true && covId) return true;
+  if (String(data.coverageStatus || '').toUpperCase() === 'COVERED' && covId) return true;
+  return false;
+}
+
+export function buildOpsCoverageDocId(titularShiftId: string, employeeId: string): string {
+  return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+}
+
+export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
+  return {
+    coverageUsed: false,
+    coverageUsedForShiftId: null,
+    coverageDocId: null,
+    coverageUsedAt: null,
+    coverageUsedBy: null,
+  };
+}
+
+export function sourceShiftCoverageUsedPatch(opts: {
+  titularShiftId: string;
+  coverageDocId: string;
+  resolvedBy: CoverageResolvedBy;
+  isRet: boolean;
+}): Record<string, unknown> {
+  const patch: Record<string, unknown> = {
+    coverageUsed: true,
+    coverageUsedForShiftId: opts.titularShiftId,
+    coverageDocId: opts.coverageDocId,
+    coverageUsedAt: serverTimestamp(),
+    coverageUsedBy: opts.resolvedBy,
+  };
+  if (opts.isRet) {
+    patch.isRetentionActivated = true;
+    patch.retentionActivatedAt = serverTimestamp();
+  }
+  return patch;
 }
 
 const toTimestamp = (val: unknown): Timestamp | null => {
@@ -132,11 +185,148 @@ const toTimestamp = (val: unknown): Timestamp | null => {
   return null;
 };
 
+export type ApplyCoverageParams = {
+  titularShiftId: string;
+  titularShift?: Record<string, unknown>;
+  candidateEmployeeId: string;
+  candidateEmployeeName: string;
+  sourceShiftId?: string | null;
+  coverageType: string;
+  resolvedBy: CoverageResolvedBy;
+  empresaId: string;
+  startTime?: Timestamp | null;
+  endTime?: Timestamp | null;
+  code?: string;
+  positionName?: string;
+  objectiveId?: string;
+  objectiveName?: string;
+  clientId?: string;
+  clientName?: string;
+  titularCloseMode?: 'FULL' | 'PARTIAL' | 'NONE';
+  convocatoriaId?: string;
+  allowReplace?: boolean;
+};
+
 /**
- * Asegura turno visible en Plan/Ops/Supervisión para el guardia que cubre:
- * - Mismo objetivo: actualiza turno existente con origin OPERATIONS_COVERAGE.
- * - Otro objetivo / sin tramo en malla: crea doc `ops_cov_{ausencia}_{legajo}` en el objetivo del hueco.
+ * Escritura única de cobertura Ops: doc B aparte + marca de uso en turno planificado (A) + titular (C).
  */
+export async function applyCoverage(
+  db: Firestore,
+  batch: WriteBatch,
+  params: ApplyCoverageParams,
+): Promise<string> {
+  const titularId = String(params.titularShiftId || '').trim();
+  if (!titularId) throw new CoverageApplyError('INVALID', 'Falta titularShiftId');
+
+  let titular = params.titularShift;
+  if (!titular) {
+    const snap = await getDoc(doc(db, 'turnos', titularId));
+    if (!snap.exists()) throw new CoverageApplyError('NOT_FOUND', 'Turno titular no encontrado');
+    titular = { id: snap.id, ...snap.data() } as Record<string, unknown>;
+  }
+
+  const empresaId = String(params.empresaId || titular.empresaId || '').trim();
+  const covDocId = buildOpsCoverageDocId(titularId, params.candidateEmployeeId);
+
+  const existingCovId = String(titular.coverageDocId || '').trim();
+  if (existingCovId && !params.allowReplace && existingCovId !== covDocId) {
+    const exSnap = await getDoc(doc(db, 'turnos', existingCovId));
+    if (exSnap.exists() && isActiveOpsCoverageDoc(exSnap.data() as Record<string, unknown>)) {
+      throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
+    }
+  }
+
+  const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
+  const dualLeg = ctEarly === 'EXTEND' || ctEarly === 'ADVANCE';
+  await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
+    keepDocId: covDocId,
+    supersededBy: params.convocatoriaId || params.resolvedBy,
+    onlySupersedeCoverageType: dualLeg ? ctEarly : null,
+  });
+
+  const linkFields = opsCoverageLinkFields(titular, titularId);
+  const bandCode = String(params.code || titular.code || 'T').trim();
+  const startTs =
+    params.startTime
+    ?? toTimestamp(titular.startTime)
+    ?? (titular.shiftDateObj instanceof Date ? Timestamp.fromDate(titular.shiftDateObj) : null);
+  const endTs =
+    params.endTime
+    ?? toTimestamp(titular.endTime)
+    ?? (titular.endDateObj instanceof Date ? Timestamp.fromDate(titular.endDateObj) : null);
+
+  const posName = params.positionName || titular.positionName || null;
+  const ct = String(params.coverageType || 'COBERTURA').toUpperCase();
+  const isRet = ct === 'RET';
+
+  const sourceId = String(params.sourceShiftId || '').trim();
+  if (sourceId && sourceId !== params.candidateEmployeeId) {
+    batch.update(
+      doc(db, 'turnos', sourceId),
+      sourceShiftCoverageUsedPatch({
+        titularShiftId: titularId,
+        coverageDocId: covDocId,
+        resolvedBy: params.resolvedBy,
+        isRet,
+      }),
+    );
+  }
+
+  batch.set(
+    doc(db, 'turnos', covDocId),
+    stampEmpresaId(
+      {
+        employeeId: params.candidateEmployeeId,
+        employeeName: params.candidateEmployeeName,
+        clientId: params.clientId ?? titular.clientId ?? null,
+        clientName: params.clientName ?? titular.clientName ?? null,
+        objectiveId: params.objectiveId ?? titular.objectiveId ?? null,
+        objectiveName: params.objectiveName ?? titular.objectiveName ?? '',
+        positionName: posName,
+        coversPositionName: posName,
+        code: ct === 'FT' ? 'FT' : bandCode,
+        type: ct === 'FT' ? 'FT' : bandCode,
+        startTime: startTs,
+        endTime: endTs,
+        status: 'PENDING',
+        origin: 'OPERATIONS_COVERAGE',
+        resolvedBy: params.resolvedBy,
+        coverageType: ct,
+        ...linkFields,
+        sourceShiftId: sourceId || null,
+        isPresent: false,
+        isAwaitingCoverageCheckIn: true,
+        coverageSuperseded: false,
+        createdAt: serverTimestamp(),
+        ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
+      },
+      empresaId,
+    ),
+    { merge: true },
+  );
+
+  const closeMode = params.titularCloseMode ?? 'FULL';
+  if (closeMode !== 'NONE') {
+    const isAbsence =
+      titular.isAbsent === true || String(titular.status || '').toUpperCase() === 'ABSENT';
+    batch.update(
+      doc(db, 'turnos', titularId),
+      absentShiftCoveragePatch({
+        coveredByEmployeeId: params.candidateEmployeeId,
+        coveredByEmployeeName: params.candidateEmployeeName,
+        coverageType: ct,
+        coverageDocId: covDocId,
+        resolvedBy: params.resolvedBy,
+        titularStatus: closeMode === 'PARTIAL' ? 'PARTIAL' : 'COVERED',
+        isAbsence,
+      }),
+    );
+  }
+
+  return covDocId;
+}
+
+/** @deprecated Usar applyCoverage */
 export async function materializeOpsCoverageShift(
   db: Firestore,
   batch: WriteBatch,
@@ -150,82 +340,16 @@ export async function materializeOpsCoverageShift(
     keepDocId?: string | null;
   },
 ): Promise<string> {
-  const absenceId = String(opts.titularShift.id || '').trim();
-  const empresaId = String(opts.empresaId || opts.titularShift.empresaId || '').trim();
-  const titularObj = String(opts.titularShift.objectiveId || '').trim();
-  const linkFields = opsCoverageLinkFields(
-    {
-      employeeId: opts.titularShift.employeeId,
-      employeeName: opts.titularShift.employeeName,
-    },
-    absenceId,
-  );
-
-  const deterministicId = absenceId
-    ? `ops_cov_${absenceId}_${opts.candidateEmployeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128)
-    : '';
-  const covDocId = opts.keepDocId || deterministicId || doc(collection(db, 'turnos')).id;
-
-  const startTs =
-    toTimestamp(opts.titularShift.startTime)
-    ?? (opts.titularShift.shiftDateObj instanceof Date
-      ? Timestamp.fromDate(opts.titularShift.shiftDateObj)
-      : null);
-  const endTs =
-    toTimestamp(opts.titularShift.endTime)
-    ?? (opts.titularShift.endDateObj instanceof Date
-      ? Timestamp.fromDate(opts.titularShift.endDateObj)
-      : null);
-
-  const candId = String(opts.candidateShiftId || '').trim();
-  if (candId && candId !== opts.candidateEmployeeId) {
-    const candSnap = await getDoc(doc(db, 'turnos', candId));
-    if (candSnap.exists()) {
-      const cd = candSnap.data() as Record<string, unknown>;
-      const sameObjective = String(cd.objectiveId || '').trim() === titularObj;
-      if (sameObjective && String(cd.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') {
-        batch.update(doc(db, 'turnos', candId), {
-          origin: 'OPERATIONS_COVERAGE',
-          resolvedBy: 'OPERACIONES',
-          coverageType: opts.coverageType,
-          coversPositionName: opts.titularShift.positionName || cd.positionName || null,
-          ...linkFields,
-          assignedAt: serverTimestamp(),
-        });
-        return candId;
-      }
-    }
-  }
-
-  batch.set(
-    doc(db, 'turnos', covDocId),
-    stampEmpresaId(
-      {
-        employeeId: opts.candidateEmployeeId,
-        employeeName: opts.candidateEmployeeName,
-        clientId: opts.titularShift.clientId || null,
-        clientName: opts.titularShift.clientName || null,
-        objectiveId: opts.titularShift.objectiveId || null,
-        objectiveName: opts.titularShift.objectiveName || '',
-        positionName: opts.titularShift.positionName || null,
-        coversPositionName: opts.titularShift.positionName || null,
-        code: opts.titularShift.code || 'T',
-        type: opts.titularShift.code || 'T',
-        startTime: startTs,
-        endTime: endTs,
-        status: 'PENDING',
-        origin: 'OPERATIONS_COVERAGE',
-        resolvedBy: 'OPERACIONES',
-        coverageType: opts.coverageType,
-        ...linkFields,
-        isAwaitingCoverageCheckIn: true,
-        createdAt: serverTimestamp(),
-      },
-      empresaId,
-    ),
-    { merge: true },
-  );
-  return covDocId;
+  return applyCoverage(db, batch, {
+    titularShiftId: String(opts.titularShift.id),
+    titularShift: opts.titularShift,
+    candidateEmployeeId: opts.candidateEmployeeId,
+    candidateEmployeeName: opts.candidateEmployeeName,
+    sourceShiftId: opts.candidateShiftId,
+    coverageType: opts.coverageType,
+    resolvedBy: 'OPERACIONES',
+    empresaId: opts.empresaId,
+  });
 }
 
 /** Vínculo titular ↔ cobertura para tooltip Plan ("cubre: NOMBRE"). */
@@ -247,7 +371,11 @@ export async function supersedeOpsCoveragesForAbsence(
   db: Firestore,
   absenceShiftId: string,
   batch: WriteBatch,
-  opts?: { keepDocId?: string | null; supersededBy?: string | null },
+  opts?: {
+    keepDocId?: string | null;
+    supersededBy?: string | null;
+    onlySupersedeCoverageType?: string | null;
+  },
 ): Promise<number> {
   const id = String(absenceShiftId || '').trim();
   if (!id) return 0;
@@ -263,6 +391,15 @@ export async function supersedeOpsCoveragesForAbsence(
     if (opts?.keepDocId && d.id === opts.keepDocId) continue;
     const data = d.data() as Record<string, unknown>;
     if (!isActiveOpsCoverageDoc(data)) continue;
+    const onlyCt = String(opts?.onlySupersedeCoverageType || '').trim().toUpperCase();
+    if (onlyCt) {
+      const docCt = String(data.coverageType || '').toUpperCase();
+      if (docCt !== onlyCt) continue;
+    }
+    const prevSource = String(data.sourceShiftId || '').trim();
+    if (prevSource) {
+      batch.update(doc(db, 'turnos', prevSource), clearSourceCoverageUsedPatch());
+    }
     batch.update(d.ref, {
       coverageSuperseded: true,
       coverageSupersededAt: serverTimestamp(),

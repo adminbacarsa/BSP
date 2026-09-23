@@ -22,7 +22,8 @@ import {
   isTitularAlreadyCovered,
   opsCoverageLinkFields,
   supersedeOpsCoveragesForAbsence,
-  materializeOpsCoverageShift,
+  applyCoverage,
+  CoverageApplyError,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
 import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
@@ -43,6 +44,7 @@ import { applyAutoRetentionForGap, pickRetentionShiftForGap } from '@/lib/operac
 import {
   convocatoriaTypeForInternalKind,
   invokeCrearConvocatoriaCobertura,
+  type OpsConvocatoriaCallableType,
 } from '@/lib/operaciones/opsConvocatoriaCobertura';
 import {
   COVERAGE_AUTO_SPEED_KMH,
@@ -654,7 +656,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             coverageKind,
           )?.id;
 
-      let callableType: 'RET' | 'FT' = 'RET';
+      let callableType: OpsConvocatoriaCallableType = 'RET';
       if (step.key === 'FT') callableType = 'FT';
       else if (step.key === 'INTERNO' && coverageKind) {
         callableType = convocatoriaTypeForInternalKind(coverageKind);
@@ -666,6 +668,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         type: callableType,
         empresaId: tid,
         ...(callableType === 'FT' && turnoId ? { ftShiftId: turnoId } : {}),
+        ...(callableType !== 'FT' && turnoId ? { candidateShiftId: turnoId } : {}),
       });
 
       onUpd({
@@ -757,64 +760,36 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         toast.error('El turno del guardia ya no existe en Firestore. Recargá operaciones e intentá de nuevo.');
         return;
       }
-      const linkFields = opsCoverageLinkFields(
-        {
-          employeeId: absenceShift.employeeId,
-          employeeName: absenceShift.employeeName,
-        },
-        String(absenceShift.id || ''),
-      );
-      // coveredBy* en el turno ausente alimenta "CUBIERTO POR" en planificación y reportes
-      const markCovered = (ct: string) => {
-        if (!canMarkTitular) return;
-        batch.update(
-          doc(db, 'turnos', absenceShift.id),
-          absentShiftCoveragePatch({
-            coveredByEmployeeId: empId,
-            coveredByEmployeeName: displayName,
-            coverageType: ct,
-            isAbsence,
-          }),
-        );
-      };
-
       if (step.key === 'INTERNO') {
         const ct = s.pending.coverageKind || 'RET';
-        const coverDocId = await materializeOpsCoverageShift(db, batch, {
+        if (!canMarkTitular || !absenceShift.id) {
+          toast.error('No se puede confirmar cobertura sobre este hueco.');
+          return;
+        }
+        const coverDocId = await applyCoverage(db, batch, {
+          titularShiftId: String(absenceShift.id),
           titularShift: { ...absenceShift, id: String(absenceShift.id) },
           candidateEmployeeId: empId,
           candidateEmployeeName: displayName,
-          candidateShiftId: shiftId,
+          sourceShiftId: shiftId,
           coverageType: ct,
+          resolvedBy: 'OPERACIONES',
           empresaId: tid,
+          startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
+          endTime: Timestamp.fromDate(absenceEnd),
         });
-        const candSnap = shiftId ? await getDoc(doc(db, 'turnos', shiftId)) : null;
-        const candObj = candSnap?.exists()
-          ? String(candSnap.data()?.objectiveId || '').trim()
-          : '';
-        const titObj = String(absenceShift.objectiveId || '').trim();
-        if (shiftId && candObj && titObj && candObj !== titObj) {
-          batch.update(doc(db, 'turnos', shiftId), {
-            coverageRedirectedTo: absenceShift.objectiveId,
-            coverageRedirectedAt: serverTimestamp(),
+        await syncAusenciaCoberturaGestionada(
+          db,
+          {
+            shiftId: absenceShift.id,
+            coveredByEmployeeId: empId,
+            coveredByEmployeeName: displayName,
+            coverageType: ct,
+            empresaId: tid || null,
             resolvedBy: 'OPERACIONES',
-            ...linkFields,
-          });
-        }
-        markCovered(ct);
-        if (absenceShift.id) {
-          await syncAusenciaCoberturaGestionada(
-            db,
-            {
-              shiftId: absenceShift.id,
-              coveredByEmployeeId: empId,
-              coveredByEmployeeName: displayName,
-              coverageType: ct,
-              empresaId: tid || null,
-            },
-            batch,
-          );
-        }
+          },
+          batch,
+        );
         await batch.commit();
         await addDoc(collection(db, 'novedades'), stampEmpresaId({
           type: 'CONVOCATORIA_COBERTURA',
@@ -830,37 +805,49 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           reportedBy: 'OPERACIONES',
         }, tid));
       } else if (step.key === 'FT') {
-        batch.update(doc(db, 'turnos', shiftId!), {
-          isFranco: false,
-          isFrancoTrabajado: true,
-          code: 'FT',
-          type: 'EXTRA_FRANCO',
+        if (!canMarkTitular || !absenceShift.id) {
+          toast.error('No se puede confirmar cobertura sobre este hueco.');
+          return;
+        }
+        const coverDocId = await applyCoverage(db, batch, {
+          titularShiftId: String(absenceShift.id),
+          titularShift: { ...absenceShift, id: String(absenceShift.id) },
+          candidateEmployeeId: empId,
+          candidateEmployeeName: displayName,
+          sourceShiftId: shiftId,
+          coverageType: 'FT',
+          resolvedBy: 'OPERACIONES',
+          empresaId: tid,
           startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
           endTime: Timestamp.fromDate(absenceEnd),
-          francoTrabajadoAt: serverTimestamp(),
-          francoObjectiveId: absenceShift.objectiveId,
-          francoObjectiveName: absenceShift.objectiveName,
-          comments: `Franco Trabajado — cubre ${absenceShift.employeeName || absenceShift.objectiveName}`,
-          origin: 'OPERATIONS_COVERAGE',
-          resolvedBy: 'OPERACIONES',
-          ...linkFields,
+          code: 'FT',
         });
-        markCovered('FRANCO');
-        if (absenceShift.id) {
-          await syncAusenciaCoberturaGestionada(
-            db,
-            {
-              shiftId: absenceShift.id,
-              coveredByEmployeeId: empId,
-              coveredByEmployeeName: displayName,
-              coverageType: 'FT',
-              empresaId: tid || null,
-            },
-            batch,
-          );
-        }
+        await syncAusenciaCoberturaGestionada(
+          db,
+          {
+            shiftId: absenceShift.id,
+            coveredByEmployeeId: empId,
+            coveredByEmployeeName: displayName,
+            coverageType: 'FT',
+            empresaId: tid || null,
+            resolvedBy: 'OPERACIONES',
+          },
+          batch,
+        );
         await batch.commit();
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'FRANCO_TRABAJADO', title: 'Franco trabajado', status: 'pending', employeeId: empId, employeeName: displayName, objectiveId: absenceShift.objectiveId, objectiveName: absenceShift.objectiveName, shiftId, description: `${displayName} trabaja su franco`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, tid));
+        await addDoc(collection(db, 'novedades'), stampEmpresaId({
+          type: 'FRANCO_TRABAJADO',
+          title: 'Franco trabajado',
+          status: 'pending',
+          employeeId: empId,
+          employeeName: displayName,
+          objectiveId: absenceShift.objectiveId,
+          objectiveName: absenceShift.objectiveName,
+          shiftId: coverDocId,
+          description: `${displayName} trabaja su franco`,
+          createdAt: serverTimestamp(),
+          reportedBy: 'OPERACIONES',
+        }, tid));
       }
       toast.success('Cobertura confirmada');
       onUpd({ status: 'CONFIRMED', pending: null, awaitingPhone: false });
