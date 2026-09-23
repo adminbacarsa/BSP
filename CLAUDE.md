@@ -198,8 +198,13 @@ Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al ab
 **UI vigente:** solo **`CoverageSessionManager`** (no reintroducir modales legacy de cobertura en estas páginas).
 
 **Backlog Ops cobertura (actualizar este listado al cerrar tareas; commit en `main`):**
-- [ ] **Auto Ext+Adel:** cascada secuencial EXTEND → ADVANCE → alinear con **PENDING_DUAL** del Manual (dos convocatorias / aceptación conjunta).
-- [ ] **Callable Manual:** tipos **REF/ESC** nativos en `crearConvocatoriaCobertura` (hoy el front mapea REF/ESC → `RET` en `opsConvocatoriaCobertura.ts`).
+- [x] **Escritor único `applyCoverage`** (`functions/src/coverage/syncAusenciaCobertura.ts` + espejo `web2/src/lib/operaciones/syncAusenciaCobertura.ts`) para Manual, app y Auto/Demo: turno origen del que cubre intacto + `coverageUsed`; cobertura siempre en doc `ops_cov_{titularShiftId}_{employeeId}` (`origin: OPERATIONS_COVERAGE`, banda/horario del titular); EXT/ADV = `coverageHoursOnSource: true` (horas en el turno propio, no se suman dos veces); claim atómico `coverageClaimConvocatoriaId` (expira 2 min). E2E: `node scripts/eval-coverage-e2e-emulator.mjs` (emulador :8080, `npm run build` en functions).
+- [x] **Auto Ext+Adel:** titular `PARTIAL` con una pata; no cancela la pata hermana y convoca la faltante (`ensureMissingDualLegConvocatoria`); sin candidato → novedad `VACANTE_PARCIAL`.
+- [x] **Callable Manual:** tipos **REF/ESC** nativos + `candidateShiftId` en `crearConvocatoriaCobertura`.
+- [ ] **Retención auto:** no escribir al abrir el protocolo; retener solo al saliente; aplicar después de chequear cobertura; liberar al resolver; no sacar de "activos" al compañero.
+- [ ] **Convocatorias CC:** cancelar al rechazar/cerrar; botón «Acepta» siempre visible.
+- [ ] **Flujos recuperados:** sin turno, retener sola, sin cobertura con turno sintético, candidatos de otros objetivos, candidatos > 30 km.
+- [ ] **Cascada Auto:** sin turno / volante primero; fechas en hora AR (hoy UTC).
 - [ ] **Fichaje convocado:** T−15…T+5 presente, T+6…T+30 “llegué tarde”, T+30 → AA; **`CONVOKED_FLEX`** en `requestCheckIn` / `registrarPresencia`.
 - [ ] **Prioridad EXT** sobre guardia **retenido** (`isRetention` / retención por ausencia) y segmentos por horario (HH:MM–HH:MM), no solo código M/T/N.
 
