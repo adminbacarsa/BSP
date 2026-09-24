@@ -135,7 +135,7 @@ async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFi
   if (!tokenSnap.exists()) return false;
   const data = tokenSnap.data();
   if (!data.verified) return false;
-  if (!data.deviceId) return true;
+  if (!data.deviceId) return false;
 
   const localId = await getStoredDeviceId();
   if (!localId) {
