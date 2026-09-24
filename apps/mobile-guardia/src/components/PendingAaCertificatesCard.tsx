@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import { CommandButton } from './ui/CommandButton';
 import { CommandCard } from './ui/CommandCard';
 import { CertificateAttachmentField } from './CertificateAttachmentField';
 import type { LocalCertificateFile } from '../lib/uploadAbsenceCertificate';
 import type { PendingAaAbsence } from '../hooks/usePendingAaCertificates';
 import { useTheme } from '../theme/ThemeContext';
+import { appAlert } from '@/lib/appAlert';
 
 type Props = {
   items: PendingAaAbsence[];
@@ -51,7 +52,7 @@ export function PendingAaCertificatesCard({ items, uploadingId, onUpload }: Prop
                 onPress={async () => {
                   if (!file) return;
                   const result = await onUpload(item.id, file);
-                  Alert.alert(result.ok ? 'Enviado' : 'Error', result.message);
+                  appAlert(result.ok ? 'Enviado' : 'Error', result.message);
                   if (result.ok) {
                     setActiveId(null);
                     setFile(null);

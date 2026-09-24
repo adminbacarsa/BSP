@@ -1,14 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  FlatList,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
@@ -30,6 +21,7 @@ import { getPortalCallables, isEmulatorMode } from '../../src/lib/portal';
 import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
 import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-core';
+import { appAlert } from '@/lib/appAlert';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
@@ -119,7 +111,7 @@ function AlertasScreenContent() {
       const ok = Number(data.successCount || 0);
       const fail = Number(data.failureCount || 0);
       if (ok === 0) {
-        Alert.alert(
+        appAlert(
           'Push no entregada',
           fail > 0
             ? `FCM rechazó ${fail} token(s). Cerrá sesión, volvé a entrar y reintentá.`
@@ -127,10 +119,10 @@ function AlertasScreenContent() {
         );
         return;
       }
-      Alert.alert('Push enviada', `OK: ${ok}${fail ? ` · fallidas: ${fail}` : ''}.`);
+      appAlert('Push enviada', `OK: ${ok}${fail ? ` · fallidas: ${fail}` : ''}.`);
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudo enviar la prueba';
-      Alert.alert('Error', msg);
+      appAlert('Error', msg);
     } finally {
       setTestBusy(false);
     }
@@ -141,10 +133,10 @@ function AlertasScreenContent() {
     setMarkAllBusy(true);
     try {
       await markAllUnreadRead();
-      Alert.alert('Listo', 'Todas las alertas quedaron leídas y confirmadas.');
+      appAlert('Listo', 'Todas las alertas quedaron leídas y confirmadas.');
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'No se pudieron marcar todas.';
-      Alert.alert('Error', msg);
+      appAlert('Error', msg);
     } finally {
       setMarkAllBusy(false);
     }
@@ -153,7 +145,7 @@ function AlertasScreenContent() {
   const onDismissAll = useCallback(() => {
     if (items.length === 0) return;
     const pendingAckCount = items.filter((n) => alertNeedsAck(n)).length;
-    Alert.alert(
+    appAlert(
       'Borrar todas',
       pendingAckCount > 0
         ? `Se van a quitar ${items.length} alerta(s). Las ${pendingAckCount} que pedían confirmación se marcarán como enteradas.`
@@ -168,10 +160,10 @@ function AlertasScreenContent() {
               setDismissAllBusy(true);
               try {
                 await dismissAll();
-                Alert.alert('Listo', 'Bandeja vaciada.');
+                appAlert('Listo', 'Bandeja vaciada.');
               } catch (e) {
                 const msg = e instanceof Error ? e.message : 'No se pudieron borrar todas.';
-                Alert.alert('Error', msg);
+                appAlert('Error', msg);
               } finally {
                 setDismissAllBusy(false);
               }
@@ -206,7 +198,7 @@ function AlertasScreenContent() {
       try {
         await acknowledge(n.id);
       } catch {
-        Alert.alert('Error', 'No se pudo registrar el acuse. Reintentá.');
+        appAlert('Error', 'No se pudo registrar el acuse. Reintentá.');
       } finally {
         setBusyId(null);
       }
@@ -217,7 +209,7 @@ function AlertasScreenContent() {
   const onRespond = useCallback(
     (n: PortalInboxItem, response: 'ACCEPTED' | 'REJECTED') => {
       const label = response === 'ACCEPTED' ? 'Aceptar' : 'Rechazar';
-      Alert.alert(
+      appAlert(
         label,
         response === 'ACCEPTED'
           ? '¿Confirmás que aceptás la cobertura?'
@@ -233,7 +225,7 @@ function AlertasScreenContent() {
                 try {
                   await respond(n.id, response);
                 } catch {
-                  Alert.alert('Error', 'No se pudo enviar la respuesta. Reintentá.');
+                  appAlert('Error', 'No se pudo enviar la respuesta. Reintentá.');
                 } finally {
                   setBusyId(null);
                 }
@@ -249,7 +241,7 @@ function AlertasScreenContent() {
   const onDismiss = useCallback(
     (n: PortalInboxItem) => {
       const needsAck = alertNeedsAck(n);
-      Alert.alert(
+      appAlert(
         'Quitar alerta',
         needsAck
           ? 'Este aviso pide confirmación. ¿Marcar como enterado y quitarlo?'
@@ -266,7 +258,7 @@ function AlertasScreenContent() {
                   if (needsAck) await acknowledge(n.id);
                   await dismiss(n.id);
                 } catch {
-                  Alert.alert('Error', 'No se pudo quitar la alerta.');
+                  appAlert('Error', 'No se pudo quitar la alerta.');
                 } finally {
                   setBusyId(null);
                 }

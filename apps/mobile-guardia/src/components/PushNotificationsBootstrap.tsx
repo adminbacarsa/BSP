@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { Alert, AppState, Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePortalAuth } from '../context/PortalAuthContext';
 import { getPortalFirebase } from '../lib/portal';
@@ -11,6 +11,7 @@ import {
   subscribeWebForegroundMessages,
   type PushRegistrationStatus,
 } from '../lib/pushNotifications';
+import { appAlert } from '@/lib/appAlert';
 
 type PushNotificationsBootstrapProps = {
   onStatusChange?: (status: PushRegistrationStatus) => void;
@@ -73,7 +74,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
       if (!cancelled) {
         onStatusChange?.(result.status);
         if (result.status === 'denied') {
-          Alert.alert(
+          appAlert(
             'Notificaciones',
             Platform.OS === 'web'
               ? 'Para recibir alertas, permití notificaciones de este sitio en el navegador. En iPhone, agregá COSP a la pantalla de inicio.'
@@ -101,12 +102,12 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         if (AppState.currentState === 'active') {
           const route = routeFromNotificationData(data);
           if (route) {
-            Alert.alert(title, body || 'Nueva notificación', [
+            appAlert(title, body || 'Nueva notificación', [
               { text: 'Después', style: 'cancel' },
               { text: 'Abrir', onPress: () => openFromData(data) },
             ]);
           } else {
-            Alert.alert(title, body || 'Nueva notificación');
+            appAlert(title, body || 'Nueva notificación');
           }
           try {
             if (Notification.permission === 'granted') {
@@ -165,12 +166,12 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
             raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : ({} as Record<string, unknown>);
           const route = routeFromNotificationData(data);
           if (route) {
-            Alert.alert(title, body || 'Nueva notificación', [
+            appAlert(title, body || 'Nueva notificación', [
               { text: 'Después', style: 'cancel' },
               { text: 'Abrir', onPress: () => openFromData(data) },
             ]);
           } else {
-            Alert.alert(title, body || 'Nueva notificación');
+            appAlert(title, body || 'Nueva notificación');
           }
         }
       });

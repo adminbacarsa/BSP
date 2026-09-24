@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>appAlert smoke</title>
+</head>
+<body>
+  <h1>appAlert smoke</h1>
+  <button id="one">1 btn</button>
+  <button id="two">2 btn</button>
+  <button id="three">3 btn</button>
+  <pre id="log"></pre>
+  <script>
+    const log = (m) => {
+      document.getElementById('log').textContent += m + '\n';
+      console.log(m);
+    };
+
+    function showDomModal(title, message, buttons) {
+      const root = document.createElement('div');
+      root.id = 'cosp-app-alert-root';
+      root.style.cssText = 'position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:rgba(15,23,42,.55)';
+      const card = document.createElement('div');
+      card.style.cssText = 'background:#fff;border-radius:20px;padding:20px;max-width:360px;width:100%';
+      card.innerHTML = '<div style="font-weight:800">' + title + '</div>' +
+        (message ? '<div style="color:#64748b;margin:8px 0">' + message + '</div>' : '');
+      const row = document.createElement('div');
+      buttons.forEach((b) => {
+        const btn = document.createElement('button');
+        btn.textContent = b.text;
+        btn.style.cssText = 'display:block;width:100%;margin-top:8px;padding:12px;border:none;border-radius:12px;font-weight:700;cursor:pointer;background:' +
+          (b.style === 'destructive' ? '#b91c1c' : b.style === 'cancel' ? '#f8fafc' : '#8B1A1A') +
+          ';color:' + (b.style === 'cancel' ? '#334155' : '#fff');
+        btn.onclick = () => { root.remove(); b.onPress && b.onPress(); };
+        row.appendChild(btn);
+      });
+      card.appendChild(row);
+      root.appendChild(card);
+      document.body.appendChild(root);
+    }
+
+    function appAlert(title, message, buttons) {
+      const btns = buttons && buttons.length ? buttons : [{ text: 'OK' }];
+      if (btns.length <= 1) {
+        window.alert(title + (message ? '\n\n' + message : ''));
+        btns[0].onPress && btns[0].onPress();
+        return;
+      }
+      if (btns.length === 2) {
+        const ok = window.confirm(title + (message ? '\n\n' + message : ''));
+        if (ok) (btns.find(b => b.style !== 'cancel') || btns[1]).onPress?.();
+        else (btns.find(b => b.style === 'cancel') || btns[0]).onPress?.();
+        return;
+      }
+      showDomModal(title, message, btns);
+    }
+
+    document.getElementById('one').onclick = () =>
+      appAlert('Listo', 'Mensaje simple', [{ text: 'OK', onPress: () => log('ONE_OK') }]);
+    document.getElementById('two').onclick = () =>
+      appAlert('Cerrar sesión', '¿Seguro?', [
+        { text: 'Cancelar', style: 'cancel', onPress: () => log('TWO_CANCEL') },
+        { text: 'Cerrar sesión', style: 'destructive', onPress: () => log('TWO_OK') },
+      ]);
+    document.getElementById('three').onclick = () =>
+      appAlert('Voy a llegar tarde', '¿Cuántos minutos?', [
+        { text: 'Cancelar', style: 'cancel', onPress: () => log('THREE_CANCEL') },
+        { text: '15 min', onPress: () => log('THREE_15') },
+        { text: '30 min', onPress: () => log('THREE_30') },
+        { text: '60 min', onPress: () => log('THREE_60') },
+      ]);
+
+    // Auto: 3-btn modal exists
+    appAlert('Voy a llegar tarde', 'auto', [
+      { text: 'Cancelar', style: 'cancel', onPress: () => log('AUTO_CANCEL') },
+      { text: '15 min', onPress: () => log('AUTO_15') },
+      { text: '30 min', onPress: () => log('AUTO_30') },
+    ]);
+    setTimeout(() => {
+      const root = document.getElementById('cosp-app-alert-root');
+      log(root ? 'MODAL_OK' : 'MODAL_FAIL');
+      const destructiveish = root && [...root.querySelectorAll('button')].some(b => b.textContent === '15 min');
+      log(destructiveish ? 'BUTTONS_OK' : 'BUTTONS_FAIL');
+      // click 30 min
+      const b30 = [...root.querySelectorAll('button')].find(b => b.textContent === '30 min');
+      b30 && b30.click();
+      log(document.getElementById('cosp-app-alert-root') ? 'STILL_OPEN' : 'CLOSED_OK');
+      document.title = 'SMOKE_DONE';
+    }, 100);
+  </script>
+</body>
+</html>

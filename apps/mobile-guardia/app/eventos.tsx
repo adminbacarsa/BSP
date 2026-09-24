@@ -1,12 +1,5 @@
 import { useMemo } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Evento, ServicioEvento, SolicitudEvento } from '@cosp/portal-types';
@@ -24,6 +17,7 @@ import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { PortalErrorPanel } from '../src/components/PortalErrorPanel';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
+import { appAlert } from '@/lib/appAlert';
 
 export default function EventosScreen() {
   return (
@@ -76,12 +70,12 @@ function EventosScreenContent() {
 
   async function onSolicitar(evento: Evento, servicio: ServicioEvento) {
     const result = await solicitar(evento, servicio);
-    Alert.alert(result.ok ? 'Enviada' : 'Error', result.message);
+    appAlert(result.ok ? 'Enviada' : 'Error', result.message);
   }
 
   async function onResponder(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
-    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+    appAlert(result.ok ? 'Listo' : 'Error', result.message);
   }
 
   return (

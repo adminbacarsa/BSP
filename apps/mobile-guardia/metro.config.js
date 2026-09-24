@@ -23,4 +23,16 @@ config.resolver.extraNodeModules = {
 };
 config.watchFolders = [projectRoot, portalCore, portalTypes];
 
+const upstreamResolveRequest = config.resolver.resolveRequest;
+config.resolver.resolveRequest = (context, moduleName, platform) => {
+  if (moduleName.startsWith('@/')) {
+    const rewritten = path.join(projectRoot, 'src', moduleName.slice(2));
+    return context.resolveRequest(context, rewritten, platform);
+  }
+  if (typeof upstreamResolveRequest === 'function') {
+    return upstreamResolveRequest(context, moduleName, platform);
+  }
+  return context.resolveRequest(context, moduleName, platform);
+};
+
 module.exports = config;

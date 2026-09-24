@@ -1,15 +1,5 @@
 import { useMemo, useState } from 'react';
-import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Redirect, Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
@@ -35,6 +25,7 @@ import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
 import { radius } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
+import { appAlert } from '@/lib/appAlert';
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -83,22 +74,22 @@ export default function NovedadScreen() {
   async function handleSubmit() {
     if (!user) return;
     if (isOffline) {
-      Alert.alert(
+      appAlert(
         'Sin conexión',
         'Para enviar una novedad necesitás internet. La fichada offline sigue disponible desde el inicio.',
       );
       return;
     }
     if (!DATE_RE.test(startDate) || !DATE_RE.test(endDate)) {
-      Alert.alert('Fechas', 'Usá formato AAAA-MM-DD (ej. 2026-07-30).');
+      appAlert('Fechas', 'Usá formato AAAA-MM-DD (ej. 2026-07-30).');
       return;
     }
     if (endDate < startDate) {
-      Alert.alert('Fechas', 'La fecha hasta no puede ser anterior al desde.');
+      appAlert('Fechas', 'La fecha hasta no puede ser anterior al desde.');
       return;
     }
     if (!reason.trim()) {
-      Alert.alert('Motivo', 'Indicá el motivo de la novedad.');
+      appAlert('Motivo', 'Indicá el motivo de la novedad.');
       return;
     }
 
@@ -150,7 +141,7 @@ export default function NovedadScreen() {
 
       const certNote = fileUrl ? ' El certificado quedó adjunto.' : '';
       const toastMsg = absenceSubmitToastMessageForType(absenceType, classified.absenceCase);
-      Alert.alert('Enviado', `${toastMsg}${certNote}`, [
+      appAlert('Enviado', `${toastMsg}${certNote}`, [
         { text: 'OK', onPress: () => router.back() },
       ]);
       setReason('');
@@ -159,7 +150,7 @@ export default function NovedadScreen() {
       setEndDate(todayKey());
     } catch (e) {
       const message = e instanceof Error ? e.message : 'No se pudo enviar la solicitud';
-      Alert.alert('Error', message);
+      appAlert('Error', message);
     } finally {
       setSubmitting(false);
     }

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import type { LocalCertificateFile } from '../lib/uploadAbsenceCertificate';
 import { colors, radius } from '../theme/tokens';
+import { appAlert } from '@/lib/appAlert';
 
 type Props = {
   value: LocalCertificateFile | null;
@@ -42,7 +43,7 @@ export function CertificateAttachmentField({ value, onChange, disabled }: Props)
     if (disabled || busy) return;
     const ok = await ensureCameraPermission();
     if (!ok) {
-      Alert.alert('Cámara', 'Activá el permiso de cámara en ajustes del teléfono.');
+      appAlert('Cámara', 'Activá el permiso de cámara en ajustes del teléfono.');
       return;
     }
     setBusy(true);
@@ -64,7 +65,7 @@ export function CertificateAttachmentField({ value, onChange, disabled }: Props)
     if (disabled || busy) return;
     const ok = await ensureLibraryPermission();
     if (!ok) {
-      Alert.alert('Galería', 'Activá el permiso de fotos en ajustes del teléfono.');
+      appAlert('Galería', 'Activá el permiso de fotos en ajustes del teléfono.');
       return;
     }
     setBusy(true);

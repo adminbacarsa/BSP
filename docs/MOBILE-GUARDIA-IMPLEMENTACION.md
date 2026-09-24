@@ -142,6 +142,24 @@
 |--------|---------|
 | **Registro dispositivo** | App llama `requestGuardDeviceRegistration` + `getGuardDeviceRegistrationStatus` (Plataforma). UI CC de aprobación = Plataforma. |
 | **VAPID en build web** | `EXPO_PUBLIC_FIREBASE_VAPID_KEY` en `.env.example`; Plataforma la inyecta desde `NEXT_PUBLIC_FIREBASE_VAPID_KEY` de web2. Sin VAPID: portal OK sin push. |
+| **Alertas UI web** | Usar `appAlert` (`src/lib/appAlert.ts`); `Alert.alert` de RN-web no ejecuta botones. Lint: `npm run lint:mobile-no-alert`. |
+
+### APIs nativas vs navegador (`/app`)
+
+| API | Uso en app | Web | Alternativa / nota |
+|-----|------------|-----|-------------------|
+| `Alert.alert` | Confirmaciones (logout, bandeja, ETA…) | ❌ no ejecuta `onPress` | **`appAlert`** (alert/confirm/modal DOM) |
+| `Linking.openURL` (https maps) | Hero / EV / agenda | ✅ abre pestaña | — |
+| `Linking.openURL` (`tel:`, WhatsApp) | No hay usos hoy | ⚠️ `tel:` OK en móvil; WhatsApp deep link variable | Si se agregan: `https://wa.me/...` |
+| `Share` | No usado | ❌ limitado | Web Share API o copiar al portapapeles |
+| `Clipboard` | No usado | ✅ vía `navigator.clipboard` | `@react-native-clipboard/clipboard` o API web |
+| `expo-image-picker` (galería) | Certificados / credencial | ✅ file input | — |
+| `expo-image-picker` (cámara) | Certificados / credencial | ⚠️ depende del browser; Safari iOS irregular | Preferir galería en web o `capture` en input |
+| `expo-document-picker` | No usado | ✅ | Si adjuntan PDF: document-picker |
+| `expo-haptics` | No usado | ❌ no-op | Omitir en web |
+| SecureStore | deviceId nativo | ❌ | LS + IndexedDB (`deviceId.ts`) |
+| `expo-notifications` | Push nativo | ❌ | FCM web VAPID |
+| `expo-location` | Fichada GPS | ✅ HTTPS + permiso | Mensajes claros si niega |
 
 ### Checklist prueba portal web `/app`
 
@@ -151,7 +169,10 @@
 | 2 | Login comparte sesión con panel (mismo origen) | ⬜ | ⬜ | ⬜ |
 | 3 | Activación `/app/activar/?token=` vincula `platform: web` | ⬜ | ⬜ | ⬜ |
 | 4 | Segundo navegador/dispositivo → device-blocked | ⬜ | ⬜ | ⬜ |
-| 5 | «Registrar este dispositivo» crea novedad | ⬜ | ⬜ | ⬜ |
+| 5 | «Registrar este dispositivo» (solo si ya activó en otro) → callables | ⬜ | ⬜ | ⬜ |
+| 5b | Nunca activó → mensaje mail RRHH, sin botón registrar | ⬜ | ⬜ | ⬜ |
+| 5c | Cerrar sesión (confirm) / vaciar bandeja / acuse alerta | ⬜ | ⬜ | ⬜ |
+| 5d | Permuta / certificado / foto credencial (galería) | ⬜ | ⬜ | ⬜ |
 | 6 | Manifest PWA + theme `#8B1A1A` | ⬜ | ⬜ | ⬜ |
 | 7 | iOS: aviso «Agregar a pantalla de inicio» | — | — | ⬜ |
 | 8 | Push: permiso + token en `device_tokens` (`platform: web`, key `fcm_token`) | ⬜ | ⬜ | ⬜* |
@@ -171,6 +192,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-24 | WEB appAlert | Alert.alert → appAlert (web: alert/confirm/modal); lint:mobile-no-alert; matriz APIs RN↔navegador en docs
 2026-09-24 | WEB device callables | requestDeviceRegistration → requestGuardDeviceRegistration + getGuardDeviceRegistrationStatus; revert deploy-lib/firebase.json/web2 (Plataforma)
 2026-09-24 | WEB /app P1-P6 | Rama cursor/mobile-web: baseUrl /app + build:web dist-web; deviceId LS+IDB; PWA #8B1A1A + A2HS iOS; FCM web VAPID + SW; GPS HTTPS; AA cert Hoy; sin OTA/EAS web
 2026-09-23 | CC main+vitest | main@74a54f78; vitest portalCheckIn 16/16 OK; OTA preview no publicada desde cloud (EXPO_TOKEN omitido) → Notebook: npm run update:preview

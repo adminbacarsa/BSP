@@ -67,6 +67,7 @@
     "eval:analisis-queries": "npx tsx apps/web2/scripts/eval-analisis-queries.ts",
     "eval:hours-balance": "npx tsx --tsconfig apps/web2/tsconfig.json apps/web2/scripts/eval-hours-balance.ts",
     "eval:vplan": "node scripts/eval-vplan.mjs",
+    "lint:mobile-no-alert": "node scripts/check-mobile-no-rn-alert.cjs",
     "run:vplan:obrador": "node scripts/run-vplan-local.mjs --emulator",
     "test:vplan-emulator": "node scripts/test-vplan-emulator.mjs",
     "test:planning-agent-emulator": "node scripts/test-planning-agent-emulator.mjs",
