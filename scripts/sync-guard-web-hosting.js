@@ -9,12 +9,14 @@ const repoRoot = path.join(__dirname, '..');
 const mobileRoot = path.join(repoRoot, 'apps', 'mobile-guardia');
 const distWeb = path.join(mobileRoot, 'dist-web');
 
-function run(cmd, cwd) {
+function run(cmd, cwd, extraEnv = {}) {
   console.log(`\n▶ ${cmd}`);
-  const r = spawnSync(cmd, { cwd, shell: true, stdio: 'inherit', env: process.env });
+  const r = spawnSync(cmd, { cwd, shell: true, stdio: 'inherit', env: { ...process.env, ...extraEnv } });
   if (r.status !== 0) {
     console.error(`\n✗ Falló: ${cmd}`);
-    process.exit(r.status ?? 1);
+    const err = new Error(`Falló: ${cmd}`);
+    err.exitCode = r.status ?? 1;
+    throw err;
   }
 }
 
@@ -49,6 +51,27 @@ function assertDistWebReady() {
   }
 }
 
+function listFilesRecursive(dir) {
+  const out = [];
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const p = path.join(dir, entry.name);
+    if (entry.isDirectory()) out.push(...listFilesRecursive(p));
+    else out.push(p);
+  }
+  return out;
+}
+
+function assertNotEmulatorBuild() {
+  const files = listFilesRecursive(distWeb).filter((f) => /\.(js|html|json)$/.test(f));
+  // La config viaja como JSON escapado dentro del bundle: \"useEmulator\":true
+  const hit = files.find((f) => /\\?"useEmulator\\?"\s*:\s*true/.test(fs.readFileSync(f, 'utf8')));
+  if (hit) {
+    console.error(`\n✗ El build web quedó en modo emulador (${path.relative(repoRoot, hit)}) — abortando deploy.`);
+    process.exit(1);
+  }
+  console.log('✓ build web en modo producción (sin emulador)');
+}
+
 function copyDir(src, dest) {
   assertDistWebReady();
   fs.mkdirSync(path.dirname(dest), { recursive: true });
@@ -68,9 +91,31 @@ function main() {
   const labRoot = process.env.COSP_LAB_ROOT || repoRoot;
   copyMobileGuardiaEnv(labRoot, repoRoot);
 
-  run('npm run build:web', mobileRoot);
+  // Sin destino explícito = deploy a producción: el .env del lab trae USE_EMULATOR=true y
+  // las variables de proceso tienen prioridad sobre los .env que carga Expo.
+  const isProdDeploy = !destArg;
+  // Expo toma el .env aunque el proceso traiga la variable: .env.production.local tiene prioridad en export.
+  const prodEnvFile = path.join(mobileRoot, '.env.production.local');
+  if (isProdDeploy) {
+    fs.writeFileSync(prodEnvFile, 'EXPO_PUBLIC_USE_EMULATOR=false\n');
+  }
+  try {
+    // --clear: la caché de Metro reutiliza el bundle con la config del lab incrustada.
+    run(
+      isProdDeploy ? 'npm run build:web -- --clear' : 'npm run build:web',
+      mobileRoot,
+      isProdDeploy ? { EXPO_PUBLIC_USE_EMULATOR: 'false' } : {},
+    );
+  } finally {
+    if (isProdDeploy && fs.existsSync(prodEnvFile)) fs.rmSync(prodEnvFile);
+  }
   assertDistWebReady();
+  if (isProdDeploy) assertNotEmulatorBuild();
   copyDir(distWeb, dest);
 }
 
-main();
+try {
+  main();
+} catch (e) {
+  process.exit(e.exitCode ?? 1);
+}
