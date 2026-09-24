@@ -97,10 +97,16 @@ exports.requestGuardDeviceRegistration = functions.https.onCall(async (data, con
     }
     const bindingRef = db.collection('device_tokens').doc(uid);
     const binding = await bindingRef.get();
-    if (!binding.exists || binding.data()?.verified !== true) {
+    if (!binding.exists) {
         throw new functions.https.HttpsError('failed-precondition', 'Activá tu cuenta con el mail de acceso antes de registrar un dispositivo nuevo.');
     }
-    const currentDeviceId = String(binding.data()?.deviceId ?? '').trim();
+    const bindingData = binding.data() || {};
+    const verified = bindingData.verified === true;
+    const unboundAfterAdmin = bindingData.unboundAt != null;
+    if (!verified && !unboundAfterAdmin) {
+        throw new functions.https.HttpsError('failed-precondition', 'Activá tu cuenta con el mail de acceso antes de registrar un dispositivo nuevo.');
+    }
+    const currentDeviceId = String(bindingData.deviceId ?? '').trim();
     if (currentDeviceId && currentDeviceId === trimmedDeviceId) {
         return { status: 'already_bound' };
     }
@@ -152,6 +158,7 @@ exports.approveGuardDeviceRegistration = functions.https.onCall(async (data, con
     }
     const req = reqSnap.data();
     employeeId = employeeId || String(req.employeeId || '').trim();
+    await assertTargetLegajoInCallerEmpresa(db, context, employeeId);
     const requestedDeviceId = String(req.requestedDeviceId || '').trim();
     if (!requestedDeviceId) {
         throw new functions.https.HttpsError('failed-precondition', 'Solicitud sin deviceId.');
@@ -220,6 +227,7 @@ exports.rejectGuardDeviceRegistration = functions.https.onCall(async (data, cont
     }
     const req = reqSnap.data();
     employeeId = employeeId || String(req.employeeId || '').trim();
+    await assertTargetLegajoInCallerEmpresa(db, context, employeeId);
     await reqRef.update({
         status: 'REJECTED',
         rejectMotivo,
@@ -270,6 +278,26 @@ async function assertAdminCaller(db, context) {
         ['admin', 'manager', 'hrmanager', 'supervisor', 'operator'].includes(callerRole.replace(/_/g, ''));
     if (!isAdmin) {
         throw new functions.https.HttpsError('permission-denied', 'Solo personal autorizado.');
+    }
+}
+async function assertTargetLegajoInCallerEmpresa(db, context, employeeId) {
+    const eid = String(employeeId || '').trim();
+    if (!eid)
+        return;
+    const callerSnap = await db.collection('system_users').doc(context.auth.uid).get();
+    const callerRole = String(callerSnap.data()?.role ?? context.auth.token?.role ?? '').toLowerCase();
+    if (callerRole === 'superadmin')
+        return;
+    const callerEmpresa = String(callerSnap.data()?.empresaId ?? context.auth.token?.empresaId ?? '').trim();
+    if (!callerEmpresa)
+        return;
+    const empSnap = await db.collection('empleados').doc(eid).get();
+    if (!empSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Legajo no encontrado.');
+    }
+    const targetEmpresa = String(empSnap.data()?.empresaId ?? '').trim();
+    if (targetEmpresa && targetEmpresa !== callerEmpresa) {
+        throw new functions.https.HttpsError('permission-denied', 'El legajo no pertenece a una empresa que podés administrar.');
     }
 }
 exports.listPendingGuardDeviceRegistrations = functions.https.onCall(async (data, context) => {
@@ -335,6 +363,15 @@ exports.unbindGuardDevice = functions.https.onCall(async (data, context) => {
     if (!targetUid) {
         throw new functions.https.HttpsError('invalid-argument', 'targetUid, employeeId o deviceId requerido.');
     }
+    if (employeeIdArg) {
+        await assertTargetLegajoInCallerEmpresa(db, context, String(employeeIdArg).trim());
+    }
+    else if (targetUid) {
+        const legajo = await resolveEmployeeIdForUid(db, targetUid, context.auth.token?.email);
+        if (legajo?.employeeId) {
+            await assertTargetLegajoInCallerEmpresa(db, context, legajo.employeeId);
+        }
+    }
     const result = await (0, bindGuardDevice_1.unbindGuardDeviceForUid)(db, targetUid, context.auth.uid);
     return { success: true, targetUid, ...result };
 });
@@ -386,6 +423,13 @@ exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, 
         };
     }
     if (rawStatus === 'APPROVED') {
+        const bind = await db.collection('device_tokens').doc(uid).get();
+        const bindData = bind.data() || {};
+        const approvedAtMs = d.approvedAt?.toMillis?.() ?? 0;
+        const unboundAtMs = bindData.unboundAt?.toMillis?.() ?? 0;
+        if (unboundAtMs > 0 && (approvedAtMs === 0 || unboundAtMs >= approvedAtMs)) {
+            return deviceTokenBindingStatus(bind);
+        }
         return {
             status: 'approved',
             requestedDeviceId: d.requestedDeviceId ?? null,
