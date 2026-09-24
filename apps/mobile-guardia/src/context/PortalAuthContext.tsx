@@ -14,7 +14,7 @@ import {
   signOut as firebaseSignOut,
   type User,
 } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, updateDoc, where } from 'firebase/firestore';
 import * as Linking from 'expo-linking';
 import {
   DEFAULT_PORTAL_FEATURES,
@@ -102,16 +102,34 @@ export function mapPortalAuthError(err: unknown, emulatorMode: boolean): string 
   return 'No se pudo iniciar sesión.';
 }
 
+async function anyLinkedLegajoBypassesDevice(
+  user: User,
+  db: ReturnType<typeof getPortalFirebase>['db'],
+): Promise<boolean> {
+  try {
+    const direct = await getDoc(doc(db, 'empleados', user.uid));
+    if (direct.exists() && direct.data()?.bypassDeviceCheck === true) return true;
+    const byUid = await getDocs(query(collection(db, 'empleados'), where('uid', '==', user.uid)));
+    if (byUid.docs.some((d) => d.data()?.bypassDeviceCheck === true)) return true;
+    const raw = user.email?.trim();
+    if (raw) {
+      for (const email of new Set([raw, raw.toLowerCase()])) {
+        const byEmail = await getDocs(query(collection(db, 'empleados'), where('email', '==', email)));
+        if (byEmail.docs.some((d) => d.data()?.bypassDeviceCheck === true)) return true;
+      }
+    }
+  } catch {
+    /* sin lectura: sigue la validación normal por device_tokens */
+  }
+  return false;
+}
+
 async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
   if (await userIsSuperAdmin(user)) return true;
 
-  const empDocId = await resolveEmpDocIdWithRetry(db, user, 2);
-  if (empDocId) {
-    const empSnap = await getDoc(doc(db, 'empleados', empDocId));
-    if (empSnap.exists() && empSnap.data()?.bypassDeviceCheck === true) {
-      return true;
-    }
-  }
+  // Un mismo usuario puede tener legajo en varias empresas (ej. Bacarsa y Pruebas SA): la excepción
+  // de dispositivo vale si cualquiera de sus legajos la tiene, no solo el primero que se resuelve.
+  if (await anyLinkedLegajoBypassesDevice(user, db)) return true;
 
   const tokenSnap = await getDoc(doc(db, 'device_tokens', user.uid));
   if (!tokenSnap.exists()) return false;
