@@ -2996,9 +2996,14 @@ export const detectarAusencias = functions
       }
     }
 
-    const convocados = await runConvocadoAbsentPass(db, now, cc);
-    if (convocados > 0) {
-      console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
+    try {
+      const convocados = await runConvocadoAbsentPass(db, now, cc);
+      if (convocados > 0) {
+        console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
+      }
+    } catch (e) {
+      // Un índice faltante o un error acá no debe cortar la detección de ausencias.
+      console.error('[detectarAusencias] runConvocadoAbsentPass:', (e as Error)?.message);
     }
 
     console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);

@@ -2527,9 +2527,14 @@ exports.detectarAusencias = functions
             await tryMarkAbsent('AUTO_T30');
         }
     }
-    const convocados = await (0, convocadoAbsentPass_1.runConvocadoAbsentPass)(db, now, cc);
-    if (convocados > 0) {
-        console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
+    try {
+        const convocados = await (0, convocadoAbsentPass_1.runConvocadoAbsentPass)(db, now, cc);
+        if (convocados > 0) {
+            console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
+        }
+    }
+    catch (e) {
+        console.error('[detectarAusencias] runConvocadoAbsentPass:', e?.message);
     }
     console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
     return null;
