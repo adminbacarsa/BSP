@@ -294,8 +294,8 @@ function AlertasScreenContent() {
             </Text>
             {isPreviewMode ? (
               <Text style={[styles.fcmHint, { color: palette.warning }]}>
-                Preview: alertas del legajo elegido. Salí y volvé a entrar al preview para atar el
-                push FCM a ese legajo.
+                Preview: alertas del legajo elegido. En web tocá «Activar notificaciones» en el banner
+                naranja para atar el push FCM a este dispositivo.
               </Text>
             ) : null}
             <ScrollView

@@ -5,12 +5,28 @@ import { deleteDoc, doc, serverTimestamp, setDoc, type Firestore } from 'firebas
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getPortalFirebase } from './portal';
+import { buildDeviceTokenDoc } from './deviceTokenDoc';
+
+export { buildDeviceTokenDoc } from './deviceTokenDoc';
 
 /** Misma clave que el portal web viejo `/empleado` (localStorage). */
 export const WEB_FCM_STORAGE_KEY = 'fcm_token';
 const NATIVE_FCM_STORAGE_KEY = '@cosp/mobile_fcm_token';
 
 export type PushRegistrationStatus = 'unsupported' | 'off' | 'denied' | 'enabled' | 'error';
+
+export type RegisterPushOptions = {
+  /**
+   * SuperAdmin en preview: token del dispositivo del SA atado al legajo visto.
+   * Las Functions buscan por employeeId → el SA recibe las push de ese guardia.
+   */
+  previewOf?: boolean;
+  /**
+   * Solo con gesto del usuario (botón). En web Safari/iOS exige gesto para
+   * Notification.requestPermission(); sin interactive no pedimos permiso.
+   */
+  interactive?: boolean;
+};
 
 function getVapidKey(): string {
   const extra = (Constants.expoConfig?.extra ?? {}) as { vapidKey?: string };
@@ -56,6 +72,7 @@ async function clearTokenLocal(): Promise<void> {
   await AsyncStorage.removeItem(NATIVE_FCM_STORAGE_KEY);
 }
 
+/** Borra `device_tokens/{token}` en servidor y limpia storage local. */
 export async function clearPushTokenOnServer(db: Firestore, token: string | null): Promise<void> {
   if (!token) {
     await clearTokenLocal();
@@ -69,13 +86,61 @@ export async function clearPushTokenOnServer(db: Firestore, token: string | null
   await clearTokenLocal();
 }
 
+/**
+ * Sale de preview: borra el doc FCM del servidor (deja de recibir push del legajo)
+ * pero conserva el token local para re-atar al entrar a otro preview sin re-prompt.
+ */
+export async function detachPushTokenOnServer(db: Firestore): Promise<void> {
+  const token = await getStoredFcmToken();
+  if (!token) return;
+  try {
+    await deleteDoc(doc(db, 'device_tokens', token));
+  } catch {
+    /* ignore */
+  }
+}
+
+async function persistTokenDoc(params: {
+  user: User;
+  db: Firestore;
+  empDocId: string | null;
+  empresaId: string | null;
+  token: string;
+  platform: 'web' | 'ios' | 'android';
+  previewOf?: boolean;
+}): Promise<void> {
+  const { user, db, empDocId, empresaId, token, platform, previewOf } = params;
+  const oldToken = await getStoredFcmToken();
+  if (oldToken && oldToken !== token) {
+    await clearPushTokenOnServer(db, oldToken);
+  }
+
+  const payload = buildDeviceTokenDoc({
+    uid: user.uid,
+    employeeId: empDocId,
+    empresaId,
+    token,
+    platform,
+    previewOf,
+  });
+
+  await setDoc(
+    doc(db, 'device_tokens', token),
+    { ...payload, updatedAt: serverTimestamp() },
+    { merge: true },
+  );
+  await persistTokenLocal(token);
+}
+
 async function registerWebPush(params: {
   user: User;
   db: Firestore;
   empDocId: string | null;
   empresaId: string | null;
+  previewOf?: boolean;
+  interactive?: boolean;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
-  const { user, db, empDocId, empresaId } = params;
+  const { user, db, empDocId, empresaId, previewOf, interactive } = params;
 
   if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
     return { status: 'unsupported', error: 'Este navegador no soporta notificaciones push.' };
@@ -88,6 +153,10 @@ async function registerWebPush(params: {
 
   let permission = Notification.permission;
   if (permission === 'default') {
+    if (!interactive) {
+      // Safari/iOS exige gesto del usuario: no pedir permiso en auto-bootstrap.
+      return { status: 'off' };
+    }
     permission = await Notification.requestPermission();
   }
   if (permission !== 'granted') {
@@ -104,25 +173,15 @@ async function registerWebPush(params: {
       return { status: 'error', error: 'No se obtuvo un token FCM web válido.' };
     }
 
-    const oldToken = await getStoredFcmToken();
-    if (oldToken && oldToken !== token) {
-      await clearPushTokenOnServer(db, oldToken);
-    }
-
-    await setDoc(
-      doc(db, 'device_tokens', token),
-      {
-        uid: user.uid,
-        employeeId: empDocId || null,
-        empresaId: empresaId || null,
-        role: 'employee',
-        token,
-        platform: 'web',
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-    await persistTokenLocal(token);
+    await persistTokenDoc({
+      user,
+      db,
+      empDocId,
+      empresaId,
+      token,
+      platform: 'web',
+      previewOf,
+    });
     return { status: 'enabled', token };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'No se pudo registrar push web';
@@ -135,6 +194,8 @@ async function registerNativePush(params: {
   db: Firestore;
   empDocId: string | null;
   empresaId: string | null;
+  previewOf?: boolean;
+  interactive?: boolean;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
   const Notifications = await import('expo-notifications');
 
@@ -148,7 +209,7 @@ async function registerNativePush(params: {
     }),
   });
 
-  const { user, db, empDocId, empresaId } = params;
+  const { user, db, empDocId, empresaId, previewOf, interactive } = params;
 
   if (!Device.isDevice) {
     return { status: 'unsupported', error: 'El emulador del teléfono no recibe push FCM nativo.' };
@@ -166,6 +227,10 @@ async function registerNativePush(params: {
   const current = await Notifications.getPermissionsAsync();
   let permission = current.status;
   if (permission !== 'granted') {
+    // Nativo: se puede pedir en bootstrap; interactive fuerza el prompt si hacía falta.
+    if (!interactive && permission === 'denied') {
+      return { status: 'denied' };
+    }
     const requested = await Notifications.requestPermissionsAsync();
     permission = requested.status;
   }
@@ -181,27 +246,16 @@ async function registerNativePush(params: {
       return { status: 'error', error: 'No se obtuvo un token FCM válido.' };
     }
 
-    const oldToken = await getStoredFcmToken();
-    if (oldToken && oldToken !== token) {
-      await clearPushTokenOnServer(db, oldToken);
-    }
-
     const platform = Platform.OS === 'ios' ? 'ios' : 'android';
-
-    await setDoc(
-      doc(db, 'device_tokens', token),
-      {
-        uid: user.uid,
-        employeeId: empDocId || null,
-        empresaId: empresaId || null,
-        role: 'employee',
-        token,
-        platform,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
-    await persistTokenLocal(token);
+    await persistTokenDoc({
+      user,
+      db,
+      empDocId,
+      empresaId,
+      token,
+      platform,
+      previewOf,
+    });
     return { status: 'enabled', token };
   } catch (err) {
     const message = err instanceof Error ? err.message : 'No se pudo registrar push';
@@ -214,11 +268,14 @@ export async function registerPushNotifications(params: {
   db: Firestore;
   empDocId: string | null;
   empresaId: string | null;
+  previewOf?: boolean;
+  interactive?: boolean;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
+  const { previewOf, interactive, ...rest } = params;
   if (Platform.OS === 'web') {
-    return registerWebPush(params);
+    return registerWebPush({ ...rest, previewOf, interactive });
   }
-  return registerNativePush(params);
+  return registerNativePush({ ...rest, previewOf, interactive });
 }
 
 export async function unregisterPushForUser(db: Firestore): Promise<void> {
@@ -233,6 +290,13 @@ export async function unregisterPushForUser(db: Firestore): Promise<void> {
       /* ignore */
     }
   }
+}
+
+/** ¿Hace falta el botón «Activar notificaciones» en web? */
+export function webPushNeedsUserGesture(): boolean {
+  if (Platform.OS !== 'web') return false;
+  if (typeof window === 'undefined' || !('Notification' in window)) return false;
+  return Notification.permission !== 'granted';
 }
 
 /** Escucha foreground FCM web; retorna unsubscribe o null. */

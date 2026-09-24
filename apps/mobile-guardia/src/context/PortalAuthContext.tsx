@@ -30,7 +30,7 @@ import {
   type DeviceBlockReason,
   type DeviceVerifyResult,
 } from '../lib/deviceVerification';
-import { unregisterPushForUser } from '../lib/pushNotifications';
+import { detachPushTokenOnServer, unregisterPushForUser } from '../lib/pushNotifications';
 import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
 import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
 
@@ -62,7 +62,7 @@ type PortalAuthContextValue = {
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
   enterPreview: (empDocId: string) => Promise<void>;
-  exitPreview: () => void;
+  exitPreview: () => Promise<void>;
 };
 
 const PortalAuthContext = createContext<PortalAuthContextValue | null>(null);
@@ -237,14 +237,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         } else {
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         }
-        // Preview SuperAdmin: atar el token FCM al legajo visto, si no el push
-        // de cronograma/turno va al empleado real y este teléfono no lo recibe.
+        // Preview SuperAdmin: atar FCM del dispositivo del SA al legajo visto
+        // (previewOf: true). En web no pide permiso acá — hace falta el botón.
         const { registerPushNotifications } = await import('../lib/pushNotifications');
         await registerPushNotifications({
           user: currentUser,
           db,
           empDocId: id,
           empresaId: (data.empresaId as string) ?? null,
+          previewOf: true,
+          interactive: false,
         }).catch(() => {});
       } catch (err) {
         setEmployee(null);
@@ -377,6 +379,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           db,
           empDocId: resolvedId,
           empresaId: (empSnap?.data()?.empresaId as string) ?? null,
+          interactive: false,
         }).catch(() => {});
       }
     },
@@ -392,7 +395,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     [user, isSuperAdmin, loadEmployeeByDocId],
   );
 
-  const exitPreview = useCallback(() => {
+  const exitPreview = useCallback(async () => {
+    try {
+      await detachPushTokenOnServer(db);
+    } catch {
+      /* no bloquear salida de preview */
+    }
     setPreviewEmpDocId(null);
     setEmpDocId(null);
     setEmployee(null);
@@ -400,7 +408,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setEmployeeProfileError(null);
     setEmployeeProfileReady(true);
     setEmployeeProfileLoading(false);
-  }, []);
+  }, [db]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {

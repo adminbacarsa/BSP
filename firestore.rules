@@ -408,7 +408,10 @@ service cloud.firestore {
     }
 
     match /device_tokens/{tokenId} {
-      allow create, update, delete: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      // create/update: el doc lleva uid del auth (FCM token id o binding por uid)
+      allow create, update: if request.auth != null && request.resource.data.uid == request.auth.uid;
+      // delete: request.resource no existe — validar el doc actual
+      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
       // Admin puede leer todos; empleado puede leer su propio doc (tokenId == uid)
       allow read: if isAdmin() || (request.auth != null && tokenId == request.auth.uid);
     }

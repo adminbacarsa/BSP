@@ -64,6 +64,28 @@ Parsing en `extractPlatformDeviceErrorCode` (message / details.code / customData
 
 ---
 
+## Preview SuperAdmin — push FCM
+
+En preview, el token del **dispositivo del SuperAdmin** se escribe en `device_tokens/{token}`:
+
+```json
+{
+  "uid": "<uid SuperAdmin>",
+  "employeeId": "<legajo en preview>",
+  "previewOf": true,
+  "token": "<fcm>",
+  "platform": "web|android|ios"
+}
+```
+
+Así las Functions que buscan por `employeeId` entregan push al teléfono de quien prueba.
+Al `exitPreview` / `signOut` se borra el doc (en exitPreview se conserva el token local para re-atar).
+
+**Web:** no se pide `Notification.requestPermission` en automatico; botón «Activar notificaciones»
+(gesto Safari/iOS). Ver `EnableWebPushButton`.
+
+---
+
 ## Coordinación con Plataforma
 
 La app espera que las callables (`requestGuardDeviceRegistration`, activación por mail, etc.) fallen con uno de estos códigos en **message** o **details.code**:

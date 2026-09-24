@@ -40,7 +40,15 @@ function mapLegacyEmployeeLink(link: string): string {
 
 export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
   const router = useRouter();
-  const { user, empDocId, employee, employeeProfileReady, deviceVerified } = usePortalAuth();
+  const {
+    user,
+    empDocId,
+    employee,
+    employeeProfileReady,
+    deviceVerified,
+    isSuperAdmin,
+    isPreviewMode,
+  } = usePortalAuth();
   const { db } = getPortalFirebase();
   const lastForegroundToastRef = useRef<string | null>(null);
   const handledColdStartRef = useRef(false);
@@ -59,8 +67,14 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     }
   };
 
+  const canAutoRegister =
+    !!user &&
+    employeeProfileReady &&
+    !!empDocId &&
+    (isPreviewMode || (deviceVerified === true && !isSuperAdmin));
+
   useEffect(() => {
-    if (!user || !employeeProfileReady || deviceVerified !== true) return;
+    if (!canAutoRegister || !user) return;
 
     let cancelled = false;
 
@@ -70,15 +84,16 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         db,
         empDocId,
         empresaId: employee?.empresaId ?? null,
+        previewOf: isPreviewMode,
+        interactive: false,
       });
       if (!cancelled) {
         onStatusChange?.(result.status);
-        if (result.status === 'denied') {
+        // En web 'off' = falta gesto; el botón «Activar notificaciones» lo resuelve.
+        if (result.status === 'denied' && Platform.OS !== 'web') {
           appAlert(
             'Notificaciones',
-            Platform.OS === 'web'
-              ? 'Para recibir alertas, permití notificaciones de este sitio en el navegador. En iPhone, agregá COSP a la pantalla de inicio.'
-              : 'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
+            'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
           );
         }
       }
@@ -87,7 +102,15 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     return () => {
       cancelled = true;
     };
-  }, [user?.uid, empDocId, employee?.empresaId, employeeProfileReady, deviceVerified, db, onStatusChange]);
+  }, [
+    canAutoRegister,
+    user?.uid,
+    empDocId,
+    employee?.empresaId,
+    isPreviewMode,
+    db,
+    onStatusChange,
+  ]);
 
   useEffect(() => {
     if (!user) return;
@@ -190,7 +213,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   }, [user?.uid, router]);
 
   useEffect(() => {
-    if (!user || !employeeProfileReady || deviceVerified !== true) return;
+    if (!canAutoRegister || !user) return;
 
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
@@ -199,11 +222,21 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         db,
         empDocId,
         empresaId: employee?.empresaId ?? null,
+        previewOf: isPreviewMode,
+        interactive: false,
       }).then((r) => onStatusChange?.(r.status));
     });
 
     return () => sub.remove();
-  }, [user, empDocId, employee?.empresaId, employeeProfileReady, deviceVerified, db, onStatusChange]);
+  }, [
+    canAutoRegister,
+    user,
+    empDocId,
+    employee?.empresaId,
+    isPreviewMode,
+    db,
+    onStatusChange,
+  ]);
 
   useEffect(() => {
     if (!user) return;
