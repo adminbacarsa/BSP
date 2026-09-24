@@ -51,6 +51,17 @@ function assertDistWebReady() {
   }
 }
 
+// La clave VAPID de push web es la misma del panel (web2); la app no la trae en su .env.
+function readWeb2VapidKey(root) {
+  for (const name of ['.env.local', '.env.production.local', '.env']) {
+    const p = path.join(root, 'apps', 'web2', name);
+    if (!fs.existsSync(p)) continue;
+    const m = fs.readFileSync(p, 'utf8').match(/^NEXT_PUBLIC_FIREBASE_VAPID_KEY=(.+)$/m);
+    if (m && m[1].trim()) return m[1].trim().replace(/^['"]|['"]$/g, '');
+  }
+  return process.env.NEXT_PUBLIC_FIREBASE_VAPID_KEY || '';
+}
+
 function listFilesRecursive(dir) {
   const out = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -70,6 +81,8 @@ function assertNotEmulatorBuild() {
     process.exit(1);
   }
   console.log('✓ build web en modo producción (sin emulador)');
+  const hasVapid = files.some((f) => /\\?"vapidKey\\?"\s*:\s*\\?"[A-Za-z0-9_-]{20,}/.test(fs.readFileSync(f, 'utf8')));
+  console.log(hasVapid ? '✓ clave VAPID incluida (push web)' : '⚠ bundle sin clave VAPID: /app no recibe push web');
 }
 
 function copyDir(src, dest) {
@@ -97,7 +110,11 @@ function main() {
   // Expo toma el .env aunque el proceso traiga la variable: .env.production.local tiene prioridad en export.
   const prodEnvFile = path.join(mobileRoot, '.env.production.local');
   if (isProdDeploy) {
-    fs.writeFileSync(prodEnvFile, 'EXPO_PUBLIC_USE_EMULATOR=false\n');
+    const lines = ['EXPO_PUBLIC_USE_EMULATOR=false'];
+    const vapid = readWeb2VapidKey(labRoot);
+    if (vapid) lines.push(`EXPO_PUBLIC_FIREBASE_VAPID_KEY=${vapid}`);
+    else console.warn('\n⚠ Sin NEXT_PUBLIC_FIREBASE_VAPID_KEY en apps/web2/.env.local: /app no va a recibir push web.');
+    fs.writeFileSync(prodEnvFile, `${lines.join('\n')}\n`);
   }
   try {
     // --clear: la caché de Metro reutiliza el bundle con la config del lab incrustada.
