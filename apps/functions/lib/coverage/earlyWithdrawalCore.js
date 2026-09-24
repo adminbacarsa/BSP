@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.processEarlyWithdrawal = processEarlyWithdrawal;
 const firestore_1 = require("firebase-admin/firestore");
-const convocatoriasCobertura_1 = require("./convocatoriasCobertura");
+const earlyWithdrawCascade_1 = require("./earlyWithdrawCascade");
 const opsManualMode_1 = require("../ops/opsManualMode");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
 const earlyWithdrawPolicy_1 = require("./earlyWithdrawPolicy");
@@ -171,7 +171,7 @@ async function processEarlyWithdrawal(db, input) {
         if (isAutoMode && empresaId) {
             const manual = await (0, opsManualMode_1.isEmpresaManualMode)(db, empresaId);
             if (!manual) {
-                await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
+                await (0, earlyWithdrawCascade_1.iniciarEarlyWithdrawCascade)(db, {
                     id: remainderShiftId,
                     empresaId,
                     objectiveId,

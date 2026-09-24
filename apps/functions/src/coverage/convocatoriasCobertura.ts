@@ -232,7 +232,7 @@ async function avanzarCascada(
 
 // ─── Helper: crear doc convocatoria + notificación ───────────────────────────
 
-async function crearConvocatoriaDoc(
+export async function crearConvocatoriaDoc(
   db: admin.firestore.Firestore,
   data: Omit<ConvocatoriaCoberturaDoc, 'createdAt' | 'status' | 'timeoutAt' | 'urgency'> & {
     createdBy: string;
@@ -299,7 +299,7 @@ interface CandidateResult {
   candidateShiftId?: string;
 }
 
-async function findBestCandidate(
+export async function findBestCandidate(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc,
   type: CandidateType,
@@ -524,7 +524,7 @@ async function findBestCandidate(
 
 // ─── Helper: broadcast FT ─────────────────────────────────────────────────────
 
-async function dispararBroadcastFT(
+export async function dispararBroadcastFT(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc,
 ): Promise<void> {

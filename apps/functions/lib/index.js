@@ -27,6 +27,7 @@ const opsManualMode_1 = require("./ops/opsManualMode");
 const autoCompletarTurnosCore_1 = require("./scheduling/autoCompletarTurnosCore");
 const earlyWithdrawalCore_1 = require("./coverage/earlyWithdrawalCore");
 const slaUnplannedGapPass_1 = require("./coverage/slaUnplannedGapPass");
+const detectPublishedSlaGaps_1 = require("./coverage/detectPublishedSlaGaps");
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
 const data_management_service_1 = require("./data-management/data-management.service");
@@ -2767,6 +2768,12 @@ exports.gestionarVacantes = functions
     }
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
     try {
+        const detected = await (0, detectPublishedSlaGaps_1.runDetectPublishedSlaGaps)(db, {
+            isEnabled: (id) => cc.isEnabled(id),
+            isDemo: (id) => cc.isDemo(id),
+        });
+        if (detected)
+            console.log(`[gestionarVacantes] Huecos SLA detectados: ${detected}`);
         const slaGaps = await (0, slaUnplannedGapPass_1.runSlaUnplannedGapPass)(db, { limit: 30 });
         if (slaGaps)
             console.log(`[gestionarVacantes] Huecos SLA sin plan: ${slaGaps} procesados`);

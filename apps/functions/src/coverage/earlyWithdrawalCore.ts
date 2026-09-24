@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { iniciarCascadaCobertura } from './convocatoriasCobertura';
+import { iniciarEarlyWithdrawCascade } from './earlyWithdrawCascade';
 import { isEmpresaManualMode } from '../ops/opsManualMode';
 import {
   countColleaguesPresentSameObjective,
@@ -228,7 +228,7 @@ export async function processEarlyWithdrawal(
     if (isAutoMode && empresaId) {
       const manual = await isEmpresaManualMode(db, empresaId);
       if (!manual) {
-        await iniciarCascadaCobertura(
+        await iniciarEarlyWithdrawCascade(
           db,
           {
             id: remainderShiftId,

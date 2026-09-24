@@ -36,6 +36,7 @@ import { isEmpresaManualMode } from './ops/opsManualMode';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
 import { processEarlyWithdrawal } from './coverage/earlyWithdrawalCore';
 import { runSlaUnplannedGapPass } from './coverage/slaUnplannedGapPass';
+import { runDetectPublishedSlaGaps } from './coverage/detectPublishedSlaGaps';
 import { INestApplicationContext } from '@nestjs/common';
 
 // Servicios expuestos por NestJS
@@ -3260,6 +3261,11 @@ export const gestionarVacantes = functions
     console.log(`[gestionarVacantes] A planificación: ${sentToPlanning} | Protocolos: ${sentToProtocol}`);
 
     try {
+      const detected = await runDetectPublishedSlaGaps(db, {
+        isEnabled: (id) => cc.isEnabled(id),
+        isDemo: (id) => cc.isDemo(id),
+      });
+      if (detected) console.log(`[gestionarVacantes] Huecos SLA detectados: ${detected}`);
       const slaGaps = await runSlaUnplannedGapPass(db, { limit: 30 });
       if (slaGaps) console.log(`[gestionarVacantes] Huecos SLA sin plan: ${slaGaps} procesados`);
     } catch (e) {
