@@ -1,9 +1,43 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.IA_OPERATIONAL_ALERTS_ENABLED = void 0;
 exports.runPlanningAutomationCycle = runPlanningAutomationCycle;
 exports.scanOperationalAlertsForEmpresa = scanOperationalAlertsForEmpresa;
 exports.buildOperationalClosureChecklist = buildOperationalClosureChecklist;
-const admin = require("firebase-admin");
+const admin = __importStar(require("firebase-admin"));
 const firestore_1 = require("firebase-admin/firestore");
 const runAutoSchedule_1 = require("../scheduling/runAutoSchedule");
 const planningGeminiServer_1 = require("../assistant/planningGeminiServer");
@@ -97,6 +131,7 @@ function isOperationalOriginForOps(row, code) {
         row.isReten === true ||
         row.resolvedBy === 'OPERACIONES');
 }
+/** Hueco de malla publicada sin guardia: Operaciones no lo muestra como vacante accionable. */
 function isPlannedCellWithoutAssignee(row, code) {
     if (!isShiftUnassigned(row))
         return false;
@@ -145,6 +180,7 @@ function shiftEligibleForIaAlert(row, start, publishedPlanKeys) {
     }
     return true;
 }
+/** Turno generado por cobertura/demo/ops: no cuenta para solapamiento de planificación. */
 function isOverlapExemptOpsShift(row) {
     if (isOperationalCoverageTurno(row) || isOpsCoverageShift(row))
         return true;
@@ -163,6 +199,7 @@ function isOverlapExemptOpsShift(row) {
     }
     return false;
 }
+/** Ausencia titular no consume capacidad horaria (el guardia puede estar cubriendo en otro puesto). */
 function shiftCountsForOverlapCapacity(row) {
     if (row.isAbsent === true)
         return false;
@@ -195,6 +232,7 @@ function shiftActsAsAbsenceCoverage(data) {
     }
     return false;
 }
+/** Titulares ausentes cubiertos por turno ops (p. ej. OPERATIONS_COVERAGE + absenceShiftId). */
 function collectAbsentShiftIdsWithOpsCoverage(shifts) {
     const covered = new Set();
     for (const row of shifts) {
@@ -548,6 +586,7 @@ async function loadEmployeeNameMap(empresaId, employeeIds) {
         }
     }
     catch {
+        // índice ausente en entornos viejos: batch por id alcanza
     }
     return map;
 }
@@ -700,6 +739,7 @@ function detectOperationalAnomalies(shifts, now, toleranceMinutes, nameCtx) {
             });
         }
         if (row.data.isAbsent === true) {
+            // Fuera del slot accionable: no repetir IA todo el día (demo/ops ya corrieron).
             if (nowMs > endMs + tolMs)
                 continue;
             const key = buildCoverageKey(row.data);
@@ -1211,8 +1251,23 @@ async function runPlanningAutomationCycle(input) {
         notes,
     };
 }
+/** Alertas IA en novedades (IA_ALERTA_*): retiradas — el monitor CC ya expone el estado (Mauro). */
+exports.IA_OPERATIONAL_ALERTS_ENABLED = false;
 async function scanOperationalAlertsForEmpresa(input) {
     const empresaId = String(input.empresaId || '').trim();
+    if (!exports.IA_OPERATIONAL_ALERTS_ENABLED) {
+        return {
+            ok: true,
+            empresaId,
+            evaluatedShifts: 0,
+            opsWindowShifts: 0,
+            anomaliesDetected: 0,
+            alertsCreated: 0,
+            alertsAutoClosed: 0,
+            byType: {},
+            generatedAt: nowIso(),
+        };
+    }
     if (!empresaId)
         throw new Error('empresaId requerido.');
     const toleranceMinutes = Math.max(5, Math.min(180, Number(input.toleranceMinutes ?? 25)));
@@ -1408,4 +1463,3 @@ async function buildOperationalClosureChecklist(input) {
     }
     return result;
 }
-//# sourceMappingURL=operationalAutomation.js.map

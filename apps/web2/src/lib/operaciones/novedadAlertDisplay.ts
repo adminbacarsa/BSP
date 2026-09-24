@@ -190,7 +190,12 @@ export function isInformationalNovedad(n: any): boolean {
     return INFO_NOVEDAD_TYPES.has(String(n?.type || ''));
 }
 
+export function isIaAlertaNovedad(n: any): boolean {
+    return String(n?.type || '').startsWith('IA_ALERTA_');
+}
+
 export function isHiddenFromOpsAlerts(n: any): boolean {
+    if (isIaAlertaNovedad(n)) return true;
     return HIDDEN_FROM_OPS_ALERTS_TYPES.has(String(n?.type || ''));
 }
 

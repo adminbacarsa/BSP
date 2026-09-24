@@ -1,14 +1,47 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = void 0;
+exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = void 0;
 require("./bootstrap-env");
-const functions = require("firebase-functions/v1");
+const functions = __importStar(require("firebase-functions/v1"));
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
-const admin = require("firebase-admin");
+const admin = __importStar(require("firebase-admin"));
 const firestore_2 = require("firebase-admin/firestore");
 const bindGuardDevice_1 = require("./auth/bindGuardDevice");
 const backup_service_1 = require("./backup/backup.service");
@@ -32,6 +65,7 @@ const autoCompletarTurnosCore_1 = require("./scheduling/autoCompletarTurnosCore"
 const earlyWithdrawalCore_1 = require("./coverage/earlyWithdrawalCore");
 const slaUnplannedGapPass_1 = require("./coverage/slaUnplannedGapPass");
 const detectPublishedSlaGaps_1 = require("./coverage/detectPublishedSlaGaps");
+// Servicios expuestos por NestJS
 const scheduling_service_1 = require("./scheduling/scheduling.service");
 const auth_service_1 = require("./auth/auth.service");
 const data_management_service_1 = require("./data-management/data-management.service");
@@ -56,7 +90,7 @@ const ccTurnoEligibility_1 = require("./ops/ccTurnoEligibility");
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
 const mobileAppHandlers_1 = require("./mobileApp/mobileAppHandlers");
-const operationalAutomation_1 = require("./automation/operationalAutomation");
+// InicializaciÃ³n de Firebase Admin
 if (!admin.apps.length) {
     admin.initializeApp();
 }
@@ -68,9 +102,14 @@ async function getService(service) {
     }
     return nestApp.get(service);
 }
+// Roles Administrativos
 const ADMIN_ROLES = ['admin', 'superadmin', 'SuperAdmin', 'Scheduler', 'HR_Manager', 'Manager', 'Operator', 'Supervisor'];
+/** Alineado con web2 `ALL_EMPRESAS_VALUE` en systemUser.ts */
 const ALL_EMPRESAS_SENTINEL = '__ALL__';
 const ALLOWED_ROLES = ['admin', 'employee'];
+// =========================================================
+// 1. GESTIÓN DE USUARIOS (AUTH)
+// =========================================================
 exports.createUser = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida.');
@@ -101,6 +140,9 @@ exports.createUser = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', 'Error al crear usuario.');
     }
 });
+// =========================================================
+// 2. MOTOR DE AGENDAMIENTO (CREAR TURNOS INDIVIDUALES)
+// =========================================================
 exports.scheduleShift = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -119,6 +161,9 @@ exports.scheduleShift = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', `Error: ${err.message}`);
     }
 });
+// =========================================================
+// 3. GESTIÓN DE TURNOS (EDITAR / ELIMINAR / REPLICAR)
+// =========================================================
 exports.manageShifts = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     const ALLOWED_PLANNING_ROLES = ['admin', 'SuperAdmin', 'Manager', 'Scheduler'];
@@ -157,6 +202,9 @@ exports.manageShifts = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 4. AUDITORÃA (GEOFENCING & MANUAL OVERRIDE)
+// =========================================================
 exports.auditShift = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
@@ -174,6 +222,9 @@ exports.auditShift = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 5. GESTIÓN DE DATOS BÃSICOS
+// =========================================================
 exports.manageData = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -197,6 +248,9 @@ exports.manageData = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 6. GESTIÓN DE JERARQUÃA COMERCIAL
+// =========================================================
 exports.manageHierarchy = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -245,6 +299,9 @@ exports.manageHierarchy = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', `Error: ${err.message}`);
     }
 });
+// =========================================================
+// 7. GESTIÓN DE EMPLEADOS (RRHH) - (INCLUYE REPORTE DE CARGA Y IMPORTACIÓN)
+// =========================================================
 exports.manageEmployees = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -269,6 +326,7 @@ exports.manageEmployees = functions.https.onCall(async (data, context) => {
             case 'DELETE_EMPLOYEE':
                 await employeeService.deleteEmployee(payload.uid);
                 return { success: true, message: 'Empleado eliminado.' };
+            // ðŸ›' NUEVO: IMPORTACIÓN MASIVA
             case 'IMPORT_EMPLOYEES':
                 if (!payload.rows || !Array.isArray(payload.rows)) {
                     throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
@@ -286,6 +344,9 @@ exports.manageEmployees = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 8. GESTIÓN DE USUARIOS DEL SISTEMA (ADMINS)
+// =========================================================
 exports.manageSystemUsers = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -319,6 +380,9 @@ exports.manageSystemUsers = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 9. GESTIÓN DE NOVEDADES (AUSENCIAS)
+// =========================================================
 exports.manageAbsences = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth) {
@@ -350,6 +414,9 @@ exports.manageAbsences = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', err.message);
     }
 });
+// =========================================================
+// 10. GESTIÓN DE PATRONES DE SERVICIO (AUTOMATIZACIÓN)
+// =========================================================
 exports.managePatterns = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -378,6 +445,9 @@ exports.managePatterns = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
+// =========================================================
+// 11. GESTIÓN DE CONVENIOS (NUEVO)
+// =========================================================
 exports.manageAgreements = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth || !ADMIN_ROLES.includes(callerAuth.token.role)) {
@@ -395,6 +465,7 @@ exports.manageAgreements = functions.https.onCall(async (data, context) => {
             case 'DELETE':
                 await agreementService.delete(payload.id);
                 return { success: true };
+            // CARGA DE DATOS POR DEFECTO
             case 'INITIALIZE_DEFAULTS':
                 const msg = await agreementService.initializeDefaults();
                 return { success: true, message: msg };
@@ -406,12 +477,16 @@ exports.manageAgreements = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', error.message);
     }
 });
+// =========================================================
+// 12. DIAGNÓSTICO DE SISTEMA (HEALTH CHECK)
+// =========================================================
 exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
     }
     const db = admin.firestore();
     const results = {};
+    // â"€â"€ Firestore â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const t0 = Date.now();
     try {
         const snap = await db.collection('empresas').limit(1).get();
@@ -420,6 +495,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     catch (e) {
         results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
     }
+    // â"€â"€ Gemini API â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const geminiKey = process.env.GEMINI_API_KEY || '';
     if (!geminiKey) {
         results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
@@ -427,7 +503,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     else {
         const tg = Date.now();
         try {
-            const { GoogleGenerativeAI } = await Promise.resolve().then(() => require('@google/generative-ai'));
+            const { GoogleGenerativeAI } = await Promise.resolve().then(() => __importStar(require('@google/generative-ai')));
             const genAI = new GoogleGenerativeAI(geminiKey);
             const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' });
             await model.generateContent({ contents: [{ role: 'user', parts: [{ text: 'ping' }] }] });
@@ -437,6 +513,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
             results.gemini = { ok: false, latencyMs: Date.now() - tg, detail: e.message?.slice(0, 120) };
         }
     }
+    // — Gmail SMTP —
     const gmailUser = (process.env.GMAIL_USER || '').trim();
     const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
     if (!gmailUser || !gmailPass) {
@@ -445,7 +522,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     else {
         const tm = Date.now();
         try {
-            const nodemailerMod = await Promise.resolve().then(() => require('nodemailer'));
+            const nodemailerMod = await Promise.resolve().then(() => __importStar(require('nodemailer')));
             const transporter = nodemailerMod.createTransport({
                 host: 'smtp.gmail.com',
                 port: 465,
@@ -463,6 +540,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
             };
         }
     }
+    // â"€â"€ Google Drive â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
     if (!driveFolderId) {
         results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
@@ -483,6 +561,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
             results.drive = { ok: false, detail: e.message?.slice(0, 120) };
         }
     }
+    // â"€â"€ FCM (Push Notifications) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try {
         const tokSnap = await db.collection('device_tokens').limit(1).get();
         results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? 'â‰¥1' : '0'}` };
@@ -490,6 +569,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     catch (e) {
         results.fcm = { ok: false, detail: e.message };
     }
+    // â"€â"€ Scheduled jobs — Ãºltima ejecuciÃ³n â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
     const jobStatus = {};
     for (const job of scheduledJobs) {
@@ -509,6 +589,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
         }
     }
     results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
+    // â"€â"€ Conteos de datos â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     try {
         const [empSnap, sysSnap, empActivos] = await Promise.all([
             db.collection('empresas').get(),
@@ -523,6 +604,7 @@ exports.platformHealthCheck = functions.https.onCall(async (_data, context) => {
     catch (e) {
         results.data = { ok: false, detail: e.message };
     }
+    // â"€â"€ Entorno â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
     results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'ProducciÃ³n (Firebase)' };
     return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
@@ -557,6 +639,11 @@ exports.checkSystemHealth = functions.https.onCall(async (data, context) => {
         };
     }
 });
+// =========================================================
+// 12b. ASISTENTE VIRTUAL (Gemini vÃ­a Functions)
+// ProducciÃ³n: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
+// misma llamable sin runWith para que cargue GEMINI desde apps/functions/.env (bootstrap-env.ts).
+// =========================================================
 async function chatPlatformAssistantHandler(data, context) {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
@@ -619,6 +706,9 @@ exports.chatPlatformAssistant = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ secrets: ['GEMINI_API_KEY'], timeoutSeconds: 180, memory: '512MB' })
         .https.onCall(chatPlatformAssistantHandler);
+// =========================================================
+// AGENTE: ejecutar acción propuesta (con confirmación humana)
+// =========================================================
 const AGENT_WRITE_ALLOWED_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'Operador', 'operador'];
 const AGENT_WRITE_ACTIONS = ['extender_jornada', 'cubrir_ausencia', 'crear_turno_refuerzo', 'confirmar_presencia', 'registrar_ausencia', 'cerrar_turno', 'planificar_objetivo_mes'];
 async function executeAgentActionHandler(data, context) {
@@ -659,6 +749,12 @@ async function executeAgentActionHandler(data, context) {
     throw new functions.https.HttpsError('internal', 'Acción no implementada.');
 }
 exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
+// =========================================================
+// MODO DEMO CONTINUO — cron cada 5 min (empresas modoDemoEnabled).
+// SOLO GENERADOR de eventos: presente / tarde / ausente + respuestas
+// a convocatorias. El pipeline Auto (autoCompletarTurnos, useAutoMonitor,
+// cascada onTurnoAbsenciaDetectada) procesa coberturas y cierres.
+// =========================================================
 async function runModoDemoForEmpresa(db, empresaId) {
     const now = new Date();
     const nowTs = admin.firestore.Timestamp.fromDate(now);
@@ -682,6 +778,8 @@ async function runModoDemoForEmpresa(db, empresaId) {
         !!t.isUnassigned ||
         !!t.isSinCobertura;
     const skipBase = (t) => t.draft === true || t.isFranco === true || t.isVirtual;
+    // Comportamiento demo rotativo (no fijo por legajo): ~60% puntual, ~30% tarde, ~10% ausente.
+    // La semilla incluye día AR + franja de 6h + turno → cambian los ausentes entre días y bloques.
     const WINDOW_BEFORE_MS = 15 * 60 * 1000;
     const WINDOW_AFTER_MS = 5 * 60 * 1000;
     const LATE_DELAY_MS = 12 * 60 * 1000;
@@ -703,6 +801,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
             return 'late';
         return 'puntual';
     };
+    // === Pase 1: Simular presentes (puntual / tarde) ===
     for (const doc of snap.docs) {
         const t = doc.data();
         if (skipBase(t) || isVacant(t))
@@ -784,6 +883,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         }
         presencias++;
     }
+    // === Pase 1c: ops_cov convocados — presente por edad del doc (createdAt + 5…40 min), ~90 % ===
     const covCreatedStart = admin.firestore.Timestamp.fromMillis(now.getTime() - 4 * 3600000);
     const covSnap = await db
         .collection('turnos')
@@ -822,6 +922,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         batchOps += 1;
         presencias += 1;
     }
+    // === Pase 1b: Simular ausencias AA (dispara cascada real vía onTurnoAbsenciaDetectada) ===
     const ABSENT_MIN_MS = 5 * 60 * 1000;
     for (const doc of snap.docs) {
         const t = doc.data();
@@ -903,6 +1004,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
     if (batchOps > 0) {
         await batch.commit();
     }
+    // === Pase 8: Simular respuestas de convocatorias (cubre el protocolo real) ===
     let convRespuestas = 0;
     try {
         convRespuestas = await (0, convocatoriasCobertura_1.simularRespuestasConvocatorias)(db, empresaId);
@@ -935,43 +1037,23 @@ exports.modoDemoCron = functions
         }
     }
 });
-exports.operationalAlertsCron = functions
-    .runWith({ timeoutSeconds: 120, memory: '512MB' })
-    .pubsub.schedule('*/15 * * * *')
-    .timeZone('America/Argentina/Buenos_Aires')
-    .onRun(async () => {
-    const db = admin.firestore();
-    const empresasSnap = await db.collection('empresas').limit(250).get();
-    for (const empresaDoc of empresasSnap.docs) {
-        const empresaId = empresaDoc.id;
-        if (empresaDoc.data()?.active === false)
-            continue;
-        if (empresaDoc.data()?.centroControlEnabled === false)
-            continue;
-        try {
-            const out = await (0, operationalAutomation_1.scanOperationalAlertsForEmpresa)({
-                empresaId,
-                toleranceMinutes: 25,
-            });
-            if (out.alertsCreated > 0 || out.alertsAutoClosed > 0) {
-                console.log(`[operationalAlertsCron] ${empresaId}: query=${out.evaluatedShifts} opsHoy=${out.opsWindowShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated} autoClosed=${out.alertsAutoClosed}`);
-            }
-        }
-        catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.warn(`[operationalAlertsCron] ${empresaId}:`, msg);
-        }
-    }
-});
+// =========================================================
+// TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
+// Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
+// En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
+// En MODO AUTO los guardias/operadores lo hacen → mismo trigger.
 exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document: 'turnos/{shiftId}', region: 'us-central1', timeoutSeconds: 60 }, async (event) => {
     const before = event.data.before.data();
     const after = event.data.after.data();
+    // Solo cuando isAbsent cambia de false/undefined a true
     if (before.isAbsent === after.isAbsent || !after.isAbsent)
         return;
+    // Ignorar borradores y turnos virtuales
     if (after.draft || after.isVirtual)
         return;
     if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(after))
         return;
+    // Fallback 'bacarsa' para turnos legacy sin empresaId (mismo patrón que centroControlGuard)
     const empresaId = String(after.empresaId || '').trim() || 'bacarsa';
     const db = admin.firestore();
     const ccGate = new ccTurnoEligibility_1.CcObjectiveMonthGate();
@@ -1014,6 +1096,11 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         empresaId,
     }, cascadeCreatedBy);
 });
+// =========================================================
+// AUTO PRESENCIA Y CIERRE — callable SuperAdmin (modo prueba)
+// Marca presencia en turnos planificados que ya iniciaron
+// y cierra los que ya terminaron y siguen presentes.
+// =========================================================
 const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 exports.autoPresenciaYCierre = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
@@ -1041,6 +1128,9 @@ exports.autoPresenciaYCierre = functions
         .where('isFranco', '==', false)
         .limit(500)
         .get();
+    // Índice: set de objetivoId con turno activo entrante (relevo aun no fichado)
+    // Relevo = turno que empieza cerca del endTime del saliente y NO tiene presencia aún
+    // Construimos mapa objectiveId → turnos de la ventana para el chequeo de relevo
     const byObjective = new Map();
     for (const doc of snap.docs) {
         const t = doc.data();
@@ -1057,6 +1147,8 @@ exports.autoPresenciaYCierre = functions
             isAbsent: !!t.isAbsent,
         });
     }
+    // ¿Tiene relevo pendiente? = hay un turno en el mismo objetivo cuyo startTime está
+    // dentro de ±90 min del endTime del turno saliente Y ese relevo aún no fichó ni es ausente.
     function hayRelevoPendiente(objectiveId, shiftEndMs) {
         const turnos = byObjective.get(objectiveId) ?? [];
         return turnos.some(r => !r.isPresent && !r.isAbsent && !r.isCompleted &&
@@ -1075,6 +1167,7 @@ exports.autoPresenciaYCierre = functions
         const endMs = (t.endTime?.seconds ?? 0) * 1000;
         const objectiveId = String(t.objectiveId || '');
         const label = `${t.empleadoNombre ?? t.employeeId} (${t.code}) en ${t.objetivoNombre ?? objectiveId}`;
+        // Marcar presencia: turno ya inició, no tiene presencia ni ausencia
         if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
             presenciaMarcada.push(label);
             if (!dryRun) {
@@ -1082,8 +1175,10 @@ exports.autoPresenciaYCierre = functions
                 ops++;
             }
         }
+        // Cerrar: turno terminó, sigue presente — pero solo si no hay relevo esperando
         if (endMs && endMs <= now.getTime() && t.isPresent && !t.isCompleted) {
             if (objectiveId && hayRelevoPendiente(objectiveId, endMs)) {
+                // Relevo no llegó → retención, no cerramos
                 turnosEnRetencion.push(label);
             }
             else {
@@ -1129,11 +1224,11 @@ async function optimizePlanningGeminiHandler(data, context) {
         throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
     }
     const role = String(context.auth.token.role || '').trim();
-    const { isSuperAdminRole } = await Promise.resolve().then(() => require('./common/role.util'));
+    const { isSuperAdminRole } = await Promise.resolve().then(() => __importStar(require('./common/role.util')));
     if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
         throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificaciÃ³n.');
     }
-    const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => require('./assistant/resolveAssistantUser'));
+    const { resolveAssistantUser, empresaAllowed } = await Promise.resolve().then(() => __importStar(require('./assistant/resolveAssistantUser')));
     const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
     const profile = await resolveAssistantUser(context.auth.uid, { tokenRole });
     if (!profile) {
@@ -1167,8 +1262,10 @@ exports.optimizePlanningGemini = process.env.FUNCTIONS_EMULATOR === 'true'
     : functions
         .runWith({ ...optimizePlanningGeminiRuntime, secrets: ['GEMINI_API_KEY'] })
         .https.onCall(optimizePlanningGeminiHandler);
+// --- VPLAN (experimental, paralelo — ver docs/VPLAN.md; handler bloquea fuera de emulador) ---
 var vplan_1 = require("./vplan");
 Object.defineProperty(exports, "vplanRun", { enumerable: true, get: function () { return vplan_1.vplanRun; } });
+// --- MOTOR DE PLANIFICACIÓN AUTOMÁTICA ---
 exports.runAutoSchedule = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
     .https.onCall(runAutoSchedule_1.runAutoScheduleHandler);
@@ -1178,6 +1275,8 @@ exports.runAjustarCrono = functions
 exports.runEquilibrarCrono = functions
     .runWith({ timeoutSeconds: 180, memory: '512MB' })
     .https.onCall(runEquilibrarCrono_1.runEquilibrarCronoHandler);
+// --- FUNCIONES DE SISTEMA INYECTADAS POR SCRIPT ---
+// 1. Crear Usuario de SISTEMA (Admin, RRHH, etc)
 exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
@@ -1233,6 +1332,7 @@ exports.crearUsuarioSistema = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
+/** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
 exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida');
@@ -1259,6 +1359,7 @@ exports.syncSystemUserClaims = functions.https.onCall(async (data, context) => {
     await admin.auth().setCustomUserClaims(targetUid, { role, type: 'SYSTEM' });
     return { ok: true, uid: targetUid, role };
 });
+/** Roles que pueden ejecutar limpieza masiva (coincide con ids en `roles` / `system_users.role`). */
 function normalizeSystemRole(role) {
     return String(role ?? "").trim().toUpperCase().replace(/\s+/g, "_");
 }
@@ -1273,6 +1374,7 @@ async function assertCanRunDangerousMaintenance(uid) {
         throw new functions.https.HttpsError("permission-denied", "Solo cuentas ADMIN o SUPERADMIN pueden ejecutar la limpieza masiva.");
     }
 }
+// 2. Limpieza Masiva (Zona de Peligro)
 exports.limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Rechazado.");
@@ -1289,6 +1391,8 @@ exports.limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).https.on
     await db.recursiveDelete(db.collection(path));
     return { success: true };
 });
+// --- OPERATIVA: FICHADAS MANUALES Y RRHH ---
+// 0. Check-in desde el portal del empleado (GPS ya validado en cliente)
 exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
@@ -1301,7 +1405,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     const shiftData = shiftDoc.data();
     const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
     const callerIsSuperAdmin = (0, backup_auth_util_1.isSuperAdminBackupRole)(callerRole);
-    const { resolvePortalEmployeeDocId } = await Promise.resolve().then(() => require('./fichajes/resolvePortalEmployee'));
+    const { resolvePortalEmployeeDocId } = await Promise.resolve().then(() => __importStar(require('./fichajes/resolvePortalEmployee')));
     let empId = await resolvePortalEmployeeDocId(db, {
         uid: context.auth.uid,
         email: context.auth.token.email,
@@ -1323,7 +1427,7 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
     if (!ownsShift) {
         throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al empleado. Cerrá sesión y volvé a entrar tras npm run seed.');
     }
-    const { processPortalCheckIn } = await Promise.resolve().then(() => require('./fichajes/applyPortalCheckIn'));
+    const { processPortalCheckIn } = await Promise.resolve().then(() => __importStar(require('./fichajes/applyPortalCheckIn')));
     try {
         const result = await processPortalCheckIn(db, {
             shiftId,
@@ -1387,6 +1491,10 @@ exports.revertirAusencia = functions.https.onCall(async (data, context) => {
     }
     return { success: true };
 });
+/**
+ * Motor único de presencia + auto-relevo FIFO 1:1.
+ * Canales: OPERATIONS | VIGI (vía executeAgentAction) | PORTAL (vía requestCheckIn).
+ */
 exports.registrarPresencia = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
@@ -1419,7 +1527,7 @@ exports.registrarPresencia = functions.https.onCall(async (data, context) => {
         overrideRelieveShiftId = null;
     }
     const db = admin.firestore();
-    const { registrarPresencia: run } = await Promise.resolve().then(() => require('./fichajes/registrarPresencia'));
+    const { registrarPresencia: run } = await Promise.resolve().then(() => __importStar(require('./fichajes/registrarPresencia')));
     try {
         const result = await run(db, {
             shiftId,
@@ -1448,6 +1556,7 @@ exports.registrarPresencia = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', msg || 'Error al registrar presencia.');
     }
 });
+// 1. Fichada Manual (Operador de Radio / Supervisor)
 exports.registrarFichadaManual = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
@@ -1457,7 +1566,7 @@ exports.registrarFichadaManual = functions.https.onCall(async (data, context) =>
     const db = admin.firestore();
     const source = String(method || '').toUpperCase() === 'PHONE' ? 'MANUAL_PHONE' : 'MANUAL_RADIO';
     try {
-        const { registrarPresencia: run } = await Promise.resolve().then(() => require('./fichajes/registrarPresencia'));
+        const { registrarPresencia: run } = await Promise.resolve().then(() => __importStar(require('./fichajes/registrarPresencia')));
         const result = await run(db, {
             shiftId,
             source,
@@ -1478,16 +1587,18 @@ exports.registrarFichadaManual = functions.https.onCall(async (data, context) =>
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
+// 2. Reporte de Ausencia (RRHH / Operador)
 exports.reportarAusencia = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError("unauthenticated", "Sin permisos.");
+    // data: { shiftId, reason, type: 'SICK' | 'NO_SHOW' | 'LATE' }
     const { shiftId, reason, type } = data;
     const db = admin.firestore();
     try {
         const shiftRef = db.collection('turnos').doc(shiftId);
         await shiftRef.update({
             status: 'ABSENT',
-            absenceType: type || 'NO_SHOW',
+            absenceType: type || 'NO_SHOW', // Enfermedad, Faltazo, etc.
             absenceReason: reason || '',
             absenceReportedBy: context.auth.uid,
             absenceReportedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -1498,6 +1609,9 @@ exports.reportarAusencia = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError("internal", error.message);
     }
 });
+// =========================================================
+// 12b. NOTIFICAR LLEGADA TARDE DESDE PORTAL
+// =========================================================
 exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Sin permisos.');
@@ -1541,6 +1655,7 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
         });
         await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'LATE_NOTICE').catch(() => { });
         await (0, relevoNotifications_1.applyLateReliefNoticeToOutgoing)(db, shiftId, shiftData, etaAt).catch(() => { });
+        // Crear novedad para notificar al operador en CC
         try {
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',
@@ -1585,7 +1700,10 @@ Object.defineProperty(exports, "getCandidatosCobertura", { enumerable: true, get
 Object.defineProperty(exports, "checkConvocatoriaTimeouts", { enumerable: true, get: function () { return convocatoriasCobertura_2.checkConvocatoriaTimeouts; } });
 var eventoPortalCallables_1 = require("./eventos/eventoPortalCallables");
 Object.defineProperty(exports, "respondEventoConvocatoria", { enumerable: true, get: function () { return eventoPortalCallables_1.respondEventoConvocatoria; } });
-const nodemailer = require("nodemailer");
+// =========================================================
+// 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
+// =========================================================
+const nodemailer = __importStar(require("nodemailer"));
 function buildPortalEmailHtml(activationLinkWeb, activationLinkApp, empresaNombre) {
     const nombre = empresaNombre || 'Bacar sa. Seguridad Privada';
     const nombreUpper = nombre.toUpperCase();
@@ -1661,8 +1779,10 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     if (!callerAuth) {
         throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
     }
+    // Check 1: token claim (rÃ¡pido, sin Firestore)
     const tokenRole = callerAuth.token.role || '';
     let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
+    // Check 2 (fallback): verificar en system_users por si el claim no fue configurado
     if (!hasAccess) {
         try {
             const sysDoc = await admin.firestore().collection('system_users').doc(callerAuth.uid).get();
@@ -1671,7 +1791,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === fsRole.toLowerCase());
             }
         }
-        catch (_) { }
+        catch (_) { /* ignorer, hasAccess stays false */ }
     }
     if (!hasAccess) {
         throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
@@ -1680,6 +1800,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     if (!employeeIds?.length) {
         throw new functions.https.HttpsError('invalid-argument', 'Se requiere al menos un empleado.');
     }
+    // Credenciales SMTP — definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
     const gmailUser = (process.env.GMAIL_USER || '').trim();
     const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
     if (!gmailUser || !gmailPass) {
@@ -1703,6 +1824,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
             }
             const emp = empDoc.data();
             const email = (emp.email || emp.correo || '').toString().trim().toLowerCase();
+            // Resolver nombre de empresa (con cache para no repetir lecturas)
             const empresaId = (emp.empresaId || '').toString();
             let empresaNombre = 'Bacar sa. Seguridad Privada';
             if (empresaId) {
@@ -1725,6 +1847,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 continue;
             }
             const name = (emp.name || `${emp.firstName || ''} ${emp.lastName || ''}`.trim() || 'Empleado');
+            // Crear usuario Auth si no existe
             let uid;
             let alreadyExisted = false;
             try {
@@ -1752,7 +1875,8 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                     throw e;
                 }
             }
-            const crypto = await Promise.resolve().then(() => require('crypto'));
+            // Generar token de activaciÃ³n (UUID, expira 48h) — Ãºnico link para crear contraseÃ±a + activar dispositivo
+            const crypto = await Promise.resolve().then(() => __importStar(require('crypto')));
             const activationToken = crypto.randomUUID();
             const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
             await db.collection('device_activations').doc(activationToken).set({
@@ -1764,7 +1888,10 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
             const activationLinkWeb = `https://comtroldata.web.app/app/activar?t=${activationToken}`;
+            // Gmail bloquea esquemas custom (cosp-guardia://). Usamos HTTPS + open=app;
+            // la página web intenta abrir la app y deja activar en navegador.
             const activationLinkApp = `https://comtroldata.web.app/app/activar?t=${activationToken}&open=app`;
+            // Enviar email — solo se marca como enviado si el envío fue exitoso
             await transporter.sendMail({
                 from: `"${empresaNombre}" <${gmailUser}>`,
                 to: email,
@@ -1772,6 +1899,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 html: buildPortalEmailHtml(activationLinkWeb, activationLinkApp, empresaNombre),
                 text: buildPortalEmailText(activationLinkWeb, activationLinkApp, empresaNombre),
             });
+            // Limpiar uid de cualquier otro documento que ya lo tenga (evita duplicados)
             const staleSnap = await db.collection('empleados')
                 .where('uid', '==', uid)
                 .get();
@@ -1785,6 +1913,7 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
             });
             if (needsCleanup)
                 await cleanupBatch.commit();
+            // Marcar invitaciÃ³n SOLO despuÃ©s del envÃ­o exitoso
             await db.collection('empleados').doc(empId).update({
                 uid,
                 portalInvite: {
@@ -1802,6 +1931,9 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
     }
     return { success: true, results };
 });
+// =========================================================
+// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vÃ­a email)
+// =========================================================
 exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesiÃ³n primero.');
@@ -1830,6 +1962,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (td.uid !== context.auth.uid) {
         throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
     }
+    // Marcar token como usado
     await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     const empSnap = await db.collection('empleados').doc(td.employeeId).get();
     const empresaId = empSnap.data()?.empresaId || null;
@@ -1851,6 +1984,9 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     }
     return { success: true, employeeId: td.employeeId };
 });
+// =========================================================
+// 15. ACTIVACIÓN COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
+// =========================================================
 exports.activateAndSetPassword = functions.https.onCall(async (data, _context) => {
     const { token, password, deviceId, deviceInfo, platform } = data;
     if (!token)
@@ -1876,11 +2012,14 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expirÃ³. Pedile al administrador que te reenvÃ­e el mail de acceso.');
     }
     const { uid, employeeId } = td;
+    // Obtener email del usuario para devolvÃ©rselo al front (necesario para signIn)
     const userRecord = await admin.auth().getUser(uid);
     const email = userRecord.email;
     if (!email)
         throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
+    // 1. Establecer contraseña
     await admin.auth().updateUser(uid, { password });
+    // Claim empresaId para reglas Firestore (eventos / solicitudes)
     try {
         const empSnap = await db.collection('empleados').doc(employeeId).get();
         const empEmpresaId = (empSnap.data()?.empresaId || '').toString();
@@ -1893,6 +2032,7 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
     catch (e) {
         console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
     }
+    // 2. Marcar token como usado
     await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     const resolvedPlatform = platform === 'ios' || platform === 'android' || platform === 'web'
         ? platform
@@ -1927,6 +2067,9 @@ Object.defineProperty(exports, "rejectGuardDeviceRegistration", { enumerable: tr
 Object.defineProperty(exports, "unbindGuardDevice", { enumerable: true, get: function () { return guardDeviceRegistration_1.unbindGuardDevice; } });
 Object.defineProperty(exports, "getGuardDeviceRegistrationStatus", { enumerable: true, get: function () { return guardDeviceRegistration_1.getGuardDeviceRegistrationStatus; } });
 Object.defineProperty(exports, "listPendingGuardDeviceRegistrations", { enumerable: true, get: function () { return guardDeviceRegistration_1.listPendingGuardDeviceRegistrations; } });
+// =========================================================
+// 16. ACCESO AL PORTAL DE CLIENTES
+// =========================================================
 function buildClientPortalEmailHtml(resetLink, clientName) {
     return `<!DOCTYPE html>
 <html lang="es">
@@ -2000,7 +2143,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
                 hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === fsRole.toLowerCase());
             }
         }
-        catch (_) { }
+        catch (_) { /* ignore */ }
     }
     if (!hasAccess) {
         throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
@@ -2022,6 +2165,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
     });
     const db = admin.firestore();
     const normalizedEmail = email.trim().toLowerCase();
+    // Crear o reutilizar usuario Auth
     let uid;
     let alreadyExisted = false;
     try {
@@ -2040,6 +2184,8 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
             throw e;
         }
     }
+    // Anti-secuestro de cliente: un usuario de portal (1 Auth uid) pertenece a UN solo cliente.
+    // Si el email ya está vinculado a otro clientId, bloquear (no reasignar) antes de enviar email.
     try {
         const existingClientUserSnap = await db.collection('client_users').where('uid', '==', uid).get();
         const conflict = existingClientUserSnap.docs
@@ -2056,10 +2202,13 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
     catch (e) {
         if (e instanceof functions.https.HttpsError)
             throw e;
+        // Error de lectura → continuar (no bloquear por fallo transitorio de Firestore).
     }
+    // Generar enlace de reset
     const resetLink = await admin.auth().generatePasswordResetLink(normalizedEmail, {
         url: 'https://comtroldata.web.app/cliente/dashboard',
     });
+    // Enviar email
     await transporter.sendMail({
         from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
         to: normalizedEmail,
@@ -2067,6 +2216,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         html: buildClientPortalEmailHtml(resetLink, clientName),
         text: buildClientPortalEmailText(resetLink, clientName),
     });
+    // Intentar obtener empresaId del doc clients si no vino en el payload
     let resolvedEmpresaId = empresaId || '';
     if (!resolvedEmpresaId) {
         try {
@@ -2074,7 +2224,7 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
             if (clientDoc.exists)
                 resolvedEmpresaId = clientDoc.data()?.empresaId || '';
         }
-        catch { }
+        catch { /* ignore */ }
     }
     const clientUserData = {
         uid,
@@ -2092,12 +2242,15 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
             sentBy: callerAuth.uid,
         },
     };
+    // El doc canónico de client_users usa el UID como ID (el portal lee con
+    // getDoc(doc('client_users', uid)) y las reglas asumen docId == uid).
     const canonicalRef = db.collection('client_users').doc(uid);
     const canonicalSnap = await canonicalRef.get();
     await canonicalRef.set({
         ...clientUserData,
         ...(canonicalSnap.exists ? {} : { creadoEn: admin.firestore.FieldValue.serverTimestamp() }),
     }, { merge: true });
+    // Migrar/limpiar docs legacy con ID autogenerado para el mismo uid (evita duplicados en el CRM).
     try {
         const legacySnap = await db.collection('client_users').where('uid', '==', uid).get();
         const batch = db.batch();
@@ -2111,9 +2264,12 @@ exports.createClientPortalAccess = functions.https.onCall(async (data, context) 
         if (hasLegacy)
             await batch.commit();
     }
-    catch { }
+    catch { /* ignore */ }
     return { success: true, alreadyExisted, email: normalizedEmail };
 });
+// =========================================================
+// Notifications
+// =========================================================
 var onNovedadCreated_1 = require("./notifications/onNovedadCreated");
 Object.defineProperty(exports, "onNovedadCreated", { enumerable: true, get: function () { return onNovedadCreated_1.onNovedadCreated; } });
 var onTurnoWrite_1 = require("./notifications/onTurnoWrite");
@@ -2130,15 +2286,21 @@ var onSolicitudEventoCreated_1 = require("./notifications/onSolicitudEventoCreat
 Object.defineProperty(exports, "onSolicitudEventoCreated", { enumerable: true, get: function () { return onSolicitudEventoCreated_1.onSolicitudEventoCreated; } });
 var shiftNotifDigest_1 = require("./notifications/shiftNotifDigest");
 Object.defineProperty(exports, "flushShiftNotifDigests", { enumerable: true, get: function () { return shiftNotifDigest_1.flushShiftNotifDigests; } });
+// =========================================================
+// Payroll API (HTTP) — para sistemas de liquidación externos
+// =========================================================
 var handler_1 = require("./payroll-api/handler");
 Object.defineProperty(exports, "payrollApi", { enumerable: true, get: function () { return handler_1.payrollApi; } });
+// =========================================================
+// Payroll API Keys — gestión de claves desde el panel admin
+// =========================================================
 exports.createPayrollApiKey = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 30, memory: '256MB' })
     .https.onCall(async (data, context) => {
     if (!context.auth)
         throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    const crypto = await Promise.resolve().then(() => require('crypto'));
+    const crypto = await Promise.resolve().then(() => __importStar(require('crypto')));
     const { name, scopes, empresaId } = data || {};
     if (!name || !empresaId) {
         throw new functions.https.HttpsError('invalid-argument', 'name y empresaId son requeridos.');
@@ -2189,6 +2351,8 @@ exports.revokePayrollApiKey = functions
     });
     return { success: true };
 });
+// Callable interna — usada por el panel admin (/admin/liquidaciones).
+// No requiere API Key; valida Firebase Auth.
 exports.getPayrollSnapshotInternal = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
@@ -2196,8 +2360,8 @@ exports.getPayrollSnapshotInternal = functions
     if (!context.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     }
-    const { parseCycleId } = await Promise.resolve().then(() => require('./payroll-api/cycle'));
-    const { buildLiquidacionSnapshot } = await Promise.resolve().then(() => require('./payroll-api/calc'));
+    const { parseCycleId } = await Promise.resolve().then(() => __importStar(require('./payroll-api/cycle')));
+    const { buildLiquidacionSnapshot } = await Promise.resolve().then(() => __importStar(require('./payroll-api/calc')));
     const cycleId = String(data?.cycleId || '');
     const empresaId = String(data?.empresaId || '');
     const cycle = parseCycleId(cycleId);
@@ -2282,6 +2446,13 @@ exports.sendTestNotification = functions.https.onCall(async (data, context) => {
     const result = await admin.messaging().sendEachForMulticast(message);
     return { successCount: result.successCount, failureCount: result.failureCount };
 });
+// =========================================================
+// 15. AUTO-COMPLETAR TURNOS (SCHEDULED - cada 5 minutos)
+// =========================================================
+// LÃ³gica:
+//   A) Turno tiene relevo ya PRESENTE → cerrar (el handover no lo cerrÃ³, safety net)
+//   B) Turno tiene relevo pero NO llegÃ³ → NO cerrar, crear novedad de AUSENCIA_RELEVO
+//   C) Turno sin relevo programado → cerrar directamente al vencimiento
 exports.autoCompletarTurnos = functions
     .region('us-central1')
     .pubsub.schedule('every 5 minutes')
@@ -2302,6 +2473,12 @@ exports.autoCompletarTurnos = functions
     console.log(`[autoCompletarTurnos] Completados: ${pass.completed} | Alertas sin relevo: ${pass.alertedNoRelief}`);
     return null;
 });
+// =========================================================
+// 16. DETECTAR AUSENCIAS (SCHEDULED - cada 5 minutos)
+// =========================================================
+// Fases:
+//   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
+//   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
 const SKIP_CODES = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
 function shiftEmpresaId(shift) {
@@ -2351,6 +2528,9 @@ exports.detectarAusencias = functions
     }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
+    // â"€â"€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
+    // Los guardias marcan a T-15, asÃ­ que T+0 sin check-in = ya estÃ¡ retrasado
     const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
     const earlyTo = admin.firestore.Timestamp.fromMillis(nowMs);
     const earlySnap = await db.collection('turnos')
@@ -2362,7 +2542,7 @@ exports.detectarAusencias = functions
         if (!cc.isEnabled(s.empresaId))
             continue;
         if (cc.isDemo(s.empresaId))
-            continue;
+            continue; // Demo genera sus propios eventos
         if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent)
             continue;
         if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(s))
@@ -2374,14 +2554,16 @@ exports.detectarAusencias = functions
         if (SKIP_STATUSES.has(s.status || ''))
             continue;
         if (s.earlyRetentionAlertAt)
-            continue;
+            continue; // ya se procesÃ³
         if (s.lateArrivalAt || s.notifiedAbsent)
-            continue;
+            continue; // tiene aviso previo
         const empId = shiftEmpresaId(s);
         const posName = (s.positionName || '').trim().toLowerCase();
         if (!s.objectiveId || !posName || !empId)
             continue;
+        // Marcar que ya se procesó la alerta temprana
         await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
+        // Preguntar al guardia tardío si viene antes de marcarlo ausente
         try {
             const empUidSnap = await db.collection('empleados').doc(s.employeeId).get();
             const empUid = empUidSnap.data()?.uid;
@@ -2402,6 +2584,7 @@ exports.detectarAusencias = functions
         catch (e) {
             console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
         }
+        // Buscar guardia saliente presente en el mismo puesto
         try {
             const presentSnap = await db.collection('turnos')
                 .where('empresaId', '==', empId)
@@ -2437,6 +2620,8 @@ exports.detectarAusencias = functions
             console.warn('[detectarAusencias] Error en alerta temprana retenciÃ³n:', e);
         }
     }
+    // â"€â"€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // Ventana: turnos que empezaron entre hace 8h y hace 30min
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
     const snap = await db.collection('turnos')
@@ -2452,9 +2637,10 @@ exports.detectarAusencias = functions
         if (!cc.isEnabled(shift.empresaId))
             continue;
         if (cc.isDemo(shift.empresaId))
-            continue;
+            continue; // Demo genera presentes/ausentes/tardes
+        // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
         if (shift.draft === true)
-            continue;
+            continue; // borrador no publicado
         if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(shift))
             continue;
         if (SKIP_STATUSES.has(shift.status || ''))
@@ -2462,9 +2648,9 @@ exports.detectarAusencias = functions
         if (shift.isPresent === true || shift.isCompleted === true)
             continue;
         if (shift.isUnassigned === true)
-            continue;
+            continue; // vacante → no es ausencia
         if (shift.isReportedToPlanning === true)
-            continue;
+            continue; // ya gestionado
         if (SKIP_CODES.has((shift.code || '').toUpperCase()))
             continue;
         if (!shift.employeeId || shift.employeeId === 'VACANTE')
@@ -2472,6 +2658,9 @@ exports.detectarAusencias = functions
         const startMs = shift.startTime?.toMillis?.() ?? 0;
         if (!startMs)
             continue;
+        // Turnos de planificaciÃ³n (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
+        // si el cronograma del objetivo/mes estÃ¡ publicado; RETEN y OPERATIONS_COVERAGE son
+        // operativos explÃ­citos y siempre se procesan.
         const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
         if (planningOrigins.has(shift.origin) && shift.objectiveId) {
             const { year: chkYear, month: chkMonth } = (0, planificacionEstadoKeys_1.ymCordobaParts)(new Date(startMs));
@@ -2479,7 +2668,7 @@ exports.detectarAusencias = functions
             const docIds = (0, planificacionEstadoKeys_1.planificacionEstadoLookupDocIds)(empId, shift.objectiveId, chkYear, chkMonth);
             const planDocs = await Promise.all(docIds.map(id => db.doc(`planificacion_estados/${id}`).get()));
             if (!planDocs.some(s => s.exists))
-                continue;
+                continue; // cronograma no publicado → no generar ausencia
         }
         const elapsedMin = (nowMs - startMs) / 60000;
         const tryMarkAbsent = async (reason) => {
@@ -2541,8 +2730,11 @@ exports.detectarAusencias = functions
             }
             continue;
         }
+        // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
         if (elapsedMin >= 30) {
+            // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
             if (shift.absenceDetectedAt) {
+                // Corrección retroactiva: turnos nocturnos cuya ausencia fue guardada con fecha UTC en vez de UTC-3
                 try {
                     const fixArDate = new Date(startMs - 3 * 60 * 60 * 1000);
                     const fixDateStr = `${fixArDate.getUTCFullYear()}-${String(fixArDate.getUTCMonth() + 1).padStart(2, '0')}-${String(fixArDate.getUTCDate()).padStart(2, '0')}`;
@@ -2585,11 +2777,13 @@ exports.detectarAusencias = functions
         }
     }
     catch (e) {
+        // Un índice faltante o un error acá no debe cortar la detección de ausencias.
         console.error('[detectarAusencias] runConvocadoAbsentPass:', e?.message);
     }
     console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);
     return null;
 });
+// =========================================================
 exports.gestionarVacantes = functions
     .region('us-central1')
     .pubsub.schedule('every 5 minutes')
@@ -2602,14 +2796,18 @@ exports.gestionarVacantes = functions
     }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
+    // Buscar vacantes: próximas 4h + últimas 12h (captura vacantes ya iniciadas sin cobertura)
     const windowStart = admin.firestore.Timestamp.fromMillis(nowMs - 12 * 60 * 60 * 1000);
     const windowEnd = admin.firestore.Timestamp.fromMillis(nowMs + 4 * 60 * 60 * 1000);
+    // Filtrar isUnassigned en memoria para evitar índice compuesto
     const snap = await db.collection('turnos')
         .where('startTime', '>=', windowStart)
         .where('startTime', '<=', windowEnd)
         .get();
     if (snap.empty)
         return null;
+    // Pre-fetch planificacion_estados para todos los objetivos con vacantes de planning
+    // Los turnos operativos (RETEN/OPERATIONS_COVERAGE/SLA_VIRTUAL) siempre se procesan.
     const planKeySet = new Set();
     for (const docSnap of snap.docs) {
         const sh = docSnap.data();
@@ -2648,12 +2846,15 @@ exports.gestionarVacantes = functions
         const shift = docSnap.data();
         if (!cc.isEnabled(shift.empresaId))
             continue;
+        // Ignorar borradores de planificación (draft flag)
         if (shift.draft === true)
             continue;
         if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(shift))
             continue;
+        // Solo vacantes sin asignación
         if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE')
             continue;
+        // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)
         {
             const shOrigin = String(shift.origin || '');
             const isOps = ['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL'].includes(shOrigin) || !!shift.isReten || shift.resolvedBy === 'OPERACIONES';
@@ -2667,6 +2868,7 @@ exports.gestionarVacantes = functions
                 }
             }
         }
+        // Ignorar si ya fue cancelada o resuelta
         const st = (shift.status || '').toUpperCase();
         if (['CANCELLED', 'COMPLETED', 'PRESENT'].includes(st))
             continue;
@@ -2678,6 +2880,7 @@ exports.gestionarVacantes = functions
         if (!startMs)
             continue;
         const minutesUntil = (startMs - nowMs) / 60000;
+        // ── Ya iniciada (minutesUntil < 0): escalar directo a Protocolo ──
         if (minutesUntil < 0 && !shift.vacanteProtocoloAt) {
             await docSnap.ref.update({ vacanteProtocoloAt: now, vacanteEscalada: true });
             {
@@ -2730,11 +2933,13 @@ exports.gestionarVacantes = functions
             }
             continue;
         }
+        // ── T-1h: Protocolo de Cobertura ──────────────────────────────
         if (minutesUntil <= 60 && !shift.vacanteProtocoloAt) {
             await docSnap.ref.update({
                 vacanteProtocoloAt: now,
                 vacanteEscalada: true,
             });
+            // ID determinístico = mismo que usa el front (autodev_prot_) para evitar duplicar
             {
                 const safeId = docSnap.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
                 const protRef = db.collection('novedades').doc(`autodev_prot_${safeId}`);
@@ -2783,6 +2988,7 @@ exports.gestionarVacantes = functions
                     }, 'AUTO');
                 }
             }
+            // ── T-3h: Devolver a Planificación ────────────────────────────
         }
         else if (minutesUntil <= 180 && !shift.vacanteReportadaAt && !shift.isReportedToPlanning) {
             await docSnap.ref.update({
@@ -2837,6 +3043,9 @@ exports.gestionarVacantes = functions
     catch (e) {
         console.warn('[gestionarVacantes] slaUnplannedGapPass:', e);
     }
+    // ── AUTO-CIERRE: protocolos de cobertura vencidos (60 min de gracia) ─────
+    // Si pasaron más de 60 minutos desde el inicio del turno sin que se resuelva,
+    // se cierra automáticamente como "sin cobertura confirmada".
     const GRACE_MINUTES = 60;
     const graceCutoff = admin.firestore.Timestamp.fromMillis(nowMs - GRACE_MINUTES * 60 * 1000);
     const staleProtos = await db.collection('novedades')
@@ -2850,12 +3059,15 @@ exports.gestionarVacantes = functions
         const n = nDoc.data();
         if (!cc.isEnabled(n.empresaId))
             continue;
+        // Verificar que el turno original no fue cubierto
         if (n.shiftId) {
             const turnoSnap = await db.collection('turnos').doc(n.shiftId).get();
             if (turnoSnap.exists) {
                 const t = turnoSnap.data();
+                // Fix 2: verificar también cobertura vía turno nuevo (RETEN/FRANCO/EARLY_START)
                 const directlyCovered = t.isPresent || t.status === 'PRESENT' || t.status === 'COMPLETED'
                     || t.isResolvedByOps || t.resolvedBy === 'OPERACIONES' || t.status === 'COVERED';
+                // Buscar si se creó un turno de retén/operativo para el mismo slot
                 let coveredByNewShift = false;
                 if (!directlyCovered && t.objectiveId && t.positionName) {
                     const slotStartMs = t.startTime?.toMillis?.() ?? 0;
@@ -2883,6 +3095,7 @@ exports.gestionarVacantes = functions
                 }
             }
         }
+        // Turno no cubierto y venció el tiempo de gracia → confirmar sin cobertura
         await nDoc.ref.update({
             status: 'ATENDIDA',
             atendidaAt: now,
@@ -2890,6 +3103,7 @@ exports.gestionarVacantes = functions
             autoResolved: true,
             sinCobertura: true,
         });
+        // Registro en audit_logs
         await db.collection('audit_logs').add({
             action: 'COBERTURA_VENCIDA_AUTO',
             actorName: 'Sistema (Auto)',
@@ -2907,7 +3121,11 @@ exports.gestionarVacantes = functions
     }
     return null;
 });
+// =========================================================
+// BACKUP — Firestore → Google Drive
+// =========================================================
 exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4GiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
+    // Wrap completo: errores fuera del try interno (auth, jobRef.set) también dan HttpsError legible
     let db = null;
     let jobRef = null;
     let empresaId = '';
@@ -2974,6 +3192,7 @@ exports.triggerBackup = (0, https_1.onCall)({ timeoutSeconds: 3600, memory: '4Gi
         throw new https_1.HttpsError('internal', msg.slice(0, 500));
     }
 });
+/** Reconcilia el historial con Google Drive: borra de system_backups los registros cuyo archivo ya no existe. */
 exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
@@ -2988,6 +3207,7 @@ exports.syncBackups = (0, https_1.onCall)({ timeoutSeconds: 300, memory: '512MiB
         throw new https_1.HttpsError('internal', e?.message || 'Error al sincronizar backups con Drive');
     }
 });
+/** Borra un backup puntual (archivo en Drive + registro en Firestore). */
 exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const caller = await (0, backup_auth_util_1.resolveBackupCaller)(request.auth.uid, request.auth.token?.role);
@@ -3012,6 +3232,7 @@ exports.deleteBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '256Mi
         throw new https_1.HttpsError('internal', e?.message || 'Error al borrar backup');
     }
 });
+/** Encola restauración (rápido). El trabajo pesado corre en processRestoreJob (hasta 1 h). */
 exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512MiB', region: 'us-central1', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const payload = (request.data ?? {});
@@ -3054,6 +3275,7 @@ exports.restoreBackup = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '512M
         throw new https_1.HttpsError('internal', msg);
     }
 });
+/** Ejecuta restore_jobs en background (hasta 60 min por invocación). */
 exports.processRestoreJob = (0, firestore_1.onDocumentWritten)({ document: 'restore_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB', serviceAccount: 'comtroldata@appspot.gserviceaccount.com' }, async (event) => {
     const change = event.data;
     if (!change)
@@ -3105,6 +3327,7 @@ exports.processRestoreJob = (0, firestore_1.onDocumentWritten)({ document: 'rest
         console.error('[processRestoreJob] failed', jobId, e);
     }
 });
+/** Copia todos los datos de una empresa a otra (superadmin). IDs nuevos + empresaId destino. */
 exports.migrateEmpresaData = (0, https_1.onCall)({ timeoutSeconds: 120, memory: '1GiB', region: 'us-central1' }, async (request) => {
     await (0, backup_auth_util_1.assertBackupCallableAllowed)(request.auth);
     const payload = (request.data ?? {});
@@ -3162,6 +3385,7 @@ exports.migrateEmpresaData = (0, https_1.onCall)({ timeoutSeconds: 120, memory: 
         throw new https_1.HttpsError('internal', msg);
     }
 });
+/** Ejecuta empresa_migrate_jobs en background. */
 exports.processEmpresaMigrateJob = (0, firestore_1.onDocumentWritten)({ document: 'empresa_migrate_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 540, memory: '4GiB' }, async (event) => {
     const change = event.data;
     if (!change)
@@ -3185,6 +3409,12 @@ exports.processEmpresaMigrateJob = (0, firestore_1.onDocumentWritten)({ document
         console.error('[processEmpresaMigrateJob] failed', jobId, e);
     }
 });
+// =========================================================
+// 18. TRIGGER: AUSENCIA DESDE PORTAL EMPLEADO
+// =========================================================
+// Cuando un empleado envía solicitud de ausencia para hoy desde el portal,
+// el sistema ya clasificó el caso (absenceCase) y ahora crea la novedad
+// urgente correspondiente para que Operaciones pueda actuar.
 exports.onAusenciaCreatedFromPortal = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 30, memory: '128MB' })
@@ -3195,9 +3425,10 @@ exports.onAusenciaCreatedFromPortal = functions
         return null;
     const absenceCase = data.absenceCase || 'PROGRAMADA';
     if (absenceCase === 'PROGRAMADA')
-        return null;
+        return null; // sin urgencia, no genera novedad operativa
     const db = admin.firestore();
     const now = admin.firestore.Timestamp.now();
+    // Buscar empresaId del empleado si no viene en el documento
     let empresaId = data.empresaId || null;
     if (!empresaId && data.employeeId) {
         const empDoc = await db.collection('empleados').doc(data.employeeId).get();
@@ -3233,6 +3464,10 @@ exports.onAusenciaCreatedFromPortal = functions
     });
     return null;
 });
+/**
+ * Retención: etiqueta archiveTier en turnos fuera de hot (diario 04:15 AR).
+ * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
+ */
 exports.scheduledTagTurnosArchiveTier = (0, scheduler_1.onSchedule)({
     schedule: '15 4 * * *',
     timeZone: 'America/Argentina/Buenos_Aires',
@@ -3240,7 +3475,7 @@ exports.scheduledTagTurnosArchiveTier = (0, scheduler_1.onSchedule)({
     memory: '1GiB',
     region: 'us-central1',
 }, async () => {
-    const { tagTurnosArchiveTier } = await Promise.resolve().then(() => require('./ops/tagTurnosArchiveTier'));
+    const { tagTurnosArchiveTier } = await Promise.resolve().then(() => __importStar(require('./ops/tagTurnosArchiveTier')));
     await tagTurnosArchiveTier({ maxDocs: 8000, dryRun: false });
 });
 exports.processEarlyWithdrawalCallable = functions.https.onCall(async (data, context) => {
@@ -3338,13 +3573,14 @@ exports.tagTurnosArchiveTier = functions.https.onCall(async (data, context) => {
     if (!allowed.includes(role)) {
         throw new functions.https.HttpsError('permission-denied', 'Solo admin puede etiquetar archivo.');
     }
-    const { tagTurnosArchiveTier: run } = await Promise.resolve().then(() => require('./ops/tagTurnosArchiveTier'));
+    const { tagTurnosArchiveTier: run } = await Promise.resolve().then(() => __importStar(require('./ops/tagTurnosArchiveTier')));
     return run({
         empresaId: data?.empresaId ? String(data.empresaId) : undefined,
         dryRun: data?.dryRun === true,
         maxDocs: typeof data?.maxDocs === 'number' ? data.maxDocs : 5000,
     });
 });
+// Backup automático horario — el cron dispara cada hora; la hora real se configura en system_config/backup_schedule
 exports.scheduledBackup = (0, scheduler_1.onSchedule)({
     schedule: '0 * * * *',
     timeZone: 'America/Argentina/Buenos_Aires',
@@ -3354,7 +3590,8 @@ exports.scheduledBackup = (0, scheduler_1.onSchedule)({
     serviceAccount: 'comtroldata@appspot.gserviceaccount.com',
 }, async () => {
     const db = admin.firestore();
-    let configHour = 3;
+    // Leer configuración de horario y habilitación
+    let configHour = 3; // default 03:00 AR
     let enabled = true;
     try {
         const cfgSnap = await db.collection('system_config').doc('backup_schedule').get();
@@ -3424,6 +3661,7 @@ exports.scheduledBackup = (0, scheduler_1.onSchedule)({
         }, { merge: true });
     }
 });
+/** Actualiza el horario del backup automático en system_config/backup_schedule (solo SuperAdmin). */
 exports.updateBackupSchedule = (0, https_1.onCall)({ timeoutSeconds: 30, memory: '256MiB', region: 'us-central1' }, async (request) => {
     if (!request.auth)
         throw new https_1.HttpsError('unauthenticated', 'Autenticación requerida.');
@@ -3447,10 +3685,12 @@ exports.updateBackupSchedule = (0, https_1.onCall)({ timeoutSeconds: 30, memory:
     const snap = await db.collection('system_config').doc('backup_schedule').get();
     return snap.data() ?? {};
 });
+// Consulta padrón AFIP (Constancia de Inscripción) — certificado en Secret Manager / .env emulador
 const afipLookupSecrets = ['AFIP_CUIT', 'AFIP_CERT', 'AFIP_PRIVATE_KEY', 'AFIP_PRODUCTION'];
 const functionsEmulator = process.env.FUNCTIONS_EMULATOR === 'true' ||
     Boolean(process.env.FIREBASE_EMULATOR_HUB) ||
     Boolean(process.env.FIRESTORE_EMULATOR_HOST);
+// Secrets en SM: montar siempre en Cloud (un deploy sin DEPLOY_AFIP_WITH_SECRETS los dejaba vacíos).
 const lookupClientByCuitRuntime = {
     timeoutSeconds: 60,
     memory: '256MB',
@@ -3471,6 +3711,11 @@ exports.triggerMobileAppPreviewBuild = functionsEmulator
         .runWith({ secrets: ['GITHUB_DISPATCH_TOKEN'], timeoutSeconds: 60, memory: '256MB' })
         .https.onCall(mobileAppHandlers_1.triggerMobileAppPreviewBuildHandler);
 exports.refreshMobileAppBuildStatus = functions.https.onCall(mobileAppHandlers_1.refreshMobileAppBuildStatusHandler);
+// =========================================================
+// 19. SCHEDULER: AUTO-INJUSTIFICADA a las 23:45 ARG
+// =========================================================
+// Marca como Injustificada toda ausencia AA del día que no tenga
+// certificado cargado y que RRHH no haya clasificado antes de medianoche.
 exports.scheduledAutoInjustificada = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 300, memory: '256MB' })
@@ -3479,9 +3724,11 @@ exports.scheduledAutoInjustificada = functions
     .onRun(async () => {
     const db = admin.firestore();
     const now = admin.firestore.Timestamp.now();
+    // Fecha de hoy en ARG (YYYY-MM-DD)
     const todayArg = new Date(Date.now() - 3 * 60 * 60 * 1000);
     const todayStr = `${todayArg.getUTCFullYear()}-${String(todayArg.getUTCMonth() + 1).padStart(2, '0')}-${String(todayArg.getUTCDate()).padStart(2, '0')}`;
     console.log(`[autoInjustificada] Procesando ausencias del día ${todayStr}`);
+    // Buscar ausencias AA del día sin certificado y sin clasificar
     const snap = await db.collection('ausencias')
         .where('startDate', '==', todayStr)
         .where('status', '==', 'Confirmada')
@@ -3494,12 +3741,13 @@ exports.scheduledAutoInjustificada = functions
     let count = 0;
     snap.docs.forEach((doc) => {
         const data = doc.data();
+        // Solo AA sin certificado
         const absType = String(data.absenceType || data.type || '').toUpperCase();
         const isAA = absType === 'AA' || data.type === 'No Presentacion' || data.type === 'No Presentación';
         if (!isAA)
             return;
         if (data.certificateUrl)
-            return;
+            return; // tiene certificado → no tocar
         batch.update(doc.ref, {
             status: 'Injustificada',
             autoInjustificadaAt: now,
@@ -3513,6 +3761,10 @@ exports.scheduledAutoInjustificada = functions
     }
     return null;
 });
+// =========================================================
+// 20. TRIGGER: CERTIFICADO PRESENTADO → DRIVE + NOVEDAD RRHH
+// =========================================================
+// Sube certificado a Google Drive (híbrido), libera Storage y avisa a RRHH.
 exports.onAusenciaCertificado = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 120, memory: '256MB' })
@@ -3574,6 +3826,13 @@ exports.onAusenciaCertificado = functions
     }
     return null;
 });
+// checkLlegadaTardeReiterada → ver src/ausencias/llegadaTardeUtils.ts
+// =========================================================
+// UTILIDAD: LIMPIAR DEVUELTAS SLA FALSAS (una sola ejecución)
+// POST /cleanupSlaDevueltas?secret=<CLEANUP_SECRET>&empresaId=<ID>
+// Elimina turnos origin='SLA_VIRTUAL' + status='REPORTED_TO_PLANNING'
+// y las novedades type='DEVUELTA_PLANNING' origin='SLA_VIRTUAL'.
+// =========================================================
 exports.cleanupSlaDevueltas = functions
     .region('us-central1')
     .runWith({ timeoutSeconds: 120, memory: '256MB' })
@@ -3590,6 +3849,7 @@ exports.cleanupSlaDevueltas = functions
     let deletedTurnos = 0;
     let deletedNovedades = 0;
     const deletedTurnoIds = [];
+    // ── 1. Borrar turnos SLA_VIRTUAL + REPORTED_TO_PLANNING ──────────────
     let turnosQ = db.collection('turnos')
         .where('origin', '==', 'SLA_VIRTUAL')
         .where('status', '==', 'REPORTED_TO_PLANNING');
@@ -3615,6 +3875,7 @@ exports.cleanupSlaDevueltas = functions
     for (const batch of turnoBatches)
         await batch.commit();
     deletedTurnos = turnosSnap.size;
+    // ── 2. Borrar novedades DEVUELTA_PLANNING / SLA_VIRTUAL ──────────────
     let novedadesQ = db.collection('novedades')
         .where('origin', '==', 'SLA_VIRTUAL');
     if (empresaId)
@@ -3640,6 +3901,12 @@ exports.cleanupSlaDevueltas = functions
     deletedNovedades = novedadesSnap.size;
     res.json({ ok: true, deletedTurnos, deletedNovedades, deletedTurnoIds });
 });
+// =========================================================
+// setEmployeePortalPassword
+// Permite al admin establecer una contraseña específica para el
+// portal del empleado (crea el usuario Auth si no existe).
+// Callable: { employeeId, password, actorName? }
+// =========================================================
 exports.setEmployeePortalPassword = functions.https.onCall(async (data, context) => {
     const callerAuth = context.auth;
     if (!callerAuth)
@@ -3768,4 +4035,3 @@ exports.geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
         throw new functions.https.HttpsError('unavailable', e.message || 'Nominatim no disponible');
     }
 });
-//# sourceMappingURL=index.js.map
