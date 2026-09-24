@@ -4,7 +4,7 @@
 > **Inicio:** 2026-07-28  
 > **Estado global:** `EN_CURSO` — validación Android + beta Play + **portal web `/app`**  
 > **Alcance v1:** App nativa **Android** (APK preview → Google Play) + **SPA web** en `https://comtroldata.web.app/app` (Expo export, sin OTA/EAS web).  
-> **Reemplazo portal viejo:** `/empleado/dashboard` y `/empleado/activar` redirigen **302** a `/app` (hasta validación Mauro). **Sin** redirect de `/empleado/app-preview` (preview SuperAdmin).  
+> **Reemplazo portal viejo:** `/empleado/*` → `/app` lo resuelve **Plataforma** (`EmpleadoAppRedirect` / sync-guard-web-hosting; sin redirects 301 en firebase.json de este PR).  
 > **Fuera de alcance v1:** App Store iOS nativa — iPhone usa la **PWA/web** en `/app`.  
 > **Backend:** Mismo Firebase (`comtroldata`) — Auth, Firestore, Functions, Storage, FCM (web VAPID + nativo).
 
@@ -46,7 +46,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
-- **Portal web `/app`** ✅ Expo `experiments.baseUrl: '/app'` + `npm run build:web` → `dist-web`; hosting + deploy-lib; deviceId LS+IDB; PWA; FCM web VAPID; GPS HTTPS; AA certificado; redirect `/empleado`→`/app`.
+- **Portal web `/app`** ✅ Expo `experiments.baseUrl: '/app'` + `build:web` → `dist-web`; deviceId LS+IDB; PWA; FCM web VAPID; GPS HTTPS; AA certificado. Deploy/redirects hosting = **Plataforma**.
 - **CC en main** ✅ merge `74a54f78` (retenido, convocatorias, ¿Venís?, ventanas, ADV∪propia, ocultar registro EXT/ADV). Backend prod: `etaMinutes`, ventanas server, rechazo TRACE.
 - **Vitest portal-core** ✅ 16/16 en `main@74a54f78`.
 - **CC-P5 Ventanas** ✅ portalCheckIn + tests (normal/late/ops/ADV/GPS).
@@ -64,7 +64,7 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **Deploy `/app`** | Notebook: `npm run deploy` (build:web **dentro** del pipeline; aborta si falta dist-web) | Web |
+| **Deploy `/app`** | Pipeline Plataforma (`sync-guard-web-hosting` + build:web) | Web |
 | **SA checklist web** | Chrome desktop/Android + Safari iOS (sección abajo) | Web |
 | **OTA preview** | Desde Notebook: `cd apps/mobile-guardia && npm run update:preview` (solo Android) | Mobile |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
@@ -140,11 +140,8 @@
 
 | Pedido | Detalle |
 |--------|---------|
-| **Aprobar dispositivo (CC/RRHH)** | Hoy «Registrar este dispositivo» crea novedad `DEVICE_REGISTRATION_REQUEST`. Falta UI CC/RRHH para aprobar y escribir `device_tokens/{uid}.deviceId` + `verified` sin reenviar mail. |
-| **Mail activación → `/app/activar`** | Confirmar que `createPortalAccess` / plantillas apunten a `https://comtroldata.web.app/app/activar/?token=` (redirect desde `/empleado/activar` ya existe). |
-| **VAPID en build web** | Deploy toma `NEXT_PUBLIC_FIREBASE_VAPID_KEY` de `apps/web2/.env.local` si falta `EXPO_PUBLIC_*`. Sin VAPID: aviso, portal OK sin push. |
-| **Redirects 302** | Hasta validación Mauro; `/empleado/app-preview` **no** se redirige (herramienta SA). Pasar a 301 cuando OK. |
-| **Safari 7 días** | Sin «Agregar a inicio», iOS puede borrar LS; IDB mitiga pero no garantiza. Documentar a RRHH. |
+| **Registro dispositivo** | App llama `requestGuardDeviceRegistration` + `getGuardDeviceRegistrationStatus` (Plataforma). UI CC de aprobación = Plataforma. |
+| **VAPID en build web** | `EXPO_PUBLIC_FIREBASE_VAPID_KEY` en `.env.example`; Plataforma la inyecta desde `NEXT_PUBLIC_FIREBASE_VAPID_KEY` de web2. Sin VAPID: portal OK sin push. |
 
 ### Checklist prueba portal web `/app`
 
@@ -174,8 +171,8 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
-2026-09-24 | WEB deploy harden | build:web obligatorio en deploy-lib (abort sin dist-web); VAPID desde web2; redirects 302; excluye /empleado/app-preview
-2026-09-24 | WEB /app P1-P6 | Rama cursor/mobile-web: baseUrl /app + build:web dist-web; deviceId LS+IDB; PWA #8B1A1A + A2HS iOS; FCM web VAPID + SW; GPS HTTPS; AA cert Hoy; redirect /empleado→/app; sin OTA/EAS web
+2026-09-24 | WEB device callables | requestDeviceRegistration → requestGuardDeviceRegistration + getGuardDeviceRegistrationStatus; revert deploy-lib/firebase.json/web2 (Plataforma)
+2026-09-24 | WEB /app P1-P6 | Rama cursor/mobile-web: baseUrl /app + build:web dist-web; deviceId LS+IDB; PWA #8B1A1A + A2HS iOS; FCM web VAPID + SW; GPS HTTPS; AA cert Hoy; sin OTA/EAS web
 2026-09-23 | CC main+vitest | main@74a54f78; vitest portalCheckIn 16/16 OK; OTA preview no publicada desde cloud (EXPO_TOKEN omitido) → Notebook: npm run update:preview
 2026-09-23 | CC-fix ADV+registro | ADV = ventana adelanto OR propia (T−15/tarde); ops_cov coverageHoursOnSource ocultos (no hero/Agenda/fichada); 16 tests
 2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK

@@ -38,43 +38,8 @@
     ],
     "rewrites": [
       {
-        "source": "/app",
-        "destination": "/app/index.html"
-      },
-      {
-        "source": "/app/**",
-        "destination": "/app/index.html"
-      },
-      {
         "source": "**",
         "destination": "/index.html"
-      }
-    ],
-    "redirects": [
-      {
-        "source": "/empleado/activar",
-        "destination": "/app/activar/",
-        "type": 302
-      },
-      {
-        "source": "/empleado/activar/**",
-        "destination": "/app/activar/",
-        "type": 302
-      },
-      {
-        "source": "/empleado/dashboard",
-        "destination": "/app/",
-        "type": 302
-      },
-      {
-        "source": "/empleado/dashboard/**",
-        "destination": "/app/",
-        "type": 302
-      },
-      {
-        "source": "/empleado",
-        "destination": "/app/",
-        "type": 302
       }
     ],
     "cleanUrls": true,
@@ -89,14 +54,6 @@
       },
       {
         "source": "/sw.js",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
-      },
-      {
-        "source": "/firebase-messaging-sw.js",
-        "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
-      },
-      {
-        "source": "/app/index.html",
         "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
       },
       {

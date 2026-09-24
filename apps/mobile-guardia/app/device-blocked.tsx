@@ -1,49 +1,89 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useResponsiveLayout } from '../src/hooks/useResponsiveLayout';
 import { getMobilePlatform } from '../src/lib/deviceId';
-import { getPortalFirebase } from '../src/lib/portal';
-import { requestDeviceRegistration } from '../src/lib/requestDeviceRegistration';
+import {
+  getGuardDeviceRegistrationStatus,
+  requestDeviceRegistration,
+  type GuardDeviceRegistrationStatus,
+} from '../src/lib/requestDeviceRegistration';
 
 export default function DeviceBlockedScreen() {
   const router = useRouter();
   const { user, employee, empDocId, signOut, refreshEmployee } = usePortalAuth();
   const { formMaxWidth } = useResponsiveLayout();
-  const { db } = getPortalFirebase();
   const [busy, setBusy] = useState(false);
+  const [statusLoading, setStatusLoading] = useState(true);
   const [requestMsg, setRequestMsg] = useState<string | null>(null);
-  const [requestOk, setRequestOk] = useState(false);
+  const [regStatus, setRegStatus] = useState<GuardDeviceRegistrationStatus>('none');
   const isWeb = getMobilePlatform() === 'web';
 
   const displayName = employee
     ? `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim()
     : user?.email || null;
 
+  useEffect(() => {
+    if (!user) {
+      setStatusLoading(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setStatusLoading(true);
+      const result = await getGuardDeviceRegistrationStatus();
+      if (cancelled) return;
+      if (result.ok) {
+        setRegStatus(result.status);
+        if (result.status === 'pending') {
+          setRequestMsg(
+            result.message ||
+              'Ya hay una solicitud pendiente. Cuando RRHH / CC la apruebe, tocá «Reintentar verificación».',
+          );
+        } else if (result.status === 'approved') {
+          setRequestMsg(
+            result.message ||
+              'Tu solicitud fue aprobada. Tocá «Reintentar verificación» para continuar.',
+          );
+        } else if (result.status === 'rejected') {
+          setRequestMsg(
+            result.message ||
+              'La última solicitud fue rechazada. Podés pedir registro de nuevo o contactar a RRHH.',
+          );
+        }
+      }
+      setStatusLoading(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid]);
+
   async function handleRequestRegister() {
-    if (!user || busy) return;
+    if (!user || busy || regStatus === 'pending') return;
     setBusy(true);
     setRequestMsg(null);
     const result = await requestDeviceRegistration({
-      db,
-      uid: user.uid,
       empDocId,
       empresaId: employee?.empresaId ?? null,
       displayName,
     });
     setBusy(false);
     if (result.ok) {
-      setRequestOk(true);
+      setRegStatus(result.status === 'approved' ? 'approved' : 'pending');
       setRequestMsg(
-        'Solicitud enviada a RRHH / Centro de Comando. Cuando aprueben o te reenvíen el mail de activación, tocá «Reintentar verificación» o abrí el enlace del correo.',
+        result.status === 'approved'
+          ? 'Dispositivo aprobado. Tocá «Reintentar verificación».'
+          : 'Solicitud enviada a RRHH / Centro de Comando. Cuando aprueben, tocá «Reintentar verificación».',
       );
     } else {
-      setRequestOk(false);
       setRequestMsg(result.message);
     }
   }
+
+  const requestSent = regStatus === 'pending' || regStatus === 'approved';
 
   return (
     <>
@@ -68,22 +108,35 @@ export default function DeviceBlockedScreen() {
               </Text>
             )}
 
-            <Pressable
-              style={[styles.btnPrimary, busy && styles.btnDisabled]}
-              onPress={handleRequestRegister}
-              disabled={busy || requestOk}
-            >
-              {busy ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <Text style={styles.btnText}>
-                  {requestOk ? 'Solicitud enviada' : 'Registrar este dispositivo'}
-                </Text>
-              )}
-            </Pressable>
+            {statusLoading ? (
+              <ActivityIndicator color="#8B1A1A" />
+            ) : (
+              <Pressable
+                style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
+                onPress={handleRequestRegister}
+                disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
+              >
+                {busy ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.btnText}>
+                    {regStatus === 'pending'
+                      ? 'Solicitud pendiente'
+                      : regStatus === 'approved'
+                        ? 'Aprobado — reintentá'
+                        : 'Registrar este dispositivo'}
+                  </Text>
+                )}
+              </Pressable>
+            )}
 
             {requestMsg ? (
-              <Text style={[styles.feedback, requestOk ? styles.feedbackOk : styles.feedbackErr]}>
+              <Text
+                style={[
+                  styles.feedback,
+                  requestSent || regStatus === 'approved' ? styles.feedbackOk : styles.feedbackErr,
+                ]}
+              >
                 {requestMsg}
               </Text>
             ) : null}

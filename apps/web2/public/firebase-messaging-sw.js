@@ -12,38 +12,28 @@ firebase.initializeApp({
 
 const messaging = firebase.messaging();
 
-/** Portal guardia web reemplazó /empleado → /app (mismo origen). */
-function resolveNotificationLink(raw) {
-  const link = (raw || '').trim() || '/app/';
-  if (link.startsWith('/empleado')) {
-    const qs = link.includes('?') ? link.slice(link.indexOf('?')) : '';
-    return `/app/${qs}`;
-  }
-  return link;
-}
-
 // Data-only messages: we control the notification display
 messaging.onBackgroundMessage((payload) => {
   const data = payload.data || {};
   const title = data.title || 'CronoApp';
   const body  = data.body  || '';
-  const link  = resolveNotificationLink(data.link);
+  const link  = data.link  || '/empleado/dashboard';
   const notificationId = data.notificationId || '';
 
   self.registration.showNotification(title, {
     body,
-    icon: '/app/icons/icon-192.png',
-    badge: '/app/icons/icon-192.png',
+    icon: '/icons/icon-192x192.png',
+    badge: '/icons/badge-72x72.png',
     tag: notificationId || 'crono-notif',
     renotify: true,
-    data: { link, notificationId, ...(data || {}) }
+    data: { link, notificationId }
   });
 });
 
 // Mark as read when tapped: open app at the notification link
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = resolveNotificationLink(event.notification.data?.link);
+  const link = event.notification.data?.link || '/empleado/dashboard';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
