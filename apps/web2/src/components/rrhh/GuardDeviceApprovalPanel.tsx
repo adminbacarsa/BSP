@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { format } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { CheckCircle2, Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { functions } from '@/lib/firebase';
@@ -22,7 +20,14 @@ export type GuardDeviceRequestRow = {
 function formatCreatedAt(createdAt?: { seconds?: number }): string {
   if (!createdAt?.seconds) return '—';
   try {
-    return format(new Date(createdAt.seconds * 1000), 'dd/MM/yyyy HH:mm', { locale: es });
+    return new Date(createdAt.seconds * 1000).toLocaleString('es-AR', {
+      timeZone: 'America/Argentina/Cordoba',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
   } catch {
     return '—';
   }
