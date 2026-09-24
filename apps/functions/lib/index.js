@@ -23,6 +23,7 @@ const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
 const cancelLlegadaTardeConvocatorias_1 = require("./attendance/cancelLlegadaTardeConvocatorias");
+const relevoNotifications_1 = require("./fichajes/relevoNotifications");
 const convocadoAbsentPass_1 = require("./attendance/convocadoAbsentPass");
 const revertConvocadoFalseAbsences_1 = require("./attendance/revertConvocadoFalseAbsences");
 const revertirAusencia_1 = require("./attendance/revertirAusencia");
@@ -1539,6 +1540,7 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
             checkInStatus: 'LATE_PENDING',
         });
         await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'LATE_NOTICE').catch(() => { });
+        await (0, relevoNotifications_1.applyLateReliefNoticeToOutgoing)(db, shiftId, shiftData, etaAt).catch(() => { });
         try {
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',

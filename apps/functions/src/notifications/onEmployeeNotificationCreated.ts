@@ -15,6 +15,7 @@ const INBOX_NEEDS_FCM = new Set([
   'SOLICITUD_ESTADO_LLEGADA',   // ¿por qué no fichaste? ¿llegás tarde?
   'SOLICITUD_ESTADO_RELEVO',    // ¿llegás a relevar? hay un guardia esperando
   'RELEVO',                     // tu relevo llegó, turno finalizado
+  'RETENCION_AVISO',            // relevo llega tarde — quedás retenido hasta que llegue
   // Planificación / Operaciones
   'VACANTE_PLANIFICACION',      // vacante — requiere reasignación en planificación
   'VACANTE_OPERACIONES',        // vacante — requiere cobertura operativa urgente

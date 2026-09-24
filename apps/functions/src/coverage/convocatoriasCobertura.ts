@@ -1185,6 +1185,8 @@ export const responderConvocatoriaCobertura = functions
           lateArrivalEtaMinutes: eta,
           lateArrivalEtaAt: etaAt,
         });
+        const { applyLateReliefNoticeToOutgoing } = await import('../fichajes/relevoNotifications');
+        await applyLateReliefNoticeToOutgoing(db, conv.shiftId, shiftData, etaAt).catch(() => {});
       } else {
         await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
         await markShiftAbsent(db, conv.shiftId, {

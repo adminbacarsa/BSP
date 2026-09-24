@@ -927,6 +927,8 @@ exports.responderConvocatoriaCobertura = functions
                 lateArrivalEtaMinutes: eta,
                 lateArrivalEtaAt: etaAt,
             });
+            const { applyLateReliefNoticeToOutgoing } = await Promise.resolve().then(() => require('../fichajes/relevoNotifications'));
+            await applyLateReliefNoticeToOutgoing(db, conv.shiftId, shiftData, etaAt).catch(() => { });
         }
         else {
             await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
