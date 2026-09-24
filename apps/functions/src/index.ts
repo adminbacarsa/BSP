@@ -2634,7 +2634,7 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
     notification: { title, body },
     data: {
       type: notifType,
-      link: '/empleado/dashboard',
+      link: '/app/',
     },
     android: {
       priority: 'high',
@@ -2644,7 +2644,7 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
     },
     webpush: {
       notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: false },
-      fcmOptions: { link: '/empleado/dashboard' },
+      fcmOptions: { link: '/app/' },
     },
     tokens,
   };
@@ -2805,7 +2805,7 @@ export const detectarAusencias = functions
               },
               webpush: {
                 notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                fcmOptions: { link: '/empleado/dashboard' },
+                fcmOptions: { link: '/app/' },
               },
             }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
           }
@@ -2886,7 +2886,7 @@ export const detectarAusencias = functions
                   icon: '/icons/icon-192x192.png',
                   requireInteraction: true,
                 },
-                fcmOptions: { link: '/empleado/dashboard' },
+                fcmOptions: { link: '/app/' },
               },
             });
           } catch (e) {

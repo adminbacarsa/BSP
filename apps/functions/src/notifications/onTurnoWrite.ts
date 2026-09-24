@@ -88,10 +88,10 @@ async function sendEmployeeTurnoPush(
         employeeId,
         title: msg.title,
         body: msg.body,
-        link: '/empleado/dashboard',
+        link: '/app/',
       },
       android: { priority: 'high' as const },
-      webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } },
+      webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/app/' } },
     }).catch(e => console.warn('[onTurnoWrite] push error:', e));
   }
 }
@@ -272,7 +272,7 @@ export const onTurnoWrite = functions
       const turnoId = change.after.id;
       await db.collection('user_notifications').add({ uid: empUid || null, employeeId, title: retMsg.title, body: retMsg.body, type: 'RETENCION_AUTO', target: 'employee', turnoId, read: false, readAt: null, createdAt: admin.firestore.FieldValue.serverTimestamp() });
       if (tokens.length) {
-        await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/empleado/dashboard' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
+        await admin.messaging().sendEachForMulticast({ tokens, notification: { title: retMsg.title, body: retMsg.body }, webpush: { notification: { icon: '/icons/icon-192x192.png', requireInteraction: true }, fcmOptions: { link: '/app/' } } }).catch(e => console.warn('[onTurnoWrite] Retención push error:', e));
       }
       return; // ya procesamos, no seguir
     }
@@ -340,7 +340,7 @@ export const onTurnoWrite = functions
         await admin.messaging().sendEachForMulticast({
           tokens: tokensC,
           notification: { title: completedMsg.title, body: completedMsg.body },
-          webpush: { notification: { icon: '/icons/icon-192x192.png' }, fcmOptions: { link: '/empleado/dashboard' } },
+          webpush: { notification: { icon: '/icons/icon-192x192.png' }, fcmOptions: { link: '/app/' } },
         }).catch(e => console.warn('[onTurnoWrite] Completado push error:', e));
       }
       return;

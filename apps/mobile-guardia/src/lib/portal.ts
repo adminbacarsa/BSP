@@ -33,6 +33,7 @@ type ExpoExtra = {
   useEmulator?: boolean;
   emulatorHost?: string;
   firebase?: PortalCoreConfig['firebase'];
+  vapidKey?: string;
 };
 
 let portal: PortalFirebase | null = null;

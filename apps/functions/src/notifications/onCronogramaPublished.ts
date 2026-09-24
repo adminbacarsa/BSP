@@ -184,7 +184,7 @@ export const onCronogramaPublished = functions
       }
 
       try {
-        const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+        const link = `/app/${notifDocId ? `?notif=${notifDocId}` : ''}`;
         const result = await admin.messaging().sendEachForMulticast({
           notification: { title, body },
           data: {
