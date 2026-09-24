@@ -12,6 +12,7 @@ import { toast } from 'sonner';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { SuperAdminGuardPreviewPicker } from '@/components/empleado/SuperAdminGuardPreviewPicker';
+import { EMPLOYEE_APP_HOME, employeeAppPath } from '@/lib/employeeAppPaths';
 
 const PHRASE_DELETE_ALL_SHIFTS = 'BORRAR TODOS LOS TURNOS';
 
@@ -293,7 +294,7 @@ export default function GeneralTab() {
                         </div>
                     ) : (
                     <Link
-                        href="/empleado/dashboard"
+                        href={EMPLOYEE_APP_HOME}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="group flex flex-col gap-3 p-5 bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl hover:border-indigo-300 hover:shadow-md transition-all"
@@ -354,7 +355,7 @@ export default function GeneralTab() {
                             variant="inline"
                             title="Preview portal guardia — producción"
                             onSelect={(empId) => {
-                                window.open(`/empleado/dashboard?preview=${encodeURIComponent(empId)}`, '_blank', 'noopener,noreferrer');
+                                window.open(employeeAppPath('preview', `emp=${encodeURIComponent(empId)}`), '_blank', 'noopener,noreferrer');
                             }}
                         />
                     </div>

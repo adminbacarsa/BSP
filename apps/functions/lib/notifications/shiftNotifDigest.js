@@ -166,7 +166,7 @@ async function sendDigestPushAndInbox(db, employeeId, data) {
         console.warn('[flushShiftNotifDigests] sin tokens', employeeId);
         return;
     }
-    const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+    const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
     try {
         await admin.messaging().sendEachForMulticast({
             tokens,

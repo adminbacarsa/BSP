@@ -66,6 +66,7 @@ import {
     bootstrapCoverageSession,
 } from '@/components/operaciones/CoverageSessionManager';
 import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
+import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -3817,6 +3818,7 @@ export default function OperacionesPage() {
                         )}
 
                         <div className="flex flex-wrap items-center gap-1 mb-1.5 shrink-0">
+                            <GuardDeviceApprovalBell empresaId={empresaId} />
                             {isSuperAdmin ? (
                                 <button
                                     type="button"

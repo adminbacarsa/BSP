@@ -159,4 +159,5 @@ if (deployFunctions) {
 }
 
 syncEnvLocal();
+process.env.COSP_LAB_ROOT = LAB_ROOT;
 runDeploy(DEPLOY_DIR, args);

@@ -160,7 +160,7 @@ async function notifyRelieved(
     const tokens = Array.from(tokenSet);
     if (tokens.length === 0) return;
 
-    const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+    const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
     await admin.messaging().sendEachForMulticast({
       data: {
         type: 'RELEVO_AUTOMATICO',
@@ -321,7 +321,7 @@ export async function registrarPresencia(
       });
       const tokens = Array.from(tokenSet);
       if (tokens.length > 0) {
-        const link = `/empleado/dashboard?notif=${notifRef.id}`;
+        const link = `/app/?notif=${encodeURIComponent(notifRef.id)}`;
         await admin.messaging().sendEachForMulticast({
           data: { type: notifType, title, body, shiftId, notificationId: notifRef.id, link },
           webpush: { headers: { Urgency: 'normal' }, fcmOptions: { link } },

@@ -176,7 +176,7 @@ export async function retainOutgoingForGap(
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-              fcmOptions: { link: '/empleado/dashboard' },
+              fcmOptions: { link: '/app/' },
             },
           })
           .catch(() => undefined);

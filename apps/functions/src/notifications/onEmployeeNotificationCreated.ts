@@ -97,8 +97,8 @@ export const onEmployeeNotificationCreated = functions
             : type === 'VACANTE_OPERACIONES'
               ? '/admin/operaciones'
               : type === 'CONVOCATORIA_COBERTURA'
-                ? '/empleado/dashboard'
-                : '/empleado/dashboard'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
+                ? '/app/'
+                : '/app/'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
     try {
       const result = await admin.messaging().sendEachForMulticast({

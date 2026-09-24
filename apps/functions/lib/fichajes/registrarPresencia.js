@@ -104,7 +104,7 @@ async function notifyRelieved(db, params) {
         const tokens = Array.from(tokenSet);
         if (tokens.length === 0)
             return;
-        const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+        const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
         await admin.messaging().sendEachForMulticast({
             data: {
                 type: 'RELEVO_AUTOMATICO',
@@ -154,7 +154,6 @@ async function registrarPresencia(db, input) {
         throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
     }
     const scheduledStartTs = shiftData.startTime ?? null;
-    const isEarlyStart = shiftData.isEarlyStart === true;
     const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
     const isLate = (windowEval.lateMinutes ?? 0) > 0
         || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
@@ -244,7 +243,7 @@ async function registrarPresencia(db, input) {
             });
             const tokens = Array.from(tokenSet);
             if (tokens.length > 0) {
-                const link = `/empleado/dashboard?notif=${notifRef.id}`;
+                const link = `/app/?notif=${encodeURIComponent(notifRef.id)}`;
                 await admin.messaging().sendEachForMulticast({
                     data: { type: notifType, title, body, shiftId, notificationId: notifRef.id, link },
                     webpush: { headers: { Urgency: 'normal' }, fcmOptions: { link } },

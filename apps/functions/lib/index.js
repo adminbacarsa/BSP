@@ -1,7 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = void 0;
+exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = void 0;
+exports.geocodeAddressProxy = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -1757,8 +1758,8 @@ exports.createPortalAccess = functions.https.onCall(async (data, context) => {
                 used: false,
                 createdAt: admin.firestore.FieldValue.serverTimestamp(),
             });
-            const activationLinkWeb = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
-            const activationLinkApp = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}&open=app`;
+            const activationLinkWeb = `https://comtroldata.web.app/app/activar?t=${activationToken}`;
+            const activationLinkApp = `https://comtroldata.web.app/app/activar?t=${activationToken}&open=app`;
             await transporter.sendMail({
                 from: `"${empresaNombre}" <${gmailUser}>`,
                 to: email,
@@ -1889,6 +1890,11 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
     });
     return { email, employeeId };
 });
+var guardDeviceRegistration_1 = require("./auth/guardDeviceRegistration");
+Object.defineProperty(exports, "requestGuardDeviceRegistration", { enumerable: true, get: function () { return guardDeviceRegistration_1.requestGuardDeviceRegistration; } });
+Object.defineProperty(exports, "approveGuardDeviceRegistration", { enumerable: true, get: function () { return guardDeviceRegistration_1.approveGuardDeviceRegistration; } });
+Object.defineProperty(exports, "getGuardDeviceRegistrationStatus", { enumerable: true, get: function () { return guardDeviceRegistration_1.getGuardDeviceRegistrationStatus; } });
+Object.defineProperty(exports, "listPendingGuardDeviceRegistrations", { enumerable: true, get: function () { return guardDeviceRegistration_1.listPendingGuardDeviceRegistrations; } });
 function buildClientPortalEmailHtml(resetLink, clientName) {
     return `<!DOCTYPE html>
 <html lang="es">
@@ -2227,7 +2233,7 @@ exports.sendTestNotification = functions.https.onCall(async (data, context) => {
         notification: { title, body },
         data: {
             type: notifType,
-            link: '/empleado/dashboard',
+            link: '/app/',
         },
         android: {
             priority: 'high',
@@ -2237,7 +2243,7 @@ exports.sendTestNotification = functions.https.onCall(async (data, context) => {
         },
         webpush: {
             notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: false },
-            fcmOptions: { link: '/empleado/dashboard' },
+            fcmOptions: { link: '/app/' },
         },
         tokens,
     };
@@ -2283,10 +2289,23 @@ async function getEmployeeTokens(db, employeeId) {
         return [];
     const empDoc = await db.collection('empleados').doc(employeeId).get();
     const authUid = empDoc.data()?.uid;
-    if (!authUid)
-        return [];
-    const tokenSnap = await db.collection('device_tokens').where('uid', '==', authUid).get();
-    return tokenSnap.docs.map(d => d.data()?.token).filter((t) => typeof t === 'string' && t.length > 10);
+    const tokens = new Set();
+    const collect = (snap) => {
+        for (const d of snap.docs) {
+            const t = d.data()?.token;
+            if (typeof t === 'string' && t.length > 10)
+                tokens.add(t);
+        }
+    };
+    const queries = [
+        db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
+    ];
+    if (authUid) {
+        queries.push(db.collection('device_tokens').where('uid', '==', authUid).get());
+    }
+    const snaps = await Promise.all(queries);
+    snaps.forEach(collect);
+    return [...tokens];
 }
 exports.detectarAusencias = functions
     .region('us-central1')
@@ -2375,7 +2394,7 @@ exports.detectarAusencias = functions
                         },
                         webpush: {
                             notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                            fcmOptions: { link: '/empleado/dashboard' },
+                            fcmOptions: { link: '/app/' },
                         },
                     }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
                 }
@@ -2455,7 +2474,7 @@ exports.detectarAusencias = functions
                                 icon: '/icons/icon-192x192.png',
                                 requireInteraction: true,
                             },
-                            fcmOptions: { link: '/empleado/dashboard' },
+                            fcmOptions: { link: '/app/' },
                         },
                     });
                 }

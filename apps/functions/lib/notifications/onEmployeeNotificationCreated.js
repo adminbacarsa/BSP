@@ -75,8 +75,8 @@ exports.onEmployeeNotificationCreated = functions
                 : type === 'VACANTE_OPERACIONES'
                     ? '/admin/operaciones'
                     : type === 'CONVOCATORIA_COBERTURA'
-                        ? '/empleado/dashboard'
-                        : '/empleado/dashboard';
+                        ? '/app/'
+                        : '/app/';
     try {
         const result = await admin.messaging().sendEachForMulticast({
             notification: { title, body },

@@ -23,6 +23,7 @@ import {
   readPortalWebOrigin,
 } from '@/lib/firebasePublicConfig';
 import { SuperAdminGuardPreviewPicker } from '@/components/empleado/SuperAdminGuardPreviewPicker';
+import { employeeAppPath } from '@/lib/employeeAppPaths';
 
 type MobileAppConfig = {
   expoAccountOwner: string;
@@ -418,7 +419,7 @@ export default function MobileAppTab() {
               variant="inline"
               title="Probar portal guardia en navegador (producción)"
               onSelect={(empId) => {
-                window.open(`/empleado/dashboard?preview=${encodeURIComponent(empId)}`, '_blank', 'noopener,noreferrer');
+                window.open(employeeAppPath('preview', `emp=${encodeURIComponent(empId)}`), '_blank', 'noopener,noreferrer');
               }}
             />
           </section>

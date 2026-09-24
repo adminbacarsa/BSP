@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import QRCode from 'qrcode';
+import { employeeAppPath } from '@/lib/employeeAppPaths';
 
 export const EXPO_HOST_STORAGE_KEY = 'cosp_expo_preview_host';
 export const PANEL_VERSION = 'prod-2';
@@ -31,8 +32,8 @@ export function normalizeMetroHost(input: string): string {
 
 /** Preview SuperAdmin en producción (mismo dominio donde estás logueado). */
 export function buildWebPreviewUrl(origin: string, empDocId: string): string {
-  const base = origin || getPreviewOrigin();
-  return `${base}/empleado/dashboard?preview=${encodeURIComponent(empDocId)}`;
+  const base = (origin || getPreviewOrigin()).replace(/\/$/, '');
+  return `${base}${employeeAppPath('preview', `emp=${encodeURIComponent(empDocId)}`)}`;
 }
 
 export function buildAppBridgeUrl(origin: string, empDocId: string, _metroHost?: string): string {
@@ -83,7 +84,7 @@ export function MobilePreviewQrPanel({ empDocId, employeeName, compact }: Props)
 
   const prodUrl = useMemo(() => buildWebPreviewUrl(origin, empDocId), [origin, empDocId]);
   const expoUrl = useMemo(() => (expoHost ? buildExpoGoPreviewUrl(expoHost, empDocId) : ''), [expoHost, empDocId]);
-  const pickerUrl = `${origin}/empleado/dashboard?picker=1`;
+  const pickerUrl = `${origin.replace(/\/$/, '')}${employeeAppPath('preview')}`;
 
   useEffect(() => {
     setOrigin(getPreviewOrigin());

@@ -4,6 +4,7 @@ import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/aut
 import { doc, getDoc, getDocs, collection, query, where } from 'firebase/firestore';
 import { ShieldCheck, Lock, Mail, Loader2, AlertCircle, ArrowLeft, CheckCircle2, Eye, EyeOff } from 'lucide-react';
 import { auth, db, ensureFirebaseEmulatorsConnected } from '@/lib/firebase';
+import { EMPLOYEE_APP_HOME } from '@/lib/employeeAppPaths';
 
 const USE_EMULATOR = process.env.NEXT_PUBLIC_USE_EMULATOR === 'true';
 
@@ -70,7 +71,7 @@ export default function LoginPage() {
         return;
       }
       if (EMPLOYEE_ROLES.includes(claimRole) || EMPLOYEE_ROLES.includes(claimType)) {
-        window.location.replace('/empleado/dashboard');
+        window.location.replace(EMPLOYEE_APP_HOME);
         return;
       }
 
@@ -96,7 +97,7 @@ export default function LoginPage() {
           query(collection(db, 'empleados'), where('email', '==', (cred.user.email || '').trim())),
         );
         if (!byEmail.empty) {
-          window.location.replace('/empleado/dashboard');
+          window.location.replace(EMPLOYEE_APP_HOME);
           return;
         }
       } catch (fireErr) {

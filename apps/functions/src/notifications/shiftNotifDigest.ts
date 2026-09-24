@@ -218,7 +218,7 @@ async function sendDigestPushAndInbox(
     return;
   }
 
-  const link = `/empleado/dashboard${notifDocId ? `?notif=${notifDocId}` : ''}`;
+  const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
   try {
     await admin.messaging().sendEachForMulticast({
       tokens,

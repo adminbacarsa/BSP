@@ -85,6 +85,17 @@ function runDeploy(projectRoot, args = []) {
   }
   console.log('✓ build/hosting/ actualizado');
 
+  console.log('\n▶ Portal guardia web (Expo) → build/hosting/app ...');
+  const syncGuard = spawnSync(
+    process.execPath,
+    [path.join(__dirname, 'sync-guard-web-hosting.js'), path.join(hosting, 'app')],
+    { stdio: 'inherit', cwd: projectRoot, env: process.env },
+  );
+  if (syncGuard.status !== 0) {
+    console.error('\n✗ Falló sync-guard-web-hosting (mobile-guardia build:web)');
+    process.exit(syncGuard.status ?? 1);
+  }
+
   const targets = [];
   if (flags.withHosting) targets.push('hosting');
   if (withFunctions) targets.push('functions');

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useRouter } from 'next/router';
 import { useAuth } from '@/context/AuthContext';
+import { employeeAppPath } from '@/lib/employeeAppPaths';
 
 type ListViewMode = 'cards' | 'table';
 
@@ -164,7 +165,7 @@ export default function EmployeesPage() {
         if (r.success && r.email) {
           try {
             await sendPasswordResetEmail(auth, r.email, {
-              url: 'https://comtroldata.web.app/empleado/dashboard',
+              url: 'https://comtroldata.web.app/app/',
               handleCodeInApp: false,
             });
             sent++;
@@ -355,7 +356,7 @@ export default function EmployeesPage() {
       </Link>
       {isSuperAdmin && emp.id && (
         <button
-          onClick={() => router.push(`/empleado/dashboard?preview=${emp.id}`)}
+          onClick={() => router.push(employeeAppPath('preview', `emp=${encodeURIComponent(emp.id)}`))}
           className="p-1.5 rounded-lg text-orange-500 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors"
           title="Ver portal del empleado (preview)"
         >

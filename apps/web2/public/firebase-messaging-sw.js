@@ -17,7 +17,7 @@ messaging.onBackgroundMessage((payload) => {
   const data = payload.data || {};
   const title = data.title || 'CronoApp';
   const body  = data.body  || '';
-  const link  = data.link  || '/empleado/dashboard';
+  const link  = data.link  || '/app/';
   const notificationId = data.notificationId || '';
 
   self.registration.showNotification(title, {
@@ -33,7 +33,7 @@ messaging.onBackgroundMessage((payload) => {
 // Mark as read when tapped: open app at the notification link
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = event.notification.data?.link || '/empleado/dashboard';
+  const link = event.notification.data?.link || '/app/';
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {

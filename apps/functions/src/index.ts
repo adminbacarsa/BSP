@@ -2095,10 +2095,10 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         used: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
       });
-      const activationLinkWeb = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}`;
+      const activationLinkWeb = `https://comtroldata.web.app/app/activar?t=${activationToken}`;
       // Gmail bloquea esquemas custom (cosp-guardia://). Usamos HTTPS + open=app;
       // la página web intenta abrir la app y deja activar en navegador.
-      const activationLinkApp = `https://comtroldata.web.app/empleado/activar/?t=${activationToken}&open=app`;
+      const activationLinkApp = `https://comtroldata.web.app/app/activar?t=${activationToken}&open=app`;
 
       // Enviar email — solo se marca como enviado si el envío fue exitoso
       await transporter.sendMail({
@@ -2279,6 +2279,13 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
 
   return { email, employeeId };
 });
+
+export {
+  requestGuardDeviceRegistration,
+  approveGuardDeviceRegistration,
+  getGuardDeviceRegistrationStatus,
+  listPendingGuardDeviceRegistrations,
+} from './auth/guardDeviceRegistration';
 
 // =========================================================
 // 16. ACCESO AL PORTAL DE CLIENTES
@@ -2673,7 +2680,7 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
     notification: { title, body },
     data: {
       type: notifType,
-      link: '/empleado/dashboard',
+      link: '/app/',
     },
     android: {
       priority: 'high',
@@ -2683,7 +2690,7 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
     },
     webpush: {
       notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: false },
-      fcmOptions: { link: '/empleado/dashboard' },
+      fcmOptions: { link: '/app/' },
     },
     tokens,
   };
@@ -2747,9 +2754,22 @@ async function getEmployeeTokens(db: admin.firestore.Firestore, employeeId: stri
   if (!employeeId || employeeId === 'VACANTE') return [];
   const empDoc = await db.collection('empleados').doc(employeeId).get();
   const authUid: string | undefined = empDoc.data()?.uid;
-  if (!authUid) return [];
-  const tokenSnap = await db.collection('device_tokens').where('uid', '==', authUid).get();
-  return tokenSnap.docs.map(d => d.data()?.token).filter((t): t is string => typeof t === 'string' && t.length > 10);
+  const tokens = new Set<string>();
+  const collect = (snap: FirebaseFirestore.QuerySnapshot) => {
+    for (const d of snap.docs) {
+      const t = d.data()?.token;
+      if (typeof t === 'string' && t.length > 10) tokens.add(t);
+    }
+  };
+  const queries: Promise<FirebaseFirestore.QuerySnapshot>[] = [
+    db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
+  ];
+  if (authUid) {
+    queries.push(db.collection('device_tokens').where('uid', '==', authUid).get());
+  }
+  const snaps = await Promise.all(queries);
+  snaps.forEach(collect);
+  return [...tokens];
 }
 
 export const detectarAusencias = functions
@@ -2844,7 +2864,7 @@ export const detectarAusencias = functions
               },
               webpush: {
                 notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                fcmOptions: { link: '/empleado/dashboard' },
+                fcmOptions: { link: '/app/' },
               },
             }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
           }
@@ -2925,7 +2945,7 @@ export const detectarAusencias = functions
                   icon: '/icons/icon-192x192.png',
                   requireInteraction: true,
                 },
-                fcmOptions: { link: '/empleado/dashboard' },
+                fcmOptions: { link: '/app/' },
               },
             });
           } catch (e) {

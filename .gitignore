@@ -14,6 +14,7 @@ out/
 _pdfgen/
 apps/web2/out_local_backup/
 apps/web2/out_prod/
+apps/web2/public/app/
 
 # --- Credenciales (nunca commitear) ---
 service-account.json

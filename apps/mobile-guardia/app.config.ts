@@ -62,6 +62,11 @@ const config: ExpoConfig = {
             host: 'comtroldata.web.app',
             pathPrefix: '/empleado/activar',
           },
+          {
+            scheme: 'https',
+            host: 'comtroldata.web.app',
+            pathPrefix: '/app/activar',
+          },
         ],
         category: ['BROWSABLE', 'DEFAULT'],
       },
@@ -72,6 +77,8 @@ const config: ExpoConfig = {
     barStyle: 'dark-content',
   },
   web: {
+    bundler: 'metro',
+    output: 'static',
     favicon: './assets/favicon.png',
   },
   plugins: [
@@ -108,6 +115,7 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
+    baseUrl: '/app',
   },
   extra: {
     eas: {

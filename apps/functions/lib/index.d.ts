@@ -43,6 +43,7 @@ export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateAndSetPassword: functions.HttpsFunction & functions.Runnable<any>;
+export { requestGuardDeviceRegistration, approveGuardDeviceRegistration, getGuardDeviceRegistrationStatus, listPendingGuardDeviceRegistrations, } from './auth/guardDeviceRegistration';
 export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
