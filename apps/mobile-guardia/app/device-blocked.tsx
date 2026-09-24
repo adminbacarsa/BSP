@@ -2,21 +2,28 @@ import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { doc, getDoc } from 'firebase/firestore';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
 import { useResponsiveLayout } from '../src/hooks/useResponsiveLayout';
 import { getMobilePlatform } from '../src/lib/deviceId';
+import { getPortalFirebase } from '../src/lib/portal';
 import {
   getGuardDeviceRegistrationStatus,
   requestDeviceRegistration,
   type GuardDeviceRegistrationStatus,
 } from '../src/lib/requestDeviceRegistration';
 
+/** Motivo de bloqueo: nunca activó vs dispositivo distinto al vinculado. */
+type BlockReason = 'loading' | 'never_activated' | 'other_device';
+
 export default function DeviceBlockedScreen() {
   const router = useRouter();
   const { user, employee, empDocId, signOut, refreshEmployee } = usePortalAuth();
   const { formMaxWidth } = useResponsiveLayout();
+  const { db } = getPortalFirebase();
   const [busy, setBusy] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [blockReason, setBlockReason] = useState<BlockReason>('loading');
   const [requestMsg, setRequestMsg] = useState<string | null>(null);
   const [regStatus, setRegStatus] = useState<GuardDeviceRegistrationStatus>('none');
   const isWeb = getMobilePlatform() === 'web';
@@ -25,14 +32,39 @@ export default function DeviceBlockedScreen() {
     ? `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim()
     : user?.email || null;
 
+  const neverActivated = blockReason === 'never_activated';
+  const canRequestRegister = blockReason === 'other_device';
+
   useEffect(() => {
     if (!user) {
       setStatusLoading(false);
+      setBlockReason('never_activated');
       return;
     }
     let cancelled = false;
     (async () => {
       setStatusLoading(true);
+      setRequestMsg(null);
+
+      let reason: BlockReason = 'other_device';
+      try {
+        const tokenSnap = await getDoc(doc(db, 'device_tokens', user.uid));
+        if (!tokenSnap.exists() || tokenSnap.data()?.verified !== true) {
+          reason = 'never_activated';
+        } else {
+          reason = 'other_device';
+        }
+      } catch {
+        reason = 'other_device';
+      }
+      if (cancelled) return;
+      setBlockReason(reason);
+
+      if (reason === 'never_activated') {
+        setStatusLoading(false);
+        return;
+      }
+
       const result = await getGuardDeviceRegistrationStatus();
       if (cancelled) return;
       if (result.ok) {
@@ -59,10 +91,10 @@ export default function DeviceBlockedScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.uid]);
+  }, [user?.uid, db]);
 
   async function handleRequestRegister() {
-    if (!user || busy || regStatus === 'pending') return;
+    if (!user || busy || !canRequestRegister || regStatus === 'pending') return;
     setBusy(true);
     setRequestMsg(null);
     const result = await requestDeviceRegistration({
@@ -87,78 +119,94 @@ export default function DeviceBlockedScreen() {
 
   return (
     <>
-      <Stack.Screen options={{ title: 'Dispositivo no autorizado' }} />
+      <Stack.Screen
+        options={{ title: neverActivated ? 'Cuenta sin activar' : 'Dispositivo no autorizado' }}
+      />
       <SafeAreaView style={styles.safe}>
         <View style={styles.container}>
           <View style={[styles.card, { maxWidth: formMaxWidth, width: '100%', alignSelf: 'center' }]}>
-            <Text style={styles.title}>Dispositivo no vinculado</Text>
-            <Text style={styles.body}>
-              Esta cuenta ya está activa en otro dispositivo. Cada legajo permite un dispositivo a la vez
-              (Android o un navegador).
-            </Text>
-            {isWeb ? (
-              <Text style={styles.body}>
-                Si usás Safari en iPhone y no abriste COSP en varios días, el navegador puede haber borrado
-                el id de este dispositivo. Pedí registro abajo o pedile a RRHH un nuevo mail de acceso.
-              </Text>
-            ) : (
-              <Text style={styles.body}>
-                Si cambiaste de teléfono, pedile a RRHH un nuevo mail de acceso y activá desde el botón
-                «Abrir en COSP Guardia».
-              </Text>
-            )}
-
-            {statusLoading ? (
+            {blockReason === 'loading' || statusLoading ? (
               <ActivityIndicator color="#8B1A1A" />
+            ) : neverActivated ? (
+              <>
+                <Text style={styles.title}>Todavía no activaste tu cuenta</Text>
+                <Text style={styles.body}>
+                  Todavía no activaste tu cuenta. Usá el mail de acceso o pedile a RRHH que te lo reenvíe.
+                </Text>
+              </>
             ) : (
-              <Pressable
-                style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
-                onPress={handleRequestRegister}
-                disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
-              >
-                {busy ? (
-                  <ActivityIndicator color="#fff" />
+              <>
+                <Text style={styles.title}>Dispositivo no vinculado</Text>
+                <Text style={styles.body}>
+                  Esta cuenta ya está activa en otro dispositivo. Cada legajo permite un dispositivo a la
+                  vez (Android o un navegador).
+                </Text>
+                {isWeb ? (
+                  <Text style={styles.body}>
+                    Si usás Safari en iPhone y no abriste COSP en varios días, el navegador puede haber
+                    borrado el id de este dispositivo. Pedí registro abajo o pedile a RRHH un nuevo mail de
+                    acceso.
+                  </Text>
                 ) : (
-                  <Text style={styles.btnText}>
-                    {regStatus === 'pending'
-                      ? 'Solicitud pendiente'
-                      : regStatus === 'approved'
-                        ? 'Aprobado — reintentá'
-                        : 'Registrar este dispositivo'}
+                  <Text style={styles.body}>
+                    Si cambiaste de teléfono, pedile a RRHH un nuevo mail de acceso y activá desde el botón
+                    «Abrir en COSP Guardia».
                   </Text>
                 )}
-              </Pressable>
+
+                <Pressable
+                  style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
+                  onPress={handleRequestRegister}
+                  disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
+                >
+                  {busy ? (
+                    <ActivityIndicator color="#fff" />
+                  ) : (
+                    <Text style={styles.btnText}>
+                      {regStatus === 'pending'
+                        ? 'Solicitud pendiente'
+                        : regStatus === 'approved'
+                          ? 'Aprobado — reintentá'
+                          : 'Registrar este dispositivo'}
+                    </Text>
+                  )}
+                </Pressable>
+
+                {requestMsg ? (
+                  <Text
+                    style={[
+                      styles.feedback,
+                      requestSent || regStatus === 'approved' ? styles.feedbackOk : styles.feedbackErr,
+                    ]}
+                  >
+                    {requestMsg}
+                  </Text>
+                ) : null}
+              </>
             )}
 
-            {requestMsg ? (
-              <Text
-                style={[
-                  styles.feedback,
-                  requestSent || regStatus === 'approved' ? styles.feedbackOk : styles.feedbackErr,
-                ]}
-              >
-                {requestMsg}
-              </Text>
+            {!statusLoading && blockReason !== 'loading' ? (
+              <>
+                <Pressable
+                  style={styles.btnSecondary}
+                  onPress={async () => {
+                    await refreshEmployee();
+                    router.replace('/');
+                  }}
+                >
+                  <Text style={styles.btnSecondaryText}>Reintentar verificación</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.btn}
+                  onPress={async () => {
+                    await signOut();
+                    router.replace('/login');
+                  }}
+                >
+                  <Text style={styles.btnText}>Cerrar sesión</Text>
+                </Pressable>
+              </>
             ) : null}
-
-            <Pressable
-              style={styles.btnSecondary}
-              onPress={async () => {
-                await refreshEmployee();
-                router.replace('/');
-              }}
-            >
-              <Text style={styles.btnSecondaryText}>Reintentar verificación</Text>
-            </Pressable>
-            <Pressable
-              style={styles.btn}
-              onPress={async () => {
-                await signOut();
-                router.replace('/login');
-              }}
-            >
-              <Text style={styles.btnText}>Cerrar sesión</Text>
-            </Pressable>
           </View>
         </View>
       </SafeAreaView>

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -53,6 +53,7 @@ import { useTheme } from '../../src/theme/ThemeContext';
 import type { SolicitudEvento } from '@cosp/portal-types';
 import type { ConvocatoriaCobertura } from '../../src/lib/convocatoriasCobertura';
 import Constants from 'expo-constants';
+import { appAlert } from '@/lib/appAlert';
 
 export default function HoyScreen() {
   return (
@@ -131,17 +132,17 @@ function HoyScreenContent() {
 
   async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
-    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+    appAlert(result.ok ? 'Listo' : 'Error', result.message);
   }
 
   async function onResponderCobertura(c: ConvocatoriaCobertura, acepta: boolean) {
     const result = await responderCobertura(c.id, acepta ? 'ACCEPTED' : 'REJECTED');
-    Alert.alert(result.ok ? 'Listo' : 'Error', result.message);
+    appAlert(result.ok ? 'Listo' : 'Error', result.message);
   }
 
   async function onSiVoyLlegadaTarde(c: ConvocatoriaCobertura, etaMinutes: number) {
     const result = await responderCobertura(c.id, 'ACCEPTED', { etaMinutes });
-    Alert.alert(
+    appAlert(
       result.ok ? 'Listo' : 'Error',
       result.ok ? `Avisaste que llegás en ${etaMinutes} min` : result.message,
     );
@@ -151,7 +152,7 @@ function HoyScreenContent() {
     const result = await responderCobertura(c.id, 'REJECTED', {
       rejectionReason: 'No voy',
     });
-    Alert.alert(result.ok ? 'Listo' : 'Error', result.ok ? 'Marcado como no voy' : result.message);
+    appAlert(result.ok ? 'Listo' : 'Error', result.ok ? 'Marcado como no voy' : result.message);
   }
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
@@ -253,18 +254,18 @@ function HoyScreenContent() {
       empDocId,
       authUid: user?.uid ?? null,
     });
-    Alert.alert(result.ok ? 'Presente' : 'Fichada', result.message);
+    appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }
 
   async function onLate() {
     if (!mainShift) return;
-    Alert.alert('Voy a llegar tarde', '¿Cuántos minutos de demora estimás?', [
+    appAlert('Voy a llegar tarde', '¿Cuántos minutos de demora estimás?', [
       { text: 'Cancelar', style: 'cancel' },
       {
         text: '15 min',
         onPress: () => {
           void notifyLateArrival(mainShift.id, 15).then((result) =>
-            Alert.alert('Llegada tarde', result.message),
+            appAlert('Llegada tarde', result.message),
           );
         },
       },
@@ -272,7 +273,7 @@ function HoyScreenContent() {
         text: '30 min',
         onPress: () => {
           void notifyLateArrival(mainShift.id, 30).then((result) =>
-            Alert.alert('Llegada tarde', result.message),
+            appAlert('Llegada tarde', result.message),
           );
         },
       },
@@ -280,7 +281,7 @@ function HoyScreenContent() {
         text: '60 min',
         onPress: () => {
           void notifyLateArrival(mainShift.id, 60).then((result) =>
-            Alert.alert('Llegada tarde', result.message),
+            appAlert('Llegada tarde', result.message),
           );
         },
       },

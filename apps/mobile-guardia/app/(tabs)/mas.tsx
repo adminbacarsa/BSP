@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
@@ -11,6 +11,7 @@ import { useTheme } from '../../src/theme/ThemeContext';
 import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useConvocatoriasPendientes } from '../../src/hooks/useConvocatoriasPendientes';
 import { checkAndApplyAppUpdate, getAppVersionLabel } from '../../src/lib/appUpdate';
+import { appAlert } from '@/lib/appAlert';
 
 export default function MasScreen() {
   return (
@@ -36,7 +37,7 @@ function MasScreenContent() {
     try {
       const result = await checkAndApplyAppUpdate({ apply: true });
       if (result.reloading) return;
-      Alert.alert('Actualización', result.message);
+      appAlert('Actualización', result.message);
     } finally {
       setUpdateBusy(false);
     }
@@ -162,7 +163,7 @@ function MasScreenContent() {
             label="Cerrar sesión"
             variant="secondary"
             onPress={() => {
-              Alert.alert(
+              appAlert(
                 'Cerrar sesión',
                 'Vas a salir de tu cuenta. La app sigue instalada; para volver a usarla tenés que ingresar de nuevo.',
                 [

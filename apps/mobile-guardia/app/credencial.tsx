@@ -1,13 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Image,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
@@ -27,6 +19,7 @@ import { readCredencialCache, writeCredencialCache } from '../src/lib/credencial
 import { uploadCredencialPhoto } from '../src/lib/uploadCredencialPhoto';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
+import { appAlert } from '@/lib/appAlert';
 
 type PublicCred = {
   photoUrl?: string;
@@ -121,7 +114,7 @@ function CredencialScreenContent() {
         );
       }
     } catch (e) {
-      if (!cached) Alert.alert('Credencial', 'No se pudo cargar. Si no hay red, solo verás la última copia guardada.');
+      if (!cached) appAlert('Credencial', 'No se pudo cargar. Si no hay red, solo verás la última copia guardada.');
     } finally {
       setLoading(false);
     }
@@ -143,7 +136,7 @@ function CredencialScreenContent() {
     if (!empDocId) return;
     const perm = await ImagePicker.requestCameraPermissionsAsync();
     if (!perm.granted) {
-      Alert.alert('Cámara', 'Activá el permiso de cámara en ajustes.');
+      appAlert('Cámara', 'Activá el permiso de cámara en ajustes.');
       return;
     }
     const result = await ImagePicker.launchCameraAsync({
@@ -166,9 +159,9 @@ function CredencialScreenContent() {
         verifyUrl,
         cachedAt: Date.now(),
       });
-      Alert.alert('Foto actualizada', 'La credencial pública ya muestra la nueva imagen.');
+      appAlert('Foto actualizada', 'La credencial pública ya muestra la nueva imagen.');
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo subir la foto');
+      appAlert('Error', e instanceof Error ? e.message : 'No se pudo subir la foto');
     } finally {
       setUploadBusy(false);
     }

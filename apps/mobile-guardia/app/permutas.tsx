@@ -1,12 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Stack } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { formatDateAr, formatTimeAr } from '@cosp/portal-core';
@@ -20,6 +13,7 @@ import { RequireAuth } from '../src/hooks/useRequireAuth';
 import { getPortalCallables } from '../src/lib/portal';
 import { radius, spacing } from '../src/theme/tokens';
 import { useTheme } from '../src/theme/ThemeContext';
+import { appAlert } from '@/lib/appAlert';
 
 type SwapCandidate = {
   shiftId: string;
@@ -83,7 +77,7 @@ function PermutasScreenContent() {
         setCandidates(list);
       })
       .catch((e) => {
-        if (!cancelled) Alert.alert('Error', e instanceof Error ? e.message : 'No se cargaron candidatos');
+        if (!cancelled) appAlert('Error', e instanceof Error ? e.message : 'No se cargaron candidatos');
       })
       .finally(() => {
         if (!cancelled) setCandidatesLoading(false);
@@ -95,20 +89,20 @@ function PermutasScreenContent() {
 
   const createRequest = useCallback(async () => {
     if (!myShiftId || !targetShiftId) {
-      Alert.alert('Permuta', 'Seleccioná tu turno y el turno del compañero.');
+      appAlert('Permuta', 'Seleccioná tu turno y el turno del compañero.');
       return;
     }
     setBusy(true);
     try {
       const callables = getPortalCallables();
       await callables.createSwapRequest({ myShiftId, targetShiftId });
-      Alert.alert('Enviada', 'Tu compañero debe aceptar. Luego confirmás y un supervisor autoriza.');
+      appAlert('Enviada', 'Tu compañero debe aceptar. Luego confirmás y un supervisor autoriza.');
       setMyShiftId('');
       setTargetShiftId('');
       setCandidates([]);
       await reload();
     } catch (e) {
-      Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo crear la solicitud');
+      appAlert('Error', e instanceof Error ? e.message : 'No se pudo crear la solicitud');
     } finally {
       setBusy(false);
     }
@@ -122,7 +116,7 @@ function PermutasScreenContent() {
         await callables.respondSwapRequest({ requestId, accept });
         await reload();
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo responder');
+        appAlert('Error', e instanceof Error ? e.message : 'No se pudo responder');
       } finally {
         setBusy(false);
       }
@@ -138,7 +132,7 @@ function PermutasScreenContent() {
         await callables.confirmSwapRequest({ requestId, confirm: confirmAction });
         await reload();
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo confirmar');
+        appAlert('Error', e instanceof Error ? e.message : 'No se pudo confirmar');
       } finally {
         setBusy(false);
       }
@@ -154,7 +148,7 @@ function PermutasScreenContent() {
         await callables.cancelSwapRequest({ requestId });
         await reload();
       } catch (e) {
-        Alert.alert('Error', e instanceof Error ? e.message : 'No se pudo cancelar');
+        appAlert('Error', e instanceof Error ? e.message : 'No se pudo cancelar');
       } finally {
         setBusy(false);
       }
