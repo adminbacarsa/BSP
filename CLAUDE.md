@@ -226,7 +226,18 @@ Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al ab
 - **IA ajuste fino de planificación:** el front llama la callable **`optimizePlanningGemini`** (`planningGeminiServer.ts` + export en `index.ts`); usa el mismo secreto **`GEMINI_API_KEY`**. No hay `NEXT_PUBLIC_GEMINI_*` en el bundle. Deploy selectivo: `firebase deploy --only functions:optimizePlanningGemini` si el deploy completo de functions timeouta.
 - **Agente planificación automática (pipeline):** motor determinístico **`autoScheduleEngineV2`** (viabilidad → generación) en `apps/web2/src/lib/planificacion/`; verificación **`coverageVerification`**; ajuste fino **`optimizePlanningGemini`** (no regenera el mes desde cero). Contrato/orquestación: `apps/functions/src/assistant/planningAgent/planningAgentTypes.ts`. UI: botón **Automatizar** en `planificacion/index.tsx`. Skill Cursor para desarrollo: **`.cursor/skills/cosp-planificacion-agent/`** (invocar `@cosp-planificacion-agent`). Smoke: `npm run eval:planning-agent`.
 - **VPLAN (cerebro experimental, paralelo):** documentación completa en **`docs/VPLAN.md`**. Código aislado en `apps/functions/src/vplan/` (callable **`vplanRun`**, pipeline fases 0–10). **No modifica** wizard Automatizar ni motores V2/V4. **Solo emulador** en fase prueba (handler rechaza prod hasta sign-off). **Sin deploy** hasta checklist §10 de `docs/VPLAN.md`. Smoke: `npm run eval:vplan`; E2E: `npm run test:vplan-emulator`.
-- **App nativa portal guardia:** seguimiento en **`docs/MOBILE-GUARDIA-IMPLEMENTACION.md`**. Código: `apps/mobile-guardia/` + `packages/portal-core`. **Portal web del vigilador:** SPA Expo en **`https://comtroldata.web.app/app`** (`build:web` → `dist-web`). Hosting `/app` + redirects `/empleado` = **Plataforma** (`sync-guard-web-hosting` / `EmpleadoAppRedirect`). Sin OTA/EAS en web. iPhone = PWA/Safari en `/app`.
+- **App nativa portal guardia:** seguimiento en **`docs/MOBILE-GUARDIA-IMPLEMENTACION.md`**. Código: `apps/mobile-guardia/` + `packages/portal-core`. **Portal web del vigilador:** SPA Expo en **`https://comtroldata.web.app/app`** (`build:web` → `dist-web`). Hosting `/app` + redirects `/empleado` = **Plataforma** (`sync-guard-web-hosting` / `EmpleadoAppRedirect`). Sin OTA/EAS en web (web = redeploy hosting). iPhone = PWA/Safari en `/app`.
+  - **Gate dispositivo:** no tabs/datos hasta `deviceVerified === true` (`useRequireAuth`, `index`, hooks). Token `verified` sin `deviceId` → `needs_rebind` (no dejar pasar). Errores Plataforma: `DEVICE_OWNED_BY_OTHER`, `RETIRED_DEVICE_NEEDS_EMAIL`. `bypassDeviceCheck` sin cambios. Informe: `apps/mobile-guardia/docs/DEVICE-VALIDATION-GATE.md`.
+  - **Preview SuperAdmin + push:** `device_tokens/{token}` con `{ uid: SA, employeeId: legajo, previewOf: true, token, platform }`. Borrar en `exitPreview` / `signOut`. **Web:** botón «Activar notificaciones» (gesto Safari/iOS; no `requestPermission` automático).
+  - **Alertas:** máx. **10** por ventana + Atrás/Adelante (`alertasPagination.ts`); misma UI nativa y web `/app`.
+  - **OTA Android (EAS, Notebook — no cloud sin `EXPO_TOKEN`):** dos comandos **separados** (nunca `update:preview / update:production` en una sola línea):
+    ```powershell
+    cd C:\APP\cronoapp\apps\mobile-guardia
+    git fetch origin; git checkout cursor/device-validation-gate-a241   # o main si ya mergeaste
+    npm run update:preview
+    npm run update:production
+    ```
+    O en un paso: `powershell -File ..\..\scripts\mobile-ota-channels.ps1` (preview luego production).
 - **Producción (hosting + app real):**
   1. Crear el secreto (una vez): en la raíz del repo ejecutá `firebase functions:secrets:set GEMINI_API_KEY` y pegá la API key cuando pida valor (queda en Google Secret Manager).
   2. Desplegar: `firebase deploy --only functions`. La función `chatPlatformAssistant` ya declara `secrets: ['GEMINI_API_KEY']` y Firebase inyecta `process.env.GEMINI_API_KEY` en runtime.
