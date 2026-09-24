@@ -3,6 +3,10 @@ import { getDeviceInfo } from './deviceInfo';
 import { getMobilePlatform, getOrCreateDeviceId, type MobilePlatform } from './deviceId';
 import { getPortalFirebase } from './portal';
 import { mapPortalCallableError } from './mapPortalCallableError';
+import {
+  extractPlatformDeviceErrorCode,
+  type PlatformDeviceErrorCode,
+} from './deviceVerification';
 
 export type GuardDeviceRegistrationStatus =
   | 'none'
@@ -24,6 +28,7 @@ type RequestCallableResponse = {
   status?: string;
   message?: string;
   deviceId?: string;
+  errorCode?: string;
 };
 
 type StatusCallableResponse = {
@@ -83,7 +88,7 @@ export async function requestDeviceRegistration(_params?: {
   displayName?: string | null;
 }): Promise<
   | { ok: true; requestId?: string; deviceId: string; status: GuardDeviceRegistrationStatus }
-  | { ok: false; message: string }
+  | { ok: false; message: string; platformCode?: PlatformDeviceErrorCode }
 > {
   try {
     const deviceId = await getOrCreateDeviceId();
@@ -107,9 +112,17 @@ export async function requestDeviceRegistration(_params?: {
     });
 
     if (data?.success === false) {
+      const platformCode =
+        extractPlatformDeviceErrorCode({
+          message: data.message,
+          details: { code: data.errorCode },
+        }) ?? undefined;
       return {
         ok: false,
-        message: data.message || 'No se pudo enviar la solicitud de registro.',
+        message: platformCode
+          ? mapPortalCallableError({ message: platformCode })
+          : data.message || 'No se pudo enviar la solicitud de registro.',
+        platformCode,
       };
     }
 
@@ -120,6 +133,11 @@ export async function requestDeviceRegistration(_params?: {
       status: normalizeStatus(data?.status || 'pending'),
     };
   } catch (err) {
-    return { ok: false, message: mapPortalCallableError(err) };
+    const platformCode = extractPlatformDeviceErrorCode(err) ?? undefined;
+    return {
+      ok: false,
+      message: mapPortalCallableError(err),
+      platformCode,
+    };
   }
 }

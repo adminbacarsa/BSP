@@ -19,6 +19,7 @@ import {
 } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { sortShiftsByStart } from '../lib/shifts';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 function monthRange(anchor: Date) {
   const start = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
@@ -112,6 +113,7 @@ export function useEmployeeShifts(
   authUid: string | null,
   monthAnchor: Date = new Date(),
 ) {
+  const { deviceVerified } = usePortalAuth();
   const [rawShifts, setRawShifts] = useState<Shift[]>([]);
   const [absentShiftIds, setAbsentShiftIds] = useState<Set<string>>(new Set());
   const [publishedKeys, setPublishedKeys] = useState<Set<string> | null>(null);
@@ -128,9 +130,9 @@ export function useEmployeeShifts(
   const monthKey = `${monthAnchor.getFullYear()}-${monthAnchor.getMonth()}`;
 
   useEffect(() => {
-    if (employeeKeys.length === 0) {
+    if (deviceVerified !== true || employeeKeys.length === 0) {
       setRawShifts([]);
-      setLoading(false);
+      setLoading(deviceVerified === null);
       setError(null);
       return;
     }
@@ -206,11 +208,11 @@ export function useEmployeeShifts(
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [employeeKeys.join('|'), monthKey]);
+  }, [deviceVerified, employeeKeys.join('|'), monthKey]);
 
   // Ausencias RRHH: si el turno no trae isAbsent, igual no debe ser "próximo turno".
   useEffect(() => {
-    if (employeeKeys.length === 0) {
+    if (deviceVerified !== true || employeeKeys.length === 0) {
       setAbsentShiftIds(new Set());
       return;
     }
@@ -275,10 +277,14 @@ export function useEmployeeShifts(
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [employeeKeys.join('|'), rawShifts]);
+  }, [deviceVerified, employeeKeys.join('|'), rawShifts]);
 
   // Solo mostrar planificación si hay publishedAt en planificacion_estados.
   useEffect(() => {
+    if (deviceVerified !== true) {
+      setPublishedKeys(null);
+      return;
+    }
     const { db } = getPortalFirebase();
     const targets = new Map<
       string,
@@ -348,7 +354,7 @@ export function useEmployeeShifts(
     return () => {
       realUnsubs.forEach((u) => u());
     };
-  }, [rawShifts]);
+  }, [deviceVerified, rawShifts]);
 
   const shifts = useMemo(() => {
     const marked = rawShifts.map((s) => {

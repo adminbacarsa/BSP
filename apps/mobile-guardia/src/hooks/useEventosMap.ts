@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Evento } from '@cosp/portal-types';
 import { eventosArrayToMap, loadEventosByEmpresaRange, portalEventosDateRange } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 export function useEventosMap(empresaId: string | undefined) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!empresaId) {
+    if (deviceVerified !== true || !empresaId) {
       setEventos([]);
       setLoading(false);
       return;
@@ -30,7 +32,7 @@ export function useEventosMap(empresaId: string | undefined) {
     return () => {
       cancelled = true;
     };
-  }, [db, empresaId]);
+  }, [db, empresaId, deviceVerified]);
 
   const eventosMap = useMemo(() => eventosArrayToMap(eventos), [eventos]);
 

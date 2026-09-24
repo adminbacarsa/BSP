@@ -1,6 +1,7 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePortalAuth } from '../context/PortalAuthContext';
+import { EnableWebPushButton } from './EnableWebPushButton';
 import { radius } from '../theme/tokens';
 
 export function PreviewModeBanner() {
@@ -16,31 +17,38 @@ export function PreviewModeBanner() {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.label} numberOfLines={2}>
-        PREVIEW · {label}
-        {'\n'}Convocatorias: Acepto/No puedo actúan como este legajo.
-      </Text>
-      <Pressable
-        style={styles.btn}
-        onPress={() => {
-          exitPreview();
-          router.push('/preview');
-        }}
-      >
-        <Text style={styles.btnText}>Cambiar</Text>
-      </Pressable>
+      <View style={styles.row}>
+        <Text style={styles.label} numberOfLines={2}>
+          PREVIEW · {label}
+          {'\n'}Convocatorias: Acepto/No puedo actúan como este legajo.
+        </Text>
+        <Pressable
+          style={styles.btn}
+          onPress={() => {
+            void exitPreview().then(() => {
+              router.push('/preview');
+            });
+          }}
+        >
+          <Text style={styles.btnText}>Cambiar</Text>
+        </Pressable>
+      </View>
+      <EnableWebPushButton compact />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
     backgroundColor: '#ea580c',
     paddingHorizontal: 14,
     paddingVertical: 10,
+    gap: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   label: {
     flex: 1,

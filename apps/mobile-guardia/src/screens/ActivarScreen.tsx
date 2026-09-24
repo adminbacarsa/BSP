@@ -17,6 +17,7 @@ import { getMobilePlatform, getOrCreateDeviceId } from '../lib/deviceId';
 import { getDeviceInfo } from '../lib/deviceInfo';
 import { getPortalCallables, getPortalFirebase } from '../lib/portal';
 import { appRoutes } from '../lib/appRoutes';
+import { mapPlatformDeviceErrorMessage } from '../lib/deviceVerification';
 import { PasswordField } from '../components/ui/PasswordField';
 import { useResponsiveLayout } from '../hooks/useResponsiveLayout';
 
@@ -25,6 +26,9 @@ type Props = {
 };
 
 function mapActivateError(err: unknown): string {
+  const platformMsg = mapPlatformDeviceErrorMessage(err);
+  if (platformMsg) return platformMsg;
+
   const e = err as { code?: string; message?: string };
   const code = e?.code?.replace('functions/', '') || '';
   if (code === 'already-exists') {

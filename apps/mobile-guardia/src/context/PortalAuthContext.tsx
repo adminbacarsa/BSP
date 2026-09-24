@@ -25,7 +25,12 @@ import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
 import { getPortalFirebase, isEmulatorMode } from '../lib/portal';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
-import { unregisterPushForUser } from '../lib/pushNotifications';
+import {
+  evaluateDeviceTokenBinding,
+  type DeviceBlockReason,
+  type DeviceVerifyResult,
+} from '../lib/deviceVerification';
+import { detachPushTokenOnServer, unregisterPushForUser } from '../lib/pushNotifications';
 import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
 import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
 
@@ -48,13 +53,16 @@ type PortalAuthContextValue = {
   empDocId: string | null;
   employee: EmpleadoPortal | null;
   portalFeatures: PortalFeatures;
+  /** null = aún verificando; true = OK; false = bloqueado (ver deviceBlockReason). */
   deviceVerified: boolean | null;
+  /** Motivo de bloqueo cuando deviceVerified === false. */
+  deviceBlockReason: DeviceBlockReason | null;
   employeeProfileError: string | null;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
   enterPreview: (empDocId: string) => Promise<void>;
-  exitPreview: () => void;
+  exitPreview: () => Promise<void>;
 };
 
 const PortalAuthContext = createContext<PortalAuthContextValue | null>(null);
@@ -124,26 +132,33 @@ async function anyLinkedLegajoBypassesDevice(
   return false;
 }
 
-async function verifyDeviceForUser(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
-  if (await userIsSuperAdmin(user)) return true;
+async function verifyDeviceForUser(
+  user: User,
+  db: ReturnType<typeof getPortalFirebase>['db'],
+): Promise<DeviceVerifyResult> {
+  if (await userIsSuperAdmin(user)) return { verified: true };
 
   // Un mismo usuario puede tener legajo en varias empresas (ej. Bacarsa y Pruebas SA): la excepción
   // de dispositivo vale si cualquiera de sus legajos la tiene, no solo el primero que se resuelve.
-  if (await anyLinkedLegajoBypassesDevice(user, db)) return true;
+  // bypassDeviceCheck: deja entrar sin vincular deviceId (no escribe device_tokens).
+  if (await anyLinkedLegajoBypassesDevice(user, db)) return { verified: true };
 
   const tokenSnap = await getDoc(doc(db, 'device_tokens', user.uid));
-  if (!tokenSnap.exists()) return false;
+  if (!tokenSnap.exists()) {
+    return { verified: false, reason: 'never_activated' };
+  }
   const data = tokenSnap.data();
-  if (!data.verified) return false;
-  if (!data.deviceId) return false;
-
-  const localId = await getStoredDeviceId();
+  let localId = await getStoredDeviceId();
   if (!localId) {
     await getOrCreateDeviceId();
-    const again = await getStoredDeviceId();
-    return again === data.deviceId;
+    localId = await getStoredDeviceId();
   }
-  return data.deviceId === localId;
+  return evaluateDeviceTokenBinding({
+    tokenExists: true,
+    verified: data?.verified === true,
+    boundDeviceId: (data?.deviceId as string | null | undefined) ?? null,
+    localDeviceId: localId,
+  });
 }
 
 function mapEmpleadoPortal(id: string, data: Record<string, unknown>, uid: string): EmpleadoPortal {
@@ -171,9 +186,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [employee, setEmployee] = useState<EmpleadoPortal | null>(null);
   const [portalFeatures, setPortalFeatures] = useState<PortalFeatures>(DEFAULT_PORTAL_FEATURES);
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
+  const [deviceBlockReason, setDeviceBlockReason] = useState<DeviceBlockReason | null>(null);
   const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
   const pendingPreviewRef = useRef<string | null>(null);
   const initialUrlHandledRef = useRef(false);
+
+  const applyDeviceVerifyResult = useCallback((result: DeviceVerifyResult) => {
+    setDeviceVerified(result.verified);
+    setDeviceBlockReason(result.verified ? null : result.reason ?? 'other_device');
+  }, []);
 
   const resolvePendingPreviewId = useCallback(async (): Promise<string | null> => {
     if (!initialUrlHandledRef.current) {
@@ -216,14 +237,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         } else {
           setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         }
-        // Preview SuperAdmin: atar el token FCM al legajo visto, si no el push
-        // de cronograma/turno va al empleado real y este teléfono no lo recibe.
+        // Preview SuperAdmin: atar FCM del dispositivo del SA al legajo visto
+        // (previewOf: true). En web no pide permiso acá — hace falta el botón.
         const { registerPushNotifications } = await import('../lib/pushNotifications');
         await registerPushNotifications({
           user: currentUser,
           db,
           empDocId: id,
           empresaId: (data.empresaId as string) ?? null,
+          previewOf: true,
+          interactive: false,
         }).catch(() => {});
       } catch (err) {
         setEmployee(null);
@@ -318,11 +341,13 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setIsSuperAdmin(false);
         setDeviceVerified(null);
+        setDeviceBlockReason(null);
         return;
       }
 
       if (superAdmin) {
         setDeviceVerified(true);
+        setDeviceBlockReason(null);
         if (previewId) {
           setPreviewEmpDocId(previewId);
           await loadEmployeeByDocId(previewId, currentUser);
@@ -339,10 +364,13 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       }
 
       setPreviewEmpDocId(null);
+      // Gate: no registrar push ni exponer datos de ops hasta deviceVerified === true.
+      // loadEmployee es necesario para device-blocked (nombre / empDocId) pero las
+      // pantallas con tabs solo montan hooks de datos tras el gate.
       await loadEmployee(currentUser);
-      const verified = await verifyDeviceForUser(currentUser, db);
-      setDeviceVerified(verified);
-      if (verified) {
+      const result = await verifyDeviceForUser(currentUser, db);
+      applyDeviceVerifyResult(result);
+      if (result.verified) {
         const resolvedId = await resolveEmpDocIdWithRetry(db, currentUser, 2);
         const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
         const { registerPushNotifications } = await import('../lib/pushNotifications');
@@ -351,10 +379,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           db,
           empDocId: resolvedId,
           empresaId: (empSnap?.data()?.empresaId as string) ?? null,
+          interactive: false,
         }).catch(() => {});
       }
     },
-    [auth, db, loadEmployee, loadEmployeeByDocId],
+    [auth, db, loadEmployee, loadEmployeeByDocId, applyDeviceVerifyResult],
   );
 
   const enterPreview = useCallback(
@@ -366,7 +395,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     [user, isSuperAdmin, loadEmployeeByDocId],
   );
 
-  const exitPreview = useCallback(() => {
+  const exitPreview = useCallback(async () => {
+    try {
+      await detachPushTokenOnServer(db);
+    } catch {
+      /* no bloquear salida de preview */
+    }
     setPreviewEmpDocId(null);
     setEmpDocId(null);
     setEmployee(null);
@@ -374,7 +408,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setEmployeeProfileError(null);
     setEmployeeProfileReady(true);
     setEmployeeProfileLoading(false);
-  }, []);
+  }, [db]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {
@@ -407,12 +441,16 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setEmployeeProfileReady(false);
         setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         setDeviceVerified(null);
+        setDeviceBlockReason(null);
         setEmployeeProfileError(null);
         setInitializing(false);
         return;
       }
 
       try {
+        // Mientras corre bootstrap, deviceVerified queda null → UI de carga (sin tabs/datos).
+        setDeviceVerified(null);
+        setDeviceBlockReason(null);
         const previewId = await resolvePendingPreviewId();
         await bootstrapSession(nextUser, previewId);
       } catch (err) {
@@ -423,6 +461,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         if (superAdmin) {
           setIsSuperAdmin(true);
           setDeviceVerified(true);
+          setDeviceBlockReason(null);
           setEmployeeProfileReady(true);
         } else if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
           try {
@@ -430,7 +469,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           } catch {
             /* Firestore intermitente en móvil */
           }
+          // No abrir la app si falló la verificación: queda en carga hasta refresh / reintento.
           setDeviceVerified(null);
+          setDeviceBlockReason(null);
         } else {
           await firebaseSignOut(auth);
           setUser(null);
@@ -487,6 +528,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setPortalFeatures(DEFAULT_PORTAL_FEATURES);
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
+    setDeviceBlockReason(null);
     setEmployeeProfileError(null);
   }, [auth, db]);
 
@@ -497,9 +539,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       return;
     }
     await loadEmployee(user);
-    const verified = await verifyDeviceForUser(user, db);
-    setDeviceVerified(verified);
-  }, [user, isSuperAdmin, previewEmpDocId, loadEmployee, loadEmployeeByDocId, db]);
+    const result = await verifyDeviceForUser(user, db);
+    applyDeviceVerifyResult(result);
+  }, [user, isSuperAdmin, previewEmpDocId, loadEmployee, loadEmployeeByDocId, db, applyDeviceVerifyResult]);
 
   const isPreviewMode = isSuperAdmin && !!previewEmpDocId;
 
@@ -516,6 +558,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       employee,
       portalFeatures,
       deviceVerified,
+      deviceBlockReason,
       employeeProfileError,
       signIn,
       signOut,
@@ -535,6 +578,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       employee,
       portalFeatures,
       deviceVerified,
+      deviceBlockReason,
       employeeProfileError,
       signIn,
       signOut,

@@ -98,6 +98,10 @@ export default function LoginScreen() {
     if (isSuperAdmin && !isPreviewMode) {
       return <Redirect href={appRoutes.preview} />;
     }
+    // Gate: null = carga; false = bloqueo; true = entrar.
+    if (deviceVerified === null) {
+      return <LoadingScreen label="Validando dispositivo…" />;
+    }
     if (deviceVerified === false) {
       return <Redirect href="/device-blocked" />;
     }

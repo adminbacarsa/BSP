@@ -17,7 +17,8 @@ export function useRequireAuth(): {
     return { ready: false, user: null };
   }
 
-  if (deviceVerified === false && !(isSuperAdmin && isPreviewMode)) {
+  // null = verificación en curso → no listo (sin datos ni tabs).
+  if (deviceVerified !== true && !(isSuperAdmin && isPreviewMode)) {
     return { ready: false, user };
   }
 
@@ -41,6 +42,11 @@ export function RequireAuth({ children }: { children: ReactNode }) {
 
   if (isSuperAdmin && !isPreviewMode) {
     return <Redirect href="/preview" />;
+  }
+
+  // Gate estricto: null → carga; false → bloqueo; solo true renderiza la app.
+  if (deviceVerified === null) {
+    return <LoadingScreen label="Validando dispositivo…" />;
   }
 
   if (deviceVerified === false) {

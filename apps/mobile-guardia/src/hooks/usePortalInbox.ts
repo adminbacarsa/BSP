@@ -17,6 +17,7 @@ import type { User } from 'firebase/auth';
 import { normalizePortalInboxItem, type PortalInboxNormalized } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { isEmployeeFacingAlert, alertNeedsAck } from '../lib/notificationNavigation';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 export type PortalInboxItem = PortalInboxNormalized;
 
@@ -58,16 +59,17 @@ function inboxTimestampMs(value: unknown): number {
  */
 export function usePortalInbox(user: User | null, previewEmpDocId?: string | null) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const [items, setItems] = useState<PortalInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const bucketsRef = useRef<Record<string, PortalInboxItem[]>>({});
   const fallbackRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!user) {
+    if (!user || deviceVerified !== true) {
       bucketsRef.current = {};
       setItems([]);
-      setLoading(false);
+      setLoading(deviceVerified === null && !!user);
       return;
     }
 
@@ -164,7 +166,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [user?.uid, previewEmpDocId, db]);
+  }, [user?.uid, previewEmpDocId, db, deviceVerified]);
 
   const unreadCount = useMemo(
     () => items.filter((n) => !n.read || alertNeedsAck(n)).length,

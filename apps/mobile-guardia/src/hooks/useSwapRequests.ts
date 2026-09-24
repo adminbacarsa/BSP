@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { getPortalFirebase } from '../lib/portal';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 export type SwapRequestRow = {
   id: string;
@@ -19,11 +20,12 @@ export type SwapRequestRow = {
 
 export function useSwapRequests(empDocId: string | null) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const [requests, setRequests] = useState<SwapRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
 
   const reload = useCallback(async () => {
-    if (!empDocId) {
+    if (deviceVerified !== true || !empDocId) {
       setRequests([]);
       setLoading(false);
       return;
@@ -46,7 +48,7 @@ export function useSwapRequests(empDocId: string | null) {
     } finally {
       setLoading(false);
     }
-  }, [empDocId, db]);
+  }, [empDocId, db, deviceVerified]);
 
   useEffect(() => {
     reload();

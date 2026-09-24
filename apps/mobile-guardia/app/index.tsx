@@ -18,6 +18,11 @@ export default function IndexScreen() {
     return <Redirect href={appRoutes.preview} />;
   }
 
+  // Gate: no tabs ni datos hasta deviceVerified === true.
+  if (deviceVerified === null) {
+    return <LoadingScreen label="Validando dispositivo…" />;
+  }
+
   if (deviceVerified === false) {
     return <Redirect href="/device-blocked" />;
   }

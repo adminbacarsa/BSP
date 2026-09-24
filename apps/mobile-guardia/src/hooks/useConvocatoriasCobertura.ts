@@ -7,6 +7,7 @@ import {
   isLlegadaTardeConvocatoria,
   type ConvocatoriaCobertura,
 } from '../lib/convocatoriasCobertura';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 function mergeById(lists: ConvocatoriaCobertura[][]): ConvocatoriaCobertura[] {
   const map = new Map<string, ConvocatoriaCobertura>();
@@ -32,6 +33,7 @@ export function useConvocatoriasCobertura(
   authUid: string | null | undefined,
 ) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const [items, setItems] = useState<ConvocatoriaCobertura[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +43,9 @@ export function useConvocatoriasCobertura(
   useEffect(() => {
     const emp = empDocId?.trim() || '';
     const uid = authUid?.trim() || '';
-    if (!emp && !uid) {
+    if (deviceVerified !== true || (!emp && !uid)) {
       setItems([]);
-      setLoading(false);
+      setLoading(deviceVerified === null && (!!emp || !!uid));
       setError(null);
       setPermissionDenied(false);
       return;
@@ -99,7 +101,7 @@ export function useConvocatoriasCobertura(
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [db, empDocId, authUid]);
+  }, [db, empDocId, authUid, deviceVerified]);
 
   const active = useMemo(
     () => items.filter((c) => isActiveCoberturaStatus(c.status)),

@@ -36,6 +36,7 @@ import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisB
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
+import { EnableWebPushButton } from '../../src/components/EnableWebPushButton';
 import { PendingAaCertificatesCard } from '../../src/components/PendingAaCertificatesCard';
 import {
   formatHeroShiftHeadline,
@@ -351,6 +352,8 @@ function HoyScreenContent() {
               </View>
             ) : null}
           </View>
+
+          {!isPreviewMode ? <EnableWebPushButton /> : null}
 
           {unreadCount > 0 ? (
             <Pressable
