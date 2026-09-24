@@ -32,6 +32,8 @@ apps/mobile-guardia/GoogleService-Info.plist
 *.png
 !apps/mobile-guardia/assets/**
 !apps/mobile-guardia/assets/**/*.png
+!apps/mobile-guardia/public/icons/**
+!apps/mobile-guardia/public/icons/**/*.png
 *.jpg
 *.jpeg
 *.gif
