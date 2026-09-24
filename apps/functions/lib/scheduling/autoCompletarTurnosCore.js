@@ -164,13 +164,15 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         }
         const windowStart = firestore_1.Timestamp.fromMillis(endTimeMs - RELEVO_WINDOW_AFTER_MS);
         const windowEnd = firestore_1.Timestamp.fromMillis(endTimeMs + RELEVO_WINDOW_AFTER_MS);
-        const relieveSnap = await db
-            .collection('turnos')
-            .where('objectiveId', '==', shift.objectiveId)
-            .where('positionName', '==', shift.positionName)
-            .where('startTime', '>=', windowStart)
-            .where('startTime', '<=', windowEnd)
-            .get();
+        const relieveSnap = shift.objectiveId && shift.positionName
+            ? await db
+                .collection('turnos')
+                .where('objectiveId', '==', shift.objectiveId)
+                .where('positionName', '==', shift.positionName)
+                .where('startTime', '>=', windowStart)
+                .where('startTime', '<=', windowEnd)
+                .get()
+            : { docs: [] };
         const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id
             && ctx.sameTenantShift(shift, d.data())
             && !(0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(d.data()));

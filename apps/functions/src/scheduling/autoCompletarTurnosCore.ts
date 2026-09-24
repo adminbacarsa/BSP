@@ -1,5 +1,5 @@
 import * as admin from 'firebase-admin';
-import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import {
   loadPositionHasContinuity,
   positionHasContinuityFromSlaDoc,
@@ -192,13 +192,16 @@ export async function runAutoCompletarTurnosPass(
     const windowStart = Timestamp.fromMillis(endTimeMs - RELEVO_WINDOW_AFTER_MS);
     const windowEnd = Timestamp.fromMillis(endTimeMs + RELEVO_WINDOW_AFTER_MS);
 
-    const relieveSnap = await db
-      .collection('turnos')
-      .where('objectiveId', '==', shift.objectiveId)
-      .where('positionName', '==', shift.positionName)
-      .where('startTime', '>=', windowStart)
-      .where('startTime', '<=', windowEnd)
-      .get();
+    // Sin objetivo o puesto no hay relevo identificable; un undefined en el where corta toda la pasada.
+    const relieveSnap = shift.objectiveId && shift.positionName
+      ? await db
+        .collection('turnos')
+        .where('objectiveId', '==', shift.objectiveId)
+        .where('positionName', '==', shift.positionName)
+        .where('startTime', '>=', windowStart)
+        .where('startTime', '<=', windowEnd)
+        .get()
+      : { docs: [] as QueryDocumentSnapshot[] };
 
     const relieveDocs = relieveSnap.docs.filter(
       (d) =>
