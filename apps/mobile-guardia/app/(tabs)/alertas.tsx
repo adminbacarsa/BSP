@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +22,7 @@ import { appRoutes } from '../../src/lib/appRoutes';
 import type { Href } from 'expo-router';
 import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-core';
 import { appAlert } from '@/lib/appAlert';
+import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
@@ -89,11 +90,28 @@ function AlertasScreenContent() {
   const [dismissAllBusy, setDismissAllBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [domainFilter, setDomainFilter] = useState<DomainFilter>('Todas');
+  const [page, setPage] = useState(0);
 
   const filtered = useMemo(() => {
     if (domainFilter === 'Todas') return items;
     return items.filter((n) => notificationDomainLabel(n.type) === domainFilter);
   }, [items, domainFilter]);
+
+  const { pageItems, safePage, totalPages, from, to, total } = useMemo(
+    () => paginateAlertItems(filtered, page),
+    [filtered, page],
+  );
+
+  const pageRangeLabel =
+    total === 0 ? '0 de 0' : `${from}–${to} de ${total}`;
+
+  useEffect(() => {
+    setPage(0);
+  }, [domainFilter]);
+
+  useEffect(() => {
+    if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
+  }, [page, totalPages]);
 
   const pendingAck = useMemo(() => items.filter((n) => alertNeedsAck(n)).length, [items]);
 
@@ -274,7 +292,7 @@ function AlertasScreenContent() {
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: palette.background }]} edges={[]}>
       <FlatList
-        data={filtered}
+        data={pageItems}
         keyExtractor={(item) => item.id}
         contentContainerStyle={[
           styles.list,
@@ -360,6 +378,43 @@ function AlertasScreenContent() {
               ) : null}
             </View>
           </View>
+        }
+        ListFooterComponent={
+          total > ALERTAS_PAGE_SIZE ? (
+            <View
+              style={[
+                styles.pager,
+                {
+                  backgroundColor: palette.card,
+                  borderColor: palette.cardBorder,
+                },
+              ]}
+            >
+              <CommandButton
+                label="Atrás"
+                variant="ghost"
+                onPress={() => setPage((p) => Math.max(0, p - 1))}
+                disabled={safePage <= 0}
+                style={styles.pagerBtn}
+              />
+              <Text style={[styles.pagerLabel, { color: palette.onSurfaceMuted }]}>
+                {pageRangeLabel}
+                {'\n'}
+                <Text style={{ fontWeight: '800', color: palette.onSurface }}>
+                  Página {safePage + 1} / {totalPages}
+                </Text>
+              </Text>
+              <CommandButton
+                label="Adelante"
+                variant="secondary"
+                onPress={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                disabled={safePage >= totalPages - 1}
+                style={styles.pagerBtn}
+              />
+            </View>
+          ) : total > 0 ? (
+            <Text style={[styles.pagerHint, { color: palette.onSurfaceMuted }]}>{pageRangeLabel}</Text>
+          ) : null
         }
         ListEmptyComponent={
           loading ? (
@@ -555,6 +610,20 @@ const styles = StyleSheet.create({
   loader: { marginVertical: 32 },
   emptyCard: { marginTop: 12 },
   emptyText: { fontSize: 14, lineHeight: 21 },
+  pager: {
+    marginTop: 8,
+    marginBottom: 16,
+    borderRadius: radius.xl,
+    borderWidth: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pagerBtn: { flexGrow: 0, minWidth: 96 },
+  pagerLabel: { flex: 1, textAlign: 'center', fontSize: 12, lineHeight: 18 },
+  pagerHint: { textAlign: 'center', fontSize: 12, marginTop: 4, marginBottom: 12 },
   inboxItem: {
     borderRadius: radius.lg,
     padding: 14,

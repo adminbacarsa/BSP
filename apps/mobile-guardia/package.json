@@ -14,6 +14,7 @@
     "lint:no-alert": "node ../../scripts/check-mobile-no-rn-alert.cjs",
     "test:device-validation": "node --experimental-strip-types --test src/lib/deviceVerification.test.ts",
     "test:push-preview": "node --experimental-strip-types --test src/lib/pushNotifications.preview.test.ts",
+    "test:alertas-pagination": "node --experimental-strip-types --test src/lib/alertasPagination.test.ts",
     "update:preview": "npx --yes eas-cli update --channel preview --environment preview",
     "update:production": "npx --yes eas-cli update --channel production --environment production"
   },
