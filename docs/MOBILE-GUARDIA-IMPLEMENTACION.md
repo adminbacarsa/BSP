@@ -1,11 +1,12 @@
 # App nativa Portal Guardia — Plan e implementación
 
-> **Versión del plan:** 1.1  
+> **Versión del plan:** 1.2  
 > **Inicio:** 2026-07-28  
-> **Estado global:** `EN_CURSO` — validación Android + beta Play  
-> **Alcance v1:** App nativa **solo Android** (APK preview → Google Play). Portal web en paralelo (`/empleado/*`).  
-> **Fuera de alcance v1:** **iOS** (Apple Developer, APNs, TestFlight, App Store) — descartado hasta nuevo aviso.  
-> **Backend:** Mismo Firebase (`comtroldata`) — Auth, Firestore, Functions, Storage, FCM.
+> **Estado global:** `EN_CURSO` — validación Android + beta Play + **portal web `/app`**  
+> **Alcance v1:** App nativa **Android** (APK preview → Google Play) + **SPA web** en `https://comtroldata.web.app/app` (Expo export, sin OTA/EAS web).  
+> **Reemplazo portal viejo:** `/empleado/*` redirige a `/app` (activar → `/app/activar`).  
+> **Fuera de alcance v1:** App Store iOS nativa — iPhone usa la **PWA/web** en `/app`.  
+> **Backend:** Mismo Firebase (`comtroldata`) — Auth, Firestore, Functions, Storage, FCM (web VAPID + nativo).
 
 ---
 
@@ -34,8 +35,8 @@
 
 \*Tareas iOS marcadas **DESCARTADO v1** (no cuentan para cierre de fase).  
 **Fase activa recomendada:** F6 beta Play — **F6-01 Internal Testing** (F0-01 Console ✅ verificada). **F4-08 permutas aplazado.**  
-**Última actualización:** 2026-09-23  
-**Última tarea completada:** Flujos CC en `main` (74a54f78) — vitest 16/16; OTA preview = Notebook (sin EXPO_TOKEN en cloud)
+**Última actualización:** 2026-09-24  
+**Última tarea completada:** Portal web Expo en `/app` (rama `cursor/mobile-web`) — P1–P6; sin OTA/EAS web
 
 ---
 
@@ -45,6 +46,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **Portal web `/app`** ✅ Expo `experiments.baseUrl: '/app'` + `npm run build:web` → `dist-web`; hosting + deploy-lib; deviceId LS+IDB; PWA; FCM web VAPID; GPS HTTPS; AA certificado; redirect `/empleado`→`/app`.
 - **CC en main** ✅ merge `74a54f78` (retenido, convocatorias, ¿Venís?, ventanas, ADV∪propia, ocultar registro EXT/ADV). Backend prod: `etaMinutes`, ventanas server, rechazo TRACE.
 - **Vitest portal-core** ✅ 16/16 en `main@74a54f78`.
 - **CC-P5 Ventanas** ✅ portalCheckIn + tests (normal/late/ops/ADV/GPS).
@@ -62,8 +64,9 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
-| **OTA preview** | Desde Notebook: `cd apps/mobile-guardia && npm run update:preview` (cloud agent sin EXPO_TOKEN) | Mobile |
-| **SA checklist CC** | Validar en teléfono Pruebas SA (sección abajo) | Mobile |
+| **Deploy `/app`** | Notebook: `npm --prefix apps/mobile-guardia run build:web` + `npm run deploy` (hosting) | Web |
+| **SA checklist web** | Chrome desktop/Android + Safari iOS (sección abajo) | Web |
+| **OTA preview** | Desde Notebook: `cd apps/mobile-guardia && npm run update:preview` (solo Android) | Mobile |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
 | **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
 
@@ -110,21 +113,58 @@
 
 ### Paridad web ↔ app (resumen)
 
-| Módulo | Web | App | Fase |
-|--------|-----|-----|------|
-| Activación dispositivo | ✅ | ⬜ | F1 |
-| Login / logout | ✅ | ⬜ | F1 |
-| Turnos / agenda | ✅ | ⬜ | F1 |
-| Fichada GPS | ✅ | ⬜ | F2 |
-| Cola offline fichadas | ✅ | ⬜ | F2 |
-| Llegada tarde | ✅ | ⬜ | F3 |
-| Ausencias + adjuntos | ✅ | ⬜ | F3 |
-| Licencias | ✅ | ⬜ | F3 |
-| Push notifications | ✅ (web) | ✅ Android | F3 |
-| Permutas | ✅ | ✅ | F4 |
-| Eventos EV (convocatoria / solicitud) | ✅ | ✅ | Pre-F4 |
-| Credencial digital | ✅ | ✅ | F5 |
-| Flags `portalFeatures` | ✅ | ⬜ | F1 |
+> **Web** = SPA Expo en `https://comtroldata.web.app/app` (reemplaza `/empleado`).  
+> **App** = APK Android. Misma base de código `apps/mobile-guardia`.
+
+| Módulo | Web `/app` | App Android | Notas |
+|--------|------------|-------------|-------|
+| Activación dispositivo | ✅ | ✅ | `activateAndSetPassword` + `platform: web\|android` |
+| Login / logout | ✅ | ✅ | Auth misma origen → sesión compartida con panel web2 |
+| Un dispositivo / legajo | ✅ | ✅ | deviceId: SecureStore (nativo) / LS+IndexedDB (web) |
+| Turnos / agenda | ✅ | ✅ | Mismos hooks |
+| Fichada GPS | ✅ | ✅ | portal-core ventanas/radio; web exige HTTPS + permiso |
+| Cola offline fichadas | ✅ | ✅ | AsyncStorage / web storage |
+| Llegada tarde / ¿Venís? | ✅ | ✅ | |
+| Ausencias + adjuntos (nueva) | ✅ | ✅ | `/novedad` |
+| Certificado sobre AA existente | ✅ | ✅ | Banner Hoy (P6) |
+| Licencias | ✅ | ✅ | Misma pantalla novedad + `portalFeatures` |
+| Push notifications | ✅ FCM web VAPID | ✅ FCM nativo | `device_tokens` + SW `/firebase-messaging-sw.js` |
+| Permutas | ✅ | ✅ | |
+| Eventos EV | ✅ | ✅ | |
+| Credencial digital | ✅ | ✅ | |
+| Flags `portalFeatures` | ✅ | ✅ | |
+| PWA / pantalla de inicio | ✅ | — | theme `#8B1A1A`; aviso iOS Safari |
+| OTA expo-updates | — | ✅ | Web: redeploy hosting |
+
+### Gaps / pedidos Plataforma (web)
+
+| Pedido | Detalle |
+|--------|---------|
+| **Aprobar dispositivo (CC/RRHH)** | Hoy «Registrar este dispositivo» crea novedad `DEVICE_REGISTRATION_REQUEST`. Falta UI CC/RRHH para aprobar y escribir `device_tokens/{uid}.deviceId` + `verified` sin reenviar mail. |
+| **Mail activación → `/app/activar`** | Confirmar que `createPortalAccess` / plantillas apunten a `https://comtroldata.web.app/app/activar/?token=` (redirect desde `/empleado/activar` ya existe). |
+| **VAPID en build web** | `EXPO_PUBLIC_FIREBASE_VAPID_KEY` en el entorno de build (misma que `NEXT_PUBLIC_FIREBASE_VAPID_KEY`). |
+| **Safari 7 días** | Sin «Agregar a inicio», iOS puede borrar LS; IDB mitiga pero no garantiza. Documentar a RRHH. |
+
+### Checklist prueba portal web `/app`
+
+| # | Caso | Chrome desktop | Chrome Android | Safari iOS |
+|---|------|----------------|----------------|------------|
+| 1 | Abre `https://comtroldata.web.app/app/` (bundle bajo `/app/_expo/...`) | ⬜ | ⬜ | ⬜ |
+| 2 | Login comparte sesión con panel (mismo origen) | ⬜ | ⬜ | ⬜ |
+| 3 | Activación `/app/activar/?token=` vincula `platform: web` | ⬜ | ⬜ | ⬜ |
+| 4 | Segundo navegador/dispositivo → device-blocked | ⬜ | ⬜ | ⬜ |
+| 5 | «Registrar este dispositivo» crea novedad | ⬜ | ⬜ | ⬜ |
+| 6 | Manifest PWA + theme `#8B1A1A` | ⬜ | ⬜ | ⬜ |
+| 7 | iOS: aviso «Agregar a pantalla de inicio» | — | — | ⬜ |
+| 8 | Push: permiso + token en `device_tokens` (`platform: web`, key `fcm_token`) | ⬜ | ⬜ | ⬜* |
+| 9 | Click notificación → `/app/` (no `/empleado`) | ⬜ | ⬜ | ⬜ |
+| 10 | Fichada GPS: pide permiso; niega → mensaje claro | ⬜ | ⬜ | ⬜ |
+| 11 | Radio / ventanas portal-core (presente / tarde) | ⬜ | ⬜ | ⬜ |
+| 12 | Novedad + certificado; AA pendiente en Hoy | ⬜ | ⬜ | ⬜ |
+| 13 | Credencial / permutas / eventos | ⬜ | ⬜ | ⬜ |
+| 14 | Redirect `/empleado/dashboard` → `/app/` | ⬜ | ⬜ | ⬜ |
+
+\*iOS push web solo fiable con PWA en pantalla de inicio y limitaciones de Safari.
 
 ---
 
@@ -133,6 +173,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-24 | WEB /app P1-P6 | Rama cursor/mobile-web: baseUrl /app + build:web dist-web; deviceId LS+IDB; PWA #8B1A1A + A2HS iOS; FCM web VAPID + SW; GPS HTTPS; AA cert Hoy; redirect /empleado→/app; sin OTA/EAS web
 2026-09-23 | CC main+vitest | main@74a54f78; vitest portalCheckIn 16/16 OK; OTA preview no publicada desde cloud (EXPO_TOKEN omitido) → Notebook: npm run update:preview
 2026-09-23 | CC-fix ADV+registro | ADV = ventana adelanto OR propia (T−15/tarde); ops_cov coverageHoursOnSource ocultos (no hero/Agenda/fichada); 16 tests
 2026-09-23 | CC-P5 Ventanas | getCheckInTiming: normal/late/ops/ADV/ausente; GPS sin coords; 13 tests vitest OK
