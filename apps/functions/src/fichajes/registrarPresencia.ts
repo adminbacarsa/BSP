@@ -3,6 +3,8 @@ import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
+import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
+import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -68,6 +70,10 @@ function isCambioCandidate(
   }
   const outEndMs = dat.endTime?.toMillis?.() ?? 0;
   if (outEndMs <= 0) return false;
+  if (nowMs >= outEndMs) return false;
+  const handoffAligned =
+    incomingStartMs > 0 && Math.abs(outEndMs - incomingStartMs) <= 30 * 60 * 1000;
+  if (handoffAligned) return true;
   return outEndMs - nowMs <= 15 * 60 * 1000;
 }
 
@@ -106,81 +112,6 @@ async function resolvePositionCapacity(
     console.warn('[registrarPresencia] capacity lookup:', (e as Error)?.message);
   }
   return 1;
-}
-
-async function notifyRelieved(
-  db: FirebaseFirestore.Firestore,
-  params: {
-    outEmpId: string;
-    outDocId: string;
-    incomingName: string;
-    objectiveName: string;
-    empresaId: string | null;
-  },
-): Promise<void> {
-  const { outEmpId, outDocId, incomingName, objectiveName, empresaId } = params;
-  try {
-    const outEmpDoc = await db.collection('empleados').doc(outEmpId).get();
-    const outEmpUid = outEmpDoc.exists ? (outEmpDoc.data()?.uid as string | undefined) : undefined;
-
-    const notifTitle = 'Turno finalizado — relevado';
-    const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
-
-    let notifDocId: string | null = null;
-    try {
-      const notifRef = await db.collection('user_notifications').add({
-        uid: outEmpUid || null,
-        employeeId: outEmpId,
-        userId: outEmpId,
-        title: notifTitle,
-        body: notifBody,
-        type: 'RELEVO_AUTOMATICO',
-        target: 'employee',
-        turnoId: outDocId,
-        empresaId: empresaId || null,
-        read: false,
-        readAt: null,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-      notifDocId = notifRef.id;
-    } catch (e) {
-      console.warn('[registrarPresencia] notif doc:', (e as Error)?.message);
-    }
-
-    const [byEmpId, byUid] = await Promise.all([
-      db.collection('device_tokens').where('employeeId', '==', outEmpId).get(),
-      outEmpUid
-        ? db.collection('device_tokens').where('uid', '==', outEmpUid).get()
-        : Promise.resolve({ docs: [] as FirebaseFirestore.QueryDocumentSnapshot[] }),
-    ]);
-    const tokenSet = new Set<string>();
-    [...byEmpId.docs, ...byUid.docs].forEach((d) => {
-      const t = d.data()?.token;
-      if (typeof t === 'string' && t.length > 10) tokenSet.add(t);
-    });
-    const tokens = Array.from(tokenSet);
-    if (tokens.length === 0) return;
-
-    const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
-    await admin.messaging().sendEachForMulticast({
-      data: {
-        type: 'RELEVO_AUTOMATICO',
-        title: notifTitle,
-        body: notifBody,
-        turnoId: outDocId,
-        employeeId: outEmpId,
-        notificationId: notifDocId || '',
-        link,
-      },
-      webpush: {
-        headers: { Urgency: 'high' },
-        fcmOptions: { link },
-      },
-      tokens,
-    });
-  } catch (e) {
-    console.warn('[registrarPresencia] notifyRelieved:', (e as Error)?.message);
-  }
 }
 
 /**
@@ -442,6 +373,19 @@ export async function registrarPresencia(
           }
 
           outDoc = pool[0] ?? null;
+          if (!outDoc && !wantOverride && incomingStartMs > 0) {
+            const pick = await findPresentOutgoingAlignedToGapStart(db, {
+              objectiveId,
+              positionName,
+              gapStartMs: incomingStartMs,
+              excludeShiftIds: [shiftId],
+              excludeEmployeeId: empId || undefined,
+            });
+            if (pick) {
+              const pickSnap = await db.collection('turnos').doc(pick.id).get();
+              if (pickSnap.exists) outDoc = pickSnap;
+            }
+          }
         }
 
         if (outDoc) {
@@ -451,20 +395,43 @@ export async function registrarPresencia(
           const outPosName = outData.positionName || '';
           const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
           const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
-          const outgoingRealEnd = isEarlyRelevo ? outData.endTime : FieldValue.serverTimestamp();
 
-          await outDoc.ref.update({
-            isCompleted: true,
-            isPresent: false,
-            status: 'COMPLETED',
-            realEndTime: outgoingRealEnd,
-            relievedBy: empId || null,
-            relievedByName: incomingName,
-            relievedAt: FieldValue.serverTimestamp(),
-            autoRelevo: !wantOverride,
-            relievedEarly: isEarlyRelevo,
-            relievedSource: source,
-          });
+          if (isEarlyRelevo) {
+            await outDoc.ref.update({
+              relievedBy: empId || null,
+              relievedByName: incomingName,
+              relievedAt: FieldValue.serverTimestamp(),
+              relieveScheduledAt: outData.endTime ?? null,
+              autoRelevo: !wantOverride,
+              relievedEarly: true,
+              relievedSource: source,
+            });
+          } else {
+            await outDoc.ref.update({
+              isCompleted: true,
+              isPresent: false,
+              status: 'COMPLETED',
+              realEndTime: Timestamp.fromMillis(nowMs),
+              relievedBy: empId || null,
+              relievedByName: incomingName,
+              relievedAt: FieldValue.serverTimestamp(),
+              relieveScheduledAt: outData.endTime ?? null,
+              autoRelevo: !wantOverride,
+              relievedEarly: false,
+              relievedSource: source,
+              completionReason: 'RELEVO_PRESENTE',
+            });
+
+            if (outEmpId) {
+              void notifyTurnoFinalizadoRelevo(db, {
+                outEmpId,
+                outDocId: outDoc.id,
+                incomingName,
+                objectiveName,
+                empresaId,
+              });
+            }
+          }
 
           relieved = {
             shiftId: outDoc.id,
@@ -475,7 +442,7 @@ export async function registrarPresencia(
           void db
             .collection('novedades')
             .add({
-              type: 'RELEVO_AUTOMATICO',
+              type: isEarlyRelevo ? 'RELEVO_PROGRAMADO' : 'RELEVO_AUTOMATICO',
               status: 'ATENDIDA',
               empresaId,
               objectiveId,
@@ -485,22 +452,14 @@ export async function registrarPresencia(
               employeeName: incomingName,
               relievedEmployeeId: outEmpId,
               relievedEmployeeName: outName,
-              description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
+              description: isEarlyRelevo
+                ? `${incomingName} fichó antes del fin de ${outName}; retiro programado a hora de fin (${source})`
+                : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
               createdAt: FieldValue.serverTimestamp(),
               autoProcessed: !wantOverride,
               source: wantOverride ? source : 'AUTO_RELEVO',
             })
             .catch(() => {});
-
-          if (outEmpId) {
-            void notifyRelieved(db, {
-              outEmpId,
-              outDocId: outDoc.id,
-              incomingName,
-              objectiveName,
-              empresaId,
-            });
-          }
         }
       }
     } catch (e) {
