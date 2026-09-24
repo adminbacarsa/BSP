@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { collection, query, where, addDoc, setDoc, updateDoc, doc, getDoc, getDocs, limit, serverTimestamp, Timestamp } from 'firebase/firestore';
 import { db, onSnapshotFresh } from '@/lib/firebase';
-import { toast } from 'sonner';
+// Todos los avisos de este hook son eventos automáticos: van a Alertas/bitácora, no a toast.
+import { silentToast as toast } from '@/lib/ui/silentToast';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 export interface AutoMonitorProps {

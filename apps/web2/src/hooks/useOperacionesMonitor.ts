@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { toast } from 'sonner';
+import { silentToast as opsEventToast } from '@/lib/ui/silentToast';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
@@ -1447,7 +1448,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             motivo,
                             createdAt: serverTimestamp(),
                         }, sinCobEmpresaId))
-                        .then(() => toast.info(`Sin cobertura: ${v.positionName} en ${v.objectiveName}`))
+                        .then(() => opsEventToast.info(`Sin cobertura: ${v.positionName} en ${v.objectiveName}`))
                         .catch(e => {
                             alertedVacancyIds.current.delete(sinCobKey);
                             console.warn('[autoSinCobertura]', e);
@@ -1512,7 +1513,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
                         completionReason: 'AUTO_SHIFT_END_CUSTOM',
                     }, empresaId).then(ok => {
-                        if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                        if (ok) opsEventToast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoCustomKey);
                         console.warn('[autoEndCustomPost]', e);
@@ -1550,7 +1551,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     if (minsToEta <= 5 && minsToEta > -10 && !alertedVacancyIds.current.has(etaAlertKey)) {
                         alertedVacancyIds.current.add(etaAlertKey);
                         const etaLabel = `${String(etaH).padStart(2,'0')}:${String(etaM).padStart(2,'0')}`;
-                        toast.warning(`⏰ Relevo inminente: ${relevoShift.employeeName || 'Guardia'} llega a las ${etaLabel} — relevar a ${s.employeeName}`, { duration: 30000 });
+                        opsEventToast.warning(`⏰ Relevo inminente: ${relevoShift.employeeName || 'Guardia'} llega a las ${etaLabel} — relevar a ${s.employeeName}`, { duration: 30000 });
                         addDoc(collection(db, 'novedades'), stampEmpresaId({
                             type: 'RELEVO_INMINENTE',
                             shiftId: s.id,
@@ -1595,7 +1596,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
                         completionReason: 'AUTO_COVERAGE_COMPLETE',
                     }, empresaId).then(ok => {
-                        if (ok) toast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
+                        if (ok) opsEventToast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoEndKey);
                         console.warn('[autoEndRetention]', e);
@@ -1641,7 +1642,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
                         completionReason: isCFRetention ? 'AUTO_END_CF_RETENTION_TIMEOUT' : 'AUTO_SHIFT_END',
                     }, empresaId).then(ok => {
-                        if (ok) toast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
+                        if (ok) opsEventToast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
                     }).catch(e => {
                         alertedVacancyIds.current.delete(autoShiftEndKey);
                         console.warn('[autoEndShift]', e);
@@ -1662,7 +1663,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     completedAt: serverTimestamp(), completedBy: 'Sistema',
                     completionReason: 'AUTO_OVERTIME_LIMIT',
                 }, empresaId).then(ok => {
-                    if (ok) toast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
+                    if (ok) opsEventToast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
                 }).catch(e => {
                     alertedVacancyIds.current.delete(autoTimeKey);
                     console.warn('[autoEndRetentionTime]', e);

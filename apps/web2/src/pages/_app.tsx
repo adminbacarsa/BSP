@@ -101,7 +101,8 @@ export default function App({ Component, pageProps }: AppProps) {
         {showAssistant && <AssistantWrapper />}
         {showTrainingCoach && <TrainingCoachBubble />}
         {showTrainingCoach && <TrainingGate />}
-        <Toaster position="top-center" richColors closeButton visibleToasts={2} duration={3200} />
+        {/* Abajo a la derecha: arriba al centro tapaba los controles del CC (Demo/Auto/Manual, contadores). */}
+        <Toaster position="bottom-right" richColors closeButton visibleToasts={3} duration={3000} gap={8} offset={16} />
       </ToastProvider>
       </EmpresaProvider>
     </AuthProvider>
