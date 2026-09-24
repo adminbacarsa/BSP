@@ -19,5 +19,7 @@ export function isOpsCoverageHoursOnSourceDoc(
 
 /** Excluir de detectarAusencias, trigger ausencia, vacantes, auto-completar y retención por hueco. */
 export function skipAbsencePipelineForShift(data: Record<string, unknown> | null | undefined): boolean {
-  return isOpsCoverageHoursOnSourceDoc(data);
+  if (isOpsCoverageHoursOnSourceDoc(data)) return true;
+  // Turno de origen (RET/REF/ESC/F) ya usado para cubrir a otro: el guardia está en el ops_cov, no acá.
+  return data?.coverageUsed === true;
 }

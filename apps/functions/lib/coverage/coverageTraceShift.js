@@ -15,6 +15,8 @@ function isOpsCoverageHoursOnSourceDoc(data) {
     return false;
 }
 function skipAbsencePipelineForShift(data) {
-    return isOpsCoverageHoursOnSourceDoc(data);
+    if (isOpsCoverageHoursOnSourceDoc(data))
+        return true;
+    return data?.coverageUsed === true;
 }
 //# sourceMappingURL=coverageTraceShift.js.map
