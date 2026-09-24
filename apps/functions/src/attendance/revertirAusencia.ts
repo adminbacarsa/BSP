@@ -1,5 +1,6 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { releaseRetentionForAbsenceShift } from '../coverage/coverageRetention';
+import { buildRestoreSourceShiftAfterCoveragePatch } from '../coverage/syncAusenciaCobertura';
 
 export type RevertirAusenciaInput = {
   shiftId: string;
@@ -87,13 +88,14 @@ export async function revertirAusenciaShift(
         status: 'CANCELLED',
         cancelledAt: FieldValue.serverTimestamp(),
       });
-      const srcId = String(cov.data().sourceShiftId || cov.data().coveredShiftId || '').trim();
+      const srcId = String(cov.data().sourceShiftId || '').trim();
       if (srcId) {
-        await db.collection('turnos').doc(srcId).update({
-          coverageUsed: FieldValue.delete(),
-          operacionallyCovered: false,
-          coverageStatus: FieldValue.delete(),
-        }).catch(() => undefined);
+        const srcSnap = await db.collection('turnos').doc(srcId).get();
+        if (srcSnap.exists) {
+          await srcSnap.ref.update(
+            buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
+          );
+        }
       }
     }
     await ref.update({

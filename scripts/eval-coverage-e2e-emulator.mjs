@@ -326,6 +326,7 @@ async function run() {
         tit?.coverageStatus === 'COVERED'
         && tit?.coverageDocId === covId
         && src?.coverageUsed === true
+        && src?.isDeleted !== true
         && cov?.origin === 'OPERATIONS_COVERAGE'
         && cov?.coverageType === 'RET'
         && aus?.coberturaEstado === 'GESTIONADA';
@@ -350,8 +351,14 @@ async function run() {
       await batch.commit();
       const cov = (await db.collection('turnos').doc(covId).get()).data();
       const src = (await db.collection('turnos').doc(s.refSourceId).get()).data();
-      const ok = cov?.objectiveId === s.objectiveId && src?.objectiveId === `${runId}_c2_obj_ref` && src?.coverageUsed === true;
-      report(2, ok, ok ? 'REF en su obj + COB en titular obj' : `cov.obj=${cov?.objectiveId}`);
+      const ok =
+        cov?.objectiveId === s.objectiveId
+        && src?.objectiveId === `${runId}_c2_obj_ref`
+        && src?.isDeleted === true
+        && src?.deletedReason === 'CONVERTIDO_EN_COBERTURA'
+        && src?.convertedToCoverageDocId === covId
+        && src?.coverageUsed !== true;
+      report(2, ok, ok ? 'REF convertido (baja lógica) + ops_cov en obj titular' : `cov.obj=${cov?.objectiveId} srcDel=${src?.isDeleted}`);
     }
 
     // Caso 3 — ESC (applyCoverage como app/resolver)
@@ -373,8 +380,14 @@ async function run() {
       const snaps = await db.collection('turnos').where('absenceShiftId', '==', s.titularId).get();
       const active = snaps.docs.filter((d) => d.data().coverageSuperseded !== true);
       const cov = (await db.collection('turnos').doc(covId).get()).data();
-      const ok = active.length === 1 && cov?.coverageType === 'ESC' && !cov?.coverageHoursOnSource;
-      report(3, ok, ok ? '1 ops_cov ESC sin duplicado' : `activos=${active.length} type=${cov?.coverageType}`);
+      const src = (await db.collection('turnos').doc(s.retSourceId).get()).data();
+      const ok =
+        active.length === 1
+        && cov?.coverageType === 'ESC'
+        && !cov?.coverageHoursOnSource
+        && src?.isDeleted === true
+        && src?.deletedReason === 'CONVERTIDO_EN_COBERTURA';
+      report(3, ok, ok ? '1 ops_cov ESC + origen convertido' : `activos=${active.length} srcDel=${src?.isDeleted}`);
     }
 
     // Caso 4 — Auto RET
@@ -1527,6 +1540,69 @@ async function run() {
         && tit?.operacionallyCovered === false
         && aus.docs[0]?.data()?.coberturaEstado === 'PENDIENTE';
       report(38, ok, ok ? 'Real: AA convocado + titular PENDIENTE' : `cov=${cov?.absenceDetectedBy} tit=${tit?.operacionallyCovered}`);
+    }
+
+    // Caso 39 — revertir ausencia + cancelCoverage restaura REF convertido
+    {
+      const prefix = `${runId}_c39`;
+      const s = await seedBase(prefix);
+      const start = Timestamp.fromMillis(Date.now() - 25 * 60 * 1000);
+      const end = Timestamp.fromMillis(Date.now() + 5 * 3600000);
+      await db.collection('turnos').doc(s.titularId).update({ startTime: start, endTime: end });
+      await db.collection('turnos').doc(s.refSourceId).update({
+        startTime: start,
+        endTime: end,
+        status: 'ACTIVE',
+        isDeleted: false,
+      });
+      const batch = db.batch();
+      const covId = await applyCoverage(db, batch, {
+        titularShiftId: s.titularId,
+        titularShift: { id: s.titularId, ...s.titular, startTime: start, endTime: end },
+        candidateEmployeeId: s.empRef,
+        candidateEmployeeName: 'Guardia REF',
+        sourceShiftId: s.refSourceId,
+        coverageType: 'REF',
+        resolvedBy: 'OPERACIONES',
+        empresaId: s.empresaId,
+        objectiveId: s.objectiveId,
+      });
+      await batch.commit();
+      const beforeRevert = (await db.collection('turnos').doc(s.refSourceId).get()).data();
+      const r = await revertirAusenciaShift(db, { shiftId: s.titularId, cancelCoverage: true });
+      const src = (await db.collection('turnos').doc(s.refSourceId).get()).data();
+      const cov = (await db.collection('turnos').doc(covId).get()).data();
+      const ok =
+        beforeRevert?.isDeleted === true
+        && r.success
+        && src?.isDeleted !== true
+        && String(src?.status || '').toUpperCase() !== 'CANCELLED'
+        && cov?.coverageSuperseded === true;
+      report(39, ok, ok ? 'revertir restaura REF planificado' : `success=${r.success} srcDel=${src?.isDeleted}`);
+    }
+
+    // Caso 40 — REF convertido (isDeleted) excluido del pipeline de ausencias
+    {
+      const s = await seedBase(`${runId}_c40`);
+      const batch = db.batch();
+      await applyCoverage(db, batch, {
+        titularShiftId: s.titularId,
+        titularShift: { id: s.titularId, ...s.titular },
+        candidateEmployeeId: s.empRef,
+        candidateEmployeeName: 'Guardia REF',
+        sourceShiftId: s.refSourceId,
+        coverageType: 'REF',
+        resolvedBy: 'OPERACIONES',
+        empresaId: s.empresaId,
+        objectiveId: s.objectiveId,
+      });
+      await batch.commit();
+      const src = (await db.collection('turnos').doc(s.refSourceId).get()).data();
+      const skip = skipAbsencePipelineForShift(src);
+      if (!skip) await markShiftAbsent(db, s.refSourceId, { reason: 'AUTO_T30', by: 'E2E' });
+      const after = (await db.collection('turnos').doc(s.refSourceId).get()).data();
+      const ok = skip === true && after?.isAbsent !== true;
+      report(40, ok, ok ? 'isDeleted: sin AA en origen convertido' : `skip=${skip} absent=${after?.isAbsent}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

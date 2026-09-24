@@ -46,15 +46,19 @@ export function sourceShiftEligibleForCoverageGap(
   gap: CoverageGapWindow,
 ): boolean {
   if (sourceShift.coverageUsed === true) return false;
+  if (sourceShift.isDeleted === true) return false;
 
   const srcStart = shiftStartMs(sourceShift);
   const srcEnd = shiftEndMs(sourceShift);
   if (!srcStart || !srcEnd || srcEnd <= srcStart) return false;
   if (!gap.startMs || !gap.endMs || gap.endMs <= gap.startMs) return false;
 
-  if (srcStart >= gap.endMs || srcEnd <= gap.startMs) return false;
-
   const code = String(sourceShift.code || '').trim().toUpperCase();
+
+  if (srcStart >= gap.endMs) return false;
+  if (srcEnd < gap.startMs) return false;
+  if (srcEnd === gap.startMs && code !== 'RET') return false;
+
   if (code === 'RET') {
     return srcStart <= gap.startMs + 60_000;
   }
