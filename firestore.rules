@@ -413,6 +413,11 @@ service cloud.firestore {
       allow read: if isAdmin() || (request.auth != null && tokenId == request.auth.uid);
     }
 
+    match /device_bindings/{deviceId} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     match /user_notifications/{notifId} {
       // Empleado: solo propias (uid o legajo con su uid). Admin: tenant.
       allow read: if request.auth != null && (

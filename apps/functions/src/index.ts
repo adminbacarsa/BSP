@@ -5,6 +5,7 @@ import { onSchedule as onScheduleV2 } from 'firebase-functions/v2/scheduler';
 import { onDocumentWritten as onDocumentWrittenV2, onDocumentUpdated as onDocumentUpdatedV2 } from 'firebase-functions/v2/firestore';
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
+import { bindGuardDevice, rethrowBindGuardDeviceError } from './auth/bindGuardDevice';
 import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup, getBackupDb } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
@@ -2155,6 +2156,10 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   if (!token) {
     throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
   }
+  const trimmedDeviceId = String(deviceId ?? '').trim();
+  if (trimmedDeviceId.length < 8) {
+    throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
+  }
 
   const db = admin.firestore();
   const tokenRef = db.collection('device_activations').doc(token);
@@ -2181,17 +2186,24 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   // Marcar token como usado
   await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
-  // Guardar dispositivo verificado — doc ID = uid (un dispositivo por usuario)
-  const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
-  await deviceRef.set({
-    uid: context.auth.uid,
-    employeeId: td.employeeId,
-    verified: true,
-    source: 'email_link',
-    activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    deviceInfo: deviceInfo || {},
-    deviceId: deviceId || null,
-  });
+  const empSnap = await db.collection('empleados').doc(td.employeeId).get();
+  const empresaId = (empSnap.data()?.empresaId as string) || null;
+
+  try {
+    await bindGuardDevice(db, {
+      uid: context.auth.uid,
+      employeeId: td.employeeId,
+      empresaId,
+      deviceId: trimmedDeviceId,
+      source: 'email_link',
+      deviceInfo: deviceInfo || {},
+      tokenExtras: {
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    });
+  } catch (err) {
+    rethrowBindGuardDeviceError(err);
+  }
 
   return { success: true, employeeId: td.employeeId };
 });
@@ -2212,6 +2224,10 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   if (!token) throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
   if (!password || password.length < 6) {
     throw new functions.https.HttpsError('invalid-argument', 'La contraseÃ±a debe tener al menos 6 caracteres.');
+  }
+  const trimmedDeviceId = String(deviceId ?? '').trim();
+  if (trimmedDeviceId.length < 8) {
+    throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
   }
 
   const db = admin.firestore();
@@ -2265,17 +2281,25 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
         ? deviceInfo.platform
         : 'web';
 
-  // 3. Registrar dispositivo verificado
-  await db.collection('device_tokens').doc(uid).set({
-    uid,
-    employeeId,
-    verified: true,
-    source: 'email_link',
-    activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    deviceInfo: deviceInfo || {},
-    deviceId: deviceId || null,
-    platform: resolvedPlatform,
-  });
+  const empSnapForBind = await db.collection('empleados').doc(employeeId).get();
+  const empresaIdForBind = (empSnapForBind.data()?.empresaId as string) || null;
+
+  try {
+    await bindGuardDevice(db, {
+      uid,
+      employeeId,
+      empresaId: empresaIdForBind,
+      deviceId: trimmedDeviceId,
+      source: 'email_link',
+      deviceInfo: deviceInfo || {},
+      platform: resolvedPlatform,
+      tokenExtras: {
+        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+    });
+  } catch (err) {
+    rethrowBindGuardDeviceError(err);
+  }
 
   return { email, employeeId };
 });
@@ -2284,6 +2308,7 @@ export {
   requestGuardDeviceRegistration,
   approveGuardDeviceRegistration,
   rejectGuardDeviceRegistration,
+  unbindGuardDevice,
   getGuardDeviceRegistrationStatus,
   listPendingGuardDeviceRegistrations,
 } from './auth/guardDeviceRegistration';

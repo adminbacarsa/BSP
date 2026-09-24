@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = void 0;
+exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -10,6 +10,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
 const admin = require("firebase-admin");
 const firestore_2 = require("firebase-admin/firestore");
+const bindGuardDevice_1 = require("./auth/bindGuardDevice");
 const backup_service_1 = require("./backup/backup.service");
 const restore_job_runner_1 = require("./backup/restore-job.runner");
 const migrate_job_runner_1 = require("./backup/migrate-job.runner");
@@ -1805,6 +1806,10 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (!token) {
         throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
     }
+    const trimmedDeviceId = String(deviceId ?? '').trim();
+    if (trimmedDeviceId.length < 8) {
+        throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
+    }
     const db = admin.firestore();
     const tokenRef = db.collection('device_activations').doc(token);
     const tokenDoc = await tokenRef.get();
@@ -1822,16 +1827,24 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
     }
     await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
-    const deviceRef = db.collection('device_tokens').doc(context.auth.uid);
-    await deviceRef.set({
-        uid: context.auth.uid,
-        employeeId: td.employeeId,
-        verified: true,
-        source: 'email_link',
-        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        deviceInfo: deviceInfo || {},
-        deviceId: deviceId || null,
-    });
+    const empSnap = await db.collection('empleados').doc(td.employeeId).get();
+    const empresaId = empSnap.data()?.empresaId || null;
+    try {
+        await (0, bindGuardDevice_1.bindGuardDevice)(db, {
+            uid: context.auth.uid,
+            employeeId: td.employeeId,
+            empresaId,
+            deviceId: trimmedDeviceId,
+            source: 'email_link',
+            deviceInfo: deviceInfo || {},
+            tokenExtras: {
+                activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+        });
+    }
+    catch (err) {
+        (0, bindGuardDevice_1.rethrowBindGuardDeviceError)(err);
+    }
     return { success: true, employeeId: td.employeeId };
 });
 exports.activateAndSetPassword = functions.https.onCall(async (data, _context) => {
@@ -1840,6 +1853,10 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
     if (!password || password.length < 6) {
         throw new functions.https.HttpsError('invalid-argument', 'La contraseÃ±a debe tener al menos 6 caracteres.');
+    }
+    const trimmedDeviceId = String(deviceId ?? '').trim();
+    if (trimmedDeviceId.length < 8) {
+        throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
     }
     const db = admin.firestore();
     const tokenRef = db.collection('device_activations').doc(token);
@@ -1878,22 +1895,32 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         : deviceInfo?.platform === 'ios' || deviceInfo?.platform === 'android'
             ? deviceInfo.platform
             : 'web';
-    await db.collection('device_tokens').doc(uid).set({
-        uid,
-        employeeId,
-        verified: true,
-        source: 'email_link',
-        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-        deviceInfo: deviceInfo || {},
-        deviceId: deviceId || null,
-        platform: resolvedPlatform,
-    });
+    const empSnapForBind = await db.collection('empleados').doc(employeeId).get();
+    const empresaIdForBind = empSnapForBind.data()?.empresaId || null;
+    try {
+        await (0, bindGuardDevice_1.bindGuardDevice)(db, {
+            uid,
+            employeeId,
+            empresaId: empresaIdForBind,
+            deviceId: trimmedDeviceId,
+            source: 'email_link',
+            deviceInfo: deviceInfo || {},
+            platform: resolvedPlatform,
+            tokenExtras: {
+                activatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            },
+        });
+    }
+    catch (err) {
+        (0, bindGuardDevice_1.rethrowBindGuardDeviceError)(err);
+    }
     return { email, employeeId };
 });
 var guardDeviceRegistration_1 = require("./auth/guardDeviceRegistration");
 Object.defineProperty(exports, "requestGuardDeviceRegistration", { enumerable: true, get: function () { return guardDeviceRegistration_1.requestGuardDeviceRegistration; } });
 Object.defineProperty(exports, "approveGuardDeviceRegistration", { enumerable: true, get: function () { return guardDeviceRegistration_1.approveGuardDeviceRegistration; } });
 Object.defineProperty(exports, "rejectGuardDeviceRegistration", { enumerable: true, get: function () { return guardDeviceRegistration_1.rejectGuardDeviceRegistration; } });
+Object.defineProperty(exports, "unbindGuardDevice", { enumerable: true, get: function () { return guardDeviceRegistration_1.unbindGuardDevice; } });
 Object.defineProperty(exports, "getGuardDeviceRegistrationStatus", { enumerable: true, get: function () { return guardDeviceRegistration_1.getGuardDeviceRegistrationStatus; } });
 Object.defineProperty(exports, "listPendingGuardDeviceRegistrations", { enumerable: true, get: function () { return guardDeviceRegistration_1.listPendingGuardDeviceRegistrations; } });
 function buildClientPortalEmailHtml(resetLink, clientName) {
