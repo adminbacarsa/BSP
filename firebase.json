@@ -54,32 +54,27 @@
       {
         "source": "/empleado/activar",
         "destination": "/app/activar/",
-        "type": 301
+        "type": 302
       },
       {
         "source": "/empleado/activar/**",
         "destination": "/app/activar/",
-        "type": 301
+        "type": 302
       },
       {
         "source": "/empleado/dashboard",
         "destination": "/app/",
-        "type": 301
+        "type": 302
       },
       {
         "source": "/empleado/dashboard/**",
         "destination": "/app/",
-        "type": 301
+        "type": 302
       },
       {
         "source": "/empleado",
         "destination": "/app/",
-        "type": 301
-      },
-      {
-        "source": "/empleado/**",
-        "destination": "/app/",
-        "type": 301
+        "type": 302
       }
     ],
     "cleanUrls": true,

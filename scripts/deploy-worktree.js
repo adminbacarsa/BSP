@@ -107,11 +107,30 @@ function syncEnvLocal() {
   const dest = path.join(DEPLOY_DIR, 'apps', 'web2', '.env.local');
   if (!fs.existsSync(src)) {
     console.warn('\n⚠ No hay apps/web2/.env.local en el lab — el build en deploy puede fallar sin credenciales Firebase.');
-    return;
+  } else {
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(src, dest);
+    console.log('✓ apps/web2/.env.local → worktree (USE_EMULATOR=false en build).');
   }
-  fs.mkdirSync(path.dirname(dest), { recursive: true });
-  fs.copyFileSync(src, dest);
-  console.log('✓ .env.local copiado al worktree de deploy (solo credenciales de build, USE_EMULATOR=false en build).');
+
+  // Portal guardia web: mismas credenciales / VAPID que el lab
+  const mobileSrcDir = path.join(LAB_ROOT, 'apps', 'mobile-guardia');
+  const mobileDestDir = path.join(DEPLOY_DIR, 'apps', 'mobile-guardia');
+  let copiedMobile = 0;
+  for (const name of ['.env', '.env.local']) {
+    const s = path.join(mobileSrcDir, name);
+    if (!fs.existsSync(s)) continue;
+    fs.mkdirSync(mobileDestDir, { recursive: true });
+    fs.copyFileSync(s, path.join(mobileDestDir, name));
+    copiedMobile += 1;
+  }
+  if (copiedMobile > 0) {
+    console.log(`✓ apps/mobile-guardia/.env* → worktree (${copiedMobile} archivo(s)).`);
+  } else {
+    console.log(
+      'ℹ Sin apps/mobile-guardia/.env* en el lab — build:web tomará NEXT_PUBLIC_* de web2/.env.local.',
+    );
+  }
 }
 
 console.log('═══════════════════════════════════════════════════════');
