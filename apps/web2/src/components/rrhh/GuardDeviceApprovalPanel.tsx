@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { httpsCallable } from 'firebase/functions';
-import { CheckCircle2, Loader2, RefreshCw, Smartphone } from 'lucide-react';
+import { CheckCircle2, Loader2, RefreshCw, Smartphone, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { functions } from '@/lib/firebase';
 import { usePendingGuardDeviceCount } from '@/hooks/usePendingGuardDeviceCount';
@@ -44,7 +44,7 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
   const { refresh: refreshGlobalCount } = usePendingGuardDeviceCount();
   const [rows, setRows] = useState<GuardDeviceRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [approvingUid, setApprovingUid] = useState<string | null>(null);
+  const [busyUid, setBusyUid] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -75,7 +75,7 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
     ) {
       return;
     }
-    setApprovingUid(row.uid);
+    setBusyUid(row.uid);
     try {
       const approveFn = httpsCallable(functions, 'approveGuardDeviceRegistration');
       await approveFn({ targetUid: row.uid, employeeId: row.employeeId || undefined });
@@ -86,7 +86,45 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
       const msg = err instanceof Error ? err.message : 'Error al aprobar';
       toast.error(msg);
     } finally {
-      setApprovingUid(null);
+      setBusyUid(null);
+    }
+  };
+
+  const reject = async (row: GuardDeviceRequestRow) => {
+    if (!row.uid) return;
+    const motivo = window.prompt(
+      `Motivo del rechazo para ${row.employeeName || row.employeeId || row.uid}:`,
+      '',
+    );
+    if (motivo === null) return;
+    const trimmed = motivo.trim();
+    if (trimmed.length < 3) {
+      toast.error('El motivo debe tener al menos 3 caracteres.');
+      return;
+    }
+    if (
+      !confirm(
+        `¿Rechazar el dispositivo (${row.platform || 'web'}) de ${row.employeeName || row.uid}?\n\nMotivo: ${trimmed}`,
+      )
+    ) {
+      return;
+    }
+    setBusyUid(row.uid);
+    try {
+      const rejectFn = httpsCallable(functions, 'rejectGuardDeviceRegistration');
+      await rejectFn({
+        targetUid: row.uid,
+        employeeId: row.employeeId || undefined,
+        motivo: trimmed,
+      });
+      toast.success('Solicitud rechazada. El guardia fue notificado.');
+      await load();
+      await refreshGlobalCount();
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Error al rechazar';
+      toast.error(msg);
+    } finally {
+      setBusyUid(null);
     }
   };
 
@@ -160,19 +198,30 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
                 </p>
               ) : null}
             </div>
-            <button
-              type="button"
-              disabled={approvingUid === row.uid}
-              onClick={() => void approve(row)}
-              className="w-full py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm"
-            >
-              {approvingUid === row.uid ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                <CheckCircle2 size={14} />
-              )}
-              Aprobar dispositivo
-            </button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <button
+                type="button"
+                disabled={busyUid === row.uid}
+                onClick={() => void approve(row)}
+                className="flex-1 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-black flex items-center justify-center gap-2 shadow-sm"
+              >
+                {busyUid === row.uid ? (
+                  <Loader2 size={14} className="animate-spin" />
+                ) : (
+                  <CheckCircle2 size={14} />
+                )}
+                Aprobar
+              </button>
+              <button
+                type="button"
+                disabled={busyUid === row.uid}
+                onClick={() => void reject(row)}
+                className="flex-1 py-2.5 rounded-xl bg-white border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 text-xs font-black flex items-center justify-center gap-2 shadow-sm"
+              >
+                <XCircle size={14} />
+                Rechazar
+              </button>
+            </div>
           </div>
         ))}
       </div>

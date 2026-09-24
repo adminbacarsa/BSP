@@ -2283,6 +2283,7 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
 export {
   requestGuardDeviceRegistration,
   approveGuardDeviceRegistration,
+  rejectGuardDeviceRegistration,
   getGuardDeviceRegistrationStatus,
   listPendingGuardDeviceRegistrations,
 } from './auth/guardDeviceRegistration';

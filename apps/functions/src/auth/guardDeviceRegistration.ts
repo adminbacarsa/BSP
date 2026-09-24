@@ -226,8 +226,110 @@ export const approveGuardDeviceRegistration = functions.https.onCall(async (data
     updatedAt: FieldValue.serverTimestamp(),
   });
 
-  return { success: true, targetUid, employeeId, deviceId: requestedDeviceId };
+  const employeeIdResolved = employeeId || String(req.employeeId || '').trim();
+  await notifyGuardDeviceDecision(db, {
+    targetUid,
+    employeeId: employeeIdResolved,
+    title: 'Dispositivo aprobado',
+    body: 'RRHH aprobó tu nuevo dispositivo. Abrí la app y tocá «Reintentar verificación».',
+    type: 'DEVICE_REGISTRATION_APPROVED',
+  });
+
+  return { success: true, targetUid, employeeId: employeeIdResolved, deviceId: requestedDeviceId };
 });
+
+/** Admin / RRHH rechaza cambio de dispositivo. */
+export const rejectGuardDeviceRegistration = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
+  }
+
+  const callerUid = context.auth.uid;
+  const db = admin.firestore();
+  await assertAdminCaller(db, context);
+
+  const { targetUid: targetUidArg, employeeId: employeeIdArg, motivo } = data as {
+    targetUid?: string;
+    employeeId?: string;
+    motivo?: string;
+  };
+
+  let targetUid = String(targetUidArg ?? '').trim();
+  let employeeId = String(employeeIdArg ?? '').trim();
+  const rejectMotivo = String(motivo ?? '').trim();
+
+  if (!targetUid && employeeId) {
+    const emp = await db.collection('empleados').doc(employeeId).get();
+    targetUid = String(emp.data()?.uid ?? '').trim();
+  }
+  if (!targetUid) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetUid o employeeId requerido.');
+  }
+  if (rejectMotivo.length < 3) {
+    throw new functions.https.HttpsError('invalid-argument', 'Indicá un motivo de rechazo (mín. 3 caracteres).');
+  }
+
+  const reqRef = db.collection('device_registration_requests').doc(targetUid);
+  const reqSnap = await reqRef.get();
+  if (!reqSnap.exists || reqSnap.data()?.status !== 'PENDING') {
+    throw new functions.https.HttpsError('not-found', 'No hay solicitud pendiente para este usuario.');
+  }
+
+  const req = reqSnap.data()!;
+  employeeId = employeeId || String(req.employeeId || '').trim();
+
+  await reqRef.update({
+    status: 'REJECTED',
+    rejectMotivo,
+    rejectedBy: callerUid,
+    rejectedAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const body = `RRHH rechazó el registro de dispositivo: ${rejectMotivo}`;
+  await notifyGuardDeviceDecision(db, {
+    targetUid,
+    employeeId,
+    title: 'Dispositivo no aprobado',
+    body,
+    type: 'DEVICE_REGISTRATION_REJECTED',
+  });
+
+  return { success: true, targetUid, employeeId, status: 'REJECTED' };
+});
+
+async function notifyGuardDeviceDecision(
+  db: admin.firestore.Firestore,
+  params: {
+    targetUid: string;
+    employeeId: string;
+    title: string;
+    body: string;
+    type: 'DEVICE_REGISTRATION_APPROVED' | 'DEVICE_REGISTRATION_REJECTED';
+  },
+): Promise<void> {
+  const { targetUid, employeeId, title, body, type } = params;
+  if (!targetUid && !employeeId) return;
+
+  let empresaId: string | null = null;
+  if (employeeId) {
+    const emp = await db.collection('empleados').doc(employeeId).get();
+    empresaId = (emp.data()?.empresaId as string) || null;
+  }
+
+  await db.collection('user_notifications').add({
+    uid: targetUid || null,
+    employeeId: employeeId || null,
+    title,
+    body,
+    type,
+    target: 'employee',
+    empresaId,
+    read: false,
+    readAt: null,
+    createdAt: FieldValue.serverTimestamp(),
+  });
+}
 
 async function assertAdminCaller(
   db: admin.firestore.Firestore,
@@ -313,8 +415,36 @@ export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (_d
     };
   }
   const d = reqSnap.data()!;
+  const rawStatus = String(d.status || '').toUpperCase();
+  if (rawStatus === 'PENDING') {
+    return {
+      status: 'pending',
+      requestedDeviceId: d.requestedDeviceId ?? null,
+      platform: d.platform ?? null,
+    };
+  }
+  if (rawStatus === 'REJECTED') {
+    const rejectMotivo = String(d.rejectMotivo ?? d.motivo ?? '').trim();
+    return {
+      status: 'rejected',
+      requestedDeviceId: d.requestedDeviceId ?? null,
+      platform: d.platform ?? null,
+      message: rejectMotivo
+        ? `Rechazado: ${rejectMotivo}`
+        : 'Tu solicitud de dispositivo fue rechazada. Podés pedir registro de nuevo o contactar a RRHH.',
+      rejectMotivo: rejectMotivo || null,
+    };
+  }
+  if (rawStatus === 'APPROVED') {
+    return {
+      status: 'approved',
+      requestedDeviceId: d.requestedDeviceId ?? null,
+      platform: d.platform ?? null,
+      message: 'Tu solicitud fue aprobada. Tocá «Reintentar verificación» para continuar.',
+    };
+  }
   return {
-    status: d.status === 'PENDING' ? 'pending' : String(d.status || 'unknown').toLowerCase(),
+    status: String(d.status || 'unknown').toLowerCase(),
     requestedDeviceId: d.requestedDeviceId ?? null,
     platform: d.platform ?? null,
   };

@@ -20,6 +20,8 @@ const INBOX_NEEDS_FCM = new Set([
   'VACANTE_OPERACIONES',        // vacante — requiere cobertura operativa urgente
   // Convocatoria de cobertura operativa (cascada RET → FT)
   'CONVOCATORIA_COBERTURA',     // llamado a cubrir turno vacante — requiere respuesta en 10 min
+  'DEVICE_REGISTRATION_REJECTED',
+  'DEVICE_REGISTRATION_APPROVED',
 ]);
 
 async function collectTokens(
@@ -98,7 +100,9 @@ export const onEmployeeNotificationCreated = functions
               ? '/admin/operaciones'
               : type === 'CONVOCATORIA_COBERTURA'
                 ? '/app/'
-                : '/app/'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
+                : type === 'DEVICE_REGISTRATION_REJECTED' || type === 'DEVICE_REGISTRATION_APPROVED'
+                  ? '/app/device-blocked'
+                  : '/app/'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
     try {
       const result = await admin.messaging().sendEachForMulticast({

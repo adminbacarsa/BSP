@@ -14,6 +14,8 @@ const INBOX_NEEDS_FCM = new Set([
     'VACANTE_PLANIFICACION',
     'VACANTE_OPERACIONES',
     'CONVOCATORIA_COBERTURA',
+    'DEVICE_REGISTRATION_REJECTED',
+    'DEVICE_REGISTRATION_APPROVED',
 ]);
 async function collectTokens(db, uid, employeeId) {
     const tokenSet = new Set();
@@ -76,7 +78,9 @@ exports.onEmployeeNotificationCreated = functions
                     ? '/admin/operaciones'
                     : type === 'CONVOCATORIA_COBERTURA'
                         ? '/app/'
-                        : '/app/';
+                        : type === 'DEVICE_REGISTRATION_REJECTED' || type === 'DEVICE_REGISTRATION_APPROVED'
+                            ? '/app/device-blocked'
+                            : '/app/';
     try {
         const result = await admin.messaging().sendEachForMulticast({
             notification: { title, body },
