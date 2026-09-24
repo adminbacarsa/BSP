@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.operationalAlertsCron = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = void 0;
+exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.activateAndSetPassword = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -21,6 +21,7 @@ const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
 const convocadoAbsentPass_1 = require("./attendance/convocadoAbsentPass");
+const revertConvocadoFalseAbsences_1 = require("./attendance/revertConvocadoFalseAbsences");
 const revertirAusencia_1 = require("./attendance/revertirAusencia");
 const opsManualMode_1 = require("./ops/opsManualMode");
 const autoCompletarTurnosCore_1 = require("./scheduling/autoCompletarTurnosCore");
@@ -777,6 +778,44 @@ async function runModoDemoForEmpresa(db, empresaId) {
             batchOps += 1;
         }
         presencias++;
+    }
+    const covCreatedStart = admin.firestore.Timestamp.fromMillis(now.getTime() - 4 * 3600000);
+    const covSnap = await db
+        .collection('turnos')
+        .where('empresaId', '==', empresaId)
+        .where('origin', '==', 'OPERATIONS_COVERAGE')
+        .where('createdAt', '>=', covCreatedStart)
+        .limit(400)
+        .get();
+    for (const doc of covSnap.docs) {
+        const t = doc.data();
+        if (t.isPresent === true || t.isAbsent === true || t.isCompleted === true)
+            continue;
+        if (t.coverageSuperseded === true)
+            continue;
+        const createdMs = t.createdAt?.seconds
+            ? t.createdAt.seconds * 1000
+            : 0;
+        if (!createdMs)
+            continue;
+        const ageMin = (now.getTime() - createdMs) / 60000;
+        if (ageMin < 5 || ageMin > 40)
+            continue;
+        const hashVal = doc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+        if (hashVal === 0)
+            continue;
+        const presentAt = admin.firestore.Timestamp.fromMillis(createdMs + 8 * 60 * 1000);
+        batch.update(doc.ref, {
+            isPresent: true,
+            status: 'PRESENT',
+            presentAt,
+            realStartTime: presentAt,
+            checkInTime: presentAt,
+            autoPresencia: true,
+            modoDemoAt: nowTs,
+        });
+        batchOps += 1;
+        presencias += 1;
     }
     const ABSENT_MIN_MS = 5 * 60 * 1000;
     for (const doc of snap.docs) {
@@ -2487,7 +2526,7 @@ exports.detectarAusencias = functions
             await tryMarkAbsent('AUTO_T30');
         }
     }
-    const convocados = await (0, convocadoAbsentPass_1.runConvocadoAbsentPass)(db, now);
+    const convocados = await (0, convocadoAbsentPass_1.runConvocadoAbsentPass)(db, now, cc);
     if (convocados > 0) {
         console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
     }
@@ -3173,6 +3212,24 @@ exports.processEarlyWithdrawalCallable = functions.https.onCall(async (data, con
     if (!result.ok) {
         throw new functions.https.HttpsError('failed-precondition', result.error || 'ERROR');
     }
+    return result;
+});
+exports.revertConvocadoFalseAbsences = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const role = String(context.auth.token.role ?? '');
+    const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+    if (!allowed.includes(role)) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo admin.');
+    }
+    const empresaId = String(data?.empresaId || '').trim();
+    if (!empresaId) {
+        throw new functions.https.HttpsError('invalid-argument', 'Falta empresaId.');
+    }
+    const db = admin.firestore();
+    const dryRun = data?.dryRun !== false;
+    const result = await (0, revertConvocadoFalseAbsences_1.revertConvocadoFalseAbsencesRun)(db, { empresaId, dryRun });
     return result;
 });
 exports.releaseInvalidRetentions = functions.https.onCall(async (data, context) => {

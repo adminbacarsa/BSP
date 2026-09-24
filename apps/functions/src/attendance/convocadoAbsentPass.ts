@@ -3,11 +3,22 @@ import { markShiftAbsent } from './markShiftAbsent';
 import { skipAbsencePipelineForShift } from '../coverage/coverageTraceShift';
 import { iniciarCascadaCobertura } from '../coverage/convocatoriasCobertura';
 import { isEmpresaManualMode } from '../ops/opsManualMode';
+import type { loadCentroControlState } from '../ops/centroControlGuard';
+import {
+  cancelPendingConvocatoriasForTitular,
+  revertTitularAfterConvocadoNoLlego,
+} from './convocadoTitularRevert';
 
 const MIN_HOURS_BEFORE_GAP_END = 2;
 
+type CcState = Awaited<ReturnType<typeof loadCentroControlState>>;
+
 function ms(v: unknown): number {
   return (v as Timestamp | undefined)?.toMillis?.() ?? 0;
+}
+
+function shiftEmpresaId(shift: Record<string, unknown>): string {
+  return String(shift.empresaId || '').trim() || 'bacarsa';
 }
 
 async function relaunchTitularCoverage(
@@ -19,7 +30,7 @@ async function relaunchTitularCoverage(
   const titSnap = await db.collection('turnos').doc(titularId).get();
   if (!titSnap.exists) return;
   const tit = titSnap.data() as Record<string, unknown>;
-  const empresaId = String(tit.empresaId || opsCov.empresaId || '').trim() || 'bacarsa';
+  const empresaId = shiftEmpresaId(tit);
   const manual = await isEmpresaManualMode(db, empresaId);
   if (manual) {
     await db.collection('novedades').add({
@@ -54,16 +65,36 @@ async function relaunchTitularCoverage(
   );
 }
 
-export async function runConvocadoAbsentPass(db: Firestore, now: Timestamp): Promise<number> {
+export async function runConvocadoAbsentPass(
+  db: Firestore,
+  now: Timestamp,
+  cc: CcState,
+): Promise<number> {
   const nowMs = now.toMillis();
-  const windowStartMs = nowMs - 12 * 60 * 60 * 1000;
-  const snap = await db.collection('turnos').where('origin', '==', 'OPERATIONS_COVERAGE').limit(300).get();
+  const windowStart = Timestamp.fromMillis(nowMs - 12 * 60 * 60 * 1000);
+  const windowEnd = Timestamp.fromMillis(nowMs);
+
+  const empSnap = await db.collection('empresas').get();
+  const empresaIds = empSnap.docs.map((d) => d.id);
+  if (empresaIds.length === 0) empresaIds.push('bacarsa');
 
   let marked = 0;
-  for (const docSnap of snap.docs) {
+  for (const empresaId of empresaIds) {
+    if (!cc.isEnabled(empresaId)) continue;
+    if (cc.isDemo(empresaId)) continue;
+
+    const snap = await db
+      .collection('turnos')
+      .where('empresaId', '==', empresaId)
+      .where('origin', '==', 'OPERATIONS_COVERAGE')
+      .where('startTime', '>=', windowStart)
+      .where('startTime', '<=', windowEnd)
+      .get();
+
+    for (const docSnap of snap.docs) {
     const shift = docSnap.data() as Record<string, unknown>;
+
     if (skipAbsencePipelineForShift(shift)) continue;
-    if (ms(shift.startTime) < windowStartMs) continue;
     if (shift.isPresent === true || shift.isCompleted === true) continue;
     if (shift.isAbsent === true) continue;
 
@@ -94,15 +125,22 @@ export async function runConvocadoAbsentPass(db: Firestore, now: Timestamp): Pro
       }
     }
 
+    const titularId = String(shift.absenceShiftId || shift.coveredShiftId || '').trim();
+    await revertTitularAfterConvocadoNoLlego(db, { ...shift, id: docSnap.id });
+
     const r = await markShiftAbsent(db, docSnap.id, {
       reason: 'CONVOCADO_NO_LLEGO',
       by: 'SYSTEM_SCHEDULER',
     });
     if (r.applied) {
       marked++;
+      if (titularId) {
+        await cancelPendingConvocatoriasForTitular(db, titularId);
+      }
       if (!skipRelaunch) {
         await relaunchTitularCoverage(db, { ...shift, id: docSnap.id });
       }
+    }
     }
   }
   return marked;

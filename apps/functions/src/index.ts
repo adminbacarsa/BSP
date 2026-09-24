@@ -29,6 +29,7 @@ import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
+import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFalseAbsences';
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
 import { isEmpresaManualMode } from './ops/opsManualMode';
@@ -945,6 +946,41 @@ async function runModoDemoForEmpresa(
       batchOps += 1;
     }
     presencias++;
+  }
+
+  // === Pase 1c: ops_cov convocados — presente por edad del doc (createdAt + 5…40 min), ~90 % ===
+  const covCreatedStart = admin.firestore.Timestamp.fromMillis(now.getTime() - 4 * 3600000);
+  const covSnap = await db
+    .collection('turnos')
+    .where('empresaId', '==', empresaId)
+    .where('origin', '==', 'OPERATIONS_COVERAGE')
+    .where('createdAt', '>=', covCreatedStart)
+    .limit(400)
+    .get();
+  for (const doc of covSnap.docs) {
+    const t = doc.data() as Record<string, unknown>;
+    if (t.isPresent === true || t.isAbsent === true || t.isCompleted === true) continue;
+    if (t.coverageSuperseded === true) continue;
+    const createdMs = (t.createdAt as { seconds?: number })?.seconds
+      ? (t.createdAt as { seconds: number }).seconds * 1000
+      : 0;
+    if (!createdMs) continue;
+    const ageMin = (now.getTime() - createdMs) / 60000;
+    if (ageMin < 5 || ageMin > 40) continue;
+    const hashVal = doc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
+    if (hashVal === 0) continue;
+    const presentAt = admin.firestore.Timestamp.fromMillis(createdMs + 8 * 60 * 1000);
+    batch.update(doc.ref, {
+      isPresent: true,
+      status: 'PRESENT',
+      presentAt,
+      realStartTime: presentAt,
+      checkInTime: presentAt,
+      autoPresencia: true,
+      modoDemoAt: nowTs,
+    });
+    batchOps += 1;
+    presencias += 1;
   }
 
   // === Pase 1b: Simular ausencias AA (dispara cascada real vía onTurnoAbsenciaDetectada) ===
@@ -2959,7 +2995,7 @@ export const detectarAusencias = functions
       }
     }
 
-    const convocados = await runConvocadoAbsentPass(db, now);
+    const convocados = await runConvocadoAbsentPass(db, now, cc);
     if (convocados > 0) {
       console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
     }
@@ -3755,6 +3791,25 @@ export const processEarlyWithdrawalCallable = functions.https.onCall(async (data
   if (!result.ok) {
     throw new functions.https.HttpsError('failed-precondition', result.error || 'ERROR');
   }
+  return result;
+});
+
+export const revertConvocadoFalseAbsences = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const role = String(context.auth.token.role ?? '');
+  const allowed = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'admin', 'ADMIN', 'ADMIN_EMPRESA'];
+  if (!allowed.includes(role)) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo admin.');
+  }
+  const empresaId = String(data?.empresaId || '').trim();
+  if (!empresaId) {
+    throw new functions.https.HttpsError('invalid-argument', 'Falta empresaId.');
+  }
+  const db = admin.firestore();
+  const dryRun = data?.dryRun !== false;
+  const result = await revertConvocadoFalseAbsencesRun(db, { empresaId, dryRun });
   return result;
 });
 

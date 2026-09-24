@@ -78,6 +78,19 @@ function hoursBetween(start, end) {
   return Math.round(h * 100) / 100;
 }
 
+function ccAllReal() {
+  return { anyEnabled: true, isEnabled: () => true, isDemo: () => false };
+}
+
+function ccWithDemo(demoEmpresaIds) {
+  const set = new Set(demoEmpresaIds);
+  return {
+    anyEnabled: true,
+    isEnabled: () => true,
+    isDemo: (id) => set.has(String(id || '').trim()),
+  };
+}
+
 async function seedBase(prefix) {
   const empresaId = `${prefix}_emp`;
   const objectiveId = `${prefix}_obj`;
@@ -1125,8 +1138,10 @@ async function run() {
       await db.batch()
         .set(db.collection('turnos').doc(titularId), {
           empresaId, objectiveId, positionName: 'P1', employeeId: `${prefix}_eT`, employeeName: 'Titular',
-          code: 'M',           startTime: start, endTime: Timestamp.fromMillis(Date.now() + 5 * 3600000),
+          code: 'M', startTime: start, endTime: Timestamp.fromMillis(Date.now() + 5 * 3600000),
           isAbsent: true, status: 'ABSENT', absenceType: 'AA',
+          operacionallyCovered: true, coverageStatus: 'COVERED',
+          coveredByEmployeeId: `${prefix}_eR`, coveredByEmployeeName: 'RET cov', coverageDocId: covId,
         })
         .set(db.collection('turnos').doc(covId), {
           empresaId, objectiveId, positionName: 'P1', employeeId: `${prefix}_eR`, employeeName: 'RET cov',
@@ -1134,13 +1149,21 @@ async function run() {
           absenceShiftId: titularId, startTime: start, endTime: Timestamp.fromMillis(Date.now() + 5 * 3600000),
           createdAt: created, status: 'PENDING', isPresent: false,
         })
-        .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true }, { merge: true })
+        .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true, modoDemoEnabled: false }, { merge: true })
         .commit();
-      await runConvocadoAbsentPass(db, Timestamp.now());
+      await db.collection('ausencias').add({
+        shiftId: titularId, employeeId: `${prefix}_eT`, empresaId, coberturaEstado: 'GESTIONADA', status: 'Confirmada',
+      });
+      await runConvocadoAbsentPass(db, Timestamp.now(), ccAllReal());
       const cov = (await db.collection('turnos').doc(covId).get()).data();
-      const convs = await db.collection('convocatorias_cobertura').where('shiftId', '==', titularId).limit(3).get();
-      const ok = cov?.isAbsent === true && cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO';
-      report(26, ok, ok ? 'CONVOCADO_NO_LLEGO + cascada' : `abs=${cov?.isAbsent} conv=${convs.size}`);
+      const tit = (await db.collection('turnos').doc(titularId).get()).data();
+      const aus = await db.collection('ausencias').where('shiftId', '==', titularId).limit(1).get();
+      const ok =
+        cov?.isAbsent === true
+        && cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO'
+        && tit?.operacionallyCovered === false
+        && aus.docs[0]?.data()?.coberturaEstado === 'PENDIENTE';
+      report(26, ok, ok ? 'CONVOCADO_NO_LLEGO + titular descubierto' : `abs=${cov?.isAbsent} cov=${tit?.operacionallyCovered}`);
     }
 
     // Caso 27 — revertir T+45 sin cobertura
@@ -1440,6 +1463,70 @@ async function run() {
       await batch.commit();
       const cov = (await db.collection('turnos').doc(covDocId).get()).data();
       report(36, cov?.coverageType === 'FT' && cov?.origin === 'OPERATIONS_COVERAGE', `cov=${covDocId}`);
+    }
+
+    // Caso 37 — Demo ON: convocadoAbsentPass no marca AA en ops_cov (createdAt + 70)
+    {
+      const prefix = `${runId}_c37`;
+      const demoEmp = `${prefix}_demo`;
+      const covId = `${prefix}_cov`;
+      const created = Timestamp.fromMillis(Date.now() - 70 * 60 * 1000);
+      const start = Timestamp.fromMillis(Date.now() - 60 * 60 * 1000);
+      await db.batch()
+        .set(db.collection('empresas').doc(demoEmp), { centroControlEnabled: true, modoDemoEnabled: true })
+        .set(db.collection('turnos').doc(covId), {
+          empresaId: demoEmp, objectiveId: `${prefix}_obj`, positionName: 'P1',
+          employeeId: `${prefix}_e`, employeeName: 'Cov demo',
+          code: 'RET', origin: 'OPERATIONS_COVERAGE', coverageType: 'RET',
+          absenceShiftId: `${prefix}_tit`, startTime: start,
+          endTime: Timestamp.fromMillis(Date.now() + 4 * 3600000),
+          createdAt: created, status: 'PENDING', isPresent: false,
+        })
+        .commit();
+      await runConvocadoAbsentPass(db, Timestamp.now(), ccWithDemo([demoEmp]));
+      const cov = (await db.collection('turnos').doc(covId).get()).data();
+      report(37, cov?.isAbsent !== true, cov?.isAbsent !== true ? 'Demo: sin AA en ops_cov' : 'marcó AA indebido');
+    }
+
+    // Caso 38 — Real: ops_cov sin fichar → AA + titular descubierto + RRHH PENDIENTE
+    {
+      const prefix = `${runId}_c38`;
+      const empresaId = `${prefix}_emp`;
+      const titularId = `${prefix}_tit`;
+      const covId = `${prefix}_cov`;
+      const created = Timestamp.fromMillis(Date.now() - 70 * 60 * 1000);
+      const start = Timestamp.fromMillis(Date.now() - 65 * 60 * 1000);
+      const endSoon = Timestamp.fromMillis(Date.now() + 90 * 60 * 1000);
+      await db.batch()
+        .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true, modoDemoEnabled: false })
+        .set(db.collection('turnos').doc(titularId), {
+          empresaId, objectiveId: `${prefix}_obj`, positionName: 'P1', code: 'M',
+          employeeId: `${prefix}_eT`, employeeName: 'Titular',
+          startTime: start, endTime: endSoon,
+          isAbsent: true, status: 'ABSENT',
+          operacionallyCovered: true, coverageDocId: covId, coveredByEmployeeId: `${prefix}_eC`,
+        })
+        .set(db.collection('turnos').doc(covId), {
+          empresaId, objectiveId: `${prefix}_obj`, positionName: 'P1',
+          employeeId: `${prefix}_eC`, employeeName: 'Convocado',
+          code: 'RET', origin: 'OPERATIONS_COVERAGE', coverageType: 'RET',
+          absenceShiftId: titularId, startTime: start,
+          endTime: endSoon,
+          createdAt: created, status: 'PENDING', isPresent: false,
+        })
+        .commit();
+      await db.collection('ausencias').add({
+        shiftId: titularId, empresaId, coberturaEstado: 'GESTIONADA', status: 'Confirmada',
+      });
+      await runConvocadoAbsentPass(db, Timestamp.now(), ccAllReal());
+      const cov = (await db.collection('turnos').doc(covId).get()).data();
+      const tit = (await db.collection('turnos').doc(titularId).get()).data();
+      const aus = await db.collection('ausencias').where('shiftId', '==', titularId).limit(1).get();
+      const ok =
+        cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO'
+        && tit?.operacionallyCovered === false
+        && aus.docs[0]?.data()?.coberturaEstado === 'PENDIENTE';
+      report(38, ok, ok ? 'Real: AA convocado + titular PENDIENTE' : `cov=${cov?.absenceDetectedBy} tit=${tit?.operacionallyCovered}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
