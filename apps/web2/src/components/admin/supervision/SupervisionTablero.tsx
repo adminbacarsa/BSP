@@ -33,6 +33,9 @@ function shiftStatus(s: any): ShiftStatusInfo {
     }
     return { label: 'Ausente', cls: 'bg-rose-100 text-rose-700 border-rose-200', prio: 1 };
   }
+  if (s.isCoverageSourceUsed && s.coverageUsedLabel) {
+    return { label: s.coverageUsedLabel, cls: 'bg-violet-100 text-violet-800 border-violet-200', prio: 2 };
+  }
   if (s.isPotentialAbsence) return { label: 'No llegó', cls: 'bg-amber-100 text-amber-700 border-amber-200', prio: 1 };
   if (s.isLateNotified) {
     const label = opsLateArrivalBadgeLabel(s) || 'Tarde avisada';

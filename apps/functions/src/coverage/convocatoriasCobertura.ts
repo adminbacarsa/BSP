@@ -13,6 +13,11 @@ import {
   findEmployeeUid,
 } from './eligibilityFilter';
 import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
+import {
+  gapWindowFromConvocatoria,
+  gapWindowFromTitularShift,
+  sourceShiftEligibleForCoverageGap,
+} from './coverageSourceShiftForGap';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -444,13 +449,24 @@ export async function findBestCandidate(
     }
   }
 
+  let gap = gapWindowFromConvocatoria(conv);
+  if (!gap && conv.shiftId) {
+    const titSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    if (titSnap.exists) {
+      gap = gapWindowFromTitularShift(titSnap.data() as Record<string, unknown>);
+    }
+  }
+
   if (type === 'REF' || type === 'ESC') {
+    if (!gap) return null;
     const want = type;
     for (const d of todayShiftsSnap.docs) {
       const t = d.data();
       const code = String(t.code || '').toUpperCase();
       if (code !== want) continue;
       if (t.isAbsent || !t.employeeId) continue;
+      if (t.coverageUsed === true) continue;
+      if (gap && !sourceShiftEligibleForCoverageGap(t, gap)) continue;
       if (alreadyConvocadoIds.has(String(t.employeeId))) continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;
@@ -474,10 +490,17 @@ export async function findBestCandidate(
 
     if (type === 'RET') {
       if (!retEmpIds.has(empId)) continue;
+      const retShiftId = retEmpIds.get(empId);
+      if (retShiftId && gap) {
+        const retSnap = await db.collection('turnos').doc(retShiftId).get();
+        if (!retSnap.exists) continue;
+        const retData = retSnap.data()!;
+        if (retData.coverageUsed === true) continue;
+        if (!sourceShiftEligibleForCoverageGap(retData, gap)) continue;
+      }
       const check = checkEligibility(emp, ctx, 'RET');
       if (check.eligible) {
         const uid = await findEmployeeUid(db, empId, emp);
-        const retShiftId = retEmpIds.get(empId);
         return {
           id: empId,
           name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,

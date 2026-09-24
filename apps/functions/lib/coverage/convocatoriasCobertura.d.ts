@@ -34,6 +34,20 @@ export interface ConvocatoriaCoberturaDoc {
     rejectionReason?: string;
     resolvedAt?: Timestamp;
 }
+export declare function crearConvocatoriaDoc(db: admin.firestore.Firestore, data: Omit<ConvocatoriaCoberturaDoc, 'createdAt' | 'status' | 'timeoutAt' | 'urgency'> & {
+    createdBy: string;
+    createdByName?: string;
+}): Promise<string>;
+interface CandidateResult {
+    id: string;
+    name: string;
+    uid?: string;
+    extendShiftId?: string;
+    advanceShiftId?: string;
+    candidateShiftId?: string;
+}
+export declare function findBestCandidate(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc, type: CandidateType): Promise<CandidateResult | null>;
+export declare function dispararBroadcastFT(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc): Promise<void>;
 export declare function resolverCobertura(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc & {
     id: string;
 }): Promise<void>;
@@ -69,3 +83,4 @@ export declare function crearConvocatoriaLlegadaTarde(db: admin.firestore.Firest
     employeeName: string;
     employeeUid?: string;
 }): Promise<void>;
+export {};

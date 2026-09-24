@@ -16,6 +16,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
+const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -319,7 +320,16 @@ async function findBestCandidate(db, conv, type) {
             alreadyConvocadoIds.add(String(c.candidateEmployeeId));
         }
     }
+    let gap = (0, coverageSourceShiftForGap_1.gapWindowFromConvocatoria)(conv);
+    if (!gap && conv.shiftId) {
+        const titSnap = await db.collection('turnos').doc(conv.shiftId).get();
+        if (titSnap.exists) {
+            gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titSnap.data());
+        }
+    }
     if (type === 'REF' || type === 'ESC') {
+        if (!gap)
+            return null;
         const want = type;
         for (const d of todayShiftsSnap.docs) {
             const t = d.data();
@@ -327,6 +337,10 @@ async function findBestCandidate(db, conv, type) {
             if (code !== want)
                 continue;
             if (t.isAbsent || !t.employeeId)
+                continue;
+            if (t.coverageUsed === true)
+                continue;
+            if (gap && !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(t, gap))
                 continue;
             if (alreadyConvocadoIds.has(String(t.employeeId)))
                 continue;
@@ -353,10 +367,20 @@ async function findBestCandidate(db, conv, type) {
         if (type === 'RET') {
             if (!retEmpIds.has(empId))
                 continue;
+            const retShiftId = retEmpIds.get(empId);
+            if (retShiftId && gap) {
+                const retSnap = await db.collection('turnos').doc(retShiftId).get();
+                if (!retSnap.exists)
+                    continue;
+                const retData = retSnap.data();
+                if (retData.coverageUsed === true)
+                    continue;
+                if (!(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(retData, gap))
+                    continue;
+            }
             const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET');
             if (check.eligible) {
                 const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                const retShiftId = retEmpIds.get(empId);
                 return {
                     id: empId,
                     name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,

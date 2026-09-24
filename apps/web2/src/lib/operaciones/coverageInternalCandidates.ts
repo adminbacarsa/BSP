@@ -1,4 +1,8 @@
 import { objectiveKnowledgeForEmployee } from '@/lib/operaciones/coverageObjectiveKnowledge';
+import {
+  gapFromAbsenceLikeShift,
+  sourceShiftEligibleForCoverageGap,
+} from '@/lib/operaciones/coverageSourceShiftForGap';
 
 export type InternalCoverageKind = 'RET' | 'REF' | 'ESC';
 
@@ -50,18 +54,13 @@ const dedupeShiftsByEmployee = (rows: Record<string, unknown>[]): Record<string,
   return [...byEmp.values()];
 };
 
-const escRefBandMatchesVacancy = (
+const escRefMatchesGap = (
   escShift: Record<string, unknown>,
-  vacancyCode: string,
-  now: Date,
+  gap: ReturnType<typeof gapFromAbsenceLikeShift>,
 ): boolean => {
-  if (escShift.isPresent && !escShift.isCompleted) return true;
-  const vac = normBandCode(vacancyCode);
-  const escBand = normBandCode(escShift.deploymentBand || escShift.coversBandCode || '');
-  if (vac && escBand && vac === escBand) return true;
-  const end = toDate(escShift.endDateObj);
-  if (end.getTime() <= now.getTime() && vac && escBand && vac === escBand) return true;
-  return false;
+  if (!gap) return false;
+  if (escShift.coverageUsed === true) return false;
+  return sourceShiftEligibleForCoverageGap(escShift, gap);
 };
 
 function mapRow(
@@ -110,7 +109,7 @@ export function buildInternalCoverageCandidates(
 ): InternalCoverageGroups {
   const objectiveId = String(absenceShift.objectiveId || '').trim();
   const absentEmpId = String(absenceShift.employeeId || '').trim();
-  const bandCode = String(absenceShift.code || '');
+  const gap = gapFromAbsenceLikeShift(absenceShift);
   const emps = (employees || []) as Record<string, unknown>[];
 
   const baseFilter = (sh: Record<string, unknown>) => {
@@ -128,7 +127,9 @@ export function buildInternalCoverageCandidates(
       .filter((raw) => {
         const sh = raw as Record<string, unknown>;
         if (!baseFilter(sh)) return false;
-        return normBandCode(sh.code) === 'RET';
+        if (sh.coverageUsed === true) return false;
+        if (normBandCode(sh.code) !== 'RET') return false;
+        return escRefMatchesGap(sh, gap);
       }) as Record<string, unknown>[],
   );
 
@@ -138,7 +139,7 @@ export function buildInternalCoverageCandidates(
         const sh = raw as Record<string, unknown>;
         if (!baseFilter(sh)) return false;
         if (normBandCode(sh.code) !== 'REF') return false;
-        return escRefBandMatchesVacancy(sh, bandCode, now);
+        return escRefMatchesGap(sh, gap);
       }) as Record<string, unknown>[],
   );
 
@@ -148,7 +149,7 @@ export function buildInternalCoverageCandidates(
         const sh = raw as Record<string, unknown>;
         if (!baseFilter(sh)) return false;
         if (normBandCode(sh.code) !== 'ESC') return false;
-        return escRefBandMatchesVacancy(sh, bandCode, now);
+        return escRefMatchesGap(sh, gap);
       }) as Record<string, unknown>[],
   );
 

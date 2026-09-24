@@ -17,6 +17,10 @@ export { isActiveOpsCoverageDoc } from '@/lib/cosp/coverageSemantics';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import { resolveCoverageBandCode } from '@/lib/operaciones/coverageExtAdvSegments';
 import {
+  gapFromAbsenceLikeShift,
+  sourceShiftEligibleForCoverageGap,
+} from '@/lib/operaciones/coverageSourceShiftForGap';
+import {
   isDualSiblingOpsCoverage,
   isTitularAlreadyCovered,
 } from '@/lib/operaciones/coverageTitularState';
@@ -283,6 +287,20 @@ export async function applyCoverage(
 
   const sourceId = String(params.sourceShiftId || '').trim();
   if (sourceId) {
+    const srcSnap = await getDoc(doc(db, 'turnos', sourceId));
+    if (!srcSnap.exists()) {
+      throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
+    }
+    const srcData = srcSnap.data() as Record<string, unknown>;
+    if (['REF', 'ESC', 'RET'].includes(ct)) {
+      const gap = gapFromAbsenceLikeShift(titular as Record<string, unknown>);
+      if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
+        throw new CoverageApplyError(
+          'INVALID_SOURCE',
+          'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET.',
+        );
+      }
+    }
     const usedBase = sourceShiftCoverageUsedPatch({
       titularShiftId: titularId,
       coverageDocId: covDocId,

@@ -14,6 +14,7 @@ exports.opsCoverageLinkFields = opsCoverageLinkFields;
 exports.applyCoverage = applyCoverage;
 const admin = require("firebase-admin");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
+const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
 function coverageServerTime() {
     if (process.env.FIRESTORE_EMULATOR_HOST) {
         return admin.firestore.Timestamp.now();
@@ -240,6 +241,17 @@ async function applyCoverage(db, batch, params) {
     const isRet = ct === 'RET';
     const sourceId = String(params.sourceShiftId || '').trim();
     if (sourceId) {
+        const srcSnap = await db.collection('turnos').doc(sourceId).get();
+        if (!srcSnap.exists) {
+            throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
+        }
+        const srcData = srcSnap.data();
+        if (['REF', 'ESC', 'RET'].includes(ct)) {
+            const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
+            if (!gap || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, gap)) {
+                throw new CoverageApplyError('INVALID_SOURCE', 'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.');
+            }
+        }
         const usedBase = sourceShiftCoverageUsedPatch({
             titularShiftId: titularId,
             coverageDocId: covDocId,

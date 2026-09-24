@@ -1,5 +1,9 @@
 import * as admin from 'firebase-admin';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
+import {
+  gapWindowFromTitularShift,
+  sourceShiftEligibleForCoverageGap,
+} from './coverageSourceShiftForGap';
 
 function coverageServerTime(): admin.firestore.Timestamp | admin.firestore.FieldValue {
   if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -315,6 +319,20 @@ export async function applyCoverage(
 
   const sourceId = String(params.sourceShiftId || '').trim();
   if (sourceId) {
+    const srcSnap = await db.collection('turnos').doc(sourceId).get();
+    if (!srcSnap.exists) {
+      throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
+    }
+    const srcData = srcSnap.data() as Record<string, unknown>;
+    if (['REF', 'ESC', 'RET'].includes(ct)) {
+      const gap = gapWindowFromTitularShift(titular);
+      if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
+        throw new CoverageApplyError(
+          'INVALID_SOURCE',
+          'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.',
+        );
+      }
+    }
     const usedBase = sourceShiftCoverageUsedPatch({
       titularShiftId: titularId,
       coverageDocId: covDocId,

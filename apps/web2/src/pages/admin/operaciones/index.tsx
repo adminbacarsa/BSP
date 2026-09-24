@@ -1083,6 +1083,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
     else if (shift.isPresent)          { accentColor = 'bg-emerald-500'; rowBg = 'bg-emerald-50/20'; }
     else if (shift.isAbsent)           { accentColor = 'bg-slate-700';   rowBg = 'bg-slate-100'; }
+    else if (shift.isCoverageSourceUsed) { accentColor = 'bg-violet-500'; rowBg = 'bg-violet-50/50'; }
     else if (shift.isPotentialAbsence) { accentColor = 'bg-red-600';     rowBg = 'bg-red-50/40'; }
     else if (shift.isLateNotified)     { accentColor = 'bg-amber-500';   rowBg = 'bg-amber-50/60'; }
     else if (shift.isLateUnnotified)   { accentColor = 'bg-amber-400';   rowBg = 'bg-amber-50/30'; }
@@ -1142,6 +1143,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
     else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
     else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>CIERRE PENDIENTE</span>;
+    else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
+        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0 max-w-[min(100%,260px)] truncate" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
+    }
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified) {
         const lateTxt = opsLateArrivalBadgeLabel(shift) || 'TARDE AVISADA';

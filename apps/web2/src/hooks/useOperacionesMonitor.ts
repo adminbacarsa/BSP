@@ -616,6 +616,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
 
             const isUnassigned = !isValidEmployee;
+            const isCoverageSourceUsed = shift.coverageUsed === true;
+            const coverageUsedLabel = isCoverageSourceUsed
+              ? `Usado: cubre a ${String(
+                  shift.coverageUsedCoversEmployeeName || shift.coversEmployeeName || 'titular',
+                ).trim()}${shift.coverageUsedObjectiveName ? ` en ${shift.coverageUsedObjectiveName}` : ''}`
+              : null;
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
             const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
             // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
@@ -655,8 +661,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const plannedOperativelyCovered = !!shift.operacionallyCovered
                 || (shift.coverageStatus === 'COVERED' && (shift.coverageSegmentRole === 'TARGET' || isAbsent))
                 || (!!shift.coveredBy && shift.coverageStatus === 'COVERED' && (isAbsent || shift.coverageSegmentRole === 'TARGET'));
-            const isEarlyStart = isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
-            const isConvocado = !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
+            const isEarlyStart = !isCoverageSourceUsed && isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
+            const isConvocado = !isCoverageSourceUsed && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
                 (isEarlyStart || isPlannedLiberationRet || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
             const extSegStart = (shift.coverageSegmentRole === 'EXTENSION' && shift.segmentFromTime)
                 ? createDateFromTime(shift.segmentFromTime, shift.shiftDateObj)
@@ -707,6 +713,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
             const minutesPastStart = -minutesUntilStart;
             const lateEligible =
+                !isCoverageSourceUsed &&
                 !isPassiveRetStandby &&
                 !isPresent &&
                 !isCompleted &&
@@ -735,7 +742,17 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 !isLateNotified &&
                 minutesUntilStart <= 15 &&
                 minutesUntilStart > -5;
-            const isFuture = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15 && !isLateNotified;
+            const isFuture =
+                !isCoverageSourceUsed &&
+                !isPassiveRetStandby &&
+                !isPresent &&
+                !isCompleted &&
+                !isUnassigned &&
+                !isAbsent &&
+                !isFranco &&
+                !hasRRHHNovedad &&
+                minutesUntilStart > 15 &&
+                !isLateNotified;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -745,7 +762,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // el puesto sigue descubierto y NO cuentan como cobertura real.
             const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
             // isSinCobertura / descubierto NO cuentan como cobertura real ni como VAC accionable.
-            const countsForCoverage = !isPassiveRetStandby && !isAutoNotification && (
+            const countsForCoverage = !isCoverageSourceUsed && !isPassiveRetStandby && !isAutoNotification && (
                 (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
                 (isReportedToPlanning && !isValidEmployee) ||
                 (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
@@ -761,6 +778,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
+                isCoverageSourceUsed, coverageUsedLabel,
                 isLateNotified, isLateUnnotified, minutesRemainingLate, lateArrivalEtaMinutes, lateArrivalEtaLabel,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isPendingClose, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
