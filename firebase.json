@@ -50,6 +50,38 @@
         "destination": "/index.html"
       }
     ],
+    "redirects": [
+      {
+        "source": "/empleado/activar",
+        "destination": "/app/activar/",
+        "type": 301
+      },
+      {
+        "source": "/empleado/activar/**",
+        "destination": "/app/activar/",
+        "type": 301
+      },
+      {
+        "source": "/empleado/dashboard",
+        "destination": "/app/",
+        "type": 301
+      },
+      {
+        "source": "/empleado/dashboard/**",
+        "destination": "/app/",
+        "type": 301
+      },
+      {
+        "source": "/empleado",
+        "destination": "/app/",
+        "type": 301
+      },
+      {
+        "source": "/empleado/**",
+        "destination": "/app/",
+        "type": 301
+      }
+    ],
     "cleanUrls": true,
     "trailingSlash": true,
     "headers": [

@@ -17,6 +17,7 @@ import { useEventosPortal } from '../../src/hooks/useEventosPortal';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
 import { useConvocatoriasCobertura } from '../../src/hooks/useConvocatoriasCobertura';
+import { usePendingAaCertificates } from '../../src/hooks/usePendingAaCertificates';
 import {
   heroShift,
   isActiveRetentionShift,
@@ -26,6 +27,7 @@ import {
 } from '../../src/lib/shifts';
 import { resolveShiftPlacement } from '../../src/lib/shiftPlacement';
 import { appRoutes } from '../../src/lib/appRoutes';
+import { getPortalFirebase } from '../../src/lib/portal';
 import { CommandButton } from '../../src/components/ui/CommandButton';
 import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
@@ -34,6 +36,7 @@ import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisB
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
+import { PendingAaCertificatesCard } from '../../src/components/PendingAaCertificatesCard';
 import {
   formatHeroShiftHeadline,
   formatHeroTimeRange,
@@ -109,6 +112,17 @@ function HoyScreenContent() {
   } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
   const { eventosMap } = useEventosMap(employee?.empresaId);
   const { unreadCount } = usePortalInbox(user, previewEmpDocId);
+  const { db } = getPortalFirebase();
+  const {
+    items: pendingAaItems,
+    uploadingId: aaUploadingId,
+    uploadCertificate: uploadAaCertificate,
+  } = usePendingAaCertificates({
+    db,
+    authUid: user?.uid ?? null,
+    empDocId,
+    enabled: employeeProfileReady && !isPreviewMode,
+  });
 
   const focusCobertura =
     String(params.focus || '').toLowerCase() === 'cobertura' ||
@@ -384,6 +398,12 @@ function HoyScreenContent() {
           {isRetentionHero && mainShift ? (
             <RetentionBanner objectiveName={placement.objective} />
           ) : null}
+
+          <PendingAaCertificatesCard
+            items={pendingAaItems}
+            uploadingId={aaUploadingId}
+            onUpload={uploadAaCertificate}
+          />
 
           {loading ? (
             <ActivityIndicator size="large" color={palette.primary} style={styles.loader} />
