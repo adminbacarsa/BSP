@@ -7,6 +7,7 @@ type DeviceInfo = Record<string, string>;
 async function resolveEmployeeIdForUid(
   db: admin.firestore.Firestore,
   uid: string,
+  email?: string | null,
 ): Promise<{ employeeId: string; empresaId: string | null } | null> {
   const byUid = await db.collection('empleados').where('uid', '==', uid).limit(1).get();
   if (!byUid.empty) {
@@ -16,7 +17,20 @@ async function resolveEmployeeIdForUid(
       empresaId: (d.data()?.empresaId as string) || null,
     };
   }
-  return null;
+  // Mismo respaldo que la app y el portal viejo: legajo con el email del usuario pero sin uid
+  // (nunca activó el acceso por mail). Solo si hay un único legajo con ese email y sin otro uid.
+  const mail = String(email || '').trim();
+  if (!mail) return null;
+  const byEmail = await db.collection('empleados').where('email', '==', mail).limit(2).get();
+  if (byEmail.size !== 1) return null;
+  const d = byEmail.docs[0];
+  const existingUid = String(d.data()?.uid || '').trim();
+  if (existingUid && existingUid !== uid) return null;
+  if (!existingUid) await d.ref.update({ uid, uidLinkedAt: FieldValue.serverTimestamp(), uidLinkedBy: 'DEVICE_REGISTRATION' });
+  return {
+    employeeId: d.id,
+    empresaId: (d.data()?.empresaId as string) || null,
+  };
 }
 
 async function notifySupervisorsDeviceRequest(
@@ -83,7 +97,7 @@ export const requestGuardDeviceRegistration = functions.https.onCall(async (data
   }
 
   const db = admin.firestore();
-  const legajo = await resolveEmployeeIdForUid(db, uid);
+  const legajo = await resolveEmployeeIdForUid(db, uid, context.auth.token.email);
   if (!legajo) {
     throw new functions.https.HttpsError('failed-precondition', 'No hay legajo vinculado a tu usuario.');
   }

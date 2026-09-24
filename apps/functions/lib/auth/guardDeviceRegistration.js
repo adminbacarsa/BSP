@@ -4,7 +4,7 @@ exports.getGuardDeviceRegistrationStatus = exports.listPendingGuardDeviceRegistr
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const functions = require("firebase-functions/v1");
-async function resolveEmployeeIdForUid(db, uid) {
+async function resolveEmployeeIdForUid(db, uid, email) {
     const byUid = await db.collection('empleados').where('uid', '==', uid).limit(1).get();
     if (!byUid.empty) {
         const d = byUid.docs[0];
@@ -13,7 +13,22 @@ async function resolveEmployeeIdForUid(db, uid) {
             empresaId: d.data()?.empresaId || null,
         };
     }
-    return null;
+    const mail = String(email || '').trim();
+    if (!mail)
+        return null;
+    const byEmail = await db.collection('empleados').where('email', '==', mail).limit(2).get();
+    if (byEmail.size !== 1)
+        return null;
+    const d = byEmail.docs[0];
+    const existingUid = String(d.data()?.uid || '').trim();
+    if (existingUid && existingUid !== uid)
+        return null;
+    if (!existingUid)
+        await d.ref.update({ uid, uidLinkedAt: firestore_1.FieldValue.serverTimestamp(), uidLinkedBy: 'DEVICE_REGISTRATION' });
+    return {
+        employeeId: d.id,
+        empresaId: d.data()?.empresaId || null,
+    };
 }
 async function notifySupervisorsDeviceRequest(db, params) {
     const empSnap = await db.collection('empleados').doc(params.employeeId).get();
@@ -62,7 +77,7 @@ exports.requestGuardDeviceRegistration = functions.https.onCall(async (data, con
         throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
     }
     const db = admin.firestore();
-    const legajo = await resolveEmployeeIdForUid(db, uid);
+    const legajo = await resolveEmployeeIdForUid(db, uid, context.auth.token.email);
     if (!legajo) {
         throw new functions.https.HttpsError('failed-precondition', 'No hay legajo vinculado a tu usuario.');
     }
