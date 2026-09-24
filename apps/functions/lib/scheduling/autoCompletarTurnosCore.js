@@ -30,7 +30,6 @@ function checkInMs(data) {
         return pres;
     return shiftStartMs(data);
 }
-/** Relevo válido: mismo puesto, start en [end−30m, end+2h], no compañero en curso (empezó antes de end−30m). */
 function isValidReliefForOutgoing(incoming, outgoingEndMs) {
     const st = shiftStartMs(incoming);
     if (!st)
@@ -125,6 +124,34 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         if (!endTimeMs)
             continue;
         const continuous = await hasContinuity(shift);
+        const relievedBy = String(shift.relievedBy || '').trim();
+        const relieveSchedMs = shift.relieveScheduledAt?.toMillis?.()
+            ?? (relievedBy ? endTimeMs : 0);
+        if (relievedBy && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
+            const incomingName = String(shift.relievedByName || 'relevo').trim();
+            completeBatch.update(docSnap.ref, {
+                status: 'COMPLETED',
+                isCompleted: true,
+                isPresent: false,
+                realEndTime: firestore_1.Timestamp.fromMillis(relieveSchedMs),
+                autoCompletedAt: now,
+                autoCompletedBy: 'SYSTEM_SCHEDULER',
+                autoCloseReason: 'RELEVO_PROGRAMADO',
+                completionReason: 'RELEVO_PROGRAMADO',
+            });
+            const outEmpId = String(shift.employeeId || '').trim();
+            if (outEmpId) {
+                relevoFinishNotifs.push({
+                    outEmpId,
+                    outDocId: docSnap.id,
+                    incomingName,
+                    objectiveName: String(shift.objectiveName || ''),
+                    empresaId: ctx.shiftEmpresaId(shift) || null,
+                });
+            }
+            completed++;
+            continue;
+        }
         if (shift.isRetention === true) {
             const manualExtended = shift.manualRetentionType === 'extended' && Number(shift.manualRetentionHours || 0) > 0;
             if (manualExtended) {
@@ -184,7 +211,6 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         }
         const windowStart = firestore_1.Timestamp.fromMillis(endTimeMs - RELEVO_WINDOW_AFTER_MS);
         const windowEnd = firestore_1.Timestamp.fromMillis(endTimeMs + RELEVO_WINDOW_AFTER_MS);
-        // Sin objetivo o puesto no hay relevo identificable; un undefined en el where corta toda la pasada.
         const relieveSnap = shift.objectiveId && shift.positionName
             ? await db
                 .collection('turnos')
@@ -242,6 +268,12 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             completed++;
         }
         else if (relievePending || relieveAbsent) {
+            const retentionUntilMs = shift.retentionExpectedUntil?.toMillis?.()
+                ?? shift.lateReliefEtaAt?.toMillis?.()
+                ?? 0;
+            if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+                continue;
+            }
             if (!continuous) {
                 completeBatch.update(docSnap.ref, {
                     status: 'COMPLETED',
@@ -281,6 +313,12 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             alertedNoRelief++;
         }
         else if (!continuous) {
+            const retentionUntilMs = shift.retentionExpectedUntil?.toMillis?.()
+                ?? shift.lateReliefEtaAt?.toMillis?.()
+                ?? 0;
+            if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+                continue;
+            }
             completeBatch.update(docSnap.ref, {
                 status: 'COMPLETED',
                 isCompleted: true,
@@ -309,3 +347,4 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
     }
     return { completed, alertedNoRelief };
 }
+//# sourceMappingURL=autoCompletarTurnosCore.js.map

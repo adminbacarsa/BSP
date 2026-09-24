@@ -20,7 +20,6 @@ async function employeeUid(db, employeeId) {
     const empDoc = await db.collection('empleados').doc(employeeId).get();
     return empDoc.exists ? empDoc.data()?.uid : undefined;
 }
-/** Push + bandeja: turno saliente cerrado con relevo ya en puesto (TURNO_FINALIZADO). */
 async function notifyTurnoFinalizadoRelevo(db, params) {
     const { outEmpId, outDocId, incomingName, objectiveName, empresaId } = params;
     const title = 'Turno finalizado';
@@ -46,7 +45,6 @@ async function notifyTurnoFinalizadoRelevo(db, params) {
         console.warn('[relevoNotifications] TURNO_FINALIZADO doc:', e?.message);
     }
 }
-/** Aviso al saliente: relevo llega tarde; queda retenido hasta que llegue (RETENCION_AVISO). */
 async function notifyRetencionAvisoRelevoTarde(db, params) {
     const { outEmpId, outDocId, incomingName, objectiveName, etaAtMs, empresaId } = params;
     const etaLabel = formatHmArgentina(etaAtMs);
@@ -75,7 +73,6 @@ async function notifyRetencionAvisoRelevoTarde(db, params) {
         console.warn('[relevoNotifications] RETENCION_AVISO doc:', e?.message);
     }
 }
-/** Saliente alineado al inicio del entrante: aviso RETENCION_AVISO (portal o convocatoria LLEGADA_TARDE). */
 async function applyLateReliefNoticeToOutgoing(db, incomingShiftId, shiftData, etaAt) {
     const gapStartMs = shiftData.startTime?.toMillis?.() ?? 0;
     const objectiveId = String(shiftData.objectiveId || '').trim();
@@ -99,8 +96,18 @@ async function applyLateReliefNoticeToOutgoing(db, incomingShiftId, shiftData, e
         lateReliefIncomingShiftId: incomingShiftId,
         lateReliefIncomingName: incomingName,
         lateReliefEtaAt: etaAt,
+        retentionExpectedUntil: etaAt,
     }, { merge: true });
     if (outEmpId) {
+        const dupSnap = await db
+            .collection('user_notifications')
+            .where('employeeId', '==', outEmpId)
+            .where('type', '==', 'RETENCION_AVISO')
+            .where('turnoId', '==', outgoing.id)
+            .limit(1)
+            .get();
+        if (!dupSnap.empty)
+            return true;
         await notifyRetencionAvisoRelevoTarde(db, {
             outEmpId,
             outDocId: outgoing.id,
@@ -112,3 +119,4 @@ async function applyLateReliefNoticeToOutgoing(db, incomingShiftId, shiftData, e
     }
     return true;
 }
+//# sourceMappingURL=relevoNotifications.js.map

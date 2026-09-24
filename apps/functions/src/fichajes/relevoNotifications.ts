@@ -127,11 +127,21 @@ export async function applyLateReliefNoticeToOutgoing(
       lateReliefIncomingShiftId: incomingShiftId,
       lateReliefIncomingName: incomingName,
       lateReliefEtaAt: etaAt,
+      retentionExpectedUntil: etaAt,
     },
     { merge: true },
   );
 
   if (outEmpId) {
+    const dupSnap = await db
+      .collection('user_notifications')
+      .where('employeeId', '==', outEmpId)
+      .where('type', '==', 'RETENCION_AVISO')
+      .where('turnoId', '==', outgoing.id)
+      .limit(1)
+      .get();
+    if (!dupSnap.empty) return true;
+
     await notifyRetencionAvisoRelevoTarde(db, {
       outEmpId,
       outDocId: outgoing.id,

@@ -159,6 +159,37 @@ export async function runAutoCompletarTurnosPass(
     if (!endTimeMs) continue;
     const continuous = await hasContinuity(shift);
 
+    const relievedBy = String(shift.relievedBy || '').trim();
+    const relieveSchedMs =
+      (shift.relieveScheduledAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+      ?? (relievedBy ? endTimeMs : 0);
+
+    if (relievedBy && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
+      const incomingName = String(shift.relievedByName || 'relevo').trim();
+      completeBatch.update(docSnap.ref, {
+        status: 'COMPLETED',
+        isCompleted: true,
+        isPresent: false,
+        realEndTime: Timestamp.fromMillis(relieveSchedMs),
+        autoCompletedAt: now,
+        autoCompletedBy: 'SYSTEM_SCHEDULER',
+        autoCloseReason: 'RELEVO_PROGRAMADO',
+        completionReason: 'RELEVO_PROGRAMADO',
+      });
+      const outEmpId = String(shift.employeeId || '').trim();
+      if (outEmpId) {
+        relevoFinishNotifs.push({
+          outEmpId,
+          outDocId: docSnap.id,
+          incomingName,
+          objectiveName: String(shift.objectiveName || ''),
+          empresaId: ctx.shiftEmpresaId(shift) || null,
+        });
+      }
+      completed++;
+      continue;
+    }
+
     if (shift.isRetention === true) {
       const manualExtended =
         shift.manualRetentionType === 'extended' && Number(shift.manualRetentionHours || 0) > 0;
@@ -285,6 +316,13 @@ export async function runAutoCompletarTurnosPass(
       }
       completed++;
     } else if (relievePending || relieveAbsent) {
+      const retentionUntilMs =
+        (shift.retentionExpectedUntil as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? (shift.lateReliefEtaAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? 0;
+      if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+        continue;
+      }
       if (!continuous) {
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
@@ -325,6 +363,13 @@ export async function runAutoCompletarTurnosPass(
       }
       alertedNoRelief++;
     } else if (!continuous) {
+      const retentionUntilMs =
+        (shift.retentionExpectedUntil as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? (shift.lateReliefEtaAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? 0;
+      if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+        continue;
+      }
       completeBatch.update(docSnap.ref, {
         status: 'COMPLETED',
         isCompleted: true,

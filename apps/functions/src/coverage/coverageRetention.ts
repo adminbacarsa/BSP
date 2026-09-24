@@ -110,6 +110,7 @@ export async function retainOutgoingForGap(
     gapStartMs,
     excludeShiftIds: [absenceShiftId],
     excludeEmployeeId: absentEmpId,
+    absenceShiftId,
   });
 
   if (!pick) {

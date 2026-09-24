@@ -54,6 +54,8 @@ export async function findPresentOutgoingAlignedToGapStart(
     gapStartMs: number;
     excludeShiftIds?: string[];
     excludeEmployeeId?: string;
+    /** Si el candidato está retenido por otra ausencia, probar el siguiente. */
+    absenceShiftId?: string;
   },
 ): Promise<OutgoingReliefPick | null> {
   const objectiveId = String(params.objectiveId || '').trim();
@@ -75,6 +77,7 @@ export async function findPresentOutgoingAlignedToGapStart(
     .filter(({ id, data }) => {
       if (exclude.has(id)) return false;
       if (data.isCompleted === true) return false;
+      if (String(data.relievedBy || '').trim()) return false;
       if (data.isAbsent || data.isVirtual === true) return false;
       if (!posMatchRelief(data.positionName, params.positionName)) return false;
       const eid = String(data.employeeId || '').trim();
@@ -86,7 +89,20 @@ export async function findPresentOutgoingAlignedToGapStart(
       if (Math.abs(en - gapStartMs) > RELEVO_GAP_ALIGN_MS) return false;
       return true;
     })
-    .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
+    .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
 
-  return outgoing[0] ?? null;
+  const absenceShiftId = String(params.absenceShiftId || '').trim();
+  for (const cand of outgoing) {
+    const linked = String(cand.data.retentionAbsenceShiftId || '').trim();
+    if (
+      cand.data.isRetention === true
+      && linked
+      && absenceShiftId
+      && linked !== absenceShiftId
+    ) {
+      continue;
+    }
+    return cand;
+  }
+  return null;
 }

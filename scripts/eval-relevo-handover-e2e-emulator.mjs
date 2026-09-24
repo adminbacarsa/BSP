@@ -271,8 +271,17 @@ async function run() {
       await applyLateReliefNoticeToOutgoing(db, inId, inData, etaAt);
       const n = await countNotifs(outEmp, 'RETENCION_AVISO');
       const out = (await db.collection('turnos').doc(outId).get()).data();
-      const ok = n >= 1 && out?.lateReliefIncomingShiftId === inId;
-      report(3, ok, ok ? 'push/bandeja RETENCION_AVISO al saliente' : `notifs=${n} link=${out?.lateReliefIncomingShiftId}`);
+      const ok =
+        n >= 1
+        && out?.lateReliefIncomingShiftId === inId
+        && out?.retentionExpectedUntil?.toMillis?.() === etaAt.toMillis();
+      report(
+        3,
+        ok,
+        ok
+          ? 'push/bandeja RETENCION_AVISO + retentionExpectedUntil'
+          : `notifs=${n} link=${out?.lateReliefIncomingShiftId} until=${out?.retentionExpectedUntil?.toMillis?.()}`,
+      );
     }
 
     // Caso 4 — entrante ficha 15:12 (post fin): saliente cierra realEnd 15:12 + TURNO_FINALIZADO

@@ -1,37 +1,4 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.RETENTION_MAX_TOTAL_MS = void 0;
 exports.retainOutgoingForGap = retainOutgoingForGap;
@@ -39,7 +6,7 @@ exports.releaseRetentionForAbsenceShift = releaseRetentionForAbsenceShift;
 exports.totalShiftMs = totalShiftMs;
 exports.releaseInvalidRetentionsRun = releaseInvalidRetentionsRun;
 exports.applyAutoRetentionForAbsenceShift = applyAutoRetentionForAbsenceShift;
-const admin = __importStar(require("firebase-admin"));
+const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("./positionHasContinuity");
 const coverageTraceShift_1 = require("./coverageTraceShift");
@@ -96,10 +63,6 @@ async function employeePushTokens(db, employeeId) {
         .map((d) => d.data()?.token)
         .filter((t) => typeof t === 'string' && t.length > 10);
 }
-/**
- * Retiene al(los) saliente(s) del puesto para cubrir el hueco del titular ausente.
- * Idempotente: una retención activa por titularShiftId (retentionAbsenceShiftId).
- */
 async function retainOutgoingForGap(db, titularShift, opts = {}) {
     if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(titularShift)) {
         return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'TRACE_REGISTRATION_SHIFT' };
@@ -132,6 +95,7 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
         gapStartMs,
         excludeShiftIds: [absenceShiftId],
         excludeEmployeeId: absentEmpId,
+        absenceShiftId,
     });
     if (!pick) {
         return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'NO_OUTGOING' };
@@ -302,7 +266,6 @@ async function releaseInvalidRetentionsRun(db, opts) {
     }
     return { rows };
 }
-/** @deprecated usar retainOutgoingForGap */
 async function applyAutoRetentionForAbsenceShift(db, absenceShiftId, absenceData) {
     const r = await retainOutgoingForGap(db, { ...absenceData, id: absenceShiftId }, { sendPush: true, reportedBy: 'AUTO' });
     return {
@@ -311,3 +274,4 @@ async function applyAutoRetentionForAbsenceShift(db, absenceShiftId, absenceData
         employeeName: r.employeeNames[0],
     };
 }
+//# sourceMappingURL=coverageRetention.js.map

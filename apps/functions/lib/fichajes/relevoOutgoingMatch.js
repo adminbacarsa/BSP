@@ -42,10 +42,6 @@ const startMs = (data) => {
     const st = data.startTime;
     return st?.toMillis?.() ?? 0;
 };
-/**
- * Saliente presente en el puesto cuyo fin coincide con gapStart (±30 min),
- * mismo criterio que retainOutgoingForGap.
- */
 async function findPresentOutgoingAlignedToGapStart(db, params) {
     const objectiveId = String(params.objectiveId || '').trim();
     const gapStartMs = params.gapStartMs;
@@ -66,6 +62,8 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
             return false;
         if (data.isCompleted === true)
             return false;
+        if (String(data.relievedBy || '').trim())
+            return false;
         if (data.isAbsent || data.isVirtual === true)
             return false;
         if (!(0, exports.posMatchRelief)(data.positionName, params.positionName))
@@ -74,7 +72,7 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
         if (!eid || eid === 'VACANTE' || (absentEmpId && eid === absentEmpId))
             return false;
         const st = startMs(data);
-        if (st >= gapStartMs + 60000)
+        if (st >= gapStartMs + 60_000)
             return false;
         const en = endMs(data);
         if (!en)
@@ -83,6 +81,18 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
             return false;
         return true;
     })
-        .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
-    return outgoing[0] ?? null;
+        .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
+    const absenceShiftId = String(params.absenceShiftId || '').trim();
+    for (const cand of outgoing) {
+        const linked = String(cand.data.retentionAbsenceShiftId || '').trim();
+        if (cand.data.isRetention === true
+            && linked
+            && absenceShiftId
+            && linked !== absenceShiftId) {
+            continue;
+        }
+        return cand;
+    }
+    return null;
 }
+//# sourceMappingURL=relevoOutgoingMatch.js.map

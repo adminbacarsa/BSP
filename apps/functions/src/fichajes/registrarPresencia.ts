@@ -64,6 +64,7 @@ function isCambioCandidate(
   nowMs: number,
   incomingStartMs: number,
 ): boolean {
+  if (String(dat.relievedBy || '').trim()) return false;
   if (dat.isRetention === true) {
     const scheduledEnd = dat.endTime?.toMillis?.() ?? 0;
     return scheduledEnd >= incomingStartMs - 45 * 60 * 1000;
@@ -348,6 +349,7 @@ export async function registrarPresencia(
             if (normPos(dat.positionName) !== normPos(positionName)) return false;
             if (d.id === shiftId) return false;
             if (empId && dat.employeeId === empId) return false;
+            if (String(dat.relievedBy || '').trim()) return false;
             return true;
           });
 
@@ -396,13 +398,13 @@ export async function registrarPresencia(
           const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
           const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
 
-          if (isEarlyRelevo) {
+          if (isEarlyRelevo && !wantOverride) {
             await outDoc.ref.update({
               relievedBy: empId || null,
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),
               relieveScheduledAt: outData.endTime ?? null,
-              autoRelevo: !wantOverride,
+              autoRelevo: true,
               relievedEarly: true,
               relievedSource: source,
             });

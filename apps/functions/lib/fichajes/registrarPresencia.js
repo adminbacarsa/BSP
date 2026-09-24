@@ -1,40 +1,7 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.registrarPresencia = registrarPresencia;
-const admin = __importStar(require("firebase-admin"));
+const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const checkInWindow_1 = require("./checkInWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
@@ -46,7 +13,6 @@ function normPos(n) {
         .trim()
         .toLowerCase();
 }
-/** Llegada real al puesto: check-in GPS/ops antes que horario planificado. */
 function arrivalMs(dat) {
     return (dat.checkInTime?.toMillis?.() ??
         dat.realStartTime?.toMillis?.() ??
@@ -55,6 +21,8 @@ function arrivalMs(dat) {
         0);
 }
 function isCambioCandidate(dat, nowMs, incomingStartMs) {
+    if (String(dat.relievedBy || '').trim())
+        return false;
     if (dat.isRetention === true) {
         const scheduledEnd = dat.endTime?.toMillis?.() ?? 0;
         return scheduledEnd >= incomingStartMs - 45 * 60 * 1000;
@@ -103,10 +71,6 @@ async function resolvePositionCapacity(db, objectiveId, positionName, empresaId)
     }
     return 1;
 }
-/**
- * Motor único de presencia + auto-relevo FIFO 1:1.
- * Usado por portal, Operaciones, VIGI y (futuro) demo.
- */
 async function registrarPresencia(db, input) {
     const { shiftId, source, coords, recordedAt, operatorUid, actorName, overrideRelieveShiftId, skipAutoRelevo, } = input;
     const shiftRef = db.collection('turnos').doc(shiftId);
@@ -183,7 +147,6 @@ async function registrarPresencia(db, input) {
     }
     await shiftRef.update(incomingPatch);
     await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'CHECKED_IN').catch((e) => console.warn('[registrarPresencia] cancelar ¿Venís?:', e.message));
-    // Notificación de confirmación al guardia (no bloqueante)
     void (async () => {
         try {
             const isPortal = source === 'PORTAL_GPS';
@@ -206,7 +169,6 @@ async function registrarPresencia(db, input) {
                 readAt: null,
                 createdAt: firestore_1.FieldValue.serverTimestamp(),
             });
-            // FCM push (solo si la app no está abierta)
             const [byEmp, byUid] = await Promise.all([
                 empId ? db.collection('device_tokens').where('employeeId', '==', empId).get() : Promise.resolve({ docs: [] }),
                 (async () => {
@@ -239,7 +201,6 @@ async function registrarPresencia(db, input) {
             console.warn('[registrarPresencia] notifyPresenceConfirmed:', e?.message);
         }
     })();
-    // Novedad ingreso (no bloqueante)
     void db
         .collection('novedades')
         .add({
@@ -313,6 +274,8 @@ async function registrarPresencia(db, input) {
                             return false;
                         if (empId && dat.employeeId === empId)
                             return false;
+                        if (String(dat.relievedBy || '').trim())
+                            return false;
                         return true;
                     });
                     const fifo = (a, b) => {
@@ -330,7 +293,6 @@ async function registrarPresencia(db, input) {
                     let pool = cambio;
                     if (pool.length === 0) {
                         const capacity = await resolvePositionCapacity(db, objectiveId, positionName, empresaId);
-                        // Tras marcar entrante, los presentes previos: si ya estaban al tope, liberar 1.
                         if (samePost.length >= capacity) {
                             pool = [...samePost].sort(fifo);
                         }
@@ -358,13 +320,13 @@ async function registrarPresencia(db, input) {
                     const outPosName = outData.positionName || '';
                     const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
                     const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
-                    if (isEarlyRelevo) {
+                    if (isEarlyRelevo && !wantOverride) {
                         await outDoc.ref.update({
                             relievedBy: empId || null,
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),
                             relieveScheduledAt: outData.endTime ?? null,
-                            autoRelevo: !wantOverride,
+                            autoRelevo: true,
                             relievedEarly: true,
                             relievedSource: source,
                         });
@@ -427,7 +389,6 @@ async function registrarPresencia(db, input) {
             console.warn('[registrarPresencia] auto-relevo:', e?.message);
         }
     }
-    // Bitácora (background)
     void db
         .collection('audit_logs')
         .add({
@@ -447,12 +408,11 @@ async function registrarPresencia(db, input) {
             : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`,
     })
         .catch(() => { });
-    // Llegada tarde (sin AA previa) → crear registro LT en ausencias para RRHH
     if (isLate && !shiftData.absenceType) {
         void (async () => {
             try {
                 const startMs2 = scheduledStartTs?.toMillis?.() ?? 0;
-                const arDate = new Date(startMs2 - 3 * 60 * 60 * 1000); // UTC-3
+                const arDate = new Date(startMs2 - 3 * 60 * 60 * 1000);
                 const dateStr = `${arDate.getUTCFullYear()}-${String(arDate.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate.getUTCDate()).padStart(2, '0')}`;
                 const existing = await db.collection('ausencias').where('shiftId', '==', shiftId).limit(1).get();
                 if (existing.empty) {
@@ -478,11 +438,9 @@ async function registrarPresencia(db, input) {
                 }
             }
             catch {
-                /* ignore */
             }
         })();
     }
-    // AA → LT en background
     if (shiftData.absenceType === 'AA') {
         void (async () => {
             try {
@@ -503,9 +461,9 @@ async function registrarPresencia(db, input) {
                 });
             }
             catch {
-                /* ignore */
             }
         })();
     }
     return { success: true, relieved };
 }
+//# sourceMappingURL=registrarPresencia.js.map

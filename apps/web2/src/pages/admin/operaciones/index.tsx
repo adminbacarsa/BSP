@@ -169,6 +169,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const activeGuards = logic.processedData
         .filter((s: any) => {
             if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
+            if (s.relievedBy) return false;
             // Filtro duración compatible (±90 min)
             const sStart = toDate(s.shiftDateObj).getTime();
             let sEnd = toDate(s.endDateObj).getTime();
