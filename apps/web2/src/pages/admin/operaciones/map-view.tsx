@@ -13,6 +13,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
+import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
     try {
@@ -1306,13 +1307,14 @@ export default function TacticalMapView() {
                                     </div>
                                     {lateShiftsPanel.map((s: any) => {
                                         const minutesPast = Math.round(s.minutesPastStart || 0);
+                                        const lateBadge = opsLateArrivalBadgeLabel(s) || `+${minutesPast}min`;
                                         return (
                                             <div key={s.id} className="px-3 py-2 flex items-center gap-2 border-l-4 border-l-amber-500 border-b border-slate-50 bg-white hover:bg-amber-50/30 transition-colors">
                                                 <div className="w-7 h-7 rounded-full bg-amber-100 text-amber-700 flex items-center justify-center text-[10px] font-black shrink-0">{(s.employeeName || '?')[0]}</div>
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                         {s.employeeName || 'Desconocido'}
-                                                        <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700">+{minutesPast}min</span>
+                                                        <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700" title={lateBadge}>{lateBadge}</span>
                                                     </p>
                                                     <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
                                                 </div>

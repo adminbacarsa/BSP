@@ -9,6 +9,7 @@ import {
   supervisionCoverageCellText,
 } from '@/lib/supervision/supervisionUtils';
 import { buildOperacionesHref, buildPlanificacionHref } from '@/lib/supervision/supervisionLinks';
+import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 
 type StatusFilter = 'ALL' | 'CRITICO' | 'ALERTA' | 'OK';
 
@@ -33,7 +34,11 @@ function shiftStatus(s: any): ShiftStatusInfo {
     return { label: 'Ausente', cls: 'bg-rose-100 text-rose-700 border-rose-200', prio: 1 };
   }
   if (s.isPotentialAbsence) return { label: 'No llegó', cls: 'bg-amber-100 text-amber-700 border-amber-200', prio: 1 };
-  if (s.isLateNotified || s.isLateUnnotified) return { label: 'Tarde', cls: 'bg-orange-100 text-orange-700 border-orange-200', prio: 2 };
+  if (s.isLateNotified) {
+    const label = opsLateArrivalBadgeLabel(s) || 'Tarde avisada';
+    return { label, cls: 'bg-orange-100 text-orange-700 border-orange-200', prio: 2 };
+  }
+  if (s.isLateUnnotified) return { label: 'Tarde sin aviso', cls: 'bg-orange-100 text-orange-700 border-orange-200', prio: 2 };
   if (s.isAwaitingCoverageCheckIn || s.isConvocado) return { label: 'Convocado', cls: 'bg-indigo-100 text-indigo-700 border-indigo-200', prio: 3 };
   if (s.isImminent) return { label: 'Por iniciar', cls: 'bg-sky-100 text-sky-700 border-sky-200', prio: 3 };
   if (s.isRetention) return { label: 'Retención', cls: 'bg-violet-100 text-violet-700 border-violet-200', prio: 4 };

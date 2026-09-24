@@ -68,6 +68,7 @@ import {
 import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal';
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
+import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -1142,8 +1143,11 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
     else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>CIERRE PENDIENTE</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
-    else if (shift.isLateNotified)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5">â± LLEGÓ TARDE {shift.minutesRemainingLate != null ? `· ${shift.minutesRemainingLate}min` : ''}</span>;
-    else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE</span>;
+    else if (shift.isLateNotified) {
+        const lateTxt = opsLateArrivalBadgeLabel(shift) || 'TARDE AVISADA';
+        badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-500 text-white animate-pulse shrink-0 flex items-center gap-0.5 max-w-[min(100%,240px)] truncate" title={lateTxt}>⏱ {lateTxt}</span>;
+    }
+    else if (shift.isLateUnnotified) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-400 text-white shrink-0">TARDE SIN AVISO</span>;
     else if (shift.isPresent)        badge =<span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-600 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ACTIVO {elapsedInShift ? elapsedInShift : ''}</span>;
     else if (shift.isEarlyStart || shift.isAwaitingCoverageCheckIn) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-indigo-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><PlayCircle size={8}/>{shift.coverageSegmentRole === 'EARLY_START' ? 'ADEL PLAN' : shift.isEarlyStart ? 'ADELANTADO' : 'CONVOCADO'}</span>;
     else if (shift.isPlannedExtensionImminent) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>EXT PLAN</span>;

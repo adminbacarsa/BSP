@@ -10,6 +10,7 @@ import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShift
 import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
 import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
+import { computeOpsLateArrivalMonitorState } from '@/lib/operaciones/opsLateArrivalMonitor';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -704,15 +705,37 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
             const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
 
-            const isImminent = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart <= 15 && minutesUntilStart > -5;
-            const isFuture = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15;
             const minutesPastStart = -minutesUntilStart;
-            // Guardia tardanza: ventana T+5 → T+60 (sin novedad RRHH)
-            const isLateNotified = !isPassiveRetStandby && !!(shift.lateArrivalAt) && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
-            const isLateUnnotified = !isPassiveRetStandby && !shift.lateArrivalAt && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 5 && minutesPastStart <= 30;
-            const minutesRemainingLate = isLateNotified ? Math.max(0, Math.round(30 - minutesPastStart)) : null;
-            // Potencial ausencia: T+30 sin confirmar presencia — fallback si el cron no alcanzó a correr
-            const isPotentialAbsence = !isPassiveRetStandby && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco && !hasRRHHNovedad && minutesPastStart > 30;
+            const lateEligible =
+                !isPassiveRetStandby &&
+                !isPresent &&
+                !isCompleted &&
+                !isAbsent &&
+                !isUnassigned &&
+                !isFranco &&
+                !hasRRHHNovedad;
+            const startMs = shift.shiftDateObj?.getTime?.() ?? 0;
+            const nowMs = currentTime.getTime();
+            const lateMonitor = computeOpsLateArrivalMonitorState({
+                shift,
+                startMs,
+                nowMs,
+                eligible: lateEligible,
+            });
+            const {
+                isLateNotified,
+                isLateUnnotified,
+                isPotentialAbsence,
+                minutesRemainingLate,
+                lateArrivalEtaMinutes,
+                lateArrivalEtaLabel,
+            } = lateMonitor;
+            const isImminent =
+                lateEligible &&
+                !isLateNotified &&
+                minutesUntilStart <= 15 &&
+                minutesUntilStart > -5;
+            const isFuture = !isPassiveRetStandby && !isPresent && !isCompleted && !isUnassigned && !isAbsent && !isFranco && !hasRRHHNovedad && minutesUntilStart > 15 && !isLateNotified;
 
             // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
             // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
@@ -738,7 +761,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
                 isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
-                isLateNotified, isLateUnnotified, minutesRemainingLate,
+                isLateNotified, isLateUnnotified, minutesRemainingLate, lateArrivalEtaMinutes, lateArrivalEtaLabel,
                 isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isPendingClose, isFranco, isImminent, isFuture,
                 isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
                 isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,

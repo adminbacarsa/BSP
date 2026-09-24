@@ -115,6 +115,22 @@ export function useOperacionesMapMarkers(allObjectives: any[] = [], filteredShif
               statusText = 'RETENCIÓN';
               priority = 4;
             } else if (
+              (s.isLateNotified || s.isLateUnnotified) &&
+              !s.isPresent &&
+              !s.isAbsent &&
+              !s.isPotentialAbsence &&
+              priority < 3
+            ) {
+              iconPreset = 'YELLOW';
+              statusText = event
+                ? (s.isLateNotified ? 'EVENTO · TARDE AVISADA' : 'EVENTO · TARDE')
+                : s.isLateNotified
+                  ? 'TARDE AVISADA'
+                  : 'TARDE';
+              priority = 3;
+            } else if (
+              !s.isLateNotified &&
+              !s.isLateUnnotified &&
               !s.isPresent &&
               !s.isAbsent &&
               !s.isPotentialAbsence &&
