@@ -66,6 +66,8 @@
     "eval:casa-matriz": "npx tsx apps/web2/scripts/eval-casa-matriz-replay.ts",
     "eval:rotative-mtn": "npx tsx apps/web2/scripts/eval-rotative-mtn-cycle.ts",
     "eval:coverage-wisdom": "npx tsx apps/web2/scripts/eval-coverage-wisdom.ts",
+    "eval:guard-device-bindings": "node scripts/eval-guard-device-bindings-e2e.mjs",
+    "migrate:device-bindings": "node scripts/migrate-device-bindings.mjs",
     "eval:analisis-queries": "npx tsx apps/web2/scripts/eval-analisis-queries.ts",
     "eval:hours-balance": "npx tsx --tsconfig apps/web2/tsconfig.json apps/web2/scripts/eval-hours-balance.ts",
     "eval:vplan": "node scripts/eval-vplan.mjs",
