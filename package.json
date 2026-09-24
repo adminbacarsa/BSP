@@ -67,6 +67,7 @@
     "eval:rotative-mtn": "npx tsx apps/web2/scripts/eval-rotative-mtn-cycle.ts",
     "eval:coverage-wisdom": "npx tsx apps/web2/scripts/eval-coverage-wisdom.ts",
     "eval:guard-device-bindings": "node scripts/eval-guard-device-bindings-e2e.mjs",
+    "eval:device-tokens-rules": "node scripts/eval-device-tokens-rules-e2e.mjs",
     "eval:ops-late-arrival-monitor": "npx tsx apps/web2/scripts/eval-ops-late-arrival-monitor.ts",
     "eval:coverage-source-gap": "npx tsx apps/web2/scripts/eval-coverage-source-gap.ts",
     "eval:relevo-handover": "node scripts/eval-relevo-handover-e2e-emulator.mjs",

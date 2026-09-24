@@ -1962,8 +1962,6 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     if (td.uid !== context.auth.uid) {
         throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
     }
-    // Marcar token como usado
-    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     const empSnap = await db.collection('empleados').doc(td.employeeId).get();
     const empresaId = empSnap.data()?.empresaId || null;
     try {
@@ -1982,6 +1980,7 @@ exports.activateDevice = functions.https.onCall(async (data, context) => {
     catch (err) {
         (0, bindGuardDevice_1.rethrowBindGuardDeviceError)(err);
     }
+    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     return { success: true, employeeId: td.employeeId };
 });
 // =========================================================
@@ -2012,28 +2011,10 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
         throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expirÃ³. Pedile al administrador que te reenvÃ­e el mail de acceso.');
     }
     const { uid, employeeId } = td;
-    // Obtener email del usuario para devolvÃ©rselo al front (necesario para signIn)
     const userRecord = await admin.auth().getUser(uid);
     const email = userRecord.email;
     if (!email)
         throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
-    // 1. Establecer contraseña
-    await admin.auth().updateUser(uid, { password });
-    // Claim empresaId para reglas Firestore (eventos / solicitudes)
-    try {
-        const empSnap = await db.collection('empleados').doc(employeeId).get();
-        const empEmpresaId = (empSnap.data()?.empresaId || '').toString();
-        await admin.auth().setCustomUserClaims(uid, {
-            role: 'employee',
-            type: 'employee',
-            ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
-        });
-    }
-    catch (e) {
-        console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
-    }
-    // 2. Marcar token como usado
-    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     const resolvedPlatform = platform === 'ios' || platform === 'android' || platform === 'web'
         ? platform
         : deviceInfo?.platform === 'ios' || deviceInfo?.platform === 'android'
@@ -2058,6 +2039,19 @@ exports.activateAndSetPassword = functions.https.onCall(async (data, _context) =
     catch (err) {
         (0, bindGuardDevice_1.rethrowBindGuardDeviceError)(err);
     }
+    await admin.auth().updateUser(uid, { password });
+    try {
+        const empEmpresaId = (empSnapForBind.data()?.empresaId || '').toString();
+        await admin.auth().setCustomUserClaims(uid, {
+            role: 'employee',
+            type: 'employee',
+            ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
+        });
+    }
+    catch (e) {
+        console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
+    }
+    await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
     return { email, employeeId };
 });
 var guardDeviceRegistration_1 = require("./auth/guardDeviceRegistration");
