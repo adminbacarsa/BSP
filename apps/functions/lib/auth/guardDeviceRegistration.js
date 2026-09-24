@@ -1,9 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getGuardDeviceRegistrationStatus = exports.listPendingGuardDeviceRegistrations = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = void 0;
+exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.listPendingGuardDeviceRegistrations = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = void 0;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const functions = require("firebase-functions/v1");
+const bindGuardDevice_1 = require("./bindGuardDevice");
 async function resolveEmployeeIdForUid(db, uid, email) {
     const byUid = await db.collection('empleados').where('uid', '==', uid).limit(1).get();
     if (!byUid.empty) {
@@ -83,17 +84,16 @@ exports.requestGuardDeviceRegistration = functions.https.onCall(async (data, con
     }
     const empSnap = await db.collection('empleados').doc(legajo.employeeId).get();
     if (empSnap.data()?.bypassDeviceCheck === true) {
-        await db.collection('device_tokens').doc(uid).set({
-            uid,
-            employeeId: legajo.employeeId,
-            verified: true,
-            deviceId: trimmedDeviceId,
-            deviceInfo: deviceInfo || {},
-            platform: platform || 'web',
-            source: 'bypass_device_check',
-            updatedAt: firestore_1.FieldValue.serverTimestamp(),
-        }, { merge: true });
         return { status: 'approved', bypass: true };
+    }
+    try {
+        await (0, bindGuardDevice_1.assertCanRequestGuardDeviceRegistration)(db, uid, trimmedDeviceId);
+    }
+    catch (err) {
+        if (err instanceof bindGuardDevice_1.GuardDeviceBindError) {
+            throw (0, bindGuardDevice_1.guardDeviceBindErrorToHttps)(err);
+        }
+        throw err;
     }
     const bindingRef = db.collection('device_tokens').doc(uid);
     const binding = await bindingRef.get();
@@ -156,18 +156,26 @@ exports.approveGuardDeviceRegistration = functions.https.onCall(async (data, con
     if (!requestedDeviceId) {
         throw new functions.https.HttpsError('failed-precondition', 'Solicitud sin deviceId.');
     }
-    await db.collection('device_tokens').doc(targetUid).set({
-        uid: targetUid,
-        employeeId: employeeId || null,
-        verified: true,
-        deviceId: requestedDeviceId,
-        deviceInfo: req.deviceInfo || {},
-        platform: req.platform || 'web',
-        source: 'supervisor_approval',
-        approvedBy: callerUid,
-        approvedAt: firestore_1.FieldValue.serverTimestamp(),
-        updatedAt: firestore_1.FieldValue.serverTimestamp(),
-    }, { merge: true });
+    const empSnap = employeeId ? await db.collection('empleados').doc(employeeId).get() : null;
+    const empresaId = empSnap?.data()?.empresaId || String(req.empresaId ?? '') || null;
+    try {
+        await (0, bindGuardDevice_1.bindGuardDevice)(db, {
+            uid: targetUid,
+            employeeId,
+            empresaId,
+            deviceId: requestedDeviceId,
+            source: 'approval',
+            deviceInfo: req.deviceInfo || {},
+            platform: String(req.platform || 'web'),
+            tokenExtras: {
+                approvedBy: callerUid,
+                approvedAt: firestore_1.FieldValue.serverTimestamp(),
+            },
+        });
+    }
+    catch (err) {
+        (0, bindGuardDevice_1.rethrowBindGuardDeviceError)(err);
+    }
     await reqRef.update({
         status: 'APPROVED',
         approvedBy: callerUid,
@@ -307,6 +315,44 @@ exports.listPendingGuardDeviceRegistrations = functions.https.onCall(async (data
     });
     return { requests: rows };
 });
+exports.unbindGuardDevice = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
+    }
+    const db = admin.firestore();
+    await assertAdminCaller(db, context);
+    const { targetUid: targetUidArg, employeeId: employeeIdArg, deviceId: deviceIdArg } = data;
+    let targetUid = String(targetUidArg ?? '').trim();
+    const deviceId = String(deviceIdArg ?? '').trim();
+    if (!targetUid && deviceId) {
+        const bindSnap = await db.collection('device_bindings').doc(deviceId).get();
+        targetUid = String(bindSnap.data()?.uid ?? '').trim();
+    }
+    if (!targetUid && employeeIdArg) {
+        const emp = await db.collection('empleados').doc(String(employeeIdArg).trim()).get();
+        targetUid = String(emp.data()?.uid ?? '').trim();
+    }
+    if (!targetUid) {
+        throw new functions.https.HttpsError('invalid-argument', 'targetUid, employeeId o deviceId requerido.');
+    }
+    const result = await (0, bindGuardDevice_1.unbindGuardDeviceForUid)(db, targetUid, context.auth.uid);
+    return { success: true, targetUid, ...result };
+});
+function deviceTokenBindingStatus(bind) {
+    const data = bind.data() || {};
+    if (!bind.exists || data.verified !== true) {
+        return { status: 'none', deviceId: null };
+    }
+    const deviceId = String(data.deviceId ?? '').trim() || null;
+    if (!deviceId) {
+        return {
+            status: 'needs_rebind',
+            deviceId: null,
+            message: 'Tu cuenta no tiene un dispositivo identificado. Pedí a RRHH un nuevo mail de acceso o que aprueben tu dispositivo.',
+        };
+    }
+    return { status: 'bound', deviceId };
+}
 exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
@@ -316,10 +362,7 @@ exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, 
     const reqSnap = await db.collection('device_registration_requests').doc(uid).get();
     if (!reqSnap.exists) {
         const bind = await db.collection('device_tokens').doc(uid).get();
-        return {
-            status: bind.exists && bind.data()?.verified ? 'bound' : 'none',
-            deviceId: bind.data()?.deviceId ?? null,
-        };
+        return deviceTokenBindingStatus(bind);
     }
     const d = reqSnap.data();
     const rawStatus = String(d.status || '').toUpperCase();

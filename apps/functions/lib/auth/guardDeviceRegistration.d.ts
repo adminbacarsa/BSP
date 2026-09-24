@@ -3,4 +3,5 @@ export declare const requestGuardDeviceRegistration: functions.HttpsFunction & f
 export declare const approveGuardDeviceRegistration: functions.HttpsFunction & functions.Runnable<any>;
 export declare const rejectGuardDeviceRegistration: functions.HttpsFunction & functions.Runnable<any>;
 export declare const listPendingGuardDeviceRegistrations: functions.HttpsFunction & functions.Runnable<any>;
+export declare const unbindGuardDevice: functions.HttpsFunction & functions.Runnable<any>;
 export declare const getGuardDeviceRegistrationStatus: functions.HttpsFunction & functions.Runnable<any>;

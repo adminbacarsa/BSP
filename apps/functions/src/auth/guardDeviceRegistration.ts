@@ -1,6 +1,14 @@
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
+import {
+  assertCanRequestGuardDeviceRegistration,
+  bindGuardDevice,
+  guardDeviceBindErrorToHttps,
+  GuardDeviceBindError,
+  rethrowBindGuardDeviceError,
+  unbindGuardDeviceForUid,
+} from './bindGuardDevice';
 
 type DeviceInfo = Record<string, string>;
 
@@ -104,20 +112,16 @@ export const requestGuardDeviceRegistration = functions.https.onCall(async (data
 
   const empSnap = await db.collection('empleados').doc(legajo.employeeId).get();
   if (empSnap.data()?.bypassDeviceCheck === true) {
-    await db.collection('device_tokens').doc(uid).set(
-      {
-        uid,
-        employeeId: legajo.employeeId,
-        verified: true,
-        deviceId: trimmedDeviceId,
-        deviceInfo: deviceInfo || {},
-        platform: platform || 'web',
-        source: 'bypass_device_check',
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true },
-    );
     return { status: 'approved', bypass: true };
+  }
+
+  try {
+    await assertCanRequestGuardDeviceRegistration(db, uid, trimmedDeviceId);
+  } catch (err) {
+    if (err instanceof GuardDeviceBindError) {
+      throw guardDeviceBindErrorToHttps(err);
+    }
+    throw err;
   }
 
   const bindingRef = db.collection('device_tokens').doc(uid);
@@ -203,21 +207,26 @@ export const approveGuardDeviceRegistration = functions.https.onCall(async (data
     throw new functions.https.HttpsError('failed-precondition', 'Solicitud sin deviceId.');
   }
 
-  await db.collection('device_tokens').doc(targetUid).set(
-    {
+  const empSnap = employeeId ? await db.collection('empleados').doc(employeeId).get() : null;
+  const empresaId = (empSnap?.data()?.empresaId as string) || String(req.empresaId ?? '') || null;
+
+  try {
+    await bindGuardDevice(db, {
       uid: targetUid,
-      employeeId: employeeId || null,
-      verified: true,
+      employeeId,
+      empresaId,
       deviceId: requestedDeviceId,
-      deviceInfo: req.deviceInfo || {},
-      platform: req.platform || 'web',
-      source: 'supervisor_approval',
-      approvedBy: callerUid,
-      approvedAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true },
-  );
+      source: 'approval',
+      deviceInfo: (req.deviceInfo as DeviceInfo) || {},
+      platform: String(req.platform || 'web'),
+      tokenExtras: {
+        approvedBy: callerUid,
+        approvedAt: FieldValue.serverTimestamp(),
+      },
+    });
+  } catch (err) {
+    rethrowBindGuardDeviceError(err);
+  }
 
   await reqRef.update({
     status: 'APPROVED',
@@ -399,6 +408,57 @@ export const listPendingGuardDeviceRegistrations = functions.https.onCall(async 
   return { requests: rows };
 });
 
+/** RRHH/CC: desvincula el dispositivo vigente del guardia. */
+export const unbindGuardDevice = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
+  }
+
+  const db = admin.firestore();
+  await assertAdminCaller(db, context);
+
+  const { targetUid: targetUidArg, employeeId: employeeIdArg, deviceId: deviceIdArg } = data as {
+    targetUid?: string;
+    employeeId?: string;
+    deviceId?: string;
+  };
+
+  let targetUid = String(targetUidArg ?? '').trim();
+  const deviceId = String(deviceIdArg ?? '').trim();
+
+  if (!targetUid && deviceId) {
+    const bindSnap = await db.collection('device_bindings').doc(deviceId).get();
+    targetUid = String(bindSnap.data()?.uid ?? '').trim();
+  }
+  if (!targetUid && employeeIdArg) {
+    const emp = await db.collection('empleados').doc(String(employeeIdArg).trim()).get();
+    targetUid = String(emp.data()?.uid ?? '').trim();
+  }
+  if (!targetUid) {
+    throw new functions.https.HttpsError('invalid-argument', 'targetUid, employeeId o deviceId requerido.');
+  }
+
+  const result = await unbindGuardDeviceForUid(db, targetUid, context.auth.uid);
+  return { success: true, targetUid, ...result };
+});
+
+function deviceTokenBindingStatus(bind: admin.firestore.DocumentSnapshot): Record<string, unknown> {
+  const data = bind.data() || {};
+  if (!bind.exists || data.verified !== true) {
+    return { status: 'none', deviceId: null };
+  }
+  const deviceId = String(data.deviceId ?? '').trim() || null;
+  if (!deviceId) {
+    return {
+      status: 'needs_rebind',
+      deviceId: null,
+      message:
+        'Tu cuenta no tiene un dispositivo identificado. Pedí a RRHH un nuevo mail de acceso o que aprueben tu dispositivo.',
+    };
+  }
+  return { status: 'bound', deviceId };
+}
+
 /** Estado de la solicitud del guardia autenticado (sin lectura directa Firestore). */
 export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, context) => {
   if (!context.auth?.uid) {
@@ -409,10 +469,7 @@ export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (_d
   const reqSnap = await db.collection('device_registration_requests').doc(uid).get();
   if (!reqSnap.exists) {
     const bind = await db.collection('device_tokens').doc(uid).get();
-    return {
-      status: bind.exists && bind.data()?.verified ? 'bound' : 'none',
-      deviceId: bind.data()?.deviceId ?? null,
-    };
+    return deviceTokenBindingStatus(bind);
   }
   const d = reqSnap.data()!;
   const rawStatus = String(d.status || '').toUpperCase();
