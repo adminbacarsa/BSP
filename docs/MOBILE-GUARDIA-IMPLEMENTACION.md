@@ -46,6 +46,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **Gate dispositivo + push preview + Alertas×10** ✅ rama `cursor/device-validation-gate-a241`: no datos hasta `deviceVerified===true`; `needs_rebind`; preview FCM con `previewOf`; botón web notificaciones; paginación Alertas 10/página. OTA = Notebook (ver abajo).
 - **Portal web `/app`** ✅ Expo `experiments.baseUrl: '/app'` + `build:web` → `dist-web`; deviceId LS+IDB; PWA; FCM web VAPID; GPS HTTPS; AA certificado. Deploy/redirects hosting = **Plataforma**.
 - **CC en main** ✅ merge `74a54f78` (retenido, convocatorias, ¿Venís?, ventanas, ADV∪propia, ocultar registro EXT/ADV). Backend prod: `etaMinutes`, ventanas server, rechazo TRACE.
 - **Vitest portal-core** ✅ 16/16 en `main@74a54f78`.
@@ -64,9 +65,9 @@
 
 | ID | Tarea | Fase |
 |----|-------|------|
+| **OTA preview + production** | Notebook: `npm run update:preview` **y después** `npm run update:production` (dos comandos; o `scripts/mobile-ota-channels.ps1`) | Mobile |
 | **Deploy `/app`** | Pipeline Plataforma (`sync-guard-web-hosting` + build:web) | Web |
 | **SA checklist web** | Chrome desktop/Android + Safari iOS (sección abajo) | Web |
-| **OTA preview** | Desde Notebook: `cd apps/mobile-guardia && npm run update:preview` (solo Android) | Mobile |
 | **F6-01** | Play Internal Testing (crear app + AAB + testers) | F6 |
 | **F0-11** | Política de privacidad (URL pública; Data Safety) | F0 |
 
@@ -192,6 +193,7 @@
 > Entradas más recientes arriba. Una línea por tarea o hito de fase.
 
 ```
+2026-09-24 | Gate+push+Alertas10 | cursor/device-validation-gate-a241: deviceVerified gate; needs_rebind; previewOf FCM; botón web notif; Alertas paginación 10; OTA Notebook (update:preview luego update:production — no unir con /)
 2026-09-24 | WEB appAlert | Alert.alert → appAlert (web: alert/confirm/modal); lint:mobile-no-alert; matriz APIs RN↔navegador en docs
 2026-09-24 | WEB device callables | requestDeviceRegistration → requestGuardDeviceRegistration + getGuardDeviceRegistrationStatus; revert deploy-lib/firebase.json/web2 (Plataforma)
 2026-09-24 | WEB /app P1-P6 | Rama cursor/mobile-web: baseUrl /app + build:web dist-web; deviceId LS+IDB; PWA #8B1A1A + A2HS iOS; FCM web VAPID + SW; GPS HTTPS; AA cert Hoy; sin OTA/EAS web
