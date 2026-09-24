@@ -8,22 +8,26 @@ import { useResponsiveLayout } from '../src/hooks/useResponsiveLayout';
 import { getMobilePlatform } from '../src/lib/deviceId';
 import { getPortalFirebase } from '../src/lib/portal';
 import {
+  canRequestDeviceRegistration,
+  DEVICE_BLOCK_MESSAGES,
+  evaluateDeviceTokenBinding,
+  type DeviceBlockReason,
+} from '../src/lib/deviceVerification';
+import { getStoredDeviceId } from '../src/lib/deviceId';
+import {
   getGuardDeviceRegistrationStatus,
   requestDeviceRegistration,
   type GuardDeviceRegistrationStatus,
 } from '../src/lib/requestDeviceRegistration';
 
-/** Motivo de bloqueo: nunca activó vs dispositivo distinto al vinculado. */
-type BlockReason = 'loading' | 'never_activated' | 'other_device';
-
 export default function DeviceBlockedScreen() {
   const router = useRouter();
-  const { user, employee, empDocId, signOut, refreshEmployee } = usePortalAuth();
+  const { user, employee, empDocId, signOut, refreshEmployee, deviceBlockReason } = usePortalAuth();
   const { formMaxWidth } = useResponsiveLayout();
   const { db } = getPortalFirebase();
   const [busy, setBusy] = useState(false);
   const [statusLoading, setStatusLoading] = useState(true);
-  const [blockReason, setBlockReason] = useState<BlockReason>('loading');
+  const [blockReason, setBlockReason] = useState<DeviceBlockReason | 'loading'>('loading');
   const [requestMsg, setRequestMsg] = useState<string | null>(null);
   const [regStatus, setRegStatus] = useState<GuardDeviceRegistrationStatus>('none');
   const isWeb = getMobilePlatform() === 'web';
@@ -33,7 +37,12 @@ export default function DeviceBlockedScreen() {
     : user?.email || null;
 
   const neverActivated = blockReason === 'never_activated';
-  const canRequestRegister = blockReason === 'other_device';
+  const needsRebind = blockReason === 'needs_rebind';
+  const ownedByOther = blockReason === 'DEVICE_OWNED_BY_OTHER';
+  const retiredNeedsEmail = blockReason === 'RETIRED_DEVICE_NEEDS_EMAIL';
+  const canRequestRegister = canRequestDeviceRegistration(
+    blockReason === 'loading' ? null : blockReason,
+  );
 
   useEffect(() => {
     if (!user) {
@@ -46,21 +55,30 @@ export default function DeviceBlockedScreen() {
       setStatusLoading(true);
       setRequestMsg(null);
 
-      let reason: BlockReason = 'other_device';
+      let reason: DeviceBlockReason = deviceBlockReason ?? 'other_device';
+
       try {
         const tokenSnap = await getDoc(doc(db, 'device_tokens', user.uid));
-        if (!tokenSnap.exists() || tokenSnap.data()?.verified !== true) {
-          reason = 'never_activated';
-        } else {
-          reason = 'other_device';
+        const localId = await getStoredDeviceId();
+        const evaluated = evaluateDeviceTokenBinding({
+          tokenExists: tokenSnap.exists(),
+          verified: tokenSnap.data()?.verified === true,
+          boundDeviceId: (tokenSnap.data()?.deviceId as string | null | undefined) ?? null,
+          localDeviceId: localId,
+        });
+        if (!evaluated.verified && evaluated.reason) {
+          reason = evaluated.reason;
+        } else if (deviceBlockReason) {
+          reason = deviceBlockReason;
         }
       } catch {
-        reason = 'other_device';
+        if (deviceBlockReason) reason = deviceBlockReason;
+        else reason = 'other_device';
       }
       if (cancelled) return;
       setBlockReason(reason);
 
-      if (reason === 'never_activated') {
+      if (!canRequestDeviceRegistration(reason)) {
         setStatusLoading(false);
         return;
       }
@@ -91,7 +109,7 @@ export default function DeviceBlockedScreen() {
     return () => {
       cancelled = true;
     };
-  }, [user?.uid, db]);
+  }, [user?.uid, db, deviceBlockReason]);
 
   async function handleRequestRegister() {
     if (!user || busy || !canRequestRegister || regStatus === 'pending') return;
@@ -111,36 +129,78 @@ export default function DeviceBlockedScreen() {
           : 'Solicitud enviada a RRHH / Centro de Comando. Cuando aprueben, tocá «Reintentar verificación».',
       );
     } else {
-      setRequestMsg(result.message);
+      if (result.platformCode) {
+        setBlockReason(result.platformCode);
+        setRequestMsg(DEVICE_BLOCK_MESSAGES[result.platformCode]);
+      } else {
+        setRequestMsg(result.message);
+      }
     }
   }
 
   const requestSent = regStatus === 'pending' || regStatus === 'approved';
+  const title =
+    neverActivated
+      ? 'Cuenta sin activar'
+      : needsRebind
+        ? 'Dispositivo sin validar'
+        : ownedByOther
+          ? 'Dispositivo de otro colaborador'
+          : retiredNeedsEmail
+            ? 'Dispositivo retirado'
+            : 'Dispositivo no autorizado';
+
+  const bodyMessage =
+    blockReason !== 'loading' ? DEVICE_BLOCK_MESSAGES[blockReason] : '';
 
   return (
     <>
-      <Stack.Screen
-        options={{ title: neverActivated ? 'Cuenta sin activar' : 'Dispositivo no autorizado' }}
-      />
+      <Stack.Screen options={{ title }} />
       <SafeAreaView style={styles.safe}>
         <View style={styles.container}>
           <View style={[styles.card, { maxWidth: formMaxWidth, width: '100%', alignSelf: 'center' }]}>
             {blockReason === 'loading' || statusLoading ? (
               <ActivityIndicator color="#8B1A1A" />
-            ) : neverActivated ? (
+            ) : neverActivated || ownedByOther || retiredNeedsEmail || needsRebind ? (
               <>
-                <Text style={styles.title}>Todavía no activaste tu cuenta</Text>
-                <Text style={styles.body}>
-                  Todavía no activaste tu cuenta. Usá el mail de acceso o pedile a RRHH que te lo reenvíe.
-                </Text>
+                <Text style={styles.title}>{title}</Text>
+                <Text style={styles.body}>{bodyMessage}</Text>
+                {needsRebind && canRequestRegister ? (
+                  <>
+                    <Pressable
+                      style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
+                      onPress={handleRequestRegister}
+                      disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
+                    >
+                      {busy ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <Text style={styles.btnText}>
+                          {regStatus === 'pending'
+                            ? 'Solicitud pendiente'
+                            : regStatus === 'approved'
+                              ? 'Aprobado — reintentá'
+                              : 'Pedir aprobación a RRHH'}
+                        </Text>
+                      )}
+                    </Pressable>
+                    {requestMsg ? (
+                      <Text
+                        style={[
+                          styles.feedback,
+                          requestSent || regStatus === 'approved' ? styles.feedbackOk : styles.feedbackErr,
+                        ]}
+                      >
+                        {requestMsg}
+                      </Text>
+                    ) : null}
+                  </>
+                ) : null}
               </>
             ) : (
               <>
                 <Text style={styles.title}>Dispositivo no vinculado</Text>
-                <Text style={styles.body}>
-                  Esta cuenta ya está activa en otro dispositivo. Cada legajo permite un dispositivo a la
-                  vez (Android o un navegador).
-                </Text>
+                <Text style={styles.body}>{bodyMessage}</Text>
                 {isWeb ? (
                   <Text style={styles.body}>
                     Si usás Safari en iPhone y no abriste COSP en varios días, el navegador puede haber
@@ -154,23 +214,25 @@ export default function DeviceBlockedScreen() {
                   </Text>
                 )}
 
-                <Pressable
-                  style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
-                  onPress={handleRequestRegister}
-                  disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
-                >
-                  {busy ? (
-                    <ActivityIndicator color="#fff" />
-                  ) : (
-                    <Text style={styles.btnText}>
-                      {regStatus === 'pending'
-                        ? 'Solicitud pendiente'
-                        : regStatus === 'approved'
-                          ? 'Aprobado — reintentá'
-                          : 'Registrar este dispositivo'}
-                    </Text>
-                  )}
-                </Pressable>
+                {canRequestRegister ? (
+                  <Pressable
+                    style={[styles.btnPrimary, (busy || regStatus === 'pending') && styles.btnDisabled]}
+                    onPress={handleRequestRegister}
+                    disabled={busy || regStatus === 'pending' || regStatus === 'approved'}
+                  >
+                    {busy ? (
+                      <ActivityIndicator color="#fff" />
+                    ) : (
+                      <Text style={styles.btnText}>
+                        {regStatus === 'pending'
+                          ? 'Solicitud pendiente'
+                          : regStatus === 'approved'
+                            ? 'Aprobado — reintentá'
+                            : 'Registrar este dispositivo'}
+                      </Text>
+                    )}
+                  </Pressable>
+                ) : null}
 
                 {requestMsg ? (
                   <Text

@@ -1,16 +1,17 @@
-import { Tabs } from 'expo-router';
+import { Redirect, Tabs } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { Platform } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { usePortalInbox } from '../../src/hooks/usePortalInbox';
+import { LoadingScreen } from '../../src/components/LoadingScreen';
 import { useTheme } from '../../src/theme/ThemeContext';
 
 const TAB_CONTENT = 56;
 
 export default function TabsLayout() {
   const { palette, isDark } = useTheme();
-  const { user, portalFeatures, previewEmpDocId } = usePortalAuth();
+  const { user, portalFeatures, previewEmpDocId, deviceVerified, initializing } = usePortalAuth();
   const { unreadCount } = usePortalInbox(user, previewEmpDocId);
   const insets = useSafeAreaInsets();
   /**
@@ -18,6 +19,14 @@ export default function TabsLayout() {
    * (algunos OEM reportan mal el safe area).
    */
   const bottom = Math.max(insets.bottom, Platform.OS === 'android' ? 28 : 8);
+
+  // Gate: sin tabs ni badge de alertas hasta deviceVerified === true.
+  if (initializing || deviceVerified === null) {
+    return <LoadingScreen label="Validando dispositivo…" />;
+  }
+  if (deviceVerified === false) {
+    return <Redirect href="/device-blocked" />;
+  }
 
   return (
     <Tabs

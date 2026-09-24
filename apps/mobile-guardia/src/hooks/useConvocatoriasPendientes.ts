@@ -3,16 +3,18 @@ import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import type { SolicitudEvento } from '@cosp/portal-types';
 import { portalEventosDateRange } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 export function useConvocatoriasPendientes(empresaId: string | undefined, empDocId: string | null) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const [solicitudes, setSolicitudes] = useState<SolicitudEvento[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!empresaId || !empDocId) {
+    if (deviceVerified !== true || !empresaId || !empDocId) {
       setSolicitudes([]);
-      setLoading(false);
+      setLoading(deviceVerified === null && !!empresaId && !!empDocId);
       return;
     }
 
@@ -39,7 +41,7 @@ export function useConvocatoriasPendientes(empresaId: string | undefined, empDoc
     );
 
     return () => unsub();
-  }, [db, empresaId, empDocId]);
+  }, [db, empresaId, empDocId, deviceVerified]);
 
   const convocatoriasPendientes = useMemo(
     () => solicitudes.filter((s) => s.tipo === 'admin_convoca' && s.status === 'convocado'),

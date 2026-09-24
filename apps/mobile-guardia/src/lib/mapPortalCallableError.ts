@@ -1,6 +1,10 @@
 import { isEmulatorMode, getEmulatorHostLabel } from './portal';
+import { mapPlatformDeviceErrorMessage } from './deviceVerification';
 
 export function mapPortalCallableError(err: unknown): string {
+  const platformMsg = mapPlatformDeviceErrorMessage(err);
+  if (platformMsg) return platformMsg;
+
   const e = err as { code?: string; message?: string };
   const code = (e?.code ?? '').replace('functions/', '');
   const msg = (e?.message ?? '').trim();

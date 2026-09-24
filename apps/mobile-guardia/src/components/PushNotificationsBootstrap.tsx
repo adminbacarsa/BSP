@@ -40,7 +40,7 @@ function mapLegacyEmployeeLink(link: string): string {
 
 export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
   const router = useRouter();
-  const { user, empDocId, employee, employeeProfileReady } = usePortalAuth();
+  const { user, empDocId, employee, employeeProfileReady, deviceVerified } = usePortalAuth();
   const { db } = getPortalFirebase();
   const lastForegroundToastRef = useRef<string | null>(null);
   const handledColdStartRef = useRef(false);
@@ -60,7 +60,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   };
 
   useEffect(() => {
-    if (!user || !employeeProfileReady) return;
+    if (!user || !employeeProfileReady || deviceVerified !== true) return;
 
     let cancelled = false;
 
@@ -87,7 +87,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     return () => {
       cancelled = true;
     };
-  }, [user?.uid, empDocId, employee?.empresaId, employeeProfileReady, db, onStatusChange]);
+  }, [user?.uid, empDocId, employee?.empresaId, employeeProfileReady, deviceVerified, db, onStatusChange]);
 
   useEffect(() => {
     if (!user) return;
@@ -190,7 +190,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   }, [user?.uid, router]);
 
   useEffect(() => {
-    if (!user || !employeeProfileReady) return;
+    if (!user || !employeeProfileReady || deviceVerified !== true) return;
 
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
@@ -203,7 +203,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     });
 
     return () => sub.remove();
-  }, [user, empDocId, employee?.empresaId, employeeProfileReady, db, onStatusChange]);
+  }, [user, empDocId, employee?.empresaId, employeeProfileReady, deviceVerified, db, onStatusChange]);
 
   useEffect(() => {
     if (!user) return;

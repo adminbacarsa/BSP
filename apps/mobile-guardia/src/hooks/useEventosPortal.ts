@@ -9,6 +9,7 @@ import {
 } from '@cosp/portal-core';
 import { getPortalCallables, getPortalFirebase } from '../lib/portal';
 import { mapPortalCallableError } from '../lib/mapPortalCallableError';
+import { usePortalAuth } from '../context/PortalAuthContext';
 
 function todayKeyAr(): string {
   const now = new Date();
@@ -22,6 +23,7 @@ export function useEventosPortal(
   opts?: { isPreviewMode?: boolean },
 ) {
   const { db } = getPortalFirebase();
+  const { deviceVerified } = usePortalAuth();
   const isPreviewMode = !!opts?.isPreviewMode;
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [solicitudes, setSolicitudes] = useState<SolicitudEvento[]>([]);
@@ -30,7 +32,7 @@ export function useEventosPortal(
   const [error, setError] = useState<string | null>(null);
 
   const reloadEventos = useCallback(async () => {
-    if (!empresaId) {
+    if (deviceVerified !== true || !empresaId) {
       setEventos([]);
       return;
     }
@@ -41,13 +43,13 @@ export function useEventosPortal(
     } catch (e) {
       setError(e instanceof Error ? e.message : 'No se pudieron cargar eventos');
     }
-  }, [db, empresaId]);
+  }, [db, empresaId, deviceVerified]);
 
   useEffect(() => {
-    if (!empresaId || !empDocId) {
+    if (deviceVerified !== true || !empresaId || !empDocId) {
       setSolicitudes([]);
       setEventos([]);
-      setLoading(false);
+      setLoading(deviceVerified === null && !!empresaId && !!empDocId);
       return;
     }
 
@@ -78,7 +80,7 @@ export function useEventosPortal(
     );
 
     return () => unsub();
-  }, [db, empresaId, empDocId, reloadEventos]);
+  }, [db, empresaId, empDocId, reloadEventos, deviceVerified]);
 
   const reload = useCallback(async () => {
     setLoading(true);
