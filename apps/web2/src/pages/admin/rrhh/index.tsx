@@ -14,7 +14,7 @@ import { db, onSnapshotFresh } from '@/lib/firebase';
 import { geocodeAddress } from '@/lib/employees/geocodeAddress';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { getFunctions, httpsCallable } from 'firebase/functions';
-import { collection, getDocs, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit } from 'firebase/firestore';
+import { collection, getDocs, getDoc, query, where, Timestamp, addDoc, updateDoc, doc, deleteDoc, writeBatch, serverTimestamp, deleteField, limit } from 'firebase/firestore';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useAuth } from '@/context/AuthContext';
 import { belongsToEmpresa, empresaScopedQuery, filterRowsByEmpresa, shouldScopeQueriesToEmpresa, belongsToEmpresaView, deleteEmployeeForEmpresa, queryAndDeleteForEmpresa, stampEmpresaId, updateDocForEmpresa, TenantIsolationError } from '@/lib/multiempresa';
@@ -341,6 +341,8 @@ export default function EmployeesPage() {
   );
   const [view, setView] = useState<'list' | 'form'>('list');
   const [selectedEmp, setSelectedEmp] = useState<any | null>(null); // Changed type to any to avoid strict interface blocking
+  const [guardDeviceBinding, setGuardDeviceBinding] = useState<{ deviceId: string | null; verified: boolean } | null>(null);
+  const [guardDeviceUnbindBusy, setGuardDeviceUnbindBusy] = useState(false);
   const [employees, setEmployees] = useState<any[]>([]); // Changed to any[]
   const [filteredEmployees, setFilteredEmployees] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
@@ -720,6 +722,63 @@ export default function EmployeesPage() {
   useEffect(() => { if (form.laborAgreement) { const selectedAgreement = agreements.find(a => a.name === form.laborAgreement); setAvailableCategories(selectedAgreement?.categories?.length ? selectedAgreement.categories : ['General']); } else { setAvailableCategories([]); } }, [form.laborAgreement, agreements]);
   
   useEffect(() => { if (selectedEmp && holidays.length > 0) { calculateStats(selectedEmp.id!, selectedEmp.laborAgreement || '', selectedEmp.cycleStartDay || 26); } }, [currentDate, selectedEmp, holidays, agreements]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const uid = String(selectedEmp?.uid ?? '').trim();
+    if (!uid) {
+      setGuardDeviceBinding(null);
+      return;
+    }
+    void (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'device_tokens', uid));
+        if (cancelled) return;
+        if (!snap.exists()) {
+          setGuardDeviceBinding({ deviceId: null, verified: false });
+          return;
+        }
+        const d = snap.data();
+        setGuardDeviceBinding({
+          deviceId: d?.deviceId ? String(d.deviceId) : null,
+          verified: d?.verified === true,
+        });
+      } catch {
+        if (!cancelled) setGuardDeviceBinding(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEmp?.uid, selectedEmp?.id]);
+
+  const handleUnbindGuardDevice = async () => {
+    const uid = String(selectedEmp?.uid ?? '').trim();
+    if (!uid) {
+      addToast('Este legajo no tiene usuario de portal vinculado.', 'error');
+      return;
+    }
+    if (
+      !confirm(
+        '¿Desvincular el dispositivo vigente?\n\nEl guardia deberá validar de nuevo (mail de acceso o aprobación RRHH/CC).',
+      )
+    ) {
+      return;
+    }
+    setGuardDeviceUnbindBusy(true);
+    try {
+      const fns = getFunctions();
+      const unbindFn = httpsCallable(fns, 'unbindGuardDevice');
+      await unbindFn({ targetUid: uid, employeeId: selectedEmp?.id });
+      addToast('Dispositivo desvinculado.', 'success');
+      setGuardDeviceBinding({ deviceId: null, verified: false });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      addToast('Error: ' + msg, 'error');
+    } finally {
+      setGuardDeviceUnbindBusy(false);
+    }
+  };
 
   // --- CARGA DE DATOS RAW (SIN FILTROS DE SERVICIO) ---
   const loadData = async () => {
@@ -2550,6 +2609,37 @@ export default function EmployeesPage() {
                                             : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-100"><Home size={8}/> {selectedEmp.address}</span>)}
                                         {selectedEmp.motivoBaja && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-600"><UserX size={8}/> {selectedEmp.motivoBaja}</span>}
                                     </div>
+                                    {selectedEmp.uid && guardDeviceBinding && (guardDeviceBinding.deviceId || guardDeviceBinding.verified) && (
+                                        <div className="mt-3 p-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/40 flex flex-col sm:flex-row sm:items-center gap-3">
+                                            <div className="flex items-start gap-2 flex-1 min-w-0">
+                                                <Smartphone size={16} className="text-indigo-600 shrink-0 mt-0.5"/>
+                                                <div className="min-w-0">
+                                                    <p className="text-[10px] font-black uppercase text-slate-500">Dispositivo portal</p>
+                                                    <p className="text-xs font-mono text-slate-800 dark:text-slate-200 truncate">
+                                                        {guardDeviceBinding.deviceId || '(sin ID — requiere revalidación)'}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-500 font-bold">
+                                                        {guardDeviceBinding.verified && guardDeviceBinding.deviceId
+                                                            ? 'Vigente'
+                                                            : guardDeviceBinding.verified
+                                                              ? 'Verificado sin hardware ID'
+                                                              : 'Sin dispositivo activo'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            {guardDeviceBinding.deviceId && (
+                                                <button
+                                                    type="button"
+                                                    disabled={guardDeviceUnbindBusy}
+                                                    onClick={() => void handleUnbindGuardDevice()}
+                                                    className="shrink-0 px-3 py-2 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 disabled:opacity-50 text-[10px] font-black uppercase flex items-center justify-center gap-1.5 shadow-sm"
+                                                >
+                                                    {guardDeviceUnbindBusy ? <Loader2 size={12} className="animate-spin"/> : <X size={12}/>}
+                                                    Desvincular dispositivo
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="flex-1 overflow-y-auto custom-scrollbar p-5 space-y-4">
                                     {empStats ? (
