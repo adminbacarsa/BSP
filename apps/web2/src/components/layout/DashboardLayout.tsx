@@ -19,6 +19,10 @@ import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtil
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
 import { useTrainingSession } from '@/hooks/useTrainingSession';
+import {
+  PendingGuardDeviceCountProvider,
+  usePendingGuardDeviceCount,
+} from '@/hooks/usePendingGuardDeviceCount';
 import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
 
 /** Título del header según el módulo (ruta) actual */
@@ -54,6 +58,9 @@ const BOTTOM_NAV = [
 
 function BottomNav() {
   const router = useRouter();
+  const { canReadModule } = useAuth();
+  const { empresaId } = useEmpresa();
+  const { count: guardDevicePendingCount } = usePendingGuardDeviceCount();
   const isActive = (href: string) => router.pathname.startsWith(href);
   return (
     <nav
@@ -66,12 +73,20 @@ function BottomNav() {
           key={href}
           href={href}
           prefetch={false}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-opacity active:opacity-60 min-h-[52px]"
+          className="relative flex-1 flex flex-col items-center justify-center gap-0.5 py-2 transition-opacity active:opacity-60 min-h-[52px]"
           style={{
             color: isActive(href) ? 'var(--company-primary, #6366f1)' : 'var(--sb-muted)',
           }}
         >
           <Icon size={20} strokeWidth={isActive(href) ? 2.5 : 1.8} />
+          {href === '/admin/rrhh' && guardDevicePendingCount > 0 && (
+            <span
+              title="Dispositivos pendientes de aprobación"
+              className="absolute top-1.5 right-[calc(50%-22px)] min-w-[16px] h-4 px-1 bg-indigo-600 text-white text-[8px] font-black rounded-full flex items-center justify-center"
+            >
+              {guardDevicePendingCount > 99 ? '99+' : guardDevicePendingCount}
+            </span>
+          )}
           <span className="text-[9px] font-black uppercase tracking-wide">{label}</span>
           {isActive(href) && (
             <span className="absolute bottom-0 w-8 h-0.5 rounded-full" style={{ backgroundColor: 'var(--company-primary, #6366f1)' }} />
@@ -388,6 +403,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const canViewServices = canReadModule('SERVICES') || canReadModule('CLIENTS');
   const canViewOps = canReadModule('OPERATIONS') || canReadModule('DASHBOARD') || canReadModule('PLANNING');
   const canViewRrhh = canReadModule('RRHH');
+  const { count: guardDevicePendingCount } = usePendingGuardDeviceCount();
 
   useEffect(() => {
     if (!empresaId || !canViewSupervision || !user?.uid) return;
@@ -731,21 +747,35 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               <Users size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap flex-1">RRHH</span>}
               {isTraining && isModuleLocked('RRHH') && <Lock size={11} className="shrink-0 ml-auto opacity-60" />}
-              {rfzEstructuralCount > 0 && (
-                <button
-                  type="button"
-                  title="Cambio de pax en SLA — marcar como visto"
-                  onClick={async e => {
-                    e.preventDefault(); e.stopPropagation();
-                    if (!rfzEstructuralIds.length) return;
-                    const batch = writeBatch(db);
-                    rfzEstructuralIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
-                    await batch.commit();
-                  }}
-                  className={`${sidebarOpen ? '' : 'absolute -top-1 -right-1'} min-w-[18px] h-[18px] px-1 bg-amber-500 hover:bg-amber-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer`}
+              {(guardDevicePendingCount > 0 || rfzEstructuralCount > 0) && (
+                <span
+                  className={`flex items-center gap-1 shrink-0 ${sidebarOpen ? '' : 'absolute -top-1 -right-1'}`}
                 >
-                  {rfzEstructuralCount > 99 ? '99+' : rfzEstructuralCount}
-                </button>
+                  {guardDevicePendingCount > 0 && (
+                    <span
+                      title="Dispositivos pendientes de aprobación"
+                      className="min-w-[18px] h-[18px] px-1 bg-indigo-600 text-white text-[9px] font-black rounded-full flex items-center justify-center"
+                    >
+                      {guardDevicePendingCount > 99 ? '99+' : guardDevicePendingCount}
+                    </span>
+                  )}
+                  {rfzEstructuralCount > 0 && (
+                    <button
+                      type="button"
+                      title="Cambio de pax en SLA — marcar como visto"
+                      onClick={async e => {
+                        e.preventDefault(); e.stopPropagation();
+                        if (!rfzEstructuralIds.length) return;
+                        const batch = writeBatch(db);
+                        rfzEstructuralIds.forEach(id => batch.update(doc(db, 'novedades', id), { status: 'read', viewed: true }));
+                        await batch.commit();
+                      }}
+                      className="min-w-[18px] h-[18px] px-1 bg-amber-500 hover:bg-amber-700 text-white text-[9px] font-black rounded-full flex items-center justify-center transition-colors cursor-pointer"
+                    >
+                      {rfzEstructuralCount > 99 ? '99+' : rfzEstructuralCount}
+                    </button>
+                  )}
+                </span>
               )}
             </Link>
           )}
@@ -865,11 +895,23 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   );
 }
 
+function PendingGuardDeviceCountBoundary({ children }: { children: React.ReactNode }) {
+  const { canReadModule } = useAuth();
+  const { empresaId } = useEmpresa();
+  return (
+    <PendingGuardDeviceCountProvider enabled={canReadModule('RRHH')} empresaId={empresaId}>
+      {children}
+    </PendingGuardDeviceCountProvider>
+  );
+}
+
 // ─── PUBLIC WRAPPER ───────────────────────────────────────────────────────────
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
     <PageHeaderProvider>
-      <LayoutInner>{children}</LayoutInner>
+      <PendingGuardDeviceCountBoundary>
+        <LayoutInner>{children}</LayoutInner>
+      </PendingGuardDeviceCountBoundary>
     </PageHeaderProvider>
   );
 }

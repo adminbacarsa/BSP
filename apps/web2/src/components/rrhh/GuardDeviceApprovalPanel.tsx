@@ -3,6 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { CheckCircle2, Loader2, RefreshCw, Smartphone } from 'lucide-react';
 import { toast } from 'sonner';
 import { functions } from '@/lib/firebase';
+import { usePendingGuardDeviceCount } from '@/hooks/usePendingGuardDeviceCount';
 
 export type GuardDeviceRequestRow = {
   uid: string;
@@ -40,6 +41,7 @@ type PanelProps = {
 };
 
 export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }: PanelProps) {
+  const { refresh: refreshGlobalCount } = usePendingGuardDeviceCount();
   const [rows, setRows] = useState<GuardDeviceRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [approvingUid, setApprovingUid] = useState<string | null>(null);
@@ -79,6 +81,7 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
       await approveFn({ targetUid: row.uid, employeeId: row.employeeId || undefined });
       toast.success('Dispositivo aprobado.');
       await load();
+      await refreshGlobalCount();
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Error al aprobar';
       toast.error(msg);
@@ -180,24 +183,7 @@ export function GuardDeviceApprovalPanel({ empresaId, compact, className = '' }:
 /** Campana compacta para CC / RRHH header */
 export function GuardDeviceApprovalBell({ empresaId }: { empresaId: string | null | undefined }) {
   const [open, setOpen] = useState(false);
-  const [count, setCount] = useState(0);
-
-  const refreshCount = useCallback(async () => {
-    try {
-      const listFn = httpsCallable(functions, 'listPendingGuardDeviceRegistrations');
-      const res = await listFn({ empresaId: empresaId || undefined, limit: 50 });
-      const data = res.data as { requests?: unknown[] };
-      setCount(Array.isArray(data?.requests) ? data.requests.length : 0);
-    } catch {
-      setCount(0);
-    }
-  }, [empresaId]);
-
-  useEffect(() => {
-    void refreshCount();
-    const t = window.setInterval(() => void refreshCount(), 60_000);
-    return () => window.clearInterval(t);
-  }, [refreshCount]);
+  const { count, refresh } = usePendingGuardDeviceCount();
 
   return (
     <div className="relative">
@@ -205,7 +191,7 @@ export function GuardDeviceApprovalBell({ empresaId }: { empresaId: string | nul
         type="button"
         onClick={() => {
           setOpen((v) => !v);
-          if (!open) void refreshCount();
+          if (!open) void refresh();
         }}
         title="Dispositivos guardia pendientes de aprobación"
         className={`relative p-2 rounded-xl transition-colors ${
