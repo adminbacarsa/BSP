@@ -33,8 +33,7 @@
     "site": "comtroldata",
     "public": "build/hosting",
     "ignore": [
-      "firebase.json",
-      "**/node_modules/**"
+      "firebase.json"
     ],
     "rewrites": [
       {

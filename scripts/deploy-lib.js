@@ -142,6 +142,37 @@ function verifyHostingReleased(projectRoot) {
     process.exit(1);
   }
   console.log(`✓ Hosting publicado (/app → ${expected})`);
+  verifyAppAssetServed(projectRoot);
+}
+
+// Un asset que falta se responde con el index.html del rewrite /app/** → hay que mirar el content-type.
+function verifyAppAssetServed(projectRoot) {
+  const assetsDir = path.join(projectRoot, 'build', 'hosting', 'app', 'assets');
+  if (!fs.existsSync(assetsDir)) return;
+  const stack = [assetsDir];
+  let sample = null;
+  while (stack.length && !sample) {
+    const dir = stack.pop();
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const p = path.join(dir, entry.name);
+      if (entry.isDirectory()) stack.push(p);
+      else if (/\.(ttf|png)$/.test(entry.name)) { sample = p; break; }
+    }
+  }
+  if (!sample) return;
+  const rel = path.relative(path.join(projectRoot, 'build', 'hosting'), sample).split(path.sep).join('/');
+  const url = `https://comtroldata.web.app/${rel}`;
+  const probe = spawnSync(
+    process.execPath,
+    ['-e', `fetch(${JSON.stringify(url)}).then(r=>process.stdout.write(r.headers.get('content-type')||'')).catch(()=>process.exit(2))`],
+    { encoding: 'utf8' },
+  );
+  const type = String(probe.stdout || '');
+  if (!type || type.includes('text/html')) {
+    console.error(`\n✗ Asset de /app no publicado (${rel} devuelve ${type || 'sin respuesta'}): revisá "ignore" en firebase.json.`);
+    process.exit(1);
+  }
+  console.log(`✓ Assets de /app publicados (${type})`);
 }
 
 module.exports = { runDeploy, labIsActive, isPortListening, verifyHostingReleased };
