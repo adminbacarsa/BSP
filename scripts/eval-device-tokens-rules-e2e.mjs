@@ -98,6 +98,45 @@ async function main() {
     failed += 1;
   }
 
+  // Caso 4: no puede suplantar role admin
+  const fcmToken4 = `eval_fcm4_${uid.slice(0, 8)}_${Date.now()}`;
+  try {
+    await setDoc(doc(db, 'device_tokens', fcmToken4), {
+      uid,
+      token: fcmToken4,
+      role: 'admin',
+    });
+    console.log('FALLA\tCaso 4\tGuardia pudo setear role admin');
+    failed += 1;
+  } catch (e) {
+    if (e?.code === 'permission-denied') {
+      console.log('OK\tCaso 4\tDenegado role admin en FCM');
+    } else {
+      console.log('FALLA\tCaso 4\tError inesperado:', e?.code || e);
+      failed += 1;
+    }
+  }
+
+  // Caso 5: no puede setear employeeId ajeno (legajo admin seed)
+  const fcmToken5 = `eval_fcm5_${uid.slice(0, 8)}_${Date.now()}`;
+  try {
+    await setDoc(doc(db, 'device_tokens', fcmToken5), {
+      uid,
+      token: fcmToken5,
+      employeeId: 'admin_seed_legajo_fake',
+      role: 'employee',
+    });
+    console.log('FALLA\tCaso 5\tGuardia pudo setear employeeId ajeno');
+    failed += 1;
+  } catch (e) {
+    if (e?.code === 'permission-denied') {
+      console.log('OK\tCaso 5\tDenegado employeeId ajeno');
+    } else {
+      console.log('FALLA\tCaso 5\tError inesperado:', e?.code || e);
+      failed += 1;
+    }
+  }
+
   // Caso 3: guardia no puede inyectar verified en doc FCM
   const fcmToken2 = `eval_fcm2_${uid.slice(0, 8)}_${Date.now()}`;
   try {
