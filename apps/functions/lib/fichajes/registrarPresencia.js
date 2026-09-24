@@ -5,6 +5,7 @@ const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const checkInWindow_1 = require("./checkInWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
+const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTardeConvocatorias");
 function normPos(n) {
     return String(n ?? '')
         .trim()
@@ -201,6 +202,7 @@ async function registrarPresencia(db, input) {
         incomingPatch.absenceReversedBy = source === 'OPERATIONS' ? 'OPERACIONES' : source;
     }
     await shiftRef.update(incomingPatch);
+    await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'CHECKED_IN').catch((e) => console.warn('[registrarPresencia] cancelar ¿Venís?:', e.message));
     void (async () => {
         try {
             const isPortal = source === 'PORTAL_GPS';

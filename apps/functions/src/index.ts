@@ -29,6 +29,7 @@ import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/co
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
+import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
 import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFalseAbsences';
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
@@ -1837,6 +1838,7 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
             lateArrivalEtaAt: etaAt,
             checkInStatus: 'LATE_PENDING',
         });
+        await cancelLlegadaTardeConvocatorias(db, shiftId, 'LATE_NOTICE').catch(() => {});
 
         // Crear novedad para notificar al operador en CC
         try {

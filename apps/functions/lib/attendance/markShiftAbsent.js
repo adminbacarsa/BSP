@@ -29,6 +29,9 @@ async function markShiftAbsent(db, shiftId, opts) {
         if (shift.absenceDetectedAt)
             return { applied: false, alreadyAbsent: true };
     }
+    if ((shift.isPresent === true || shift.isCompleted === true) && opts.reason !== 'MANUAL_OPS') {
+        return { applied: false };
+    }
     const now = firestore_1.Timestamp.now();
     const startMs = shift.startTime?.toMillis?.() ?? 0;
     const dateStr = startMs ? arDateStrFromStartMs(startMs) : arDateStrFromStartMs(Date.now());

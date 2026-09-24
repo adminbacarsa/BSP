@@ -54,6 +54,10 @@ export async function markShiftAbsent(
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
     if (shift.absenceDetectedAt) return { applied: false, alreadyAbsent: true };
   }
+  // Un guardia que ya fichó no queda ausente por un proceso automático; solo el operador puede decidirlo.
+  if ((shift.isPresent === true || shift.isCompleted === true) && opts.reason !== 'MANUAL_OPS') {
+    return { applied: false };
+  }
 
   const now = Timestamp.now();
   const startMs = (shift.startTime as { toMillis?: () => number })?.toMillis?.() ?? 0;

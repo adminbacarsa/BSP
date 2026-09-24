@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -277,6 +278,9 @@ export async function registrarPresencia(
   }
 
   await shiftRef.update(incomingPatch);
+  await cancelLlegadaTardeConvocatorias(db, shiftId, 'CHECKED_IN').catch((e) =>
+    console.warn('[registrarPresencia] cancelar ¿Venís?:', (e as Error).message),
+  );
 
   // Notificación de confirmación al guardia (no bloqueante)
   void (async () => {

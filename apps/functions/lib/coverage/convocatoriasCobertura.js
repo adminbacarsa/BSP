@@ -1174,7 +1174,8 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
             if (conv.type === 'LLEGADA_TARDE') {
                 await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
                 const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
-                if (!(0, coverageTraceShift_1.skipAbsencePipelineForShift)(sh)) {
+                const alreadyHandled = !!(sh?.isPresent || sh?.isCompleted || sh?.lateArrivalAt || sh?.lateArrivalConfirmed);
+                if (!alreadyHandled && !(0, coverageTraceShift_1.skipAbsencePipelineForShift)(sh)) {
                     await (0, markShiftAbsent_1.markShiftAbsent)(db, conv.shiftId, {
                         reason: 'LLEGADA_TARDE_TIMEOUT',
                         by: 'SYSTEM_SCHEDULER',

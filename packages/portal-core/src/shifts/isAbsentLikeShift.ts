@@ -7,7 +7,6 @@ const LEAVE_SHIFT_CODES = new Set([
   'A',
   'ART',
   'PG',
-  'LT',
   'SGS',
   'SUS',
 ]);
@@ -86,8 +85,16 @@ export function isAbsentLikeShift(shift: Record<string, unknown> | null | undefi
 }
 
 /** Ausencia RRHH activa (no rechazada) que invalida el turno del titular. */
+/** LT = llegada tarde: novedad RRHH del guardia que SÍ trabajó, no una ausencia. */
+function isLateArrivalRecord(data: Record<string, unknown>): boolean {
+  const code = String(data.absenceType || data.code || '').trim().toUpperCase();
+  const type = String(data.type || '').trim().toLowerCase();
+  return code === 'LT' || type === 'llegada tarde' || String(data.origin || '').toUpperCase() === 'LATE_ARRIVAL';
+}
+
 export function isActiveAbsenceRecord(data: Record<string, unknown> | null | undefined): boolean {
   if (!data) return false;
+  if (isLateArrivalRecord(data)) return false;
   const st = String(data.status || data.estado || '')
     .trim()
     .toUpperCase();

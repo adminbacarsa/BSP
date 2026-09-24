@@ -1510,7 +1510,9 @@ export const checkConvocatoriaTimeouts = onSchedule(
         if (conv.type === 'LLEGADA_TARDE') {
           await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
           const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
-          if (!skipAbsencePipelineForShift(sh as Record<string, unknown>)) {
+          // Ya fichó o avisó demora: la ventana la resuelve detectarAusencias (ETA / T+30), no este timeout.
+          const alreadyHandled = !!(sh?.isPresent || sh?.isCompleted || sh?.lateArrivalAt || sh?.lateArrivalConfirmed);
+          if (!alreadyHandled && !skipAbsencePipelineForShift(sh as Record<string, unknown>)) {
             await markShiftAbsent(db, conv.shiftId, {
               reason: 'LLEGADA_TARDE_TIMEOUT',
               by: 'SYSTEM_SCHEDULER',
