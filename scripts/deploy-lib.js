@@ -85,6 +85,35 @@ function runDeploy(projectRoot, args = []) {
   }
   console.log('✓ build/hosting/ actualizado');
 
+  // Portal guardia (Expo web) → build/hosting/app/
+  const mobileDist = path.join(projectRoot, 'apps', 'mobile-guardia', 'dist-web');
+  const hostingApp = path.join(hosting, 'app');
+  if (fs.existsSync(mobileDist)) {
+    console.log('\n▶ Copiando apps/mobile-guardia/dist-web → build/hosting/app/ ...');
+    fs.rmSync(hostingApp, { recursive: true, force: true });
+    fs.mkdirSync(hostingApp, { recursive: true });
+    const copyApp =
+      process.platform === 'win32'
+        ? `robocopy "${mobileDist}" "${hostingApp}" /E /NFL /NDL /NJH /NJS`
+        : `rsync -a "${mobileDist}/" "${hostingApp}/"`;
+    const copy = spawnSync(copyApp, { stdio: 'inherit', cwd: projectRoot, shell: true });
+    if (process.platform === 'win32') {
+      if (copy.status !== null && copy.status > 3) {
+        console.error('\n✗ Falló la copia de dist-web → hosting/app');
+        process.exit(copy.status);
+      }
+    } else if (copy.status !== 0) {
+      console.error('\n✗ Falló la copia de dist-web → hosting/app');
+      process.exit(copy.status ?? 1);
+    }
+    console.log('✓ build/hosting/app/ (portal guardia web) listo');
+  } else {
+    console.warn(
+      '\n⚠ No hay apps/mobile-guardia/dist-web — /app no se actualizará.\n' +
+        '  Generá con: npm --prefix apps/mobile-guardia run build:web',
+    );
+  }
+
   const targets = [];
   if (flags.withHosting) targets.push('hosting');
   if (withFunctions) targets.push('functions');
