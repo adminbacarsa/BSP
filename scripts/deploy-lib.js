@@ -106,7 +106,14 @@ function runDeploy(projectRoot, args = []) {
     process.exit(1);
   }
 
-  run(`firebase deploy --only "${targets.join(',')}" --force`, projectRoot);
+  // Hosting en un comando aparte: con muchas functions el CLI puede agotar cuota y no llegar a publicarlo.
+  const nonHosting = targets.filter((t) => t !== 'hosting');
+  if (nonHosting.length) run(`firebase deploy --only "${nonHosting.join(',')}" --force`, projectRoot);
+  if (flags.withHosting) run('firebase deploy --only hosting --force', projectRoot);
+
+  // El CLI puede salir con 0 sin publicar el hosting (visto con errores de cuota en functions):
+  // se compara el bundle de /app publicado con el recién compilado.
+  if (flags.withHosting) verifyHostingReleased(projectRoot);
 
   console.log('\n✅ Deploy OK.');
   if (projectRoot !== path.join(__dirname, '..')) {
@@ -114,4 +121,27 @@ function runDeploy(projectRoot, args = []) {
   }
 }
 
-module.exports = { runDeploy, labIsActive, isPortListening };
+function verifyHostingReleased(projectRoot) {
+  const localIndex = path.join(projectRoot, 'build', 'hosting', 'app', 'index.html');
+  if (!fs.existsSync(localIndex)) return;
+  const entryRe = /entry-[a-f0-9]+\.js/;
+  const expected = (fs.readFileSync(localIndex, 'utf8').match(entryRe) || [])[0];
+  if (!expected) return;
+  const url = `https://comtroldata.web.app/app/?deploycheck=${Date.now()}`;
+  const probe = spawnSync(
+    process.execPath,
+    ['-e', `fetch(${JSON.stringify(url)}).then(r=>r.text()).then(t=>process.stdout.write(t)).catch(()=>process.exit(2))`],
+    { encoding: 'utf8' },
+  );
+  const published = ((probe.stdout || '').match(entryRe) || [])[0];
+  if (published !== expected) {
+    console.error(
+      `\n✗ El hosting no quedó publicado: /app sirve ${published || '(sin respuesta)'} y el build es ${expected}.\n` +
+        '  Reintentá solo hosting: npm run deploy',
+    );
+    process.exit(1);
+  }
+  console.log(`✓ Hosting publicado (/app → ${expected})`);
+}
+
+module.exports = { runDeploy, labIsActive, isPortListening, verifyHostingReleased };
