@@ -133,6 +133,7 @@ export default function DeviceBlockedScreen() {
                 <Text style={styles.body}>
                   Todavía no activaste tu cuenta. Usá el mail de acceso o pedile a RRHH que te lo reenvíe.
                 </Text>
+                {requestMsg ? <Text style={[styles.feedback, styles.feedbackErr]}>{requestMsg}</Text> : null}
               </>
             ) : (
               <>
@@ -190,8 +191,11 @@ export default function DeviceBlockedScreen() {
                 <Pressable
                   style={styles.btnSecondary}
                   onPress={async () => {
+                    setRequestMsg('Verificando…');
                     await refreshEmployee();
                     router.replace('/');
+                    // Si vuelve a quedar bloqueado, la pantalla se re-monta: dejar claro que se reintentó.
+                    setTimeout(() => setRequestMsg('No se pudo verificar este dispositivo todavía. Si RRHH ya lo aprobó, esperá unos segundos y reintentá.'), 1500);
                   }}
                 >
                   <Text style={styles.btnSecondaryText}>Reintentar verificación</Text>

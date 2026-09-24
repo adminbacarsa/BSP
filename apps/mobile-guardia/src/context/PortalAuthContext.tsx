@@ -470,7 +470,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   const signOut = useCallback(async () => {
     try {
-      await unregisterPushForUser(db);
+      // En web la baja del token FCM puede no resolver nunca: no bloquear el logout más de 3 s.
+      await Promise.race([
+        unregisterPushForUser(db),
+        new Promise((resolve) => setTimeout(resolve, 3000)),
+      ]);
     } catch {
       /* no bloquear logout */
     }
