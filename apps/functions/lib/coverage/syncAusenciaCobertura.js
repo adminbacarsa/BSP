@@ -1,12 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.CoverageApplyError = void 0;
+exports.DELETED_REASON_CONVERTED_COVERAGE = exports.CoverageApplyError = void 0;
 exports.syncAusenciaCoberturaGestionada = syncAusenciaCoberturaGestionada;
 exports.absentShiftCoveragePatch = absentShiftCoveragePatch;
 exports.isDualSiblingOpsCoverage = isDualSiblingOpsCoverage;
 exports.isTitularAlreadyCovered = isTitularAlreadyCovered;
 exports.buildOpsCoverageDocId = buildOpsCoverageDocId;
+exports.isSourceShiftConvertedForCoverage = isSourceShiftConvertedForCoverage;
 exports.clearSourceCoverageUsedPatch = clearSourceCoverageUsedPatch;
+exports.buildEscRefSourceConvertedPatch = buildEscRefSourceConvertedPatch;
+exports.buildRestoreSourceShiftAfterCoveragePatch = buildRestoreSourceShiftAfterCoveragePatch;
 exports.sourceShiftCoverageUsedPatch = sourceShiftCoverageUsedPatch;
 exports.isActiveOpsCoverageDoc = isActiveOpsCoverageDoc;
 exports.supersedeOpsCoveragesForAbsence = supersedeOpsCoveragesForAbsence;
@@ -102,6 +105,13 @@ function isTitularAlreadyCovered(data) {
 function buildOpsCoverageDocId(titularShiftId, employeeId) {
     return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
 }
+exports.DELETED_REASON_CONVERTED_COVERAGE = 'CONVERTIDO_EN_COBERTURA';
+function isSourceShiftConvertedForCoverage(data) {
+    if (!data)
+        return false;
+    return (data.isDeleted === true
+        && String(data.deletedReason || '') === exports.DELETED_REASON_CONVERTED_COVERAGE);
+}
 function clearSourceCoverageUsedPatch() {
     return {
         coverageUsed: false,
@@ -109,10 +119,52 @@ function clearSourceCoverageUsedPatch() {
         coverageDocId: null,
         coverageUsedAt: null,
         coverageUsedBy: null,
+        coverageUsedCoversEmployeeName: null,
+        coverageUsedObjectiveName: null,
+    };
+}
+function buildEscRefSourceConvertedPatch(srcData, covDocId) {
+    const statusBeforeDelete = String(srcData.status ?? 'ACTIVE');
+    return {
+        isDeleted: true,
+        status: 'CANCELLED',
+        deletedReason: exports.DELETED_REASON_CONVERTED_COVERAGE,
+        convertedToCoverageDocId: covDocId,
+        statusBeforeDelete,
+        coverageUsed: admin.firestore.FieldValue.delete(),
+        coverageUsedForShiftId: admin.firestore.FieldValue.delete(),
+        coverageDocId: admin.firestore.FieldValue.delete(),
+        coverageUsedAt: admin.firestore.FieldValue.delete(),
+        coverageUsedBy: admin.firestore.FieldValue.delete(),
+        coverageUsedCoversEmployeeName: admin.firestore.FieldValue.delete(),
+        coverageUsedObjectiveName: admin.firestore.FieldValue.delete(),
+    };
+}
+function buildRestoreSourceShiftAfterCoveragePatch(srcData) {
+    if (!srcData)
+        return clearSourceCoverageUsedPatch();
+    if (isSourceShiftConvertedForCoverage(srcData)) {
+        const prevStatus = String(srcData.statusBeforeDelete || 'ACTIVE');
+        return {
+            isDeleted: false,
+            status: prevStatus,
+            deletedReason: admin.firestore.FieldValue.delete(),
+            convertedToCoverageDocId: admin.firestore.FieldValue.delete(),
+            statusBeforeDelete: admin.firestore.FieldValue.delete(),
+            ...clearSourceCoverageUsedPatch(),
+        };
+    }
+    return {
+        ...clearSourceCoverageUsedPatch(),
+        isRetentionActivated: admin.firestore.FieldValue.delete(),
+        retentionActivatedAt: admin.firestore.FieldValue.delete(),
     };
 }
 function sourceShiftCoverageUsedPatch(opts) {
-    const patch = {
+    if (!opts.isRet) {
+        return { coverageDocId: opts.coverageDocId };
+    }
+    return {
         coverageUsed: true,
         coverageUsedForShiftId: opts.titularShiftId,
         coverageDocId: opts.coverageDocId,
@@ -120,12 +172,9 @@ function sourceShiftCoverageUsedPatch(opts) {
         coverageUsedBy: opts.resolvedBy,
         coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
         coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
+        isRetentionActivated: true,
+        retentionActivatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
-    if (opts.isRet) {
-        patch.isRetentionActivated = true;
-        patch.retentionActivatedAt = admin.firestore.FieldValue.serverTimestamp();
-    }
-    return patch;
 }
 function isActiveOpsCoverageDoc(data) {
     if (!data)
@@ -167,7 +216,10 @@ async function supersedeOpsCoveragesForAbsence(db, absenceShiftId, batch, opts) 
         }
         const prevSource = String(data.sourceShiftId || '').trim();
         if (prevSource) {
-            batch.update(db.collection('turnos').doc(prevSource), clearSourceCoverageUsedPatch());
+            const srcSnap = await db.collection('turnos').doc(prevSource).get();
+            if (srcSnap.exists) {
+                batch.update(srcSnap.ref, buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data()));
+            }
         }
         batch.update(d.ref, {
             coverageSuperseded: true,
@@ -246,7 +298,9 @@ async function applyCoverage(db, batch, params) {
             throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
         }
         const srcData = srcSnap.data();
-        if (['REF', 'ESC', 'RET'].includes(ct)) {
+        const sameCovOnSource = String(srcData.coverageDocId || '').trim() === covDocId
+            && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
+        if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
             const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
             if (!gap || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, gap)) {
                 throw new CoverageApplyError('INVALID_SOURCE', 'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.');
@@ -260,7 +314,9 @@ async function applyCoverage(db, batch, params) {
             coversEmployeeName: titular.employeeName || null,
             coversObjectiveName: titular.objectiveName || null,
         });
-        if (ct === 'EXTEND' && params.extensionEndTime) {
+        if (sameCovOnSource) {
+        }
+        else if (ct === 'EXTEND' && params.extensionEndTime) {
             batch.update(db.collection('turnos').doc(sourceId), {
                 ...usedBase,
                 isExtended: true,
@@ -274,6 +330,9 @@ async function applyCoverage(db, batch, params) {
                 isEarlyStart: true,
                 adjustedStartTime: params.adjustedStartTime,
             });
+        }
+        else if (ct === 'ESC' || ct === 'REF') {
+            batch.update(db.collection('turnos').doc(sourceId), buildEscRefSourceConvertedPatch(srcData, covDocId));
         }
         else {
             batch.update(db.collection('turnos').doc(sourceId), usedBase);

@@ -17,6 +17,10 @@ function isOpsCoverageHoursOnSourceDoc(data) {
 function skipAbsencePipelineForShift(data) {
     if (isOpsCoverageHoursOnSourceDoc(data))
         return true;
+    if (data?.isDeleted === true)
+        return true;
+    if (data?.isExtended === true || data?.isEarlyStart === true)
+        return false;
     return data?.coverageUsed === true;
 }
 //# sourceMappingURL=coverageTraceShift.js.map
