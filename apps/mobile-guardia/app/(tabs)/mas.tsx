@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
@@ -65,20 +65,30 @@ function MasScreenContent() {
           tab Alertas.
         </Text>
 
-        <CommandCard title="Actualización de la app">
-          <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
-            Descarga mejoras sin desinstalar. Después de descargar, cerrá la app por completo
-            (recientes) y volvé a abrirla. No reinicia sola (evita pantalla gris en Android).
-          </Text>
-          <Text style={[styles.versionLine, { color: palette.onSurface }]}>{getAppVersionLabel()}</Text>
-          <CommandButton
-            label={updateBusy ? 'Buscando…' : 'Buscar / descargar actualización'}
-            variant="primary"
-            loading={updateBusy}
-            onPress={onCheckUpdate}
-            disabled={updateBusy}
-          />
-        </CommandCard>
+        {Platform.OS !== 'web' ? (
+          <CommandCard title="Actualización de la app">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Descarga mejoras sin desinstalar. Después de descargar, cerrá la app por completo
+              (recientes) y volvé a abrirla. No reinicia sola (evita pantalla gris en Android).
+            </Text>
+            <Text style={[styles.versionLine, { color: palette.onSurface }]}>{getAppVersionLabel()}</Text>
+            <CommandButton
+              label={updateBusy ? 'Buscando…' : 'Buscar / descargar actualización'}
+              variant="primary"
+              loading={updateBusy}
+              onPress={onCheckUpdate}
+              disabled={updateBusy}
+            />
+          </CommandCard>
+        ) : (
+          <CommandCard title="Versión web">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Portal en el navegador (sin OTA). Para iPhone: agregá COSP a la pantalla de inicio desde
+              Safari.
+            </Text>
+            <Text style={[styles.versionLine, { color: palette.onSurface }]}>{getAppVersionLabel()}</Text>
+          </CommandCard>
+        )}
 
         <CommandCard title="Apariencia">
           <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>

@@ -62,11 +62,6 @@ const config: ExpoConfig = {
             host: 'comtroldata.web.app',
             pathPrefix: '/empleado/activar',
           },
-          {
-            scheme: 'https',
-            host: 'comtroldata.web.app',
-            pathPrefix: '/app/activar',
-          },
         ],
         category: ['BROWSABLE', 'DEFAULT'],
       },
@@ -80,6 +75,14 @@ const config: ExpoConfig = {
     bundler: 'metro',
     output: 'static',
     favicon: './assets/favicon.png',
+    name: 'COSP Guardia',
+    shortName: 'COSP',
+    description: 'Portal del vigilador — turnos, fichada GPS y novedades.',
+    themeColor: '#8B1A1A',
+    backgroundColor: '#8B1A1A',
+    display: 'standalone',
+    lang: 'es-AR',
+    startUrl: '/app/',
   },
   plugins: [
     'expo-router',
@@ -115,6 +118,7 @@ const config: ExpoConfig = {
   ],
   experiments: {
     typedRoutes: true,
+    /** SPA bajo https://comtroldata.web.app/app/ */
     baseUrl: '/app',
   },
   extra: {
@@ -131,6 +135,7 @@ const config: ExpoConfig = {
       messagingSenderId: process.env.EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || '',
       appId: process.env.EXPO_PUBLIC_FIREBASE_APP_ID || '',
     },
+    vapidKey: process.env.EXPO_PUBLIC_FIREBASE_VAPID_KEY || '',
   },
 };
 

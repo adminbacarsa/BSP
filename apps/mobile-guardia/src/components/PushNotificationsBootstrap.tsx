@@ -1,16 +1,14 @@
 import { useEffect, useRef } from 'react';
-import { Alert, AppState } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import { Alert, AppState, Platform } from 'react-native';
 import { useRouter } from 'expo-router';
 import { usePortalAuth } from '../context/PortalAuthContext';
 import { getPortalFirebase } from '../lib/portal';
-import {
-  routeFromNotification,
-} from '../lib/notificationNavigation';
+import { routeFromNotificationData } from '../lib/notificationNavigation';
 import { appRoutes } from '../lib/appRoutes';
 import {
   getStoredFcmToken,
   registerPushNotifications,
+  subscribeWebForegroundMessages,
   type PushRegistrationStatus,
 } from '../lib/pushNotifications';
 
@@ -20,6 +18,7 @@ type PushNotificationsBootstrapProps = {
 
 function hrefFromRoute(route: string) {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
+  if (route.startsWith('/(tabs)?')) return appRoutes.hoy;
   if (route === '/(tabs)/agenda') return appRoutes.agenda;
   if (route === '/(tabs)/alertas') return appRoutes.alertas;
   if (route === '/(tabs)/mas') return appRoutes.mas;
@@ -30,6 +29,14 @@ function hrefFromRoute(route: string) {
   return appRoutes.alertas;
 }
 
+function mapLegacyEmployeeLink(link: string): string {
+  const raw = link.trim();
+  if (!raw) return '/app/';
+  if (raw.startsWith('/empleado')) return '/app/';
+  if (raw.startsWith('/app')) return raw;
+  return raw;
+}
+
 export function PushNotificationsBootstrap({ onStatusChange }: PushNotificationsBootstrapProps) {
   const router = useRouter();
   const { user, empDocId, employee, employeeProfileReady } = usePortalAuth();
@@ -37,10 +44,17 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   const lastForegroundToastRef = useRef<string | null>(null);
   const handledColdStartRef = useRef(false);
 
-  const openFromNotification = (notification: Notifications.Notification) => {
-    const route = routeFromNotification(notification);
+  const openFromData = (data: Record<string, unknown>) => {
+    const route = routeFromNotificationData(data);
     if (route) {
       router.push(hrefFromRoute(route));
+      return;
+    }
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      const link = mapLegacyEmployeeLink(String(data.link ?? data.route ?? data.path ?? '/app/'));
+      if (link.startsWith('/app')) {
+        window.location.href = link;
+      }
     }
   };
 
@@ -61,7 +75,9 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
         if (result.status === 'denied') {
           Alert.alert(
             'Notificaciones',
-            'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
+            Platform.OS === 'web'
+              ? 'Para recibir alertas, permití notificaciones de este sitio en el navegador. En iPhone, agregá COSP a la pantalla de inicio.'
+              : 'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
           );
         }
       }
@@ -75,44 +91,100 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   useEffect(() => {
     if (!user) return;
 
-    if (!handledColdStartRef.current) {
-      handledColdStartRef.current = true;
-      void Notifications.getLastNotificationResponseAsync().then((response) => {
-        if (response?.notification) {
-          openFromNotification(response.notification);
+    if (Platform.OS === 'web') {
+      let unsub: (() => void) | null = null;
+      let cancelled = false;
+      void subscribeWebForegroundMessages(({ title, body, data }) => {
+        const dedupeKey = `${title}|${body}`;
+        if (lastForegroundToastRef.current === dedupeKey) return;
+        lastForegroundToastRef.current = dedupeKey;
+        if (AppState.currentState === 'active') {
+          const route = routeFromNotificationData(data);
+          if (route) {
+            Alert.alert(title, body || 'Nueva notificación', [
+              { text: 'Después', style: 'cancel' },
+              { text: 'Abrir', onPress: () => openFromData(data) },
+            ]);
+          } else {
+            Alert.alert(title, body || 'Nueva notificación');
+          }
+          try {
+            if (Notification.permission === 'granted') {
+              const n = new Notification(title, { body });
+              n.onclick = () => openFromData(data);
+            }
+          } catch {
+            /* ignore */
+          }
         }
+      }).then((fn) => {
+        if (cancelled) {
+          fn?.();
+          return;
+        }
+        unsub = fn;
       });
+      return () => {
+        cancelled = true;
+        unsub?.();
+      };
     }
 
-    const received = Notifications.addNotificationReceivedListener((notification) => {
-      const title = notification.request.content.title ?? 'CronoApp';
-      const body = notification.request.content.body ?? '';
-      const dedupeKey = `${title}|${body}`;
-      if (lastForegroundToastRef.current === dedupeKey) return;
-      lastForegroundToastRef.current = dedupeKey;
-      if (AppState.currentState === 'active') {
-        const route = routeFromNotification(notification);
-        if (route) {
-          Alert.alert(title, body || 'Nueva notificación', [
-            { text: 'Después', style: 'cancel' },
-            { text: 'Abrir', onPress: () => router.push(hrefFromRoute(route)) },
-          ]);
-        } else {
-          Alert.alert(title, body || 'Nueva notificación');
-        }
-      }
-    });
+    let Notifications: typeof import('expo-notifications');
+    let received: { remove: () => void } | null = null;
+    let response: { remove: () => void } | null = null;
+    let cancelled = false;
 
-    const response = Notifications.addNotificationResponseReceivedListener((event) => {
-      lastForegroundToastRef.current = null;
-      if (event.notification) {
-        openFromNotification(event.notification);
+    void import('expo-notifications').then((mod) => {
+      if (cancelled) return;
+      Notifications = mod;
+
+      const openFromNotification = (notification: import('expo-notifications').Notification) => {
+        const raw = notification.request.content.data;
+        const data =
+          raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : ({} as Record<string, unknown>);
+        openFromData(data);
+      };
+
+      if (!handledColdStartRef.current) {
+        handledColdStartRef.current = true;
+        void Notifications.getLastNotificationResponseAsync().then((resp) => {
+          if (resp?.notification) openFromNotification(resp.notification);
+        });
       }
+
+      received = Notifications.addNotificationReceivedListener((notification) => {
+        const title = notification.request.content.title ?? 'CronoApp';
+        const body = notification.request.content.body ?? '';
+        const dedupeKey = `${title}|${body}`;
+        if (lastForegroundToastRef.current === dedupeKey) return;
+        lastForegroundToastRef.current = dedupeKey;
+        if (AppState.currentState === 'active') {
+          const raw = notification.request.content.data;
+          const data =
+            raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : ({} as Record<string, unknown>);
+          const route = routeFromNotificationData(data);
+          if (route) {
+            Alert.alert(title, body || 'Nueva notificación', [
+              { text: 'Después', style: 'cancel' },
+              { text: 'Abrir', onPress: () => openFromData(data) },
+            ]);
+          } else {
+            Alert.alert(title, body || 'Nueva notificación');
+          }
+        }
+      });
+
+      response = Notifications.addNotificationResponseReceivedListener((event) => {
+        lastForegroundToastRef.current = null;
+        if (event.notification) openFromNotification(event.notification);
+      });
     });
 
     return () => {
-      received.remove();
-      response.remove();
+      cancelled = true;
+      received?.remove();
+      response?.remove();
     };
   }, [user?.uid, router]);
 

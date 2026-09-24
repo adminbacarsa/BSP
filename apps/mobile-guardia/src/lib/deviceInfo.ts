@@ -4,8 +4,9 @@ import { getMobilePlatform } from './deviceId';
 
 export function getDeviceInfo(): Record<string, string> {
   const { width, height } = Dimensions.get('window');
-  return {
-    platform: getMobilePlatform(),
+  const platform = getMobilePlatform();
+  const base: Record<string, string> = {
+    platform,
     osName: Device.osName ?? Platform.OS,
     osVersion: Device.osVersion ?? '',
     modelName: Device.modelName ?? '',
@@ -14,4 +15,10 @@ export function getDeviceInfo(): Record<string, string> {
     screenH: String(Math.round(height)),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
   };
+  if (platform === 'web' && typeof navigator !== 'undefined') {
+    base.userAgent = navigator.userAgent || '';
+    base.language = navigator.language || '';
+    base.vendor = navigator.vendor || '';
+  }
+  return base;
 }

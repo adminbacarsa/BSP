@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import NetInfo, { type NetInfoState } from '@react-native-community/netinfo';
 import * as Location from 'expo-location';
+import { Platform } from 'react-native';
 import type { Shift, ObjectiveLocation } from '@cosp/portal-types';
 import {
   buildCheckInPayload,
@@ -14,14 +15,41 @@ import { mapPortalCallableError } from '../lib/mapPortalCallableError';
 import { enqueuePendingCheckin, loadPendingCheckins, savePendingCheckins } from '../lib/pendingCheckins';
 
 async function getCurrentCoords(): Promise<{ latitude: number; longitude: number }> {
+  if (Platform.OS === 'web' && typeof window !== 'undefined') {
+    if (!window.isSecureContext) {
+      throw new Error(
+        'La ubicación en el navegador requiere HTTPS (o localhost). Abrí https://comtroldata.web.app/app/',
+      );
+    }
+    if (!('geolocation' in navigator)) {
+      throw new Error('Este navegador no soporta geolocalización. Probá Chrome o Safari actualizado.');
+    }
+  }
+
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') {
-    throw new Error('Permiso de ubicación denegado. Activá GPS en ajustes.');
+    throw new Error(
+      Platform.OS === 'web'
+        ? 'Permiso de ubicación denegado. En el candado de la barra de direcciones, permití «Ubicación» para este sitio y reintentá.'
+        : 'Permiso de ubicación denegado. Activá GPS en ajustes.',
+    );
   }
-  const pos = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
-  });
-  return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+  try {
+    const pos = await Location.getCurrentPositionAsync({
+      accuracy: Location.Accuracy.High,
+    });
+    return { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : '';
+    if (Platform.OS === 'web') {
+      throw new Error(
+        msg.includes('denied') || msg.includes('Permission')
+          ? 'No se pudo leer el GPS: permiso denegado o bloqueado por el navegador. Permití ubicación y reintentá.'
+          : 'No se pudo obtener la ubicación. Verificá que el GPS esté activo y que el sitio tenga permiso.',
+      );
+    }
+    throw err;
+  }
 }
 
 export function useCheckIn() {
