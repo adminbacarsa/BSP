@@ -8,6 +8,7 @@ import { ThemeProvider, useTheme } from '../src/theme/ThemeContext';
 import { PushNotificationsBootstrap } from '../src/components/PushNotificationsBootstrap';
 import { AppUpdateBootstrap } from '../src/components/AppUpdateBootstrap';
 import { OfflineBanner } from '../src/components/OfflineBanner';
+import { AddToHomeBanner } from '../src/components/AddToHomeBanner';
 
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
@@ -67,6 +68,7 @@ export default function RootLayout() {
           <PushNotificationsBootstrap />
           <AppUpdateBootstrap />
           <OfflineBanner />
+          <AddToHomeBanner />
           <RootNavigator />
         </PortalAuthProvider>
       </ThemeProvider>
