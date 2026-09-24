@@ -85,7 +85,8 @@ export function ActivarScreen({ token }: Props) {
         <View style={styles.card}>
           <Text style={styles.successTitle}>¡Cuenta activada!</Text>
           <Text style={styles.successBody}>
-            Este celular quedó vinculado. Si iniciás sesión en otro dispositivo, vas a ver la pantalla de bloqueo.
+            Este dispositivo quedó vinculado. Si iniciás sesión en otro celular o navegador, vas a ver
+            la pantalla de bloqueo (un dispositivo activo por legajo).
           </Text>
           <Pressable style={styles.btn} onPress={() => router.replace(appRoutes.hoy)}>
             <Text style={styles.btnText}>Continuar</Text>
@@ -129,7 +130,8 @@ export function ActivarScreen({ token }: Props) {
         <Text style={styles.badge}>Activación</Text>
         <Text style={styles.title}>Vincular dispositivo</Text>
         <Text style={styles.subtitle}>
-          Creá tu contraseña. Este paso ata tu legajo a este celular (un dispositivo activo por cuenta).
+          Creá tu contraseña. Este paso ata tu legajo a este dispositivo (un Android o un navegador
+          activo por cuenta).
         </Text>
 
         <Text style={styles.label}>Nueva contraseña</Text>
