@@ -5,7 +5,7 @@ import {
   pickDefaultMode,
   resolveVisibleModes,
   type StaffProfile,
-} from '../../../../packages/ops-core/src/index.ts';
+} from '../../../../packages/ops-core/src/staffAppModes.ts';
 
 function profile(partial: Partial<StaffProfile>): StaffProfile {
   return {
