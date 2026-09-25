@@ -16,7 +16,8 @@
     "test:push-preview": "node --experimental-strip-types --test src/lib/pushNotifications.preview.test.ts",
     "test:alertas-pagination": "node --experimental-strip-types --test src/lib/alertasPagination.test.ts",
     "update:preview": "npx --yes eas-cli update --channel preview --environment preview",
-    "update:production": "npx --yes eas-cli update --channel production --environment production"
+    "update:production": "npx --yes eas-cli update --channel production --environment production",
+    "update:channels": "echo Run update:preview and update:production as TWO separate commands (or scripts/mobile-ota-channels.ps1). Do not join with /"
   },
   "dependencies": {
     "@cosp/portal-core": "file:../../packages/portal-core",
