@@ -170,7 +170,8 @@ export async function registrarPresencia(
 
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
   if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
-    realStartTime = nowTs;
+    // Presente anticipado: el turno arranca a la hora planificada (igual que la fichada GPS), no al click.
+    realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : Timestamp.fromMillis(nowMs);
   } else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
     realStartTime =
       windowEval.usePlannedStart
