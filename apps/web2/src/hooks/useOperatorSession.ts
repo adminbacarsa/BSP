@@ -3,20 +3,27 @@ import {
   collection,
   query,
   where,
-  addDoc,
   updateDoc,
   doc,
-  serverTimestamp,
-  getDocs,
   Timestamp,
   writeBatch,
 } from 'firebase/firestore';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, onSnapshotFresh, functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { pickCanonicalPilotSession, type OpsSessionRole } from '@/lib/operaciones/opsMode';
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
+
+type SesionOperadorAction =
+  | 'start'
+  | 'end'
+  | 'requestPilot'
+  | 'cancelPilotRequest'
+  | 'acceptPilot'
+  | 'rejectPilot'
+  | 'passToAuto';
 
 export type PilotRequestStatus = 'NONE' | 'PENDING' | 'REJECTED';
 
@@ -63,6 +70,15 @@ export const useOperatorSession = () => {
   const [activeSessions, setActiveSessions] = useState<OperatorSession[]>([]);
   const [loading, setLoading] = useState(true);
   const reconcileBusy = useRef(false);
+
+  const callSesionOperador = useCallback(
+    async (action: SesionOperadorAction) => {
+      if (!empresaId) throw new Error('Sin empresa');
+      const fn = httpsCallable(functions, 'sesionOperador');
+      await fn({ action, empresaId, writeOrigin: 'WEB' });
+    },
+    [empresaId],
+  );
 
   useEffect(() => {
     if (!empresaId) {
@@ -149,137 +165,38 @@ export const useOperatorSession = () => {
 
   const startSession = useCallback(async () => {
     if (!user || !empresaId) return;
-    const existing = await getDocs(
-      query(
-        collection(db, 'sesiones_operador'),
-        where('empresaId', '==', empresaId),
-        where('operatorId', '==', user.uid),
-        where('status', '==', 'ACTIVO'),
-      ),
-    );
-    if (!existing.empty) return;
+    await callSesionOperador('start');
+  }, [user, empresaId, callSesionOperador]);
 
-    const roomSnap = await getDocs(
-      query(
-        collection(db, 'sesiones_operador'),
-        where('empresaId', '==', empresaId),
-        where('status', '==', 'ACTIVO'),
-      ),
-    );
-    const roomBusy = roomSnap.docs.some((d) => {
-      const exp = d.data().expiresAt?.toDate?.();
-      return !exp || exp > new Date();
-    });
-    const role: OpsSessionRole = roomBusy ? 'COPILOTO' : 'PILOTO';
-
-    await addDoc(collection(db, 'sesiones_operador'), {
-      operatorId: user.uid,
-      operatorName: user.email?.split('@')[0] || 'Operador',
-      empresaId,
-      startTime: serverTimestamp(),
-      endTime: null,
-      expiresAt: Timestamp.fromMillis(Date.now() + SESSION_TTL_MS),
-      status: 'ACTIVO',
-      accionesCount: 0,
-      role,
-      pilotRequestStatus: 'NONE',
-      pilotRequestedAt: null,
-    });
-  }, [user, empresaId]);
-
-  const closeSessionsByIds = useCallback(async (ids: string[]) => {
-    if (!ids.length) return;
-    const batch = writeBatch(db);
-    for (const id of ids) {
-      batch.update(doc(db, 'sesiones_operador', id), {
-        endTime: serverTimestamp(),
-        status: 'CERRADO',
-        pilotRequestStatus: 'NONE',
-        pilotRequestedAt: null,
-      });
-    }
-    await batch.commit();
-  }, []);
-
-  /** Sale solo yo (copiloto o piloto que deja la sala sin forzar Auto si quedan otros — reconcile asigna piloto). */
   const endSession = useCallback(async () => {
     if (!user || !empresaId) throw new Error('Sin sesión de usuario');
-    const toClose = mySessions.length
-      ? mySessions
-      : (
-          await getDocs(
-            query(
-              collection(db, 'sesiones_operador'),
-              where('empresaId', '==', empresaId),
-              where('operatorId', '==', user.uid),
-              where('status', '==', 'ACTIVO'),
-            ),
-          )
-        ).docs.map((d) => ({ id: d.id }));
+    await callSesionOperador('end');
+  }, [user, empresaId, callSesionOperador]);
 
-    if (!toClose.length) throw new Error('No hay guardia activa');
-    await closeSessionsByIds(toClose.map((s) => s.id));
-  }, [user, empresaId, mySessions, closeSessionsByIds]);
-
-  /** Piloto (o SA): cierra TODA la sala → empresa en Auto. */
   const endRoomToAuto = useCallback(async () => {
     if (!empresaId) throw new Error('Sin empresa');
-    const ids = activeSessions.map((s) => s.id);
-    if (!ids.length) {
-      const snap = await getDocs(
-        query(
-          collection(db, 'sesiones_operador'),
-          where('empresaId', '==', empresaId),
-          where('status', '==', 'ACTIVO'),
-        ),
-      );
-      await closeSessionsByIds(snap.docs.map((d) => d.id));
-      return;
-    }
-    await closeSessionsByIds(ids);
-  }, [empresaId, activeSessions, closeSessionsByIds]);
+    await callSesionOperador('passToAuto');
+  }, [empresaId, callSesionOperador]);
 
   const requestPilot = useCallback(async () => {
     if (!mySession || isPilot) return;
-    await updateDoc(doc(db, 'sesiones_operador', mySession.id), {
-      pilotRequestStatus: 'PENDING',
-      pilotRequestedAt: serverTimestamp(),
-    });
-  }, [mySession, isPilot]);
+    await callSesionOperador('requestPilot');
+  }, [mySession, isPilot, callSesionOperador]);
 
   const cancelPilotRequest = useCallback(async () => {
     if (!mySession) return;
-    await updateDoc(doc(db, 'sesiones_operador', mySession.id), {
-      pilotRequestStatus: 'NONE',
-      pilotRequestedAt: null,
-    });
-  }, [mySession]);
+    await callSesionOperador('cancelPilotRequest');
+  }, [mySession, callSesionOperador]);
 
   const acceptPilotRequest = useCallback(async () => {
     if (!isPilot || !pendingPilotRequest || !mySession) return;
-    const batch = writeBatch(db);
-    batch.update(doc(db, 'sesiones_operador', pendingPilotRequest.id), {
-      role: 'PILOTO',
-      pilotRequestStatus: 'NONE',
-      pilotRequestedAt: null,
-      startTime: Timestamp.fromMillis(
-        Math.min(mySession.startTime.getTime() - 1000, Date.now() - 1000),
-      ),
-    });
-    batch.update(doc(db, 'sesiones_operador', mySession.id), {
-      role: 'COPILOTO',
-      pilotRequestStatus: 'NONE',
-    });
-    await batch.commit();
-  }, [isPilot, pendingPilotRequest, mySession]);
+    await callSesionOperador('acceptPilot');
+  }, [isPilot, pendingPilotRequest, mySession, callSesionOperador]);
 
   const rejectPilotRequest = useCallback(async () => {
     if (!isPilot || !pendingPilotRequest) return;
-    await updateDoc(doc(db, 'sesiones_operador', pendingPilotRequest.id), {
-      pilotRequestStatus: 'REJECTED',
-      pilotRequestedAt: null,
-    });
-  }, [isPilot, pendingPilotRequest]);
+    await callSesionOperador('rejectPilot');
+  }, [isPilot, pendingPilotRequest, callSesionOperador]);
 
   useEffect(() => {
     if (!mySession?.expiresAt) return;

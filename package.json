@@ -71,6 +71,8 @@
     "eval:ops-late-arrival-monitor": "npx tsx apps/web2/scripts/eval-ops-late-arrival-monitor.ts",
     "eval:coverage-source-gap": "npx tsx apps/web2/scripts/eval-coverage-source-gap.ts",
     "eval:relevo-handover": "node scripts/eval-relevo-handover-e2e-emulator.mjs",
+    "eval:ops-core": "npm --prefix apps/web2 run eval:ops-core",
+    "eval:sesion-operador-e2e": "node scripts/eval-sesion-operador-e2e-emulator.mjs",
     "migrate:device-bindings": "node scripts/migrate-device-bindings.mjs",
     "eval:analisis-queries": "npx tsx apps/web2/scripts/eval-analisis-queries.ts",
     "eval:hours-balance": "npx tsx --tsconfig apps/web2/tsconfig.json apps/web2/scripts/eval-hours-balance.ts",
