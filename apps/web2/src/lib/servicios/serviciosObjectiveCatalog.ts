@@ -1,9 +1,12 @@
 import type { ServiceSLA } from '@/services/slaService';
 import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import { calculateMonthlyBreakdown, parseYmdToLocalDate } from '@/lib/servicios/slaHoursCalculator';
+import { isObjectivePlanificacionPublished } from '@/lib/multiempresa';
+import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import {
   filterSlasForPlanningContext,
   isSlaContractActive,
+  isSlaOpenForOperations,
   pickSlaForPlanningMonth,
   planningMonthHasActiveSla,
   type SlaPlanningRow,
@@ -38,14 +41,35 @@ export type ServiciosKpiSnapshot = {
   guards: number;
 };
 
+function isObjectiveActiveInCrm(o: { status?: unknown; active?: unknown }): boolean {
+  if (o.active === false) return false;
+  const st = String(o.status ?? '').trim().toUpperCase();
+  return st !== 'INACTIVE';
+}
+
 function normalizeObjectives(client: ServiciosClientRef): Array<{ id: string; name: string }> {
   const raw = client.objectives || client.objetivos || [];
   return raw
+    .filter((o) => isObjectiveActiveInCrm(o as { status?: unknown; active?: unknown }))
     .map((o) => ({
       id: String(o.id ?? '').trim(),
       name: String(o.name ?? '').trim(),
     }))
     .filter((o) => o.id || o.name);
+}
+
+/** Misma regla que CC/Ops: contrato abierto en el mes + cronograma publicado. */
+export function slaOperationalInCalendarMonth(
+  srv: ServiceSLA & { id: string },
+  year: number,
+  monthIndex0: number,
+  publishStatusMap: Record<string, boolean>,
+): boolean {
+  if (!isSlaOpenForOperations(srv as unknown as SlaPlanningRow)) return false;
+  if (!slaCoversCalendarMonth(srv.startDate, srv.endDate, year, monthIndex0)) return false;
+  const oid = String(srv.objectiveId ?? '').trim();
+  if (!oid) return false;
+  return isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
 }
 
 export function monthBoundsYmd(year: number, month: number): { start: string; end: string } {
@@ -171,8 +195,12 @@ export function buildServiciosObjectiveCatalog(
     clientId?: string;
     search?: string;
     slasByClient?: Map<string, SlaPlanningRow[]>;
+    /** Sin mapa vacío: hasSlaInMonth exige cronograma publicado (coherente con Operaciones). */
+    publishStatusMap?: Record<string, boolean>;
   },
 ): ServiciosCatalogRow[] {
+  const publishStatusMap = opts?.publishStatusMap ?? {};
+  const requirePublished = Object.keys(publishStatusMap).length > 0;
   const clientsForPlanning = clients.map((c) => ({
     id: c.id,
     name: c.name,
@@ -208,8 +236,15 @@ export function buildServiciosObjectiveCatalog(
       const matching = matchingRows as unknown as (ServiceSLA & { id: string })[];
 
       const { vigente } = pickSlaForPlanningMonth(matchingRows, kpiYear, kpiMonth);
-      const hasSlaInMonth = planningMonthHasActiveSla(matchingRows, kpiYear, kpiMonth);
-      const vigenteSla = vigente ? (vigente as unknown as ServiceSLA & { id: string }) : null;
+      const contractInMonth = planningMonthHasActiveSla(matchingRows, kpiYear, kpiMonth);
+      const published =
+        !requirePublished
+        || !obj.id
+        || isObjectivePlanificacionPublished(publishStatusMap, obj.id, kpiYear, kpiMonth + 1);
+      const hasSlaInMonth = contractInMonth && published;
+      const vigenteSla = vigente && hasSlaInMonth
+        ? (vigente as unknown as ServiceSLA & { id: string })
+        : null;
 
       if (q) {
         const matchSearch =
@@ -243,6 +278,7 @@ export function computeServiciosKpiSnapshot(
   services: (ServiceSLA & { id: string })[],
   year: number,
   month: number,
+  publishStatusMap: Record<string, boolean> = {},
 ): ServiciosKpiSnapshot {
   const mStart = new Date(year, month, 1);
   const mEnd = new Date(year, month + 1, 0);
@@ -254,6 +290,7 @@ export function computeServiciosKpiSnapshot(
   let guards = 0;
 
   for (const srv of services) {
+    if (!slaOperationalInCalendarMonth(srv, year, month, publishStatusMap)) continue;
     if (!srv.startDate) continue;
     const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
     const sEnd = srv.endDate

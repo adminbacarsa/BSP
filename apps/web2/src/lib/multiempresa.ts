@@ -987,6 +987,51 @@ export function planificacionPublishLookupKey(objectiveId: string, year: number,
   return `${String(objectiveId ?? '').trim()}_${year}_${month}`;
 }
 
+export function registerPlanificacionPublishedLookup(
+  map: Record<string, boolean>,
+  objectiveId: string,
+  year: number,
+  month: number,
+): void {
+  const oid = String(objectiveId ?? '').trim();
+  if (!oid || !Number.isFinite(year) || !Number.isFinite(month)) return;
+  map[planificacionPublishLookupKey(oid, year, month)] = true;
+}
+
+/** Mes calendario 1–12 (como en planificacion_estados). */
+export function isObjectivePlanificacionPublished(
+  publishStatusMap: Record<string, boolean>,
+  objectiveId: string,
+  year: number,
+  month1to12: number,
+): boolean {
+  return !!publishStatusMap[planificacionPublishLookupKey(objectiveId, year, month1to12)];
+}
+
+/** Mapa `${objectiveId}_${year}_${month}` → true solo con publishedAt presente. */
+export function buildPlanificacionPublishStatusMap(
+  docs: Array<{ id: string; data: () => Record<string, unknown> }>,
+  includeDoc: (data: Record<string, unknown>) => boolean,
+): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const d of docs) {
+    const data = d.data();
+    if (!includeDoc(data)) continue;
+    if (data.publishedAt == null || data.publishedAt === '') continue;
+    const parsed = parsePlanificacionEstadoDocId(d.id);
+    if (parsed) {
+      registerPlanificacionPublishedLookup(map, parsed.objectiveId, parsed.year, parsed.month);
+    }
+    const objId = String(data.objectiveId ?? data.objetivoId ?? parsed?.objectiveId ?? '').trim();
+    const y = Number(data.year ?? data.año ?? parsed?.year);
+    const m = Number(data.month ?? data.mes ?? parsed?.month);
+    if (objId && Number.isFinite(y) && Number.isFinite(m)) {
+      registerPlanificacionPublishedLookup(map, objId, y, m);
+    }
+  }
+  return map;
+}
+
 export function parsePlanificacionEstadoDocId(docId: string): {
   empresaId?: string;
   objectiveId: string;

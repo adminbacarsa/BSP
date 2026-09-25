@@ -23,7 +23,7 @@ import { useAuth } from '@/context/AuthContext';
 import {
   filterSlaRowsByEmpresa, belongsToEmpresaView, belongsToEmpresa, shouldScopeQueriesToEmpresa,
   collectTurnoIdsForSlaDelete, deleteSlaWithRelatedDataForEmpresa, deleteDocsByIdsForEmpresa, TenantIsolationError,
-  empresaCollectionQuery,
+  empresaCollectionQuery, buildPlanificacionPublishStatusMap,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
 import { patchSlaHoursOnBalances } from '@/lib/hoursBalance';
@@ -65,6 +65,7 @@ import {
   buildServiciosCatalogClientGroups,
   buildServiciosObjectiveCatalog,
   monthBoundsYmd,
+  slaOperationalInCalendarMonth,
   type ServiciosCatalogFilter,
   type ServiciosCatalogRow,
 } from '@/lib/servicios/serviciosObjectiveCatalog';
@@ -139,6 +140,7 @@ export default function ServiciosSLAPage() {
   const [view, setView] = useState<'list' | 'form'>('list');
   const [services, setServices] = useState<ServiceSLA[]>([]);
   const [clients, setClients] = useState<any[]>([]);
+  const [publishStatusMap, setPublishStatusMap] = useState<Record<string, boolean>>({});
   const [availableObjectives, setAvailableObjectives] = useState<any[]>([]);
 
   // Fechas por defecto
@@ -268,24 +270,31 @@ export default function ServiciosSLAPage() {
       .catch(() => setPlantillaEmps([]));
   }, [view, empresaId, scopeEmpresa, migracionCompleta, hasEncargadoPos]);
 
+  const loadServicesReq = useRef(0);
   // Carga única de servicios_sla + clientes en paralelo (sin listener persistente).
   // Las mutaciones (create/edit/delete) actualizan el estado local directamente.
   const loadServices = useCallback(async () => {
     if (!empresaId) return;
+    // Al entrar, el SA pasa un instante por su empresa del auth (bacarsa) antes de la elegida:
+    // la carga vieja (más lenta) no debe pisar a la nueva.
+    const reqId = ++loadServicesReq.current;
     setLoading(true);
     try {
       const q = scopeEmpresa
         ? query(collection(db, 'servicios_sla'), where('empresaId', '==', empresaId))
         : query(collection(db, 'servicios_sla'), limit(500));
 
-      const [clientRows, snapshot] = await Promise.all([
+      const planifQ = empresaCollectionQuery('planificacion_estados', empresaId, scopeEmpresa);
+      const [clientRows, snapshot, planifSnap] = await Promise.all([
         slaService.getClients({ empresaId, scopeEmpresa }).catch((e) => {
           console.error('Error cargando clientes:', e);
           return [] as any[];
         }),
         getDocsOnce(q),
+        getDocsOnce(planifQ),
       ]);
 
+      if (reqId !== loadServicesReq.current) return;
       setClients(clientRows);
       const clientIds = new Set(clientRows.map((c: any) => c.id));
 
@@ -304,6 +313,11 @@ export default function ServiciosSLAPage() {
         (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
       );
       setServices(adaptedData);
+      setPublishStatusMap(
+        buildPlanificacionPublishStatusMap(planifSnap.docs, (data) =>
+          belongsToEmpresaView(data, empresaId, migracionCompleta),
+        ),
+      );
       setDbStatus('online');
     } catch (error) {
       console.error('Error cargando servicios:', error);
@@ -311,7 +325,7 @@ export default function ServiciosSLAPage() {
     } finally {
       setLoading(false);
     }
-  }, [empresaId, scopeEmpresa]);
+  }, [empresaId, scopeEmpresa, migracionCompleta]);
 
   useEffect(() => {
     void loadServices();
@@ -1666,9 +1680,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         services as (ServiceSLA & { id: string })[],
         kpiYear,
         kpiMonth,
-        { clientId: srvClientFilter, search: srvSearch },
+        { clientId: srvClientFilter, search: srvSearch, publishStatusMap },
       ),
-    [clients, services, kpiYear, kpiMonth, srvClientFilter, srvSearch],
+    [clients, services, kpiYear, kpiMonth, srvClientFilter, srvSearch, publishStatusMap],
   );
 
   const objectiveCatalog = useMemo(
@@ -1709,6 +1723,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       const sk = `${y}-${String(m + 1).padStart(2, '0')}`;
       let active = 0, hours = 0, positions = 0, guards = 0;
       services.forEach(srv => {
+        const srvRow = srv as ServiceSLA & { id: string };
+        if (!slaOperationalInCalendarMonth(srvRow, y, m, publishStatusMap)) return;
         if (!srv.startDate) return;
         const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
         // Sin endDate = contrato en curso (abierto); usar fecha lejana
@@ -1736,7 +1752,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       result.push({ label: `${MONTHS[m]} ${y}`, short: MONTHS[m], year: y, month: m, isCurrent: i === 0, active, hours: Math.round(hours), positions, guards });
     }
     return result;
-  }, [services, kpiYear, kpiMonth]);
+  }, [services, kpiYear, kpiMonth, publishStatusMap]);
 
   const filteredServicesForKpi = useMemo(() => {
     const q = srvSearch.toLowerCase().trim();
@@ -1761,6 +1777,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     let positions = 0;
     let guards = 0;
     filteredServicesForKpi.forEach((srv) => {
+      if (!slaOperationalInCalendarMonth(srv, y, m, publishStatusMap)) return;
       if (!srv.startDate) return;
       const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
       const sEnd = srv.endDate
@@ -1789,7 +1806,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       positions,
       guards,
     };
-  }, [filteredServicesForKpi, kpiYear, kpiMonth]);
+  }, [filteredServicesForKpi, kpiYear, kpiMonth, publishStatusMap]);
 
   const kpiCurrent = kpiHistory[kpiHistory.length - 1] ?? { active: 0, hours: 0, positions: 0, guards: 0, label: '' };
   const kpiMetricsActive = Boolean(srvSearch.trim() || srvCatalogFilter !== 'all' || srvFeatureFilter !== 'all' || srvClientFilter !== 'all');

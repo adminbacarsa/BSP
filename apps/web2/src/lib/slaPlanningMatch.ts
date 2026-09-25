@@ -35,6 +35,13 @@ export function isSlaContractActive(status: unknown): boolean {
   return st !== 'inactive' && st !== 'inactivo' && st !== 'cancelled' && st !== 'cancelado';
 }
 
+/** Contrato usable en Ops / KPI «activo» (no cerrado por vencimiento ni status inactivo). */
+export function isSlaOpenForOperations(sla: SlaPlanningRow | null | undefined): boolean {
+  if (!sla) return false;
+  if ((sla as { closed?: unknown }).closed === true) return false;
+  return isSlaContractActive(sla.status);
+}
+
 function normObjectiveKey(value: unknown): string {
   return String(value ?? '')
     .trim()
@@ -205,7 +212,7 @@ export function planningMonthHasActiveSla(
   const { vigente, hasExactMatch } = pickSlaForPlanningMonth(matching, year, month);
   if (hasExactMatch && vigente) return true;
   return matching.some(
-    (d) => isSlaContractActive(d.status) && slaCoversCalendarMonth(d.startDate, d.endDate, year, month),
+    (d) => isSlaOpenForOperations(d) && slaCoversCalendarMonth(d.startDate, d.endDate, year, month),
   );
 }
 
@@ -214,8 +221,8 @@ export function pickSlaForPlanningMonth(
   year: number,
   month: number,
 ): { vigente: SlaPlanningRow | null; hasExactMatch: boolean; fallback: SlaPlanningRow | null } {
-  const active = matching.filter((s) => isSlaContractActive(s.status));
-  const pool = active.length > 0 ? active : matching;
+  const active = matching.filter((s) => isSlaOpenForOperations(s));
+  const pool = active.length > 0 ? active : matching.filter((s) => isSlaOpenForOperations(s));
   const overlapping = pool.filter((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month));
   const vigente =
     overlapping.length > 0
@@ -228,8 +235,8 @@ export type SlaDateRange = { start: string; end: string; closed?: boolean };
 
 /** Rangos de contratos (activos si hay) que tocan el mes; vacío = sin fecha → abierto. */
 export function planningMonthSlaRanges(matching: SlaPlanningRow[], year: number, month: number): SlaDateRange[] {
-  const active = matching.filter((s) => isSlaContractActive(s.status));
-  const pool = active.length > 0 ? active : matching;
+  const active = matching.filter((s) => isSlaOpenForOperations(s));
+  const pool = active.length > 0 ? active : matching.filter((s) => isSlaOpenForOperations(s));
   return pool
     .filter((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month))
     .map((d) => ({
