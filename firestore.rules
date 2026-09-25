@@ -426,6 +426,7 @@ service cloud.firestore {
 
       function deviceTokenFcmRoleOk(data) {
         return !data.keys().hasAny(['role'])
+          || isSuperAdmin()
           || (isEmployeeClaim() && data.get('role', '') == 'employee')
           || (isAdmin() && (data.get('role', '') == 'admin' || data.get('role', '') == 'employee'));
       }
