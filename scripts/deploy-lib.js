@@ -89,7 +89,7 @@ function runDeploy(projectRoot, args = []) {
   const syncGuard = spawnSync(
     process.execPath,
     [path.join(__dirname, 'sync-guard-web-hosting.js'), path.join(hosting, 'app')],
-    { stdio: 'inherit', cwd: projectRoot, env: process.env },
+    { stdio: 'inherit', cwd: projectRoot, env: { ...process.env, COSP_GUARD_WEB_PROD: '1' } },
   );
   if (syncGuard.status !== 0) {
     console.error('\n✗ Falló sync-guard-web-hosting (mobile-guardia build:web)');
@@ -142,6 +142,17 @@ function verifyHostingReleased(projectRoot) {
     process.exit(1);
   }
   console.log(`✓ Hosting publicado (/app → ${expected})`);
+  const bundleUrl = `https://comtroldata.web.app/app/_expo/static/js/web/${expected}`;
+  const bundleProbe = spawnSync(
+    process.execPath,
+    ['-e', `fetch(${JSON.stringify(bundleUrl)}).then(r=>r.text()).then(t=>process.stdout.write(/useEmulator\\W{0,4}true/.test(t)?'EMU':'PROD')).catch(()=>process.exit(2))`],
+    { encoding: 'utf8' },
+  );
+  if (String(bundleProbe.stdout || '') !== 'PROD') {
+    console.error(`\n✗ /app publicado apunta al EMULADOR (${bundleProbe.stdout || 'sin respuesta'}). Redeploy urgente de hosting.`);
+    process.exit(1);
+  }
+  console.log('✓ /app publicado en modo producción');
   verifyAppAssetServed(projectRoot);
 }
 

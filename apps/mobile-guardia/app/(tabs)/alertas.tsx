@@ -312,8 +312,8 @@ function AlertasScreenContent() {
             </Text>
             {isPreviewMode ? (
               <Text style={[styles.fcmHint, { color: palette.warning }]}>
-                Preview: alertas del legajo elegido. En web tocá «Activar notificaciones» en el banner
-                naranja para atar el push FCM a este dispositivo.
+                Vista de SuperAdmin: ves las alertas de este guardia. Mientras dure la vista, sus
+                notificaciones también llegan a este teléfono.
               </Text>
             ) : null}
             <ScrollView

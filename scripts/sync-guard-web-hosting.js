@@ -104,9 +104,11 @@ function main() {
   const labRoot = process.env.COSP_LAB_ROOT || repoRoot;
   copyMobileGuardiaEnv(labRoot, repoRoot);
 
-  // Sin destino explícito = deploy a producción: el .env del lab trae USE_EMULATOR=true y
-  // las variables de proceso tienen prioridad sobre los .env que carga Expo.
-  const isProdDeploy = !destArg;
+  // El .env del lab trae USE_EMULATOR=true. Producción = cualquier destino que no sea el
+  // public/ del lab (deploy-lib pasa build/hosting/app y COSP_GUARD_WEB_PROD=1).
+  const labPublic = path.join(repoRoot, 'apps', 'web2', 'public');
+  const isProdDeploy =
+    process.env.COSP_GUARD_WEB_PROD === '1' || !destArg || !path.resolve(dest).startsWith(path.resolve(labPublic));
   // Expo toma el .env aunque el proceso traiga la variable: .env.production.local tiene prioridad en export.
   const prodEnvFile = path.join(mobileRoot, '.env.production.local');
   if (isProdDeploy) {
