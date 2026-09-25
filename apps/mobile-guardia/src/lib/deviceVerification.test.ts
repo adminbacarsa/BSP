@@ -113,7 +113,7 @@ describe('códigos Plataforma', () => {
   it('mensaje UX DEVICE_OWNED_BY_OTHER', () => {
     assert.equal(
       mapPlatformDeviceErrorMessage({ message: 'DEVICE_OWNED_BY_OTHER' }),
-      'Este dispositivo está vinculado a otro colaborador. Pedile a RRHH que lo desvincule.',
+      'Este teléfono ya tiene otra cuenta validada. Cada teléfono se usa con un solo colaborador: entrá con esa cuenta, o pedile a RRHH que desvincule el teléfono.',
     );
   });
 

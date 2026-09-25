@@ -85,6 +85,11 @@ export default function DeviceBlockedScreen() {
 
       const result = await getGuardDeviceRegistrationStatus();
       if (cancelled) return;
+      if (result.ok && result.blockReason) {
+        setBlockReason(result.blockReason);
+        setStatusLoading(false);
+        return;
+      }
       if (result.ok) {
         setRegStatus(result.status);
         if (result.status === 'pending') {

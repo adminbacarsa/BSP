@@ -20,6 +20,7 @@ export type GuardDeviceRegistrationStatusResult = {
   requestId?: string | null;
   deviceId?: string | null;
   message?: string | null;
+  blockReason?: PlatformDeviceErrorCode | null;
 };
 
 type RequestCallableResponse = {
@@ -37,6 +38,7 @@ type StatusCallableResponse = {
   deviceId?: string | null;
   message?: string | null;
   verified?: boolean;
+  blockReason?: string | null;
 };
 
 function normalizeStatus(raw: unknown): GuardDeviceRegistrationStatus {
@@ -59,17 +61,20 @@ export async function getGuardDeviceRegistrationStatus(): Promise<
 > {
   try {
     const { functions } = getPortalFirebase();
-    const callable = httpsCallable<Record<string, never>, StatusCallableResponse>(
+    const callable = httpsCallable<{ deviceId?: string }, StatusCallableResponse>(
       functions,
       'getGuardDeviceRegistrationStatus',
     );
-    const { data } = await callable({});
+    const deviceId = await getOrCreateDeviceId().catch(() => undefined);
+    const { data } = await callable(deviceId ? { deviceId } : {});
+    const blockReason = data?.blockReason ? extractPlatformDeviceErrorCode({ message: String(data.blockReason) }) : null;
     return {
       ok: true,
       status: normalizeStatus(data?.status),
       requestId: data?.requestId ?? null,
       deviceId: data?.deviceId ?? null,
       message: data?.message ?? null,
+      blockReason,
     };
   } catch (err) {
     return { ok: false, message: mapPortalCallableError(err) };

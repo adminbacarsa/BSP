@@ -509,12 +509,24 @@ function deviceTokenBindingStatus(bind: admin.firestore.DocumentSnapshot): Recor
 }
 
 /** Estado de la solicitud del guardia autenticado (sin lectura directa Firestore). */
-export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, context) => {
+export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
   }
   const uid = context.auth.uid;
   const db = admin.firestore();
+  // El cliente no puede leer device_bindings: el servidor le avisa si este teléfono es de otra cuenta.
+  const localDeviceId = String((data as { deviceId?: string } | null)?.deviceId ?? '').trim();
+  if (localDeviceId.length >= 8) {
+    try {
+      await assertCanRequestGuardDeviceRegistration(db, uid, localDeviceId);
+    } catch (err) {
+      if (err instanceof GuardDeviceBindError) {
+        return { status: 'none', blockReason: err.code, message: err.message };
+      }
+      throw err;
+    }
+  }
   const reqSnap = await db.collection('device_registration_requests').doc(uid).get();
   if (!reqSnap.exists) {
     const bind = await db.collection('device_tokens').doc(uid).get();
@@ -547,6 +559,10 @@ export const getGuardDeviceRegistrationStatus = functions.https.onCall(async (_d
     const approvedAtMs = (d.approvedAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
     const unboundAtMs = (bindData.unboundAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
     if (unboundAtMs > 0 && (approvedAtMs === 0 || unboundAtMs >= approvedAtMs)) {
+      return deviceTokenBindingStatus(bind);
+    }
+    const approvedDeviceId = String(d.requestedDeviceId ?? '').trim();
+    if (localDeviceId && approvedDeviceId && approvedDeviceId !== localDeviceId) {
       return deviceTokenBindingStatus(bind);
     }
     return {

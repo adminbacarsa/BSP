@@ -33,7 +33,7 @@ export const DEVICE_BLOCK_MESSAGES: Record<DeviceBlockReason, string> = {
   needs_rebind:
     'Validá este dispositivo con el mail de acceso o pedí aprobación a RRHH.',
   DEVICE_OWNED_BY_OTHER:
-    'Este dispositivo está vinculado a otro colaborador. Pedile a RRHH que lo desvincule.',
+    'Este teléfono ya tiene otra cuenta validada. Cada teléfono se usa con un solo colaborador: entrá con esa cuenta, o pedile a RRHH que desvincule el teléfono.',
   RETIRED_DEVICE_NEEDS_EMAIL: 'Para volver a este dispositivo usá el mail de acceso.',
 };
 
