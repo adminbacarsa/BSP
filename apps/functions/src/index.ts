@@ -36,6 +36,8 @@ import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFal
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
 import { isEmpresaManualMode } from './ops/opsManualMode';
+import { sesionOperadorCallable } from './ops/sesionOperadorHandler';
+import { resolveStaffProfileCallable } from './ops/resolveStaffProfileHandler';
 import { runAutoCompletarTurnosPass } from './scheduling/autoCompletarTurnosCore';
 import { processEarlyWithdrawal } from './coverage/earlyWithdrawalCore';
 import { runSlaUnplannedGapPass } from './coverage/slaUnplannedGapPass';
@@ -1589,6 +1591,9 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
         throw new functions.https.HttpsError('internal', msg || 'Error al registrar fichaje.');
     }
 });
+
+export const sesionOperador = sesionOperadorCallable;
+export const resolveStaffProfile = resolveStaffProfileCallable;
 
 export const marcarAusenciaOperaciones = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {

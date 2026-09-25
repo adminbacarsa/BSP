@@ -27,16 +27,13 @@ export declare const runAutoSchedule: functions.HttpsFunction & functions.Runnab
 export declare const runAjustarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const runEquilibrarCrono: functions.HttpsFunction & functions.Runnable<any>;
 export declare const crearUsuarioSistema: functions.HttpsFunction & functions.Runnable<any>;
-/** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
 export declare const syncSystemUserClaims: functions.HttpsFunction & functions.Runnable<any>;
 export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Runnable<any>;
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
+export declare const sesionOperador: functions.HttpsFunction & functions.Runnable<any>;
+export declare const resolveStaffProfile: functions.HttpsFunction & functions.Runnable<any>;
 export declare const marcarAusenciaOperaciones: functions.HttpsFunction & functions.Runnable<any>;
 export declare const revertirAusencia: functions.HttpsFunction & functions.Runnable<any>;
-/**
- * Motor único de presencia + auto-relevo FIFO 1:1.
- * Canales: OPERATIONS | VIGI (vía executeAgentAction) | PORTAL (vía requestCheckIn).
- */
 export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarFichadaManual: functions.HttpsFunction & functions.Runnable<any>;
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
@@ -79,23 +76,18 @@ export declare const triggerBackup: import("firebase-functions/v2/https").Callab
     empresaId?: string;
     jobId: string;
 }>, unknown>;
-/** Reconcilia el historial con Google Drive: borra de system_backups los registros cuyo archivo ya no existe. */
 export declare const syncBackups: import("firebase-functions/v2/https").CallableFunction<any, Promise<import("./backup/backup.service").SyncDriveBackupsResult>, unknown>;
-/** Borra un backup puntual (archivo en Drive + registro en Firestore). */
 export declare const deleteBackup: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     deleted: boolean;
     driveDeleted: boolean;
 }>, unknown>;
-/** Encola restauración (rápido). El trabajo pesado corre en processRestoreJob (hasta 1 h). */
 export declare const restoreBackup: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     jobId: string;
     queued: boolean;
 }>, unknown>;
-/** Ejecuta restore_jobs en background (hasta 60 min por invocación). */
 export declare const processRestoreJob: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
     jobId: string;
 }>>;
-/** Copia todos los datos de una empresa a otra (superadmin). IDs nuevos + empresaId destino. */
 export declare const migrateEmpresaData: import("firebase-functions/v2/https").CallableFunction<any, Promise<{
     jobId: string;
     isComplete: boolean;
@@ -105,15 +97,10 @@ export declare const migrateEmpresaData: import("firebase-functions/v2/https").C
     docsDeleted: number;
     totalCollections: number;
 }>, unknown>;
-/** Ejecuta empresa_migrate_jobs en background. */
 export declare const processEmpresaMigrateJob: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
     jobId: string;
 }>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
-/**
- * Retención: etiqueta archiveTier en turnos fuera de hot (diario 04:15 AR).
- * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
- */
 export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const processEarlyWithdrawalCallable: functions.HttpsFunction & functions.Runnable<any>;
 export declare const revertConvocadoFalseAbsences: functions.HttpsFunction & functions.Runnable<any>;
@@ -121,7 +108,6 @@ export declare const releaseInvalidRetentions: functions.HttpsFunction & functio
 export declare const releaseTraceAbsences: functions.HttpsFunction & functions.Runnable<any>;
 export declare const tagTurnosArchiveTier: functions.HttpsFunction & functions.Runnable<any>;
 export declare const scheduledBackup: import("firebase-functions/v2/scheduler").ScheduleFunction;
-/** Actualiza el horario del backup automático en system_config/backup_schedule (solo SuperAdmin). */
 export declare const updateBackupSchedule: import("firebase-functions/v2/https").CallableFunction<any, Promise<admin.firestore.DocumentData>, unknown>;
 export declare const lookupClientByCuit: functions.HttpsFunction & functions.Runnable<any>;
 export declare const saveEmpresaAfipCredentials: functions.HttpsFunction & functions.Runnable<any>;
