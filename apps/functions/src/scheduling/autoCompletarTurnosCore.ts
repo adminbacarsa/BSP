@@ -113,7 +113,7 @@ export async function runAutoCompletarTurnosPass(
   let completed = 0;
   let alertedNoRelief = 0;
 
-  const slaCache = new Map<string, FirebaseFirestore.DocumentData | null>();
+  const slaCache = new Map<string, FirebaseFirestore.DocumentData[]>();
   const reliefIncomingClaimed = new Set<string>();
   const reliefPendingClaimed = new Set<string>();
   const relevoFinishNotifs: {
@@ -129,16 +129,17 @@ export async function runAutoCompletarTurnosPass(
     const end = shiftEndDate(shift);
     if (!oid || !end) return false;
     if (!slaCache.has(oid)) {
+      // Un objetivo puede tener varios contratos "active" (uno por mes): vale el vigente en la fecha.
       const slaSnap = await db
         .collection('servicios_sla')
         .where('objectiveId', '==', oid)
         .where('status', '==', 'active')
-        .limit(1)
         .get();
-      slaCache.set(oid, slaSnap.empty ? null : slaSnap.docs[0].data());
+      slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
     }
-    const sla = slaCache.get(oid);
-    return positionHasContinuityFromSlaDoc(sla || undefined, shift.positionName || '', end);
+    return (slaCache.get(oid) || []).some((sla) =>
+      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', end),
+    );
   }
 
   const outgoingDocs = [...snap.docs].sort(

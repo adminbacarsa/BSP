@@ -132,7 +132,6 @@ export async function loadPositionHasContinuity(
     .collection('servicios_sla')
     .where('objectiveId', '==', oid)
     .where('status', '==', 'active')
-    .limit(3)
     .get();
   for (const d of slaSnap.docs) {
     if (positionHasContinuityFromSlaDoc(d.data(), positionName, shiftEndTime)) {

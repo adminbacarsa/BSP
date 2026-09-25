@@ -262,7 +262,7 @@ export async function releaseInvalidRetentionsRun(
   let q = db.collection('turnos').where('isRetention', '==', true).limit(400);
   const snap = await q.get();
   const rows: ReleaseInvalidRetentionRow[] = [];
-  const slaCache = new Map<string, FirebaseFirestore.DocumentData | null>();
+  const slaCache = new Map<string, FirebaseFirestore.DocumentData[]>();
 
   for (const docSnap of snap.docs) {
     const shift = docSnap.data();
@@ -275,14 +275,11 @@ export async function releaseInvalidRetentionsRun(
         .collection('servicios_sla')
         .where('objectiveId', '==', oid)
         .where('status', '==', 'active')
-        .limit(1)
         .get();
-      slaCache.set(oid, slaSnap.empty ? null : slaSnap.docs[0].data());
+      slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
     }
-    const continuous = positionHasContinuityFromSlaDoc(
-      slaCache.get(oid) || undefined,
-      shift.positionName || '',
-      new Date(endMs),
+    const continuous = (slaCache.get(oid) || []).some((sla) =>
+      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', new Date(endMs)),
     );
     if (continuous) continue;
     const reason = String(shift.retentionReason || '');
