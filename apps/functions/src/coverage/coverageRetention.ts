@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { positionHasContinuityFromSlaDoc } from './positionHasContinuity';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
+import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = 12 * 60 * 60 * 1000;
@@ -103,38 +104,25 @@ export async function retainOutgoingForGap(
     };
   }
 
-  const presentSnap = await db
-    .collection('turnos')
-    .where('objectiveId', '==', objectiveId)
-    .where('isPresent', '==', true)
-    .limit(40)
-    .get();
+  const pick = await findPresentOutgoingAlignedToGapStart(db, {
+    objectiveId,
+    positionName,
+    gapStartMs,
+    excludeShiftIds: [absenceShiftId],
+    excludeEmployeeId: absentEmpId,
+    absenceShiftId,
+  });
 
-  const outgoing = presentSnap.docs
-    .map((d) => ({ id: d.id, data: d.data() as Record<string, unknown> }))
-    .filter(({ id, data }) => {
-      if (id === absenceShiftId) return false;
-      if (data.isCompleted === true) return false;
-      if (data.isAbsent || data.isVirtual === true) return false;
-      if (!posMatch(data.positionName, positionName)) return false;
-      const eid = String(data.employeeId || '').trim();
-      if (!eid || eid === 'VACANTE' || eid === absentEmpId) return false;
-      const st = startMs(data);
-      if (st >= gapStartMs + 60_000) return false;
-      const en = endMs(data);
-      if (!en) return false;
-      if (Math.abs(en - gapStartMs) > GAP_ALIGN_MS) return false;
-      const linked = String(data.retentionAbsenceShiftId || '').trim();
-      if (data.isRetention === true && linked && linked !== absenceShiftId) return false;
-      return true;
-    })
-    .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
-
-  if (!outgoing.length) {
+  if (!pick) {
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'NO_OUTGOING' };
   }
 
-  const toRetain = [outgoing[0]];
+  const linked = String(pick.data.retentionAbsenceShiftId || '').trim();
+  if (pick.data.isRetention === true && linked && linked !== absenceShiftId) {
+    return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'NO_OUTGOING' };
+  }
+
+  const toRetain = [{ id: pick.id, data: pick.data }];
   const now = Timestamp.now();
   const nowMs = now.toMillis();
   const retainedIds: string[] = [];

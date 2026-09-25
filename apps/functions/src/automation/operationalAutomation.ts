@@ -1389,10 +1389,26 @@ export async function runPlanningAutomationCycle(input: PlanningAutomationInput)
   };
 }
 
+/** Alertas IA en novedades (IA_ALERTA_*): retiradas — el monitor CC ya expone el estado (Mauro). */
+export const IA_OPERATIONAL_ALERTS_ENABLED = false;
+
 export async function scanOperationalAlertsForEmpresa(
   input: OperationalAlertScanInput,
 ): Promise<OperationalAlertScanResult> {
   const empresaId = String(input.empresaId || '').trim();
+  if (!IA_OPERATIONAL_ALERTS_ENABLED) {
+    return {
+      ok: true,
+      empresaId,
+      evaluatedShifts: 0,
+      opsWindowShifts: 0,
+      anomaliesDetected: 0,
+      alertsCreated: 0,
+      alertsAutoClosed: 0,
+      byType: {},
+      generatedAt: nowIso(),
+    };
+  }
   if (!empresaId) throw new Error('empresaId requerido.');
   const toleranceMinutes = Math.max(5, Math.min(180, Number(input.toleranceMinutes ?? 25)));
   const now = new Date();

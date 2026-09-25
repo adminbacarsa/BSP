@@ -121,6 +121,18 @@ export function buildOpsCoverageDocId(titularShiftId: string, employeeId: string
   return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
 }
 
+export const DELETED_REASON_CONVERTED_COVERAGE = 'CONVERTIDO_EN_COBERTURA';
+
+export function isSourceShiftConvertedForCoverage(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data) return false;
+  return (
+    data.isDeleted === true
+    && String(data.deletedReason || '') === DELETED_REASON_CONVERTED_COVERAGE
+  );
+}
+
 export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
   return {
     coverageUsed: false,
@@ -128,6 +140,53 @@ export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
     coverageDocId: null,
     coverageUsedAt: null,
     coverageUsedBy: null,
+    coverageUsedCoversEmployeeName: null,
+    coverageUsedObjectiveName: null,
+  };
+}
+
+/** REF/ESC: el turno planificado se convierte en cobertura (baja lógica); el ops_cov lleva banda del titular. */
+export function buildEscRefSourceConvertedPatch(
+  srcData: Record<string, unknown>,
+  covDocId: string,
+): Record<string, unknown> {
+  const statusBeforeDelete = String(srcData.status ?? 'ACTIVE');
+  return {
+    isDeleted: true,
+    status: 'CANCELLED',
+    deletedReason: DELETED_REASON_CONVERTED_COVERAGE,
+    convertedToCoverageDocId: covDocId,
+    statusBeforeDelete,
+    coverageUsed: admin.firestore.FieldValue.delete(),
+    coverageUsedForShiftId: admin.firestore.FieldValue.delete(),
+    coverageDocId: admin.firestore.FieldValue.delete(),
+    coverageUsedAt: admin.firestore.FieldValue.delete(),
+    coverageUsedBy: admin.firestore.FieldValue.delete(),
+    coverageUsedCoversEmployeeName: admin.firestore.FieldValue.delete(),
+    coverageUsedObjectiveName: admin.firestore.FieldValue.delete(),
+  };
+}
+
+/** Restaura turno origen al cancelar/supersedear cobertura (REF/ESC convertidos o RET con coverageUsed). */
+export function buildRestoreSourceShiftAfterCoveragePatch(
+  srcData: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!srcData) return clearSourceCoverageUsedPatch();
+  if (isSourceShiftConvertedForCoverage(srcData)) {
+    const prevStatus = String(srcData.statusBeforeDelete || 'ACTIVE');
+    return {
+      isDeleted: false,
+      status: prevStatus,
+      deletedReason: admin.firestore.FieldValue.delete(),
+      convertedToCoverageDocId: admin.firestore.FieldValue.delete(),
+      statusBeforeDelete: admin.firestore.FieldValue.delete(),
+      ...clearSourceCoverageUsedPatch(),
+    };
+  }
+  return {
+    ...clearSourceCoverageUsedPatch(),
+    isRetentionActivated: admin.firestore.FieldValue.delete(),
+    retentionActivatedAt: admin.firestore.FieldValue.delete(),
   };
 }
 
@@ -139,7 +198,10 @@ export function sourceShiftCoverageUsedPatch(opts: {
   coversEmployeeName?: string | null;
   coversObjectiveName?: string | null;
 }): Record<string, unknown> {
-  const patch: Record<string, unknown> = {
+  if (!opts.isRet) {
+    return { coverageDocId: opts.coverageDocId };
+  }
+  return {
     coverageUsed: true,
     coverageUsedForShiftId: opts.titularShiftId,
     coverageDocId: opts.coverageDocId,
@@ -147,12 +209,9 @@ export function sourceShiftCoverageUsedPatch(opts: {
     coverageUsedBy: opts.resolvedBy,
     coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
     coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
+    isRetentionActivated: true,
+    retentionActivatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
-  if (opts.isRet) {
-    patch.isRetentionActivated = true;
-    patch.retentionActivatedAt = admin.firestore.FieldValue.serverTimestamp();
-  }
-  return patch;
 }
 
 /** Cobertura ops activa (no supersedida / cancelada). */
@@ -205,7 +264,13 @@ export async function supersedeOpsCoveragesForAbsence(
     }
     const prevSource = String(data.sourceShiftId || '').trim();
     if (prevSource) {
-      batch.update(db.collection('turnos').doc(prevSource), clearSourceCoverageUsedPatch());
+      const srcSnap = await db.collection('turnos').doc(prevSource).get();
+      if (srcSnap.exists) {
+        batch.update(
+          srcSnap.ref,
+          buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
+        );
+      }
     }
     batch.update(d.ref, {
       coverageSuperseded: true,
@@ -324,7 +389,10 @@ export async function applyCoverage(
       throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
     }
     const srcData = srcSnap.data() as Record<string, unknown>;
-    if (['REF', 'ESC', 'RET'].includes(ct)) {
+    const sameCovOnSource =
+      String(srcData.coverageDocId || '').trim() === covDocId
+      && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
+    if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
       const gap = gapWindowFromTitularShift(titular);
       if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
         throw new CoverageApplyError(
@@ -341,7 +409,9 @@ export async function applyCoverage(
       coversEmployeeName: (titular.employeeName as string) || null,
       coversObjectiveName: (titular.objectiveName as string) || null,
     });
-    if (ct === 'EXTEND' && params.extensionEndTime) {
+    if (sameCovOnSource) {
+      // Reintento / resync: origen ya vinculado a este ops_cov.
+    } else if (ct === 'EXTEND' && params.extensionEndTime) {
       batch.update(db.collection('turnos').doc(sourceId), {
         ...usedBase,
         isExtended: true,
@@ -354,6 +424,11 @@ export async function applyCoverage(
         isEarlyStart: true,
         adjustedStartTime: params.adjustedStartTime,
       });
+    } else if (ct === 'ESC' || ct === 'REF') {
+      batch.update(
+        db.collection('turnos').doc(sourceId),
+        buildEscRefSourceConvertedPatch(srcData, covDocId),
+      );
     } else {
       batch.update(db.collection('turnos').doc(sourceId), usedBase);
     }

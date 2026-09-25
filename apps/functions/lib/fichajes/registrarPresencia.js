@@ -6,6 +6,8 @@ const firestore_1 = require("firebase-admin/firestore");
 const checkInWindow_1 = require("./checkInWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTardeConvocatorias");
+const relevoNotifications_1 = require("./relevoNotifications");
+const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
 function normPos(n) {
     return String(n ?? '')
         .trim()
@@ -19,6 +21,8 @@ function arrivalMs(dat) {
         0);
 }
 function isCambioCandidate(dat, nowMs, incomingStartMs) {
+    if (String(dat.relievedBy || '').trim())
+        return false;
     if (dat.isRetention === true) {
         const scheduledEnd = dat.endTime?.toMillis?.() ?? 0;
         return scheduledEnd >= incomingStartMs - 45 * 60 * 1000;
@@ -26,6 +30,11 @@ function isCambioCandidate(dat, nowMs, incomingStartMs) {
     const outEndMs = dat.endTime?.toMillis?.() ?? 0;
     if (outEndMs <= 0)
         return false;
+    if (nowMs >= outEndMs)
+        return false;
+    const handoffAligned = incomingStartMs > 0 && Math.abs(outEndMs - incomingStartMs) <= 30 * 60 * 1000;
+    if (handoffAligned)
+        return true;
     return outEndMs - nowMs <= 15 * 60 * 1000;
 }
 async function resolvePositionCapacity(db, objectiveId, positionName, empresaId) {
@@ -61,71 +70,6 @@ async function resolvePositionCapacity(db, objectiveId, positionName, empresaId)
         console.warn('[registrarPresencia] capacity lookup:', e?.message);
     }
     return 1;
-}
-async function notifyRelieved(db, params) {
-    const { outEmpId, outDocId, incomingName, objectiveName, empresaId } = params;
-    try {
-        const outEmpDoc = await db.collection('empleados').doc(outEmpId).get();
-        const outEmpUid = outEmpDoc.exists ? outEmpDoc.data()?.uid : undefined;
-        const notifTitle = 'Turno finalizado — relevado';
-        const notifBody = `Fuiste relevado por ${incomingName} en ${objectiveName}. Tu turno ha finalizado.`;
-        let notifDocId = null;
-        try {
-            const notifRef = await db.collection('user_notifications').add({
-                uid: outEmpUid || null,
-                employeeId: outEmpId,
-                userId: outEmpId,
-                title: notifTitle,
-                body: notifBody,
-                type: 'RELEVO_AUTOMATICO',
-                target: 'employee',
-                turnoId: outDocId,
-                empresaId: empresaId || null,
-                read: false,
-                readAt: null,
-                createdAt: firestore_1.FieldValue.serverTimestamp(),
-            });
-            notifDocId = notifRef.id;
-        }
-        catch (e) {
-            console.warn('[registrarPresencia] notif doc:', e?.message);
-        }
-        const [byEmpId, byUid] = await Promise.all([
-            db.collection('device_tokens').where('employeeId', '==', outEmpId).get(),
-            outEmpUid
-                ? db.collection('device_tokens').where('uid', '==', outEmpUid).get()
-                : Promise.resolve({ docs: [] }),
-        ]);
-        const tokenSet = new Set();
-        [...byEmpId.docs, ...byUid.docs].forEach((d) => {
-            const t = d.data()?.token;
-            if (typeof t === 'string' && t.length > 10)
-                tokenSet.add(t);
-        });
-        const tokens = Array.from(tokenSet);
-        if (tokens.length === 0)
-            return;
-        const link = notifDocId ? `/app/?notif=${encodeURIComponent(notifDocId)}` : '/app/';
-        await admin.messaging().sendEachForMulticast({
-            data: {
-                type: 'RELEVO_AUTOMATICO',
-                title: notifTitle,
-                body: notifBody,
-                turnoId: outDocId,
-                employeeId: outEmpId,
-                notificationId: notifDocId || '',
-                link,
-            },
-            webpush: {
-                headers: { Urgency: 'high' },
-                fcmOptions: { link },
-            },
-            tokens,
-        });
-    }
-    catch (e) {
-        console.warn('[registrarPresencia] notifyRelieved:', e?.message);
-    }
 }
 async function registrarPresencia(db, input) {
     const { shiftId, source, coords, recordedAt, operatorUid, actorName, overrideRelieveShiftId, skipAutoRelevo, } = input;
@@ -330,6 +274,8 @@ async function registrarPresencia(db, input) {
                             return false;
                         if (empId && dat.employeeId === empId)
                             return false;
+                        if (String(dat.relievedBy || '').trim())
+                            return false;
                         return true;
                     });
                     const fifo = (a, b) => {
@@ -352,6 +298,20 @@ async function registrarPresencia(db, input) {
                         }
                     }
                     outDoc = pool[0] ?? null;
+                    if (!outDoc && !wantOverride && incomingStartMs > 0) {
+                        const pick = await (0, relevoOutgoingMatch_1.findPresentOutgoingAlignedToGapStart)(db, {
+                            objectiveId,
+                            positionName,
+                            gapStartMs: incomingStartMs,
+                            excludeShiftIds: [shiftId],
+                            excludeEmployeeId: empId || undefined,
+                        });
+                        if (pick) {
+                            const pickSnap = await db.collection('turnos').doc(pick.id).get();
+                            if (pickSnap.exists)
+                                outDoc = pickSnap;
+                        }
+                    }
                 }
                 if (outDoc) {
                     const outData = outDoc.data();
@@ -360,19 +320,42 @@ async function registrarPresencia(db, input) {
                     const outPosName = outData.positionName || '';
                     const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
                     const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
-                    const outgoingRealEnd = isEarlyRelevo ? outData.endTime : firestore_1.FieldValue.serverTimestamp();
-                    await outDoc.ref.update({
-                        isCompleted: true,
-                        isPresent: false,
-                        status: 'COMPLETED',
-                        realEndTime: outgoingRealEnd,
-                        relievedBy: empId || null,
-                        relievedByName: incomingName,
-                        relievedAt: firestore_1.FieldValue.serverTimestamp(),
-                        autoRelevo: !wantOverride,
-                        relievedEarly: isEarlyRelevo,
-                        relievedSource: source,
-                    });
+                    if (isEarlyRelevo && !wantOverride) {
+                        await outDoc.ref.update({
+                            relievedBy: empId || null,
+                            relievedByName: incomingName,
+                            relievedAt: firestore_1.FieldValue.serverTimestamp(),
+                            relieveScheduledAt: outData.endTime ?? null,
+                            autoRelevo: true,
+                            relievedEarly: true,
+                            relievedSource: source,
+                        });
+                    }
+                    else {
+                        await outDoc.ref.update({
+                            isCompleted: true,
+                            isPresent: false,
+                            status: 'COMPLETED',
+                            realEndTime: firestore_1.Timestamp.fromMillis(nowMs),
+                            relievedBy: empId || null,
+                            relievedByName: incomingName,
+                            relievedAt: firestore_1.FieldValue.serverTimestamp(),
+                            relieveScheduledAt: outData.endTime ?? null,
+                            autoRelevo: !wantOverride,
+                            relievedEarly: false,
+                            relievedSource: source,
+                            completionReason: 'RELEVO_PRESENTE',
+                        });
+                        if (outEmpId) {
+                            void (0, relevoNotifications_1.notifyTurnoFinalizadoRelevo)(db, {
+                                outEmpId,
+                                outDocId: outDoc.id,
+                                incomingName,
+                                objectiveName,
+                                empresaId,
+                            });
+                        }
+                    }
                     relieved = {
                         shiftId: outDoc.id,
                         employeeId: outEmpId,
@@ -381,7 +364,7 @@ async function registrarPresencia(db, input) {
                     void db
                         .collection('novedades')
                         .add({
-                        type: 'RELEVO_AUTOMATICO',
+                        type: isEarlyRelevo ? 'RELEVO_PROGRAMADO' : 'RELEVO_AUTOMATICO',
                         status: 'ATENDIDA',
                         empresaId,
                         objectiveId,
@@ -391,21 +374,14 @@ async function registrarPresencia(db, input) {
                         employeeName: incomingName,
                         relievedEmployeeId: outEmpId,
                         relievedEmployeeName: outName,
-                        description: `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
+                        description: isEarlyRelevo
+                            ? `${incomingName} fichó antes del fin de ${outName}; retiro programado a hora de fin (${source})`
+                            : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
                         createdAt: firestore_1.FieldValue.serverTimestamp(),
                         autoProcessed: !wantOverride,
                         source: wantOverride ? source : 'AUTO_RELEVO',
                     })
                         .catch(() => { });
-                    if (outEmpId) {
-                        void notifyRelieved(db, {
-                            outEmpId,
-                            outDocId: outDoc.id,
-                            incomingName,
-                            objectiveName,
-                            empresaId,
-                        });
-                    }
                 }
             }
         }

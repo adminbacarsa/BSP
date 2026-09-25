@@ -87,5 +87,7 @@ export type ClosureChecklistResult = {
     recomendaciones: string[];
 };
 export declare function runPlanningAutomationCycle(input: PlanningAutomationInput): Promise<PlanningAutomationResult>;
+/** Alertas IA en novedades (IA_ALERTA_*): retiradas — el monitor CC ya expone el estado (Mauro). */
+export declare const IA_OPERATIONAL_ALERTS_ENABLED = false;
 export declare function scanOperationalAlertsForEmpresa(input: OperationalAlertScanInput): Promise<OperationalAlertScanResult>;
 export declare function buildOperationalClosureChecklist(input: ClosureChecklistInput): Promise<ClosureChecklistResult>;

@@ -1177,7 +1177,9 @@ export const responderConvocatoriaCobertura = functions
       const startMs = (shiftData.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (response === 'ACCEPTED') {
         await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
-        const eta = Number.isFinite(Number(etaMinutes)) ? Math.max(1, Math.floor(Number(etaMinutes))) : 30;
+        const eta = Number.isFinite(Number(etaMinutes))
+          ? Math.min(60, Math.max(1, Math.floor(Number(etaMinutes))))
+          : 30;
         const etaAt = startMs > 0 ? Timestamp.fromMillis(startMs + eta * 60 * 1000) : now;
         await db.collection('turnos').doc(conv.shiftId).update({
           lateArrivalConfirmed: true,
@@ -1185,6 +1187,8 @@ export const responderConvocatoriaCobertura = functions
           lateArrivalEtaMinutes: eta,
           lateArrivalEtaAt: etaAt,
         });
+        const { applyLateReliefNoticeToOutgoing } = await import('../fichajes/relevoNotifications');
+        await applyLateReliefNoticeToOutgoing(db, conv.shiftId, shiftData, etaAt).catch(() => {});
       } else {
         await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
         await markShiftAbsent(db, conv.shiftId, {

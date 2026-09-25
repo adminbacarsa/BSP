@@ -1,6 +1,6 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import {
-  clearSourceCoverageUsedPatch,
+  buildRestoreSourceShiftAfterCoveragePatch,
   isActiveOpsCoverageDoc,
 } from '../coverage/syncAusenciaCobertura';
 
@@ -21,7 +21,13 @@ export async function revertTitularAfterConvocadoNoLlego(
   if (isActiveOpsCoverageDoc(opsData)) {
     const sourceId = String(opsData.sourceShiftId || '').trim();
     if (sourceId) {
-      batch.update(db.collection('turnos').doc(sourceId), clearSourceCoverageUsedPatch());
+      const srcSnap = await db.collection('turnos').doc(sourceId).get();
+      if (srcSnap.exists) {
+        batch.update(
+          srcSnap.ref,
+          buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
+        );
+      }
     }
     batch.update(opsRef, {
       coverageSuperseded: true,

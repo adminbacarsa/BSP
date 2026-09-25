@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.revertirAusenciaShift = revertirAusenciaShift;
 const firestore_1 = require("firebase-admin/firestore");
 const coverageRetention_1 = require("../coverage/coverageRetention");
+const syncAusenciaCobertura_1 = require("../coverage/syncAusenciaCobertura");
 async function revertirAusenciaShift(db, input) {
     const shiftId = String(input.shiftId || '').trim();
     if (!shiftId)
@@ -70,13 +71,12 @@ async function revertirAusenciaShift(db, input) {
                 status: 'CANCELLED',
                 cancelledAt: firestore_1.FieldValue.serverTimestamp(),
             });
-            const srcId = String(cov.data().sourceShiftId || cov.data().coveredShiftId || '').trim();
+            const srcId = String(cov.data().sourceShiftId || '').trim();
             if (srcId) {
-                await db.collection('turnos').doc(srcId).update({
-                    coverageUsed: firestore_1.FieldValue.delete(),
-                    operacionallyCovered: false,
-                    coverageStatus: firestore_1.FieldValue.delete(),
-                }).catch(() => undefined);
+                const srcSnap = await db.collection('turnos').doc(srcId).get();
+                if (srcSnap.exists) {
+                    await srcSnap.ref.update((0, syncAusenciaCobertura_1.buildRestoreSourceShiftAfterCoveragePatch)(srcSnap.data()));
+                }
             }
         }
         await ref.update({
@@ -87,4 +87,3 @@ async function revertirAusenciaShift(db, input) {
     }
     return { success: true };
 }
-//# sourceMappingURL=revertirAusencia.js.map

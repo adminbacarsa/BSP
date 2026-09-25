@@ -30,6 +30,7 @@ import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
+import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
 import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
 import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFalseAbsences';
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
@@ -91,7 +92,6 @@ import {
   triggerMobileAppPreviewBuildHandler,
   refreshMobileAppBuildStatusHandler,
 } from './mobileApp/mobileAppHandlers';
-import { scanOperationalAlertsForEmpresa } from './automation/operationalAutomation';
 
 // InicializaciÃ³n de Firebase Admin
 if (!admin.apps.length) {
@@ -1105,37 +1105,6 @@ export const modoDemoCron = functions
   });
 
 // =========================================================
-// ALERTAS OPERATIVAS IA (P0) — misma ventana que Operaciones (isOpsShiftHoy)
-// =========================================================
-export const operationalAlertsCron = functions
-  .runWith({ timeoutSeconds: 120, memory: '512MB' as const })
-  .pubsub.schedule('*/15 * * * *')
-  .timeZone('America/Argentina/Buenos_Aires')
-  .onRun(async () => {
-    const db = admin.firestore();
-    const empresasSnap = await db.collection('empresas').limit(250).get();
-    for (const empresaDoc of empresasSnap.docs) {
-      const empresaId = empresaDoc.id;
-      if (empresaDoc.data()?.active === false) continue;
-      if (empresaDoc.data()?.centroControlEnabled === false) continue;
-      try {
-        const out = await scanOperationalAlertsForEmpresa({
-          empresaId,
-          toleranceMinutes: 25,
-        });
-        if (out.alertsCreated > 0 || out.alertsAutoClosed > 0) {
-          console.log(
-            `[operationalAlertsCron] ${empresaId}: query=${out.evaluatedShifts} opsHoy=${out.opsWindowShifts} anomalies=${out.anomaliesDetected} created=${out.alertsCreated} autoClosed=${out.alertsAutoClosed}`,
-          );
-        }
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.warn(`[operationalAlertsCron] ${empresaId}:`, msg);
-      }
-    }
-  });
-
-// =========================================================
 // TRIGGER: iniciar cascada de cobertura cuando un turno queda ausente
 // Dispara para CUALQUIER empresa con centroControlEnabled (demo o real).
 // En MODO DEMO el cron marca isAbsent=true → esto dispara la cascada.
@@ -1840,6 +1809,8 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
         });
         await cancelLlegadaTardeConvocatorias(db, shiftId, 'LATE_NOTICE').catch(() => {});
 
+        await applyLateReliefNoticeToOutgoing(db, shiftId, shiftData, etaAt).catch(() => {});
+
         // Crear novedad para notificar al operador en CC
         try {
             await db.collection('novedades').add({
@@ -2185,9 +2156,6 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
     throw new functions.https.HttpsError('permission-denied', 'Este enlace no corresponde a tu cuenta.');
   }
 
-  // Marcar token como usado
-  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
-
   const empSnap = await db.collection('empleados').doc(td.employeeId).get();
   const empresaId = (empSnap.data()?.empresaId as string) || null;
 
@@ -2206,6 +2174,8 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   } catch (err) {
     rethrowBindGuardDeviceError(err);
   }
+
+  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
   return { success: true, employeeId: td.employeeId };
 });
@@ -2252,29 +2222,9 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
 
   const { uid, employeeId } = td;
 
-  // Obtener email del usuario para devolvÃ©rselo al front (necesario para signIn)
   const userRecord = await admin.auth().getUser(uid);
   const email = userRecord.email;
   if (!email) throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
-
-  // 1. Establecer contraseña
-  await admin.auth().updateUser(uid, { password });
-
-  // Claim empresaId para reglas Firestore (eventos / solicitudes)
-  try {
-    const empSnap = await db.collection('empleados').doc(employeeId).get();
-    const empEmpresaId = (empSnap.data()?.empresaId || '').toString();
-    await admin.auth().setCustomUserClaims(uid, {
-      role: 'employee',
-      type: 'employee',
-      ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
-    });
-  } catch (e) {
-    console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
-  }
-
-  // 2. Marcar token como usado
-  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
   const resolvedPlatform =
     platform === 'ios' || platform === 'android' || platform === 'web'
@@ -2302,6 +2252,21 @@ export const activateAndSetPassword = functions.https.onCall(async (data, _conte
   } catch (err) {
     rethrowBindGuardDeviceError(err);
   }
+
+  await admin.auth().updateUser(uid, { password });
+
+  try {
+    const empEmpresaId = (empSnapForBind.data()?.empresaId || '').toString();
+    await admin.auth().setCustomUserClaims(uid, {
+      role: 'employee',
+      type: 'employee',
+      ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
+    });
+  } catch (e) {
+    console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
+  }
+
+  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
 
   return { email, employeeId };
 });

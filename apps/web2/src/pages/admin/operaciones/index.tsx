@@ -169,6 +169,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const activeGuards = logic.processedData
         .filter((s: any) => {
             if (s.id === incomingShift.id || !samePost(s) || !s.isPresent || s.isCompleted || recentlyRelievedIds?.has(s.id)) return false;
+            if (s.relievedBy) return false;
             // Filtro duración compatible (±90 min)
             const sStart = toDate(s.shiftDateObj).getTime();
             let sEnd = toDate(s.endDateObj).getTime();
@@ -2708,6 +2709,7 @@ export default function OperacionesPage() {
         const todayStartMs = new Date(todayIso + 'T00:00:00-03:00').getTime();
         const alertsToday  = empNovedades.filter((n:any) => {
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            if (isHiddenFromOpsAlerts(n)) return false;
             const tsMs = n.createdAt?.seconds ? n.createdAt.seconds * 1000 : 0;
             return tsMs >= todayStartMs - 3*3600000; // incluir desde 21hs día anterior
         });

@@ -617,7 +617,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
 
             const isUnassigned = !isValidEmployee;
-            const isCoverageSourceUsed = shift.coverageUsed === true;
+            const isCoverageSourceUsed =
+                shift.coverageUsed === true
+                && shift.isExtended !== true
+                && shift.isEarlyStart !== true;
             const coverageUsedLabel = isCoverageSourceUsed
               ? `Usado: cubre a ${String(
                   shift.coverageUsedCoversEmployeeName || shift.coversEmployeeName || 'titular',

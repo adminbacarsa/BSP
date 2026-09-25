@@ -178,6 +178,8 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 
 **Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front.
 
+**Alertas IA retiradas (CC):** el cron `operationalAlertsCron` (**no desplegado**) generaba novedades `IA_ALERTA_*` vía `scanOperationalAlertsForEmpresa` (`apps/functions/src/automation/operationalAutomation.ts`, flag `IA_OPERATIONAL_ALERTS_ENABLED = false`). Duplicaban el monitor; el front oculta `IA_ALERTA_*`. Limpieza histórica: `node scripts/retire-ia-alerta-novedades.mjs` (dry-run; `--apply` solo con OK de Mauro).
+
 **Sala multi-operador (Manual):** el modo Manual/Auto se resuelve a nivel **empresa** (`sesiones_operador` activas), no por “si yo abrí sesión”. Primer ingreso = **piloto**; siguientes = **copiloto** (pueden pedir mando; el piloto acepta/rechaza). Piloto “Pasar a Auto” cierra todas las sesiones → Auto para todos. Banner en Ops muestra quién es piloto/copiloto. Asistido solo lo ejecuta el piloto. Demo (SA) cierra la sala al activarse.
 
 ### Protocolo de cobertura (Ops — CC, Map view, Auto, Demo)

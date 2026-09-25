@@ -6,6 +6,7 @@ import {
 } from '../coverage/positionHasContinuity';
 import { retainOutgoingForGap, totalShiftMs, RETENTION_MAX_TOTAL_MS } from '../coverage/coverageRetention';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 
 const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
@@ -77,19 +78,34 @@ function shiftEndDate(data: FirebaseFirestore.DocumentData): Date | null {
   return ms ? new Date(ms) : null;
 }
 
+export type AutoCompletarTurnosPassOpts = {
+  /** Emulador/E2E: procesar solo este turno saliente (evita escanear miles de docs de lab). */
+  onlyOutgoingShiftId?: string | null;
+};
+
 export async function runAutoCompletarTurnosPass(
   db: Firestore,
   ctx: AutoCompleteContext,
   now: Timestamp = Timestamp.now(),
+  passOpts?: AutoCompletarTurnosPassOpts,
 ): Promise<AutoCompletePassResult> {
   const nowMs = now.toMillis();
   const cutoff = Timestamp.fromMillis(nowMs - 5 * 60 * 1000);
+  const onlyOutId = String(passOpts?.onlyOutgoingShiftId || '').trim();
 
-  const snap = await db
-    .collection('turnos')
-    .where('status', '==', 'PRESENT')
-    .where('endTime', '<=', cutoff)
-    .get();
+  let snap: FirebaseFirestore.QuerySnapshot;
+  if (onlyOutId) {
+    const direct = await db.collection('turnos').doc(onlyOutId).get();
+    snap = direct.exists
+      ? ({ empty: false, docs: [direct] } as FirebaseFirestore.QuerySnapshot)
+      : ({ empty: true, docs: [] } as FirebaseFirestore.QuerySnapshot);
+  } else {
+    snap = await db
+      .collection('turnos')
+      .where('status', '==', 'PRESENT')
+      .where('endTime', '<=', cutoff)
+      .get();
+  }
 
   if (snap.empty) return { completed: 0, alertedNoRelief: 0 };
 
@@ -99,6 +115,13 @@ export async function runAutoCompletarTurnosPass(
 
   const slaCache = new Map<string, FirebaseFirestore.DocumentData | null>();
   const reliefIncomingClaimed = new Set<string>();
+  const relevoFinishNotifs: {
+    outEmpId: string;
+    outDocId: string;
+    incomingName: string;
+    objectiveName: string;
+    empresaId: string | null;
+  }[] = [];
 
   async function hasContinuity(shift: FirebaseFirestore.DocumentData): Promise<boolean> {
     const oid = String(shift.objectiveId || '');
@@ -122,6 +145,11 @@ export async function runAutoCompletarTurnosPass(
   );
 
   for (const docSnap of outgoingDocs) {
+    if (onlyOutId && docSnap.id !== onlyOutId) continue;
+    if (onlyOutId) {
+      const endMs = shiftEndMs(docSnap.data());
+      if (!endMs || endMs > cutoff.toMillis()) continue;
+    }
     const shift = docSnap.data();
     if (!ctx.isEnabled(shift.empresaId)) continue;
     if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) continue;
@@ -130,6 +158,37 @@ export async function runAutoCompletarTurnosPass(
     const endTimeMs = shiftEndMs(shift);
     if (!endTimeMs) continue;
     const continuous = await hasContinuity(shift);
+
+    const relievedBy = String(shift.relievedBy || '').trim();
+    const relieveSchedMs =
+      (shift.relieveScheduledAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+      ?? (relievedBy ? endTimeMs : 0);
+
+    if (relievedBy && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
+      const incomingName = String(shift.relievedByName || 'relevo').trim();
+      completeBatch.update(docSnap.ref, {
+        status: 'COMPLETED',
+        isCompleted: true,
+        isPresent: false,
+        realEndTime: Timestamp.fromMillis(relieveSchedMs),
+        autoCompletedAt: now,
+        autoCompletedBy: 'SYSTEM_SCHEDULER',
+        autoCloseReason: 'RELEVO_PROGRAMADO',
+        completionReason: 'RELEVO_PROGRAMADO',
+      });
+      const outEmpId = String(shift.employeeId || '').trim();
+      if (outEmpId) {
+        relevoFinishNotifs.push({
+          outEmpId,
+          outDocId: docSnap.id,
+          incomingName,
+          objectiveName: String(shift.objectiveName || ''),
+          empresaId: ctx.shiftEmpresaId(shift) || null,
+        });
+      }
+      completed++;
+      continue;
+    }
 
     if (shift.isRetention === true) {
       const manualExtended =
@@ -234,17 +293,36 @@ export async function runAutoCompletarTurnosPass(
         relData.checkInTime?.toMillis?.() ??
         nowMs;
       const closeMs = relCheckMs <= endTimeMs ? endTimeMs : relCheckMs;
+      const outEmpId = String(shift.employeeId || '').trim();
+      const incomingName = String(relData.employeeName || 'tu relevo').trim();
       completeBatch.update(docSnap.ref, {
         status: 'COMPLETED',
         isCompleted: true,
+        isPresent: false,
         realEndTime: Timestamp.fromMillis(closeMs),
         autoCompletedAt: now,
         autoCompletedBy: 'SYSTEM_SCHEDULER',
         autoCloseReason: 'RELEVO_PRESENTE',
         completionReason: 'RELEVO_PRESENTE',
       });
+      if (outEmpId && relCheckMs <= endTimeMs) {
+        relevoFinishNotifs.push({
+          outEmpId,
+          outDocId: docSnap.id,
+          incomingName,
+          objectiveName: String(shift.objectiveName || ''),
+          empresaId: ctx.shiftEmpresaId(shift) || null,
+        });
+      }
       completed++;
     } else if (relievePending || relieveAbsent) {
+      const retentionUntilMs =
+        (shift.retentionExpectedUntil as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? (shift.lateReliefEtaAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? 0;
+      if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+        continue;
+      }
       if (!continuous) {
         completeBatch.update(docSnap.ref, {
           status: 'COMPLETED',
@@ -285,6 +363,13 @@ export async function runAutoCompletarTurnosPass(
       }
       alertedNoRelief++;
     } else if (!continuous) {
+      const retentionUntilMs =
+        (shift.retentionExpectedUntil as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? (shift.lateReliefEtaAt as { toMillis?: () => number } | undefined)?.toMillis?.()
+        ?? 0;
+      if (retentionUntilMs > 0 && nowMs < retentionUntilMs) {
+        continue;
+      }
       completeBatch.update(docSnap.ref, {
         status: 'COMPLETED',
         isCompleted: true,
@@ -308,6 +393,13 @@ export async function runAutoCompletarTurnosPass(
   }
 
   await completeBatch.commit();
+
+  for (const n of relevoFinishNotifs) {
+    await notifyTurnoFinalizadoRelevo(db, n).catch((e) =>
+      console.warn('[autoCompletarTurnos] TURNO_FINALIZADO:', (e as Error)?.message),
+    );
+  }
+
   return { completed, alertedNoRelief };
 }
 

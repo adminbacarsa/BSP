@@ -407,13 +407,65 @@ service cloud.firestore {
       allow create, update, delete: if isSuperAdmin();
     }
 
+    function deviceTokenBindingFieldsPresent(data) {
+      return data.keys().hasAny(['verified', 'deviceId', 'retiredDeviceIds']);
+    }
+
     match /device_tokens/{tokenId} {
-      // create/update: el doc lleva uid del auth (FCM token id o binding por uid)
-      allow create, update: if request.auth != null && request.resource.data.uid == request.auth.uid;
-      // delete: request.resource no existe — validar el doc actual
-      allow delete: if request.auth != null && resource.data.uid == request.auth.uid;
-      // Admin puede leer todos; empleado puede leer su propio doc (tokenId == uid)
+      function clientFcmDeviceTokenWriteOk() {
+        return request.auth != null
+          && tokenId != request.auth.uid
+          && request.resource.data.get('uid', '') == request.auth.uid;
+      }
+
+      function deviceTokenFcmEmployeeIdOk(data) {
+        return !data.keys().hasAny(['employeeId'])
+          || empleadoDocOwnedByAuth(data.get('employeeId', ''))
+          || isSuperAdmin();
+      }
+
+      function deviceTokenFcmRoleOk(data) {
+        return !data.keys().hasAny(['role'])
+          || isSuperAdmin()
+          || (isEmployeeClaim() && data.get('role', '') == 'employee')
+          || (isAdmin() && (data.get('role', '') == 'admin' || data.get('role', '') == 'employee'));
+      }
+
+      function deviceTokenFcmEmpresaIdOk(data) {
+        return !data.keys().hasAny(['empresaId'])
+          || data.get('empresaId', null) == null
+          || (isSuperAdmin())
+          || (isAdmin() && (
+            data.get('empresaId', '') == authEmpresaId()
+            || authEmpresaId() == ''
+            || systemUserHasAllEmpresas()
+          ))
+          || (isEmployeeClaim() && data.get('empresaId', '') == authEmpresaId());
+      }
+
+      function deviceTokenFcmMetadataOk(data) {
+        return deviceTokenFcmEmployeeIdOk(data)
+          && deviceTokenFcmRoleOk(data)
+          && deviceTokenFcmEmpresaIdOk(data);
+      }
+
+      // Doc vínculo device_tokens/{uid}: solo Admin SDK (bindGuardDevice, activaciones, approve/unbind).
+      // Docs FCM (tokenId != uid): el cliente registra push sin tocar verified/deviceId/retiredDeviceIds.
       allow read: if isAdmin() || (request.auth != null && tokenId == request.auth.uid);
+
+      allow create: if clientFcmDeviceTokenWriteOk()
+        && !deviceTokenBindingFieldsPresent(request.resource.data)
+        && deviceTokenFcmMetadataOk(request.resource.data);
+
+      allow update: if clientFcmDeviceTokenWriteOk()
+        && resource.data.get('uid', '') == request.auth.uid
+        && !deviceTokenBindingFieldsPresent(request.resource.data)
+        && deviceTokenFcmMetadataOk(request.resource.data)
+        && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['verified', 'deviceId', 'retiredDeviceIds']);
+
+      allow delete: if request.auth != null
+        && tokenId != request.auth.uid
+        && resource.data.get('uid', '') == request.auth.uid;
     }
 
     match /device_bindings/{deviceId} {

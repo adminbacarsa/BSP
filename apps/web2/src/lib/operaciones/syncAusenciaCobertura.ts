@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteField,
   doc,
   getDoc,
   query,
@@ -147,6 +148,18 @@ export function buildOpsCoverageDocId(titularShiftId: string, employeeId: string
   return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
 }
 
+export const DELETED_REASON_CONVERTED_COVERAGE = 'CONVERTIDO_EN_COBERTURA';
+
+export function isSourceShiftConvertedForCoverage(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data) return false;
+  return (
+    data.isDeleted === true
+    && String(data.deletedReason || '') === DELETED_REASON_CONVERTED_COVERAGE
+  );
+}
+
 export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
   return {
     coverageUsed: false,
@@ -154,6 +167,53 @@ export function clearSourceCoverageUsedPatch(): Record<string, unknown> {
     coverageDocId: null,
     coverageUsedAt: null,
     coverageUsedBy: null,
+    coverageUsedCoversEmployeeName: null,
+    coverageUsedObjectiveName: null,
+  };
+}
+
+/** REF/ESC: el turno planificado se convierte en cobertura (baja lógica); el ops_cov lleva banda del titular. */
+export function buildEscRefSourceConvertedPatch(
+  srcData: Record<string, unknown>,
+  covDocId: string,
+): Record<string, unknown> {
+  const statusBeforeDelete = String(srcData.status ?? 'ACTIVE');
+  return {
+    isDeleted: true,
+    status: 'CANCELLED',
+    deletedReason: DELETED_REASON_CONVERTED_COVERAGE,
+    convertedToCoverageDocId: covDocId,
+    statusBeforeDelete,
+    coverageUsed: deleteField(),
+    coverageUsedForShiftId: deleteField(),
+    coverageDocId: deleteField(),
+    coverageUsedAt: deleteField(),
+    coverageUsedBy: deleteField(),
+    coverageUsedCoversEmployeeName: deleteField(),
+    coverageUsedObjectiveName: deleteField(),
+  };
+}
+
+/** Restaura turno origen al cancelar/supersedear cobertura (REF/ESC convertidos o RET con coverageUsed). */
+export function buildRestoreSourceShiftAfterCoveragePatch(
+  srcData: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  if (!srcData) return clearSourceCoverageUsedPatch();
+  if (isSourceShiftConvertedForCoverage(srcData)) {
+    const prevStatus = String(srcData.statusBeforeDelete || 'ACTIVE');
+    return {
+      isDeleted: false,
+      status: prevStatus,
+      deletedReason: deleteField(),
+      convertedToCoverageDocId: deleteField(),
+      statusBeforeDelete: deleteField(),
+      ...clearSourceCoverageUsedPatch(),
+    };
+  }
+  return {
+    ...clearSourceCoverageUsedPatch(),
+    isRetentionActivated: deleteField(),
+    retentionActivatedAt: deleteField(),
   };
 }
 
@@ -165,7 +225,10 @@ export function sourceShiftCoverageUsedPatch(opts: {
   coversEmployeeName?: string | null;
   coversObjectiveName?: string | null;
 }): Record<string, unknown> {
-  const patch: Record<string, unknown> = {
+  if (!opts.isRet) {
+    return { coverageDocId: opts.coverageDocId };
+  }
+  return {
     coverageUsed: true,
     coverageUsedForShiftId: opts.titularShiftId,
     coverageDocId: opts.coverageDocId,
@@ -175,12 +238,9 @@ export function sourceShiftCoverageUsedPatch(opts: {
     coverageUsedBy: opts.resolvedBy,
     coverageUsedCoversEmployeeName: opts.coversEmployeeName ?? null,
     coverageUsedObjectiveName: opts.coversObjectiveName ?? null,
+    isRetentionActivated: true,
+    retentionActivatedAt: serverTimestamp(),
   };
-  if (opts.isRet) {
-    patch.isRetentionActivated = true;
-    patch.retentionActivatedAt = serverTimestamp();
-  }
-  return patch;
 }
 
 const toTimestamp = (val: unknown): Timestamp | null => {
@@ -292,7 +352,10 @@ export async function applyCoverage(
       throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
     }
     const srcData = srcSnap.data() as Record<string, unknown>;
-    if (['REF', 'ESC', 'RET'].includes(ct)) {
+    const sameCovOnSource =
+      String(srcData.coverageDocId || '').trim() === covDocId
+      && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
+    if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
       const gap = gapFromAbsenceLikeShift(titular as Record<string, unknown>);
       if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
         throw new CoverageApplyError(
@@ -309,7 +372,9 @@ export async function applyCoverage(
       coversEmployeeName: (titular.employeeName as string) || null,
       coversObjectiveName: (titular.objectiveName as string) || null,
     });
-    if (ct === 'EXTEND' && params.extensionEndTime) {
+    if (sameCovOnSource) {
+      // Reintento / resync.
+    } else if (ct === 'EXTEND' && params.extensionEndTime) {
       batch.update(doc(db, 'turnos', sourceId), {
         ...usedBase,
         isExtended: true,
@@ -322,6 +387,11 @@ export async function applyCoverage(
         isEarlyStart: true,
         adjustedStartTime: params.adjustedStartTime,
       });
+    } else if (ct === 'ESC' || ct === 'REF') {
+      batch.update(
+        doc(db, 'turnos', sourceId),
+        buildEscRefSourceConvertedPatch(srcData, covDocId),
+      );
     } else {
       batch.update(doc(db, 'turnos', sourceId), usedBase);
     }
@@ -464,7 +534,13 @@ export async function supersedeOpsCoveragesForAbsence(
     }
     const prevSource = String(data.sourceShiftId || '').trim();
     if (prevSource) {
-      batch.update(doc(db, 'turnos', prevSource), clearSourceCoverageUsedPatch());
+      const srcSnap = await getDoc(doc(db, 'turnos', prevSource));
+      if (srcSnap.exists()) {
+        batch.update(
+          srcSnap.ref,
+          buildRestoreSourceShiftAfterCoveragePatch(srcSnap.data() as Record<string, unknown>),
+        );
+      }
     }
     batch.update(d.ref, {
       coverageSuperseded: true,

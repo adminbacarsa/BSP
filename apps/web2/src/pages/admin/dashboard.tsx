@@ -767,6 +767,7 @@ function AdminDashboard() {
       const novedadesShiftIdsCovered = new Set<string>();
       novedadesSnap.forEach(doc => {
         const d = doc.data();
+        if (String(d.type || '').startsWith('IA_ALERTA_')) return;
         if (!belongsToEmpresaView(d, empresaId, migracionCompleta)) return;
         const shiftId = String(d.shiftId || '');
         if (shiftId) novedadesShiftIdsCovered.add(shiftId);
