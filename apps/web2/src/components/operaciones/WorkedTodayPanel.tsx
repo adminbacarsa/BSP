@@ -27,6 +27,7 @@ type Row = {
   lateMinutes: number;
   inProgress: boolean;
   closeLabel: string;
+  closeKind: CloseKind;
   checkInBy: string;
   coversName: string;
 };
@@ -56,6 +57,32 @@ function todayAr(): string {
 function arMidnight(ymd: string): Date {
   return new Date(`${ymd}T00:00:00-03:00`);
 }
+
+type CloseKind = 'EN_SERVICIO' | 'RETENIDO' | 'RELEVO' | 'SIN_RELEVO' | 'SALIDA' | 'AUTO' | 'RETIRO';
+
+const CLOSE_KIND_LABEL: Record<CloseKind, string> = {
+  EN_SERVICIO: 'En servicio',
+  RETENIDO: 'Retenido',
+  RELEVO: 'Relevo',
+  SIN_RELEVO: 'Fin sin relevo (SLA)',
+  SALIDA: 'Salida manual',
+  AUTO: 'Cierre automático',
+  RETIRO: 'Retiro anticipado',
+};
+
+function closeKindFor(s: Record<string, any>): CloseKind {
+  const reason = String(s.completionReason || s.autoCloseReason || '').toUpperCase();
+  const done = s.isCompleted === true || String(s.status || '').toUpperCase() === 'COMPLETED';
+  if (s.isInterrupted || String(s.status || '').toUpperCase() === 'INTERRUPTED') return 'RETIRO';
+  if (reason.startsWith('RELEVO') || (done && s.relievedByName)) return 'RELEVO';
+  if (reason === 'SIN_CONTINUIDAD_SLA') return 'SIN_RELEVO';
+  if (reason.startsWith('AUTO') || reason.includes('TOPE') || reason.includes('12H')) return 'AUTO';
+  if (done) return 'SALIDA';
+  if (s.isRetention) return 'RETENIDO';
+  return 'EN_SERVICIO';
+}
+
+type SortKey = 'PLAN' | 'REAL' | 'TURNO' | 'ACTIVOS' | 'CIERRE';
 
 function closeLabelFor(s: Record<string, any>): string {
   const reason = String(s.completionReason || s.autoCloseReason || '').toUpperCase();
@@ -87,6 +114,9 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<'TODOS' | 'ACTIVOS' | 'CERRADOS'>('TODOS');
+  const [kindFilter, setKindFilter] = useState<CloseKind | ''>('');
+  const [sortBy, setSortBy] = useState<SortKey>('PLAN');
 
   useEffect(() => {
     let cancelled = false;
@@ -136,6 +166,7 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
             lateMinutes: Math.max(Number(s.lateMinutes) || 0, lateFromPlan > 5 ? lateFromPlan : 0),
             inProgress,
             closeLabel: closeLabelFor(s),
+            closeKind: closeKindFor(s),
             checkInBy: checkInByLabel(s),
             coversName: String(s.coversEmployeeName || s.coverageUsedCoversEmployeeName || ''),
           });
@@ -156,6 +187,9 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
     const q = String(filterText || '').trim().toLowerCase();
     const filtered = rows.filter((r) => {
       if (clientId && r.clientId !== clientId) return false;
+      if (statusFilter === 'ACTIVOS' && !r.inProgress) return false;
+      if (statusFilter === 'CERRADOS' && r.inProgress) return false;
+      if (kindFilter && r.closeKind !== kindFilter) return false;
       if (!q) return true;
       return [r.employeeName, r.objectiveName, r.clientName, r.positionName].some((x) => x.toLowerCase().includes(q));
     });
@@ -174,14 +208,31 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
           .sort((a, b) => a[0].localeCompare(b[0]))
           .map(([objective, list]) => ({
             objective,
-            list: list.sort(
-              (a, b) =>
-                a.positionName.localeCompare(b.positionName)
-                || (a.realStart?.getTime() ?? 0) - (b.realStart?.getTime() ?? 0),
-            ),
+            list: list.sort((a, b) => {
+              const t = (d: Date | null) => d?.getTime() ?? 0;
+              const kindOrder = Object.keys(CLOSE_KIND_LABEL) as CloseKind[];
+              switch (sortBy) {
+                case 'REAL':
+                  return t(a.realStart) - t(b.realStart);
+                case 'TURNO':
+                  return a.code.localeCompare(b.code) || t(a.plannedStart) - t(b.plannedStart);
+                case 'ACTIVOS':
+                  return Number(b.inProgress) - Number(a.inProgress) || t(a.plannedStart) - t(b.plannedStart);
+                case 'CIERRE':
+                  return kindOrder.indexOf(a.closeKind) - kindOrder.indexOf(b.closeKind) || t(a.plannedStart) - t(b.plannedStart);
+                default:
+                  return t(a.plannedStart) - t(b.plannedStart) || a.positionName.localeCompare(b.positionName);
+              }
+            }),
           })),
       }));
-  }, [rows, filterText, clientId]);
+  }, [rows, filterText, clientId, statusFilter, kindFilter, sortBy]);
+
+  const kindCounts = useMemo(() => {
+    const m = new Map<CloseKind, number>();
+    for (const r of rows) if (!clientId || r.clientId === clientId) m.set(r.closeKind, (m.get(r.closeKind) || 0) + 1);
+    return m;
+  }, [rows, clientId]);
 
   const total = grouped.reduce((n, c) => n + c.objectives.reduce((m, o) => m + o.list.length, 0), 0);
 
@@ -223,11 +274,51 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
         </button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-3 py-2">
+        {(['TODOS', 'ACTIVOS', 'CERRADOS'] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setStatusFilter(k)}
+            className={`px-2 py-1 rounded-lg text-[10px] font-black uppercase ${statusFilter === k ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+          >
+            {k === 'TODOS' ? 'Todos' : k === 'ACTIVOS' ? 'Activos' : 'Cerrados'}
+          </button>
+        ))}
+        <select
+          value={kindFilter}
+          onChange={(e) => setKindFilter(e.target.value as CloseKind | '')}
+          className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 bg-slate-50"
+          title="Filtrar por tipo de cierre"
+        >
+          <option value="">Tipo de cierre: todos</option>
+          {(Object.keys(CLOSE_KIND_LABEL) as CloseKind[]).map((k) => (
+            <option key={k} value={k}>{CLOSE_KIND_LABEL[k]} ({kindCounts.get(k) || 0})</option>
+          ))}
+        </select>
+        <label className="ml-auto flex items-center gap-1 text-[10px] font-black uppercase text-slate-400">
+          Ordenar
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortKey)}
+            className="text-[10px] font-bold border border-slate-200 rounded-lg px-2 py-1 bg-slate-50 normal-case text-slate-700"
+          >
+            <option value="PLAN">Horario planificado</option>
+            <option value="REAL">Entrada real</option>
+            <option value="TURNO">Turno</option>
+            <option value="ACTIVOS">Activos primero</option>
+            <option value="CIERRE">Tipo de cierre</option>
+          </select>
+        </label>
+      </div>
+
       {error ? <div className="text-xs text-rose-600 px-2">Error: {error}</div> : null}
       {loading ? (
         <div className="flex justify-center py-10 text-slate-400"><Loader2 className="animate-spin" size={18} /></div>
       ) : total === 0 ? (
-        <div className="text-center py-10 text-slate-400 text-xs">Nadie fichó en esta fecha.</div>
+        <div className="text-center py-10 text-slate-400 text-xs">
+          {rows.length === 0 ? 'Nadie fichó en esta fecha.' : 'Ningún guardia coincide con los filtros.'}
+        </div>
       ) : (
         grouped.map((c) => (
           <div key={c.client} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
