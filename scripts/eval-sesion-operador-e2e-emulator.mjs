@@ -111,14 +111,38 @@ async function runFlow() {
   const pilotDoc = afterAccept.docs.find((d) => d.data().operatorId === copilotUid);
   report('3-accept-pilot', !!pilotDoc && String(pilotDoc.data().role).toUpperCase() === 'PILOTO', `copilotoEsPiloto=${!!pilotDoc}`);
 
-  await handleSesionOperador(db, pilotUid, {
+  let copilotDenied = false;
+  try {
+    await handleSesionOperador(db, pilotUid, { action: 'passToAuto', empresaId, writeOrigin: 'WEB' });
+  } catch (e) {
+    copilotDenied = String(e?.code || e?.message || '').includes('permission-denied');
+  }
+  manual = await isEmpresaManualMode(db, empresaId);
+  report('4-copiloto-no-pasa-a-auto', copilotDenied && manual === true, `denied=${copilotDenied} manual=${manual}`);
+
+  await handleSesionOperador(db, copilotUid, {
     action: 'passToAuto',
     empresaId,
     writeOrigin: 'WEB',
   });
 
   manual = await isEmpresaManualMode(db, empresaId);
-  report('4-pass-to-auto', manual === false, `isEmpresaManualMode=${manual}`);
+  report('5-piloto-pasa-a-auto', manual === false, `isEmpresaManualMode=${manual}`);
+
+  // SuperAdmin solo por claim (sin system_users), como los operadores reales de Pruebas SA.
+  const saUid = 'ses_sa_claim_only';
+  await db.collection('system_users').doc(saUid).delete().catch(() => {});
+  await handleSesionOperador(db, saUid, { action: 'start', empresaId, writeOrigin: 'WEB' }, 'SUPERADMIN', 'sa@x.com');
+  manual = await isEmpresaManualMode(db, empresaId);
+  report('6-sa-por-claim-toma-mando', manual === true, `manual=${manual}`);
+  let noClaimDenied = false;
+  try {
+    await handleSesionOperador(db, 'ses_sin_perfil', { action: 'start', empresaId, writeOrigin: 'WEB' });
+  } catch (e) {
+    noClaimDenied = String(e?.code || e?.message || '').includes('permission-denied');
+  }
+  report('7-sin-perfil-rechazado', noClaimDenied, `denied=${noClaimDenied}`);
+  await handleSesionOperador(db, saUid, { action: 'passToAuto', empresaId, writeOrigin: 'WEB' }, 'SUPERADMIN', 'sa@x.com');
 }
 
 async function main() {

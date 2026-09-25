@@ -105,6 +105,7 @@ export async function handleSesionOperador(
   uid: string,
   data: SesionOperadorRequest,
   tokenRole?: unknown,
+  tokenEmail?: unknown,
 ): Promise<{ success: true; action: SesionOperadorAction }> {
   const action = String(data?.action || '').trim() as SesionOperadorAction;
   const empresaId = String(data?.empresaId || '').trim();
@@ -116,7 +117,8 @@ export async function handleSesionOperador(
     throw new functions.https.HttpsError('invalid-argument', 'action inválida.');
   }
 
-  const panel = await assertOperationsUpdatePermission(db, uid, empresaId, tokenRole);
+  const emailName = String(tokenEmail || '').split('@')[0] || undefined;
+  const panel = await assertOperationsUpdatePermission(db, uid, empresaId, tokenRole, emailName);
   const audit = auditFields(action, writeOrigin, uid);
 
   if (action === 'start') {
@@ -166,7 +168,12 @@ export async function handleSesionOperador(
   }
 
   if (action === 'passToAuto') {
-    let ids = (await loadActiveSessions(db, empresaId)).map((s) => s.id);
+    const room = await loadActiveSessions(db, empresaId);
+    const roomPilot = room.find((s) => s.role === 'PILOTO') || pickCanonicalPilotSession(room);
+    if (!panel.isSuperAdmin && roomPilot && roomPilot.operatorId !== uid) {
+      throw new functions.https.HttpsError('permission-denied', 'Solo el piloto puede pasar la sala a Auto.');
+    }
+    let ids = room.map((s) => s.id);
     if (!ids.length) {
       const snap = await db
         .collection('sesiones_operador')
@@ -255,5 +262,6 @@ export const sesionOperadorCallable = functions.https.onCall(async (data, contex
     context.auth.uid,
     data as SesionOperadorRequest,
     context.auth.token?.role,
+    context.auth.token?.email,
   );
 });

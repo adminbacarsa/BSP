@@ -54,10 +54,22 @@ export async function resolvePanelUserForUid(
   db: Firestore,
   uid: string,
   tokenRoleRaw?: unknown,
+  operatorNameFallback = 'Operador',
 ): Promise<ResolvedPanelUser | null> {
   const tokenRole = String(tokenRoleRaw ?? '').trim();
   const sys = await db.collection('system_users').doc(uid).get();
-  if (!sys.exists) return null;
+  // Igual que AuthContext de web2: SuperAdmin por claim aunque no tenga doc en system_users.
+  if (!sys.exists) {
+    if (!isSuperAdminRole(tokenRole)) return null;
+    return {
+      isSuperAdmin: true,
+      allEmpresas: true,
+      empresaId: '',
+      roleName: tokenRole,
+      permissions: fullStaffModulePermissions() as unknown as Record<string, string[]>,
+      operatorName: operatorNameFallback,
+    };
+  }
 
   const data = sys.data() ?? {};
   const role = String(data.role || '').trim();
@@ -121,8 +133,9 @@ export async function assertOperationsUpdatePermission(
   uid: string,
   empresaId: string,
   tokenRoleRaw?: unknown,
+  operatorNameFallback?: string,
 ): Promise<ResolvedPanelUser> {
-  const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw);
+  const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback);
   if (!panel) {
     throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado en el panel.');
   }
