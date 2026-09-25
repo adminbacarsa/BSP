@@ -1539,13 +1539,16 @@ export const checkConvocatoriaTimeouts = onSchedule(
           const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
           // Ya fichó o avisó demora: la ventana la resuelve detectarAusencias (ETA / T+30), no este timeout.
           const alreadyHandled = !!(sh?.isPresent || sh?.isCompleted || sh?.lateArrivalAt || sh?.lateArrivalConfirmed);
-          if (!alreadyHandled && !skipAbsencePipelineForShift(sh as Record<string, unknown>)) {
+          // Sin respuesta al ¿Venís? no es ausencia todavía: el AA sin aviso es a T+30 (detectarAusencias BLOQUE 2).
+          const startMs = (sh?.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
+          const pastNoNoticeDeadline = startMs > 0 && now.toMillis() >= startMs + 30 * 60 * 1000;
+          if (!alreadyHandled && pastNoNoticeDeadline && !skipAbsencePipelineForShift(sh as Record<string, unknown>)) {
             await markShiftAbsent(db, conv.shiftId, {
               reason: 'LLEGADA_TARDE_TIMEOUT',
               by: 'SYSTEM_SCHEDULER',
             });
           }
-          console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → ausente ${conv.shiftId}`);
+          console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout ${conv.shiftId}`);
         } else {
           // Cascada regular: ESCALATED sigue activa, avanzar al siguiente paso
           await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
