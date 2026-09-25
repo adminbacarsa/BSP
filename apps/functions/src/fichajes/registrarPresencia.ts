@@ -337,19 +337,19 @@ export async function registrarPresencia(
               .where('empresaId', '==', empresaId)
               .where('objectiveId', '==', objectiveId)
               .where('isPresent', '==', true)
-              .where('isCompleted', '==', false)
               .get();
           } else {
             activeSnap = await db
               .collection('turnos')
               .where('objectiveId', '==', objectiveId)
               .where('isPresent', '==', true)
-              .where('isCompleted', '==', false)
               .get();
           }
 
+          // Sin filtro isCompleted en la query: los turnos de carga masiva no traen el campo (== false no los devuelve).
           const samePost = activeSnap.docs.filter((d) => {
             const dat = d.data();
+            if (dat.isCompleted === true) return false;
             if (normPos(dat.positionName) !== normPos(positionName)) return false;
             if (d.id === shiftId) return false;
             if (empId && dat.employeeId === empId) return false;

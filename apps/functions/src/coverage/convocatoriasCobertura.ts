@@ -321,12 +321,12 @@ export async function findBestCandidate(
       .where('objectiveId', '==', conv.objectiveId)
       .where('empresaId', '==', conv.empresaId)
       .where('isPresent', '==', true)
-      .where('isCompleted', '==', false)
-      .limit(10)
+      .limit(30)
       .get();
 
     for (const d of active.docs) {
       const t = d.data();
+      if (t.isCompleted === true) continue;
       const code = String(t.code || '').toUpperCase();
       if (code !== 'M' && code !== 'T' && code !== 'N') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
@@ -351,18 +351,18 @@ export async function findBestCandidate(
     const endOfDay = Timestamp.fromMillis(
       new Date(new Date().setHours(23, 59, 59, 0)).getTime(),
     );
+    // Índice objectiveId+startTime; empresa e isCompleted en código (el campo falta en carga masiva).
     const next = await db.collection('turnos')
       .where('objectiveId', '==', conv.objectiveId)
-      .where('empresaId', '==', conv.empresaId)
       .where('startTime', '>', now)
       .where('startTime', '<=', endOfDay)
-      .where('isCompleted', '==', false)
       .orderBy('startTime')
-      .limit(5)
+      .limit(20)
       .get();
 
     for (const d of next.docs) {
       const t = d.data();
+      if (t.isCompleted === true || String(t.empresaId || '') !== String(conv.empresaId || '')) continue;
       if (!t.employeeId || t.employeeId === 'VACANTE') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;

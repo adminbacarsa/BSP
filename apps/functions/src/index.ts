@@ -2841,11 +2841,11 @@ export const detectarAusencias = functions
           .where('empresaId', '==', empId)
           .where('objectiveId', '==', s.objectiveId)
           .where('isPresent', '==', true)
-          .where('isCompleted', '==', false)
           .get();
 
         const toAlert = presentSnap.docs.filter(d => {
           const dat = d.data();
+          if (dat.isCompleted === true) return false;
           return (dat.positionName || '').trim().toLowerCase() === posName
             && dat.employeeId !== s.employeeId;
         });
