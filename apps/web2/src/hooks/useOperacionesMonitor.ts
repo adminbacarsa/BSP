@@ -598,8 +598,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     turaImputationPos: turaExt.tura.positionName,
                     turaExtensionRange: combinedContiguousRangeLabel(shift, turaExt.tura),
                 } : {}),
-                vacancyOrigin: isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
-                operacionallyCovered: plannedOperativelyCovered || !!shift.operacionallyCovered,
+                vacancyOrigin: classified.isRfzVacante ? 'ABSENCE' : shift.vacancyOrigin,
+                operacionallyCovered: classified.plannedOperativelyCovered || !!shift.operacionallyCovered,
             };
         }).filter(Boolean);
 
