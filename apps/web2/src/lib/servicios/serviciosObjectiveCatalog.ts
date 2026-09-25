@@ -2,7 +2,6 @@ import type { ServiceSLA } from '@/services/slaService';
 import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import { calculateMonthlyBreakdown, parseYmdToLocalDate } from '@/lib/servicios/slaHoursCalculator';
 import { isObjectivePlanificacionPublished } from '@/lib/multiempresa';
-import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import {
   filterSlasForPlanningContext,
   isSlaContractActive,
