@@ -14,11 +14,22 @@ import {
   assessSplitPackageStatus,
   type PlanningShiftSlice,
 } from '@/lib/planificacion/positionCoverageUnits';
-import { isOperationalOriginShift } from '@/lib/planificacion/planningScheduledHours';
+import { isOperationalOriginShift as isOperationalOriginShiftPlanning } from '@/lib/planificacion/planningScheduledHours';
+import {
+  isOpsCoverageHoursOnSourceDoc,
+  isActiveOpsCoverageDoc,
+  computePlannedOperativelyCovered,
+} from '@cosp/ops-core';
 
 export { assessSplitPackageStatus as assessCoveragePackageStatus } from '@/lib/planificacion/positionCoverageUnits';
 export type { PlanningShiftSlice } from '@/lib/planificacion/positionCoverageUnits';
-export { isOperationalOriginShift } from '@/lib/planificacion/planningScheduledHours';
+export { isOperationalOriginShiftPlanning as isOperationalOriginShift };
+export {
+  isOpsCoverageHoursOnSourceDoc,
+  isActiveOpsCoverageDoc,
+  computePlannedOperativelyCovered,
+} from '@cosp/ops-core';
+export { isOperationalOriginShift as isOperationalOriginShiftOpsMonitor } from '@cosp/ops-core';
 
 export type CoberturaRrhhEstado = 'PENDIENTE' | 'GESTIONADA' | 'VACANTE';
 
@@ -73,31 +84,6 @@ export function isTitularCoverageAssigned(
   return false;
 }
 
-/**
- * Flags de malla planificada sobre un turno (antes de inferencia Ops por presentes).
- * Espejo de useOperacionesMonitor → plannedOperativelyCovered.
- */
-export function computePlannedOperativelyCovered(shift: Record<string, unknown>): boolean {
-  if (!shift) return false;
-  if (shift.operacionallyCovered === true) return true;
-  const isAbsent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
-  const role = String(shift.coverageSegmentRole || '');
-  if (
-    String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
-    && (role === 'TARGET' || isAbsent)
-  ) {
-    return true;
-  }
-  if (
-    String(shift.coveredBy || '').trim()
-    && String(shift.coverageStatus || '').toUpperCase() === 'COVERED'
-    && (isAbsent || role === 'TARGET')
-  ) {
-    return true;
-  }
-  return false;
-}
-
 /** Titular ausente: hueco cerrado a nivel plan/ops-doc (no implica presente en puesto). */
 export function isAbsentTitularCoverageClosed(
   shift: Record<string, unknown> | null | undefined,
@@ -137,36 +123,12 @@ export function isOpsReplacementShift(shift: Record<string, unknown> | null | un
   return false;
 }
 
-/** Estado RRHH alineado con turno titular (ausencias.coberturaEstado). */
-/** ops_cov EXT/ADV: trazabilidad; las horas del tramo van en el turno source (isExtended / isEarlyStart). */
-export function isOpsCoverageHoursOnSourceDoc(
-  data: Record<string, unknown> | null | undefined,
-): boolean {
-  if (!data) return false;
-  if (data.coverageHoursOnSource === true) return true;
-  const ct = String(data.coverageType || '').toUpperCase();
-  if (String(data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE' && (ct === 'EXTEND' || ct === 'ADVANCE')) {
-    return true;
-  }
-  return false;
-}
-
 /** ops_cov que suman horas en plan / extracto / liquidación / análisis. */
 export function opsCoverageDocCountsBillableHours(
   data: Record<string, unknown> | null | undefined,
 ): boolean {
   if (!isActiveOpsCoverageDoc(data)) return false;
   return !isOpsCoverageHoursOnSourceDoc(data);
-}
-
-/** Doc activo de cobertura CC (no superseded / cancelado). */
-export function isActiveOpsCoverageDoc(data: Record<string, unknown> | null | undefined): boolean {
-  if (!data) return false;
-  if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
-  if (data.coverageSuperseded === true) return false;
-  if (String(data.status || '').toUpperCase() === 'CANCELLED') return false;
-  if (data.isDeleted === true) return false;
-  return true;
 }
 
 /** Turno OPERATIONS_COVERAGE del guardia en el objetivo del cronograma (puede ser 2º doc del día). */

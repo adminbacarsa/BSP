@@ -8,10 +8,17 @@ import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
-import { isPassiveRetStandbyShift } from '@/lib/operaciones/passiveRetShift';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
-import { isOpsCoverageHoursOnSourceDoc } from '@/lib/cosp/coverageSemantics';
-import { computeOpsLateArrivalMonitorState } from '@/lib/operaciones/opsLateArrivalMonitor';
+import {
+  classifyOpsShift,
+  isOpsCoverageHoursOnSourceDoc,
+  isOperationalOriginShift,
+  shiftMatchesOpsViewTab as shiftMatchesOpsViewTabCore,
+  VACANCY_DESCUBIERTO_RATIO,
+  getVacancyElapsedRatio,
+  isVacancyDescubierto,
+  isActionableOpsVacancy,
+} from '@cosp/ops-core';
 
 const registerPublishedState = (
     map: Record<string, boolean>,
@@ -97,70 +104,15 @@ export function opsShiftDayLabel(shiftDate: any, now: Date = new Date()): {
     }
 }
 
-/** Fracción del slot ya transcurrida (≥1 = turno terminado). Null si faltan fechas. */
-export const VACANCY_DESCUBIERTO_RATIO = 0.55;
-
-export function getVacancyElapsedRatio(s: any, now: Date = new Date()): number | null {
-    const start = s?.shiftDateObj instanceof Date ? s.shiftDateObj : getSafeDate(s?.shiftDateObj);
-    const end = s?.endDateObj instanceof Date ? s.endDateObj : getSafeDate(s?.endDateObj);
-    if (!start || !end) return null;
-    let startMs = start.getTime();
-    let endMs = end.getTime();
-    if (endMs <= startMs) endMs += 86400000;
-    const dur = endMs - startMs;
-    if (dur <= 0) return null;
-    return (now.getTime() - startMs) / dur;
-}
-
-/** Vacante ya no accionable: slot terminado o >55% del turno, o doc SIN COBERTURA. */
-export function isVacancyDescubierto(s: any, now: Date = new Date()): boolean {
-    if (!s?.isUnassigned) return false;
-    if (s.isSinCobertura || s.status === 'SIN_COBERTURA') return true;
-    if (typeof s.isDescubierto === 'boolean') return s.isDescubierto;
-    const ratio = getVacancyElapsedRatio(s, now);
-    if (ratio == null) return false;
-    return ratio >= VACANCY_DESCUBIERTO_RATIO;
-}
-
-/**
- * Vacante viva para Ops (tab VAC / sirena / mapa rojo):
- * sin devolver a planificación y aún dentro de la ventana accionable (<55%).
- */
-export function isActionableOpsVacancy(s: any, now: Date = new Date()): boolean {
-    if (!s?.isUnassigned) return false;
-    if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
-    if (isVacancyDescubierto(s, now)) return false;
-    return true;
-}
+export {
+  VACANCY_DESCUBIERTO_RATIO,
+  getVacancyElapsedRatio,
+  isVacancyDescubierto,
+  isActionableOpsVacancy,
+} from '@cosp/ops-core';
 
 export function shiftMatchesOpsViewTab(s: any, viewTab: string): boolean {
-    switch (viewTab) {
-        case 'TODOS':
-            // Devueltas y descubiertas no son “cola viva”: salen de TODOS/VAC.
-            if (s.isUnassigned && (s.isReportedToPlanning || isVacancyDescubierto(s))) return false;
-            if (s.isPassiveRetStandby) return false;
-            return !s.isFranco;
-        case 'PRIORIDAD':
-            return (s.isImminent || s.isRetention || s.isPendingRetention || s.isEarlyStart || s.isAwaitingCoverageCheckIn || s.isPlannedExtensionImminent || s.isPlannedLiberationRet || s.isRRHHUrgent) && !s.isFranco && !s.isPassiveRetStandby;
-        case 'NO_LLEGO':
-            return (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence) && !s.isFranco && !s.isAbsent && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.hasRRHHNovedad && !s.isPassiveRetStandby;
-        case 'PLAN':
-            return (s.isFuture || s.isRRHHPlanned) && !s.isFranco && !s.isUnassigned && !s.isEarlyStart && !s.isAwaitingCoverageCheckIn && !s.isPlannedLiberationRet && !s.isPassiveRetStandby;
-        case 'ACTIVOS':
-            return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention && !s.isPendingClose;
-        case 'RETENIDOS':
-            return s.isRetention;
-        case 'VACANTES':
-            return isActionableOpsVacancy(s);
-        case 'AUSENTES':
-            // RET nunca "falta": es stand-by pasivo, si no se activa simplemente no trabajó ese día
-            if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') return false;
-            return s.isAbsent || s.isPotentialAbsence;
-        case 'FRANCOS':
-            return s.isFranco;
-        default:
-            return !s.isFranco;
-    }
+    return shiftMatchesOpsViewTabCore(s, viewTab);
 }
 
 // HELPER: GAPS (SOLO FALLBACK)
@@ -555,13 +507,10 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // porque no tienen doc en planificacion_estados.
             const isClientRefuerzoPlanificado = shift.origin === 'CLIENT_REQUEST'
                 && (shiftCodeUpper === 'RFZ' || shiftCodeUpper === 'TURA');
-            const isOperationalOrigin = shift.origin === 'RETEN'
-                || shift.origin === 'OPERATIONS_COVERAGE'
-                || shift.origin === 'SLA_VIRTUAL'
-                || (shift.origin === 'CLIENT_REQUEST' && !isClientRefuerzoPlanificado)
-                || shift.origin === 'EVENTO'
-                || !!shift.isReten
-                || shift.resolvedBy === 'OPERACIONES';
+            const isOperationalOrigin = isOperationalOriginShift({
+                ...shift,
+                code: shiftCodeUpper,
+            });
             if (!isOperationalOrigin) {
                 const shiftDate = shift.shiftDateObj!;
                 const pubKey = planificacionPublishLookupKey(
@@ -597,180 +546,33 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const posRowForPos = slaRowForPos?.positions?.find((p: any) => normPosName(p.name) === normPosName(rawPos));
             const _posCV = String(posRowForPos?.coverageType || '').toLowerCase();
             const isCustomPost = !!_posCV && _posCV !== '24hs' && _posCV !== '24' && _posCV !== '24h';
-            const isAbsent = !!shift.isAbsent;
-            // isPresent solo si el turno arranca dentro de los próximos 60 min O ya inició
-            // Evita el bug de turnos con isPresent=true que en realidad no empiezan en horas
-            const isEarlyStartShift = shift.isEarlyStart === true || shift.isReten === true
-                || shift.origin === 'RETEN' || shift.origin === 'OPERATIONS_COVERAGE';
-            const shiftStartMs = shift.shiftDateObj ? shift.shiftDateObj.getTime() : 0;
-            // withinWindow: extendido a 4h para no ocultar guardias que marcan entrada anticipada.
-            // Antes era 60 min y causaba que guardias presentes "desaparecieran" al refrescar.
-            // Solo oculta isPresent=true si el turno empieza en más de 4h (claramente dato incorrecto).
-            const withinWindow = !shiftStartMs || isEarlyStartShift
-                || (currentTime.getTime() + 4 * 60 * 60 * 1000) >= shiftStartMs;
-            const isPresent = !!shift.isPresent && isValidEmployee && !isAbsent && withinWindow;
-            const isCompleted = !!shift.isCompleted;
-            
-            const isReportedToPlanning = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
-            const isResolvedByOps = shift.origin === 'OPERATIONS_COVERAGE' || shift.resolvedBy === 'OPERACIONES';
-            // countsForCoverage se calcula después de isPotentialAbsence (línea ~332)
-            // para excluir guardias que no llegaron aunque isAbsent=false en Firestore
-
-            const isUnassigned = !isValidEmployee;
-            const isCoverageSourceUsed =
-                shift.coverageUsed === true
-                && shift.isExtended !== true
-                && shift.isEarlyStart !== true;
-            const coverageUsedLabel = isCoverageSourceUsed
-              ? `Usado: cubre a ${String(
-                  shift.coverageUsedCoversEmployeeName || shift.coversEmployeeName || 'titular',
-                ).trim()}${shift.coverageUsedObjectiveName ? ` en ${shift.coverageUsedObjectiveName}` : ''}`
-              : null;
             const shiftCode = String(shift.code || shift.type || '').toUpperCase();
-            const isPassiveRetStandby = isPassiveRetStandbyShift({ ...shift, code: shiftCode });
-            // RFZ publicado sin guardia = refuerzo por ausencia pendiente de asignar en Planificación
-            const isRfzVacante = shiftCode === 'RFZ' && isUnassigned;
-            const isTuraVacante = shiftCode === 'TURA' && isUnassigned && !parentEmpleadoId;
-            if (isRfzVacante) finalEmpName = 'VACANTE: RFZ';
-            if (isTuraVacante) {
+            const isUnassignedPre = !isValidEmployee;
+            const isRfzVacantePre = shiftCode === 'RFZ' && isUnassignedPre;
+            const isTuraVacantePre = shiftCode === 'TURA' && isUnassignedPre && !parentEmpleadoId;
+            const isReportedToPlanningPre = shift.status === 'REPORTED_TO_PLANNING' || shift.isReported === true;
+            const isSinCoberturaPre = !!shift.isSinCobertura;
+            if (isRfzVacantePre) finalEmpName = 'VACANTE: RFZ';
+            if (isTuraVacantePre) {
                 finalEmpName = shift.parentEmpleadoName
                     ? `TURA · ${shift.parentEmpleadoName}`
                     : 'VACANTE: TURA';
             }
-            // isOperationalVacancy: usado para la generación de vacantes virtuales y deduplicación.
-            // Display VAC / mapa rojo: solo isActionableOpsVacancy (no DEVUELTO ni >55%/fin).
-            const isOperationalVacancy = isUnassigned && !isReportedToPlanning;
-
-            const isSinCobertura = !!shift.isSinCobertura;
-            // Descartar docs reales vacantes no-devueltos EXCEPTO autosinc_ SIN COBERTURA, RFZ y TURA (2º tramo cortado)
-            if (isUnassigned && !isReportedToPlanning && !isSinCobertura && !isRfzVacante && !isTuraVacante) return null;
+            if (isUnassignedPre && !isReportedToPlanningPre && !isSinCoberturaPre && !isRfzVacantePre && !isTuraVacantePre) return null;
 
             const turaExt = parentTuraExt.get(shift.id);
             const effectiveEndDateObj = (turaExt?.endDateObj instanceof Date ? turaExt.endDateObj : shift.endDateObj) as Date | undefined;
-            const isDescubierto = isUnassigned && (
-                isSinCobertura ||
-                (() => {
-                    const ratio = getVacancyElapsedRatio(
-                        { shiftDateObj: shift.shiftDateObj, endDateObj: effectiveEndDateObj || shift.endDateObj },
-                        currentTime,
-                    );
-                    return ratio != null && ratio >= VACANCY_DESCUBIERTO_RATIO;
-                })()
-            );
 
-            const isEarlyStartScheduled = !!shift.isEarlyStart;
-            const isPlannedSplitSegment = !!shift.coveragePackageId && (shift.coverageSegmentRole === 'EXTENSION' || shift.coverageSegmentRole === 'EARLY_START');
-            const isPlannedLiberationRet = String(shift.code || '').toUpperCase() === 'RET'
-                && (shift.coverageSegmentRole === 'LIBERATED' || !!shift.liberationReason);
-            const plannedOperativelyCovered = !!shift.operacionallyCovered
-                || (shift.coverageStatus === 'COVERED' && (shift.coverageSegmentRole === 'TARGET' || isAbsent))
-                || (!!shift.coveredBy && shift.coverageStatus === 'COVERED' && (isAbsent || shift.coverageSegmentRole === 'TARGET'));
-            const isEarlyStart = !isCoverageSourceUsed && isEarlyStartScheduled && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco;
-            const isConvocado = !isCoverageSourceUsed && !isPresent && !isCompleted && !isAbsent && !isUnassigned && !isFranco &&
-                (isEarlyStart || isPlannedLiberationRet || shift.origin === 'RETEN' || !!shift.isReten || shift.origin === 'OPERATIONS_COVERAGE');
-            const extSegStart = (shift.coverageSegmentRole === 'EXTENSION' && shift.segmentFromTime)
-                ? createDateFromTime(shift.segmentFromTime, shift.shiftDateObj)
-                : null;
-            const isPlannedExtensionImminent = !!shift.isExtended && shift.coverageSegmentRole === 'EXTENSION'
-                && extSegStart && ((extSegStart.getTime() - currentTime.getTime()) / 60000) <= 15;
-
-            let minutesUntilStart = (shift.shiftDateObj.getTime() - currentTime.getTime()) / 60000;
-            // CONVOCADO: solo es accionable (PRIORIDAD) cuando está a ≤15 min o ya inició.
-            // Si falta más tiempo, va a PLAN como cualquier turno futuro.
-            const isAwaitingCoverageCheckIn = isConvocado && minutesUntilStart <= 15;
-            if (isAwaitingCoverageCheckIn) minutesUntilStart = Math.min(minutesUntilStart, 0);
-            let retentionMinutes = 0;
-            const shiftEnded = effectiveEndDateObj ? currentTime > effectiveEndDateObj : false;
-            const isPendingClose =
-                isPresent && !isCompleted && shift.isRetention !== true && !!shiftEnded;
-            const isRetentionByField = isPresent && !isCompleted && shift.isRetention === true;
-            const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
-            const isRetention = isRetentionByField;
-            if (isRetentionByField && effectiveEndDateObj && shiftEnded) {
-                retentionMinutes = Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000);
-            } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
-                retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
-            }
-            // totalMinutesWorked: para ordenar por FIFO quién lleva más tiempo en el puesto
-            const checkInMs = shift.realStartTime?.seconds
-                ? shift.realStartTime.seconds * 1000
-                : shift.checkInTime?.seconds
-                    ? shift.checkInTime.seconds * 1000
-                    : (shift.shiftDateObj?.getTime?.() ?? 0);
-            const totalMinutesWorked = checkInMs > 0 ? Math.floor((currentTime.getTime() - checkInMs) / 60000) : 0;
-            const activeStartTime: Date | null = isPresent
-                ? (shift.realStartTime?.seconds ? new Date(shift.realStartTime.seconds * 1000) : shift.shiftDateObj)
-                : null;
-            
-            // ── Novedad RRHH: turno marcado por replicarAusenciaEnPlanificador ─────
-            // absenceCreatedAt es ISO string guardado en el turno original al momento de
-            // cargar la novedad en RRHH. Calculamos la anticipación respecto al inicio del turno.
-            const hasRRHHNovedad = !!shift.hasNovedad && !!shift.absenceId && !shift.isFranco && shift.type !== 'NOVEDAD';
-            const rrhhAnticipacionMinutes: number | null = (() => {
-                if (!hasRRHHNovedad || !shift.absenceCreatedAt || !shift.shiftDateObj) return null;
-                const createdAt = new Date(shift.absenceCreatedAt).getTime();
-                return Math.round((shift.shiftDateObj.getTime() - createdAt) / 60000);
-            })();
-            // ≥720 min (12hs) → Planning puede actuar; <720 → Operaciones debe resolver
-            const isRRHHPlanned = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes >= 720;
-            const isRRHHUrgent  = hasRRHHNovedad && rrhhAnticipacionMinutes !== null && rrhhAnticipacionMinutes < 720;
-
-            const minutesPastStart = -minutesUntilStart;
-            const lateEligible =
-                !isCoverageSourceUsed &&
-                !isPassiveRetStandby &&
-                !isPresent &&
-                !isCompleted &&
-                !isAbsent &&
-                !isUnassigned &&
-                !isFranco &&
-                !hasRRHHNovedad;
-            const startMs = shift.shiftDateObj?.getTime?.() ?? 0;
-            const nowMs = currentTime.getTime();
-            const lateMonitor = computeOpsLateArrivalMonitorState({
-                shift,
-                startMs,
-                nowMs,
-                eligible: lateEligible,
+            const classified = classifyOpsShift({
+                shift: { ...shift, endDateObj: effectiveEndDateObj || shift.endDateObj },
+                now: currentTime,
+                isValidEmployee,
+                isFranco,
+                shiftCode,
+                effectiveEndDateObj,
+                parentEmpleadoId,
+                createDateFromTime,
             });
-            const {
-                isLateNotified,
-                isLateUnnotified,
-                isPotentialAbsence,
-                minutesRemainingLate,
-                lateArrivalEtaMinutes,
-                lateArrivalEtaLabel,
-            } = lateMonitor;
-            const isImminent =
-                lateEligible &&
-                !isLateNotified &&
-                minutesUntilStart <= 15 &&
-                minutesUntilStart > -5;
-            const isFuture =
-                !isCoverageSourceUsed &&
-                !isPassiveRetStandby &&
-                !isPresent &&
-                !isCompleted &&
-                !isUnassigned &&
-                !isAbsent &&
-                !isFranco &&
-                !hasRRHHNovedad &&
-                minutesUntilStart > 15 &&
-                !isLateNotified;
-
-            // Un ausente (confirmado o potencial) NO cubre el puesto — el slot queda descubierto y genera vacante
-            // ⚠️ DEBE ir después de isPotentialAbsence para poder usarlo en la condición
-            // isReportedToPlanning solo cuenta como cobertura cuando el turno es VACANTE NO-ASIGNADO reportado
-            // MANUALMENTE por el operador (no si fue auto-notificación del sistema).
-            // Los turnos origin==='SLA_VIRTUAL' son solo notificaciones hacia planificación:
-            // el puesto sigue descubierto y NO cuentan como cobertura real.
-            const isAutoNotification = shift.origin === 'SLA_VIRTUAL';
-            // isSinCobertura / descubierto NO cuentan como cobertura real ni como VAC accionable.
-            const countsForCoverage = !isCoverageSourceUsed && !isPassiveRetStandby && !isAutoNotification && (
-                (isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad) ||
-                (isReportedToPlanning && !isValidEmployee) ||
-                (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence)
-            );
 
             const phone = empPhoneMap.get(effectiveEmployeeId || shift.employeeId) || shift.phone || shift.celular || '';
 
@@ -781,18 +583,13 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: displayPos,
                 phone,
                 employeeId: effectiveEmployeeId || shift.employeeId,
-                isValidEmployee, isUnassigned, isPresent, isCompleted, isAbsent, isPotentialAbsence,
-                isCoverageSourceUsed, coverageUsedLabel,
-                isLateNotified, isLateUnnotified, minutesRemainingLate, lateArrivalEtaMinutes, lateArrivalEtaLabel,
-                isReportedToPlanning, isOperationalVacancy, isResolvedByOps, isRetention, isPendingRetention, isPendingClose, isFranco, isImminent, isFuture,
-                isEarlyStart, isAwaitingCoverageCheckIn, isConvocado,
-                isPlannedSplitSegment, isPlannedLiberationRet, isPlannedExtensionImminent, plannedOperativelyCovered,
-                hasRRHHNovedad, isRRHHPlanned, isRRHHUrgent, rrhhAnticipacionMinutes,
-                minutesUntilStart, minutesPastStart, retentionMinutes, totalMinutesWorked, activeStartTime, hasActiveSLA, isCustomPost,
+                isValidEmployee,
+                ...classified,
+                isFranco,
+                hasActiveSLA, isCustomPost,
                 duration: getDuration(shift.shiftDateObj, effectiveEndDateObj),
                 endDateObj: effectiveEndDateObj || shift.endDateObj,
-                countsForCoverage, isPassiveRetStandby, isRetentionByField, isSinCobertura, isDescubierto,
-                isRfzVacante, isTuraVacante, isTuraCutSegment,
+                isTuraCutSegment,
                 turaRequiresSeparateCheckIn: isTuraCutSegment,
                 isRefuerzoCliente: shiftCode === 'RFZ' || shiftCode === 'TURA',
                 ...(turaExt ? {
