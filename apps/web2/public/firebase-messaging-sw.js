@@ -14,6 +14,8 @@ const messaging = firebase.messaging();
 
 // Data-only messages: we control the notification display
 messaging.onBackgroundMessage((payload) => {
+  // Con payload.notification el SDK ya muestra la notificación: mostrar otra duplica ("CronoApp" vacía).
+  if (payload.notification) return;
   const data = payload.data || {};
   const title = data.title || 'CronoApp';
   const body  = data.body  || '';
