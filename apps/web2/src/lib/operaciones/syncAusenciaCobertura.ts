@@ -459,6 +459,28 @@ export async function applyCoverage(
     );
   }
 
+  // Espejo de functions: cierra el turno VACANTE_POR_AUSENCIA que crea onGuardAbsenceDetected.
+  if (closeMode === 'FULL') {
+    const empresaId = String(titular.empresaId || '').trim();
+    const constraints = [
+      where('causedByShiftId', '==', titularId),
+      where('origin', '==', 'VACANTE_POR_AUSENCIA'),
+      ...(empresaId ? [where('empresaId', '==', empresaId)] : []),
+      limit(5),
+    ];
+    const vacSnap = await getDocs(query(collection(db, 'turnos'), ...constraints)).catch(() => null);
+    for (const d of vacSnap?.docs ?? []) {
+      if (d.data().isDeleted === true) continue;
+      batch.update(d.ref, {
+        isDeleted: true,
+        status: 'COVERED',
+        deletedReason: 'TITULAR_CUBIERTO',
+        closedBy: params.resolvedBy || 'COVERAGE',
+        closedAt: serverTimestamp(),
+      });
+    }
+  }
+
   return covDocId;
 }
 

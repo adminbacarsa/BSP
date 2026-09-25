@@ -117,6 +117,36 @@ export function isTitularAlreadyCovered(data: Record<string, any> | undefined | 
   return false;
 }
 
+/**
+ * onGuardAbsenceDetected crea un turno VACANTE_POR_AUSENCIA aparte (push a admins). Nadie más lo
+ * cierra: sin esto queda "DESCUBIERTO" en el CC aunque el titular ya esté cubierto o revertido.
+ */
+export async function findOpenAbsenceVacancyDocs(
+  db: admin.firestore.Firestore,
+  titularShiftId: string,
+): Promise<admin.firestore.DocumentReference[]> {
+  const snap = await db
+    .collection('turnos')
+    .where('causedByShiftId', '==', titularShiftId)
+    .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+    .limit(5)
+    .get();
+  return snap.docs.filter((d) => d.data().isDeleted !== true).map((d) => d.ref);
+}
+
+export function absenceVacancyClosePatch(
+  outcome: 'COVERED' | 'REVERTED',
+  by: string,
+): Record<string, unknown> {
+  return {
+    isDeleted: true,
+    status: outcome === 'COVERED' ? 'COVERED' : 'CANCELLED',
+    deletedReason: outcome === 'COVERED' ? 'TITULAR_CUBIERTO' : 'AUSENCIA_REVERTIDA',
+    closedBy: by,
+    closedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+}
+
 export function buildOpsCoverageDocId(titularShiftId: string, employeeId: string): string {
   return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
 }
@@ -493,6 +523,9 @@ export async function applyCoverage(
   }
 
   if (closeMode === 'FULL') {
+    for (const ref of await findOpenAbsenceVacancyDocs(db, titularId)) {
+      batch.update(ref, absenceVacancyClosePatch('COVERED', params.resolvedBy || 'COVERAGE'));
+    }
     const { releaseRetentionForAbsenceShift } = await import('./coverageRetention');
     await releaseRetentionForAbsenceShift(db, titularId, params.resolvedBy || 'COVERAGE');
   }

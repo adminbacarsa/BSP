@@ -1,6 +1,10 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { releaseRetentionForAbsenceShift } from '../coverage/coverageRetention';
-import { buildRestoreSourceShiftAfterCoveragePatch } from '../coverage/syncAusenciaCobertura';
+import {
+  absenceVacancyClosePatch,
+  buildRestoreSourceShiftAfterCoveragePatch,
+  findOpenAbsenceVacancyDocs,
+} from '../coverage/syncAusenciaCobertura';
 
 export type RevertirAusenciaInput = {
   shiftId: string;
@@ -80,6 +84,10 @@ export async function revertirAusenciaShift(
   }
 
   await releaseRetentionForAbsenceShift(db, shiftId, 'REVERTIR_AUSENCIA');
+
+  for (const vRef of await findOpenAbsenceVacancyDocs(db, shiftId)) {
+    await vRef.update(absenceVacancyClosePatch('REVERTED', input.operatorUid || 'REVERTIR_AUSENCIA'));
+  }
 
   if (input.cancelCoverage === true && activeCov.length) {
     for (const cov of activeCov) {
