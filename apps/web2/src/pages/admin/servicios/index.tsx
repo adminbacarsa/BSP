@@ -299,9 +299,7 @@ export default function ServiciosSLAPage() {
           positions: data.positions || [],
         } as ServiceSLA;
       });
-      if (scopeEmpresa) {
-        adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, true, clientIds);
-      }
+      adaptedData = filterSlaRowsByEmpresa(adaptedData, empresaId, scopeEmpresa, clientIds);
       adaptedData.sort((a, b) =>
         (a.clientName || a.objectiveName || '').localeCompare(b.clientName || b.objectiveName || '', 'es'),
       );

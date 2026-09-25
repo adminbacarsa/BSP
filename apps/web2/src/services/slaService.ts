@@ -278,9 +278,8 @@ export const slaService = {
       const q = query(collection(db, 'servicios_sla'), where('clientId', '==', clientId));
       const s = await getDocs(q);
       const rows = s.docs.map(d => ({ id: d.id, ...d.data() } as ServiceSLA));
-      if (!scope) return rows;
       const clientIds = new Set([clientId]);
-      return filterSlaRowsByEmpresa(rows, opts!.empresaId!, true, clientIds);
+      return filterSlaRowsByEmpresa(rows, opts?.empresaId || '', scope, clientIds);
     } catch (e) {
       console.error("Error filter services:", e);
       return [];

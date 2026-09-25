@@ -872,7 +872,11 @@ export function filterSlaRowsByEmpresa<T extends { empresaId?: unknown; clientId
   scopeEmpresa: boolean,
   clientIds: Set<string>,
 ): T[] {
-  if (!scopeEmpresa) return rows;
+  // Sin scope (Bacarsa legacy): igual se descartan contratos de otras empresas (pruebas_sa, grupos…).
+  if (!scopeEmpresa) {
+    if (!String(empresaId ?? '').trim()) return rows;
+    return rows.filter((r) => belongsToEmpresaView(r, empresaId, false));
+  }
   return rows.filter(r => slaBelongsToEmpresa(r, empresaId, true, clientIds));
 }
 
