@@ -72,6 +72,7 @@ import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonito
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
+import { WorkedTodayPanel } from '@/components/operaciones/WorkedTodayPanel';
 
 // --- HELPERS ---
 const toDate = (d: any) => { if (!d) return new Date(); if (d instanceof Date) return d; if (d.seconds) return new Date(d.seconds * 1000); return new Date(d); };
@@ -4085,13 +4086,14 @@ export default function OperacionesPage() {
                                     </button>
                                 );
                             })}
-                            {/* TOTAL — no clickable, solo info */}
-                            <div className="flex-1 px-1 py-1.5 rounded-lg bg-slate-100 flex flex-col items-center gap-0">
-                                <span className="text-sm font-black leading-none text-slate-600">
+                            {/* TOT → vista «Trabajaron»: quién fichó en el día por cliente/objetivo */}
+                            <button type="button" onClick={() => logic.setViewTab('TRABAJARON' as any)} title="Quiénes trabajaron (por cliente y objetivo)"
+                                className={`flex-1 px-1 py-1.5 rounded-lg flex flex-col items-center gap-0 transition-all active:scale-95 ${logic.viewTab === ('TRABAJARON' as any) ? 'bg-slate-800' : 'bg-slate-100 hover:bg-slate-200'}`}>
+                                <span className={`text-sm font-black leading-none ${logic.viewTab === ('TRABAJARON' as any) ? 'text-white' : 'text-slate-600'}`}>
                                     {logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes}
                                 </span>
                                 <span className="text-[8px] font-black uppercase leading-none mt-0.5 text-slate-400">TOT</span>
-                            </div>
+                            </button>
                         </div>
                     </div>
 
@@ -4193,6 +4195,15 @@ export default function OperacionesPage() {
                     <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
                         {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                        {logic.viewTab === ('TRABAJARON' as any) && (
+                            <WorkedTodayPanel
+                                empresaId={empresaId || ''}
+                                scopeEmpresa={shouldScopeQueriesToEmpresa(empresaId, !!(empresa as any)?.migracionCompleta)}
+                                clientId={logic.selectedClientId || undefined}
+                                filterText={logic.filterText}
+                                objectives={logic.objectives as any}
+                            />
+                        )}
                         {viewMode === 'objetivos' && logic.viewTab === 'FRANCOS' && (
                         <div className={`p-2 ${objectivesLayoutClass}`}>
                             {logic.listData.length === 0 ? (
@@ -4220,7 +4231,7 @@ export default function OperacionesPage() {
                             )}
                         </div>
                         )}
-                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && (
+                        {viewMode === 'objetivos' && logic.viewTab !== 'FRANCOS' && logic.viewTab !== ('TRABAJARON' as any) && (
                         <div className={`p-2 ${objectivesLayoutClass}`}>
                             {(filteredEventsWithAlerts.length === 0 && filteredObjectivesWithAlerts.length === 0) ? (
                                 <div className="text-center py-10 text-slate-400 text-xs">
@@ -4431,7 +4442,7 @@ export default function OperacionesPage() {
                         )}
 
                         {/* â•â• MODO LISTA (existente) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
-                        {viewMode === 'lista' && (
+                        {viewMode === 'lista' && logic.viewTab !== ('TRABAJARON' as any) && (
                         <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
                             isGrouped ? (groupedList.filter((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; return !!logic.publishStatusMap[pubKey]; }).map((group: any) => { const today = new Date(); const pubKey = `${group.id}_${today.getFullYear()}_${today.getMonth()+1}`; const isPublished = !!logic.publishStatusMap[pubKey]; return <ObjectiveGroup key={group.id} group={group} modals={modalSetters} isCompact={logic.isCompact} isAutoMode={opsCaps.fullAuto} onReport={handleReportPlanning} viewTab={logic.viewTab} onOpenWorkedFranco={(s:any)=>setWorkedFrancoData({isOpen:true, shift:s})} onNovedadAbsence={handleNovedadAbsence} onOpenWA={handleOpenWA} onOpenAbsenceDecision={(s:any)=>setAbsenceDecisionData({isOpen:true,shift:s})} onOpenRRHH={(s:any)=>setRrhhVacancyData({isOpen:true,shift:s})} isPublished={isPublished} layoutGrid={wideOpsPanel}/>; })) :
