@@ -417,8 +417,9 @@ Artefactos de producción van a **`build/hosting`** y **`build/.next-prod`** (no
 
 ```bash
 # Recomendado con lab corriendo (worktree automático)
-npm run deploy
-npm run deploy -- --functions
+npm run deploy              # solo hosting
+npm run deploy:functions    # hosting + functions
+npm run deploy:all          # hosting + functions + firestore:rules
 
 # Forzar build en esta carpeta (lab apagado o explícito)
 npm run deploy:here
@@ -426,6 +427,12 @@ npm run deploy:here
 # Siempre worktree aunque el lab esté apagado
 npm run deploy:worktree
 ```
+
+- **PowerShell se come el `--`**: `npm run deploy:functions -- --rules` pierde el flag y NO publica reglas. Usar los scripts con nombre (`deploy:all`, etc.).
+- Las reglas (`firestore.rules`) e índices (`firestore.indexes.json`) solo se publican con `deploy:all` o `firebase deploy --only firestore:rules` / `firestore:indexes`.
+- El deploy publica functions y hosting en comandos separados y al final verifica que `/app` quedó publicado (bundle y assets). Si una function falla, el deploy termina con error.
+- Antes de deployar, revisar qué commits trae `main` (`git log origin/main..` y los de otros agentes): el deploy publica HEAD completo.
+- App Android: después del deploy de hosting, OTA a `production` (`npm run update:production` en `apps/mobile-guardia`) para que app y web `/app` queden iguales.
 
 Variable opcional: `COSP_DEPLOY_DIR` (default `../cronoapp-deploy`).
 
