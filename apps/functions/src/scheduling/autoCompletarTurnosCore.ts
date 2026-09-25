@@ -115,6 +115,7 @@ export async function runAutoCompletarTurnosPass(
 
   const slaCache = new Map<string, FirebaseFirestore.DocumentData | null>();
   const reliefIncomingClaimed = new Set<string>();
+  const reliefPendingClaimed = new Set<string>();
   const relevoFinishNotifs: {
     outEmpId: string;
     outDocId: string;
@@ -143,6 +144,21 @@ export async function runAutoCompletarTurnosPass(
   const outgoingDocs = [...snap.docs].sort(
     (a, b) => checkInMs(a.data()) - checkInMs(b.data()),
   );
+
+  // Entrantes que ya relevan a otro saliente (fichada anticipada → relievedBy en el saliente):
+  // no pueden volver a usarse como relevo de un segundo saliente (1:1).
+  const reservedReliefKey = (objectiveId: unknown, employeeId: unknown) => `${String(objectiveId || '')}|${String(employeeId || '')}`;
+  const reservedRelief = new Map<string, string>();
+  for (const d of outgoingDocs) {
+    const rb = String(d.data().relievedBy || '').trim();
+    if (rb) reservedRelief.set(reservedReliefKey(d.data().objectiveId, rb), d.id);
+  }
+  const reliefBusyForOther = (incoming: FirebaseFirestore.DocumentData, outgoingId: string): boolean => {
+    const linked = String(incoming.relievedOutgoingShiftId || '').trim();
+    if (linked && linked !== outgoingId) return true;
+    const owner = reservedRelief.get(reservedReliefKey(incoming.objectiveId, incoming.employeeId));
+    return !!owner && owner !== outgoingId;
+  };
 
   for (const docSnap of outgoingDocs) {
     if (onlyOutId && docSnap.id !== onlyOutId) continue;
@@ -271,14 +287,18 @@ export async function runAutoCompletarTurnosPass(
 
     const relievePresent = relieveDocs.find((d) => {
       if (reliefIncomingClaimed.has(d.id)) return false;
+      if (reliefBusyForOther(d.data(), docSnap.id)) return false;
       const data = d.data();
       return isReliefPresent(data) && isValidReliefForOutgoing(data, endTimeMs);
     });
 
-    const relievePending = relieveDocs.find((d) => {
-      const data = d.data();
-      return isReliefPending(data) && isValidReliefForOutgoing(data, endTimeMs);
-    });
+    const relievePending =
+      relieveDocs.find((d) => {
+        const data = d.data();
+        return !reliefPendingClaimed.has(d.id) && isReliefPending(data) && isValidReliefForOutgoing(data, endTimeMs);
+      })
+      ?? relieveDocs.find((d) => isReliefPending(d.data()) && isValidReliefForOutgoing(d.data(), endTimeMs));
+    if (relievePending) reliefPendingClaimed.add(relievePending.id);
 
     const relieveAbsent = relieveDocs.find((d) => {
       const data = d.data();
@@ -287,6 +307,7 @@ export async function runAutoCompletarTurnosPass(
 
     if (relievePresent) {
       reliefIncomingClaimed.add(relievePresent.id);
+      completeBatch.update(relievePresent.ref, { relievedOutgoingShiftId: docSnap.id });
       const relData = relievePresent.data();
       const relCheckMs =
         relData.realStartTime?.toMillis?.() ??

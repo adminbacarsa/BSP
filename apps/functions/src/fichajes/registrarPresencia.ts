@@ -402,6 +402,8 @@ export async function registrarPresencia(
           const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
           const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
 
+          // El entrante queda atado a este saliente: no releva a un segundo (autoCompletarTurnos).
+          await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
           if (isEarlyRelevo && !wantOverride) {
             await outDoc.ref.update({
               relievedBy: empId || null,
