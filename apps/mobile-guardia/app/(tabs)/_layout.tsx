@@ -53,6 +53,7 @@ export default function TabsLayout() {
         name="index"
         options={{
           title: 'Hoy',
+          tabBarLabel: 'Hoy',
           tabBarIcon: ({ color, size }) => (
             <Ionicons name="home" size={size} color={color} />
           ),

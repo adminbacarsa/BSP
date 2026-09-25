@@ -453,7 +453,7 @@ function HoyScreenContent() {
                   </Text>
                 ) : (
                   <>
-                    <CheckInStatusBanner view={checkInStatusView} />
+                    <CheckInStatusBanner view={checkInStatusView} onHero />
                     {mainShiftEv ? <EvShiftDetails ev={mainShiftEv} compact /> : null}
                     {pendingCount > 0 && !pendingShiftIds.includes(mainShift?.id ?? '') ? (
                       <Text style={styles.pendingLine}>
@@ -468,7 +468,7 @@ function HoyScreenContent() {
                   <View style={styles.heroActions}>
                     {portalFeatures.checkIn && canCheckIn ? (
                       <CommandButton
-                        label={isOpsHero ? 'Presente en cobertura (GPS)' : 'Marcar presente (GPS)'}
+                        label="Presente"
                         variant="success"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onCheckIn}
@@ -477,7 +477,7 @@ function HoyScreenContent() {
                     {portalFeatures.checkIn && canLate ? (
                       <CommandButton
                         label="Voy a llegar tarde"
-                        variant="ghost"
+                        variant="onHero"
                         loading={busyShiftId === mainShift?.id}
                         onPress={onLate}
                       />

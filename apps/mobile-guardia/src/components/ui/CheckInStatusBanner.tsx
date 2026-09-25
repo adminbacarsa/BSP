@@ -5,11 +5,36 @@ import { useTheme } from '../../theme/ThemeContext';
 
 type Props = {
   view: CheckInUiStatusView;
+  /** Sobre la tarjeta roja del turno: texto blanco, acento de color solo en el borde. */
+  onHero?: boolean;
 };
 
-export function CheckInStatusBanner({ view }: Props) {
+const HERO_ACCENT: Record<CheckInUiStatusView['tone'], string> = {
+  success: '#34d399',
+  warning: '#fbbf24',
+  danger: '#fecaca',
+  info: '#ffffff',
+  neutral: 'rgba(255,255,255,0.6)',
+};
+
+export function CheckInStatusBanner({ view, onHero }: Props) {
   const { palette } = useTheme();
   if (!view.title || view.status === 'none') return null;
+
+  if (onHero) {
+    return (
+      <View
+        style={[
+          styles.box,
+          styles.heroBox,
+          { borderColor: HERO_ACCENT[view.tone], borderLeftColor: HERO_ACCENT[view.tone] },
+        ]}
+      >
+        <Text style={[styles.title, styles.heroTitle]}>{view.title}</Text>
+        {view.subtitle ? <Text style={[styles.sub, styles.heroSub]}>{view.subtitle}</Text> : null}
+      </View>
+    );
+  }
 
   const tone = (() => {
     switch (view.tone) {
@@ -70,4 +95,7 @@ const styles = StyleSheet.create({
   },
   title: { fontWeight: '800', fontSize: 14 },
   sub: { fontSize: 12, fontWeight: '600', lineHeight: 18 },
+  heroBox: { backgroundColor: 'rgba(0,0,0,0.22)', borderLeftWidth: 5 },
+  heroTitle: { color: '#ffffff', fontSize: 16 },
+  heroSub: { color: 'rgba(255,255,255,0.9)', fontSize: 13 },
 });

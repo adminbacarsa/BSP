@@ -29,7 +29,8 @@ export default function Root({ children }: PropsWithChildren) {
         <ScrollViewStyleReset />
         <style
           dangerouslySetInnerHTML={{
-            __html: `#root,body,html{height:100%}body{overflow:hidden;background:#8B1A1A}`,
+            // 100dvh = alto visible real (Safari iOS: 100% incluye la barra del navegador y tapa las pestañas).
+            __html: `body,html{height:100%}#root{height:100%;height:100dvh}body{overflow:hidden;background:#8B1A1A}`,
           }}
         />
       </head>

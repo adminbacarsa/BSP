@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View, type PressableProps, type ViewStyle 
 import { radius, layout } from '../../theme/tokens';
 import { useTheme } from '../../theme/ThemeContext';
 
-type Variant = 'primary' | 'secondary' | 'success' | 'ghost' | 'danger';
+type Variant = 'primary' | 'secondary' | 'success' | 'ghost' | 'danger' | 'onHero';
 
 type Props = PressableProps & {
   label: string;
@@ -39,6 +39,16 @@ export function CommandButton({ label, variant = 'primary', loading, disabled, s
             borderColor: palette.outline,
           },
           text: { color: palette.onSurfaceMuted },
+        };
+      case 'onHero':
+        // Botón secundario sobre la tarjeta roja del turno: blanco sobre translúcido.
+        return {
+          button: {
+            backgroundColor: 'rgba(255,255,255,0.14)',
+            borderWidth: 1.5,
+            borderColor: 'rgba(255,255,255,0.85)',
+          },
+          text: { color: '#ffffff' },
         };
       case 'danger':
         return {
