@@ -136,6 +136,7 @@ import {
     type SlaPlanningRow,
     planningMonthSlaRanges,
     isDateOutsideSlaRanges,
+    isDateInClosedSlaOnly,
     type SlaDateRange,
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
@@ -3453,14 +3454,20 @@ export default function PlanificacionPage() {
     }, [allowPlanningMultiSelect]);
 
     /** Día fuera de la vigencia del contrato (ej. servicio de un solo día): no se planifican turnos. */
+    // Bloqueo por contrato: fuera de vigencia, o día cubierto solo por contratos cerrados (solo SuperAdmin reabre en Servicios).
     const isOutsideServiceRange = useCallback(
-        (dateStr: string) => isDateOutsideSlaRanges(dateStr, planningSlaRanges),
+        (dateStr: string) =>
+            isDateOutsideSlaRanges(dateStr, planningSlaRanges) || isDateInClosedSlaOnly(dateStr, planningSlaRanges),
         [planningSlaRanges],
     );
     const outsideServiceMsg = useMemo(() => {
         if (!planningSlaRanges?.length) return 'Fuera de la vigencia del servicio.';
         const fmt = (d: string) => (d ? d.split('-').reverse().join('/') : '…');
-        return `Fuera de la vigencia del servicio (${planningSlaRanges.map((r) => `${fmt(r.start)} → ${fmt(r.end)}`).join(' · ')}).`;
+        const open = planningSlaRanges.filter((r) => !r.closed);
+        if (open.length === 0) {
+            return 'Contrato cerrado: la planificación de estas fechas no se puede modificar. Un SuperAdmin puede reabrirlo en Servicios.';
+        }
+        return `Fuera de la vigencia del servicio abierto (${open.map((r) => `${fmt(r.start)} → ${fmt(r.end)}`).join(' · ')}). Los días de contratos cerrados no se modifican.`;
     }, [planningSlaRanges]);
 
     const isPlanningDateLocked = useCallback(

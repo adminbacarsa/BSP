@@ -3,7 +3,8 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry, appendSlaChangeLog } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
-import { db, getDocsOnce } from '@/lib/firebase';
+import { db, getDocsOnce, functions as cloudFunctions } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, getDoc, writeBatch, doc, Timestamp, limit, updateDoc } from 'firebase/firestore';
@@ -1245,7 +1246,34 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     }));
   };
 
+  const isClosedContract = isEditing && (form as { closed?: boolean }).closed === true;
+
+  const handleReopenContract = async () => {
+    if (!form.id) return;
+    const motivo = window.prompt('Motivo de la reapertura del contrato (queda auditado):', '');
+    if (!motivo || motivo.trim().length < 5) return addToast('Indicá un motivo (mínimo 5 caracteres)', 'error');
+    try {
+      await httpsCallable(cloudFunctions, 'reabrirContratoSla')({ slaId: form.id, motivo: motivo.trim() });
+      setForm((prev: any) => ({ ...prev, closed: false, reopenedManually: true }));
+      addToast('Contrato reabierto', 'success');
+    } catch (e: any) {
+      addToast('No se pudo reabrir: ' + (e?.message || e), 'error');
+    }
+  };
+
+  const handleCloseContract = async () => {
+    if (!form.id || !window.confirm('¿Cerrar este contrato? Queda sin edición y su planificación bloqueada.')) return;
+    try {
+      await httpsCallable(cloudFunctions, 'cerrarContratoSla')({ slaId: form.id });
+      setForm((prev: any) => ({ ...prev, closed: true, reopenedManually: false }));
+      addToast('Contrato cerrado', 'success');
+    } catch (e: any) {
+      addToast('No se pudo cerrar: ' + (e?.message || e), 'error');
+    }
+  };
+
   const handleSave = async () => {
+    if (isClosedContract) return addToast('Contrato cerrado: no se puede modificar. Un SuperAdmin puede reabrirlo.', 'error');
     if (!form.clientId) return addToast('Falta Cliente', 'error');
     if (!form.objectiveId) return addToast('Falta Objetivo', 'error');
     if (form.positions.length === 0) return addToast('Agregue al menos un puesto', 'error');
@@ -2272,8 +2300,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                 <div className="flex items-center gap-2 mb-2">
                                   <Calendar size={10} className="text-slate-400 shrink-0"/>
                                   <span className="text-[10px] font-mono font-bold text-slate-600 dark:text-slate-300">{srv.startDate} → {srv.endDate}</span>
-                                  <span className={`ml-auto text-[8px] font-black px-1.5 py-0.5 rounded-full ${isSlaContractActive(srv.status) ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
-                                    {isSlaContractActive(srv.status) ? 'Activo' : 'Inactivo'}
+                                  <span className={`ml-auto text-[8px] font-black px-1.5 py-0.5 rounded-full ${(srv as any).closed ? 'bg-slate-700 text-white' : isSlaContractActive(srv.status) ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-200 text-slate-400'}`}>
+                                    {(srv as any).closed ? 'Cerrado' : isSlaContractActive(srv.status) ? 'Activo' : 'Inactivo'}
                                   </span>
                                 </div>
                                 <div className="flex items-center justify-between gap-2">
@@ -4546,7 +4574,22 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
             <div className="mt-8 flex justify-end gap-4 border-t dark:border-slate-700 pt-6">
               <button onClick={() => setView('list')} className="text-slate-400 font-bold uppercase text-xs hover:text-slate-600 transition-colors">Cancelar</button>
-              {isEditing && form.id && canUpdateService && isSlaContractActive(form.status) && (
+              {isClosedContract && (
+                <span className="mr-auto self-center text-[11px] font-black uppercase text-slate-600 bg-slate-100 border border-slate-300 rounded-xl px-3 py-2">
+                  🔒 Contrato cerrado{(form as any).closedReason === 'VENCIDO' ? ' (vencido)' : ''} — solo lectura
+                </span>
+              )}
+              {isClosedContract && isSuperAdmin && (
+                <button type="button" onClick={handleReopenContract} className="text-indigo-700 font-black uppercase text-xs hover:text-indigo-900">
+                  Reabrir contrato
+                </button>
+              )}
+              {isEditing && form.id && !isClosedContract && isSuperAdmin && (form as any).reopenedManually === true && (
+                <button type="button" onClick={handleCloseContract} className="text-slate-600 font-black uppercase text-xs hover:text-slate-900">
+                  Cerrar contrato
+                </button>
+              )}
+              {isEditing && form.id && !isClosedContract && canUpdateService && isSlaContractActive(form.status) && (
                 <button
                   type="button"
                   onClick={() => handleCancelService(form.id!)}
@@ -4555,7 +4598,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   <Ban size={14}/> Dar de baja servicio
                 </button>
               )}
-              <button data-action="sla-form-guardar" onClick={handleSave} className="bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button>
+              <button data-action="sla-form-guardar" onClick={handleSave} disabled={isClosedContract} className="disabled:opacity-40 disabled:cursor-not-allowed bg-slate-900 dark:bg-white dark:text-slate-900 text-white px-8 py-3 rounded-xl font-black uppercase text-xs shadow-sm transition-transform active:scale-95"><Save size={16} className="mr-2 inline"/> Guardar</button>
             </div>
             </div>
           </div>

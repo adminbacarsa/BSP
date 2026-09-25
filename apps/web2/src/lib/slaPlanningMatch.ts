@@ -224,7 +224,7 @@ export function pickSlaForPlanningMonth(
   return { vigente, hasExactMatch: !!vigente, fallback: vigente };
 }
 
-export type SlaDateRange = { start: string; end: string };
+export type SlaDateRange = { start: string; end: string; closed?: boolean };
 
 /** Rangos de contratos (activos si hay) que tocan el mes; vacío = sin fecha → abierto. */
 export function planningMonthSlaRanges(matching: SlaPlanningRow[], year: number, month: number): SlaDateRange[] {
@@ -232,7 +232,20 @@ export function planningMonthSlaRanges(matching: SlaPlanningRow[], year: number,
   const pool = active.length > 0 ? active : matching;
   return pool
     .filter((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month))
-    .map((d) => ({ start: toYyyyMmDd(d.startDate) || '', end: toYyyyMmDd(d.endDate) || '' }));
+    .map((d) => ({
+      start: toYyyyMmDd(d.startDate) || '',
+      end: toYyyyMmDd(d.endDate) || '',
+      closed: (d as { closed?: unknown }).closed === true,
+    }));
+}
+
+const inRange = (dateStr: string, r: SlaDateRange) => (!r.start || dateStr >= r.start) && (!r.end || dateStr <= r.end);
+
+/** Día cubierto solo por contratos cerrados (ninguno abierto lo cubre): sin cambios de turnos. */
+export function isDateInClosedSlaOnly(dateStr: string, ranges: SlaDateRange[] | null): boolean {
+  if (!ranges || ranges.length === 0) return false;
+  const covering = ranges.filter((r) => inRange(dateStr, r));
+  return covering.length > 0 && covering.every((r) => r.closed === true);
 }
 
 export function isDateOutsideSlaRanges(dateStr: string, ranges: SlaDateRange[] | null): boolean {

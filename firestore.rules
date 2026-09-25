@@ -324,7 +324,9 @@ service cloud.firestore {
     match /servicios_sla/{slaId} {
       allow read: if isSuperAdmin() || tenantAdminRead() || request.auth != null;
       allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate();
+      // Contrato cerrado (vencido): solo lectura salvo SuperAdmin; reapertura por callable reabrirContratoSla.
+      allow update: if tenantAdminUpdate()
+        && (resource.data.get('closed', false) != true || isSuperAdmin());
       allow delete: if tenantAdminDelete();
     }
 
