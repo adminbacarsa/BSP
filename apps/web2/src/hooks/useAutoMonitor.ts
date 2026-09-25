@@ -269,12 +269,10 @@ export const useAutoMonitor = ({
         const endMs = s.endDateObj?.getTime?.() || 0;
         if (!(endMs > 0)) return false;
         const msPastEnd = now.getTime() - endMs;
-        if (msPastEnd <= 2 * 60 * 1000) return false;
-        const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
-        const isNaturalRetention = s.isRetention && s.manualRetentionType !== 'extended' && !(s.isCustomPost && !isOperatorRetention);
-        // Retención natural reciente: esperar; >2h past end = zombie (Demo/lab)
-        if (isNaturalRetention && msPastEnd < 2 * 60 * 60 * 1000) return false;
-        return true;
+        // Cierre / retención / relevo al fin del turno los decide autoCompletarTurnos (servidor, continuidad SLA).
+        // El navegador solo limpia zombies (>2h después del fin) y el fin de una extensión manual.
+        if (s.manualRetentionType === 'extended') return msPastEnd > 2 * 60 * 1000;
+        return msPastEnd >= 2 * 60 * 60 * 1000;
       });
 
       const dismissShiftNoise = async (shiftId: string) => {

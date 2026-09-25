@@ -1301,26 +1301,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         for (const s of retainedShifts) {
             const endMs = s.endDateObj?.getTime?.() ?? 0;
 
-            // ── PUESTO CUSTOM: cerrar inmediatamente al terminar (sin relevo ni espera) ──
-            // Solo si NO hay retención manual del operador (manualRetentionType está seteado)
+            // Puestos custom siguen la misma regla que el resto: el servidor retiene si el SLA tiene
+            // un turno que empieza al terminar éste (mismo puesto), sin importar el código (M1/T1, P1/P2…).
             const isOperatorRetention = s.isRetentionByField && !!s.manualRetentionType;
-            if (s.isCustomPost && !isOperatorRetention) {
-                const autoCustomKey = `${s.id}_AUTO_END_CUSTOM_POST`;
-                if (!alertedVacancyIds.current.has(autoCustomKey)) {
-                    alertedVacancyIds.current.add(autoCustomKey);
-                    autoCloseShiftTx(s.id, {
-                        status: 'COMPLETED', isCompleted: true, isPresent: false,
-                        completedAt: serverTimestamp(), completedBy: 'Sistema',
-                        completionReason: 'AUTO_SHIFT_END_CUSTOM',
-                    }, empresaId).then(ok => {
-                        if (ok) opsEventToast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
-                    }).catch(e => {
-                        alertedVacancyIds.current.delete(autoCustomKey);
-                        console.warn('[autoEndCustomPost]', e);
-                    });
-                }
-                continue;
-            }
 
             // ── RELEVO CON TARDANZA REGISTRADA (lateETA): respetar hora acordada ──────────────
             // Si hay un turno de relevo en el mismo puesto con lateETA registrado,
@@ -1417,9 +1400,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // isCFRetention: retenido por la CF (autoRetentionAt existe → retentionMinutes > 0)
             // vs retención manual del operador (isRetentionByField pero retentionMinutes == 0)
             const isCFRetention = s.isRetentionByField && (s.retentionMinutes ?? 0) > 0;
-            const shouldAutoClose =
-                (!s.isRetentionByField && minutesOvertime >= 1 && minutesOvertime < 720) ||
-                (isCFRetention && (s.retentionMinutes ?? 0) >= 60 && (s.retentionMinutes ?? 0) < 720);
+            // Fin de turno / retención: lo decide autoCompletarTurnos (servidor). El front no cierra antes.
+            const shouldAutoClose = false as boolean;
 
             if (shouldAutoClose && !alertedVacancyIds.current.has(autoShiftEndKey)) {
                 // Hay relevo planificado que todavía no llegó? (solo aplica en los primeros 60 min)
