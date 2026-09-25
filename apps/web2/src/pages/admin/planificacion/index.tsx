@@ -134,6 +134,9 @@ import {
     excludedPositionsTooltip,
     resolvePlanningMonthSlaHours,
     type SlaPlanningRow,
+    planningMonthSlaRanges,
+    isDateOutsideSlaRanges,
+    type SlaDateRange,
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
@@ -1263,6 +1266,7 @@ export default function PlanificacionPage() {
 
     const [positionStructure, setPositionStructure] = useState<any[]>([]);
     const [activePlanningSlaRow, setActivePlanningSlaRow] = useState<SlaPlanningRow | null>(null);
+    const [planningSlaRanges, setPlanningSlaRanges] = useState<SlaDateRange[] | null>(null);
     const [slaVendidas, setSlaVendidas] = useState<number>(0);
     const [showDiagnostic, setShowDiagnostic] = useState<boolean>(false);
     const [publishStatusMap, setPublishStatusMap] = useState<Record<string, { publishedAt: any; publishedBy: string } | null>>({});
@@ -1926,9 +1930,11 @@ export default function PlanificacionPage() {
             let shiftCount = 0;
             let hasRet = false;
             let hasFranco = false;
+            let hasPending = false;
             for (const dateStr of dateKeys) {
                 const key = `${e.id}_${dateStr}`;
                 const pending = pendingChanges[key];
+                if (pending && !pending.isDeleted) hasPending = true;
                 const sh = pending && !pending.isDeleted ? pending : shiftsMap[key];
                 if (!sh || sh.isDeleted) continue;
                 shiftCount += 1;
@@ -1939,9 +1945,13 @@ export default function PlanificacionPage() {
             const isRet = hasRet || empHasDotacionCode(e, 'RET');
             const isFranco = hasFranco || empHasDotacionCode(e, 'F');
             const isLibre = shiftCount === 0;
-            if (dotacionPoolType === 'RET' && !isRet) continue;
-            if (dotacionPoolType === 'F' && !isFranco) continue;
-            if (dotacionPoolType === 'LIBRE' && !isLibre) continue;
+            // Con cambio pendiente se mantiene en el pool aunque ya no cumpla el filtro: el efecto de pin
+            // lo pasa a la dotación y la grilla muestra la previa antes de guardar.
+            if (!hasPending) {
+                if (dotacionPoolType === 'RET' && !isRet) continue;
+                if (dotacionPoolType === 'F' && !isFranco) continue;
+                if (dotacionPoolType === 'LIBRE' && !isLibre) continue;
+            }
             const kind = isRet ? 'RET' : isFranco ? 'F' : isLibre ? 'Sin turno' : 'Turno';
             out.push({ ...e, _km: km, _kind: kind, _fromDotacionPool: true });
             if (out.length >= DOTACION_NEARBY_ROW_CAP) break;
@@ -3442,6 +3452,17 @@ export default function PlanificacionPage() {
         setColumnSelectSource(null);
     }, [allowPlanningMultiSelect]);
 
+    /** Día fuera de la vigencia del contrato (ej. servicio de un solo día): no se planifican turnos. */
+    const isOutsideServiceRange = useCallback(
+        (dateStr: string) => isDateOutsideSlaRanges(dateStr, planningSlaRanges),
+        [planningSlaRanges],
+    );
+    const outsideServiceMsg = useMemo(() => {
+        if (!planningSlaRanges?.length) return 'Fuera de la vigencia del servicio.';
+        const fmt = (d: string) => (d ? d.split('-').reverse().join('/') : '…');
+        return `Fuera de la vigencia del servicio (${planningSlaRanges.map((r) => `${fmt(r.start)} → ${fmt(r.end)}`).join(' · ')}).`;
+    }, [planningSlaRanges]);
+
     const isPlanningDateLocked = useCallback(
         (dateStr: string) => (enforcePlanningClosureRules ? isDateLocked(dateStr) : false),
         [enforcePlanningClosureRules],
@@ -4601,6 +4622,7 @@ export default function PlanificacionPage() {
         if (!selectedClient || !selectedObjective) {
             setPositionStructure([]);
             setActivePlanningSlaRow(null);
+            setPlanningSlaRanges(null);
             setHasActiveSLA(true);
             setSlaVendidas(0);
             setSlaPlanningHint('');
@@ -4665,6 +4687,7 @@ export default function PlanificacionPage() {
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
                 setActivePlanningSlaRow(srvForStructure ?? null);
+                setPlanningSlaRanges(monthHasSla ? planningMonthSlaRanges(matching, viewYear, viewMonth) : null);
                 setActiveSlaPositionAssignments(mergeEncargadoIntoAssignments({
                     positionAssignments: srvForStructure?.positionAssignments,
                     encargadoEmployeeId: typeof srvForStructure?.encargadoEmployeeId === 'string' ? srvForStructure.encargadoEmployeeId : undefined,
@@ -4684,6 +4707,7 @@ export default function PlanificacionPage() {
                 console.error("CRONO SLA ERROR:", e);
                 setPositionStructure([{ positionName: 'ERROR', shifts: [], qty: 1 }]);
                 setActivePlanningSlaRow(null);
+                setPlanningSlaRanges(null);
                 setHasActiveSLA(false);
                 setSlaVendidas(0);
                 setSlaPlanningHint('error al cargar contratos');
@@ -7929,6 +7953,7 @@ export default function PlanificacionPage() {
     const handleAssignShift = async (shiftConfig: any, positionName: string) => {
         if (isServiceLocked) { toast.error(activeServiceStatus.msg || 'Bloqueado'); return; } 
         if (!selectedCell) return; 
+        if (isOutsideServiceRange(selectedCell.dateStr) && !shiftConfig?.isDeleted) { toast.error(outsideServiceMsg); return; }
         if (isPlanningDateLocked(selectedCell.dateStr)) {
             // Días pasados: solo se permiten RET, ESC y francos (F/FF/FP/FT). Turnos bloqueados.
             const c = String(shiftConfig.code || '').toUpperCase();
@@ -8184,6 +8209,7 @@ export default function PlanificacionPage() {
             const emp = displayedEmployees[r];
             const dateStr = getDateKey(daysInMonth[c]);
             if (isPlanningDateLocked(dateStr)) return;
+            if (shift && isOutsideServiceRange(dateStr)) return;
             const key = `${emp.id}_${dateStr}`;
             if (!shift) {
                 if (newChanges[key] || shiftsMap[key]) newChanges[key] = { isDeleted: true };
@@ -8206,7 +8232,7 @@ export default function PlanificacionPage() {
                 : `${pasted} turno(s) pegado(s) — portapapeles listo para repetir`,
         );
         if (clipboardIsCut) setClipboardIsCut(false);
-    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
+    }, [allowPlanningMultiSelect, clipboard, clipboardIsCut, commitPendingChanges, displayedEmployees, daysInMonth, shiftsMap, selectedObjective, isPlanningDateLocked, isOutsideServiceRange, selectedGrupo, grupoUnifiedMode, resolveObjectiveForEmp]);
 
     const cutSelection = useCallback(() => {
         if (!allowPlanningMultiSelect) {
@@ -8303,6 +8329,7 @@ export default function PlanificacionPage() {
                 const effectiveShift = pendingChanges[key]?.isDeleted
                     ? null
                     : ((cellP && !cellP.isDeleted ? cellP : cellS) || (rfzOnCell ? rfzDocToShiftView(rfzOnCell) : null));
+                if (!effectiveShift && !absence && isOutsideServiceRange(dateStr)) { toast.message(outsideServiceMsg); return; }
                 const effObjId = effectiveShift?.objectiveId;
                 if (
                     effectiveShift &&
@@ -8417,7 +8444,7 @@ export default function PlanificacionPage() {
                 const targetDay = daysInMonth.find(d => d.getDate() === dayNum);
                 if (!targetDay) return;
                 const targetDateStr = getDateKey(targetDay);
-                if (isPlanningDateLocked(targetDateStr)) return;
+                if (isPlanningDateLocked(targetDateStr) || isOutsideServiceRange(targetDateStr)) return;
                 if (!displayedEmployees.find((e: any) => e.id === shift.employeeId)) return;
                 const key = `${shift.employeeId}_${targetDateStr}`;
                 if (pendingChanges[key] || shiftsMap[key]) { skipped++; return; }
@@ -8722,7 +8749,7 @@ export default function PlanificacionPage() {
             const cutoff = autoV2ReportRef.current?.metrics?.cctCutoffDay ?? 25;
             const prevM = m === 0 ? 12 : m;
             const prevY = m === 0 ? y - 1 : y;
-            const diasBloqueados = daysInMonth.map((d) => getDateKey(d)).filter((ds) => isDateLocked(ds));
+            const diasBloqueados = daysInMonth.map((d) => getDateKey(d)).filter((ds) => isDateLocked(ds) || isOutsideServiceRange(ds));
             const plannerContext = buildPlannerContextFromAutoRun({
                 mes,
                 objetivo: getObjectiveName(selectedObjective),
@@ -10395,7 +10422,7 @@ export default function PlanificacionPage() {
                                         );
                                         const rfzOnCell = rfzByEmpDate[key];
                                         const selected = !isSnapshotView && isCellSelected(idx, dayIndex);
-                                        const isLockedDate = !isSnapshotView && isPlanningDateLocked(getDateKey(day));
+                                        const isLockedDate = !isSnapshotView && (isPlanningDateLocked(getDateKey(day)) || isOutsideServiceRange(getDateKey(day)));
                                         const isCellWeekend = [0, 6].includes(day.getDay());
                                         let content = null; let style = "";
                                         let isFT = s?.isFrancoTrabajado || p?.isFrancoTrabajado; let isFF = s?.isFrancoCompensatorio || p?.isFrancoCompensatorio;

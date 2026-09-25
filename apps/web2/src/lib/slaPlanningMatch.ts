@@ -224,6 +224,22 @@ export function pickSlaForPlanningMonth(
   return { vigente, hasExactMatch: !!vigente, fallback: vigente };
 }
 
+export type SlaDateRange = { start: string; end: string };
+
+/** Rangos de contratos (activos si hay) que tocan el mes; vacío = sin fecha → abierto. */
+export function planningMonthSlaRanges(matching: SlaPlanningRow[], year: number, month: number): SlaDateRange[] {
+  const active = matching.filter((s) => isSlaContractActive(s.status));
+  const pool = active.length > 0 ? active : matching;
+  return pool
+    .filter((d) => slaCoversCalendarMonth(d.startDate, d.endDate, year, month))
+    .map((d) => ({ start: toYyyyMmDd(d.startDate) || '', end: toYyyyMmDd(d.endDate) || '' }));
+}
+
+export function isDateOutsideSlaRanges(dateStr: string, ranges: SlaDateRange[] | null): boolean {
+  if (!ranges || ranges.length === 0) return false;
+  return !ranges.some((r) => (!r.start || dateStr >= r.start) && (!r.end || dateStr <= r.end));
+}
+
 export function formatSlaRangeHint(rows: SlaPlanningRow[]): string {
   if (!rows.length) return '';
   return rows
