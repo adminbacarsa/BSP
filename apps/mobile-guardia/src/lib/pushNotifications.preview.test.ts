@@ -47,4 +47,29 @@ describe('buildDeviceTokenDoc — preview SuperAdmin', () => {
     });
     assert.ok(!('previewOf' in doc));
   });
+
+  it('audience staff → role staff y pushAudience staff', () => {
+    const doc = buildDeviceTokenDoc({
+      uid: 'staff-uid',
+      employeeId: null,
+      empresaId: 'emp-1',
+      token: 'tok-staff',
+      platform: 'android',
+      audience: 'staff',
+    });
+    assert.equal(doc.role, 'staff');
+    assert.equal(doc.pushAudience, 'staff');
+    assert.equal(doc.employeeId, null);
+  });
+
+  it('audience guard (default) → role employee', () => {
+    const doc = buildDeviceTokenDoc({
+      uid: 'g',
+      employeeId: 'e1',
+      token: 't',
+      platform: 'web',
+    });
+    assert.equal(doc.role, 'employee');
+    assert.equal(doc.pushAudience, 'guard');
+  });
 });

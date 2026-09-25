@@ -48,6 +48,8 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     deviceVerified,
     isSuperAdmin,
     isPreviewMode,
+    staffProfile,
+    activeEmpresaId,
   } = usePortalAuth();
   const { db } = getPortalFirebase();
   const lastForegroundToastRef = useRef<string | null>(null);
@@ -67,35 +69,52 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
     }
   };
 
-  const canAutoRegister =
+  const canAutoRegisterGuard =
     !!user &&
     employeeProfileReady &&
     !!empDocId &&
-    (isPreviewMode || (deviceVerified === true && !isSuperAdmin));
+    (isPreviewMode || (deviceVerified === true && !(isSuperAdmin && !isPreviewMode)));
+
+  const canAutoRegisterStaff =
+    !!user &&
+    !!staffProfile &&
+    (staffProfile.isStaff || staffProfile.isSuperAdmin) &&
+    !isPreviewMode;
 
   useEffect(() => {
-    if (!canAutoRegister || !user) return;
-
+    if (!user) return;
     let cancelled = false;
 
     (async () => {
-      const result = await registerPushNotifications({
-        user,
-        db,
-        empDocId,
-        empresaId: employee?.empresaId ?? null,
-        previewOf: isPreviewMode,
-        interactive: false,
-      });
-      if (!cancelled) {
-        onStatusChange?.(result.status);
-        // En web 'off' = falta gesto; el botón «Activar notificaciones» lo resuelve.
-        if (result.status === 'denied' && Platform.OS !== 'web') {
-          appAlert(
-            'Notificaciones',
-            'Para recibir alertas operativas, activá notificaciones de COSP Guardia en Ajustes del teléfono.',
-          );
+      if (canAutoRegisterGuard) {
+        const result = await registerPushNotifications({
+          user,
+          db,
+          empDocId,
+          empresaId: employee?.empresaId ?? null,
+          previewOf: isPreviewMode,
+          interactive: false,
+          audience: 'guard',
+        });
+        if (!cancelled) {
+          onStatusChange?.(result.status);
+          if (result.status === 'denied' && Platform.OS !== 'web') {
+            appAlert(
+              'Notificaciones',
+              'Para recibir alertas operativas, activá notificaciones de COSP en Ajustes del teléfono.',
+            );
+          }
         }
+      } else if (canAutoRegisterStaff) {
+        const result = await registerPushNotifications({
+          user,
+          db,
+          empDocId: null,
+          empresaId: activeEmpresaId,
+          interactive: false,
+          audience: 'staff',
+        });
+        if (!cancelled) onStatusChange?.(result.status);
       }
     })();
 
@@ -103,11 +122,13 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
       cancelled = true;
     };
   }, [
-    canAutoRegister,
+    canAutoRegisterGuard,
+    canAutoRegisterStaff,
     user?.uid,
     empDocId,
     employee?.empresaId,
     isPreviewMode,
+    activeEmpresaId,
     db,
     onStatusChange,
   ]);
@@ -178,7 +199,7 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
       }
 
       received = Notifications.addNotificationReceivedListener((notification) => {
-        const title = notification.request.content.title ?? 'CronoApp';
+        const title = notification.request.content.title ?? 'COSP';
         const body = notification.request.content.body ?? '';
         const dedupeKey = `${title}|${body}`;
         if (lastForegroundToastRef.current === dedupeKey) return;
@@ -213,27 +234,43 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
   }, [user?.uid, router]);
 
   useEffect(() => {
-    if (!canAutoRegister || !user) return;
+    if ((!canAutoRegisterGuard && !canAutoRegisterStaff) || !user) return;
 
     const sub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
-      registerPushNotifications({
-        user,
-        db,
-        empDocId,
-        empresaId: employee?.empresaId ?? null,
-        previewOf: isPreviewMode,
-        interactive: false,
-      }).then((r) => onStatusChange?.(r.status));
+      if (canAutoRegisterGuard) {
+        registerPushNotifications({
+          user,
+          db,
+          empDocId,
+          empresaId: employee?.empresaId ?? null,
+          previewOf: isPreviewMode,
+          interactive: false,
+          audience: 'guard',
+        }).then((r) => onStatusChange?.(r.status));
+        return;
+      }
+      if (canAutoRegisterStaff) {
+        registerPushNotifications({
+          user,
+          db,
+          empDocId: null,
+          empresaId: activeEmpresaId,
+          interactive: false,
+          audience: 'staff',
+        }).then((r) => onStatusChange?.(r.status));
+      }
     });
 
     return () => sub.remove();
   }, [
-    canAutoRegister,
+    canAutoRegisterGuard,
+    canAutoRegisterStaff,
     user,
     empDocId,
     employee?.empresaId,
     isPreviewMode,
+    activeEmpresaId,
     db,
     onStatusChange,
   ]);

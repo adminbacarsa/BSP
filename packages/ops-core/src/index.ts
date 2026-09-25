@@ -25,3 +25,23 @@ export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
+
+export {
+  APP_MODE_DEFS,
+  STAFF_APP_MODULE_KEYS,
+  canAccessMode,
+  fullSuperAdminModules,
+  normalizeStaffProfile,
+  pickDefaultMode,
+  resolveVisibleModes,
+} from './staffAppModes';
+export type {
+  AppModeDef,
+  AppModeId,
+  SesionOperadorAction,
+  SesionOperadorRequest,
+  SesionOperadorResponse,
+  StaffEmpresa,
+  StaffProfile,
+  WriteOrigin,
+} from './staffAppModes';

@@ -5,6 +5,7 @@ const projectRoot = __dirname;
 const monorepoRoot = path.resolve(projectRoot, '../..');
 const portalCore = path.resolve(monorepoRoot, 'packages/portal-core');
 const portalTypes = path.resolve(monorepoRoot, 'packages/portal-types');
+const opsCore = path.resolve(monorepoRoot, 'packages/ops-core');
 
 const config = getDefaultConfig(projectRoot);
 
@@ -20,8 +21,9 @@ config.resolver.extraNodeModules = {
   '@expo/metro-runtime': path.resolve(projectRoot, 'node_modules/@expo/metro-runtime'),
   '@cosp/portal-core': portalCore,
   '@cosp/portal-types': portalTypes,
+  '@cosp/ops-core': opsCore,
 };
-config.watchFolders = [projectRoot, portalCore, portalTypes];
+config.watchFolders = [projectRoot, portalCore, portalTypes, opsCore];
 
 const upstreamResolveRequest = config.resolver.resolveRequest;
 config.resolver.resolveRequest = (context, moduleName, platform) => {

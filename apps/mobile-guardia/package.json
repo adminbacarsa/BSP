@@ -15,11 +15,14 @@
     "test:device-validation": "node --experimental-strip-types --test src/lib/deviceVerification.test.ts",
     "test:push-preview": "node --experimental-strip-types --test src/lib/pushNotifications.preview.test.ts",
     "test:alertas-pagination": "node --experimental-strip-types --test src/lib/alertasPagination.test.ts",
+    "test:mode-selection": "node --experimental-strip-types --test src/lib/modeSelection.test.ts",
+    "test:all": "node --experimental-strip-types --test src/lib/deviceVerification.test.ts src/lib/pushNotifications.preview.test.ts src/lib/alertasPagination.test.ts src/lib/modeSelection.test.ts",
     "update:preview": "npx --yes eas-cli update --channel preview --environment preview",
     "update:production": "npx --yes eas-cli update --channel production --environment production --auto",
     "update:channels": "echo Run update:preview and update:production as TWO separate commands (or scripts/mobile-ota-channels.ps1). Do not join with /"
   },
   "dependencies": {
+    "@cosp/ops-core": "file:../../packages/ops-core",
     "@cosp/portal-core": "file:../../packages/portal-core",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",

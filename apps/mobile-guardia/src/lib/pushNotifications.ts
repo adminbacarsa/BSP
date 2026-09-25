@@ -6,8 +6,10 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getPortalFirebase } from './portal';
 import { buildDeviceTokenDoc } from './deviceTokenDoc';
+import type { DeviceTokenAudience } from './deviceTokenDoc';
 
 export { buildDeviceTokenDoc } from './deviceTokenDoc';
+export type { DeviceTokenAudience } from './deviceTokenDoc';
 
 /** Misma clave que el portal web viejo `/empleado` (localStorage). */
 export const WEB_FCM_STORAGE_KEY = 'fcm_token';
@@ -16,16 +18,9 @@ const NATIVE_FCM_STORAGE_KEY = '@cosp/mobile_fcm_token';
 export type PushRegistrationStatus = 'unsupported' | 'off' | 'denied' | 'enabled' | 'error';
 
 export type RegisterPushOptions = {
-  /**
-   * SuperAdmin en preview: token del dispositivo del SA atado al legajo visto.
-   * Las Functions buscan por employeeId → el SA recibe las push de ese guardia.
-   */
   previewOf?: boolean;
-  /**
-   * Solo con gesto del usuario (botón). En web Safari/iOS exige gesto para
-   * Notification.requestPermission(); sin interactive no pedimos permiso.
-   */
   interactive?: boolean;
+  audience?: DeviceTokenAudience;
 };
 
 function getVapidKey(): string {
@@ -108,8 +103,9 @@ async function persistTokenDoc(params: {
   token: string;
   platform: 'web' | 'ios' | 'android';
   previewOf?: boolean;
+  audience?: DeviceTokenAudience;
 }): Promise<void> {
-  const { user, db, empDocId, empresaId, token, platform, previewOf } = params;
+  const { user, db, empDocId, empresaId, token, platform, previewOf, audience } = params;
   const oldToken = await getStoredFcmToken();
   if (oldToken && oldToken !== token) {
     await clearPushTokenOnServer(db, oldToken);
@@ -122,6 +118,7 @@ async function persistTokenDoc(params: {
     token,
     platform,
     previewOf,
+    audience,
   });
 
   await setDoc(
@@ -139,8 +136,9 @@ async function registerWebPush(params: {
   empresaId: string | null;
   previewOf?: boolean;
   interactive?: boolean;
+  audience?: DeviceTokenAudience;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
-  const { user, db, empDocId, empresaId, previewOf, interactive } = params;
+  const { user, db, empDocId, empresaId, previewOf, interactive, audience } = params;
 
   if (typeof window === 'undefined' || !('Notification' in window) || !('serviceWorker' in navigator)) {
     return { status: 'unsupported', error: 'Este navegador no soporta notificaciones push.' };
@@ -181,6 +179,7 @@ async function registerWebPush(params: {
       token,
       platform: 'web',
       previewOf,
+      audience,
     });
     return { status: 'enabled', token };
   } catch (err) {
@@ -196,6 +195,7 @@ async function registerNativePush(params: {
   empresaId: string | null;
   previewOf?: boolean;
   interactive?: boolean;
+  audience?: DeviceTokenAudience;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
   const Notifications = await import('expo-notifications');
 
@@ -209,7 +209,7 @@ async function registerNativePush(params: {
     }),
   });
 
-  const { user, db, empDocId, empresaId, previewOf, interactive } = params;
+  const { user, db, empDocId, empresaId, previewOf, interactive, audience } = params;
 
   if (!Device.isDevice) {
     return { status: 'unsupported', error: 'El emulador del teléfono no recibe push FCM nativo.' };
@@ -221,6 +221,12 @@ async function registerNativePush(params: {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#312e81',
+    });
+    await Notifications.setNotificationChannelAsync('cosp-staff', {
+      name: 'COSP Staff',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 200, 100, 200],
+      lightColor: '#0f766e',
     });
   }
 
@@ -255,6 +261,7 @@ async function registerNativePush(params: {
       token,
       platform,
       previewOf,
+      audience,
     });
     return { status: 'enabled', token };
   } catch (err) {
@@ -270,12 +277,13 @@ export async function registerPushNotifications(params: {
   empresaId: string | null;
   previewOf?: boolean;
   interactive?: boolean;
+  audience?: DeviceTokenAudience;
 }): Promise<{ status: PushRegistrationStatus; token?: string; error?: string }> {
-  const { previewOf, interactive, ...rest } = params;
+  const { previewOf, interactive, audience, ...rest } = params;
   if (Platform.OS === 'web') {
-    return registerWebPush({ ...rest, previewOf, interactive });
+    return registerWebPush({ ...rest, previewOf, interactive, audience });
   }
-  return registerNativePush({ ...rest, previewOf, interactive });
+  return registerNativePush({ ...rest, previewOf, interactive, audience });
 }
 
 export async function unregisterPushForUser(db: Firestore): Promise<void> {
@@ -315,7 +323,7 @@ export async function subscribeWebForegroundMessages(
     const messaging = getMessaging(app);
     return onMessage(messaging, (payload) => {
       const data = (payload.data ?? {}) as Record<string, unknown>;
-      const title = String(data.title || payload.notification?.title || 'CronoApp');
+      const title = String(data.title || payload.notification?.title || 'COSP');
       const body = String(data.body || payload.notification?.body || '');
       onPayload({ title, body, data });
     });

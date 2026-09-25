@@ -15,10 +15,10 @@ export default function Root({ children }: PropsWithChildren) {
           name="viewport"
           content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, shrink-to-fit=no"
         />
-        <title>COSP Guardia</title>
-        <meta name="description" content="Portal del vigilador — turnos, fichada GPS y novedades." />
+        <title>COSP</title>
+        <meta name="description" content="COSP — portal multi-rol: guardia, operaciones, RRHH y planificación." />
         <meta name="theme-color" content="#8B1A1A" />
-        <meta name="application-name" content="COSP Guardia" />
+        <meta name="application-name" content="COSP" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="COSP" />

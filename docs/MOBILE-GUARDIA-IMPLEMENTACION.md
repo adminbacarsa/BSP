@@ -46,6 +46,7 @@
 
 ### Hecho esta semana (no reabrir salvo regresión)
 
+- **Multi-rol Fase 0 (COSP)** ✅ rama `cursor/mobile-multi-role-fase0-a241`: `resolveStaffProfile` stub + `@cosp/ops-core`; staff sin device gate; selector modo/empresa; rutas `(staff)/*` placeholder + sala `sesionOperador` MOBILE; FCM staff (`role: staff`, canal `cosp-staff`); nombre visible **COSP** (package/runtime 1.1.3 sin cambio). Tests 32/32; `build:web` OK. Sin push/OTA/deploy en cloud.
 - **Gate dispositivo + push preview + Alertas×10** ✅ rama `cursor/device-validation-gate-a241`: no datos hasta `deviceVerified===true`; `needs_rebind`; preview FCM con `previewOf`; botón web notificaciones; paginación Alertas 10/página. OTA = Notebook (ver abajo).
 - **Portal web `/app`** ✅ Expo `experiments.baseUrl: '/app'` + `build:web` → `dist-web`; deviceId LS+IDB; PWA; FCM web VAPID; GPS HTTPS; AA certificado. Deploy/redirects hosting = **Plataforma**.
 - **CC en main** ✅ merge `74a54f78` (retenido, convocatorias, ¿Venís?, ventanas, ADV∪propia, ocultar registro EXT/ADV). Backend prod: `etaMinutes`, ventanas server, rechazo TRACE.
@@ -207,6 +208,7 @@
 2026-09-08 | F6-01 link | Internal Testing invite: https://play.google.com/apps/internaltest/4701606202645789130
 2026-09-08 | Package OK | Firebase Android `com.cosp.guardia` + google-services + EAS secret; AAB production nuevo en curso
 2026-09-08 | Package | Android/iOS id → `com.cosp.guardia` (sin grupobacar); falta Firebase app + google-services + AAB nuevo
+2026-09-25 | Multi-rol F0 | App COSP: resolveStaffProfile stub, modos staff, sesionOperador MOBILE, FCM staff, nombre COSP; tests 32; sin OTA
 2026-09-08 | F6-01 start | AAB production EAS + checklist Internal Testing Play
 2026-09-08 | Header Hoy | Título = COSP · {empresa} · vX.Y.Z (tab Hoy queda en bottom nav)
 2026-09-08 | UX piloto | Sin Salir en Hoy; Cerrar sesión con confirmación en Más; Probar push solo lab/preview; sin card Tu empresa

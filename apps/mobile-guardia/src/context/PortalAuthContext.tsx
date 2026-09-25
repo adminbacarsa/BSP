@@ -33,6 +33,21 @@ import {
 import { detachPushTokenOnServer, unregisterPushForUser } from '../lib/pushNotifications';
 import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
 import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
+import {
+  pickDefaultMode,
+  resolveVisibleModes,
+  type AppModeId,
+  type StaffProfile,
+} from '@cosp/ops-core';
+import { profileCanEnterApp, resolveStaffProfileForUser, StaffProfileResolveError } from '../lib/staffProfile';
+import {
+  clearPersistedEmpresaId,
+  clearPersistedMode,
+  loadPersistedEmpresaId,
+  loadPersistedMode,
+  persistEmpresaId,
+  persistMode,
+} from '../lib/modeStorage';
 
 const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
 const AUTH_INIT_TIMEOUT_MS = 9_000;
@@ -58,6 +73,13 @@ type PortalAuthContextValue = {
   /** Motivo de bloqueo cuando deviceVerified === false. */
   deviceBlockReason: DeviceBlockReason | null;
   employeeProfileError: string | null;
+  /** Perfil multi-rol (callable resolveStaffProfile o stub). */
+  staffProfile: StaffProfile | null;
+  activeMode: AppModeId | null;
+  activeEmpresaId: string | null;
+  visibleModes: ReturnType<typeof resolveVisibleModes>;
+  setActiveMode: (mode: AppModeId) => Promise<void>;
+  setActiveEmpresaId: (empresaId: string) => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
@@ -79,6 +101,15 @@ async function isEmployeeUser(user: User, db: ReturnType<typeof getPortalFirebas
   try {
     const empId = await resolveEmpDocIdWithRetry(db, user, 2);
     return empId !== null;
+  } catch {
+    return false;
+  }
+}
+
+async function isStaffUserDoc(user: User, db: ReturnType<typeof getPortalFirebase>['db']): Promise<boolean> {
+  try {
+    const snap = await getDoc(doc(db, 'system_users', user.uid));
+    return snap.exists();
   } catch {
     return false;
   }
@@ -188,12 +219,47 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
   const [deviceBlockReason, setDeviceBlockReason] = useState<DeviceBlockReason | null>(null);
   const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
+  const [staffProfile, setStaffProfile] = useState<StaffProfile | null>(null);
+  const [activeMode, setActiveModeState] = useState<AppModeId | null>(null);
+  const [activeEmpresaId, setActiveEmpresaIdState] = useState<string | null>(null);
   const pendingPreviewRef = useRef<string | null>(null);
   const initialUrlHandledRef = useRef(false);
 
   const applyDeviceVerifyResult = useCallback((result: DeviceVerifyResult) => {
     setDeviceVerified(result.verified);
     setDeviceBlockReason(result.verified ? null : result.reason ?? 'other_device');
+  }, []);
+
+  const applyStaffProfile = useCallback(async (profile: StaffProfile) => {
+    setStaffProfile(profile);
+    setIsSuperAdmin(profile.isSuperAdmin);
+    const preferredMode = await loadPersistedMode();
+    const mode = pickDefaultMode(profile, preferredMode);
+    setActiveModeState(mode);
+    if (mode) await persistMode(mode);
+
+    const preferredEmp = await loadPersistedEmpresaId();
+    const empresas = profile.empresas || [];
+    let empresaId: string | null = null;
+    if (preferredEmp && empresas.some((e) => e.id === preferredEmp)) {
+      empresaId = preferredEmp;
+    } else if (empresas.length === 1) {
+      empresaId = empresas[0].id;
+    } else if (empresas.length > 1) {
+      empresaId = empresas[0].id;
+    }
+    setActiveEmpresaIdState(empresaId);
+    if (empresaId) await persistEmpresaId(empresaId);
+  }, []);
+
+  const setActiveMode = useCallback(async (mode: AppModeId) => {
+    setActiveModeState(mode);
+    await persistMode(mode);
+  }, []);
+
+  const setActiveEmpresaId = useCallback(async (empresaId: string) => {
+    setActiveEmpresaIdState(empresaId);
+    await persistEmpresaId(empresaId);
   }, []);
 
   const resolvePendingPreviewId = useCallback(async (): Promise<string | null> => {
@@ -332,44 +398,91 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   const bootstrapSession = useCallback(
     async (currentUser: User, previewId: string | null) => {
-      const superAdmin = await userIsSuperAdmin(currentUser);
-      setIsSuperAdmin(superAdmin);
+      let profile: StaffProfile;
+      try {
+        profile = await resolveStaffProfileForUser(currentUser);
+      } catch (err) {
+        const msg =
+          err instanceof StaffProfileResolveError
+            ? err.message
+            : err instanceof Error
+              ? err.message
+              : 'No se pudo resolver el perfil (resolveStaffProfile).';
+        setEmployeeProfileError(msg);
+        setStaffProfile(null);
+        setDeviceVerified(null);
+        setDeviceBlockReason(null);
+        setEmployeeProfileReady(true);
+        throw err instanceof StaffProfileResolveError
+          ? err
+          : new StaffProfileResolveError(msg);
+      }
 
-      const okEmployee = await isEmployeeUser(currentUser, db);
-      if (!okEmployee) {
+      if (!profileCanEnterApp(profile)) {
         await firebaseSignOut(auth);
         setUser(null);
         setIsSuperAdmin(false);
+        setStaffProfile(null);
         setDeviceVerified(null);
         setDeviceBlockReason(null);
         return;
       }
 
-      if (superAdmin) {
+      setEmployeeProfileError(null);
+      await applyStaffProfile(profile);
+
+      // SuperAdmin + deep link preview: atar legajo (flujo vigente).
+      if (profile.isSuperAdmin && previewId) {
         setDeviceVerified(true);
         setDeviceBlockReason(null);
-        if (previewId) {
-          setPreviewEmpDocId(previewId);
-          await loadEmployeeByDocId(previewId, currentUser);
-        } else {
-          setPreviewEmpDocId(null);
-          setEmpDocId(null);
-          setEmployee(null);
-          setPortalFeatures(DEFAULT_PORTAL_FEATURES);
-          setEmployeeProfileReady(true);
-          setEmployeeProfileLoading(false);
-          setEmployeeProfileError(null);
-        }
+        setPreviewEmpDocId(previewId);
+        await loadEmployeeByDocId(previewId, currentUser);
         return;
       }
 
       setPreviewEmpDocId(null);
-      // Gate: no registrar push ni exponer datos de ops hasta deviceVerified === true.
-      // loadEmployee es necesario para device-blocked (nombre / empDocId) pero las
-      // pantallas con tabs solo montan hooks de datos tras el gate.
+
+      // Staff (sin ser solo-guardia): sin bloqueo de dispositivo.
+      if (profile.isStaff && !profile.isGuard) {
+        setDeviceVerified(true);
+        setDeviceBlockReason(null);
+        setEmpDocId(null);
+        setEmployee(null);
+        setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+        setEmployeeProfileReady(true);
+        setEmployeeProfileLoading(false);
+        setEmployeeProfileError(null);
+        const { registerPushNotifications } = await import('../lib/pushNotifications');
+        await registerPushNotifications({
+          user: currentUser,
+          db,
+          empDocId: null,
+          empresaId: (await loadPersistedEmpresaId()) || profile.empresas[0]?.id || null,
+          interactive: false,
+          audience: 'staff',
+        }).catch(() => {});
+        return;
+      }
+
+      // Guardia (solo o dual): validación de dispositivo por legajo — sin cambios.
       await loadEmployee(currentUser);
       const result = await verifyDeviceForUser(currentUser, db);
       applyDeviceVerifyResult(result);
+
+      // Dual staff+guardia: si el dispositivo falla, staff sigue usable (deviceVerified false
+      // solo bloquea modo Guardia). Staff push se registra igual si hay empresa.
+      if (profile.isStaff && !result.verified) {
+        const { registerPushNotifications } = await import('../lib/pushNotifications');
+        await registerPushNotifications({
+          user: currentUser,
+          db,
+          empDocId: null,
+          empresaId: profile.empresas[0]?.id || null,
+          interactive: false,
+          audience: 'staff',
+        }).catch(() => {});
+      }
+
       if (result.verified) {
         const resolvedId = await resolveEmpDocIdWithRetry(db, currentUser, 2);
         const empSnap = resolvedId ? await getDoc(doc(db, 'empleados', resolvedId)) : null;
@@ -380,10 +493,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           empDocId: resolvedId,
           empresaId: (empSnap?.data()?.empresaId as string) ?? null,
           interactive: false,
+          audience: 'guard',
         }).catch(() => {});
       }
     },
-    [auth, db, loadEmployee, loadEmployeeByDocId, applyDeviceVerifyResult],
+    [auth, db, loadEmployee, loadEmployeeByDocId, applyDeviceVerifyResult, applyStaffProfile],
   );
 
   const enterPreview = useCallback(
@@ -443,6 +557,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setDeviceVerified(null);
         setDeviceBlockReason(null);
         setEmployeeProfileError(null);
+        setStaffProfile(null);
+        setActiveModeState(null);
+        setActiveEmpresaIdState(null);
         setInitializing(false);
         return;
       }
@@ -454,6 +571,14 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         const previewId = await resolvePendingPreviewId();
         await bootstrapSession(nextUser, previewId);
       } catch (err) {
+        if (err instanceof StaffProfileResolveError) {
+          setEmployeeProfileError(err.message);
+          setStaffProfile(null);
+          setEmployeeProfileReady(true);
+          setDeviceVerified(null);
+          setInitializing(false);
+          return;
+        }
         const token = await nextUser.getIdTokenResult(true).catch(() => null);
         const role = normalizeRoleKey(String(token?.claims?.role ?? ''));
         const type = normalizeRoleKey(String(token?.claims?.type ?? ''));
@@ -463,18 +588,49 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           setDeviceVerified(true);
           setDeviceBlockReason(null);
           setEmployeeProfileReady(true);
+          try {
+            const profile = await resolveStaffProfileForUser(nextUser);
+            await applyStaffProfile(profile);
+            setEmployeeProfileError(null);
+          } catch (profileErr) {
+            const msg =
+              profileErr instanceof Error
+                ? profileErr.message
+                : 'No se pudo resolver el perfil (resolveStaffProfile).';
+            setEmployeeProfileError(msg);
+            setStaffProfile(null);
+          }
         } else if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
           try {
             await loadEmployee(nextUser);
           } catch {
             /* Firestore intermitente en móvil */
           }
-          // No abrir la app si falló la verificación: queda en carga hasta refresh / reintento.
           setDeviceVerified(null);
           setDeviceBlockReason(null);
         } else {
-          await firebaseSignOut(auth);
-          setUser(null);
+          const staff = await isStaffUserDoc(nextUser, db).catch(() => false);
+          if (staff) {
+            try {
+              const profile = await resolveStaffProfileForUser(nextUser);
+              await applyStaffProfile(profile);
+              setDeviceVerified(true);
+              setDeviceBlockReason(null);
+              setEmployeeProfileReady(true);
+              setEmployeeProfileError(null);
+            } catch (profileErr) {
+              setEmployeeProfileError(
+                profileErr instanceof Error
+                  ? profileErr.message
+                  : 'No se pudo resolver el perfil (resolveStaffProfile).',
+              );
+              setStaffProfile(null);
+              setEmployeeProfileReady(true);
+            }
+          } else {
+            await firebaseSignOut(auth);
+            setUser(null);
+          }
         }
       } finally {
         setInitializing(false);
@@ -484,16 +640,18 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(authReadyTimer);
       unsub();
     };
-  }, [auth, bootstrapSession, loadEmployee, resolvePendingPreviewId]);
+  }, [auth, bootstrapSession, loadEmployee, resolvePendingPreviewId, db, applyStaffProfile]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
       try {
         const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
-        const okEmployee = await isEmployeeUser(cred.user, db);
-        if (!okEmployee) {
+        const profile = await resolveStaffProfileForUser(cred.user);
+        if (!profileCanEnterApp(profile)) {
           await firebaseSignOut(auth);
-          throw new Error('Esta app es solo para vigiladores. Usá el panel web para administración.');
+          throw new Error(
+            'Esta app es para vigiladores y personal autorizado (ops/RRHH/supervisión). Pedile acceso a RRHH o usá el panel web si corresponde.',
+          );
         }
         const previewId = await resolvePendingPreviewId();
         await bootstrapSession(cred.user, previewId);
@@ -506,7 +664,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [auth, db, bootstrapSession, resolvePendingPreviewId],
+    [auth, bootstrapSession, resolvePendingPreviewId],
   );
 
   const signOut = useCallback(async () => {
@@ -530,6 +688,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setDeviceVerified(null);
     setDeviceBlockReason(null);
     setEmployeeProfileError(null);
+    setStaffProfile(null);
+    setActiveModeState(null);
+    setActiveEmpresaIdState(null);
+    await clearPersistedMode().catch(() => {});
+    await clearPersistedEmpresaId().catch(() => {});
   }, [auth, db]);
 
   const refreshEmployee = useCallback(async () => {
@@ -544,6 +707,10 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   }, [user, isSuperAdmin, previewEmpDocId, loadEmployee, loadEmployeeByDocId, db, applyDeviceVerifyResult]);
 
   const isPreviewMode = isSuperAdmin && !!previewEmpDocId;
+  const visibleModes = useMemo(
+    () => (staffProfile ? resolveVisibleModes(staffProfile) : []),
+    [staffProfile],
+  );
 
   const value = useMemo(
     () => ({
@@ -560,6 +727,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       deviceVerified,
       deviceBlockReason,
       employeeProfileError,
+      staffProfile,
+      activeMode,
+      activeEmpresaId,
+      visibleModes,
+      setActiveMode,
+      setActiveEmpresaId,
       signIn,
       signOut,
       refreshEmployee,
@@ -580,6 +753,12 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       deviceVerified,
       deviceBlockReason,
       employeeProfileError,
+      staffProfile,
+      activeMode,
+      activeEmpresaId,
+      visibleModes,
+      setActiveMode,
+      setActiveEmpresaId,
       signIn,
       signOut,
       refreshEmployee,

@@ -4,7 +4,7 @@ const useEmulator = process.env.EXPO_PUBLIC_USE_EMULATOR === 'true';
 const projectId = '79b445af-b6a7-456b-b1be-87cf25a20bd5';
 
 const config: ExpoConfig = {
-  name: 'COSP Guardia',
+  name: 'COSP',
   slug: 'cosp-guardia',
   owner: 'cosp-guardia',
   version: '1.1.3',
@@ -25,16 +25,18 @@ const config: ExpoConfig = {
     supportsTablet: true,
     bundleIdentifier: 'com.cosp.guardia',
     infoPlist: {
+      CFBundleDisplayName: 'COSP',
       NSLocationWhenInUseUsageDescription:
-        'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',
+        'COSP usa tu ubicación para validar la fichada en el puesto de trabajo.',
       NSCameraUsageDescription:
-        'COSP Guardia usa la cámara para adjuntar certificados médicos a tus novedades.',
+        'COSP usa la cámara para adjuntar certificados médicos a tus novedades.',
       NSPhotoLibraryUsageDescription:
-        'COSP Guardia accede a tus fotos para adjuntar certificados a novedades de ausencia.',
+        'COSP accede a tus fotos para adjuntar certificados a novedades de ausencia.',
     },
   },
   android: {
     package: 'com.cosp.guardia',
+    label: 'COSP',
     googleServicesFile: process.env.GOOGLE_SERVICES_JSON ?? './google-services.json',
     permissions: [
       'ACCESS_COARSE_LOCATION',
@@ -75,9 +77,9 @@ const config: ExpoConfig = {
     bundler: 'metro',
     output: 'static',
     favicon: './assets/favicon.png',
-    name: 'COSP Guardia',
+    name: 'COSP',
     shortName: 'COSP',
-    description: 'Portal del vigilador — turnos, fichada GPS y novedades.',
+    description: 'COSP — portal multi-rol: guardia, operaciones, RRHH y planificación.',
     themeColor: '#8B1A1A',
     backgroundColor: '#8B1A1A',
     display: 'standalone',
@@ -94,16 +96,16 @@ const config: ExpoConfig = {
       'expo-location',
       {
         locationWhenInUsePermission:
-          'COSP Guardia necesita tu ubicación para validar que estás en el puesto al marcar presente.',
+          'COSP necesita tu ubicación para validar que estás en el puesto al marcar presente.',
       },
     ],
     [
       'expo-image-picker',
       {
         photosPermission:
-          'COSP Guardia accede a tus fotos para adjuntar certificados a novedades de ausencia.',
+          'COSP accede a tus fotos para adjuntar certificados a novedades de ausencia.',
         cameraPermission:
-          'COSP Guardia usa la cámara para adjuntar certificados médicos a tus novedades.',
+          'COSP usa la cámara para adjuntar certificados médicos a tus novedades.',
       },
     ],
     [

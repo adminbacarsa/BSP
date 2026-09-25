@@ -128,7 +128,7 @@ export default function LoginScreen() {
                   { color: isDark ? palette.heroText : BACAR_RED_DEEP },
                 ]}
               >
-                COSP Guardia
+                COSP
               </Text>
               <Text style={[styles.brandSub, { color: palette.onSurfaceMuted }]}>
                 Centro de comando del vigilador
