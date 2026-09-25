@@ -191,7 +191,10 @@ export async function registrarPresencia(
     checkInCoords: coords || null,
     checkInRecordedAt: recordedAt || null,
     isLate,
-    lateMinutes: windowEval.lateMinutes ?? (isLate && scheduledStartMs ? Math.round((nowMs - scheduledStartMs) / 60000) : 0),
+    // Ops/VIGI no traen lateMinutes de la ventana: la tardanza siempre se mide contra el inicio planificado.
+    lateMinutes: isLate && scheduledStartMs
+      ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
+      : (windowEval.lateMinutes ?? 0),
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,

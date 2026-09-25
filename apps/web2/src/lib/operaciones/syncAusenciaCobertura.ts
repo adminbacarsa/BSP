@@ -461,6 +461,14 @@ export async function applyCoverage(
 
   // Espejo de functions: cierra el turno VACANTE_POR_AUSENCIA que crea onGuardAbsenceDetected.
   if (closeMode === 'FULL') {
+    if (titular.isSinCobertura === true || titular.vacanteEscalada === true) {
+      const realEmployee = String(titular.employeeId || '').trim() && titular.employeeId !== 'VACANTE';
+      batch.update(doc(db, 'turnos', titularId), {
+        isSinCobertura: false,
+        vacanteEscalada: false,
+        ...(realEmployee ? { isUnassigned: false } : {}),
+      });
+    }
     const empresaId = String(titular.empresaId || '').trim();
     const constraints = [
       where('causedByShiftId', '==', titularId),

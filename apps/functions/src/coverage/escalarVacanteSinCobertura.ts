@@ -107,6 +107,10 @@ export async function escalarVacanteSinCobertura(
   const shiftSnap = await shiftRef.get();
   const shift = shiftSnap.exists ? (shiftSnap.data() as Record<string, unknown>) : null;
 
+  if (shift && (shift.operacionallyCovered === true || String(shift.coverageStatus || '').toUpperCase() === 'COVERED')) {
+    return { escalated: false, retained: false, retentionShiftIds: [], supervisorsNotified: 0 };
+  }
+
   const empresaId = String(params.empresaId || shift?.empresaId || '').trim() || null;
   const objectiveId = String(params.objectiveId || shift?.objectiveId || '').trim() || null;
   const objectiveName = String(params.objectiveName || shift?.objectiveName || '').trim();

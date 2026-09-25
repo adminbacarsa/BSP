@@ -523,6 +523,24 @@ export async function applyCoverage(
   }
 
   if (closeMode === 'FULL') {
+    if (titular.isSinCobertura === true || titular.vacanteEscalada === true) {
+      const realEmployee = String(titular.employeeId || '').trim() && titular.employeeId !== 'VACANTE';
+      batch.update(db.collection('turnos').doc(titularId), {
+        isSinCobertura: false,
+        vacanteEscalada: false,
+        ...(realEmployee ? { isUnassigned: false } : {}),
+      });
+      const escRef = db
+        .collection('novedades')
+        .doc(`escalada_${titularId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128)}`);
+      if ((await escRef.get()).exists) {
+        batch.update(escRef, {
+          status: 'ATENDIDA',
+          resolved: true,
+          resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    }
     for (const ref of await findOpenAbsenceVacancyDocs(db, titularId)) {
       batch.update(ref, absenceVacancyClosePatch('COVERED', params.resolvedBy || 'COVERAGE'));
     }

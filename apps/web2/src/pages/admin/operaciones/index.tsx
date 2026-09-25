@@ -1111,7 +1111,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         ? (shift.vacancyBand ? `VACANTE · ${shift.vacancyBand}` : (shift.employeeName || 'VACANTE'))
         : (shift.employeeName || 'Desconocido');
     if (shift.isUnassigned && shift.isReportedToPlanning) name = name.replace('VACANTE: ', '').replace('VACANTE · ', '');
-    if (shift.isDescubierto || shift.isSinCobertura) {
+    if ((shift.isDescubierto || shift.isSinCobertura) && !shift.operacionallyCovered) {
         name = (shift.vacancyBand ? `DESCUBIERTO · ${shift.vacancyBand}` : 'DESCUBIERTO');
     }
     const refuerzoLabel = getRefuerzoLabel(shift);

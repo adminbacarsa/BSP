@@ -64,6 +64,18 @@ export function resolveCheckInUiStatus(
         tone: 'success',
       };
     }
+    const plannedStart = toDate(shift.startTime);
+    const realStart = toDate((shift as { realStartTime?: Parameters<typeof toDate>[0] }).realStartTime) ?? checkInAt;
+    const lateMin =
+      plannedStart && realStart ? Math.round((realStart.getTime() - plannedStart.getTime()) / 60000) : 0;
+    if (plannedStart && realStart && lateMin > 5) {
+      return {
+        status: 'present',
+        title: `Presente desde las ${formatTimeAr(realStart)}`,
+        subtitle: `Turno ${formatTimeAr(plannedStart)} · llegada tarde ${lateMin} min`,
+        tone: 'success',
+      };
+    }
     return {
       status: 'present',
       title: turnoStart ? `Tu turno comenzó a las ${formatTimeAr(turnoStart)}` : 'Presente confirmado',
