@@ -108,7 +108,13 @@ function runDeploy(projectRoot, args = []) {
 
   // Hosting en un comando aparte: con muchas functions el CLI puede agotar cuota y no llegar a publicarlo.
   const nonHosting = targets.filter((t) => t !== 'hosting');
-  if (nonHosting.length) run(`firebase deploy --only "${nonHosting.join(',')}" --force`, projectRoot);
+  const functionsDeployEnv =
+    withFunctions && !process.env.FUNCTIONS_DISCOVERY_TIMEOUT
+      ? { FUNCTIONS_DISCOVERY_TIMEOUT: '120' }
+      : {};
+  if (nonHosting.length) {
+    run(`firebase deploy --only "${nonHosting.join(',')}" --force`, projectRoot, functionsDeployEnv);
+  }
   if (flags.withHosting) run('firebase deploy --only hosting --force', projectRoot);
 
   // El CLI puede salir con 0 sin publicar el hosting (visto con errores de cuota en functions):

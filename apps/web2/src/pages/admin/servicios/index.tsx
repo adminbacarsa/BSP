@@ -65,6 +65,8 @@ import {
   buildServiciosCatalogClientGroups,
   buildServiciosObjectiveCatalog,
   monthBoundsYmd,
+  serviciosCatalogDisplaySla,
+  serviciosCatalogRowHasListableSla,
   slaOperationalInCalendarMonth,
   type ServiciosCatalogFilter,
   type ServiciosCatalogRow,
@@ -1696,19 +1698,23 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   const groupedServices = useMemo((): SrvGroupItem[] => {
     return objectiveCatalog
-      .filter((r) => r.hasSlaInMonth && r.allSlas.length > 0)
-      .map((r) => ({
-        key: r.key,
-        clientName: r.clientName,
-        objectiveName: r.objectiveName,
-        services: r.allSlas,
-      }));
-  }, [objectiveCatalog]);
+      .filter((r) => serviciosCatalogRowHasListableSla(r, srvCatalogFilter) && r.allSlas.length > 0)
+      .map((r) => {
+        const display = serviciosCatalogDisplaySla(r, srvCatalogFilter);
+        return {
+          key: r.key,
+          clientName: r.clientName,
+          objectiveName: r.objectiveName,
+          services: display ? [display, ...r.allSlas.filter((s) => s.id !== display.id)] : r.allSlas,
+        };
+      });
+  }, [objectiveCatalog, srvCatalogFilter]);
 
   const catalogStats = useMemo(() => ({
     totalObjectives: rawCatalog.length,
     withSla: rawCatalog.filter((r) => r.hasSlaInMonth).length,
-    withoutSla: rawCatalog.filter((r) => !r.hasSlaInMonth).length,
+    closedSla: rawCatalog.filter((r) => r.hasClosedSlaInMonth).length,
+    withoutSla: rawCatalog.filter((r) => !r.hasSlaInMonth && !r.hasClosedSlaInMonth).length,
   }), [rawCatalog]);
 
 
@@ -1809,7 +1815,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   }, [filteredServicesForKpi, kpiYear, kpiMonth, publishStatusMap]);
 
   const kpiCurrent = kpiHistory[kpiHistory.length - 1] ?? { active: 0, hours: 0, positions: 0, guards: 0, label: '' };
-  const kpiMetricsActive = Boolean(srvSearch.trim() || srvCatalogFilter !== 'all' || srvFeatureFilter !== 'all' || srvClientFilter !== 'all');
+  const kpiMetricsActive = Boolean(
+    srvSearch.trim()
+    || (srvCatalogFilter !== 'all' && srvCatalogFilter !== 'closed_sla')
+    || srvFeatureFilter !== 'all'
+    || srvClientFilter !== 'all',
+  );
   const kpiDisplay = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
   const kpiMaxHours = Math.max(...kpiHistory.map(m => m.hours), 1);
 
@@ -1964,11 +1975,20 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 rounded-xl p-1">
               {([
                 { v: 'all' as const, label: 'Todos' },
-                { v: 'with_sla' as const, label: '● Con servicio' },
+                { v: 'with_sla' as const, label: '● En operación' },
+                { v: 'closed_sla' as const, label: '🔒 Cerrados' },
                 { v: 'without_sla' as const, label: '○ Sin servicio' },
               ]).map(({ v, label }) => (
                 <button key={v} onClick={() => setSrvCatalogFilter(v)}
-                  title={v === 'with_sla' ? `Con SLA vigente en ${kpiCurrent.label}` : v === 'without_sla' ? `Objetivos sin SLA en ${kpiCurrent.label}` : undefined}
+                  title={
+                    v === 'with_sla'
+                      ? `Contrato abierto + cronograma publicado en ${kpiCurrent.label} (como Operaciones)`
+                      : v === 'closed_sla'
+                        ? `Contrato cerrado que cubre ${kpiCurrent.label} (solo lectura)`
+                        : v === 'without_sla'
+                          ? `Sin SLA operativo ni cerrado en ${kpiCurrent.label}`
+                          : undefined
+                  }
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvCatalogFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
                   {label}
@@ -2039,9 +2059,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             {listMode === 'clients'
               ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`
               : `${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`}
-            {` · ${catalogStats.withSla} con servicio · ${catalogStats.withoutSla} sin servicio`}
+            {` · ${catalogStats.withSla} en operación · ${catalogStats.closedSla} cerrados · ${catalogStats.withoutSla} sin servicio`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
-            {srvCatalogFilter !== 'all' && ` · ${srvCatalogFilter === 'with_sla' ? `con servicio en ${kpiCurrent.label}` : `sin servicio en ${kpiCurrent.label}`}`}
+            {srvCatalogFilter === 'with_sla' && ` · solo en operación (${kpiCurrent.label})`}
+            {srvCatalogFilter === 'closed_sla' && ` · solo cerrados (${kpiCurrent.label})`}
+            {srvCatalogFilter === 'without_sla' && ` · sin servicio en ${kpiCurrent.label}`}
+            {srvCatalogFilter === 'closed_sla' && (
+              <span className="text-slate-500 normal-case font-bold"> — KPIs arriba siguen siendo «en operación».</span>
+            )}
             {srvClientFilter !== 'all' && ` · cliente filtrado`}
             {srvFeatureFilter !== 'all' && ` · con ${srvFeatureFilter}`}
           </p>
@@ -2104,7 +2129,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                       {isExp && (
                         <div className="border-t border-slate-100 dark:border-slate-700 divide-y divide-slate-100 dark:divide-slate-700/60">
                           {cg.rows.map((row) => {
-                            if (!row.hasSlaInMonth || !row.activeSla) {
+                            const displaySla = serviciosCatalogDisplaySla(row, srvCatalogFilter);
+                            if (!displaySla) {
                               return (
                                 <div key={row.key} className="px-4 py-3 flex items-center gap-3 bg-amber-50/40 dark:bg-amber-950/20 border-l-4 border-amber-400">
                                   <div className="w-1.5 h-1.5 rounded-full shrink-0 bg-amber-400"/>
@@ -2116,7 +2142,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                       Sin servicio SLA en {kpiDisplay.label}
                                     </p>
                                   </div>
-                                  {canCreateService && (
+                                  {canCreateService && srvCatalogFilter !== 'closed_sla' && (
                                     <button
                                       onClick={() => openNewForObjective(row)}
                                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase transition-colors shrink-0"
@@ -2133,18 +2159,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               objectiveName: row.objectiveName,
                               services: row.allSlas,
                             };
-                            const currentSrv = row.activeSla || row.allSlas[0];
-                            const hasObjActive = row.allSlas.some((s) => isSlaContractActive(s.status));
+                            const currentSrv = displaySla;
+                            const isClosedRow = (currentSrv as { closed?: boolean }).closed === true;
+                            const hasObjActive = !isClosedRow && row.allSlas.some((s) => isSlaContractActive(s.status));
                             const slaR = getResolvedSlaForMargin(currentSrv);
                             const total = serviceTotals.get(serviceSlaRowKey(currentSrv)) ?? 0;
                             return (
                               <div key={group.key} className="px-4 py-3 flex items-center gap-3 hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors">
                                 {/* Indicador activo */}
-                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${hasObjActive ? 'bg-emerald-400' : 'bg-slate-300'}`}/>
+                                <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isClosedRow ? 'bg-slate-500' : hasObjActive ? 'bg-emerald-400' : 'bg-slate-300'}`}/>
                                 {/* Nombre objetivo */}
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-black text-slate-700 dark:text-white uppercase truncate flex items-center gap-1.5">
-                                    <MapPin size={9} className="text-indigo-400 shrink-0"/>{group.objectiveName}
+                                    <MapPin size={9} className={isClosedRow ? 'text-slate-400 shrink-0' : 'text-indigo-400 shrink-0'}/>{group.objectiveName}
                                   </p>
                                   <div className="flex items-center gap-3 mt-0.5 flex-wrap">
                                     <span className="text-[9px] font-mono font-bold text-slate-400">
@@ -2169,25 +2196,27 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                   <p className="text-[8px] font-bold text-slate-400 tabular-nums">Total: {total} h</p>
                                 </div>
                                 {/* Badge estado */}
-                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase shrink-0 ${hasObjActive ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                                  {hasObjActive ? 'Activo' : 'Inactivo'}
+                                <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-full uppercase shrink-0 ${isClosedRow ? 'bg-slate-700 text-white' : hasObjActive ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                                  {isClosedRow ? 'Cerrado' : hasObjActive ? 'Activo' : 'Inactivo'}
                                 </span>
                                 {/* Acciones */}
                                 <div className="flex gap-1 shrink-0">
-                                  <button onClick={() => handleNewVersion(currentSrv)} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
-                                    <Copy size={11}/>
-                                  </button>
+                                  {!isClosedRow && (
+                                    <button onClick={() => handleNewVersion(currentSrv)} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
+                                      <Copy size={11}/>
+                                    </button>
+                                  )}
                                   {canUpdateService && (
-                                  <button onClick={() => handleEdit(currentSrv)} title="Editar" className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
+                                  <button onClick={() => handleEdit(currentSrv)} title={isClosedRow ? 'Ver contrato (cerrado)' : 'Editar'} className="p-1.5 rounded-lg bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors">
                                     <Edit2 size={11}/>
                                   </button>
                                   )}
-                                  {canUpdateService && isSlaContractActive(currentSrv.status) && (
+                                  {!isClosedRow && canUpdateService && isSlaContractActive(currentSrv.status) && (
                                   <button onClick={() => currentSrv.id && handleCancelService(currentSrv.id)} title="Dar de baja (conserva turnos)" className="p-1.5 rounded-lg bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors">
                                     <Ban size={11}/>
                                   </button>
                                   )}
-                                  {canDeleteService && (
+                                  {!isClosedRow && canDeleteService && (
                                   <button onClick={() => currentSrv.id && handleDelete(currentSrv.id)} title="Eliminar" className="p-1.5 rounded-lg bg-rose-50 text-rose-500 hover:bg-rose-100 transition-colors">
                                     <Trash2 size={11}/>
                                   </button>
@@ -2217,7 +2246,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           {listMode === 'objectives' && !loading && objectiveCatalog.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {objectiveCatalog.map((row) => {
-                if (!row.hasSlaInMonth || !row.activeSla) {
+                const displaySla = serviciosCatalogDisplaySla(row, srvCatalogFilter);
+                if (!displaySla) {
                   return (
                     <div key={row.key} className="bg-white dark:bg-slate-800 rounded-xl border border-amber-200 dark:border-amber-800 shadow-sm overflow-hidden">
                       <div className="h-1 w-full bg-amber-400"/>
@@ -2231,7 +2261,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
                           Sin servicio SLA en {kpiDisplay.label}
                         </p>
-                        {canCreateService && (
+                        {canCreateService && srvCatalogFilter !== 'closed_sla' && (
                           <button
                             onClick={() => openNewForObjective(row)}
                             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase transition-colors"
@@ -2250,17 +2280,18 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                   objectiveName: row.objectiveName,
                   services: row.allSlas,
                 };
-                const currentSrv = row.activeSla || row.allSlas[0];
+                const currentSrv = displaySla;
+                const isClosedRow = (currentSrv as { closed?: boolean }).closed === true;
                 const orderedServices = currentSrv
                   ? [currentSrv, ...group.services.filter(s => s !== currentSrv)]
                   : group.services;
                 const latestSrv = currentSrv;
-                const hasActive = group.services.some(s => isSlaContractActive(s.status));
+                const hasActive = !isClosedRow && group.services.some(s => isSlaContractActive(s.status));
                 const isExpanded = expandedGroups.has(group.key);
                 return (
                   <div key={group.key} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-100 dark:border-slate-700 shadow-sm overflow-hidden">
                     {/* Accent */}
-                    <div className={`h-1 w-full ${hasActive ? 'bg-indigo-600' : 'bg-slate-300'}`}/>
+                    <div className={`h-1 w-full ${isClosedRow ? 'bg-slate-600' : hasActive ? 'bg-indigo-600' : 'bg-slate-300'}`}/>
                     <div className="p-4">
                       {/* Cabecera */}
                       <div className="flex items-start justify-between gap-2 mb-3">
@@ -2271,8 +2302,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                           </p>
                         </div>
                         <div className="flex items-center gap-1.5 shrink-0">
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${hasActive ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
-                            {hasActive ? 'Activo' : 'Inactivo'}
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase ${isClosedRow ? 'bg-slate-700 text-white' : hasActive ? 'bg-emerald-100 text-emerald-600' : 'bg-slate-100 text-slate-400'}`}>
+                            {isClosedRow ? 'Cerrado' : hasActive ? 'Activo' : 'Inactivo'}
                           </span>
                           {group.services.length > 1 && (
                             <span className="text-[9px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300">

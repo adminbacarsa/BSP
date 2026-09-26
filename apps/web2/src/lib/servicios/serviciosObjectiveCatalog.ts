@@ -6,6 +6,7 @@ import {
   filterSlasForPlanningContext,
   isSlaContractActive,
   isSlaOpenForOperations,
+  pickClosedSlaForPlanningMonth,
   pickSlaForPlanningMonth,
   planningMonthHasActiveSla,
   type SlaPlanningRow,
@@ -24,12 +25,16 @@ export type ServiciosCatalogRow = {
   clientName: string;
   objectiveId: string;
   objectiveName: string;
+  /** En operación (abierto + cronograma publicado) — mismo criterio que Ops/KPI. */
   hasSlaInMonth: boolean;
+  /** Contrato cerrado que cubre el mes (sin duplicar filas ya operativas). */
+  hasClosedSlaInMonth: boolean;
   activeSla: (ServiceSLA & { id: string }) | null;
+  closedSla: (ServiceSLA & { id: string }) | null;
   allSlas: (ServiceSLA & { id: string })[];
 };
 
-export type ServiciosCatalogFilter = 'all' | 'with_sla' | 'without_sla';
+export type ServiciosCatalogFilter = 'all' | 'with_sla' | 'without_sla' | 'closed_sla';
 export type ServiciosCatalogSort = 'alpha' | 'sla_desc' | 'status_active';
 
 export type ServiciosKpiSnapshot = {
@@ -100,11 +105,12 @@ function rowPassesFeatureFilter(
   featureFilter: 'all' | 'rotaciones' | 'condiciones',
 ): boolean {
   if (featureFilter === 'all') return true;
-  if (!row.hasSlaInMonth || !row.activeSla) return false;
+  const srv = row.activeSla || row.closedSla;
+  if ((!row.hasSlaInMonth && !row.hasClosedSlaInMonth) || !srv) return false;
   if (featureFilter === 'rotaciones') {
-    return Array.isArray(row.activeSla.serviceRotations) && row.activeSla.serviceRotations.length > 0;
+    return Array.isArray(srv.serviceRotations) && srv.serviceRotations.length > 0;
   }
-  return Array.isArray(row.activeSla.serviceRules) && row.activeSla.serviceRules.length > 0;
+  return Array.isArray(srv.serviceRules) && srv.serviceRules.length > 0;
 }
 
 export function applyServiciosCatalogFilters(
@@ -118,10 +124,29 @@ export function applyServiciosCatalogFilters(
   const featureFilter = opts?.featureFilter || 'all';
   return rows.filter((row) => {
     if (catalogFilter === 'with_sla' && !row.hasSlaInMonth) return false;
-    if (catalogFilter === 'without_sla' && row.hasSlaInMonth) return false;
+    if (catalogFilter === 'without_sla' && (row.hasSlaInMonth || row.hasClosedSlaInMonth)) return false;
+    if (catalogFilter === 'closed_sla' && !row.hasClosedSlaInMonth) return false;
     if (!rowPassesFeatureFilter(row, featureFilter)) return false;
     return true;
   });
+}
+
+/** SLA a mostrar en listado según filtro de catálogo. */
+export function serviciosCatalogDisplaySla(
+  row: ServiciosCatalogRow,
+  catalogFilter: ServiciosCatalogFilter = 'all',
+): (ServiceSLA & { id: string }) | null {
+  if (catalogFilter === 'closed_sla') return row.closedSla;
+  if (row.hasSlaInMonth) return row.activeSla;
+  if (catalogFilter === 'all' && row.hasClosedSlaInMonth) return row.closedSla;
+  return null;
+}
+
+export function serviciosCatalogRowHasListableSla(
+  row: ServiciosCatalogRow,
+  catalogFilter: ServiciosCatalogFilter = 'all',
+): boolean {
+  return !!serviciosCatalogDisplaySla(row, catalogFilter);
 }
 
 export function sortServiciosCatalogRows(
@@ -244,6 +269,12 @@ export function buildServiciosObjectiveCatalog(
       const vigenteSla = vigente && hasSlaInMonth
         ? (vigente as unknown as ServiceSLA & { id: string })
         : null;
+      const closedPick = pickClosedSlaForPlanningMonth(matchingRows, kpiYear, kpiMonth);
+      const closedSla =
+        published && closedPick && !hasSlaInMonth
+          ? (closedPick as unknown as ServiceSLA & { id: string })
+          : null;
+      const hasClosedSlaInMonth = !!closedSla;
 
       if (q) {
         const matchSearch =
@@ -260,7 +291,9 @@ export function buildServiciosObjectiveCatalog(
         objectiveId: obj.id,
         objectiveName: obj.name || obj.id || 'Sin nombre',
         hasSlaInMonth,
+        hasClosedSlaInMonth,
         activeSla: vigenteSla,
+        closedSla,
         allSlas: [...matching].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')),
       });
     }
@@ -359,6 +392,13 @@ export function buildServiciosCatalogClientGroups(
       group.withSla += 1;
       group.hasActive = true;
       const srv = row.activeSla;
+      if (srv) {
+        group.totalHoursKpi += getHours(srv);
+        group.totalPositions += (srv.positions || []).reduce((s, p) => s + (p.quantity || 1), 0);
+      }
+    } else if (row.hasClosedSlaInMonth) {
+      group.withSla += 1;
+      const srv = row.closedSla;
       if (srv) {
         group.totalHoursKpi += getHours(srv);
         group.totalPositions += (srv.positions || []).reduce((s, p) => s + (p.quantity || 1), 0);

@@ -231,6 +231,22 @@ export function pickSlaForPlanningMonth(
   return { vigente, hasExactMatch: !!vigente, fallback: vigente };
 }
 
+/** Contrato cerrado (`closed: true`) que cubre el mes — historial / auditoría en Servicios. */
+export function pickClosedSlaForPlanningMonth(
+  matching: SlaPlanningRow[],
+  year: number,
+  month: number,
+): SlaPlanningRow | null {
+  const overlapping = matching.filter(
+    (d) =>
+      (d as { closed?: unknown }).closed === true &&
+      isSlaContractActive(d.status) &&
+      slaCoversCalendarMonth(d.startDate, d.endDate, year, month),
+  );
+  if (overlapping.length === 0) return null;
+  return [...overlapping].sort((a, b) => toYyyyMmDd(b.startDate).localeCompare(toYyyyMmDd(a.startDate)))[0];
+}
+
 export type SlaDateRange = { start: string; end: string; closed?: boolean };
 
 /** Rangos de contratos (activos si hay) que tocan el mes; vacío = sin fecha → abierto. */
