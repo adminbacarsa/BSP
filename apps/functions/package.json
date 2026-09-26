@@ -2,6 +2,7 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint --ext .ts,.js src/",
+    "prebuild": "node ../../scripts/sync-hours-core-to-functions.mjs",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",
@@ -15,6 +16,7 @@
   },
   "main": "lib/index.js",
   "dependencies": {
+    "@cosp/hours-core": "file:./vendor/hours-core",
     "@afipsdk/afip.js": "^1.2.3",
     "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^10.0.0",

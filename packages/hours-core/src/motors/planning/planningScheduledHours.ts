@@ -1,0 +1,406 @@
+import { normalizePlanningPositionName, PLANNING_NON_BILLABLE_CODES } from './positionCoverageUnits';
+import { isDeploymentOrPoolShift, normalizeDeploymentShiftCode, shiftCountsForEmployeeCronoHours } from './deploymentRoles';
+import { isOpsCoverageHoursOnSourceDoc } from './coverageSemantics';
+import { isSinCoberturaShift } from './proformaVacancy';
+
+const SHIFT_HOURS_LOOKUP: Record<string, number> = {
+  M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, EN: 9,
+  F: 0, FF: 0, FP: 0, FT: 0, V: 0, L: 0, A: 0, E: 0, AA: 0, PG: 0, RET: 0, REF: 0, RFZ: 8, TURA: 8, ESC: 0, C: 8, GU: 8,
+};
+
+export { isDeploymentOrPoolShift, normalizeDeploymentShiftCode as normalizeShiftCode } from './deploymentRoles';
+
+function parseHHmmToHours(t: string | undefined | null): number | null {
+  if (!t || typeof t !== 'string') return null;
+  const m = t.trim().match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  return Number(m[1]) + Number(m[2]) / 60;
+}
+
+/** Duración en horas entre dos horarios HH:mm (puede cruzar medianoche). */
+export function hoursBetweenClockTimes(from: string, to: string): number | null {
+  const f = parseHHmmToHours(from);
+  const t = parseHHmmToHours(to);
+  if (f == null || t == null) return null;
+  let dur = t - f;
+  if (dur <= 0) dur += 24;
+  return Math.max(0, Math.min(dur, 24));
+}
+
+/**
+ * Horas billables adicionales por extensión o adelanto de cobertura (split / cierre SLA).
+ * El código base (E1, M, etc.) ya se suma aparte; esto es el tramo extra (segmentFrom→segmentTo).
+ */
+export function shiftCoverageExtensionExtraHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift || shift.isDeleted) return 0;
+
+  const fromRaw = shift.segmentFromTime
+    || (shift.isEarlyStart ? shift.adjustedStartTime : null);
+  const toRaw = shift.segmentToTime
+    || (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
+
+  const hasCoverageSegment = !!(
+    shift.coveragePackageId
+    || shift.coversPositionName
+    || shift.coverageSegmentRole
+    || shift.isExtended
+    || shift.isEarlyStart
+  );
+
+  if (fromRaw && toRaw && hasCoverageSegment) {
+    const from = String(fromRaw).slice(0, 5);
+    const to = String(toRaw).slice(0, 5);
+    const h = hoursBetweenClockTimes(from, to);
+    if (h != null && h >= 0.25 && h <= 6) {
+      const code = String(shift.code || '').toUpperCase();
+      const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
+      if (codeBase !== undefined && h >= codeBase - 0.5) {
+        return Math.max(0, Math.min(h - codeBase, 12));
+      }
+      return Math.min(h, 12);
+    }
+  }
+
+  const explicit = Number(shift.extExtraHours ?? shift.extensionExtraHours);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return Math.min(explicit, 12);
+  }
+
+  if (!shift.isExtended && !shift.isEarlyStart) return 0;
+
+  if (fromRaw && toRaw) {
+    const from = String(fromRaw).slice(0, 5);
+    const to = String(toRaw).slice(0, 5);
+    const h = hoursBetweenClockTimes(from, to);
+    if (h != null && h > 0) {
+      if (h < 0.25) return 0;
+      const code = String(shift.code || '').toUpperCase();
+      const codeBase = SHIFT_HOURS_LOOKUP[code] ?? slaHoursHint?.[code];
+      if (codeBase !== undefined && h >= codeBase - 0.5) {
+        return Math.max(0, Math.min(h - codeBase, 12));
+      }
+      if (h <= 5 && (shift.isExtended || shift.isEarlyStart)) return h;
+      if (codeBase !== undefined) {
+        return Math.max(0, Math.min(h - codeBase, 12));
+      }
+      return 0;
+    }
+  }
+
+  return 0;
+}
+
+/** Turnos de cobertura operativa (reten, ops) — no son crono planificado del objetivo. */
+export function isOperationalOriginShift(data: any): boolean {
+  const o = String(data?.origin || '').toUpperCase();
+  if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
+  if (data?.resolvedBy === 'OPERACIONES') return true;
+  return false;
+}
+
+/** Misma regla que el pie «Hs. Plan.» del planificador por objetivo. */
+export function isPlanningScheduledCoverageShift(t: any): boolean {
+  if (!t) return false;
+  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+  const status = String(t.status || '').toLowerCase();
+  if (status.includes('cancel') || status.includes('delet')) return false;
+  if (t.isFranco === true) return false;
+  if (isDeploymentOrPoolShift(t)) return false;
+  const code = normalizeDeploymentShiftCode(t?.code || t?.type);
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return false;
+  if (isOperationalOriginShift(t)) return false;
+  const origin = String(t.origin || '').trim().toUpperCase();
+  if (origin === 'INTERRUPTION') return false;
+  return true;
+}
+
+/** Pie «Hs. Plan.» / CRM — misma elegibilidad que planificador (sin filtros extra de cobertura SLA). */
+export function isPlanificadorPlannedHoursShift(t: any): boolean {
+  if (!t) return false;
+  if (isSinCoberturaShift(t)) return false;
+  if (String(t.type || '').toUpperCase() === 'NOVEDAD') return false;
+  const status = String(t.status || '').toLowerCase();
+  if (status.includes('cancel') || status.includes('delet')) return false;
+  if (isOperationalOriginShift(t)) return false;
+  if (!shiftCountsForEmployeeCronoHours(t)) return false;
+  return true;
+}
+
+function instantFromShiftClock(val: unknown): Date | null {
+  if (!val) return null;
+  if (typeof (val as { toDate?: () => Date }).toDate === 'function') {
+    const d = (val as { toDate: () => Date }).toDate();
+    return isNaN(d.getTime()) ? null : d;
+  }
+  const sec = (val as { seconds?: number; _seconds?: number }).seconds
+    ?? (val as { _seconds?: number })._seconds;
+  if (typeof sec === 'number' && sec > 0) return new Date(sec * 1000);
+  if (typeof val === 'string') {
+    const raw = val.trim();
+    if (/^\d{1,2}:\d{2}$/.test(raw)) return null;
+    const d = new Date(raw);
+    return isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+function durationHoursFromShiftTimestamps(shift: any): number {
+  const startAt = instantFromShiftClock(shift.startTime);
+  const endAt = instantFromShiftClock(shift.endTime);
+  if (startAt && endAt) {
+    let dur = (endAt.getTime() - startAt.getTime()) / 3600000;
+    if (dur <= 0) dur += 24;
+    if (dur > 0 && dur <= 24) return Math.round(dur * 100) / 100;
+  }
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const parseH = (t: string) => {
+      const raw = t.trim();
+      const hm = raw.match(/^(\d{1,2}):(\d{2})$/);
+      if (hm) return +hm[1] + +hm[2] / 60;
+      const iso = raw.match(/T(\d{2}):(\d{2})/);
+      return iso ? +iso[1] + +iso[2] / 60 : null;
+    };
+    const s = parseH(shift.startTime);
+    const e = parseH(shift.endTime);
+    if (s !== null && e !== null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      return Math.max(0, Math.min(dur, 24));
+    }
+  }
+  return 0;
+}
+
+/**
+ * Horas billables de un turno planificado: primero lo guardado en el cronograma (hours / start→end),
+ * después banda SLA del objetivo, y por último lookup CCT. Extensiones/adelantos se suman aparte.
+ */
+export function calcPlanningBillableShiftHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift) return 0;
+  if (isOpsCoverageHoursOnSourceDoc(shift)) return 0;
+  const code = String(shift.code || shift.type || '').toUpperCase();
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
+
+  const explicitExt = Number(shift.extExtraHours ?? shift.extensionExtraHours);
+  const hintBand = slaHoursHint?.[code];
+  const cctBand = SHIFT_HOURS_LOOKUP[code];
+  const bandHint = hintBand ?? cctBand;
+
+  const hasRealExtension = !!(
+    shift.isExtended
+    || shift.isEarlyStart
+    || shift.coverageSegmentRole === 'EXTENSION'
+    || shift.coverageSegmentRole === 'EARLY_START'
+    || (Number.isFinite(explicitExt) && explicitExt > 0)
+  );
+
+  const storedForBase = Number(shift.hours);
+  const tsDur = durationHoursFromShiftTimestamps(shift);
+  const isClienteRefuerzo = code === 'RFZ' || code === 'TURA';
+  const intrinsic =
+    isClienteRefuerzo && tsDur >= 0.25
+      ? tsDur
+      : storedForBase >= 0.5 ? Math.min(storedForBase, 24)
+        : tsDur >= 0.5 ? tsDur
+          : 0;
+
+  let codeBase = 0;
+  if (intrinsic >= 0.5) {
+    codeBase = intrinsic;
+  } else if (hintBand !== undefined && hintBand > 0) {
+    codeBase = hintBand;
+  } else if (cctBand !== undefined) {
+    codeBase = cctBand;
+  } else if (bandHint != null && bandHint > 0) {
+    codeBase = bandHint;
+  } else {
+    codeBase = 8;
+  }
+
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+  const extensionBillable = hasRealExtension || extra >= 0.25;
+
+  const finish = (base: number, ext: number) =>
+    Math.round((base + ext) * 100) / 100;
+
+  if (extensionBillable && bandHint != null && bandHint > 0) {
+    const baseBand = codeBase >= bandHint - 0.5 ? codeBase : bandHint;
+    const extraPart = Math.max(
+      extra,
+      Number.isFinite(explicitExt) && explicitExt > 0 ? explicitExt : 0,
+    );
+    return finish(baseBand, extraPart);
+  }
+
+  if (codeBase < 0.5 && bandHint != null && bandHint > 0) {
+    return finish(bandHint, extra);
+  }
+
+  const stored = Number(shift.hours);
+  if (!extensionBillable && intrinsic >= 0.5) {
+    return finish(intrinsic, extra);
+  }
+
+  if (!extensionBillable && bandHint != null && bandHint > 0) {
+    let base = Math.max(codeBase, bandHint);
+    if (stored >= 0.5) {
+      if (stored < bandHint && bandHint - stored < 0.75) {
+        base = bandHint;
+      } else if (stored > bandHint + 0.25) {
+        return Math.round(Math.min(stored, 24) * 100) / 100;
+      }
+    }
+    return finish(base, extra);
+  }
+
+  if (!extensionBillable && stored > codeBase + 0.25) {
+    return Math.round(Math.min(stored, 24) * 100) / 100;
+  }
+
+  if (!extensionBillable && bandHint != null && bandHint > 0 && codeBase + extra < bandHint - 0.05) {
+    if (bandHint - (codeBase + extra) < 0.75) {
+      return finish(bandHint, extra);
+    }
+  }
+
+  return finish(codeBase, extra);
+}
+
+/** Desglose jornada facturable (base SLA + tramo ext/adel). */
+export function planningShiftBillableBreakdown(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): { gross: number; base: number; extra: number } {
+  const gross = calcPlanningBillableShiftHours(shift, slaHoursHint);
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+  const base = Math.max(0, Math.round((gross - extra) * 100) / 100);
+  return { gross, base, extra: Math.round(extra * 100) / 100 };
+}
+
+/**
+ * Horas del tramo en el puesto cubierto (ext/adel): primero o después del turno “casa”.
+ * Usa segmentFrom→segmentTo del paquete split o extensión de celda.
+ */
+export function shiftCoverageSegmentBillableHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift || shift.isDeleted) return 0;
+  const cover = normalizePlanningPositionName(shift.coversPositionName || '');
+  if (!cover) return 0;
+
+  const isSegment = shift.isExtended
+    || shift.isEarlyStart
+    || shift.coverageSegmentRole === 'EXTENSION'
+    || shift.coverageSegmentRole === 'EARLY_START'
+    || shift.coveragePackageId;
+  if (!isSegment) return 0;
+
+  const fromRaw = shift.segmentFromTime
+    ?? (shift.isEarlyStart ? shift.adjustedStartTime : null);
+  const toRaw = shift.segmentToTime
+    ?? (shift.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
+
+  if (fromRaw && toRaw) {
+    const h = hoursBetweenClockTimes(String(fromRaw).slice(0, 5), String(toRaw).slice(0, 5));
+    if (h != null && h > 0) return Math.round(h * 100) / 100;
+  }
+
+  const explicit = Number(shift.extExtraHours ?? shift.extensionExtraHours);
+  if (Number.isFinite(explicit) && explicit > 0) return Math.min(explicit, 12);
+
+  return shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+}
+
+/**
+ * Imputación por puesto: tramo de cobertura → coversPositionName; jornada base → positionName.
+ * Totales por legajo siguen usando calcPlanningBillableShiftHours (sin doble conteo global).
+ */
+export function calcPlanningBillableHoursAttributedToPosition(
+  shift: any,
+  positionName: string,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift) return 0;
+  const code = String(shift.code || shift.type || '').toUpperCase();
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
+
+  const target = normalizePlanningPositionName(positionName);
+  const home = normalizePlanningPositionName(shift.positionName || '');
+  const cover = normalizePlanningPositionName(shift.coversPositionName || '');
+  const total = calcPlanningBillableShiftHours(shift, slaHoursHint);
+
+  const crossCover = !!cover && cover !== home;
+  if (!crossCover) {
+    if (!home) return total;
+    return home === target ? total : 0;
+  }
+
+  const atCover = shiftCoverageSegmentBillableHours(shift, slaHoursHint);
+  const atHome = Math.max(0, Math.round((total - atCover) * 100) / 100);
+
+  if (target === cover) return atCover;
+  if (home && target === home) return atHome;
+  return 0;
+}
+
+export function calcPlanificadorShiftHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  return calcPlanningBillableShiftHours(shift, slaHoursHint);
+}
+
+/**
+ * Horas que cierran contra «vendidas» del SLA mensual: jornada/banda vendida sin tramos
+ * extra de extensión o adelanto (cobertura operativa dentro del mismo contrato).
+ * CRM / liquidación puede seguir usando calcPlanningBillableShiftHours (base + extra).
+ */
+export function calcPlanningSlaReconciliationHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift || shift.isDeleted) return 0;
+  const total = calcPlanningBillableShiftHours(shift, slaHoursHint);
+  const extra = shiftCoverageExtensionExtraHours(shift, slaHoursHint);
+  if (extra <= 0) return total;
+  return Math.max(0, Math.round((total - extra) * 100) / 100);
+}
+
+export function calcPlanningScheduledShiftHours(
+  shift: any,
+  slaHoursHint?: Record<string, number>,
+): number {
+  if (!shift) return 0;
+  if (isDeploymentOrPoolShift(shift)) return 0;
+  const code = String(shift.code || '').toUpperCase();
+  if (PLANNING_NON_BILLABLE_CODES.has(code)) return 0;
+  const stored = Number(shift.hours);
+  if (stored > 0) return Math.min(stored, 24);
+  if (shift.startTime?.seconds && shift.endTime?.seconds) {
+    return Math.max(0, Math.min((shift.endTime.seconds - shift.endTime.seconds) / 3600, 24));
+  }
+  if (typeof shift.startTime === 'string' && typeof shift.endTime === 'string') {
+    const parseH = (t: string) => {
+      const m = t.match(/^(\d{1,2}):(\d{2})$/);
+      return m ? +m[1] + +m[2] / 60 : null;
+    };
+    const s = parseH(shift.startTime);
+    const e = parseH(shift.endTime);
+    if (s !== null && e !== null) {
+      let dur = e - s;
+      if (dur <= 0) dur += 24;
+      return Math.max(0, Math.min(dur, 24));
+    }
+  }
+  const fromLookup = SHIFT_HOURS_LOOKUP[code];
+  if (fromLookup !== undefined) return fromLookup;
+  if (slaHoursHint?.[code] !== undefined) return slaHoursHint[code];
+  return 8;
+}
