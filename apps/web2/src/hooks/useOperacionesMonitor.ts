@@ -1377,6 +1377,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     autoCloseShiftTx(s.id, {
                         status: 'COMPLETED', isCompleted: true, isPresent: false,
                         completedAt: serverTimestamp(), completedBy: 'Sistema',
+                        realEndTime: serverTimestamp(),
                         completionReason: 'AUTO_COVERAGE_COMPLETE',
                     }, empresaId).then(ok => {
                         if (ok) opsEventToast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);

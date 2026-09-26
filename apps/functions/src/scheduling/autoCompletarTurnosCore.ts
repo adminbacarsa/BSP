@@ -416,6 +416,8 @@ export async function runAutoCompletarTurnosPass(
 
   await completeBatch.commit();
 
+  if (!onlyOutId) completed += await closeZombieShifts(db, ctx, nowMs);
+
   for (const n of relevoFinishNotifs) {
     await notifyTurnoFinalizadoRelevo(db, n).catch((e) =>
       console.warn('[autoCompletarTurnos] TURNO_FINALIZADO:', (e as Error)?.message),
@@ -426,3 +428,36 @@ export async function runAutoCompletarTurnosPass(
 }
 
 export { loadPositionHasContinuity };
+
+/** Turnos que siguen "presentes" más de 12 h después de su fin (retenciones olvidadas, Demo): cierre al fin planificado, para revisión. */
+const ZOMBIE_AFTER_MS = 12 * 60 * 60 * 1000;
+
+async function closeZombieShifts(db: Firestore, ctx: AutoCompleteContext, nowMs: number): Promise<number> {
+  const snap = await db
+    .collection('turnos')
+    .where('isPresent', '==', true)
+    .where('endTime', '<=', Timestamp.fromMillis(nowMs - ZOMBIE_AFTER_MS))
+    .limit(200)
+    .get();
+  let n = 0;
+  const batch = db.batch();
+  for (const d of snap.docs) {
+    const x = d.data();
+    if (x.isCompleted === true || !ctx.isEnabled(x.empresaId)) continue;
+    if (isOpsCoverageHoursOnSourceDoc(x as Record<string, unknown>)) continue;
+    batch.update(d.ref, {
+      status: 'COMPLETED',
+      isCompleted: true,
+      isPresent: false,
+      isRetention: false,
+      realEndTime: x.realEndTime ?? x.endTime,
+      autoCompletedAt: Timestamp.fromMillis(nowMs),
+      autoCompletedBy: 'SYSTEM_SCHEDULER',
+      completionReason: 'AUTO_ZOMBIE_12H',
+      requiereRevision: true,
+    });
+    n++;
+  }
+  if (n) await batch.commit();
+  return n;
+}

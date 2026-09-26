@@ -141,6 +141,8 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
           if (s.isDeleted === true || s.isFranco === true) continue;
           if (!s.employeeId || s.employeeId === 'VACANTE' || s.isUnassigned === true) continue;
           if (s.coverageHoursOnSource === true) continue;
+          // Licencias / ausencias no son horas trabajadas aunque el turno figure "presente" (Demo).
+          if (['V', 'L', 'E', 'A', 'AA', 'PG', 'LT', 'F', 'FF', 'FP'].includes(String(s.code || '').toUpperCase())) continue;
           const realStart = toDate(s.realStartTime) || toDate(s.checkInTime);
           if (!realStart) continue;
           const plannedStart = toDate(s.startTime);

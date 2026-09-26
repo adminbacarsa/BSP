@@ -272,6 +272,8 @@ export const useAutoMonitor = ({
         // Cierre / retención / relevo al fin del turno los decide autoCompletarTurnos (servidor, continuidad SLA).
         // El navegador solo limpia zombies (>2h después del fin) y el fin de una extensión manual.
         if (s.manualRetentionType === 'extended') return msPastEnd > 2 * 60 * 1000;
+        // Un retenido cubre el puesto hasta que llegue el relevo: nunca lo cierra el navegador (tope 12 h en servidor).
+        if (s.isRetention) return false;
         return msPastEnd >= 2 * 60 * 60 * 1000;
       });
 
