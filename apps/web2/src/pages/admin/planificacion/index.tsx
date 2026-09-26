@@ -118,6 +118,7 @@ import {
     filterSlasForPlanningContext,
     formatSlaRangeHint,
     pickSlaForPlanningMonth,
+    pickClosedSlaForPlanningMonth,
     planningMonthHasActiveSla,
     slaBelongsToPlanningClient,
     buildPlanningPositionStructure,
@@ -4657,9 +4658,13 @@ export default function PlanificacionPage() {
 
                 const viewYear = currentDate.getFullYear();
                 const viewMonth = currentDate.getMonth();
-                const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                const srvForStructure = srv ?? fallback;
-                const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
+                const openPick = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
+                // Mes con contrato cerrado (vencido): se usa solo para ver puestos/horas; toda edición queda bloqueada.
+                const closedSla = openPick.vigente ? null : pickClosedSlaForPlanningMonth(matching, viewYear, viewMonth);
+                const srv = openPick.vigente ?? closedSla;
+                const hasExactMatch = openPick.hasExactMatch || !!closedSla;
+                const srvForStructure = srv ?? openPick.fallback;
+                const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSla;
 
                 if (!monthHasSla) {
                     if (matching.length > 0) {
@@ -4694,7 +4699,11 @@ export default function PlanificacionPage() {
                 setHasActiveSLA(monthHasSla);
                 setPositionStructure(structure);
                 setActivePlanningSlaRow(srvForStructure ?? null);
-                setPlanningSlaRanges(monthHasSla ? planningMonthSlaRanges(matching, viewYear, viewMonth) : null);
+                setPlanningSlaRanges(
+                    closedSla
+                        ? [{ start: toYyyyMmDd(closedSla.startDate) || '', end: toYyyyMmDd(closedSla.endDate) || '', closed: true }]
+                        : monthHasSla ? planningMonthSlaRanges(matching, viewYear, viewMonth) : null,
+                );
                 setActiveSlaPositionAssignments(mergeEncargadoIntoAssignments({
                     positionAssignments: srvForStructure?.positionAssignments,
                     encargadoEmployeeId: typeof srvForStructure?.encargadoEmployeeId === 'string' ? srvForStructure.encargadoEmployeeId : undefined,
@@ -4814,8 +4823,9 @@ export default function PlanificacionPage() {
                 for (const objId of selectedGrupo.objectiveIds) {
                     const matching = filterSlasForPlanningContext(allDocs, selectedClient, objId, clients, slaIdToObjId);
                     const { vigente: srv, hasExactMatch, fallback } = pickSlaForPlanningMonth(matching, viewYear, viewMonth);
-                    const srvForStructure = srv ?? fallback;
-                    const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth);
+                    const closedSlaG = srv ? null : pickClosedSlaForPlanningMonth(matching, viewYear, viewMonth);
+                    const srvForStructure = srv ?? fallback ?? closedSlaG;
+                    const monthHasSla = planningMonthHasActiveSla(matching, viewYear, viewMonth) || !!closedSlaG;
                     if (monthHasSla && srvForStructure) {
                         const objVend = resolvePlanningMonthSlaHours(srvForStructure, viewYear, viewMonth);
                         vendidasByObj[objId] = objVend;
@@ -9924,7 +9934,7 @@ export default function PlanificacionPage() {
             );
             const y = currentDate.getFullYear(), m = currentDate.getMonth();
             const { vigente, fallback } = pickSlaForPlanningMonth(matching, y, m);
-            const srv = vigente ?? fallback;
+            const srv = vigente ?? fallback ?? pickClosedSlaForPlanningMonth(matching, y, m);
             if (!srv) { toast.error('No se encontró ningún servicios_sla para este objetivo'); return; }
             const { id, ...rest } = srv;
             setSlaDebug({ id, data: rest });
