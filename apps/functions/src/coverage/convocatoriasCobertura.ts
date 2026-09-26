@@ -314,10 +314,6 @@ export async function findBestCandidate(
     clientId: conv.clientId,
     aptitudesRequeridas: conv.aptitudesRequeridas || [],
   };
-  // El ausente nunca cubre su propia vacante (ej. su turno anterior sigue abierto al detectarse la ausencia).
-  const absentEmployeeId = conv.shiftId
-    ? String((await db.collection('turnos').doc(conv.shiftId).get()).data()?.employeeId || '')
-    : '';
 
   if (type === 'EXTEND') {
     // Buscar turno activo en el objetivo que sea 8h (convertible a 12h)
@@ -331,7 +327,6 @@ export async function findBestCandidate(
     for (const d of active.docs) {
       const t = d.data();
       if (t.isCompleted === true) continue;
-      if (absentEmployeeId && t.employeeId === absentEmployeeId) continue;
       const code = String(t.code || '').toUpperCase();
       if (code !== 'M' && code !== 'T' && code !== 'N') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
@@ -368,7 +363,6 @@ export async function findBestCandidate(
     for (const d of next.docs) {
       const t = d.data();
       if (t.isCompleted === true || String(t.empresaId || '') !== String(conv.empresaId || '')) continue;
-      if (absentEmployeeId && t.employeeId === absentEmployeeId) continue;
       if (!t.employeeId || t.employeeId === 'VACANTE') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
       if (!empSnap.exists) continue;
