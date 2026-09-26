@@ -252,9 +252,10 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 ### Flujo 13 — Marcar / revertir ausencia Manual
 
 - **Marcar:** `marcarAusenciaOperaciones` → `MANUAL_OPS` (puede ausentar presente) → Flujo 1.
-- **Revertir:** solo hasta **T+60**; si hay ops_cov exige `cancelCoverage:true`. Limpia AA, anula ausencia, cancela conv, libera retención, opcional supersede ops_cov, marca PRESENT + isLate.
+- **Revertir:** solo hasta **T+60** (inicio planificado `startTime` + `REVERT_ABSENCE_WINDOW_MS`); si hay ops_cov exige `cancelCoverage:true`. Limpia AA, anula ausencia, cancela conv, libera retención, opcional supersede ops_cov, marca PRESENT + isLate.
+- **Tarjeta CC (AUSENTES):** pasado T+60 la X se reemplaza por **VENCIDO** aunque el turno siga en curso (`isRevertAbsenceExpired`, espejo del plazo del servidor); "→ VAC" se mantiene. Al terminar el turno, VENCIDO reemplaza todas las acciones.
 
-**Archivos:** `attendance/revertirAusencia.ts`, callables en `index.ts`
+**Archivos:** `attendance/revertirAusencia.ts`, callables en `index.ts`, `web2/src/lib/operaciones/revertAbsenceWindow.ts`
 
 ---
 

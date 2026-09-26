@@ -4,7 +4,8 @@
  * 1) Exportar (solo lectura prod, una vez):
  *    node scripts/cc-caso-real-snapshot.mjs export --empresa pruebas_sa --objective "Angelelli" --date 2026-09-26 --shift LplWKivQhBKowL3vVKTj --shift lXLFk2F33HRiAsQpmoqS --name caps-angelelli-2026-09-26
  * 2) Emulador Firestore activo (:8080) + `npm run build` en apps/functions.
- * 3) node scripts/eval-cc-casos-reales-emulator.mjs
+ * 3) node --experimental-strip-types scripts/eval-cc-casos-reales-emulator.mjs
+ *    (strip-types: importa helpers TS de web2 para validar paridad front/servidor)
  *
  * Cada caso recarga su snapshot en el proyecto `demo-cc-casos` (no toca los datos del lab).
  */
@@ -23,6 +24,11 @@ admin.initializeApp({ projectId });
 const db = admin.firestore();
 
 const CAPS = 'caps-angelelli-2026-09-26';
+const Timestamp = admin.firestore.Timestamp;
+const MIN = 60000;
+
+const { revertirAusenciaShift, REVERT_ABSENCE_WINDOW_MS } = requireFn('./lib/attendance/revertirAusencia.js');
+const webRevert = await import('../apps/web2/src/lib/operaciones/revertAbsenceWindow.ts');
 
 const results = [];
 function report(caseId, ok, detail) {
@@ -72,6 +78,43 @@ async function run() {
       'DIAZ cerrado por el navegador (AUTO_ZOMBIE_SHIFT_END) a las 17:00');
     report('T0.6', barrio?.realStartTime instanceof admin.firestore.Timestamp && barrio?.code === 'FT',
       'Barrionuevo FT con realStartTime 18:17');
+  });
+
+  // P4 — revertir ausencia: la tarjeta muestra VENCIDO con el mismo plazo que el servidor (PAST_T60).
+  await withCase(CAPS, async () => {
+    const titular = await shift('LplWKivQhBKowL3vVKTj');
+    const startMs = titular.startTime.toMillis();
+    report('P4.1', webRevert.REVERT_ABSENCE_WINDOW_MS === REVERT_ABSENCE_WINDOW_MS, 'mismo plazo front/servidor (60 min)');
+    report('P4.2', !webRevert.isRevertAbsenceExpired(titular, startMs + 45 * MIN),
+      'Quevedo 26/09 15:45 (T+45): la tarjeta ofrece revertir (X)');
+    report('P4.3', webRevert.isRevertAbsenceExpired(titular, startMs + 61 * MIN),
+      'Quevedo 26/09 16:01 (T+61): la tarjeta muestra VENCIDO');
+    report('P4.4', webRevert.isRevertAbsenceExpired(titular, startMs + 7 * 60 * MIN)
+      && titular.endTime.toMillis() > startMs + 7 * 60 * MIN,
+      '22:00 (turno aún en curso): VENCIDO — antes seguía la X hasta las 23:00');
+
+    const res = await revertirAusenciaShift(db, { shiftId: titular.id });
+    report('P4.5', res.success === false && res.reason === 'PAST_T60'
+      && webRevert.isRevertAbsenceExpired(titular, Date.now()),
+      `servidor hoy rechaza (${res.reason}) y la tarjeta coincide (VENCIDO)`);
+
+    for (const offsetMin of [59, 61]) {
+      const cloneId = `p4_parity_${offsetMin}`;
+      const nowMs = Date.now();
+      const clone = {
+        ...titular,
+        startTime: Timestamp.fromMillis(nowMs - offsetMin * MIN),
+        endTime: Timestamp.fromMillis(nowMs - offsetMin * MIN + 8 * 60 * MIN),
+      };
+      delete clone.id;
+      await db.collection('turnos').doc(cloneId).set(clone);
+      const expectedExpired = offsetMin > 60;
+      const r = await revertirAusenciaShift(db, { shiftId: cloneId });
+      const serverExpired = r.reason === 'PAST_T60';
+      const frontExpired = webRevert.isRevertAbsenceExpired(clone, Date.now());
+      report(`P4.6.${offsetMin}`, serverExpired === expectedExpired && frontExpired === expectedExpired,
+        `T+${offsetMin}: servidor ${serverExpired ? 'PAST_T60' : `ok (${r.reason || 'revertida'})`} · tarjeta ${frontExpired ? 'VENCIDO' : 'X'}`);
+    }
   });
 
   const failed = results.filter((r) => !r.ok);
