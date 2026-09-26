@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { collection, onSnapshot, query, where, type Unsubscribe } from 'firebase/firestore';
-import { getPortalCallables, getPortalFirebase } from '../lib/portal';
+import { getPortalFirebase } from '../lib/portal';
 import { mapPortalCallableError } from '../lib/mapPortalCallableError';
+import { respondCoberturaConvocatoria } from '../lib/respondCoberturaConvocatoria';
 import {
   isActiveCoberturaStatus,
   isLlegadaTardeConvocatoria,
@@ -126,20 +127,15 @@ export function useConvocatoriasCobertura(
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyId(convocatoriaId);
       try {
-        const { responderConvocatoriaCobertura } = getPortalCallables();
-        await responderConvocatoriaCobertura({
+        const result = await respondCoberturaConvocatoria({
           convocatoriaId,
           response,
+          responseChannel: 'BANNER_HOY',
           rejectionReason: opts?.rejectionReason,
           etaMinutes: opts?.etaMinutes,
         });
-        return {
-          ok: true,
-          message:
-            response === 'ACCEPTED'
-              ? 'Convocatoria aceptada'
-              : 'Respuesta enviada',
-        };
+        if (result.ok) return { ok: true, message: result.message };
+        return { ok: false, message: result.message };
       } catch (e) {
         return { ok: false, message: mapPortalCallableError(e) };
       } finally {

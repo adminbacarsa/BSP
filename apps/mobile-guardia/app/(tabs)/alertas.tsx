@@ -23,6 +23,7 @@ import type { Href } from 'expo-router';
 import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-core';
 import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
+import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
@@ -241,7 +242,32 @@ function AlertasScreenContent() {
               void (async () => {
                 setBusyId(n.id);
                 try {
-                  await respond(n.id, response);
+                  const convId = String(n.convocatoriaId || '').trim();
+                  if (!convId) {
+                    appAlert(
+                      'Cobertura',
+                      'No encontramos el id de la convocatoria. Abrí Hoy y respondé desde el banner.',
+                    );
+                    return;
+                  }
+                  const result = await respondCoberturaConvocatoria({
+                    convocatoriaId: convId,
+                    response,
+                    responseChannel: 'ALERTAS',
+                  });
+                  if (result.ok) {
+                    try {
+                      await respond(n.id, response);
+                    } catch {
+                      /* cobertura ya aplicada; ocultar alerta igual */
+                      await dismiss(n.id).catch(() => {});
+                    }
+                    return;
+                  }
+                  appAlert('Cobertura', result.message);
+                  if (result.dismissInbox) {
+                    await dismiss(n.id).catch(() => {});
+                  }
                 } catch {
                   appAlert('Error', 'No se pudo enviar la respuesta. Reintentá.');
                 } finally {
@@ -253,7 +279,7 @@ function AlertasScreenContent() {
         ],
       );
     },
-    [respond],
+    [respond, dismiss],
   );
 
   const onDismiss = useCallback(

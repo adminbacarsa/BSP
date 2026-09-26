@@ -23,6 +23,10 @@ export function createPortalCallables(functions: Functions) {
         response: 'ACCEPTED' | 'REJECTED';
         rejectionReason?: string;
         etaMinutes?: number;
+        /** Canal UI (audit P6 Plataforma; no-op si el server aún no lo persiste). */
+        responseChannel?: 'ALERTAS' | 'BANNER_HOY' | 'PUSH_ACTION';
+        deviceId?: string;
+        platform?: 'android' | 'ios' | 'web';
       },
       { success?: boolean }
     >(functions, PORTAL_CALLABLES.responderConvocatoriaCobertura),
