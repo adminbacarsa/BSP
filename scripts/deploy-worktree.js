@@ -145,6 +145,15 @@ const installWeb2 = spawnSync(npm, ['install', '--ignore-scripts'], {
   shell: process.platform === 'win32',
 });
 if (installWeb2.status !== 0) process.exit(installWeb2.status ?? 1);
+// La web /app se compila desde mobile-guardia: sin sus deps (expo) falla build:web.
+const mobileDir = path.join(DEPLOY_DIR, 'apps', 'mobile-guardia');
+console.log('\n▶ npm install apps/mobile-guardia ...');
+const installMobile = spawnSync(npm, ['install', '--ignore-scripts'], {
+  cwd: mobileDir,
+  stdio: 'inherit',
+  shell: process.platform === 'win32',
+});
+if (installMobile.status !== 0) process.exit(installMobile.status ?? 1);
 
 const deployFunctions = flags.withFunctions;
 if (deployFunctions) {
