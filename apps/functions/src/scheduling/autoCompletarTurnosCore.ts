@@ -416,7 +416,12 @@ export async function runAutoCompletarTurnosPass(
 
   await completeBatch.commit();
 
-  if (!onlyOutId) completed += await closeZombieShifts(db, ctx, nowMs);
+  if (!onlyOutId) {
+    completed += await closeZombieShifts(db, ctx, nowMs).catch((e) => {
+      console.warn('[autoCompletarTurnos] zombies:', (e as Error)?.message);
+      return 0;
+    });
+  }
 
   for (const n of relevoFinishNotifs) {
     await notifyTurnoFinalizadoRelevo(db, n).catch((e) =>
