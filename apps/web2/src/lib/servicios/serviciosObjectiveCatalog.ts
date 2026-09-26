@@ -76,6 +76,22 @@ export function slaOperationalInCalendarMonth(
   return isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
 }
 
+/** Contrato cerrado que cubre el mes + cronograma publicado (histórico, no cuenta en Ops). */
+export function slaClosedInCalendarMonth(
+  srv: ServiceSLA & { id: string },
+  year: number,
+  monthIndex0: number,
+  publishStatusMap: Record<string, boolean>,
+): boolean {
+  if ((srv as { closed?: unknown }).closed !== true) return false;
+  if (!isSlaContractActive(srv.status)) return false;
+  if (slaOperationalInCalendarMonth(srv, year, monthIndex0, publishStatusMap)) return false;
+  if (!slaCoversCalendarMonth(srv.startDate, srv.endDate, year, monthIndex0)) return false;
+  const oid = String(srv.objectiveId ?? '').trim();
+  if (!oid) return false;
+  return isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
+}
+
 export function monthBoundsYmd(year: number, month: number): { start: string; end: string } {
   const pad = (n: number) => String(n).padStart(2, '0');
   const lastDay = new Date(year, month + 1, 0).getDate();
@@ -313,16 +329,33 @@ export function computeServiciosKpiSnapshot(
   publishStatusMap: Record<string, boolean> = {},
 ): ServiciosKpiSnapshot {
   const mStart = new Date(year, month, 1);
+  const monthName = mStart.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+  const totals = accumulateServiciosKpiForMonth(services, year, month, publishStatusMap, (srv) =>
+    slaOperationalInCalendarMonth(srv, year, month, publishStatusMap),
+  );
+  return {
+    label: monthName.charAt(0).toUpperCase() + monthName.slice(1),
+    ...totals,
+  };
+}
+
+function accumulateServiciosKpiForMonth(
+  services: (ServiceSLA & { id: string })[],
+  year: number,
+  month: number,
+  publishStatusMap: Record<string, boolean>,
+  include: (srv: ServiceSLA & { id: string }) => boolean,
+): Omit<ServiciosKpiSnapshot, 'label'> {
+  const mStart = new Date(year, month, 1);
   const mEnd = new Date(year, month + 1, 0);
   const sk = `${year}-${String(month + 1).padStart(2, '0')}`;
-  const monthName = mStart.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
   let active = 0;
   let hours = 0;
   let positions = 0;
   let guards = 0;
 
   for (const srv of services) {
-    if (!slaOperationalInCalendarMonth(srv, year, month, publishStatusMap)) continue;
+    if (!include(srv)) continue;
     if (!srv.startDate) continue;
     const sStart = parseYmdToLocalDate((srv.startDate || '').trim().slice(0, 10));
     const sEnd = srv.endDate
@@ -345,12 +378,23 @@ export function computeServiciosKpiSnapshot(
     });
   }
 
+  return { active, hours: Math.round(hours), positions, guards };
+}
+
+export function computeServiciosKpiClosedSnapshot(
+  services: (ServiceSLA & { id: string })[],
+  year: number,
+  month: number,
+  publishStatusMap: Record<string, boolean> = {},
+): ServiciosKpiSnapshot {
+  const mStart = new Date(year, month, 1);
+  const monthName = mStart.toLocaleString('es-ES', { month: 'long', year: 'numeric' });
+  const totals = accumulateServiciosKpiForMonth(services, year, month, publishStatusMap, (srv) =>
+    slaClosedInCalendarMonth(srv, year, month, publishStatusMap),
+  );
   return {
     label: monthName.charAt(0).toUpperCase() + monthName.slice(1),
-    active,
-    hours: Math.round(hours),
-    positions,
-    guards,
+    ...totals,
   };
 }
 

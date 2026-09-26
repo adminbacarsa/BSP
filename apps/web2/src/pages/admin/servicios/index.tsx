@@ -64,6 +64,7 @@ import {
   applyServiciosCatalogFilters,
   buildServiciosCatalogClientGroups,
   buildServiciosObjectiveCatalog,
+  computeServiciosKpiClosedSnapshot,
   monthBoundsYmd,
   serviciosCatalogDisplaySla,
   serviciosCatalogRowHasListableSla,
@@ -1822,6 +1823,23 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     || srvClientFilter !== 'all',
   );
   const kpiDisplay = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
+
+  const kpiClosedCurrent = useMemo(
+    () =>
+      computeServiciosKpiClosedSnapshot(
+        services as (ServiceSLA & { id: string })[],
+        kpiYear,
+        kpiMonth,
+        publishStatusMap,
+      ),
+    [services, kpiYear, kpiMonth, publishStatusMap],
+  );
+  const kpiClosedFiltered = useMemo(
+    () => computeServiciosKpiClosedSnapshot(filteredServicesForKpi, kpiYear, kpiMonth, publishStatusMap),
+    [filteredServicesForKpi, kpiYear, kpiMonth, publishStatusMap],
+  );
+  const kpiClosedDisplay = kpiMetricsActive ? kpiClosedFiltered : kpiClosedCurrent;
+
   const kpiMaxHours = Math.max(...kpiHistory.map(m => m.hours), 1);
 
   const kpiPrevMonth = () => { if (kpiMonth === 0) { setKpiMonth(11); setKpiYear(y => y - 1); } else setKpiMonth(m => m - 1); };
@@ -2052,6 +2070,31 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 </div>
               ))}
             </div>
+            {kpiClosedDisplay.active > 0 && (
+              <div className="space-y-2 pt-1">
+                <p className="text-[9px] font-black uppercase text-slate-500 tracking-widest">Histórico — contratos cerrados (no operación)</p>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  {([
+                    { icon: Ban, color: '#475569', label: 'Cerrados en el mes', value: kpiClosedDisplay.active, unit: '' },
+                    { icon: Clock, color: '#64748b', label: 'Horas cerradas', value: kpiClosedDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
+                    { icon: Layers, color: '#64748b', label: 'Puestos', value: kpiClosedDisplay.positions, unit: '' },
+                    { icon: Users, color: '#64748b', label: 'Guardias ref.', value: kpiClosedDisplay.guards, unit: '' },
+                  ] as const).map(({ icon: Icon, color, label, value, unit }) => (
+                    <div key={label} className="bg-slate-50 dark:bg-slate-800/80 rounded-xl border border-slate-200 dark:border-slate-600 shadow-sm px-4 pt-3.5 pb-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className="p-1.5 rounded-lg shrink-0" style={{ background: color + '1a' }}>
+                          <Icon size={13} color={color} strokeWidth={2.5} />
+                        </div>
+                        <p className="text-[9px] font-black text-slate-500 uppercase tracking-wide leading-tight">{label}</p>
+                      </div>
+                      <p className="text-2xl font-black text-slate-700 dark:text-slate-200 leading-none">
+                        {value}{unit && <span className="text-xs font-bold text-slate-400 ml-1">{unit}</span>}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Contador */}
