@@ -1,103 +1,39 @@
 import type { Shift } from '@cosp/portal-types';
-import { toDate, isAbsentLikeShift, isCoverageHoursOnSourceShift } from '@cosp/portal-core';
+import * as hero from './heroShiftSelection';
+
+export const isRestFrancoShift = hero.isRestFrancoShift;
+export const isOperationsCoverageHeroShift = hero.isOperationsCoverageHeroShift;
 
 export function sortShiftsByStart(shifts: Shift[]): Shift[] {
-  return [...shifts].sort((a, b) => {
-    const ad = toDate(a.startTime)?.getTime() ?? 0;
-    const bd = toDate(b.startTime)?.getTime() ?? 0;
-    return ad - bd;
-  });
+  return hero.sortShiftsByStart(shifts);
 }
 
-function dateKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/** Retenido presente: sigue siendo hero aunque haya pasado endTime (espera relevo). */
 export function isActiveRetentionShift(shift: Shift | null | undefined): boolean {
-  if (!shift) return false;
-  const raw = shift as Shift & { isRetention?: boolean };
-  return (
-    raw.isRetention === true &&
-    shift.isPresent === true &&
-    shift.isCompleted !== true &&
-    !isAbsentLikeShift(shift as unknown as Record<string, unknown>)
-  );
-}
-
-function isHeroCandidate(s: Shift): boolean {
-  if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
-  // Registro EXT/ADV: no es hero ni fichable.
-  if (isCoverageHoursOnSourceShift(s as Shift & { coverageHoursOnSource?: boolean })) return false;
-  return true;
+  return hero.isActiveRetentionShift(shift);
 }
 
 export function pickTodayShiftAny(shifts: Shift[], now = new Date()): Shift | undefined {
-  const sorted = sortShiftsByStart(shifts);
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
-
-  return sorted.find((s) => {
-    if (!isHeroCandidate(s)) return false;
-    const start = toDate(s.startTime);
-    const end = toDate(s.endTime);
-    if (!start || start < startOfDay || start > endOfDay) return false;
-    // Al llegar a la hora de fin, ya no es el hero de hoy (pasa al próximo),
-    // salvo retención activa: el vigilador sigue en puesto esperando relevo.
-    if (end && end.getTime() <= now.getTime() && !isActiveRetentionShift(s)) return false;
-    return true;
-  });
+  return hero.pickTodayShiftAny(shifts, now);
 }
 
 export function pickTodayWorkShift(shifts: Shift[], now = new Date()): Shift | undefined {
-  const today = pickTodayShiftAny(shifts, now);
-  return today && !today.isFranco ? today : undefined;
+  return hero.pickTodayWorkShift(shifts, now);
 }
 
-/** Próximo turno de trabajo con inicio estrictamente posterior a `now` (incluye más tarde hoy). */
 export function pickNextShift(shifts: Shift[], now = new Date()): Shift | undefined {
-  const sorted = sortShiftsByStart(shifts);
-  const t = now.getTime();
-  return sorted.find((s) => {
-    if (s.isFranco || !isHeroCandidate(s)) return false;
-    const start = toDate(s.startTime);
-    return !!start && start.getTime() > t;
-  });
+  return hero.pickNextShift(shifts, now);
 }
 
-/** Turno de hoy ausente/cubierto (para hero "Ausente" en vez de Próximo turno). */
 export function pickTodayAbsentShift(shifts: Shift[], now = new Date()): Shift | undefined {
-  const sorted = sortShiftsByStart(shifts);
-  const startOfDay = new Date(now);
-  startOfDay.setHours(0, 0, 0, 0);
-  const endOfDay = new Date(now);
-  endOfDay.setHours(23, 59, 59, 999);
-  return sorted.find((s) => {
-    if (!isAbsentLikeShift(s as unknown as Record<string, unknown>)) return false;
-    const start = toDate(s.startTime);
-    if (!start || start < startOfDay || start > endOfDay) return false;
-    return true;
-  });
+  return hero.pickTodayAbsentShift(shifts, now);
 }
 
 export function isShiftInProgress(shift: Shift, now = new Date()): boolean {
-  const start = toDate(shift.startTime);
-  const end = toDate(shift.endTime);
-  if (!start) return false;
-  const t = now.getTime();
-  if (start.getTime() > t) return false;
-  if (end && end.getTime() <= t) return false;
-  return true;
+  return hero.isShiftInProgress(shift, now);
 }
 
 export function shiftStartsToday(shift: Shift, now = new Date()): boolean {
-  const start = toDate(shift.startTime);
-  return !!start && dateKey(start) === dateKey(now);
+  return hero.shiftStartsToday(shift, now);
 }
 
 export function shiftOwnedByEmployee(
@@ -105,11 +41,7 @@ export function shiftOwnedByEmployee(
   empDocId: string | null | undefined,
   authUid: string | null | undefined,
 ): boolean {
-  const id = String(shift.employeeId ?? '').trim();
-  if (!id) return false;
-  if (empDocId?.trim() && id === empDocId.trim()) return true;
-  if (authUid?.trim() && id === authUid.trim()) return true;
-  return false;
+  return hero.shiftOwnedByEmployee(shift, empDocId, authUid);
 }
 
 export function heroShift(
@@ -117,9 +49,5 @@ export function heroShift(
   now = new Date(),
   owner?: { empDocId?: string | null; authUid?: string | null },
 ): Shift | undefined {
-  const scoped =
-    owner?.empDocId || owner?.authUid
-      ? shifts.filter((s) => shiftOwnedByEmployee(s, owner.empDocId, owner.authUid))
-      : shifts;
-  return pickTodayWorkShift(scoped, now) ?? pickNextShift(scoped, now);
+  return hero.heroShift(shifts, now, owner);
 }
