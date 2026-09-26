@@ -332,6 +332,10 @@ export async function findBestCandidate(
       const t = d.data();
       if (t.isCompleted === true) continue;
       if (absentEmployeeId && t.employeeId === absentEmployeeId) continue;
+      // Extiende quien termina justo antes de la vacante: nunca un turno de otro día que quedó abierto.
+      const vacStartMs = (conv.startTime as admin.firestore.Timestamp | undefined)?.toMillis?.() ?? 0;
+      const candEndMs = (t.endTime as admin.firestore.Timestamp | undefined)?.toMillis?.() ?? 0;
+      if (!vacStartMs || !candEndMs || Math.abs(candEndMs - vacStartMs) > 90 * 60 * 1000) continue;
       const code = String(t.code || '').toUpperCase();
       if (code !== 'M' && code !== 'T' && code !== 'N') continue;
       const empSnap = await db.collection('empleados').doc(t.employeeId).get();
