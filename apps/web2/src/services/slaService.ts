@@ -232,6 +232,14 @@ export interface ServiceSLA {
   cancelledBy?: string;
   cancelledByUid?: string;
   cancelReason?: string;
+  closed?: boolean;
+  closedReason?: string;
+  /** Modo de facturación prefactura (default PLANIFICADO). */
+  /** null / ausente = Auto: contrato comercial abierto → EJECUTADO, si no PLANIFICADO. */
+  billingMode?: 'PLANIFICADO' | 'EJECUTADO' | 'FIJO' | 'ORDEN_COMPRA' | null;
+  billingFixedMonthlyHours?: number;
+  billingFixedMonthlyAmount?: number;
+  billingPurchaseOrderId?: string;
 }
 
 /**

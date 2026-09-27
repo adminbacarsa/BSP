@@ -331,6 +331,8 @@ export async function loadClientTurnosForClient(
     byId.set(id, { id, ...data, clientId: rowCid || client.id });
   };
 
+  // Carga por rango de startTime. Los ops_cov no tienen scheduleDate: si la query
+  // fuera por esa fecha, la cobertura no entraría en la prefactura.
   // Índice (clientId, startTime) ya existe en firestore.indexes.json.
   // Pad de 1 día para cubrir turnos nocturnos que empiezan fuera del rango exacto.
   const padStart = new Date(start); padStart.setDate(padStart.getDate() - 1);

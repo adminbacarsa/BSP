@@ -330,6 +330,14 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Órdenes de compra de prefactura (cliente externo). Query: empresaId + clientId.
+    match /ordenes_compra/{id} {
+      allow read: if tenantAdminRead() || isSuperAdmin();
+      allow create: if tenantAdminCreate();
+      allow update: if tenantAdminUpdate();
+      allow delete: if tenantAdminDelete();
+    }
+
     match /planificacion_estados/{docId} {
       allow read: if tenantAdminRead() || request.auth != null;
       // Asignación de puestos / estado mensual: admin autenticado con empresa sellada.

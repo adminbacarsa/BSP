@@ -14,6 +14,8 @@ import { formatMoney } from '@/lib/crm/proformaFormat';
 import { formatHoursColonTotal, shortDayHeader } from '@/lib/crm/proformaGrid';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
 import type { ProformaDetailMode } from '@/lib/crm/proformaMode';
+import type { ProformaBillingRow } from '@/lib/crm/slaBilling.types';
+import { billingModeLabel } from '@/lib/crm/slaBilling';
 
 export type ProformaPanelProps = {
   client: any;
@@ -47,6 +49,11 @@ export type ProformaPanelProps = {
   onExportCsv: () => void;
   onExportExcel: () => void;
   exporting?: boolean;
+  billingRows?: ProformaBillingRow[];
+  adicionalHours?: number;
+  contractDetailMode?: 'planned' | 'executed';
+  contractBillingMixed?: boolean;
+  detailModeOverride?: boolean;
 };
 
 export default function ProformaPanel(props: ProformaPanelProps) {
@@ -82,6 +89,11 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     onExportCsv,
     onExportExcel,
     exporting,
+    billingRows = [],
+    adicionalHours = 0,
+    contractDetailMode = 'planned',
+    contractBillingMixed = false,
+    detailModeOverride = false,
   } = props;
 
   const periodLabel = proformaBundle?.periodLabel || `${monthsEs[proformaMonth]?.toUpperCase()}/${proformaYear}`;
@@ -173,9 +185,15 @@ export default function ProformaPanel(props: ProformaPanelProps) {
             <p className="text-[10px] font-black uppercase text-slate-400 mb-3">Importes estimados</p>
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
-                <span className="text-slate-500 font-bold">Horas base ({proformaBase})</span>
+                <span className="text-slate-500 font-bold">Horas contrato (modo SLA)</span>
                 <span className="font-black text-slate-800">{baseHours} hs</span>
               </div>
+              {adicionalHours > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500 font-bold">Adicionales (eventos / refuerzos)</span>
+                  <span className="font-black text-amber-700">{adicionalHours} hs</span>
+                </div>
+              )}
               <div className="flex justify-between text-sm">
                 <span className="text-slate-500 font-bold">Valor hora</span>
                 <span className="font-black text-slate-800">{formatMoney(Number(proformaHourlyValue) || 0)}</span>
@@ -219,11 +237,17 @@ export default function ProformaPanel(props: ProformaPanelProps) {
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Detalle horas</label>
               <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaDetailMode} onChange={(e) => onDetailModeChange(e.target.value as ProformaDetailMode)}>
-                <option value="auto">Auto</option>
+                <option value="auto">Auto (contrato)</option>
                 <option value="planned">Planificado</option>
                 <option value="executed">Ejecutado (fichaje)</option>
                 <option value="sin_cobertura">Sin cobertura (ops)</option>
               </select>
+              {detailModeOverride && (
+                <p className="text-[9px] font-bold text-amber-700 mt-1">Override manual: no coincide con el modo del contrato ({contractDetailMode === 'executed' ? 'Ejecutado' : 'Planificado'}).</p>
+              )}
+              {contractBillingMixed && proformaDetailMode === 'auto' && (
+                <p className="text-[9px] font-bold text-amber-700 mt-1">Contratos con modos distintos — revisá facturación por objetivo abajo.</p>
+              )}
             </div>
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Vista / PDF</label>
@@ -242,6 +266,34 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               </select>
             </div>
           </div>
+          {billingRows.length > 0 && (
+            <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+              <table className="w-full text-[10px]">
+                <thead>
+                  <tr className="bg-slate-100 text-slate-500 uppercase font-black">
+                    <th className="text-left p-2">Objetivo</th>
+                    <th className="text-left p-2">Modo</th>
+                    <th className="text-right p-2">Prestado</th>
+                    <th className="text-right p-2">Facturable</th>
+                    <th className="text-right p-2">Auth. OC</th>
+                    <th className="text-right p-2">Saldo OC</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {billingRows.map((r) => (
+                    <tr key={`${r.objectiveId}-${r.slaId || ''}`} className="border-t border-slate-100">
+                      <td className="p-2 font-bold text-slate-800">{r.objectiveName}</td>
+                      <td className="p-2 font-bold text-indigo-600">{billingModeLabel(r.billingMode)}{r.ocNumber ? ` · ${r.ocNumber}` : ''}</td>
+                      <td className="p-2 text-right tabular-nums">{r.prestadoHours}</td>
+                      <td className="p-2 text-right font-black tabular-nums">{r.billableHours}</td>
+                      <td className="p-2 text-right tabular-nums">{r.authorizedHours ?? '—'}</td>
+                      <td className="p-2 text-right tabular-nums">{r.balanceHours ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Valor hora (ARS)</label>

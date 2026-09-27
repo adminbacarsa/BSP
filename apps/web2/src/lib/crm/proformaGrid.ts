@@ -20,10 +20,12 @@ import {
   proformaGridUsesExecutedTimes,
   resolveProformaDetailMode,
   turnoEligibleForProformaGrid,
+  type AutoExecutedResolver,
   type ProformaDetailMode,
 } from './proformaMode';
 import type { SlaExclusionContext } from './slaExclusionForPlanned';
 import { isTurnoOnSlaExcludedSlot } from './slaExclusionForPlanned';
+import type { FranjaBillableResult, FranjaContribution } from './executedBillableHoursByFranja';
 
 const SHIFT_CODE_HOURS: Record<string, number> = { M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, C: 8, GU: 8, EN: 9, RFZ: 8, TURA: 8 };
 const FRANCO_CODES = new Set(['F', 'FF', 'FP', 'FT']);
@@ -187,11 +189,61 @@ export type BuildProformaGridsOpts = {
   start: Date;
   end: Date;
   mode: ProformaDetailMode;
-  useExecutedForAuto: boolean;
+  useExecutedForAuto: AutoExecutedResolver;
   slaExclusion?: SlaExclusionContext;
   slaCodeHoursHint?: Record<string, number>;
   slaCodeHoursHintByObjective?: Record<string, Record<string, number>>;
+  /**
+   * Franjas del período (mismo cálculo que el contador Ejecutado). Si viene, los objetivos
+   * en modo ejecutado se pintan con los aportes por legajo de cada franja y no por fichada.
+   */
+  executedFranja?: FranjaBillableResult;
 };
+
+type FranjaCellInput = {
+  objectiveId: string;
+  objectiveName: string;
+  positionName: string;
+  date: string;
+  contribution: FranjaContribution;
+};
+
+/** Aportes por legajo de las franjas en modo ejecutado, dentro de las columnas de la grilla. */
+function executedFranjaCells(opts: BuildProformaGridsOpts, dateColumns: string[]): FranjaCellInput[] {
+  if (!opts.executedFranja) return [];
+  const inRange = new Set(dateColumns);
+  const out: FranjaCellInput[] = [];
+  for (const b of opts.executedFranja.buckets) {
+    if (!inRange.has(b.date)) continue;
+    const ctx = { objectiveId: b.objectiveId, objectiveName: b.objectiveName };
+    if (!proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto, ctx)) continue;
+    for (const tit of b.titulares) {
+      for (const contribution of tit.contributions) {
+        if (contribution.hours <= 0) continue;
+        out.push({ objectiveId: b.objectiveId, objectiveName: b.objectiveName, positionName: b.positionName, date: b.date, contribution });
+      }
+    }
+  }
+  return out;
+}
+
+function franjaNightHours(c: FranjaContribution): number {
+  const night = c.pieces.reduce((a, p) => a + getNightDuration(new Date(p.start), new Date(p.end)), 0);
+  return Math.min(night, c.hours);
+}
+
+function addHoursToCell(prev: ProformaDayCell | undefined, date: string, hours: number, night: number): ProformaDayCell {
+  const base = prev || emptyCell(date);
+  const total = base.hours + hours;
+  const nightTotal = base.nightHours + night;
+  return {
+    date,
+    display: formatHoursHm(total),
+    hours: total,
+    dayHours: Math.max(0, total - nightTotal),
+    nightHours: nightTotal,
+  };
+}
 
 function slaOverlapsRange(sla: { startDate?: string; endDate?: string }, start: Date, end: Date): boolean {
   const sd = String(sla.startDate ?? '').trim().slice(0, 10);
@@ -224,7 +276,6 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     employees: Record<string, ProformaEmployeeRow>;
   }> = {};
 
-  const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto);
   const sinCoberturaMode = resolveProformaDetailMode(opts.mode, opts.useExecutedForAuto) === 'sin_cobertura';
   const aliases = opts.objectiveAliases || {};
   const hint = opts.slaCodeHoursHint;
@@ -233,6 +284,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
   const cellGroups = new Map<string, ProformaTurnoInput[]>();
 
   for (const t of opts.turnos) {
+    if (opts.executedFranja && proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto, t)) continue;
     if (!turnoEligibleForProformaGrid(t, opts.mode, opts.useExecutedForAuto)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart) continue;
@@ -269,6 +321,7 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
 
     const t = coalescePlannedTurnosForCell(groupTurnos, cellHint) as ProformaTurnoInput;
     if (!t) continue;
+    const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto, t);
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
     const plannedStart = toDateSafe(t.startTime);
@@ -320,6 +373,29 @@ export function buildProformaObjectiveGrids(opts: BuildProformaGridsOpts): Profo
     const cell = cellFromShift(dateKey, code, start, end, hrs);
     const row = byObjective[objId].employees[empId];
     row.days[dateKey] = cell;
+  }
+
+  for (const f of executedFranjaCells(opts, dateColumns)) {
+    const rowCtx = { objectiveId: f.objectiveId, objectiveName: f.objectiveName, clientId: opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(f.objectiveId || 'sin-id');
+    const objName = formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases));
+    const empId = String(f.contribution.employeeId || 'unknown');
+    const meta = resolveEmployeeMeta(opts.empMeta, empId, f.contribution.employeeName);
+    const empName = meta.name || 'Sin nombre';
+    if (isProformaVacancyEmployee({ employeeId: empId, name: empName })) continue;
+    byObjective[objId] ||= { objectiveId: objId, objectiveName: objName, employees: {} };
+    if (!objName.startsWith('Objetivo sin nombre')) byObjective[objId].objectiveName = objName;
+    byObjective[objId].employees[empId] ||= {
+      employeeId: empId,
+      legajo: meta.legajo || '—',
+      name: empName,
+      days: Object.fromEntries(dateColumns.map((d) => [d, emptyCell(d)])),
+      totalHours: 0,
+      totalDay: 0,
+      totalNight: 0,
+    };
+    const row = byObjective[objId].employees[empId];
+    row.days[f.date] = addHoursToCell(row.days[f.date], f.date, f.contribution.hours, franjaNightHours(f.contribution));
   }
 
   for (const sla of opts.slaInRange || []) {
@@ -402,7 +478,6 @@ export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): Profor
     positions: Record<string, ProformaPositionRow>;
   }> = {};
 
-  const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto);
   const sinCoberturaMode = resolveProformaDetailMode(opts.mode, opts.useExecutedForAuto) === 'sin_cobertura';
   const aliases = opts.objectiveAliases || {};
   const hint = opts.slaCodeHoursHint;
@@ -411,6 +486,7 @@ export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): Profor
   const cellGroups = new Map<string, ProformaTurnoInput[]>();
 
   for (const t of opts.turnos) {
+    if (opts.executedFranja && proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto, t)) continue;
     if (!turnoEligibleForProformaGrid(t, opts.mode, opts.useExecutedForAuto)) continue;
     const plannedStart = toDateSafe(t.startTime);
     if (!plannedStart) continue;
@@ -452,6 +528,7 @@ export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): Profor
 
     const t = coalescePlannedTurnosForCell(groupTurnos, cellHint) as ProformaTurnoInput;
     if (!t) continue;
+    const useExecuted = proformaGridUsesExecutedTimes(opts.mode, opts.useExecutedForAuto, t);
 
     const code = String(t.code || t.type || '').trim().toUpperCase();
     const plannedStart = toDateSafe(t.startTime);
@@ -509,6 +586,27 @@ export function buildProformaPositionGrids(opts: BuildProformaGridsOpts): Profor
       dayHours: nextDay,
       nightHours: nextNight,
     };
+  }
+
+  for (const f of executedFranjaCells(opts, dateColumns)) {
+    const rowCtx = { objectiveId: f.objectiveId, objectiveName: f.objectiveName, clientId: opts.clientId };
+    const objId = resolveCanonicalObjectiveId(rowCtx, aliases) || String(f.objectiveId || 'sin-id');
+    const objName = formatProformaObjectiveLabel(objId, resolveObjectiveDisplayName(rowCtx, aliases));
+    const empId = String(f.contribution.employeeId || 'unknown');
+    const meta = resolveEmployeeMeta(opts.empMeta, empId, f.contribution.employeeName);
+    if (isProformaVacancyEmployee({ employeeId: empId, name: meta.name || '' })) continue;
+    const posKey = String(f.positionName || '').trim() || 'Sin puesto';
+    byObjective[objId] ||= { objectiveId: objId, objectiveName: objName, positions: {} };
+    if (!objName.startsWith('Objetivo sin nombre')) byObjective[objId].objectiveName = objName;
+    byObjective[objId].positions[posKey] ||= {
+      positionName: posKey,
+      days: Object.fromEntries(dateColumns.map((d) => [d, emptyCell(d)])),
+      totalHours: 0,
+      totalDay: 0,
+      totalNight: 0,
+    };
+    const row = byObjective[objId].positions[posKey];
+    row.days[f.date] = addHoursToCell(row.days[f.date], f.date, f.contribution.hours, franjaNightHours(f.contribution));
   }
 
   for (const sla of opts.slaInRange || []) {

@@ -82,6 +82,8 @@ export type ProformaEvento = {
   totalHoras: number;
 };
 
+export type { ProformaBillingRow } from './slaBilling.types';
+
 export type ProformaExportBundle = {
   clientName: string;
   legalName: string;
@@ -99,6 +101,14 @@ export type ProformaExportBundle = {
   /** Controla vista UI y export PDF/CSV/Excel. */
   layoutMode?: ProformaLayoutMode;
   eventos?: ProformaEvento[];
+  /** Facturación por contrato (modo, OC, fijo). */
+  billingSummary?: import('./slaBilling.types').ProformaBillingRow[];
+  /** Modo de detalle que imponen los contratos cuando UI = auto. */
+  contractDetailMode?: 'planned' | 'executed';
+  contractBillingMixed?: boolean;
+  detailModeOverride?: boolean;
+  /** Horas adicionales (eventos + refuerzos puntuales) fuera del modo base. */
+  adicionalHours?: number;
   /** Trazabilidad de lectura Firestore (solo UI pre-factura). */
   sourceDebug?: {
     clientId: string;

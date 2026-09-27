@@ -80,6 +80,15 @@ import { SlaTrazabilidadPanel } from '@/components/servicios/SlaTrazabilidadPane
 import { SlaShiftDateMultiSelect } from '@/components/servicios/SlaShiftDateMultiSelect';
 import { SlaPositionShiftCalendar } from '@/components/servicios/SlaPositionShiftCalendar';
 import { validateCustomShiftDates } from '@/lib/servicios/slaShiftCalendarUtils';
+import {
+  autoBillingModeLabel,
+  billingModeLabel,
+  clientHasOpenCommercialContract,
+  hasExplicitSlaBillingMode,
+  normalizeSlaBillingMode,
+} from '@/lib/crm/slaBilling';
+import type { PurchaseOrder, SlaBillingMode } from '@/lib/crm/slaBilling.types';
+import { purchaseOrderService } from '@/services/purchaseOrderService';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -154,8 +163,48 @@ export default function ServiciosSLAPage() {
   const [form, setForm] = useState<ServiceSLA>({
     clientId: '', clientName: '', objectiveId: '', objectiveName: '',
     startDate: firstDay, endDate: lastDay,
-    positions: [], totalMonthlyHours: 0, status: 'active'
+    positions: [], totalMonthlyHours: 0, status: 'active',
+    billingMode: 'PLANIFICADO',
   });
+  const [slaFormPurchaseOrders, setSlaFormPurchaseOrders] = useState<PurchaseOrder[]>([]);
+
+  useEffect(() => {
+    if (view !== 'form' || !form.clientId) {
+      setSlaFormPurchaseOrders([]);
+      return;
+    }
+    let cancelled = false;
+    void purchaseOrderService
+      .getByClient(form.clientId, { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) })
+      .then((rows) => {
+        if (!cancelled) setSlaFormPurchaseOrders(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setSlaFormPurchaseOrders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, form.clientId, empresaId, migracionCompleta]);
+
+  const [slaFormClientHasOpenContract, setSlaFormClientHasOpenContract] = useState(false);
+  useEffect(() => {
+    if (view !== 'form' || !form.clientId) {
+      setSlaFormClientHasOpenContract(false);
+      return;
+    }
+    let cancelled = false;
+    void getDocs(query(collection(db, 'contracts'), where('clientId', '==', form.clientId)))
+      .then((snap) => {
+        if (!cancelled) setSlaFormClientHasOpenContract(clientHasOpenCommercialContract(snap.docs.map((d) => d.data())));
+      })
+      .catch(() => {
+        if (!cancelled) setSlaFormClientHasOpenContract(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, form.clientId]);
 
   const [showPositionModal, setShowPositionModal] = useState(false);
   const [positionForm, setPositionForm] = useState<ServicePosition>({
@@ -2872,8 +2921,71 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                  <div data-action="sla-form-cliente"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.clientId} onChange={handleClientChange}><option value="">Seleccionar...</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                  <div data-action="sla-form-objetivo"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.objectiveId} onChange={handleObjectiveChange} disabled={!form.clientId}><option value="">Seleccionar...</option>{availableObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                  <div className="grid grid-cols-2 gap-4">
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
+                 </div>
+
+                 <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+                   <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Facturación prefactura</p>
+                   <div>
+                     <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Modo</label>
+                     <select
+                       disabled={isClosedContract}
+                       className="w-full p-3 bg-white dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60"
+                       value={hasExplicitSlaBillingMode(form) ? normalizeSlaBillingMode(form.billingMode) : ''}
+                       onChange={(e) => setForm({ ...form, billingMode: e.target.value ? e.target.value as SlaBillingMode : null })}
+                     >
+                       <option value="">{autoBillingModeLabel({ clientHasOpenContract: slaFormClientHasOpenContract })}</option>
+                       {(['PLANIFICADO', 'EJECUTADO', 'FIJO', 'ORDEN_COMPRA'] as SlaBillingMode[]).map((m) => (
+                         <option key={m} value={m}>{billingModeLabel(m)}</option>
+                       ))}
+                     </select>
+                   </div>
+                   {normalizeSlaBillingMode(form.billingMode) === 'FIJO' && (
+                     <div className="grid grid-cols-2 gap-3">
+                       <div>
+                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Hs fijas / mes</label>
+                         <input
+                           type="number"
+                           min={0}
+                           disabled={isClosedContract}
+                           className="w-full p-3 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold disabled:opacity-60"
+                           value={form.billingFixedMonthlyHours ?? ''}
+                           onChange={(e) => setForm({ ...form, billingFixedMonthlyHours: e.target.value === '' ? undefined : Number(e.target.value) })}
+                         />
+                       </div>
+                       <div>
+                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Monto fijo / mes (ARS)</label>
+                         <input
+                           type="number"
+                           min={0}
+                           disabled={isClosedContract}
+                           className="w-full p-3 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold disabled:opacity-60"
+                           value={form.billingFixedMonthlyAmount ?? ''}
+                           onChange={(e) => setForm({ ...form, billingFixedMonthlyAmount: e.target.value === '' ? undefined : Number(e.target.value) })}
+                         />
+                       </div>
+                     </div>
+                   )}
+                   {normalizeSlaBillingMode(form.billingMode) === 'ORDEN_COMPRA' && (
+                     <div>
+                       <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Orden de compra</label>
+                       <select
+                         disabled={isClosedContract}
+                         className="w-full p-3 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold disabled:opacity-60"
+                         value={form.billingPurchaseOrderId || ''}
+                         onChange={(e) => setForm({ ...form, billingPurchaseOrderId: e.target.value || undefined })}
+                       >
+                         <option value="">— Seleccionar OC del cliente —</option>
+                         {slaFormPurchaseOrders.map((o) => (
+                           <option key={o.id} value={o.id}>
+                             {o.ocNumber} ({o.startDate} → {o.endDate}{o.authorizedHours != null ? ` · ${o.authorizedHours} hs` : ''})
+                           </option>
+                         ))}
+                       </select>
+                       <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente.</p>
+                     </div>
+                   )}
                  </div>
 
                  {/* Días excluidos — puesto completo, o bandas de un puesto */}

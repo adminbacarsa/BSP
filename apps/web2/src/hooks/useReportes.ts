@@ -758,7 +758,11 @@ const getNightDuration = (start: Date, end: Date) => {
     return durationMins / 60;
 };
 
-/** Calculadora CCT de horas teóricas/reales por legajo (misma regla que Reportes → Liquidación). */
+/**
+ * Calculadora CCT de horas teóricas/reales por legajo (misma regla que Reportes → Liquidación).
+ * No recibe el ciclo: sumá solo turnos ya recortados al rango
+ * (liquidación 26→25 vía `hoursPeriod`; prefactura/KPI usan mes calendario).
+ */
 export function calculateLiquidationHoursStats(
     shifts: any[],
     holidaysMap: Record<string, boolean> = {},

@@ -112,7 +112,18 @@ import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, buildProformaPositionGrids } from '@/lib/crm/proformaGrid';
 import type { ProformaLayoutMode } from '@/lib/crm/proformaTypes';
-import { turnoEligibleForProformaGrid, type ProformaDetailMode } from '@/lib/crm/proformaMode';
+import { turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
+import {
+  autoDetailUsesExecutedForObjective,
+  buildProformaBillingRows,
+  clientHasOpenCommercialContract,
+  resolveClientDefaultProformaDetailMode,
+  sumBillableContractHours,
+} from '@/lib/crm/slaBilling';
+import type { ProformaBillingRow, PurchaseOrder } from '@/lib/crm/slaBilling.types';
+import { purchaseOrderService } from '@/services/purchaseOrderService';
+import { isSolicitudRefuerzoExtraVendible } from '@/lib/refuerzo/refuerzoDisplay';
+import { executedBillableHoursByFranja } from '@/lib/crm/executedBillableHoursByFranja';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
 import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
@@ -129,10 +140,7 @@ import {
   calculateMonthlyBreakdown,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
-  CRM_PLANNED_SHIFT_HOURS,
-  getDurationHours,
   isCrmPlannedEligibleShift,
-  isCrmWorkingShiftCode,
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
   sumPlannedHoursForClient,
@@ -152,8 +160,10 @@ import {
   applyRefuerzoHorasVendidasToGrids,
   applyRefuerzoHorasVendidasToPositionGrids,
   applyRefuerzoHorasVendidasToBreakdown,
+  calcRefuerzoHorasVendidas,
   countEstructuralesEnRango,
   solicitudIdsBilledInRange,
+  solicitudRefuerzoInRange,
 } from '@/lib/refuerzo/refuerzoProforma';
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
@@ -206,9 +216,6 @@ function resolveCanonicalClientIdForCrmRow(
   return null;
 }
 
-const SHIFT_CODE_HOURS = CRM_PLANNED_SHIFT_HOURS;
-const isWorkingCode = isCrmWorkingShiftCode;
-
 const sumContractSlaHours = (
   positions: any[],
   startStr: string,
@@ -254,6 +261,79 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
 type RangeMode = CrmRangeMode;
 type ViewMode = 'grid' | 'list';
 type ProformaBase = 'requested' | 'planned' | 'executed';
+
+function ProformaOcQuickPanel(props: {
+  clientId?: string;
+  empresaId: string;
+  orders: PurchaseOrder[];
+  onRefresh: () => void | Promise<void>;
+}) {
+  const { clientId, empresaId, orders, onRefresh } = props;
+  const [ocNumber, setOcNumber] = useState('');
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [authorizedHours, setAuthorizedHours] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  if (!clientId) return null;
+
+  const handleCreate = async () => {
+    if (!ocNumber.trim() || !startDate || !endDate) {
+      toast.error('Completá número de OC y vigencia');
+      return;
+    }
+    setSaving(true);
+    try {
+      await purchaseOrderService.create(
+        {
+          empresaId,
+          clientId,
+          ocNumber: ocNumber.trim(),
+          startDate,
+          endDate,
+          status: 'ACTIVE',
+          authorizedHours: authorizedHours ? Number(authorizedHours) : undefined,
+          currency: 'ARS',
+        },
+        { empresaId },
+      );
+      toast.success('Orden de compra creada');
+      setOcNumber('');
+      setAuthorizedHours('');
+      await onRefresh();
+    } catch (e) {
+      console.error(e);
+      toast.error('No se pudo crear la OC');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mb-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 space-y-3">
+      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Órdenes de compra (Ministerio / OC externa)</p>
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <input className="col-span-2 p-2 rounded-lg border text-xs font-bold" placeholder="Nº OC" value={ocNumber} onChange={(e) => setOcNumber(e.target.value)} />
+        <input type="date" className="p-2 rounded-lg border text-xs font-bold" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+        <input type="date" className="p-2 rounded-lg border text-xs font-bold" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+        <input className="p-2 rounded-lg border text-xs font-bold" placeholder="Hs auth." value={authorizedHours} onChange={(e) => setAuthorizedHours(e.target.value)} />
+        <button type="button" disabled={saving} onClick={() => void handleCreate()} className="col-span-2 md:col-span-5 py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-black uppercase disabled:opacity-50">
+          Agregar OC
+        </button>
+      </div>
+      {orders.length > 0 && (
+        <ul className="text-xs space-y-1">
+          {orders.map((o) => (
+            <li key={o.id} className="font-bold text-slate-700 dark:text-slate-200">
+              OC {o.ocNumber} · {o.startDate} → {o.endDate}
+              {o.authorizedHours != null ? ` · ${o.authorizedHours} hs` : ''}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
 
 export default function CRMPage() {
   const router = useRouter();
@@ -382,6 +462,12 @@ export default function CRMPage() {
   const [proformaExporting, setProformaExporting] = useState(false);
   const [empMetaMap, setEmpMetaMap] = useState<Record<string, { legajo?: string; name?: string }>>({});
   const [expandedKeys, setExpandedKeys] = useState<Record<string, boolean>>({});
+  const [clientPurchaseOrders, setClientPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [proformaBillingRows, setProformaBillingRows] = useState<ProformaBillingRow[]>([]);
+  const [proformaAdicionalHours, setProformaAdicionalHours] = useState(0);
+  const [proformaContractDetailMode, setProformaContractDetailMode] = useState<'planned' | 'executed'>('planned');
+  const [proformaContractBillingMixed, setProformaContractBillingMixed] = useState(false);
+  const [proformaDetailModeOverride, setProformaDetailModeOverride] = useState(false);
 
   useEffect(() => {
     setSelectedClient(null);
@@ -395,6 +481,25 @@ export default function CRMPage() {
       setCurrentUserName(u?.displayName || u?.email || 'Operador');
     });
   }, []);
+
+  useEffect(() => {
+    if (!selectedClient?.id) {
+      setClientPurchaseOrders([]);
+      return;
+    }
+    let cancelled = false;
+    void purchaseOrderService
+      .getByClient(selectedClient.id, { empresaId, scopeEmpresa })
+      .then((rows) => {
+        if (!cancelled) setClientPurchaseOrders(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setClientPurchaseOrders([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedClient?.id, empresaId, scopeEmpresa]);
 
   const crmRestoredRef = useRef(false);
   useEffect(() => {
@@ -1946,6 +2051,30 @@ export default function CRMPage() {
       });
       const slaInRange = [...servicesForProforma, ...objetivoStubs];
 
+      const vigenteSlasForBilling = pickVigenteSlasForPeriod(
+        servicesForProforma,
+        start,
+        end,
+        selectedClient.id,
+      );
+      const clientHasOpenContract = clientHasOpenCommercialContract(clientContracts);
+      const billingDefault = resolveClientDefaultProformaDetailMode(
+        vigenteSlasForBilling as unknown as import('@/services/slaService').ServiceSLA[],
+        { clientHasOpenContract },
+      );
+      setProformaContractDetailMode(billingDefault.mode);
+      setProformaContractBillingMixed(billingDefault.mixed);
+      const contractDetailMode = billingDefault.mode;
+      setProformaDetailModeOverride(
+        proformaDetailMode !== 'auto'
+        && proformaDetailMode !== 'sin_cobertura'
+        && proformaDetailMode !== contractDetailMode,
+      );
+      const autoExecutedForObjective = (objectiveId: unknown, objectiveName: unknown) =>
+        autoDetailUsesExecutedForObjective(billingDefault, objectiveId, objectiveName);
+      const useExecutedForAuto: AutoExecutedResolver = (t: any) =>
+        autoExecutedForObjective(t?.objectiveId, t?.objectiveName);
+
       const objectiveAliases = buildProformaObjectiveAliases(
         selectedClient.id,
         selectedClient.objetivos || [],
@@ -1992,18 +2121,14 @@ export default function CRMPage() {
       };
 
       const plannedCellGroups = new Map<string, { rows: any[]; objectiveName: string; positionName: string; dateKey: string }>();
+      const breakdownObjectiveIdByKey = new Map<string, string>();
 
       turnosEnriched.forEach((t) => {
         if (t.isDeleted === true) return;
         if (!isCrmPlannedEligibleShift(t, slaExclusion)) return;
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return;
-        const code = String((t.code || t.type || '')).trim().toUpperCase();
-
         const plannedStart = toDateSafe(t.startTime);
         if (!plannedStart) return;
-        const plannedEnd = toDateSafe(t.endTime);
-        const realStart = toDateSafe(t.realStartTime);
-        const realEnd = toDateSafe(t.realEndTime);
 
         const rowCtx = { objectiveId: t.objectiveId, objectiveName: t.objectiveName, clientId: selectedClient.id };
         const objectiveName = formatProformaObjectiveLabel(
@@ -2011,6 +2136,9 @@ export default function CRMPage() {
           resolveObjectiveDisplayName(rowCtx, objectiveAliases),
         );
         const positionName = (t.positionName || 'Sin puesto').toString().trim();
+        if (t.objectiveId && !breakdownObjectiveIdByKey.has(normalize(objectiveName))) {
+          breakdownObjectiveIdByKey.set(normalize(objectiveName), String(t.objectiveId));
+        }
 
         const dateKey = resolveTurnoScheduleDateKey(t) || getDateKeyInTimezone(plannedStart!);
         const periodStartKey = getDateKeyInTimezone(start);
@@ -2023,17 +2151,24 @@ export default function CRMPage() {
           bucket.rows.push(t);
           plannedCellGroups.set(cellKey, bucket);
         }
+      });
 
-        if (realStart && realStart >= start && realStart <= end) {
-          const execEnd = realEnd || plannedEnd;
-          if (isWorkingCode(code) && execEnd) {
-            let hrs = getDurationHours(realStart, execEnd);
-            if (SHIFT_CODE_HOURS[code]) hrs = SHIFT_CODE_HOURS[code];
-            if (!Number.isFinite(hrs) || hrs <= 0 || hrs > 24) hrs = SHIFT_CODE_HOURS[code] || 8;
-            executed.total += hrs;
-            add(executed, objectiveName, positionName, getDateKeyInTimezone(realStart), hrs);
-          }
+      const franja = executedBillableHoursByFranja(turnosEnriched as any[], {
+        startYmd: getDateKeyInTimezone(start),
+        endYmd: getDateKeyInTimezone(end),
+      });
+      franja.buckets.forEach((b) => {
+        if (b.billable <= 0) return;
+        const rowCtx = { objectiveId: b.objectiveId, objectiveName: b.objectiveName, clientId: selectedClient.id };
+        const objectiveName = formatProformaObjectiveLabel(
+          String(b.objectiveId || ''),
+          resolveObjectiveDisplayName(rowCtx, objectiveAliases),
+        );
+        if (b.objectiveId && !breakdownObjectiveIdByKey.has(normalize(objectiveName))) {
+          breakdownObjectiveIdByKey.set(normalize(objectiveName), String(b.objectiveId));
         }
+        executed.total += b.billable;
+        add(executed, objectiveName, b.positionName, b.date, b.billable);
       });
 
       plannedCellGroups.forEach(({ rows, objectiveName, positionName, dateKey }) => {
@@ -2081,13 +2216,23 @@ export default function CRMPage() {
       const refuerzoHorasVendidas = applyRefuerzoHorasVendidasToBreakdown(planned, solicitudesRefuerzo, { start, end }, normalize);
       applyRefuerzoHorasVendidasToBreakdown(executed, solicitudesRefuerzo, { start, end }, normalize);
 
+      const autoBreakdownByContract = () => {
+        const byObjective: Record<string, any> = {};
+        const keys = new Set([...Object.keys(planned.byObjective), ...Object.keys(executed.byObjective)]);
+        keys.forEach((k) => {
+          const label = planned.byObjective[k]?.objectiveName ?? executed.byObjective[k]?.objectiveName;
+          const src = autoExecutedForObjective(breakdownObjectiveIdByKey.get(k), label) ? executed : planned;
+          if (src.byObjective[k]) byObjective[k] = src.byObjective[k];
+        });
+        return { byObjective };
+      };
       const breakdownSource = proformaDetailMode === 'sin_cobertura'
         ? sinCobertura
         : proformaDetailMode === 'executed'
           ? executed
           : proformaDetailMode === 'planned'
             ? planned
-            : (clientContracts || []).some((c) => c.type === 'abierto') ? executed : planned;
+            : autoBreakdownByContract();
       const breakdown = Object.values(breakdownSource.byObjective)
         .map((o: any) => ({
           ...o,
@@ -2137,7 +2282,6 @@ export default function CRMPage() {
       }
       setEmpMetaMap(empMeta);
 
-      const useExecutedForAuto = (clientContracts || []).some((c) => c.type === 'abierto');
       const turnosRaw = turnosEnriched.filter((t) => {
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return false;
         if (!turnoEligibleForProformaGrid(t, proformaDetailMode, useExecutedForAuto)) return false;
@@ -2158,6 +2302,7 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
+        executedFranja: franja,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
       const positionGrids = applyRefuerzoHorasVendidasToPositionGrids(
@@ -2174,11 +2319,48 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
+        executedFranja: franja,
       }),
         solicitudesRefuerzo,
         { start, end },
       );
-      const vigenteSlas = pickVigenteSlasForPeriod(servicesForProforma, start, end, selectedClient.id);
+      const vigenteSlas = vigenteSlasForBilling;
+      const periodStartYmd = getDateKeyInTimezone(start);
+      const periodEndYmd = getDateKeyInTimezone(end);
+      const plannedByObjectiveId: Record<string, number> = {};
+      const plannedByObjectiveName: Record<string, number> = {};
+      Object.values(planned.byObjective).forEach((o: any) => {
+        plannedByObjectiveName[normalize(o.objectiveName)] = Math.round(o.totalHours);
+      });
+      for (const srv of vigenteSlas) {
+        const oid = String(srv.objectiveId ?? '').trim();
+        const key = normalize(String(srv.objectiveName ?? ''));
+        if (oid) plannedByObjectiveId[oid] = plannedByObjectiveName[key] ?? 0;
+      }
+      const billingRows = buildProformaBillingRows({
+        vigenteSlas: vigenteSlas as unknown as (import('@/services/slaService').ServiceSLA & { id: string })[],
+        purchaseOrders: clientPurchaseOrders,
+        periodStartYmd,
+        periodEndYmd,
+        plannedByObjectiveId,
+        plannedByObjectiveName,
+        franjaByObjectiveId: franja.byObjectiveId,
+        franjaByObjectiveName: franja.byObjectiveName,
+        clientHasOpenContract,
+      });
+      setProformaBillingRows(billingRows);
+
+      let adicionalRefuerzoHours = 0;
+      const padYmd = (n: number) => String(n).padStart(2, '0');
+      const refStart = `${start.getFullYear()}-${padYmd(start.getMonth() + 1)}-${padYmd(start.getDate())}`;
+      const refEnd = `${end.getFullYear()}-${padYmd(end.getMonth() + 1)}-${padYmd(end.getDate())}`;
+      for (const sol of solicitudesRefuerzo) {
+        if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
+        if (!['APROBADA', 'ASIGNADA', 'COMPLETADA'].includes(sol.estado)) continue;
+        if (!solicitudRefuerzoInRange(sol, refStart, refEnd)) continue;
+        adicionalRefuerzoHours += calcRefuerzoHorasVendidas(sol);
+      }
+
       const slaHoursByObjectiveId: Record<string, number> = {};
       for (const srv of vigenteSlas) {
         const oid = String((srv as any).objectiveId ?? '').trim();
@@ -2230,6 +2412,9 @@ export default function CRMPage() {
         const servicios = Array.from(ev.srvs.values());
         return { eventoId, eventoNombre: ev.nombre, servicios, totalHoras: servicios.reduce((a: number, s: any) => a + s.totalHoras, 0) };
       });
+      const eventosAdicionalHours = eventosProforma.reduce((a, e) => a + e.totalHoras, 0);
+      const adicionalHoursTotal = Math.round(adicionalRefuerzoHours + eventosAdicionalHours);
+      setProformaAdicionalHours(adicionalHoursTotal);
 
       setProformaBundle({
         clientName: selectedClient.name || '',
@@ -2246,6 +2431,14 @@ export default function CRMPage() {
         positionGrids,
         layoutMode: proformaLayoutMode,
         eventos: eventosProforma.length > 0 ? eventosProforma : undefined,
+        billingSummary: billingRows,
+        contractDetailMode,
+        contractBillingMixed: billingDefault.mixed,
+        detailModeOverride:
+          proformaDetailMode !== 'auto'
+          && proformaDetailMode !== 'sin_cobertura'
+          && proformaDetailMode !== contractDetailMode,
+        adicionalHours: adicionalHoursTotal,
         sourceDebug: {
           clientId: selectedClient.id,
           turnosLoaded: turnosList.length,
@@ -2255,7 +2448,6 @@ export default function CRMPage() {
         },
       });
 
-      const modeIsExecuted = proformaDetailMode === 'executed' || (proformaDetailMode === 'auto' && useExecutedForAuto);
       const modeIsSinCobertura = proformaDetailMode === 'sin_cobertura';
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
       const plannedBase = Math.round(sumPlannedHoursForClient(
@@ -2268,9 +2460,7 @@ export default function CRMPage() {
       ));
       setProformaTotals({
         planned: plannedBase + Math.round(refuerzoHorasVendidas),
-        executed: modeIsExecuted
-          ? gridTotal + Math.round(refuerzoHorasVendidas)
-          : Math.round(executed.total),
+        executed: Math.round(franja.totalBillable),
         sinCobertura: modeIsSinCobertura ? gridTotal : Math.round(sinCobertura.total),
         loading: false,
         estructurales: countEstructuralesEnRango(solicitudesRefuerzo, { start, end }),
@@ -2296,7 +2486,7 @@ export default function CRMPage() {
     if (!proformaActive || !selectedClient?.id) return;
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proformaActive, selectedClient?.id, clientServices, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+  }, [proformaActive, selectedClient?.id, clientServices, clientPurchaseOrders, clientContracts, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
 
   useEffect(() => {
     setProformaBundle((prev) => (prev ? { ...prev, layoutMode: proformaLayoutMode } : prev));
@@ -2345,18 +2535,21 @@ export default function CRMPage() {
   };
 
   const baseHours = useMemo(() => {
+    if (proformaBillingRows.length > 0) {
+      return sumBillableContractHours(proformaBillingRows);
+    }
     if (!selectedClient) return 0;
     const { start, end } = getProformaRange();
     const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end, selectedClient.id));
     if (proformaBase === 'requested') return requested;
     if (proformaBase === 'planned') return proformaTotals.planned;
     return proformaTotals.executed;
-  }, [selectedClient, clientServices, proformaBase, proformaTotals, proformaStartDate, proformaEndDate, proformaMonth, proformaYear]);
+  }, [selectedClient, clientServices, proformaBase, proformaTotals, proformaBillingRows, proformaStartDate, proformaEndDate, proformaMonth, proformaYear]);
 
   const totalEstimate = useMemo(() => {
     const hourly = Number(proformaHourlyValue) || 0;
-    return baseHours * hourly;
-  }, [baseHours, proformaHourlyValue]);
+    return baseHours * hourly + proformaAdicionalHours * hourly;
+  }, [baseHours, proformaAdicionalHours, proformaHourlyValue]);
 
   const conSlaCount = useMemo(
     () => clients.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0).length,
@@ -3929,6 +4122,20 @@ export default function CRMPage() {
                 )}
 
                 {activeTab === 'PREFACTURA' && (
+                  <>
+                  <ProformaOcQuickPanel
+                    clientId={selectedClient?.id}
+                    empresaId={empresaId || ''}
+                    orders={clientPurchaseOrders}
+                    onRefresh={async () => {
+                      if (!selectedClient?.id) return;
+                      const rows = await purchaseOrderService.getByClient(selectedClient.id, {
+                        empresaId,
+                        scopeEmpresa,
+                      });
+                      setClientPurchaseOrders(rows);
+                    }}
+                  />
                   <ProformaPanel
                     client={selectedClient}
                     empresaName={empresa?.name}
@@ -3961,7 +4168,13 @@ export default function CRMPage() {
                     onExportCsv={handleExportProformaCsv}
                     onExportExcel={handleExportProformaExcel}
                     exporting={proformaExporting}
+                    billingRows={proformaBillingRows}
+                    adicionalHours={proformaAdicionalHours}
+                    contractDetailMode={proformaContractDetailMode}
+                    contractBillingMixed={proformaContractBillingMixed}
+                    detailModeOverride={proformaDetailModeOverride}
                   />
+                  </>
                 )}
 
                 {activeTab === 'COTIZACIONES' && (

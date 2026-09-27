@@ -105,10 +105,19 @@ cronoapp/
 | `tipos_novedad` | Catálogo parametrizable de tipos RRHH por empresa (label, código grilla, `defaultDays`, flags). Soft delete `status: INACTIVE`. Seed incluye MAVIC (mutual SUVICO) |
 | `novedades` | Alertas operativas. `shiftId` vincula con turno |
 | `planificacion_estados` | Publicación de planificación. Key: `${objectiveId}_${year}_${month}` |
-| `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos. Puesto `coverageType: eventos` = extras (Eventos): no cubre ni vende SLA; las TURA imputadas van a prefactura agrupadas por día. |
+| `servicios_sla` | Contratos/SLA con estructura de puestos y turnos permitidos. Puesto `coverageType: eventos` = extras (Eventos): no cubre ni vende SLA; las TURA imputadas van a prefactura agrupadas por día. `billingMode` (`PLANIFICADO`/`EJECUTADO`/`FIJO`/`ORDEN_COMPRA`) manda en la prefactura; sin `billingMode`, contrato comercial `abierto` (`contracts`) → EJECUTADO. Prefactura **Auto** resuelve el modo por objetivo (`resolveSlaBillingMode`, `lib/crm/slaBilling.ts`). EJECUTADO/OC = horas por franja (`executedBillableHoursByFranja`: ESC/REF no facturan, la tardanza no descuenta, la salida anticipada sí salvo que cubra un retenido —tope 12:59 h— o el relevo que llegó antes; turnos cargados por rango de `startTime`). La grilla Ejecutado se pinta con los aportes por legajo de esas franjas (mismo total que el contador). Servicios: sin `billingMode` = opción «Auto: …» (guarda `null`). |
 | `hours_balances` | Extracto mensual por objetivo: SLA (debe), plan (turno cubierto, sin novedades), reales, FT/ext (costo), resultante cobertura (plan+ext/adel+ops), saldos. Doc id = `{empresaId}_{objectiveId}_{yyyy-mm}` |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
+
+### Períodos de horas (no mezclar)
+
+| Consumidor | Rango |
+|------------|--------|
+| Liquidación, libro PERSONA, Reportes, `payrollApi` | Ciclo CCT **26 del mes anterior → 25** del mes de cierre |
+| Prefactura, libro PUESTO, SLA vendido, KPIs mensuales | Mes calendario **1 → 30/31** |
+
+El detalle se guarda **por día**. Un doc id `yyyy-mm` es solo el mes calendario: la liquidación del cierre octubre lee `yyyy-09` (días 26..fin) **y** `yyyy-10` (días 1..25). Congelar un ciclo 26→25 no congela la prefactura de ese mes, ni al revés. Helper: `apps/web2/src/lib/hoursPeriod.ts`. `calculateLiquidationHoursStats` no recibe el ciclo: el llamador filtra los turnos al rango antes.
 
 ### Campos importantes en `turnos`
 
