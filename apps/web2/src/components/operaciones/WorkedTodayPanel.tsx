@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { Download, Loader2 } from 'lucide-react';
 import { db } from '@/lib/firebase';
+import { missingCoverageLinkIds, selectWorkedDayShifts } from '@/lib/operaciones/workedDayShifts';
 
 type Props = {
   empresaId: string;
@@ -126,7 +127,7 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
       try {
         const dayStart = arMidnight(day);
         const dayEnd = new Date(dayStart.getTime() + 24 * 3600e3);
-        // Desde el mediodía anterior: incluye nocturnos que terminan dentro del día.
+        // Desde el mediodía anterior: trae los titulares nocturnos que las coberturas del día referencian.
         const from = Timestamp.fromDate(new Date(dayStart.getTime() - 12 * 3600e3));
         const to = Timestamp.fromDate(dayEnd);
         const base = collection(db, 'turnos');
@@ -134,25 +135,27 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
           ? query(base, where('empresaId', '==', empresaId), where('startTime', '>=', from), where('startTime', '<', to))
           : query(base, where('startTime', '>=', from), where('startTime', '<', to));
         const snap = await getDocs(q);
+        const docs = snap.docs.map((d) => ({ id: d.id, data: d.data() as Record<string, any> }));
+        const linkedNames = new Map<string, string>();
+        await Promise.all(
+          missingCoverageLinkIds(docs).slice(0, 40).map(async (id) => {
+            const t = await getDoc(doc(db, 'turnos', id));
+            const name = t.exists() ? String(t.data()?.employeeName || '') : '';
+            if (name) linkedNames.set(id, name);
+          }),
+        );
         const out: Row[] = [];
         const objInfo = (id: unknown) => objById.get(String(id || ''));
-        for (const d of snap.docs) {
-          const s = d.data() as Record<string, any>;
-          if (s.isDeleted === true || s.isFranco === true) continue;
-          if (!s.employeeId || s.employeeId === 'VACANTE' || s.isUnassigned === true) continue;
-          if (s.coverageHoursOnSource === true) continue;
-          const realStart = toDate(s.realStartTime) || toDate(s.checkInTime);
-          if (!realStart) continue;
+        for (const { id, data: s, coversName } of selectWorkedDayShifts(docs, day, linkedNames)) {
+          const realStart = (toDate(s.realStartTime) || toDate(s.checkInTime)) as Date;
           const plannedStart = toDate(s.startTime);
           const plannedEnd = toDate(s.endTime);
           const realEnd = toDate(s.realEndTime) || toDate(s.checkOutTime);
           const inProgress = !s.isCompleted && !realEnd;
-          const workedEnd = realEnd || (inProgress ? new Date() : plannedEnd);
-          if (realStart >= dayEnd || (workedEnd && workedEnd < dayStart)) continue;
           const lateFromPlan =
             plannedStart ? Math.round((realStart.getTime() - plannedStart.getTime()) / 60000) : 0;
           out.push({
-            id: d.id,
+            id,
             clientId: String(s.clientId || ''),
             clientName: String(s.clientName || objInfo(s.objectiveId)?.clientName || s.clientId || 'Sin cliente'),
             objectiveName: String(s.objectiveName || objInfo(s.objectiveId)?.name || s.objectiveId || 'Sin objetivo'),
@@ -168,7 +171,7 @@ export function WorkedTodayPanel({ empresaId, scopeEmpresa, clientId, filterText
             closeLabel: closeLabelFor(s),
             closeKind: closeKindFor(s),
             checkInBy: checkInByLabel(s),
-            coversName: String(s.coversEmployeeName || s.coverageUsedCoversEmployeeName || ''),
+            coversName,
           });
         }
         if (!cancelled) setRows(out);
