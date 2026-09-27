@@ -89,12 +89,7 @@ Planificador — Armar y Publicar Cronogramas (Instructivo 07):
 
 **Siglas CCT 422/05 en la grilla:** M/T/N (8h), D12/N12 (12h), F/FF/FT (francos), V/L/E/A/PG/SGS/SUS/AA (ausencias/licencias — se cargan en RRHH Novedades), RET/REF/ESC (operativos sin cobertura SLA), C (consolidado), LOCKED, SWAP/S! (permutas).
 
-**Automatizar cronograma (agente planificación COSP):**
-1. Con Cliente, Objetivo y SLA activo para el mes.
-2. Botón **Automatizar** (wizard): primero viabilidad (dotación vs SLA + CCT 200h).
-3. Si es viable, genera el mes (motor determinístico) y reprocesa descansos/slots.
-4. Opcional: ajuste fino IA (Gemini) — solo correcciones puntuales.
-5. Revisar verificación de cobertura, guardar y publicar.
+**Automatizar cronograma:** pausado por ahora; en la grilla de Planificación no hay botón **Automatizar**. El cronograma se arma a mano (o copiando el mes anterior), se guarda y se publica. Los motores automáticos se prueban en **Lab de casos** (menú **Más acciones** de la grilla, permiso Auto Lab).
 `.trim();
 
 const OPERATIONS_OPS = `

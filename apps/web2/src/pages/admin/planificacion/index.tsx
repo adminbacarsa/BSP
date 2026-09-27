@@ -45,6 +45,8 @@ function buildDotacionMapsFromEmployees(employees: { id: string; planificacionDo
     return { pos, shift };
 }
 
+/** Automatizar pausado (decisión Mauro): el wizard y sus indicadores no se muestran. Auto Lab sigue activo. */
+const PLANNING_AUTOMATE_ENABLED = false;
 const DOTACION_NEARBY_KM_DEFAULT = 10;
 const DOTACION_NEARBY_KM_MIN = 5;
 const DOTACION_NEARBY_KM_MAX = 100;
@@ -12753,13 +12755,13 @@ export default function PlanificacionPage() {
                                 <p className={`${metricValue} text-emerald-700`}>{retBufferHours}h</p>
                             </div>
                         )}
-                        {autoV2GenStats && autoCycles.length > 0 && (
+                        {PLANNING_AUTOMATE_ENABLED && autoV2GenStats && autoCycles.length > 0 && (
                             <div className={`${metricBox} max-w-[4rem]`} title="Esquema(s) de ciclo aplicados en la generación automática.">
                                 <p className={metricLabel}>Esquema</p>
                                 <p className="text-[9px] font-semibold text-slate-700 dark:text-slate-200 truncate w-full text-center">{autoCycles.join('·')}</p>
                             </div>
                         )}
-                        {autoV2GenStats?.excessPositionEmployees && autoV2GenStats.excessPositionEmployees.length > 0 && (
+                        {PLANNING_AUTOMATE_ENABLED && autoV2GenStats?.excessPositionEmployees && autoV2GenStats.excessPositionEmployees.length > 0 && (
                             <div
                                 className={`${metricBox} min-w-[2.25rem] cursor-default`}
                                 title={autoV2GenStats.excessPositionEmployees.map(e => `${e.positionName}: ${e.assigned} asignados, necesita ${e.needed} (sobran ${e.excess})`).join('\n')}
@@ -12770,7 +12772,7 @@ export default function PlanificacionPage() {
                                 </p>
                             </div>
                         )}
-                        {autoV2GenStats && (
+                        {PLANNING_AUTOMATE_ENABLED && autoV2GenStats && (
                             <button
                                 type="button"
                                 onClick={() => setShowCapacityModal(true)}
@@ -16378,7 +16380,7 @@ export default function PlanificacionPage() {
                 )}
 
                 {/* ── Modal automatizar cronograma (motor COSP) ── */}
-                {showAutoV2Modal && createPortal(
+                {PLANNING_AUTOMATE_ENABLED && showAutoV2Modal && createPortal(
                     <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/40 backdrop-blur-sm" onClick={() => { if (!autoV2Loading && !autoV2Generating) setShowAutoV2Modal(false); }}>
                         <div className="bg-white rounded-xl shadow-2xl w-[760px] max-w-[95vw] max-h-[92vh] flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
 
