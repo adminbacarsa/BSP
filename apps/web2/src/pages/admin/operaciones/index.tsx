@@ -69,6 +69,7 @@ import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal'
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -1230,7 +1231,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         return (
                             <div className="flex gap-1">
                                 <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>
-                                <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>
+                                {isRevertAbsenceExpired(shift, now.getTime())
+                                    ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold" title="Revertir vencido (T+60)">VENCIDO</span>
+                                    : <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>}
                             </div>
                         );
                       })()
@@ -1339,7 +1342,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             return (
                                 <div className="flex gap-1.5 items-center">
                                     <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>
-                                    <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia"><XCircle size={11}/></button>
+                                    {isRevertAbsenceExpired(shift, now.getTime())
+                                        ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold" title="Revertir vencido (T+60)">VENCIDO</span>
+                                        : <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia"><XCircle size={11}/></button>}
                                 </div>
                             );
                           })()
@@ -3215,6 +3220,10 @@ export default function OperacionesPage() {
     };
 
     const handleRevertAbsence = async (shift: any) => {
+        if (isRevertAbsenceExpired(shift)) {
+            toast.error('No se puede revertir después de T+60.');
+            return;
+        }
         const covDoc = String(shift.coverageDocId || '').trim();
         const covSt = String(shift.coverageStatus || '').toUpperCase();
         let pendingConv = false;

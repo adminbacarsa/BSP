@@ -1,0 +1,379 @@
+# PROMPT / CONTEXTO CANÓNICO — Cobertura Centro de Comando (COSP)
+
+> **Uso:** Pegá este documento completo al inicio de un chat con Claude (o adjuntálo) cuando trabajes cobertura en Ops/CC.
+> **Proyecto:** COSP V1.0 / CronoApp — `C:\APP\cronoapp` (repo GitHub `adminbacarsa/BSP`).
+> **Fuente:** código actual (`apps/functions/src/coverage/*`, `apps/web2` Ops) + `CLAUDE.md` § Protocolo de cobertura.
+> **Idioma de trabajo:** español técnico.
+
+---
+
+## Instrucciones para el asistente
+
+Sos un ingeniero senior del sistema COSP. Este documento es la **fuente de verdad de cobertura CC**. Al responder:
+
+1. Respetá los **escritores únicos** (`applyCoverage`, `retainOutgoingForGap`). No inventes docs `ops_cov_*` ad hoc ni segunda cascada.
+2. Distinguí siempre **Manual / Auto / Demo** (misma prioridad CCT; distinta orquestación).
+3. Antes de proponer cambios, identificá **qué flujo(s)** tocás y **qué colecciones / módulos** impactás.
+4. No reintroduzcas modales legacy de cobertura: UI vigente = `CoverageSessionManager` en lista + map-view.
+5. Soft-delete: no `deleteDoc` de usuarios/clientes; REF/ESC convertidos usan soft-delete `CONVERTIDO_EN_COBERTURA`.
+6. Si algo contradice este prompt vs código, **priorizá el código** y señalá la divergencia.
+
+---
+
+## 1. Resumen ejecutivo
+
+Manual, Auto y Demo comparten el **mismo orden CCT**:
+
+```
+Retención en puesto → RET → REF → ESC → Ext+Adel (EXTEND + ADVANCE) → FT
+```
+
+| Modo | Gate | Retención al ausentar | Cascada automática | Quién cubre |
+|------|------|----------------------|--------------------|-------------|
+| **Manual** | ≥1 `sesiones_operador` ACTIVO no vencido (`isEmpresaManualMode`) | Sí | **No** | Operador CC (`CoverageSessionManager`) |
+| **Auto** | Sin sala Manual | Sí | Sí (`createdBy: AUTO`) | Convocatorias reales + app portal |
+| **Demo** | `empresas.modoDemoEnabled` | Sí | Sí (`MODO_DEMO`; **ignora** Manual) | Cron inventa AA + `simularRespuestasConvocatorias` |
+
+**Kill switch:** `empresas/{id}.centroControlEnabled === false` → sin cascada/novedades de cobertura para esa empresa.
+
+**UI:** `apps/web2/src/pages/admin/operaciones/index.tsx` + `map-view.tsx` montan `CoverageSessionManager` + `bootstrapCoverageSession`.
+
+---
+
+## 2. Arquitectura y escritores únicos
+
+```
+Ausencia (markShiftAbsent / T+30 / Manual / Demo / ETA / convocado)
+        │
+        ▼
+onTurnoAbsenciaDetectada
+        ├─ retainOutgoingForGap          ← escritor único retención por hueco
+        └─ iniciarCascadaCobertura       ← solo si NO Manual (Demo sí)
+                │
+                ▼
+        convocatorias_cobertura (PENDING → timeout 3 min → ESCALATED)
+                │
+        aceptar (portal / simulación / «Acepta» CC)
+                │
+                ▼
+        resolverCobertura ──claim 2 min──► applyCoverage
+                │                              │
+                │                              ├─ turnos/ops_cov_{titular}_{employee}
+                │                              │     origin: OPERATIONS_COVERAGE
+                │                              ├─ source: coverageUsed / soft-delete / EXT-ADV
+                │                              └─ FULL → releaseRetentionForAbsenceShift
+                └─ rechazo/timeout → avanzar cascada / VACANTE_PARCIAL / escalarVacanteSinCobertura
+```
+
+### Invariantes de `applyCoverage`
+
+| Regla | Detalle |
+|-------|---------|
+| ID estable | `ops_cov_{titularShiftId}_{employeeId}` |
+| Origen intacto | RET → `coverageUsed`; REF/ESC → soft-delete `CONVERTIDO_EN_COBERTURA`; EXT/ADV → horas en source |
+| EXT/ADV | `coverageHoursOnSource: true` — no fichables como titular; excluidos de ausencias/retención/listas Ops (`skipAbsencePipelineForShift`) |
+| Dual Ext+Adel | 1ª pata `PARTIAL`, 2ª `FULL`; no cancela hermana; sin candidato → `VACANTE_PARCIAL` |
+| Claim | `coverageClaimConvocatoriaId` + `coverageClaimAt` (2 min) en `resolverCobertura` |
+| FULL | cierra vacantes, limpia claim, libera retención, RRHH `coberturaEstado: GESTIONADA` |
+
+**Orden backend:** `CASCADE_ORDER` en `eligibilityFilter.ts` = `RET → REF → ESC → EXTEND → ADVANCE → FT`  
+**UI Manual STEPS:** INTERNO (RET·REF·ESC, 180s) → Ext+Adel (key `RETENCION`, 60s) → FT (180s)  
+**Retiro anticipado Auto:** `RET → REF → ESC → ADVANCE → FT` (**sin EXTEND**)  
+**Nota:** `SIN_TURNO` / `VOLANTE` existen en tipos/candidatos pero **no** en `CASCADE_ORDER` Auto actual (backlog).
+
+---
+
+## 3. Grafo de conexiones entre flujos
+
+```
+[13 Marcar Manual] ──┐
+[7 Llegada tarde] ───┼──► [1 markShiftAbsent] ──► [trigger onTurnoAbsenciaDetectada]
+[4 Demo AA] ─────────┤              │                      │
+[11 Convocado no llegó]┘            │                      ├─► [6 Retención]
+[9 Vacante iniciada/T-1h] ──────────┘                      └─► [3 Cascada Auto] (si !Manual o Demo)
+                                                                    │
+                         [2 Manual CC wizard] ◄── sala Manual ───────┤ (cascada OFF)
+                                                                    │
+                         [10 Convocatoria] ◄─────────────────────────┘
+                                    │
+                         aceptar ───┼──► [5 applyCoverage PARTIAL|FULL]
+                         rechazo/timeout ──► avanzar / [12 Escalado]
+                                    │
+                         FULL ──► release retención [6] + RRHH GESTIONADA
+                         PARTIAL dual ──► ensureMissingDualLeg / VACANTE_PARCIAL
+
+[8 Retiro anticipado] ──► vacante INTERRUPTION ──► earlyWithdrawCascade (Auto) o CC Manual
+[9 gestionarVacantes] ──► protocolo + cascada Auto; pases SLA gaps → retención [6]
+[13 Revertir] ──► limpia AA + cancela conv + release retención + opcional supersede ops_cov
+```
+
+---
+
+## 4. Zoom de los 13 flujos
+
+### Flujo 1 — Ausencia → `markShiftAbsent` → `onTurnoAbsenciaDetectada`
+
+- **Trigger:** `turnos.isAbsent` false→true. Callables/schedulers: `detectarAusencias` (AUTO_T30 / ETA_VENCIDA), `marcarAusenciaOperaciones` (MANUAL_OPS), LLEGADA_TARDE rechazada/timeout, `runConvocadoAbsentPass`, ETA>60 (`AVISO_MAYOR_60`), Demo (write inline).
+- **Condiciones:** CC on; objetivo en scope (`CcObjectiveMonthGate`); no draft/virtual/trace EXT-ADV. Manual → retención sí, cascada no. Auto/Demo → retención + cascada. Demo bypasea Manual.
+- **Pasos:** (1) turno ABSENT + AA; (2) idempotencia; (3) `ausencias` Confirmada; (4) novedad `AUSENCIA_AUTO`; (5) `retainOutgoingForGap`; (6) `iniciarCascadaCobertura` si aplica.
+- **Edges:** Presente solo se ausenta con `MANUAL_OPS`. CC off / fuera scope → return.
+
+**Archivos:** `attendance/markShiftAbsent.ts`, `index.ts` (trigger), `ops/opsManualMode.ts`, `coverage/coverageRetention.ts`
+
+---
+
+### Flujo 2 — Protocolo Manual CC (`CoverageSessionManager`)
+
+- **Trigger:** `openCoverageProtocol(shift)` → session + `bootstrapCoverageSession` (solo lectura retención).
+- **Pasos UI:** INTERNO → Ext+Adel dual → FT. Geo 15/30 km.
+- **Pasos datos:** convocatoria callable `crearConvocatoriaCobertura` o confirmación front `applyCoverage` (`resolvedBy: OPERACIONES`) + `syncAusenciaCoberturaGestionada`. Dual: EXTEND PARTIAL + ADVANCE FULL.
+- **Edges:** No escribe retención. Backlog: cancelar conv al cerrar UI. Idempotencia si ya cubierto.
+
+**Archivos:** `components/operaciones/CoverageSessionManager.tsx`, `lib/operaciones/opsConvocatoriaCobertura.ts`, espejo `syncAusenciaCobertura.ts`, `operaciones/index.tsx`, `map-view.tsx`
+
+---
+
+### Flujo 3 — Cascada Auto
+
+- **Trigger:** trigger ausencia Auto/Demo; `gestionarVacantes`; `runConvocadoAbsentPass`; rechazo/timeout.
+- **Condiciones:** !Manual (salvo Demo); titular no covered; sin PENDING/ESCALATED; timeout paso **3 min** (`checkConvocatoriaTimeouts` cada 1 min).
+- **Pasos:** `findBestCandidate` → `crearConvocatoriaDoc` PENDING → timeout ESCALATED + avanzar → aceptación `resolverCobertura` → `applyCoverage`. Sin candidatos → Flujo 12. Dual PARTIAL + fallo pata → `VACANTE_PARCIAL`.
+- **Edges:** Claim 2 min. EXTEND/ADVANCE PARTIAL conserva hermana; FULL cancela resto.
+
+**Archivos:** `coverage/convocatoriasCobertura.ts`, `coverage/eligibilityFilter.ts`
+
+---
+
+### Flujo 4 — Demo
+
+- **Trigger:** cron 5 min `modoDemoCron` → empresas `modoDemoEnabled`.
+- **Pasos:** presencias ficticias ops_cov; AA inline (`absenceDetectedBy: MODO_DEMO`); trigger real retención+cascada; `simularRespuestasConvocatorias` (~80% accept / 20% reject, antigüedad ≥90s).
+- **Edges:** No usa `markShiftAbsent`. Skip `detectarAusencias`/llegada tarde. Skip `runConvocadoAbsentPass`.
+
+**Archivos:** `index.ts` (`runModoDemoForEmpresa`), `simularRespuestasConvocatorias`
+
+---
+
+### Flujo 5 — `applyCoverage` PARTIAL vs FULL
+
+- **Trigger:** `resolverCobertura` o front Manual `confirmCandidate` / `confirmDualTogether`.
+- **PARTIAL:** `coverageStatus: PARTIAL`, `operacionallyCovered: false`; Auto llama `ensureMissingDualLegConvocatoria`.
+- **FULL:** COVERED; limpia `isSinCobertura`/`vacanteEscalada`; cierra `VACANTE_POR_AUSENCIA`; `releaseRetentionForAbsenceShift`; `ausencias.coberturaEstado: GESTIONADA`.
+- **Origen source:** RET `coverageUsed`; REF/ESC soft-delete; EXTEND `isExtended`; ADVANCE `isEarlyStart`; EXT/ADV `coverageHoursOnSource: true`.
+- **Edges:** Titular ausencia real mantiene `isAbsent`/`ABSENT`. `ALREADY_COVERED` cancela conv.
+
+**Archivos:** `functions` + `web2` `syncAusenciaCobertura.ts`, `coverageExtAdvSegments.ts`
+
+---
+
+### Flujo 6 — Retención
+
+- **Escritor:** `retainOutgoingForGap` (backend). Front solo lee/pick.
+- **Entrada:** trigger ausencia; `escalarVacanteSinCobertura(attemptRetention)`; `autoCompletarTurnosCore`; `slaUnplannedGapPass`.
+- **Match:** saliente presente alineado **±30 min** al `startTime` del hueco.
+- **Liberación:** `releaseRetentionForAbsenceShift` en FULL y `revertirAusencia`.
+- **Tope 12 h:** `RETENTION_MAX_TOTAL_MS` en `coverageRetention.ts`, aplicado en `autoCompletarTurnosCore`. Sin continuidad → COMPLETED `RETENCION_TOPE_12H`. Con continuidad → novedad `RETENCION_TOPE_12H`, **sigue retenido**. Continuidad SLA: `positionHasContinuity` (±30 min AR sobre `servicios_sla`).
+- **Backlog:** liberar FIFO al fichar entrante; no sacar compañero de activos en edge UI.
+
+**Archivos:** `coverageRetention.ts`, `autoCompletarTurnosCore.ts`, `positionHasContinuity.ts`, `relevoOutgoingMatch.ts`
+
+---
+
+### Flujo 7 — Llegada tarde
+
+- **No entra en cascada CCT** como tipo de cobertura.
+- **Portal:** `notificarLlegadaTarde` (T−60…T+5) → ETA fields + `LLEGADA_TARDE_AVISO`; ETA>60 → AA inmediata `AVISO_MAYOR_60`.
+- **Scheduler:** BLOQUE 1 T+0…T+10 → conv `LLEGADA_TARDE` 3 min. Acepta confirma ETA; rechaza → AA; timeout → TIMEOUT (± AA si T+30).
+- **BLOQUE 2:** ETA vencida → `ETA_VENCIDA` → Flujo 1. Sin aviso: T+30 → `AUTO_T30`.
+- Demo skip en BLOQUE 1.
+
+**Archivos:** `index.ts`, branch LLEGADA_TARDE en `convocatoriasCobertura.ts`, `relevoNotifications.ts`
+
+---
+
+### Flujo 8 — Retiro anticipado
+
+- **Callable:** `processEarlyWithdrawalCallable` → `processEarlyWithdrawal`.
+- **Policy:** &lt;2h + compañeros → NO_REPLACE; solo/&gt;3h → REPLACE; 2–3h → flag SLA `reemplazarRetiro2a3h` (null: Manual `OPERATOR_CHOICE`, Auto REPLACE).
+- **Cascada remanente:** solo Auto + !Manual; orden **sin EXTEND**; ADVANCE máx gap 4h.
+- Cierra saliente `EARLY_WITHDRAW`; ausencia parcial; vacante `origin: INTERRUPTION` si REPLACE; audit `BAJA_*`.
+
+**Archivos:** `earlyWithdrawalCore.ts`, `earlyWithdrawCascade.ts`, `earlyWithdrawPolicy.ts`
+
+---
+
+### Flujo 9 — `gestionarVacantes` (cron 5 min)
+
+- Vacantes `isUnassigned` o `employeeId==='VACANTE'`; ventana start [now−12h, now+4h]; planning no-ops solo si `planificacion_estados` publicado.
+- **Ya iniciada / T−1h:** protocolo + `VACANTE_PROTOCOLO_COBERTURA`; cascada si !Manual.
+- **T−3h:** `isReportedToPlanning` + `VACANTE_A_PLANIFICACION`.
+- Pases: `runDetectPublishedSlaGaps`, `runSlaUnplannedGapPass` (retención huecos SLA).
+
+**Archivos:** `index.ts` (`gestionarVacantes`), `slaUnplannedGapPass.ts`, `detectPublishedSlaGaps.ts`
+
+---
+
+### Flujo 10 — Convocatoria (ciclo de vida)
+
+Colección `convocatorias_cobertura`. Estados: `PENDING | ESCALATED | ACCEPTED | REJECTED | TIMEOUT | CANCELLED`.
+
+| Acción | Efecto |
+|--------|--------|
+| Crear | Doc + notif + `CONVOCATORIA_ENVIADA` |
+| Aceptar (PENDING o ESCALATED) | `resolverCobertura` → Flujo 5 + cancel siblings + `COBERTURA_RESUELTA` |
+| Rechazar | `REJECTED` + avanzar cascada / partial |
+| Timeout cascada | `ESCALATED` + avanzar (sigue aceptando) |
+| Timeout LLEGADA_TARDE | `TIMEOUT` (± AA) |
+| Cancelar | Solo PENDING → `CANCELLED` (no avanza) |
+
+Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `getCandidatosCobertura`.
+
+---
+
+### Flujo 11 — Convocado no llegó
+
+- Dentro de `detectarAusencias`; no Demo; `origin===OPERATIONS_COVERAGE`; no EXTEND; deadline +60 min; relanzar si quedan ≥2h.
+- Revert titular (`convocadoTitularRevert`) → `markShiftAbsent(ops_cov, CONVOCADO_NO_LLEGO)` → cancel pending → Manual: novedad; Auto: nueva cascada sobre titular.
+
+**Archivos:** `attendance/convocadoAbsentPass.ts`, `convocadoTitularRevert.ts`
+
+---
+
+### Flujo 12 — Escalado sin cobertura
+
+- Cascada agotada / early sin candidatos.
+- Primero `attemptRetention` → si retiene, **no** escala.
+- Else: novedad `escalada_{shiftId}` `VACANTE_SIN_COBERTURA`; titular `isSinCobertura` / `SIN_COBERTURA` / `vacanteEscalada`; notif supervisores.
+
+**Archivo:** `coverage/escalarVacanteSinCobertura.ts`
+
+---
+
+### Flujo 13 — Marcar / revertir ausencia Manual
+
+- **Marcar:** `marcarAusenciaOperaciones` → `MANUAL_OPS` (puede ausentar presente) → Flujo 1.
+- **Revertir:** solo hasta **T+60** (inicio planificado `startTime` + `REVERT_ABSENCE_WINDOW_MS`); si hay ops_cov exige `cancelCoverage:true`. Limpia AA, anula ausencia, cancela conv, libera retención, opcional supersede ops_cov, marca PRESENT + isLate.
+- **Tarjeta CC (AUSENTES):** pasado T+60 la X se reemplaza por **VENCIDO** aunque el turno siga en curso (`isRevertAbsenceExpired`, espejo del plazo del servidor); "→ VAC" se mantiene. Al terminar el turno, VENCIDO reemplaza todas las acciones.
+
+**Archivos:** `attendance/revertirAusencia.ts`, callables en `index.ts`, `web2/src/lib/operaciones/revertAbsenceWindow.ts`
+
+---
+
+## 5. Impacto por módulo
+
+| Módulo | Rol / impacto |
+|--------|----------------|
+| **Operaciones (CC)** | Origen UI; sala piloto/copiloto; badges RECARGO (`isRetention`) y CIERRE PENDIENTE; filtra ops_cov EXT/ADV |
+| **Functions** | Motor canónico cobertura/retención/cascada/triggers/crons |
+| **Planificación** | Muestra celdas `OPERATIONS_COVERAGE` / `coverageUsed` (no es motor) |
+| **RRHH** | Entrada AA; al FULL `coberturaEstado: GESTIONADA` |
+| **Fichajes** | `registrarPresencia`, `checkInWindow`, relevo; EXT/ADV no fichables; Flujo 11 |
+| **Análisis** | ops_cov en malla/demanda/resultante; EXT/ADV sin doble conteo; FT no infla cobertura |
+| **Reportes / liquidación** | Badges COBERTURA/RETENCIÓN; FT, RET/REF/ESC, ext/adel, overtime retención |
+| **Portal** | Responde convocatorias; ventanas `OPERATIONS_COVERAGE`; backlog alinear `getCheckInTiming` |
+| **Novedades** | `AUSENCIA_AUTO`, `RETENCION_*`, `VACANTE_*`, `COBERTURA_RESUELTA`, `CONVOCATORIA_*`, etc. |
+
+---
+
+## 6. Colecciones Firestore
+
+| Colección | Rol |
+|-----------|-----|
+| `turnos` | Titular AA, saliente retenido, `ops_cov_*`, vacantes |
+| `convocatorias_cobertura` | Pipeline Auto/Manual/Demo/LLEGADA_TARDE |
+| `ausencias` | AA / parcial / GESTIONADA |
+| `novedades` | Bitácora CC |
+| `user_notifications` | Push app |
+| `sesiones_operador` | Gate Manual vs Auto |
+| `empresas` | `centroControlEnabled`, `modoDemoEnabled` |
+| `servicios_sla` | Continuidad / `reemplazarRetiro2a3h` |
+| `planificacion_estados` | Scope vacantes planning |
+| `audit_logs` | Scheduler / baja protocolo |
+| `empleados` | uid candidato / elegibilidad |
+| `system_users` | Supervisores notificados en escalado |
+
+---
+
+## 7. Triggers, crons y callables
+
+### Schedulers / triggers
+- `onTurnoAbsenciaDetectada` — retención; cascada si !Manual (Demo sí)
+- `gestionarVacantes` — cada 5 min
+- `checkConvocatoriaTimeouts` — cada 1 min
+- `modoDemoCron` — cada 5 min
+- `detectarAusencias` — T+30 / ETA / convocado absent
+- `autoCompletarTurnos` — cierre + tope retención 12 h / continuidad
+
+### Callables
+`crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `getCandidatosCobertura`, `sesionOperador`, `marcarAusenciaOperaciones`, `revertirAusencia`, `notificarLlegadaTarde`, `registrarPresencia`, `processEarlyWithdrawalCallable`, `releaseInvalidRetentions`, `releaseTraceAbsences`
+
+### Internos (no callables)
+`applyCoverage`, `iniciarCascadaCobertura`, `resolverCobertura`, `retainOutgoingForGap`, `simularRespuestasConvocatorias`, `markShiftAbsent`
+
+---
+
+## 8. Espejos front / back
+
+| Backend `apps/functions/src/coverage/` | Front `apps/web2/src/lib/operaciones/` |
+|---------------------------------------|----------------------------------------|
+| `syncAusenciaCobertura.ts` | `syncAusenciaCobertura.ts` |
+| `coverageRetention.ts` (escritor) | `coverageRetention.ts` (UI pick) |
+| `coverageSourceShiftForGap.ts` | `coverageSourceShiftForGap.ts` |
+| `coverageExtAdvSegments.ts` | `coverageExtAdvSegments.ts` |
+| `earlyWithdrawPolicy.ts` | `earlyWithdrawPolicy.ts` |
+
+**Solo front:** `CoverageSessionManager`, `coverageInternalCandidates`, `coverageGeo`, `opsExtAdvCandidates`, `opsConvocatoriaCobertura`, `opsDualCoverageApply`  
+**Solo backend:** `convocatoriasCobertura`, `eligibilityFilter`, `escalarVacanteSinCobertura`, `positionHasContinuity`, `earlyWithdrawalCore`, `earlyWithdrawCascade`  
+**Shared:** `packages/ops-core`, `packages/portal-core`
+
+---
+
+## 9. Reglas críticas (checklist)
+
+1. Un solo materializador: `applyCoverage`.
+2. Un solo escritor retención por hueco: `retainOutgoingForGap`.
+3. Manual = retención sí, cascada no; Demo bypasea bloqueo Manual.
+4. Claim 2 min evita doble aceptación.
+5. EXT/ADV no duplican horas.
+6. Continuidad SLA ±30 min + tope retención 12 h.
+7. Timeout convocatoria 3 min → ESCALATED; primero que acepta gana (salvo dual).
+8. Cascada agotada → `escalarVacanteSinCobertura` (+ intento retención previo).
+9. CC off → sin cascada/novedades cobertura.
+10. Elegibilidad: mismo objetivo, geo ~15 km (ampliable 30), solape source↔hueco, aptitudes.
+
+---
+
+## 10. Backlog pendiente (no asumir implementado)
+
+- [ ] Retención: liberar FIFO al fichar entrante; orden estricto spec; edge UI activos
+- [ ] Convocatorias CC: cancelar al rechazar/cerrar
+- [ ] Flujos: sin turno, retener sola, sintético, otros objetivos, &gt;30 km
+- [ ] Cascada Auto: sin turno/volante primero; fechas AR
+- [ ] Portal: alinear `getCheckInTiming` con ventanas servidor
+- [ ] Prioridad EXT sobre retenido + segmentos HH:MM–HH:MM
+
+**Cerrado Fase 1–2:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12 h, ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor.
+
+**E2E:** `node scripts/eval-coverage-e2e-emulator.mjs`
+
+**Casos reales (snapshot prod → emulador):** `scripts/cc-caso-real-snapshot.mjs export` lee de prod en solo lectura (ADC) el objetivo/día y sigue los vínculos entre turnos (extend/advance/source/absence/covered/causedBy); `load` lo carga en el emulador bajo el proyecto aislado `demo-cc-casos` (no pisa el lab). Salida en `scripts/out/cc-casos/` (gitignored: datos personales). Runner: `node scripts/eval-cc-casos-reales-emulator.mjs`. Caso base: CAPS Angelelli 26/09 (`caps-angelelli-2026-09-26`).
+
+---
+
+## 11. Prompt corto de arranque (copiar/pegar)
+
+```
+Leé docs/PROMPT-COBERTURA-CC-FLUJOS.md (o el PDF equivalente). Es el mapa canónico de cobertura CC en COSP: 13 flujos, Manual/Auto/Demo, applyCoverage, retención, cascada, y conexiones entre módulos.
+
+Tarea: [DESCRIBÍ AQUÍ LO QUE NECESITÁS]
+
+Restricciones:
+- No inventar ops_cov ad hoc ni segunda cascada.
+- Respetar Manual (sin cascada) vs Auto/Demo.
+- UI vigente = CoverageSessionManager.
+- Antes de editar, nombrá qué flujos y colecciones tocás.
+```
+
+---
+
+*Documento generado para Mauro Martinez / Grupo Bacar — uso interno COSP.*

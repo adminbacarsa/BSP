@@ -6,6 +6,8 @@ import {
   findOpenAbsenceVacancyDocs,
 } from '../coverage/syncAusenciaCobertura';
 
+export const REVERT_ABSENCE_WINDOW_MS = 60 * 60 * 1000;
+
 export type RevertirAusenciaInput = {
   shiftId: string;
   cancelCoverage?: boolean;
@@ -26,7 +28,7 @@ export async function revertirAusenciaShift(
 
   const startMs = (shift.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
   const nowMs = Date.now();
-  if (startMs && nowMs > startMs + 60 * 60 * 1000) {
+  if (startMs && nowMs > startMs + REVERT_ABSENCE_WINDOW_MS) {
     return { success: false, reason: 'PAST_T60' };
   }
 
