@@ -219,26 +219,6 @@ const normalizePosMatch = (n: unknown): string => {
     return s;
 };
 
-/**
- * Auto-cierre atómico via Firestore transaction.
- * Si otro browser ya completó el turno, cancela silenciosamente (devuelve false).
- */
-const autoCloseShiftTx = async (
-    shiftId: string,
-    fields: Record<string, unknown>,
-    empresaId: string,
-): Promise<boolean> => {
-    const ref = doc(db, 'turnos', shiftId);
-    let didWrite = false;
-    await runTransaction(db, async (t) => {
-        const snap = await t.get(ref);
-        if (!snap.exists() || snap.data()?.isCompleted === true) return; // ya cerrado
-        t.update(ref, { ...fields, empresaId: empresaId || undefined });
-        didWrite = true;
-    });
-    return didWrite;
-};
-
 const getPositionCapacity = (servicesSLA: any[], objectiveId: string, positionName: string): number => {
     const sla = servicesSLA.find((s: any) => s.objectiveId === objectiveId);
     const pos = sla?.positions?.find((p: any) => normPosName(p.name) === normPosName(positionName));
@@ -1362,96 +1342,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 }
             }
 
-            // ── AUTO-FIN RETENCIÓN: puesto cubierto por turnos regulares ──
-            const autoEndKey = `${s.id}_AUTO_END_RETENTION`;
-            if (!alertedVacancyIds.current.has(autoEndKey)) {
-                const capacity = getPositionCapacity(servicesSLA, s.objectiveId, s.positionName);
-                const coverageCount = processedData.filter((other: any) =>
-                    other.id !== s.id &&
-                    other.isPresent && !other.isCompleted && !other.isRetention &&
-                    other.objectiveId === s.objectiveId &&
-                    normPosName(other.positionName) === normPosName(s.positionName)
-                ).length;
-                if (coverageCount >= capacity) {
-                    alertedVacancyIds.current.add(autoEndKey);
-                    autoCloseShiftTx(s.id, {
-                        status: 'COMPLETED', isCompleted: true, isPresent: false,
-                        completedAt: serverTimestamp(), completedBy: 'Sistema',
-                        completionReason: 'AUTO_COVERAGE_COMPLETE',
-                    }, empresaId).then(ok => {
-                        if (ok) opsEventToast.success(`✅ Recarga finalizada: ${s.employeeName || 'Guardia'} — puesto cubierto`);
-                    }).catch(e => {
-                        alertedVacancyIds.current.delete(autoEndKey);
-                        console.warn('[autoEndRetention]', e);
-                    });
-                    continue; // no generar alerta de retención larga para este turno
-                }
-            }
-
+            // Fin de retención (relevo presente, puesto cubierto, tope 12:59): lo decide autoCompletarTurnos (servidor).
             if (!endMs) continue;
             const minutesOvertime = (nowMs - endMs) / 60000;
-
-            // ── AUTO-FIN TURNO ─────────────────────────────────────────────────────
-            // Dos caminos:
-            // 1. isRetentionByField=false (solo por tiempo): esperar relevo 60 min → cerrar
-            // 2. isRetentionByField=true por CF (autoRetentionAt existe): cerrar a los 60 min
-            //    Si la retención fue puesta por operador (sin autoRetentionAt) → NO tocar
-            const autoShiftEndKey = `${s.id}_AUTO_END_SHIFT`;
-            // isCFRetention: retenido por la CF (autoRetentionAt existe → retentionMinutes > 0)
-            // vs retención manual del operador (isRetentionByField pero retentionMinutes == 0)
-            const isCFRetention = s.isRetentionByField && (s.retentionMinutes ?? 0) > 0;
-            // Fin de turno / retención: lo decide autoCompletarTurnos (servidor). El front no cierra antes.
-            const shouldAutoClose = false as boolean;
-
-            if (shouldAutoClose && !alertedVacancyIds.current.has(autoShiftEndKey)) {
-                // Hay relevo planificado que todavía no llegó? (solo aplica en los primeros 60 min)
-                const hasScheduledRelevo = !isCFRetention && minutesOvertime < 60 && processedData.some((other: any) => {
-                    const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
-                    return (
-                        other.id !== s.id &&
-                        other.objectiveId === s.objectiveId &&
-                        normPosName(other.positionName) === normPosName(s.positionName) &&
-                        !other.isPresent && !other.isCompleted && !other.isUnassigned &&
-                        !other.isAbsent && !other.isPotentialAbsence &&
-                        otherStart >= endMs - 15 * 60000 &&
-                        otherStart <= endMs + 90 * 60000
-                    );
-                });
-                if (!hasScheduledRelevo) {
-                    alertedVacancyIds.current.add(autoShiftEndKey);
-                    autoCloseShiftTx(s.id, {
-                        status: 'COMPLETED', isCompleted: true, isPresent: false,
-                        completedAt: serverTimestamp(), completedBy: 'Sistema',
-                        completionReason: isCFRetention ? 'AUTO_END_CF_RETENTION_TIMEOUT' : 'AUTO_SHIFT_END',
-                    }, empresaId).then(ok => {
-                        if (ok) opsEventToast.success(`Turno finalizado: ${s.employeeName || 'Guardia'}`);
-                    }).catch(e => {
-                        alertedVacancyIds.current.delete(autoShiftEndKey);
-                        console.warn('[autoEndShift]', e);
-                    });
-                    continue;
-                }
-            }
-
-            // ── AUTO-FIN POR TIEMPO EXCESIVO (>6h sin relevo) ─────────────────────
-            // Cubre el caso en que nadie tuvo la plataforma abierta durante la noche
-            // y los turnos del día anterior quedaron en isRetention sin auto-completarse.
-            // Si el turno lleva >6h de retención, se cierra automáticamente.
-            const autoTimeKey = `${s.id}_AUTO_END_OVERTIME`;
-            if (minutesOvertime > 360 && !alertedVacancyIds.current.has(autoTimeKey)) {
-                alertedVacancyIds.current.add(autoTimeKey);
-                autoCloseShiftTx(s.id, {
-                    status: 'COMPLETED', isCompleted: true, isPresent: false,
-                    completedAt: serverTimestamp(), completedBy: 'Sistema',
-                    completionReason: 'AUTO_OVERTIME_LIMIT',
-                }, empresaId).then(ok => {
-                    if (ok) opsEventToast.info(`ℹ️ Turno cerrado: ${s.employeeName || 'Guardia'} — retención > 6h`);
-                }).catch(e => {
-                    alertedVacancyIds.current.delete(autoTimeKey);
-                    console.warn('[autoEndRetentionTime]', e);
-                });
-                continue;
-            }
 
             if (minutesOvertime < 120) continue;
             const alertKey = `${s.id}_RETENCION_LARGA`;

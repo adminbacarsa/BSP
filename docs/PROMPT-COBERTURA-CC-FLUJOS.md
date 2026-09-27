@@ -172,10 +172,24 @@ onTurnoAbsenciaDetectada
 - **Entrada:** trigger ausencia; `escalarVacanteSinCobertura(attemptRetention)`; `autoCompletarTurnosCore`; `slaUnplannedGapPass`.
 - **Match:** saliente presente alineado **±30 min** al `startTime` del hueco.
 - **Liberación:** `releaseRetentionForAbsenceShift` en FULL y `revertirAusencia`.
-- **Tope 12 h:** `RETENTION_MAX_TOTAL_MS` en `coverageRetention.ts`, aplicado en `autoCompletarTurnosCore`. Sin continuidad → COMPLETED `RETENCION_TOPE_12H`. Con continuidad → novedad `RETENCION_TOPE_12H`, **sigue retenido**. Continuidad SLA: `positionHasContinuity` (±30 min AR sobre `servicios_sla`).
+- **Tope 12:59:** `SHIFT_HARD_CAP_MS` en `scheduling/shiftClose.ts` (= `RETENTION_MAX_TOTAL_MS`), contado desde el inicio real (`realStartTime`/`checkInTime`; si no fichó, `startTime`), **aun con continuidad**. Al tope el server cierra COMPLETED `TOPE_JORNADA` con `realEndTime` = inicio + 12:59, novedad `tope_{shiftId}` (`TOPE_JORNADA`) y, si el hueco no está cubierto, `escalarVacanteSinCobertura(attemptRetention:false)` → el puesto pasa a vacante. Push al guardia «Fin de jornada por tope». Continuidad SLA: `positionHasContinuity` (±30 min AR sobre todos los `servicios_sla` activos del objetivo; vale el vigente).
+- **Retención hasta relevo:** puesto 24 h / custom con continuidad retiene hasta que ficha el relevo (dentro del tope). Relevo presente → cierre `RELEVO_PRESENTE` en su fichada (o en el fin planificado si llegó antes). Hueco ya cubierto con cubridor en camino → `ESPERA_CUBRIDOR` (retención silenciosa, sin re-notificar).
 - **Backlog:** liberar FIFO al fichar entrante; no sacar compañero de activos en edge UI.
 
-**Archivos:** `coverageRetention.ts`, `autoCompletarTurnosCore.ts`, `positionHasContinuity.ts`, `relevoOutgoingMatch.ts`
+**Archivos:** `coverageRetention.ts`, `autoCompletarTurnosCore.ts`, `shiftClose.ts`, `positionHasContinuity.ts`, `relevoOutgoingMatch.ts`
+
+### Flujo 6b — Cierre de turnos (un solo responsable)
+
+- **Cierres automáticos: solo el server** (`autoCompletarTurnosCore`, cron `autoCompletarTurnos`, y `registrarPresencia` al fichar el relevo). Todos pasan por `buildAutoClosePatch`: `realEndTime` siempre presente y acotado al tope; si estaba retenido, `retentionMinutes` + `retentionEndedAt` (Liquidación computa la salida real). `isRetention` se conserva en el completado; `retainOutgoingForGap` / `releaseRetentionForAbsenceShift` ignoran completados.
+- **Motivos:** `RELEVO_PROGRAMADO`, `RELEVO_PRESENTE`, `SIN_CONTINUIDAD_SLA`, `MANUAL_EXTENSION_ELAPSED`, `TOPE_JORNADA`, `TOPE_JORNADA_RETROACTIVO` (pasó el tope hace > 2 h: cron caído / turno viejo abierto → retenido cierra en inicio + 12:59, resto en fin planificado, `requiereRevision: true`).
+- **CC apagado (`centroControlEnabled=false`):** el cron corre igual en modo silencioso. Solo `RELEVO_PROGRAMADO`, `RELEVO_PRESENTE`, `SIN_CONTINUIDAD_SLA` (fin planificado), `TOPE_JORNADA` y `TOPE_JORNADA_RETROACTIVO`. Sin retención (`retainOutgoingForGap` / `isRetention`), sin novedades, sin `escalarVacanteSinCobertura`, sin push. Con continuidad y sin relevo queda abierto hasta el tope (acción `WAIT CC_OFF_ESPERA_TOPE`). E2E 41–43.
+- **Navegador:** no cierra solo. `useAutoMonitor` solo avisa «Turno vencido sin cierre» (presente, no retenido, > 2 h del fin). `useOperacionesMonitor` ya no tiene `AUTO_COVERAGE_COMPLETE` / `AUTO_OVERTIME_LIMIT`. **Salida manual y relevo manual del operador siguen en el CC**, siempre con `realEndTime`.
+- **Retención manual (modal CC / Map view):** extensiones +1/+2/+4 h y «Indeterminada» acotadas al tope (`lib/operaciones/shiftHardCap.ts`, espejo del server).
+- **Escritores de presencia:** todo alta presente escribe `status: 'PRESENT'` (la query del cron es `status == PRESENT && endTime <= now−5 min`).
+- **dryRun:** `runAutoCompletarTurnosPass(db, ctx, now, { dryRun: true })` devuelve `actions[]` (CLOSE / RETAIN / RETAIN_QUIET / LINK_RELIEF / WAIT) sin escribir ni notificar.
+- **Caso real:** `caps-angelelli-2026-09-26` (casos P1.1–P1.5 en `eval-cc-casos-reales-emulator.mjs`).
+
+**Archivos:** `scheduling/shiftClose.ts`, `scheduling/autoCompletarTurnosCore.ts`, `fichajes/registrarPresencia.ts`, `coverage/coverageRetention.ts`, `web2/hooks/useAutoMonitor.ts`, `web2/hooks/useOperacionesMonitor.ts`
 
 ---
 
@@ -302,7 +316,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 - `checkConvocatoriaTimeouts` — cada 1 min
 - `modoDemoCron` — cada 5 min
 - `detectarAusencias` — T+30 / ETA / convocado absent
-- `autoCompletarTurnos` — cierre + tope retención 12 h / continuidad
+- `autoCompletarTurnos` — único cierre automático + tope 12:59 / continuidad
 
 ### Callables
 `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `getCandidatosCobertura`, `sesionOperador`, `marcarAusenciaOperaciones`, `revertirAusencia`, `notificarLlegadaTarde`, `registrarPresencia`, `processEarlyWithdrawalCallable`, `releaseInvalidRetentions`, `releaseTraceAbsences`
@@ -335,10 +349,11 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 3. Manual = retención sí, cascada no; Demo bypasea bloqueo Manual.
 4. Claim 2 min evita doble aceptación.
 5. EXT/ADV no duplican horas.
-6. Continuidad SLA ±30 min + tope retención 12 h.
+6. Continuidad SLA ±30 min + tope 12:59 desde inicio real (cierra aun con continuidad; el puesto pasa a vacante).
+6b. Cierres automáticos solo en el server, siempre con `realEndTime`; el navegador no cierra turnos solo.
 7. Timeout convocatoria 3 min → ESCALATED; primero que acepta gana (salvo dual).
 8. Cascada agotada → `escalarVacanteSinCobertura` (+ intento retención previo).
-9. CC off → sin cascada/novedades cobertura.
+9. CC off → sin cascada/novedades cobertura; el cierre automático corre igual en silencioso (tope 12:59 incluido).
 10. Elegibilidad: mismo objetivo, geo ~15 km (ampliable 30), solape source↔hueco, aptitudes.
 
 ---
@@ -352,7 +367,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 - [ ] Portal: alinear `getCheckInTiming` con ventanas servidor
 - [ ] Prioridad EXT sobre retenido + segmentos HH:MM–HH:MM
 
-**Cerrado Fase 1–2:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12 h, ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor.
+**Cerrado Fase 1–2:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12:59 con cierre único en server (P1), ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor.
 
 **E2E:** `node scripts/eval-coverage-e2e-emulator.mjs`
 

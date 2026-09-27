@@ -3,9 +3,10 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { positionHasContinuityFromSlaDoc } from './positionHasContinuity';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
+import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
-const RETENTION_MAX_TOTAL_MS = 12 * 60 * 60 * 1000;
+const RETENTION_MAX_TOTAL_MS = SHIFT_HARD_CAP_MS;
 
 const normPos = (n: unknown): string =>
   String(n ?? '')
@@ -95,11 +96,12 @@ export async function retainOutgoingForGap(
     .where('isRetention', '==', true)
     .limit(5)
     .get();
-  if (!existing.empty) {
+  const activeRetained = existing.docs.filter((d) => d.data().isCompleted !== true);
+  if (activeRetained.length) {
     return {
       applied: false,
-      shiftIds: existing.docs.map((d) => d.id),
-      employeeNames: existing.docs.map((d) => String(d.data().employeeName || '')),
+      shiftIds: activeRetained.map((d) => d.id),
+      employeeNames: activeRetained.map((d) => String(d.data().employeeName || '')),
       skippedReason: 'ALREADY_RETAINED_FOR_GAP',
     };
   }
@@ -221,7 +223,9 @@ export async function releaseRetentionForAbsenceShift(
 
   const ordered = snap.docs
     .map((d) => ({ ref: d.ref, data: d.data() as Record<string, unknown> }))
+    .filter((row) => row.data.isCompleted !== true)
     .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
+  if (!ordered.length) return 0;
 
   const batch = db.batch();
   const now = FieldValue.serverTimestamp();
@@ -267,6 +271,7 @@ export async function releaseInvalidRetentionsRun(
   for (const docSnap of snap.docs) {
     const shift = docSnap.data();
     if (empresaFilter && String(shift.empresaId || '') !== empresaFilter) continue;
+    if (shift.isCompleted === true) continue;
     const endMs = (shift.endTime as Timestamp | undefined)?.toMillis?.() ?? 0;
     if (!endMs) continue;
     const oid = String(shift.objectiveId || '');
@@ -295,13 +300,16 @@ export async function releaseInvalidRetentionsRun(
 
     if (!dryRun) {
       await docSnap.ref.update({
+        ...buildAutoClosePatch(shift as Record<string, unknown>, {
+          realEndMs: endMs,
+          reason: 'SIN_CONTINUIDAD_SLA',
+          now: Timestamp.now(),
+          by: 'ADMIN_RELEASE_INVALID',
+          extra: { requiereRevision: true },
+        }),
         isRetention: false,
-        status: 'COMPLETED',
-        isCompleted: true,
-        isPresent: false,
         retentionReleasedAt: FieldValue.serverTimestamp(),
         releasedBy: 'ADMIN_RELEASE_INVALID',
-        completionReason: 'SIN_CONTINUIDAD_SLA',
       });
     }
   }

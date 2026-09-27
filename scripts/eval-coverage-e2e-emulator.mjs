@@ -878,7 +878,7 @@ async function run() {
       report(16, ok, ok ? 'retenido liberado tras FULL' : `isRet=${ret?.isRetention}`);
     }
 
-    // Caso 17 — tope 12h con continuidad → novedad, no cierre
+    // Caso 17 — tope 12:59 con continuidad → cierre TOPE_JORNADA en inicio+12:59 + novedad
     {
       const prefix = `${runId}_c17`;
       const objectiveId = `${prefix}_obj`;
@@ -904,11 +904,19 @@ async function run() {
       });
       await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 16, 0));
       const data = (await db.collection('turnos').doc(shiftId).get()).data();
-      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'RETENCION_TOPE_12H').get();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'TOPE_JORNADA').get();
       const slaDoc = (await db.collection('servicios_sla').doc(`${objectiveId}_sla`).get()).data();
       const cont = positionHasContinuityFromSlaDoc(slaDoc, 'Puesto 1', new Date(data.endTime.toMillis()));
-      const ok = cont && data?.status === 'PRESENT' && nov.size >= 1;
-      report(17, ok, ok ? 'sigue retenido + RETENCION_TOPE_12H' : `st=${data?.status} nov=${nov.size} cont=${cont}`);
+      const expectedEnd = checkIn.toMillis() + RETENTION_MAX_TOTAL_MS;
+      const realEnd = data?.realEndTime?.toMillis?.() ?? 0;
+      const ok =
+        cont
+        && data?.status === 'COMPLETED'
+        && data?.completionReason === 'TOPE_JORNADA'
+        && realEnd === expectedEnd
+        && Number(data?.retentionMinutes || 0) === 0
+        && nov.size === 1;
+      report(17, ok, ok ? 'cierre TOPE_JORNADA inicio+12:59 + novedad' : `st=${data?.status} r=${data?.completionReason} realEnd=${realEnd} exp=${expectedEnd} nov=${nov.size} cont=${cont}`);
     }
 
     // Caso 18 — 2 pax: compañero 1h antes no cierra al saliente; relevo no llega → retención
@@ -1603,6 +1611,130 @@ async function run() {
       const after = (await db.collection('turnos').doc(s.refSourceId).get()).data();
       const ok = skip === true && after?.isAbsent !== true;
       report(40, ok, ok ? 'isDeleted: sin AA en origen convertido' : `skip=${skip} absent=${after?.isAbsent}`);
+    }
+
+    // Casos 41–43 — empresa con Centro de Control apagado: cierre silencioso (sin retención/novedad/push).
+    let ccOffTokenCalls = 0;
+    const ccOffCtx = {
+      ...autoCompleteCtx,
+      isEnabled: (eid) => !String(eid || '').endsWith('_ccoff'),
+      getEmployeeTokens: async () => {
+        ccOffTokenCalls++;
+        return ['tok_e2e'];
+      },
+    };
+    const silentTrace = async (shiftId, extraIds = []) => {
+      const ids = [shiftId, ...extraIds];
+      let nov = 0;
+      for (const id of ids) {
+        nov += (await db.collection('novedades').where('shiftId', '==', id).get()).size;
+        nov += (await db.collection('novedades').where('absenceShiftId', '==', id).get()).size;
+      }
+      const notifs = (await db.collection('user_notifications').where('turnoId', '==', shiftId).get()).size;
+      return { nov, notifs };
+    };
+
+    // Caso 41 — CC off, 24 h con continuidad, relevo ausente: abierto sin retener; al tope cierra silencioso.
+    {
+      const prefix = `${runId}_c41`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_ccoff`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const salId = `${prefix}_sal`;
+      const entId = `${prefix}_ent`;
+      const checkIn = tsAt(2026, 9, 23, 6, 55);
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eS`,
+          employeeName: 'Saliente CC off', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: checkIn,
+        })
+        .set(db.collection('turnos').doc(entId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          employeeName: 'Entrante ausente', code: 'T', status: 'ABSENT', isAbsent: true,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+        })
+        .commit();
+      ccOffTokenCalls = 0;
+      await runAutoCompletarTurnosPass(db, ccOffCtx, tsAt(2026, 9, 23, 15, 10), { onlyOutgoingShiftId: salId });
+      const mid = (await db.collection('turnos').doc(salId).get()).data();
+      const capMs = checkIn.toMillis() + RETENTION_MAX_TOTAL_MS;
+      await runAutoCompletarTurnosPass(db, ccOffCtx, Timestamp.fromMillis(capMs + 5 * 60000), { onlyOutgoingShiftId: salId });
+      const end = (await db.collection('turnos').doc(salId).get()).data();
+      const ent = (await db.collection('turnos').doc(entId).get()).data();
+      const tr = await silentTrace(salId, [entId]);
+      const ok =
+        mid?.status === 'PRESENT' && mid?.isRetention !== true
+        && end?.status === 'COMPLETED' && end?.completionReason === 'TOPE_JORNADA'
+        && end?.realEndTime?.toMillis?.() === capMs
+        && ent?.isSinCobertura !== true
+        && tr.nov === 0 && tr.notifs === 0 && ccOffTokenCalls === 0;
+      report(41, ok, ok
+        ? 'CC off: abierto sin retener; cierre TOPE_JORNADA sin novedad/escalado/push'
+        : `mid=${mid?.status}/${mid?.isRetention} end=${end?.status}/${end?.completionReason} sinCob=${ent?.isSinCobertura} nov=${tr.nov} notif=${tr.notifs} push=${ccOffTokenCalls}`);
+    }
+
+    // Caso 42 — CC off, sin continuidad → cierre en fin planificado.
+    {
+      const prefix = `${runId}_c42`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_ccoff`;
+      await seedSla(objectiveId, `${prefix}_cli`, 'partial');
+      const salId = `${prefix}_sal`;
+      const endPlan = tsAt(2026, 9, 23, 15, 0);
+      await db.collection('turnos').doc(salId).set({
+        empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eS`,
+        employeeName: 'Saliente CC off', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: tsAt(2026, 9, 23, 8, 0), endTime: endPlan,
+      });
+      ccOffTokenCalls = 0;
+      await runAutoCompletarTurnosPass(db, ccOffCtx, tsAt(2026, 9, 23, 15, 10), { onlyOutgoingShiftId: salId });
+      const d = (await db.collection('turnos').doc(salId).get()).data();
+      const tr = await silentTrace(salId);
+      const ok =
+        d?.status === 'COMPLETED' && d?.completionReason === 'SIN_CONTINUIDAD_SLA'
+        && d?.realEndTime?.toMillis?.() === endPlan.toMillis()
+        && d?.isRetention !== true && tr.nov === 0 && ccOffTokenCalls === 0;
+      report(42, ok, ok
+        ? 'CC off: sin continuidad cierra en fin planificado'
+        : `st=${d?.status} r=${d?.completionReason} nov=${tr.nov} push=${ccOffTokenCalls}`);
+    }
+
+    // Caso 43 — CC off, relevo presente → cierra al relevo, sin aviso TURNO_FINALIZADO.
+    {
+      const prefix = `${runId}_c43`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_ccoff`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const salId = `${prefix}_sal`;
+      const relId = `${prefix}_rel`;
+      const relCheck = tsAt(2026, 9, 23, 15, 20);
+      await db.batch()
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eS`,
+          employeeName: 'Saliente CC off', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 58),
+        })
+        .set(db.collection('turnos').doc(relId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eR`,
+          employeeName: 'Relevo', code: 'T', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+          checkInTime: relCheck, realStartTime: relCheck,
+        })
+        .commit();
+      ccOffTokenCalls = 0;
+      await runAutoCompletarTurnosPass(db, ccOffCtx, tsAt(2026, 9, 23, 15, 25), { onlyOutgoingShiftId: salId });
+      const d = (await db.collection('turnos').doc(salId).get()).data();
+      const tr = await silentTrace(salId);
+      const ok =
+        d?.status === 'COMPLETED' && d?.completionReason === 'RELEVO_PRESENTE'
+        && d?.realEndTime?.toMillis?.() === relCheck.toMillis()
+        && tr.nov === 0 && tr.notifs === 0 && ccOffTokenCalls === 0;
+      report(43, ok, ok
+        ? 'CC off: cierra al fichar el relevo, sin avisos'
+        : `st=${d?.status} r=${d?.completionReason} nov=${tr.nov} notif=${tr.notifs} push=${ccOffTokenCalls}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

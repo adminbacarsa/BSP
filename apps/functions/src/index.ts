@@ -1258,7 +1258,7 @@ export const autoPresenciaYCierre = functions
       if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
         presenciaMarcada.push(label);
         if (!dryRun) {
-          batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+          batch.update(doc.ref, { isPresent: true, status: 'PRESENT', presentAt: nowTs, autoPresencia: true });
           ops++;
         }
       }
@@ -2709,11 +2709,8 @@ export const autoCompletarTurnos = functions
   .pubsub.schedule('every 5 minutes')
   .onRun(async () => {
     const db = admin.firestore();
+    // Corre aunque el CC esté apagado: el tope de jornada cierra igual, en modo silencioso.
     const cc = await loadCentroControlState(db);
-    if (!cc.anyEnabled) {
-      console.log('[autoCompletarTurnos] Centro de Control desactivado en todas las empresas');
-      return null;
-    }
     const now = admin.firestore.Timestamp.now();
     const pass = await runAutoCompletarTurnosPass(db, {
       isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
