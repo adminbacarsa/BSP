@@ -2,9 +2,9 @@
  * P1 — dryRun del cierre automático contra PRODUCCIÓN (solo lectura, ADC).
  *
  * Lista qué cerraría/retendría `runAutoCompletarTurnosPass` si P1 se publicara ahora, en especial
- * los cierres TOPE_JORNADA_RETROACTIVO (turnos abiertos que pasaron el tope hace > 2 h).
- * Además lista presentes vencidos que el cron no ve (isPresent sin status PRESENT) y los de empresas
- * con Centro de Control apagado (el cron los saltea).
+ * los cierres TOPE_JORNADA_RETROACTIVO (turnos abiertos que pasaron el tope hace > 2 h), separados
+ * por empresa. Las empresas con Centro de Control apagado entran en modo silencioso (solo cierres).
+ * Además lista presentes vencidos que el cron no ve (isPresent sin status PRESENT).
  *
  * Requisitos: `npm run build` en apps/functions; `gcloud auth application-default login`.
  *   node scripts/cc-p1-dryrun-prod.mjs [--now 2026-09-26T20:00:00-03:00] [--empresa pruebas_sa]
@@ -72,7 +72,7 @@ async function main() {
 
   const cc = await loadCentroControlState(db);
   const ctx = {
-    isEnabled: (eid) => cc.isEnabled(String(eid ?? '')) && (!onlyEmpresa || String(eid ?? '') === onlyEmpresa),
+    isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
     shiftEmpresaId: (s) => String(s.empresaId ?? '').trim(),
     sameTenantShift: (a, b) => {
       const ae = String(a.empresaId ?? '').trim();
@@ -84,13 +84,15 @@ async function main() {
     getEmployeeTokens: async () => [],
   };
 
-  const pass = await runAutoCompletarTurnosPass(db, ctx, now, { dryRun: true });
+  const pass = await runAutoCompletarTurnosPass(db, ctx, now, {
+    dryRun: true,
+    empresaFilter: onlyEmpresa ? (eid) => eid === onlyEmpresa : undefined,
+  });
 
-  // Presentes vencidos fuera del alcance del cron: status distinto de PRESENT o CC apagado.
+  // Presentes vencidos fuera del alcance del cron: status distinto de PRESENT.
   const presentSnap = await db.collection('turnos').where('isPresent', '==', true).get();
   const cutoff = nowMs - 5 * 60 * 1000;
   const outOfScope = [];
-  const ccDisabled = [];
   for (const d of presentSnap.docs) {
     const s = d.data();
     if (s.isCompleted === true) continue;
@@ -98,9 +100,11 @@ async function main() {
     if (!endMs || endMs > cutoff) continue;
     const eid = String(s.empresaId ?? '').trim();
     if (onlyEmpresa && eid !== onlyEmpresa) continue;
-    const row = {
+    if (String(s.status || '') === 'PRESENT') continue;
+    outOfScope.push({
       shiftId: d.id,
       empresaId: eid || null,
+      ccEnabled: cc.isEnabled(eid),
       objectiveName: s.objectiveName || s.objectiveId || '',
       positionName: s.positionName || '',
       employeeName: s.employeeName || s.employeeId || '',
@@ -112,9 +116,7 @@ async function main() {
       plannedEnd: fmtAr(endMs),
       capAt: fmtAr(shiftHardCapAtMs(s)),
       staleCap: shiftHardCapAtMs(s) > 0 && nowMs >= shiftHardCapAtMs(s) + STALE_CAP_GRACE_MS,
-    };
-    if (String(s.status || '') !== 'PRESENT') outOfScope.push(row);
-    else if (!cc.isEnabled(eid)) ccDisabled.push(row);
+    });
   }
 
   const byKindReason = {};
@@ -123,12 +125,29 @@ async function main() {
     byKindReason[k] = (byKindReason[k] || 0) + 1;
   }
 
+  const empresasSnap = await db.collection('empresas').get();
+  const empresaName = new Map(empresasSnap.docs.map((d) => [d.id, String(d.data().name || d.data().nombre || d.data().razonSocial || d.id)]));
+  const byEmpresa = {};
+  for (const e of empresasSnap.docs) {
+    if (onlyEmpresa && e.id !== onlyEmpresa) continue;
+    byEmpresa[e.id] = { nombre: empresaName.get(e.id), ccEnabled: cc.isEnabled(e.id), acciones: 0, porMotivo: {}, retroactivos: 0 };
+  }
+  for (const a of pass.actions) {
+    const eid = a.empresaId || '(sin empresaId)';
+    const row = byEmpresa[eid] ?? (byEmpresa[eid] = { nombre: empresaName.get(eid) || eid, ccEnabled: !a.ccOff, acciones: 0, porMotivo: {}, retroactivos: 0 });
+    row.acciones++;
+    const k = `${a.kind} ${a.reason}`;
+    row.porMotivo[k] = (row.porMotivo[k] || 0) + 1;
+    if (a.reason === 'TOPE_JORNADA_RETROACTIVO') row.retroactivos++;
+  }
+
   const retro = pass.actions
     .filter((a) => a.reason === 'TOPE_JORNADA_RETROACTIVO')
     .sort((a, b) => String(a.empresaId).localeCompare(String(b.empresaId)) || a.endMs - b.endMs)
     .map((a) => ({
       shiftId: a.shiftId,
       empresaId: a.empresaId,
+      ccEnabled: !a.ccOff,
       objectiveName: a.objectiveName,
       positionName: a.positionName,
       employeeName: a.employeeName,
@@ -147,6 +166,7 @@ async function main() {
       kind: a.kind,
       reason: a.reason,
       empresaId: a.empresaId,
+      ccEnabled: !a.ccOff,
       objectiveName: a.objectiveName,
       positionName: a.positionName,
       employeeName: a.employeeName,
@@ -163,10 +183,10 @@ async function main() {
     now: fmtAr(nowMs),
     empresa: onlyEmpresa,
     summary: byKindReason,
+    porEmpresa: byEmpresa,
     retroactivos: retro,
     otrasAcciones: other,
     presentesFueraDelCron: outOfScope,
-    presentesCentroControlApagado: ccDisabled,
   };
 
   const outDir = path.join(__dirname, 'out');
@@ -177,21 +197,23 @@ async function main() {
 
   console.log(`dryRun P1 @ ${report.now} (${onlyEmpresa || 'todas las empresas'})`);
   console.log('Resumen:', byKindReason);
+  console.log('\nPor empresa:');
+  const empRows = Object.entries(byEmpresa).sort(([, a], [, b]) => Number(a.ccEnabled) - Number(b.ccEnabled) || b.acciones - a.acciones);
+  for (const [eid, r] of empRows) {
+    const motivos = Object.entries(r.porMotivo).map(([k, v]) => `${k}=${v}`).join(', ') || '-';
+    console.log(`  [CC ${r.ccEnabled ? 'ON ' : 'OFF'}] ${eid} (${r.nombre})\tacciones=${r.acciones}\tretroactivos=${r.retroactivos}\t${motivos}`);
+  }
   console.log(`\nTOPE_JORNADA_RETROACTIVO (${retro.length}):`);
   for (const r of retro) {
-    console.log(`  ${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tret=${r.retenido ? 'sí' : 'no'}\tinicio ${r.inicioReal}\tfin plan ${r.finPlanificado}\t→ cierre ${r.cierrePropuesto} (${r.horasPropuestas} h)\t${r.shiftId}`);
+    console.log(`  [CC ${r.ccEnabled ? 'ON ' : 'OFF'}] ${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tret=${r.retenido ? 'sí' : 'no'}\tinicio ${r.inicioReal}\tfin plan ${r.finPlanificado}\t→ cierre ${r.cierrePropuesto} (${r.horasPropuestas} h)\t${r.shiftId}`);
   }
   console.log(`\nOtras acciones (${other.length}):`);
   for (const r of other) {
-    console.log(`  ${r.kind} ${r.reason}\t${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tfin plan ${r.finPlanificado}${r.cierrePropuesto ? ` → ${r.cierrePropuesto}` : ''}\t${r.shiftId}`);
+    console.log(`  [CC ${r.ccEnabled ? 'ON ' : 'OFF'}] ${r.kind} ${r.reason}\t${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tfin plan ${r.finPlanificado}${r.cierrePropuesto ? ` → ${r.cierrePropuesto}` : ''}\t${r.shiftId}`);
   }
   console.log(`\nPresentes vencidos que el cron no ve (isPresent sin status PRESENT): ${outOfScope.length}`);
   for (const r of outOfScope) {
-    console.log(`  ${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tstatus=${r.status} origin=${r.origin}\tfin plan ${r.plannedEnd}\t${r.shiftId}`);
-  }
-  console.log(`\nPresentes vencidos en empresas con Centro de Control apagado: ${ccDisabled.length}`);
-  for (const r of ccDisabled) {
-    console.log(`  ${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tfin plan ${r.plannedEnd}\t${r.shiftId}`);
+    console.log(`  [CC ${r.ccEnabled ? 'ON ' : 'OFF'}] ${r.empresaId}\t${r.objectiveName} / ${r.positionName}\t${r.employeeName} (${r.code})\tstatus=${r.status} origin=${r.origin}\tfin plan ${r.plannedEnd}\t${r.shiftId}`);
   }
   console.log(`\nDetalle: ${outFile}`);
 }

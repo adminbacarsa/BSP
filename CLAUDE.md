@@ -176,7 +176,7 @@ Acciones por módulo: `read`, `create`, `update`, `delete`.
 `RRHH` además: `adjust`.
 `isSuperAdmin` bypasea todos los permisos.
 
-**Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front.
+**Centro de Control (kill switch):** campo `empresas/{id}.centroControlEnabled` (default ON). SuperAdmin lo apaga en Configuración → Empresas. Si está en `false`, los crons `detectarAusencias`, `gestionarVacantes` y `autoCompletarTurnos` no generan novedades/AUTO_T30/avisos para esa empresa; tampoco el aviso de llegada tarde ni el auto-monitor del front. **Excepción:** `autoCompletarTurnos` igual **cierra** turnos en modo silencioso (relevo programado/presente, sin continuidad en fin planificado, tope 12:59 y retroactivo con `requiereRevision`), sin retener, sin novedades, sin escalar vacante y sin push.
 
 **Alertas IA retiradas (CC):** el cron `operationalAlertsCron` (**no desplegado**) generaba novedades `IA_ALERTA_*` vía `scanOperationalAlertsForEmpresa` (`apps/functions/src/automation/operationalAutomation.ts`, flag `IA_OPERATIONAL_ALERTS_ENABLED = false`). Duplicaban el monitor; el front oculta `IA_ALERTA_*`. Limpieza histórica: `node scripts/retire-ia-alerta-novedades.mjs` (dry-run; `--apply` solo con OK de Mauro).
 

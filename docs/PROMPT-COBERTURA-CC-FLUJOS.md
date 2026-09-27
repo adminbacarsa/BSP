@@ -182,6 +182,7 @@ onTurnoAbsenciaDetectada
 
 - **Cierres automáticos: solo el server** (`autoCompletarTurnosCore`, cron `autoCompletarTurnos`, y `registrarPresencia` al fichar el relevo). Todos pasan por `buildAutoClosePatch`: `realEndTime` siempre presente y acotado al tope; si estaba retenido, `retentionMinutes` + `retentionEndedAt` (Liquidación computa la salida real). `isRetention` se conserva en el completado; `retainOutgoingForGap` / `releaseRetentionForAbsenceShift` ignoran completados.
 - **Motivos:** `RELEVO_PROGRAMADO`, `RELEVO_PRESENTE`, `SIN_CONTINUIDAD_SLA`, `MANUAL_EXTENSION_ELAPSED`, `TOPE_JORNADA`, `TOPE_JORNADA_RETROACTIVO` (pasó el tope hace > 2 h: cron caído / turno viejo abierto → retenido cierra en inicio + 12:59, resto en fin planificado, `requiereRevision: true`).
+- **CC apagado (`centroControlEnabled=false`):** el cron corre igual en modo silencioso. Solo `RELEVO_PROGRAMADO`, `RELEVO_PRESENTE`, `SIN_CONTINUIDAD_SLA` (fin planificado), `TOPE_JORNADA` y `TOPE_JORNADA_RETROACTIVO`. Sin retención (`retainOutgoingForGap` / `isRetention`), sin novedades, sin `escalarVacanteSinCobertura`, sin push. Con continuidad y sin relevo queda abierto hasta el tope (acción `WAIT CC_OFF_ESPERA_TOPE`). E2E 41–43.
 - **Navegador:** no cierra solo. `useAutoMonitor` solo avisa «Turno vencido sin cierre» (presente, no retenido, > 2 h del fin). `useOperacionesMonitor` ya no tiene `AUTO_COVERAGE_COMPLETE` / `AUTO_OVERTIME_LIMIT`. **Salida manual y relevo manual del operador siguen en el CC**, siempre con `realEndTime`.
 - **Retención manual (modal CC / Map view):** extensiones +1/+2/+4 h y «Indeterminada» acotadas al tope (`lib/operaciones/shiftHardCap.ts`, espejo del server).
 - **Escritores de presencia:** todo alta presente escribe `status: 'PRESENT'` (la query del cron es `status == PRESENT && endTime <= now−5 min`).
@@ -351,7 +352,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 6b. Cierres automáticos solo en el server, siempre con `realEndTime`; el navegador no cierra turnos solo.
 7. Timeout convocatoria 3 min → ESCALATED; primero que acepta gana (salvo dual).
 8. Cascada agotada → `escalarVacanteSinCobertura` (+ intento retención previo).
-9. CC off → sin cascada/novedades cobertura.
+9. CC off → sin cascada/novedades cobertura; el cierre automático corre igual en silencioso (tope 12:59 incluido).
 10. Elegibilidad: mismo objetivo, geo ~15 km (ampliable 30), solape source↔hueco, aptitudes.
 
 ---

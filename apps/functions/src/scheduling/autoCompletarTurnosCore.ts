@@ -19,6 +19,10 @@ const RELEVO_WINDOW_AFTER_MS = 2 * 60 * 60 * 1000;
 const RELEVO_ALIGN_MS = 30 * 60 * 1000;
 
 export type AutoCompleteContext = {
+  /**
+   * Centro de Control prendido. Con CC apagado el cierre corre igual en modo silencioso:
+   * solo relevo / sin continuidad / tope, sin retener, sin novedades, sin escalar, sin push.
+   */
   isEnabled: (empresaId: unknown) => boolean;
   shiftEmpresaId: (shift: FirebaseFirestore.DocumentData) => string;
   sameTenantShift: (
@@ -46,6 +50,8 @@ export type AutoCompleteAction = {
   realEndMs?: number;
   requiereRevision?: boolean;
   gapShiftId?: string | null;
+  /** Empresa con Centro de Control apagado (pase silencioso). */
+  ccOff: boolean;
 };
 
 export type AutoCompletePassResult = {
@@ -105,6 +111,8 @@ export type AutoCompletarTurnosPassOpts = {
   onlyOutgoingShiftId?: string | null;
   /** Solo lista las acciones que haría (no escribe, no notifica). */
   dryRun?: boolean;
+  /** Limita la pasada a las empresas que devuelvan true (dryRun por empresa). */
+  empresaFilter?: (empresaId: string) => boolean;
 };
 
 type CapEscalation = {
@@ -178,6 +186,7 @@ export async function runAutoCompletarTurnosPass(
     endMs: shiftEndMs(shift),
     workStartMs: shiftWorkStartMs(shift as Record<string, unknown>),
     wasRetention: shift.isRetention === true,
+    ccOff: !ctx.isEnabled(shift.empresaId),
     ...extra,
   });
 
@@ -247,7 +256,8 @@ export async function runAutoCompletarTurnosPass(
       if (!endMs || endMs > cutoff.toMillis()) continue;
     }
     const shift = docSnap.data();
-    if (!ctx.isEnabled(shift.empresaId)) continue;
+    if (passOpts?.empresaFilter && !passOpts.empresaFilter(ctx.shiftEmpresaId(shift))) continue;
+    const ccOff = !ctx.isEnabled(shift.empresaId);
     if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) continue;
     if ((shift.status || '') === 'INTERRUPTED') continue;
 
@@ -265,7 +275,7 @@ export async function runAutoCompletarTurnosPass(
       const incomingName = String(shift.relievedByName || 'relevo').trim();
       close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO');
       const outEmpId = String(shift.employeeId || '').trim();
-      if (outEmpId) {
+      if (outEmpId && !ccOff) {
         relevoFinishNotifs.push({
           outEmpId,
           outDocId: docSnap.id,
@@ -287,7 +297,8 @@ export async function runAutoCompletarTurnosPass(
     }
 
     const manualExtended =
-      shift.isRetention === true
+      !ccOff
+      && shift.isRetention === true
       && shift.manualRetentionType === 'extended'
       && Number(shift.manualRetentionHours || 0) > 0;
     if (manualExtended) {
@@ -356,7 +367,7 @@ export async function runAutoCompletarTurnosPass(
       const overCap = capAtMs > 0 && closeMs > capAtMs;
       close(docSnap, shift, closeMs, overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE');
       const outEmpId = String(shift.employeeId || '').trim();
-      if (outEmpId && relCheckMs <= endTimeMs) {
+      if (outEmpId && !ccOff && relCheckMs <= endTimeMs) {
         relevoFinishNotifs.push({
           outEmpId,
           outDocId: docSnap.id,
@@ -380,7 +391,12 @@ export async function runAutoCompletarTurnosPass(
       const gapShiftId = linkedGapId || (relieveAbsent ?? relievePending)?.id || null;
       const gapCovered = gapData ? isGapCovered(gapData) : false;
       close(docSnap, shift, capAtMs, 'TOPE_JORNADA', undefined, gapShiftId);
-      capEscalations.push({ shiftId: docSnap.id, shift, capAtMs, gapShiftId, gapCovered });
+      if (!ccOff) capEscalations.push({ shiftId: docSnap.id, shift, capAtMs, gapShiftId, gapCovered });
+      continue;
+    }
+
+    if (ccOff && shift.isRetention === true) {
+      actions.push(describe(docSnap.id, shift, 'WAIT', 'CC_OFF_ESPERA_TOPE'));
       continue;
     }
 
@@ -395,6 +411,13 @@ export async function runAutoCompletarTurnosPass(
     }
 
     const continuous = await hasContinuity(shift);
+
+    if (ccOff) {
+      // CC apagado: sin retención ni avisos; con continuidad queda abierto hasta relevo o tope.
+      if (continuous) actions.push(describe(docSnap.id, shift, 'WAIT', 'CC_OFF_ESPERA_TOPE'));
+      else close(docSnap, shift, endTimeMs, 'SIN_CONTINUIDAD_SLA');
+      continue;
+    }
 
     if (relievePending || relieveAbsent) {
       const retentionUntilMs =
