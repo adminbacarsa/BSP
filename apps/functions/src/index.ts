@@ -1258,7 +1258,7 @@ export const autoPresenciaYCierre = functions
       if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
         presenciaMarcada.push(label);
         if (!dryRun) {
-          batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+          batch.update(doc.ref, { isPresent: true, status: 'PRESENT', presentAt: nowTs, autoPresencia: true });
           ops++;
         }
       }

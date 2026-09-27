@@ -69,6 +69,7 @@ import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal'
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
 import { DebugPanel } from '@/components/operaciones/DebugPanel';
@@ -947,8 +948,12 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
     const now = new Date();
     const endTime: Date = shift.endDateObj instanceof Date ? shift.endDateObj : now;
     const checkInTime: Date | null = shift.activeStartTime instanceof Date ? shift.activeStartTime : null;
-    const max12h: Date | null = checkInTime ? new Date(checkInTime.getTime() + 12 * 3600000) : null;
-    const getNewEnd = (h: number) => { const base = endTime > now ? endTime : now; return new Date(base.getTime() + h * 3600000); };
+    const capAt = shiftHardCapAt(checkInTime ?? (shift.shiftDateObj instanceof Date ? shift.shiftDateObj : null));
+    const getNewEnd = (h: number) => {
+        const base = endTime > now ? endTime : now;
+        const target = new Date(base.getTime() + h * 3600000);
+        return capAt && target > capAt ? capAt : target;
+    };
     const fmt = (d: Date) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
     const handleConfirm = async () => {
         if (!selected) return;
@@ -968,7 +973,7 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
             } else {
                 updates.manualRetentionType = 'open';
                 updates.retentionType = 'open';
-                if (max12h) updates.retentionUntil = Timestamp.fromDate(max12h);
+                if (capAt) updates.retentionUntil = Timestamp.fromDate(capAt);
             }
             await updateDoc(doc(db, 'turnos', shift.id), updates);
             // Auto-desestimar novedades RETENCION_DETECTADA activas del turno
@@ -985,11 +990,15 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
         } catch (e: any) { toast.error('Error al aplicar retención: ' + e.message); }
         setLoading(false);
     };
+    const capSub = (h: number) => {
+        const end = getNewEnd(h);
+        return capAt && end.getTime() === capAt.getTime() ? `${fmt(end)} (tope)` : fmt(end);
+    };
     const options = [
-        { key: '1', label: '+1h', sub: fmt(getNewEnd(1)) },
-        { key: '2', label: '+2h', sub: fmt(getNewEnd(2)) },
-        { key: '4', label: '+4h', sub: fmt(getNewEnd(4)) },
-        { key: 'open', label: 'Indeterminada', sub: max12h ? `máx. ${fmt(max12h)}` : 'hasta 12h' },
+        { key: '1', label: '+1h', sub: capSub(1) },
+        { key: '2', label: '+2h', sub: capSub(2) },
+        { key: '4', label: '+4h', sub: capSub(4) },
+        { key: 'open', label: 'Indeterminada', sub: capAt ? `máx. ${fmt(capAt)}` : 'hasta 12:59 h' },
     ] as const;
     const newEnd = selected && selected !== 'open' ? getNewEnd(parseInt(selected)) : null;
     return (
@@ -1028,7 +1037,7 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
                     {selected === 'open' && (
                         <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 text-xs text-amber-800 flex items-center gap-2">
                             <AlarmClock size={13} className="shrink-0 text-amber-500"/>
-                            <span>Retención activa. Corte manual o automático a las <strong>{max12h ? fmt(max12h) : '12h desde entrada'}</strong></span>
+                            <span>Retención activa. Corte manual o automático a las <strong>{capAt ? fmt(capAt) : '12:59 h desde entrada'}</strong></span>
                         </div>
                     )}
                     <div className="flex gap-2">

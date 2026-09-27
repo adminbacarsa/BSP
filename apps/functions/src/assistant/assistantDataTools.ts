@@ -4563,7 +4563,7 @@ async function ejecutarAutoPresenciaCierre(
       if (entry) entry.isPresent = true;
     }
     if (!dryRun) {
-      batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+      batch.update(doc.ref, { isPresent: true, status: 'PRESENT', presentAt: nowTs, autoPresencia: true });
       ops++;
     }
   }

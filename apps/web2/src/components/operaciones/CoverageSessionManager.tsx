@@ -204,13 +204,14 @@ export async function bootstrapCoverageSession(
         collection(db, 'turnos'),
         where('retentionAbsenceShiftId', '==', absenceShiftId),
         where('isRetention', '==', true),
-        limit(1),
+        limit(5),
       );
       const retainedSnap = await getDocs(retainedQ);
-      if (!retainedSnap.empty) {
-        const d = retainedSnap.docs[0].data();
+      const activeRetained = retainedSnap.docs.find((doc) => doc.data().isCompleted !== true);
+      if (activeRetained) {
+        const d = activeRetained.data();
         return {
-          retentionShiftId: retainedSnap.docs[0].id,
+          retentionShiftId: activeRetained.id,
           retentionEmployeeName: String(d.employeeName || 'Guardia'),
           autoRetentionApplied: false,
         };

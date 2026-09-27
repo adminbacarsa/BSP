@@ -205,7 +205,8 @@ Ambas montan **`CoverageSessionManager`** + **`bootstrapCoverageSession`** al ab
 - [x] **Callable Manual:** tipos **REF/ESC** nativos + `candidateShiftId` en `crearConvocatoriaCobertura`.
 - [x] **Retención auto (Fase 1):** `retainOutgoingForGap` en backend; protocolo CC solo lectura (`bootstrapCoverageSession`); liberación al `applyCoverage` FULL; saliente ±30 min del hueco; CC badge RECARGO solo `isRetention` + **CIERRE PENDIENTE** si pasó fin sin retención.
 - [x] **Cascada Manual/Auto (Fase 1):** con sesión CC activa no corre `iniciarCascadaCobertura` (trigger + `gestionarVacantes`); Demo sin cambio.
-- [x] **Cierre automático (Fase 1):** `positionHasContinuity` + tope 12 h (novedad `RETENCION_TOPE_12H` si hay continuidad); sin continuidad → `SIN_CONTINUIDAD_SLA`; sin auto-cierre 2 h en puestos continuos.
+- [x] **Cierre automático (Fase 1):** `positionHasContinuity`; sin continuidad → `SIN_CONTINUIDAD_SLA`; sin auto-cierre 2 h en puestos continuos.
+- [x] **Cierre único + tope 12:59 (P1):** solo el server cierra automáticamente (`autoCompletarTurnosCore` + `registrarPresencia`, vía `scheduling/shiftClose.ts` `buildAutoClosePatch`: siempre `realEndTime`, `retentionMinutes` si retenido). Tope 12:59 desde inicio real aun con continuidad → `TOPE_JORNADA` + novedad + vacante escalada; > 2 h pasado el tope → `TOPE_JORNADA_RETROACTIVO` con `requiereRevision`. El navegador ya no cierra (solo aviso); salida/relevo manual del CC siguen. `dryRun` en `runAutoCompletarTurnosPass`.
 - [ ] **Retención — pendiente:** liberar FIFO al fichar entrante (relevo); retención tras chequear cobertura en orden estricto spec; no sacar compañero de activos en edge cases UI.
 - [ ] **Convocatorias CC:** cancelar al rechazar/cerrar; botón «Acepta» siempre visible.
 - [ ] **Flujos recuperados:** sin turno, retener sola, sin cobertura con turno sintético, candidatos de otros objetivos, candidatos > 30 km.

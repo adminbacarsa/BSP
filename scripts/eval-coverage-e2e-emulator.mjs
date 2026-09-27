@@ -878,7 +878,7 @@ async function run() {
       report(16, ok, ok ? 'retenido liberado tras FULL' : `isRet=${ret?.isRetention}`);
     }
 
-    // Caso 17 — tope 12h con continuidad → novedad, no cierre
+    // Caso 17 — tope 12:59 con continuidad → cierre TOPE_JORNADA en inicio+12:59 + novedad
     {
       const prefix = `${runId}_c17`;
       const objectiveId = `${prefix}_obj`;
@@ -904,11 +904,19 @@ async function run() {
       });
       await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 23, 16, 0));
       const data = (await db.collection('turnos').doc(shiftId).get()).data();
-      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'RETENCION_TOPE_12H').get();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'TOPE_JORNADA').get();
       const slaDoc = (await db.collection('servicios_sla').doc(`${objectiveId}_sla`).get()).data();
       const cont = positionHasContinuityFromSlaDoc(slaDoc, 'Puesto 1', new Date(data.endTime.toMillis()));
-      const ok = cont && data?.status === 'PRESENT' && nov.size >= 1;
-      report(17, ok, ok ? 'sigue retenido + RETENCION_TOPE_12H' : `st=${data?.status} nov=${nov.size} cont=${cont}`);
+      const expectedEnd = checkIn.toMillis() + RETENTION_MAX_TOTAL_MS;
+      const realEnd = data?.realEndTime?.toMillis?.() ?? 0;
+      const ok =
+        cont
+        && data?.status === 'COMPLETED'
+        && data?.completionReason === 'TOPE_JORNADA'
+        && realEnd === expectedEnd
+        && Number(data?.retentionMinutes || 0) === 0
+        && nov.size === 1;
+      report(17, ok, ok ? 'cierre TOPE_JORNADA inicio+12:59 + novedad' : `st=${data?.status} r=${data?.completionReason} realEnd=${realEnd} exp=${expectedEnd} nov=${nov.size} cont=${cont}`);
     }
 
     // Caso 18 — 2 pax: compañero 1h antes no cierra al saliente; relevo no llega → retención

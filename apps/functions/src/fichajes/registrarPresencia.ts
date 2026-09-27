@@ -5,6 +5,7 @@ import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
 import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
+import { buildAutoClosePatch } from '../scheduling/shiftClose';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -415,11 +416,19 @@ export async function registrarPresencia(
               relievedSource: source,
             });
           } else {
+            const outClose = buildAutoClosePatch(outData as Record<string, unknown>, {
+              realEndMs: nowMs,
+              reason: 'RELEVO_PRESENTE',
+              now: Timestamp.fromMillis(nowMs),
+              by: 'RELEVO',
+            });
             await outDoc.ref.update({
               isCompleted: true,
               isPresent: false,
               status: 'COMPLETED',
-              realEndTime: Timestamp.fromMillis(nowMs),
+              realEndTime: outClose.realEndTime,
+              ...(outClose.retentionMinutes != null ? { retentionMinutes: outClose.retentionMinutes } : {}),
+              ...(outClose.retentionEndedAt ? { retentionEndedAt: outClose.retentionEndedAt } : {}),
               relievedBy: empId || null,
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),

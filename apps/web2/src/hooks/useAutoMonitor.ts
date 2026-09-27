@@ -260,104 +260,25 @@ export const useAutoMonitor = ({
         }
       }
 
-      // ── Auto-finalización (incluye zombies: retención natural vencida >2h) ──
-      const toComplete = processedData.filter(s => {
+      // Los cierres automáticos los hace solo el servidor (autoCompletarTurnos: relevo, continuidad SLA, tope 12:59).
+      // El navegador solo avisa si un turno sigue abierto 2 h después del fin sin estar retenido.
+      const overdue = processedData.filter(s => {
         if (s.isCompleted || s.status === 'COMPLETED' || s.status === 'INTERRUPTED') return false;
         if (!(s.isPresent || s.status === 'PRESENT')) return false;
-        if (s.isFranco || s.isUnassigned) return false;
-        if (processedIds.current.has(`autocomplete_${s.id}`)) return false;
+        if (s.isFranco || s.isUnassigned || s.isRetention) return false;
+        if (processedIds.current.has(`overdue_${s.id}`)) return false;
         const endMs = s.endDateObj?.getTime?.() || 0;
-        if (!(endMs > 0)) return false;
-        const msPastEnd = now.getTime() - endMs;
-        // Cierre / retención / relevo al fin del turno los decide autoCompletarTurnos (servidor, continuidad SLA).
-        // El navegador solo limpia zombies (>2h después del fin) y el fin de una extensión manual.
-        if (s.manualRetentionType === 'extended') return msPastEnd > 2 * 60 * 1000;
-        return msPastEnd >= 2 * 60 * 60 * 1000;
+        return endMs > 0 && now.getTime() - endMs >= 2 * 60 * 60 * 1000;
       });
-
-      const dismissShiftNoise = async (shiftId: string) => {
-        try {
-          const snap = await getDocs(query(
-            collection(db, 'novedades'),
-            where('shiftId', '==', shiftId),
-            where('status', '==', 'pending'),
-            limit(20),
-          ));
-          const noise = ['RECARGO_12H', 'RETENCION_DETECTADA', 'RETENCION_LARGA'];
-          await Promise.all(snap.docs
-            .filter(d => noise.includes(String(d.data().type || '')))
-            .map(d => updateDoc(d.ref, {
-              status: 'ATENDIDA',
-              atendidaAt: serverTimestamp(),
-              atendidaPor: 'AUTO_SHIFT_END',
-              autoAttended: true,
-            })));
-        } catch { /* ignore */ }
-      };
-
-      for (const s of toComplete) {
-        processedIds.current.add(`autocomplete_${s.id}`);
+      for (const s of overdue) {
+        processedIds.current.add(`overdue_${s.id}`);
+        if (isBaseline) continue;
         const msg = `${s.employeeName} — ${s.objectiveName}`;
-        if (pipelineRoutine) {
-          try {
-            const turnoSnap = await getDoc(doc(db, 'turnos', s.id));
-            const freshData = turnoSnap.data();
-            if (turnoSnap.exists() && freshData?.isCompleted) {
-              continue;
-            }
-            const endMs = s.endDateObj?.getTime?.() || 0;
-            const msPastEnd = endMs > 0 ? now.getTime() - endMs : 0;
-            const naturalRetention = freshData?.isRetention && freshData?.manualRetentionType !== 'extended';
-            if (naturalRetention && msPastEnd < 2 * 60 * 60 * 1000) {
-              continue;
-            }
-            const lastAutoComplete = freshData?.autoCompletedAt?.toMillis?.() ?? 0;
-            if (lastAutoComplete && (Date.now() - lastAutoComplete) < 120_000) {
-              continue;
-            }
-            await updateDoc(doc(db, 'turnos', s.id), {
-              status: 'COMPLETED', isCompleted: true, isPresent: false, isRetention: false,
-              realEndTime: serverTimestamp(), autoCompletedAt: serverTimestamp(),
-              completionReason: msPastEnd >= 2 * 60 * 60 * 1000
-                ? 'AUTO_ZOMBIE_SHIFT_END'
-                : (s.manualRetentionType === 'extended' ? 'AUTO_MANUAL_RETENTION_END' : 'AUTO_SHIFT_END'),
-            });
-            await dismissShiftNoise(s.id);
-            const safeId = (s.id || '').replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-            const novedadRef = doc(db, 'novedades', `autocompletar_${safeId}`);
-            const existingNov = await getDoc(novedadRef).catch(() => null);
-            if (!existingNov?.exists()) {
-              await setDoc(novedadRef, stampEmpresaId({
-                type: 'TURNO_COMPLETADO_AUTO',
-                status: 'ATENDIDA',
-                title: 'Turno Completado (Auto)',
-                description: `Finalización automática al vencimiento del horario: ${msg}`,
-                shiftId: s.id || null,
-                clientId: s.clientId || null,
-                objectiveId: s.objectiveId || null,
-                objectiveName: s.objectiveName || null,
-                employeeId: s.employeeId || null,
-                employeeName: s.employeeName || null,
-                positionName: s.positionName || null,
-                createdAt: serverTimestamp(),
-                atendidaAt: serverTimestamp(),
-                atendidaPor: 'SISTEMA_AUTO',
-                autoAttended: true,
-                reportedBy: 'SISTEMA_AUTO',
-              }, String(s.empresaId || empresaId || '').trim()), { merge: false }).catch(() => {});
-            }
-            toast.success(`🤖 Turno finalizado: ${msg}`, { duration: 6000 });
-            sendBrowserNotif('Turno Completado', msg);
-          } catch (e) {
-            console.error('[autoComplete] Error al finalizar turno:', s.id, e);
-          }
-        } else if (!isBaseline) {
-          toast.info(`⏱️ Finalizar turno: ${msg}`, {
-            duration: 20000,
-            description: 'El horario de fin ya pasó. Confirmar salida manualmente.',
-          });
-          sendBrowserNotif('⏱️ Turno a finalizar', msg);
-        }
+        toast.info(`⏱️ Turno vencido sin cierre: ${msg}`, {
+          duration: 20000,
+          description: 'Lo cierra el servidor (relevo o tope 12:59). Si el guardia ya se retiró, registrá la Salida.',
+        });
+        sendBrowserNotif('⏱️ Turno vencido sin cierre', msg);
       }
 
       const over12h = processedData.filter(s => {
