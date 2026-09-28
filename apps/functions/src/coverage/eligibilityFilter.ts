@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
+import { COVERAGE_CASCADE_ORDER } from './coverageCandidates';
 
 export type CandidateType =
   | 'RET'                // RET pasivo en objetivo (obligación)
@@ -87,37 +88,8 @@ export function checkEligibility(
   return { eligible: true };
 }
 
-export function deriveCandidateType(
-  employee: Record<string, any>,
-  objectiveId: string,
-  todayShifts: { employeeId: string; code?: string }[],
-): CandidateType | null {
-  const empId = employee.id as string;
-  const shift = todayShifts.find((s) => s.employeeId === empId);
-  if (shift) {
-    const code = String(shift.code || '').toUpperCase();
-    if (code === 'RET') return 'RET';
-    if (['F', 'FF', 'FP', 'FT'].includes(code)) return 'FT';
-    return null; // ya tiene turno activo, no disponible
-  }
-  // Sin turno hoy
-  const isVolante = (employee.volante || []).includes(objectiveId);
-  if (isVolante) return 'VOLANTE';
-  const isTitular = employee.preferredObjectiveId === objectiveId;
-  const hasExp = !!(employee.experienciaObjetivos || {})[objectiveId];
-  if (isTitular || hasExp) return 'SIN_TURNO_CON_EXP';
-  return 'SIN_TURNO';
-}
-
-/** Alineado al protocolo Manual Ops: interno → ext/adel → FT. */
-export const CASCADE_ORDER: CandidateType[] = [
-  'RET',
-  'REF',
-  'ESC',
-  'EXTEND',
-  'ADVANCE',
-  'FT',
-];
+/** Misma constante que el CC y la cascada Auto/Demo (`COVERAGE_CASCADE_ORDER`). */
+export const CASCADE_ORDER: CandidateType[] = [...COVERAGE_CASCADE_ORDER];
 
 export function nextCascadeStep(current: CandidateType): CandidateType | null {
   const idx = CASCADE_ORDER.indexOf(current);

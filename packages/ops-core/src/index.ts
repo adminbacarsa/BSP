@@ -25,3 +25,31 @@ export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
+export {
+  COVERAGE_CASCADE_ORDER,
+  COVERAGE_LEGACY_CANDIDATE_TYPES,
+  COVERAGE_JOIN_TOLERANCE_MS,
+  COVERAGE_HARD_CAP_MS,
+  COVERAGE_LICENSE_CODES,
+  COVERAGE_REJECT_LABEL,
+  coverageRejectMessage,
+  coverageWizardStepKeys,
+  dualSegmentBounds,
+  buildCoverageCandidates,
+  pickBestCandidate,
+  acceptanceStillValid,
+} from './coverageCandidates';
+export type {
+  CoverageCascadeType,
+  CoverageWizardStepKey,
+  CoverageRejectReason,
+  CoverageShiftView,
+  CoverageAbsenceView,
+  CoverageEmployeeView,
+  CoverageEngagementView,
+  CoverageGapView,
+  BuildCoverageCandidatesInput,
+  CoverageCandidateRow,
+  CoverageCandidateSet,
+  AcceptanceCheck,
+} from './coverageCandidates';

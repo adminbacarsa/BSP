@@ -1870,7 +1870,6 @@ export {
   crearConvocatoriaCobertura,
   responderConvocatoriaCobertura,
   cancelarConvocatoriaCobertura,
-  getCandidatosCobertura,
   checkConvocatoriaTimeouts,
 } from './coverage/convocatoriasCobertura';
 

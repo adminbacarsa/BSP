@@ -50,11 +50,13 @@ export declare function findBestCandidate(db: admin.firestore.Firestore, conv: C
 export declare function dispararBroadcastFT(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc): Promise<void>;
 export declare function resolverCobertura(db: admin.firestore.Firestore, conv: ConvocatoriaCoberturaDoc & {
     id: string;
-}): Promise<void>;
+}): Promise<{
+    ok: boolean;
+    message?: string;
+}>;
 export declare const crearConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
 export declare const responderConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
 export declare const cancelarConvocatoriaCobertura: functions.HttpsFunction & functions.Runnable<any>;
-export declare const getCandidatosCobertura: functions.HttpsFunction & functions.Runnable<any>;
 export interface ShiftDataForCascade {
     id: string;
     objectiveId: string;

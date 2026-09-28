@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
-import { getUrgency, type CandidateType } from './eligibilityFilter';
+import { getUrgency } from './eligibilityFilter';
+import { COVERAGE_CASCADE_ORDER } from './coverageCandidates';
 import {
   crearConvocatoriaDoc,
   dispararBroadcastFT,
@@ -9,8 +10,8 @@ import {
 } from './convocatoriasCobertura';
 import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
 
-/** Retiro anticipado: sin EXT; ADV máx 4 h (filtro en candidatos). */
-const EARLY_WITHDRAW_CASCADE: CandidateType[] = ['RET', 'REF', 'ESC', 'ADVANCE', 'FT'];
+/** Retiro anticipado: el orden compartido, sin EXTEND. ADV máx 4 h (filtro abajo). */
+const EARLY_WITHDRAW_CASCADE = COVERAGE_CASCADE_ORDER.filter((t) => t !== 'EXTEND');
 
 export async function iniciarEarlyWithdrawCascade(
   db: admin.firestore.Firestore,

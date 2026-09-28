@@ -2,11 +2,11 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CASCADE_ORDER = void 0;
 exports.checkEligibility = checkEligibility;
-exports.deriveCandidateType = deriveCandidateType;
 exports.nextCascadeStep = nextCascadeStep;
 exports.getUrgency = getUrgency;
 exports.findEmployeeUid = findEmployeeUid;
 const firestore_1 = require("firebase-admin/firestore");
+const coverageCandidates_1 = require("./coverageCandidates");
 function checkEligibility(employee, ctx, candidateType, distanceKm) {
     const today = new Date().toISOString().slice(0, 10);
     const restricObjs = employee.restriccionesObjetivo || [];
@@ -46,34 +46,7 @@ function checkEligibility(employee, ctx, candidateType, distanceKm) {
     }
     return { eligible: true };
 }
-function deriveCandidateType(employee, objectiveId, todayShifts) {
-    const empId = employee.id;
-    const shift = todayShifts.find((s) => s.employeeId === empId);
-    if (shift) {
-        const code = String(shift.code || '').toUpperCase();
-        if (code === 'RET')
-            return 'RET';
-        if (['F', 'FF', 'FP', 'FT'].includes(code))
-            return 'FT';
-        return null;
-    }
-    const isVolante = (employee.volante || []).includes(objectiveId);
-    if (isVolante)
-        return 'VOLANTE';
-    const isTitular = employee.preferredObjectiveId === objectiveId;
-    const hasExp = !!(employee.experienciaObjetivos || {})[objectiveId];
-    if (isTitular || hasExp)
-        return 'SIN_TURNO_CON_EXP';
-    return 'SIN_TURNO';
-}
-exports.CASCADE_ORDER = [
-    'RET',
-    'REF',
-    'ESC',
-    'EXTEND',
-    'ADVANCE',
-    'FT',
-];
+exports.CASCADE_ORDER = [...coverageCandidates_1.COVERAGE_CASCADE_ORDER];
 function nextCascadeStep(current) {
     const idx = exports.CASCADE_ORDER.indexOf(current);
     if (idx === -1 || idx >= exports.CASCADE_ORDER.length - 1)

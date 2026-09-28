@@ -28,18 +28,15 @@ import {
   CoverageApplyError,
 } from '@/lib/operaciones/syncAusenciaCobertura';
 import { toast } from 'sonner';
-import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
 import { opsPositionMatches } from '@/lib/operaciones/opsDualCoverageApply';
 import { computeDualExtAdvPlan } from '@/lib/operaciones/coverageExtAdvSegments';
 import {
-  listOpsAdvCandidatesForVacancy,
-  listOpsExtCandidatesForVacancy,
-} from '@/lib/operaciones/opsExtAdvCandidates';
-import {
-  buildInternalCoverageCandidates,
   type InternalCoverageCandidate,
   type InternalCoverageKind,
 } from '@/lib/operaciones/coverageInternalCandidates';
+import { buildOpsCandidateView } from '@/lib/operaciones/coverageCandidateView';
+import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
+import { COVERAGE_REJECT_LABEL, coverageWizardStepKeys, type CoverageWizardStepKey } from '@cosp/ops-core';
 import { pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
 import {
   convocatoriaTypeForInternalKind,
@@ -112,11 +109,13 @@ export type SessionAction =
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
 
-const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }[] = [
-  { key: 'INTERNO', label: 'RET · REF · ESC', icon: '1', mandatory: true, timeoutSec: 180, desc: 'Plantel del objetivo — prioridad RET, luego REF y ESC' },
-  { key: 'RETENCION', label: 'Ext + Adel', icon: '2', mandatory: false, timeoutSec: 60, isDual: true, desc: 'Extensión + adelanto (costo extra). Solo gente del objetivo' },
-  { key: 'FT', label: 'Franco Trabajado', icon: '3', mandatory: false, timeoutSec: 180, desc: 'Último recurso' },
-];
+const STEP_META: Record<CoverageWizardStepKey, { label: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }> = {
+  INTERNO: { label: 'RET · REF · ESC', mandatory: true, timeoutSec: 180, desc: 'Plantel del objetivo — prioridad RET, luego REF y ESC' },
+  RETENCION: { label: 'Ext + Adel', mandatory: false, timeoutSec: 60, isDual: true, desc: 'Extensión + adelanto (costo extra). Primero el mismo puesto, después el resto del objetivo' },
+  FT: { label: 'Franco Trabajado', mandatory: false, timeoutSec: 180, desc: 'Último recurso' },
+};
+const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }[] =
+  coverageWizardStepKeys().map((key, i) => ({ key, icon: String(i + 1), ...STEP_META[key] }));
 
 const BAND_LABEL: Record<string, string> = {
   M: 'Mañana', T: 'Tarde', N: 'Noche', D12: '12h diurno', N12: '12h nocturno',
@@ -419,6 +418,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const [search, setSearch] = React.useState('');
   /** 15 km (default CCT) → ampliar a 30 km si no hay candidatos cercanos. */
   const [distanceTierKm, setDistanceTierKm] = React.useState<15 | 30>(COVERAGE_RADIUS_PRIMARY_KM);
+  const [rrhhAbsences, setRrhhAbsences] = React.useState<Record<string, unknown>[]>([]);
   // Refs para siempre apuntar a la versión más reciente de las funciones de confirmación
   // y evitar closures stale en los callbacks de onSnapshot
   const confirmCandidateRef = useRef<() => Promise<void>>(async () => {});
@@ -459,6 +459,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     setDistanceTierKm(COVERAGE_RADIUS_PRIMARY_KM);
   }, [s.currentStep, step.key]);
 
+  React.useEffect(() => {
+    let cancel = false;
+    getDocs(query(collection(db, 'ausencias'), where('empresaId', '==', tid)))
+      .then((snap) => {
+        if (cancel) return;
+        setRrhhAbsences(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Record<string, unknown>)));
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, [tid]);
+
   const empById = React.useMemo(() => {
     const m = new Map<string, Record<string, unknown>>();
     for (const e of logic.employees || []) {
@@ -487,10 +498,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     [absenceShift, empById],
   );
 
-  const applyDistanceTier = React.useCallback(
-    <T extends WithGeo>(list: T[]) => filterByCoverageRadius(sortByDistanceAsc(list), distanceTierKm),
-    [distanceTierKm],
-  );
+  function applyDistanceTier<T extends WithGeo>(list: T[]): T[] {
+    return filterByCoverageRadius(sortByDistanceAsc(list), distanceTierKm);
+  }
 
   // ── Candidatos ─────────────────────────────────────────────────────────────
 
@@ -507,53 +517,46 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       ].filter(Boolean) as string[])
   );
 
-  const internalGroupsRaw = buildInternalCoverageCandidates(
-    logic.processedData || [],
-    logic.employees || [],
+  const candidateView = buildOpsCandidateView({
     absenceShift,
+    processedData: logic.processedData || [],
+    rawShifts: logic.rawShifts || [],
+    employees: logic.employees || [],
+    absences: rrhhAbsences,
+    sessionBusy: [...crossSessionBusy],
     now,
-    crossSessionBusy,
-  );
+  });
   const internalGroups = {
-    ret: sortByDistanceAsc(internalGroupsRaw.ret.map(attachInternalGeo)),
-    ref: sortByDistanceAsc(internalGroupsRaw.ref.map(attachInternalGeo)),
-    esc: sortByDistanceAsc(internalGroupsRaw.esc.map(attachInternalGeo)),
+    ret: sortByDistanceAsc(candidateView.ret.map(attachInternalGeo)),
+    ref: sortByDistanceAsc(candidateView.ref.map(attachInternalGeo)),
+    esc: sortByDistanceAsc(candidateView.esc.map(attachInternalGeo)),
   };
 
-  const ftCandidatesRaw = step.key === 'FT'
-    ? collectFrancoShiftRowsToday(logic.rawShifts, logic.processedData, now)
-      .filter((sh: any) => !crossSessionBusy.has(sh.employeeId))
-      .map((sh: any) => {
-        const emp = empById.get(String(sh.employeeId || ''));
-        return attachShiftGeo({
-          ...sh,
-          fullName: sh.employeeName || (emp as any)?.fullName || (emp as any)?.name || '',
-          phone: sh.phone || (emp as any)?.phone || (emp as any)?.celular || '',
-        });
-      })
-    : [];
+  const ftCandidatesRaw = candidateView.ft.map((sh: any) => {
+    const emp = empById.get(String(sh.employeeId || ''));
+    return attachShiftGeo({
+      ...sh,
+      fullName: sh.fullName || sh.employeeName || (emp as any)?.fullName || (emp as any)?.name || '',
+      phone: sh.phone || (emp as any)?.phone || (emp as any)?.celular || '',
+    });
+  });
 
-  const candidatesExtRaw = listOpsExtCandidatesForVacancy(
-    logic.processedData || [],
-    absenceShift,
-    now,
-    crossSessionBusy,
-  ).map((sh: any) => attachShiftGeo(sh));
-  const candidatesAdvRaw = listOpsAdvCandidatesForVacancy(
-    logic.processedData || [],
-    absenceShift,
-    now,
-    crossSessionBusy,
-  ).map((sh: any) => attachShiftGeo(sh));
+  const candidatesExtRaw = candidateView.ext.map((sh: any) => attachShiftGeo(sh));
+  const candidatesAdvRaw = candidateView.adv.map((sh: any) => attachShiftGeo(sh));
+  const rejectedForStep = candidateView.rejected.filter((r) => {
+    if (step.key === 'FT') return r.type === 'FT';
+    if (step.key === 'RETENCION') return r.type === 'EXTEND' || r.type === 'ADVANCE';
+    return r.type === 'RET' || r.type === 'REF' || r.type === 'ESC';
+  });
 
-  const candidatesExt = applyDistanceTier(candidatesExtRaw);
-  const candidatesAdv = applyDistanceTier(candidatesAdvRaw);
+  const candidatesExt: any[] = applyDistanceTier(candidatesExtRaw as any[]);
+  const candidatesAdv: any[] = applyDistanceTier(candidatesAdvRaw as any[]);
 
-  const filterInternal = (list: InternalCoverageCandidate[]) => {
+  function filterInternal<T extends InternalCoverageCandidate>(list: T[]): T[] {
     if (!search.trim()) return list;
     const q = search.trim().toLowerCase();
     return list.filter((c) => c.fullName.toLowerCase().includes(q));
-  };
+  }
 
   const internalFiltered = {
     ret: applyDistanceTier(filterInternal(internalGroups.ret)),
@@ -569,12 +572,33 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     ...internalGroups.esc,
   ]);
 
-  const ftAfterTier = applyDistanceTier(ftCandidatesRaw);
+  const ftAfterTier: any[] = applyDistanceTier(ftCandidatesRaw as any[]);
   const ftFiltered = search.trim()
     ? ftAfterTier.filter((c: any) =>
       (c.fullName || c.employeeName || '').toLowerCase().includes(search.trim().toLowerCase()))
     : ftAfterTier;
   const ftExtendedOnlyCount = countBeyondPrimaryWithinExtended(ftCandidatesRaw);
+
+  const renderRejected = () => {
+    if (rejectedForStep.length === 0) return null;
+    return (
+      <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50">
+        <summary className="cursor-pointer px-3 py-2 text-[11px] font-bold text-slate-600">
+          No disponibles ({rejectedForStep.length})
+        </summary>
+        <ul className="px-3 pb-2 flex flex-col gap-1 max-h-40 overflow-y-auto">
+          {rejectedForStep.map((r) => (
+            <li key={`${r.type}-${r.employeeId}-${r.sourceShiftId}-${r.rejectReason}`} className="text-[10px] text-slate-600 leading-snug">
+              <span className="font-bold text-slate-700">{r.employeeName}</span>
+              {` · ${r.type}`}
+              {r.otherPosition ? ' · otro puesto' : ''}
+              {r.rejectReason ? ` · ${COVERAGE_REJECT_LABEL[r.rejectReason]}` : ''}
+            </li>
+          ))}
+        </ul>
+      </details>
+    );
+  };
 
   const renderDistanceTierBanner = (extendedOnlyCount: number, visibleCount: number) => {
     if (distanceTierKm === COVERAGE_RADIUS_EXTENDED_KM) {
@@ -1224,7 +1248,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         >
           <div className={`w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-500 text-white' : 'bg-slate-100 text-slate-500'}`}>{isSelected ? '✓' : initials(name)}</div>
           <div className="flex-1 min-w-0">
-            <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>{name}</div>
+            <div className={`text-xs font-bold truncate ${isSelected ? 'text-indigo-700' : 'text-slate-800'}`}>
+              {name}
+              {cand.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
+            </div>
             {sub && <div className="text-[10px] font-semibold text-slate-600 truncate">{sub}</div>}
             <CoverageDistanceLine geo={cand as WithGeo} />
             <div className="text-xs font-mono text-slate-600">📱 {phone}</div>
@@ -1267,6 +1294,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                 : candidatesAdv.map((c: any) => <DualCard key={c.id} cand={c} role="adv" />)}
           </div>
         </div>
+        {renderRejected()}
         {isPending && s.pendingExt && s.pendingAdv && (
           <div className="flex flex-col items-center gap-3 py-1">
             <div className="relative w-20 h-20">
@@ -1327,7 +1355,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   {c.coverageKind}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="text-sm font-bold text-slate-800 truncate">{c.fullName}</div>
+                  <div className="text-sm font-bold text-slate-800 truncate">
+                    {c.fullName}
+                    {c.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
+                  </div>
                   <div className="text-[10px] text-slate-500 truncate">
                     {c.positionName ? `${c.positionName} · ` : ''}{c.code}
                   </div>
@@ -1504,6 +1535,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                         {renderInternalBlock('RET — stand-by (prioridad)', 'text-violet-700', internalFiltered.ret)}
                         {renderInternalBlock('REF — refuerzo', 'text-emerald-700', internalFiltered.ref)}
                         {renderInternalBlock('ESC — escuela', 'text-sky-700', internalFiltered.esc)}
+                        {renderRejected()}
                       </div>
                     )
                   : step.key === 'FT' && ftCandidatesRaw.length === 0
@@ -1537,7 +1569,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                               <div key={c.id || empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white">
                                 <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black">{initials(name)}</div>
                                 <div className="flex-1 min-w-0">
-                                  <div className="text-sm font-bold truncate">{name}</div>
+                                  <div className="text-sm font-bold truncate">
+                                    {name}
+                                    {c.otherPosition ? <span className="ml-1 text-[9px] font-black uppercase text-amber-700">otro puesto</span> : null}
+                                  </div>
                                   <CoverageDistanceLine geo={c as WithGeo} />
                                   <div className="text-[11px] font-mono text-slate-500 mt-0.5">{phone}</div>
                                 </div>
@@ -1559,6 +1594,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                               </div>
                             );
                           })}
+                          {renderRejected()}
                         </div>
                       )
                       : null
