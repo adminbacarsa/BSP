@@ -31,6 +31,7 @@ exports.dispatchAssistantToolCall = dispatchAssistantToolCall;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const assistantEmpresaScope_1 = require("./assistantEmpresaScope");
+const simulableShift_1 = require("../common/simulableShift");
 const assistantLiquidacionAggregate_1 = require("./assistantLiquidacionAggregate");
 const assistantSlaHours_1 = require("./assistantSlaHours");
 const planificacionEstadoKeys_1 = require("./planificacionEstadoKeys");
@@ -3896,12 +3897,19 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
     const presenciaMarcada = [];
     const turnosCerrados = [];
     const turnosEnRetencion = [];
+    const turnosLicencia = [];
     const batch = db.batch();
     let ops = 0;
     for (const doc of snap.docs) {
         const t = doc.data();
-        if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted || t.isAbsent)
+        if (t.isAbsent || t.isPresent || t.isCompleted)
             continue;
+        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(t);
+        if (skipSim) {
+            if (skipSim === 'LICENCIA')
+                turnosLicencia.push(`${t.empleadoNombre || t.employeeId} (${t.code})`);
+            continue;
+        }
         const startSec = t.startTime?.seconds ?? 0;
         const endSec = t.endTime?.seconds ?? 0;
         const startMs = startSec * 1000;
@@ -3916,13 +3924,15 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
                 entry.isPresent = true;
         }
         if (!dryRun) {
-            batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+            batch.update(doc.ref, { isPresent: true, status: 'PRESENT', presentAt: nowTs, autoPresencia: true });
             ops++;
         }
     }
     for (const doc of snap.docs) {
         const t = doc.data();
-        if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted)
+        if (t.isAbsent || !t.isPresent || t.isCompleted)
+            continue;
+        if ((0, simulableShift_1.simulableShiftSkipReason)(t))
             continue;
         const startSec = t.startTime?.seconds ?? 0;
         const endSec = t.endTime?.seconds ?? 0;
@@ -3972,18 +3982,21 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
     if (!dryRun && ops > 0)
         await batch.commit();
     const modo = dryRun ? 'SIMULACIÓN' : 'EJECUTADO';
+    const licenciaTxt = turnosLicencia.length > 0 ? ` ${turnosLicencia.length} turno(s) en licencia sin tocar.` : '';
     const resumen = dryRun
-        ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}`
-        : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.`;
+        ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}${licenciaTxt}`
+        : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.${licenciaTxt}`;
     return {
         modo,
         turnos_evaluados: snap.size,
         presencias_a_marcar: presenciaMarcada.length,
         turnos_a_cerrar: turnosCerrados.length,
         turnos_en_retencion: turnosEnRetencion.length,
+        turnos_en_licencia: turnosLicencia.length,
         detalle_presencias: presenciaMarcada,
         detalle_cierres: turnosCerrados,
         detalle_retencion: turnosEnRetencion,
+        detalle_licencia: turnosLicencia,
         resumen,
         instruccion: dryRun
             ? 'Para ejecutar los cambios reales, respondé "ejecutá" o "activá modo demo".'

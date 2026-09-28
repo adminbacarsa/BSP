@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.monthKeyFromDate = monthKeyFromDate;
 exports.calcTurnoHoursContrib = calcTurnoHoursContrib;
 const firestore_1 = require("firebase-admin/firestore");
+const hours_core_1 = require("@cosp/hours-core");
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const TRUE_NON_WORK = new Set(['F', 'FF', 'FP', 'AA', 'FT']);
@@ -43,7 +44,7 @@ const clampEnd = (real, plan, tolMin = 5) => Math.abs((real.getTime() - plan.get
 function monthKeyFromDate(d) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
-function calcTurnoHoursContrib(data, holidays = new Set()) {
+function calcTurnoHoursContribLegacy(data, holidays = new Set()) {
     if (data.draft === true)
         return null;
     if (data.isUnassigned === true)
@@ -118,5 +119,23 @@ function calcTurnoHoursContrib(data, holidays = new Set()) {
         isFT,
         monthKey,
     };
+}
+function calcTurnoHoursContrib(data, holidays = new Set(), hoursCoreEnabled = false) {
+    if (hoursCoreEnabled) {
+        const c = (0, hours_core_1.calcTurnoHoursContrib)(data, holidays);
+        if (!c)
+            return null;
+        return {
+            hsTeoricas: c.hsTeoricas,
+            hsReales: c.hsReales,
+            diurnas: c.diurnas,
+            nocturnas: c.nocturnas,
+            al100FT: c.al100FT,
+            plusFeriado: c.plusFeriado,
+            isFT: c.isFT,
+            monthKey: c.monthKey || (0, hours_core_1.monthKeyFromDate)(tsToDate(data.startTime) || new Date()),
+        };
+    }
+    return calcTurnoHoursContribLegacy(data, holidays);
 }
 //# sourceMappingURL=turnoHoursCalc.js.map

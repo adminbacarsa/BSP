@@ -8,6 +8,7 @@ exports.titularAnchorFromShift = titularAnchorFromShift;
 exports.extensionEndTimestamp = extensionEndTimestamp;
 exports.adjustedStartTimestamp = adjustedStartTimestamp;
 const firestore_1 = require("firebase-admin/firestore");
+const arClock_1 = require("../common/arClock");
 function defaultSplitTimesCct(band) {
     const b = String(band || 'M').toUpperCase();
     if (b === 'T') {
@@ -54,17 +55,13 @@ function parseHm(hm) {
     return { h: h || 0, m: m || 0 };
 }
 function hhmmPairToTimestamps(anchor, fromHm, toHm) {
-    const a = new Date(anchor);
-    a.setHours(0, 0, 0, 0);
     const f = parseHm(fromHm);
     const t = parseHm(toHm);
-    const start = new Date(a);
-    start.setHours(f.h, f.m, 0, 0);
-    const end = new Date(a);
-    end.setHours(t.h, t.m, 0, 0);
-    if (end.getTime() <= start.getTime())
-        end.setDate(end.getDate() + 1);
-    return { start: firestore_1.Timestamp.fromDate(start), end: firestore_1.Timestamp.fromDate(end) };
+    const startMs = (0, arClock_1.arHmOnDayMs)(anchor.getTime(), f.h, f.m);
+    let endMs = (0, arClock_1.arHmOnDayMs)(anchor.getTime(), t.h, t.m);
+    if (endMs <= startMs)
+        endMs += 24 * 60 * 60 * 1000;
+    return { start: firestore_1.Timestamp.fromMillis(startMs), end: firestore_1.Timestamp.fromMillis(endMs) };
 }
 function resolveCoverageBandCode(opts) {
     const c = String(opts.code || '').trim().toUpperCase();
@@ -73,7 +70,7 @@ function resolveCoverageBandCode(opts) {
     const d = tsToDate(opts.startTime);
     if (!d)
         throw new Error('Falta código de banda del titular');
-    const h = d.getHours();
+    const h = (0, arClock_1.arHour)(d.getTime());
     if (h >= 6 && h < 14)
         return 'M';
     if (h >= 14 && h < 22)

@@ -32,7 +32,6 @@ function gapWindowFromConvocatoria(conv) {
     const band = String(conv.shiftCode || '').trim().toUpperCase();
     return { startMs, endMs, band: band || null };
 }
-/** Banda operativa del hueco o del turno origen (REF/ESC usan deploymentBand). */
 function resolveOperationalBand(shift) {
     const deploy = String(shift.deploymentBand || shift.coversBandCode || '').trim().toUpperCase();
     if (WORK_BANDS.has(deploy))
@@ -42,10 +41,6 @@ function resolveOperationalBand(shift) {
         return code;
     return deploy || code;
 }
-/**
- * REF/ESC/RET: el turno origen debe solapar el hueco y (misma banda operativa o inicio ≤ inicio del hueco).
- * Excluye origen ya marcado coverageUsed.
- */
 function sourceShiftEligibleForCoverageGap(sourceShift, gap) {
     if (sourceShift.coverageUsed === true)
         return false;
@@ -65,12 +60,12 @@ function sourceShiftEligibleForCoverageGap(sourceShift, gap) {
     if (srcEnd === gap.startMs && code !== 'RET')
         return false;
     if (code === 'RET') {
-        return srcStart <= gap.startMs + 60000;
+        return srcStart <= gap.startMs + 60_000;
     }
     const gapBand = String(gap.band || '').trim().toUpperCase();
     const srcBand = resolveOperationalBand(sourceShift);
     const sameBand = WORK_BANDS.has(gapBand) && WORK_BANDS.has(srcBand) && gapBand === srcBand;
-    const startsBeforeOrAtGap = srcStart <= gap.startMs + 60000;
+    const startsBeforeOrAtGap = srcStart <= gap.startMs + 60_000;
     return sameBand || startsBeforeOrAtGap;
 }
 function gapFromAbsenceLikeShift(absenceShift) {
@@ -86,3 +81,4 @@ function gapFromAbsenceLikeShift(absenceShift) {
     const band = String(absenceShift.code || '').trim().toUpperCase();
     return { startMs: start, endMs: end, band: band || null };
 }
+//# sourceMappingURL=coverageSourceShiftForGap.js.map

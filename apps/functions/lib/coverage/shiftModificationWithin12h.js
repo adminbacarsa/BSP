@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.handlePublishedShiftModifiedWithin12h = handlePublishedShiftModifiedWithin12h;
 const firestore_1 = require("firebase-admin/firestore");
+const arClock_1 = require("../common/arClock");
 const TZ = 'America/Argentina/Cordoba';
 function startMs(shift) {
     const st = shift.startTime;
@@ -13,8 +14,7 @@ async function isPlanningPublishedForShift(db, objectiveId, startMsVal) {
     const oid = String(objectiveId || '').trim();
     if (!oid || !startMsVal)
         return false;
-    const d = new Date(startMsVal);
-    const planKey = `${oid}_${d.getFullYear()}_${d.getMonth() + 1}`;
+    const planKey = (0, arClock_1.arPlanificacionEstadoKey)(oid, startMsVal);
     const pub = await db.collection('planificacion_estados').doc(planKey).get();
     if (!pub.exists)
         return false;

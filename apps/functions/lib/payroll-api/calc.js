@@ -1,15 +1,18 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.datesBetween = exports.overlapsDay = exports.tsToDate = exports.fmtCuil = exports.round = exports.RRHH_TYPE_LABEL_TO_CODE = exports.RRHH_CODE_MAP = void 0;
 exports.buildLiquidacionSnapshot = buildLiquidacionSnapshot;
 const admin = require("firebase-admin");
 const cycle_1 = require("./cycle");
 const assistantEmpresaScope_1 = require("../assistant/assistantEmpresaScope");
+const hours_core_1 = require("@cosp/hours-core");
+const calcPersona_1 = require("./calcPersona");
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const SHIFT_HOURS_FALLBACK = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 8, FT: 8, EN: 9, RO: 10, EV: 8,
 };
-const RRHH_CODE_MAP = {
+exports.RRHH_CODE_MAP = {
     V: 'vacacionesDias',
     L: 'licenciaEspecialDias',
     E: 'enfermedadDias',
@@ -18,7 +21,7 @@ const RRHH_CODE_MAP = {
     AA: 'injustificadaDias',
     RA: 'retiroAnticipadoDias',
 };
-const RRHH_TYPE_LABEL_TO_CODE = {
+exports.RRHH_TYPE_LABEL_TO_CODE = {
     VACACIONES: 'V',
     ENFERMEDAD: 'E',
     ART: 'A',
@@ -30,6 +33,7 @@ const RRHH_TYPE_LABEL_TO_CODE = {
     'RETIRO ANTICIPADO': 'RA',
 };
 const round = (n) => Math.round(n * 100) / 100;
+exports.round = round;
 const fmtCuil = (raw) => {
     if (!raw)
         return null;
@@ -38,6 +42,7 @@ const fmtCuil = (raw) => {
         return `${s.slice(0, 2)}-${s.slice(2, 10)}-${s.slice(10)}`;
     return String(raw);
 };
+exports.fmtCuil = fmtCuil;
 const tsToDate = (val) => {
     if (!val)
         return null;
@@ -62,6 +67,7 @@ const tsToDate = (val) => {
     }
     return null;
 };
+exports.tsToDate = tsToDate;
 const dateKeyAR = (d) => {
     const ar = new Date(d.getTime() - 3 * 3600 * 1000);
     const y = ar.getUTCFullYear();
@@ -94,6 +100,7 @@ const overlapsDay = (rangeStart, rangeEnd, dayStr) => {
     const dayEnd = new Date(`${dayStr}T23:59:59.999-03:00`);
     return rangeStart.getTime() <= dayEnd.getTime() && rangeEnd.getTime() >= dayStart.getTime();
 };
+exports.overlapsDay = overlapsDay;
 const datesBetween = (start, end) => {
     const out = [];
     let curKey = dateKeyAR(start);
@@ -108,6 +115,7 @@ const datesBetween = (start, end) => {
     }
     return out;
 };
+exports.datesBetween = datesBetween;
 const normEmpresa = (v) => String(v ?? '').trim().toLowerCase().replace(/\s+/g, '_');
 async function buildLiquidacionSnapshot(params) {
     const db = admin.firestore();
@@ -116,6 +124,20 @@ async function buildLiquidacionSnapshot(params) {
     const pageSize = Math.min(500, Math.max(1, params.pageSize || 100));
     const hoursMode = params.hoursMode === 'planned' ? 'planned' : 'real';
     const { scopeEmpresa, migracionCompleta } = await (0, assistantEmpresaScope_1.resolveAssistantEmpresaScope)(db, empresaId);
+    const empresaSnap = await db.collection('empresas').doc(empresaId).get();
+    if ((0, hours_core_1.isHoursCoreEnabled)(empresaSnap.data())) {
+        return (0, calcPersona_1.buildLiquidacionSnapshotPersona)({
+            db,
+            cycle,
+            empresaId,
+            scopeEmpresa,
+            migracionCompleta,
+            clientIdFilter: params.clientIdFilter,
+            page,
+            pageSize,
+            hoursMode,
+        });
+    }
     const empDocs = await (0, assistantEmpresaScope_1.queryEmpleadosDocsScoped)(db, empresaId, scopeEmpresa, 5000);
     const empMap = new Map();
     const empIdByLegajo = new Map();
@@ -173,7 +195,7 @@ async function buildLiquidacionSnapshot(params) {
         .get();
     const lockDoc = await db.collection('payroll_cycles_locks').doc(cycle.cycleId).get();
     const lockedAtRaw = lockDoc.exists ? lockDoc.data()?.lockedAt : null;
-    const lockedAt = lockedAtRaw ? tsToDate(lockedAtRaw)?.toISOString() ?? null : null;
+    const lockedAt = lockedAtRaw ? (0, exports.tsToDate)(lockedAtRaw)?.toISOString() ?? null : null;
     const acc = new Map();
     const diagnostics = {
         empleadosEmpresa: empMap.size,
@@ -261,8 +283,8 @@ async function buildLiquidacionSnapshot(params) {
         const a = getAcc(empId);
         a.turnosCount++;
         diagnostics.turnosContados++;
-        let start = tsToDate(data.startTime);
-        let end = tsToDate(data.endTime);
+        let start = (0, exports.tsToDate)(data.startTime);
+        let end = (0, exports.tsToDate)(data.endTime);
         if ((!start || !end) && data.scheduleDate) {
             const ds = String(data.scheduleDate).slice(0, 10);
             if (/^\d{4}-\d{2}-\d{2}$/.test(ds)) {
@@ -310,8 +332,8 @@ async function buildLiquidacionSnapshot(params) {
             workDur = plannedDur;
         }
         else {
-            const rStartRaw = tsToDate(data.realStartTime) ?? tsToDate(data.checkInTime);
-            const rEndRaw = tsToDate(data.realEndTime) ?? tsToDate(data.checkOutTime);
+            const rStartRaw = (0, exports.tsToDate)(data.realStartTime) ?? (0, exports.tsToDate)(data.checkInTime);
+            const rEndRaw = (0, exports.tsToDate)(data.realEndTime) ?? (0, exports.tsToDate)(data.checkOutTime);
             const rStart = rStartRaw ? clampStart(rStartRaw, start, 5) : null;
             const rEnd = rEndRaw ? clampEnd(rEndRaw, end, 5) : null;
             let rDur = null;
@@ -359,16 +381,16 @@ async function buildLiquidacionSnapshot(params) {
         const endStr = String(data.endDate || startStr).slice(0, 10);
         if (!/^\d{4}-\d{2}-\d{2}$/.test(startStr))
             return;
-        const start = tsToDate(startStr);
-        const end = tsToDate(endStr) || start;
+        const start = (0, exports.tsToDate)(startStr);
+        const end = (0, exports.tsToDate)(endStr) || start;
         if (!start || !end)
             return;
         if (end < cycle.cycleStart || start > cycle.cycleEnd)
             return;
-        const allDays = datesBetween(start, end);
+        const allDays = (0, exports.datesBetween)(start, end);
         let count = 0;
         for (const dStr of allDays) {
-            if (overlapsDay(cycle.cycleStart, cycle.cycleEnd, dStr))
+            if ((0, exports.overlapsDay)(cycle.cycleStart, cycle.cycleEnd, dStr))
                 count++;
         }
         if (count <= 0)
@@ -377,10 +399,10 @@ async function buildLiquidacionSnapshot(params) {
         diagnostics.ausenciasContadas++;
         const raw = String(data.absenceType || data.codigo || data.type || '').trim();
         const upper = raw.toUpperCase();
-        const code = RRHH_CODE_MAP[upper]
+        const code = exports.RRHH_CODE_MAP[upper]
             ? upper
-            : (RRHH_TYPE_LABEL_TO_CODE[upper] || upper);
-        const mappedField = RRHH_CODE_MAP[code];
+            : (exports.RRHH_TYPE_LABEL_TO_CODE[upper] || upper);
+        const mappedField = exports.RRHH_CODE_MAP[code];
         if (mappedField) {
             a.rrhh[mappedField] += count;
         }
@@ -397,7 +419,7 @@ async function buildLiquidacionSnapshot(params) {
                 : '') ||
             'Sin Nombre';
         const dni = String(empData.dni || '').trim();
-        const cuil = fmtCuil(empData.cuil || empData.cuit);
+        const cuil = (0, exports.fmtCuil)(empData.cuil || empData.cuit);
         const fileNumber = empData.fileNumber || empData.legajo
             ? String(empData.fileNumber || empData.legajo)
             : null;
@@ -408,23 +430,23 @@ async function buildLiquidacionSnapshot(params) {
         allItems.push({
             employee: { id: empId, dni, cuil, fileNumber, fullName, laborAgreement },
             acumulado: {
-                hsTeoricas: round(a.hsTeoricas),
-                hsReales: round(a.hsReales),
-                diurnas: round(a.diurnas),
-                nocturnas: round(a.nocturnas),
-                al50: round(al50),
-                al100FT: round(a.al100FT),
-                plusFeriado: round(a.plusFeriado),
+                hsTeoricas: (0, exports.round)(a.hsTeoricas),
+                hsReales: (0, exports.round)(a.hsReales),
+                diurnas: (0, exports.round)(a.diurnas),
+                nocturnas: (0, exports.round)(a.nocturnas),
+                al50: (0, exports.round)(al50),
+                al100FT: (0, exports.round)(a.al100FT),
+                plusFeriado: (0, exports.round)(a.plusFeriado),
             },
             liquidacion200: {
-                bolsa: round(bolsa),
-                hsSimples: round(hsSimples),
-                al50: round(al50),
+                bolsa: (0, exports.round)(bolsa),
+                hsSimples: (0, exports.round)(hsSimples),
+                al50: (0, exports.round)(al50),
                 nota: 'FT y Feriados se pagan aparte.',
             },
             pagaAparte: {
-                francoTrabajado100: round(a.al100FT),
-                plusFeriado: round(a.plusFeriado),
+                francoTrabajado100: (0, exports.round)(a.al100FT),
+                plusFeriado: (0, exports.round)(a.plusFeriado),
             },
             novedadesRRHH: a.rrhh,
             turnosCount: a.turnosCount,
