@@ -10,6 +10,7 @@ import {
   coalescePlannedTurnosForCell,
 } from '../planning/planningTurnoCoalesce';
 import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES } from '../planning/leaveCoverage';
+import { arMinutesOfDay, arYearMonth, arYmd, withArClock } from '../../time/ar';
 
 function planificacionPublishLookupKey(objectiveId: string, year: number, month: number): string {
   return `${String(objectiveId ?? '').trim()}_${year}_${month}`;
@@ -256,13 +257,10 @@ export type ReportFetchScope = {
 };
 
 export function isShiftPublishedForReports(shift: any, publishStatusMap: Record<string, boolean>): boolean {
-    const start = shift?.startTime?.toDate?.();
+    const start = parseShiftInstant(shift?.startTime);
     if (!start || !shift?.objectiveId) return false;
-    const pubKey = planificacionPublishLookupKey(
-        shift.objectiveId,
-        start.getFullYear(),
-        start.getMonth() + 1,
-    );
+    const { year, month } = arYearMonth(start);
+    const pubKey = planificacionPublishLookupKey(shift.objectiveId, year, month);
     return pubKey ? !!publishStatusMap[pubKey] : false;
 }
 
@@ -371,13 +369,72 @@ export function mapAbsenceStatusLabel(status?: string | null): string {
     return s;
 }
 
-function shiftCalendarDateKey(shift: any): string {
+export function shiftCalendarDateKey(shift: any): string {
     const start = parseShiftInstant(shift?.startTime);
     if (!start) return '';
-    return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+    return arYmd(start);
 }
 
-/** Misma regla que CRM/proforma: varios docs mismo legajo/día (base + ext/adelanto) → una jornada billable. */
+/** Tramo base+EXT/ADV: mismo criterio que `planningTurnoCoalesce` para decidir si un doc aporta al merge. */
+function isLiquidationTramoDoc(t: any): boolean {
+    if (!t) return false;
+    if (t.isExtended || t.isEarlyStart) return true;
+    const role = String(t.coverageSegmentRole || '').toUpperCase();
+    if (role === 'EXTENSION' || role === 'EARLY_START') return true;
+    const ex = Number(t.extExtraHours ?? t.extensionExtraHours);
+    return Number.isFinite(ex) && ex > 0;
+}
+
+function liquidationDocsOverlapInTime(a: any, b: any): boolean {
+    const sa = parseShiftInstant(a?.startTime);
+    const ea = parseShiftInstant(a?.endTime);
+    const sb = parseShiftInstant(b?.startTime);
+    const eb = parseShiftInstant(b?.endTime);
+    if (!sa || !ea || !sb || !eb) return false;
+    return sa.getTime() < eb.getTime() && sb.getTime() < ea.getTime();
+}
+
+/** Decisión Mauro H1 #2: solo se juntan docs que se pisan en horario o son base + tramo EXT/ADV. */
+function shouldMergeLiquidationDocs(a: any, b: any): boolean {
+    if (liquidationDocsOverlapInTime(a, b)) return true;
+    return isLiquidationTramoDoc(a) || isLiquidationTramoDoc(b);
+}
+
+/** Agrupa por adyacencia (overlap u tramo) dentro del mismo legajo/día — Union-Find simple. */
+function clusterLiquidationDocsForDay(group: any[]): any[][] {
+    const n = group.length;
+    const parent = Array.from({ length: n }, (_, i) => i);
+    const find = (x: number): number => {
+        while (parent[x] !== x) {
+            parent[x] = parent[parent[x]];
+            x = parent[x];
+        }
+        return x;
+    };
+    const union = (x: number, y: number) => {
+        const rx = find(x);
+        const ry = find(y);
+        if (rx !== ry) parent[rx] = ry;
+    };
+    for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+            if (shouldMergeLiquidationDocs(group[i], group[j])) union(i, j);
+        }
+    }
+    const clusters = new Map<number, any[]>();
+    for (let i = 0; i < n; i++) {
+        const root = find(i);
+        (clusters.get(root) ?? (clusters.set(root, []), clusters.get(root)!)).push(group[i]);
+    }
+    return [...clusters.values()];
+}
+
+/**
+ * Misma regla que CRM/proforma para el tramo base+EXT/ADV: esos docs se juntan en una jornada
+ * billable. Decisión Mauro H1 #2: dos jornadas independientes el mismo día (que no se pisan en
+ * horario ni son tramo del mismo turno) se pagan las DOS por separado. Si la suma del día supera
+ * 12 h se marca `_liquidationDayExceeds12h` para revisión, sin recortar el pago.
+ */
 export function collapseShiftsByEmployeeDayForLiquidation(
     shifts: any[],
     slaHoursHint: Record<string, number> = SHIFT_HOURS_LOOKUP,
@@ -402,13 +459,28 @@ export function collapseShiftsByEmployeeDayForLiquidation(
             out.push(group[0]);
             continue;
         }
-        const merged = coalescePlannedTurnosForCell(group, slaHoursHint);
-        const billable = coalescePlannedCellBillableHours(group, slaHoursHint);
-        out.push({
-            ...merged,
-            id: merged?.id || group.map((g) => g.id).join('_'),
-            _liquidationCoalescedIds: group.map((g) => g.id),
-            _liquidationBillableHours: billable,
+        const clusters = clusterLiquidationDocsForDay(group);
+        const clusterHours = clusters.map((cl) => (
+            cl.length === 1
+                ? liquidationBillableHoursForShift(cl[0], slaHoursHint)
+                : coalescePlannedCellBillableHours(cl, slaHoursHint)
+        ));
+        const dayTotalHours = clusterHours.reduce((sum, h) => sum + (Number.isFinite(h) ? h : 0), 0);
+        const exceeds12h = dayTotalHours > 12 + 0.01;
+
+        clusters.forEach((cl, i) => {
+            if (cl.length === 1) {
+                out.push(exceeds12h ? { ...cl[0], _liquidationDayExceeds12h: true } : cl[0]);
+                return;
+            }
+            const merged = coalescePlannedTurnosForCell(cl, slaHoursHint);
+            out.push({
+                ...merged,
+                id: merged?.id || cl.map((g) => g.id).join('_'),
+                _liquidationCoalescedIds: cl.map((g) => g.id),
+                _liquidationBillableHours: clusterHours[i],
+                ...(exceeds12h ? { _liquidationDayExceeds12h: true } : {}),
+            });
         });
     }
     return out;
@@ -426,10 +498,8 @@ export function liquidationBillableHoursForShift(
 
 function applyHHmmToShiftDate(base: Date, hhmm: string): Date {
     const m = String(hhmm).trim().slice(0, 5).match(/^(\d{1,2}):(\d{2})$/);
-    const d = new Date(base);
-    if (!m) return d;
-    d.setHours(Number(m[1]), Number(m[2]), 0, 0);
-    return d;
+    if (!m) return new Date(base);
+    return withArClock(base, Number(m[1]), Number(m[2]));
 }
 
 function hhmmToMinutes(hhmm: string): number | null {
@@ -445,7 +515,7 @@ function coverageSegmentIsPreBandAdelanto(shift: any, bandStart: Date): boolean 
     const segTo = shift?.segmentToTime
         || (shift?.isExtended ? (shift.adjustedEndTime || shift.extensionEndTime) : null);
     if (!segFrom || !segTo) return false;
-    const bandMin = bandStart.getHours() * 60 + bandStart.getMinutes();
+    const bandMin = arMinutesOfDay(bandStart);
     const fromM = hhmmToMinutes(String(segFrom));
     const toM = hhmmToMinutes(String(segTo));
     if (fromM == null || toM == null) return false;
@@ -489,7 +559,7 @@ export function resolveLiquidationPlannedWindow(
         if (to) {
             dispEnd = applyHHmmToShiftDate(plannedEnd, String(to));
             if (dispEnd.getTime() <= dispStart.getTime()) {
-                dispEnd.setDate(dispEnd.getDate() + 1);
+                dispEnd = new Date(dispEnd.getTime() + 24 * 3600000);
             }
         }
     }
@@ -543,12 +613,12 @@ export function isReportVacancyShift(shift: any, empMap: Record<string, string>)
 }
 
 function objectiveReportSlotKey(shift: any): string {
-    const start = shift?.startTime?.toDate?.();
+    const start = parseShiftInstant(shift?.startTime);
     if (!start) return `id:${shift?.id || '?'}`;
     const dk = getArgentinaDate(shift.startTime);
     const pos = String(shift?.positionName || 'general').trim().toLowerCase();
     const code = String(shift?.code || '-').trim().toUpperCase();
-    const startMin = start.getHours() * 60 + start.getMinutes();
+    const startMin = arMinutesOfDay(start);
     return `${dk}|${pos}|${code}|${startMin}`;
 }
 
@@ -713,16 +783,8 @@ export function resolveShiftDurationHours(
 
 // Helper seguro para fechas (Formato local Argentina)
 const getArgentinaDate = (dateInput: any): string => {
-    if (!dateInput) return '';
-    try {
-        const d = dateInput.toDate ? dateInput.toDate() : new Date(dateInput);
-        const year = d.getFullYear();
-        const month = String(d.getMonth() + 1).padStart(2, '0');
-        const day = String(d.getDate()).padStart(2, '0');
-        return `${year}-${month}-${day}`;
-    } catch (e) {
-        return ''; 
-    }
+    const d = parseShiftInstant(dateInput);
+    return d ? arYmd(d) : '';
 };
 
 // CÃ¡lculo de horas nocturnas (21:00 a 06:00)
@@ -779,12 +841,21 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let desgloseCobertura = 0;
     let desgloseFt = 0;
     let desgloseTura = 0;
+    const warnings: string[] = [];
+    const exceeds12hDaysWarned = new Set<string>();
 
     sortedDocs.forEach(d => {
         try {
             const st = (d.status || '').toLowerCase();
             if (st.includes('cancel') || st.includes('delet')) return;
             if (d.type === 'NOVEDAD') return;
+            if (d._liquidationDayExceeds12h) {
+                const dk = shiftCalendarDateKey(d) || '?';
+                if (!exceeds12hDaysWarned.has(dk)) {
+                    exceeds12hDaysWarned.add(dk);
+                    warnings.push(`Día ${dk} supera 12 h (jornadas independientes) — se paga completo, requiere revisión.`);
+                }
+            }
             if (
                 d.coverageHoursOnSource === true
                 || (String(d.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
@@ -978,5 +1049,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             ft: desgloseFt,
             tura: desgloseTura,
         },
+        /** Decisión Mauro H1 #2: días con jornadas independientes que suman >12 h (revisar, no se recorta el pago). */
+        warnings,
+        requiresReview: warnings.length > 0,
     };
 };

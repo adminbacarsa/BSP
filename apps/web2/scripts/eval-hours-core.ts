@@ -753,6 +753,48 @@ async function main() {
     realEndTime: secAt(2026, 5, 18, 19, 0),
   });
   const extLeftAtBand = { ...extWorked, id: 'ext-left', realEndTime: secAt(2026, 5, 18, 15, 0) };
+  // Decisión Mauro H1 #2: doble jornada el mismo día, sin pisarse en horario ni ser tramo EXT/ADV → se pagan las DOS.
+  const dblM = liqShift({
+    id: 'dbl-m',
+    employeeId: 'emp-dbl-jornada',
+    code: 'M',
+    startTime: secAt(2026, 5, 20, 7, 0),
+    endTime: secAt(2026, 5, 20, 15, 0),
+    realStartTime: secAt(2026, 5, 20, 7, 0),
+    realEndTime: secAt(2026, 5, 20, 15, 0),
+  });
+  const dblN = liqShift({
+    id: 'dbl-n',
+    employeeId: 'emp-dbl-jornada',
+    code: 'N',
+    startTime: secAt(2026, 5, 20, 23, 0),
+    endTime: secAt(2026, 5, 21, 7, 0),
+    realStartTime: secAt(2026, 5, 20, 23, 0),
+    realEndTime: secAt(2026, 5, 21, 7, 0),
+  });
+  const liqDoubleJornada = core.calculateLiquidationHoursStats([dblM, dblN], {});
+
+  // Docs que SÍ se pisan en horario (mismo legajo/día, sin flags EXT/ADV): una sola jornada billable.
+  const ovlA = liqShift({
+    id: 'ovl-a',
+    employeeId: 'emp-ovl-jornada',
+    code: 'M',
+    startTime: secAt(2026, 5, 21, 7, 0),
+    endTime: secAt(2026, 5, 21, 15, 0),
+    realStartTime: secAt(2026, 5, 21, 7, 0),
+    realEndTime: secAt(2026, 5, 21, 15, 0),
+  });
+  const ovlB = liqShift({
+    id: 'ovl-b',
+    employeeId: 'emp-ovl-jornada',
+    code: 'M',
+    startTime: secAt(2026, 5, 21, 9, 0),
+    endTime: secAt(2026, 5, 21, 17, 0),
+    realStartTime: secAt(2026, 5, 21, 9, 0),
+    realEndTime: secAt(2026, 5, 21, 17, 0),
+  });
+  const liqOverlapJornada = core.calculateLiquidationHoursStats([ovlA, ovlB], {});
+
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
   const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
@@ -778,6 +820,18 @@ async function main() {
   canon('persona celda turno + ops_cov (nunca 16)', liqExtWithOpsCov.totales, 12);
   canon('persona ext autorizada pero salió 15:00', liqExtLeft.totales, 8);
   canon('persona FT desglose.ft', liqFt.desglose.ft, 8);
+  canon('persona doble jornada M+N sin pisarse: se pagan las dos', liqDoubleJornada.horasReales, 16);
+  if (!liqDoubleJornada.requiresReview) {
+    canonFails.push('persona doble jornada >12h debe marcar requiresReview (sin recortar el pago)');
+  } else {
+    canonOk += 1;
+  }
+  canon('persona docs que se pisan en horario: una sola jornada', liqOverlapJornada.horasReales, 8);
+  if (liqOverlapJornada.requiresReview) {
+    canonFails.push('persona jornada única de 8h no debería marcar requiresReview');
+  } else {
+    canonOk += 1;
+  }
   canon('liquidación adelanto', liqAdv.horasReales, 9);
   canon('liquidación retención 3 min', liqRet.horasReales, 8.05);
   canon('liquidación relevo anticipado', liqEarly.horasReales, 8);
