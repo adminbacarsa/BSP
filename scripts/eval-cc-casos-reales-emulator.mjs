@@ -20,6 +20,7 @@ const admin = requireFn('firebase-admin');
 const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletarTurnosCore.js');
 const { calcTurnoHoursContrib } = requireFn('./lib/liquidacion/turnoHoursCalc.js');
 const { SHIFT_HARD_CAP_MS } = requireFn('./lib/scheduling/shiftClose.js');
+const { simulableShiftSkipReason } = requireFn('./lib/common/simulableShift.js');
 const { Timestamp, FieldValue } = admin.firestore;
 
 if (!process.env.FIRESTORE_EMULATOR_HOST) process.env.FIRESTORE_EMULATOR_HOST = '127.0.0.1:8080';
@@ -31,6 +32,15 @@ const CAPS = 'caps-angelelli-2026-09-26';
 const MIN = 60000;
 
 const NUEVO_EDIFICIO = 'nuevo-edificio-2026-09-28';
+const ONCOLOGICO = 'h-oncologico-2026-09-27';
+
+/** Licencias de Cejas Mario marcadas presentes por la simulación (25→28/09). */
+const CEJAS_V = {
+  d25: 'K7gpSv2yZqNaF4kAbNgo',
+  d26: '1jZiqRna06TO0917zs90',
+  d27: 'jsrIlkjT3yyqRbnkLiSK',
+  d28: 'ocEeKfwW46k1vaz6ecBe',
+};
 
 const { revertirAusenciaShift, REVERT_ABSENCE_WINDOW_MS } = requireFn('./lib/attendance/revertirAusencia.js');
 const { resolverCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
@@ -93,6 +103,19 @@ async function reopenRetained(id) {
     realEndTime: FieldValue.delete(),
     completionReason: FieldValue.delete(),
     autoCompletedAt: FieldValue.delete(),
+  });
+}
+
+/** Deshace un cierre automático: el turno vuelve a quedar presente y abierto. */
+async function reopenPresent(id) {
+  await db.collection('turnos').doc(id).update({
+    status: 'PRESENT',
+    isPresent: true,
+    isCompleted: false,
+    realEndTime: FieldValue.delete(),
+    completionReason: FieldValue.delete(),
+    autoCompletedAt: FieldValue.delete(),
+    requiereRevision: FieldValue.delete(),
   });
 }
 
@@ -343,6 +366,51 @@ async function run() {
     const got = `ADV ${hmAr(a?.startTime)}–${hmAr(a?.endTime)} (inicio ${hmAr(as?.adjustedStartTime)})`;
     const ok = got === 'ADV 11:00–15:00 (inicio 11:00)' && t?.coverageStatus === 'PARTIAL';
     report('P1c.2', ok, ok ? `Recepción 1 28/09 en UTC: ${got}, titular PARTIAL` : `${got} st=${t?.coverageStatus}`);
+  });
+
+  // P1b — H. Oncológico 25→28/09: la simulación marcó presente la licencia (V) de Cejas Mario
+  // y el cron la cerró por tope. Con el filtro compartido nada de eso vuelve a pasar.
+  await withCase(ONCOLOGICO, async () => {
+    const vs = await Promise.all(Object.values(CEJAS_V).map(shift));
+    const razones = vs.map((s) => simulableShiftSkipReason(s));
+    const franco = simulableShiftSkipReason(await shift('swP15JxecSAnblufQjbE'));
+    const nocheReal = simulableShiftSkipReason(await shift('KVVz8sJ6o6HFtTkW4tzB'));
+    const okFiltro = vs.every((s) => s?.code === 'V')
+      && razones.every((r) => r === 'LICENCIA')
+      && franco === 'FRANCO'
+      && nocheReal === null;
+    report('P1b.1', okFiltro, okFiltro
+      ? 'las 4 V de Cejas (25→28/09) y el F de Yulitta quedan fuera de la simulación; el N de Morán sigue simulable'
+      : `razones=${razones.join(',')} franco=${franco} noche=${nocheReal}`);
+
+    const v27 = await shift(CEJAS_V.d27);
+    const v28 = await shift(CEJAS_V.d28);
+    report('P1b.2', v27?.completionReason === 'TOPE_JORNADA_RETROACTIVO' && v28?.status === 'PRESENT',
+      `estado de prod: V 27/09 cerrada por tope (${v27?.completionReason}) y V 28/09 todavía PRESENT`);
+
+    await reopenPresent(CEJAS_V.d27);
+    const now = tsAr(2026, 9, 29, 8, 0);
+    const dry = await runAutoCompletarTurnosPass(db, autoCompleteCtx, now, { dryRun: true });
+    const a27 = dry.actions.find((a) => a.shiftId === CEJAS_V.d27);
+    const a28 = dry.actions.find((a) => a.shiftId === CEJAS_V.d28);
+    const control = dry.actions.find((a) => a.shiftId === 'E4X2EpIU7NZNNTbeq77a');
+    const okDry = a27?.kind === 'WAIT' && a27?.reason === 'LICENCIA_PRESENTE'
+      && a28?.kind === 'WAIT' && a28?.reason === 'LICENCIA_PRESENTE'
+      && control?.kind === 'CLOSE';
+    report('P1b.3', okDry, okDry
+      ? 'dryRun 29/09 08:00: las dos V presentes quedan en LICENCIA_PRESENTE y el M de Capdevila sí cierra'
+      : `v27=${JSON.stringify(a27)} v28=${JSON.stringify(a28)} ctrl=${JSON.stringify(control)}`);
+
+    await runAutoCompletarTurnosPass(db, autoCompleteCtx, now);
+    const f27 = await shift(CEJAS_V.d27);
+    const f28 = await shift(CEJAS_V.d28);
+    const nov = await db.collection('novedades').doc(`tope_${CEJAS_V.d27}`).get();
+    const okPass = f27?.status === 'PRESENT' && !f27?.realEndTime && !f27?.completionReason
+      && f28?.status === 'PRESENT' && !f28?.realEndTime && !f28?.completionReason
+      && !nov.exists;
+    report('P1b.4', okPass, okPass
+      ? 'tras la pasada real las licencias siguen abiertas, sin realEndTime ni novedad de tope (las corrige RRHH)'
+      : `v27=${f27?.status}/${f27?.completionReason} v28=${f28?.status}/${f28?.completionReason} nov=${nov.exists}`);
   });
 
   const failed = results.filter((r) => !r.ok);

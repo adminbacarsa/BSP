@@ -30,7 +30,12 @@ const {
   syncAusenciaCoberturaGestionada,
 } = requireFn('./lib/coverage/syncAusenciaCobertura.js');
 
-const { resolverCobertura, iniciarCascadaCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const {
+  resolverCobertura,
+  iniciarCascadaCobertura,
+  simularRespuestasConvocatorias,
+} = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const { isSimulableShift, simulableShiftSkipReason } = requireFn('./lib/common/simulableShift.js');
 const {
   retainOutgoingForGap,
   releaseRetentionForAbsenceShift,
@@ -1794,6 +1799,110 @@ async function run() {
         got === 'ext 07:00-11:00 fin 11:00 · adv 11:00-15:00 inicio 11:00'
         && tit?.coverageStatus === 'COVERED';
       report(44, ok, ok ? `TZ=UTC: ${got}` : `${got} st=${tit?.coverageStatus}`);
+    }
+
+    // Caso 45 — Demo no toca licencias: el filtro descarta los códigos de licencia/franco
+    // y la simulación de respuestas ignora las convocatorias sobre un titular de licencia.
+    {
+      const prefix = `${runId}_c45`;
+      const empresaId = `${prefix}_emp`;
+      const noSimulables = ['V', 'L', 'E', 'A', 'ART', 'AA', 'PG', 'SGS', 'SUS', 'F', 'FF', 'FP'];
+      const filtroOk =
+        noSimulables.every((code) => isSimulableShift({ code }) === false)
+        && isSimulableShift({ code: 'M' }) === true
+        && isSimulableShift({ code: 'M', draft: true }) === false
+        && isSimulableShift({ code: 'M', isVirtual: true }) === false
+        && isSimulableShift({ code: 'M', isFranco: true }) === false
+        && isSimulableShift({ code: 'M', origin: 'OPERATIONS_COVERAGE', coverageType: 'EXTEND' }) === false
+        && simulableShiftSkipReason({ code: 'v' }) === 'LICENCIA';
+
+      const vShiftId = `${prefix}_vac`;
+      const mShiftId = `${prefix}_m`;
+      const oldCreated = Timestamp.fromMillis(Date.now() - 10 * 60000);
+      await db.batch()
+        .set(db.collection('turnos').doc(vShiftId), {
+          empresaId, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+          employeeId: `${prefix}_eV`, employeeName: 'Cejas licencia', code: 'V',
+          status: 'PENDING', isPresent: false, isAbsent: true,
+          startTime: tsAt(2026, 9, 27, 0, 0), endTime: tsAt(2026, 9, 27, 23, 59),
+        })
+        .set(db.collection('turnos').doc(mShiftId), {
+          empresaId, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+          employeeId: `${prefix}_eM`, employeeName: 'Titular M', code: 'M',
+          status: 'ABSENT', isPresent: false, isAbsent: true,
+          startTime: tsAt(2026, 9, 27, 7, 0), endTime: tsAt(2026, 9, 27, 15, 0),
+        })
+        .commit();
+
+      const convV = db.collection('convocatorias_cobertura').doc(`${prefix}_convV`);
+      await convV.set({
+        empresaId, shiftId: vShiftId, objectiveId: `${prefix}_obj`, clientId: `${prefix}_cli`,
+        type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
+        timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand`,
+      });
+      const respondidas = await simularRespuestasConvocatorias(db, empresaId);
+      const convVAfter = (await convV.get()).data();
+      const vAfter = (await db.collection('turnos').doc(vShiftId).get()).data();
+
+      const ok =
+        filtroOk
+        && respondidas === 0
+        && convVAfter?.status === 'PENDING'
+        && vAfter?.isPresent !== true
+        && vAfter?.realStartTime === undefined;
+      report(45, ok, ok
+        ? 'licencias/francos fuera de la simulación; Demo no responde convocatoria sobre V'
+        : `filtro=${filtroOk} respondidas=${respondidas} conv=${convVAfter?.status} present=${vAfter?.isPresent}`);
+    }
+
+    // Caso 46 — turno con código de licencia en PRESENT: no se cierra por tope, queda para RRHH.
+    {
+      const prefix = `${runId}_c46`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await seedSla(objectiveId, `${prefix}_cli`, '24h');
+      const vId = `${prefix}_v_present`;
+      const mId = `${prefix}_m_control`;
+      const checkIn = tsAt(2026, 9, 27, 0, 12);
+      // Pasada media hora del tope: los dos turnos ya vencieron y entran en la query del cron.
+      const nowPass = Timestamp.fromMillis(checkIn.toMillis() + RETENTION_MAX_TOTAL_MS + 30 * 60000);
+      await db.batch()
+        .set(db.collection('turnos').doc(vId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eV`,
+          employeeName: 'Cejas licencia', code: 'V', status: 'PRESENT', isPresent: true, isCompleted: false,
+          checkInTime: checkIn, realStartTime: checkIn,
+          startTime: tsAt(2026, 9, 27, 0, 0), endTime: tsAt(2026, 9, 27, 8, 0),
+        })
+        .set(db.collection('turnos').doc(mId), {
+          empresaId, objectiveId, positionName: 'Puesto 2', employeeId: `${prefix}_eM`,
+          employeeName: 'Titular M', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          checkInTime: checkIn, realStartTime: checkIn,
+          startTime: tsAt(2026, 9, 27, 0, 0), endTime: tsAt(2026, 9, 27, 8, 0),
+        })
+        .commit();
+
+      const dry = await runAutoCompletarTurnosPass(db, autoCompleteCtx, nowPass, {
+        dryRun: true,
+        empresaFilter: (eid) => eid === empresaId,
+      });
+      const accionV = dry.actions.find((a) => a.shiftId === vId);
+      const accionM = dry.actions.find((a) => a.shiftId === mId);
+
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, nowPass, { onlyOutgoingShiftId: vId });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, nowPass, { onlyOutgoingShiftId: mId });
+      const vAfter = (await db.collection('turnos').doc(vId).get()).data();
+      const mAfter = (await db.collection('turnos').doc(mId).get()).data();
+      const novV = await db.collection('novedades').where('shiftId', '==', vId).where('type', '==', 'TOPE_JORNADA').get();
+
+      const ok =
+        accionV?.kind === 'WAIT' && accionV?.reason === 'LICENCIA_PRESENTE'
+        && accionM?.kind === 'CLOSE'
+        && vAfter?.status === 'PRESENT' && vAfter?.isCompleted !== true
+        && vAfter?.realEndTime === undefined && novV.empty
+        && mAfter?.status === 'COMPLETED' && mAfter?.completionReason === 'TOPE_JORNADA';
+      report(46, ok, ok
+        ? 'V PRESENT queda abierto (WAIT LICENCIA_PRESENTE); el M de control sí cierra por tope'
+        : `V=${accionV?.kind}/${accionV?.reason} st=${vAfter?.status} end=${vAfter?.realEndTime ? 'sí' : 'no'} nov=${novV.size} · M=${accionM?.kind}/${mAfter?.completionReason}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
