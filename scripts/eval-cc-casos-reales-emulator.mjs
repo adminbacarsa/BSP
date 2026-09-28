@@ -30,7 +30,10 @@ const db = admin.firestore();
 const CAPS = 'caps-angelelli-2026-09-26';
 const MIN = 60000;
 
+const NUEVO_EDIFICIO = 'nuevo-edificio-2026-09-28';
+
 const { revertirAusenciaShift, REVERT_ABSENCE_WINDOW_MS } = requireFn('./lib/attendance/revertirAusencia.js');
+const { resolverCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
 const webRevert = await import('../apps/web2/src/lib/operaciones/revertAbsenceWindow.ts');
 
 const results = [];
@@ -108,6 +111,50 @@ async function dropBarrionuevoCoverage() {
     resolvedBy: FieldValue.delete(),
   });
 }
+
+/** Estado previo a una cobertura EXT/ADV: titular sin cubrir, origen sin ajuste, sin ops_cov. */
+async function undoExtAdvCoverage({ titularId, opsCovIds, sourceIds }) {
+  for (const id of opsCovIds) await db.collection('turnos').doc(id).delete();
+  await db.collection('turnos').doc(titularId).update({
+    coverageStatus: FieldValue.delete(),
+    coverageDocId: FieldValue.delete(),
+    coverageConvocatoriaId: FieldValue.delete(),
+    coverageClaimConvocatoriaId: FieldValue.delete(),
+    coverageClaimAt: FieldValue.delete(),
+    coveredAt: FieldValue.delete(),
+    coverageType: FieldValue.delete(),
+    operacionallyCovered: FieldValue.delete(),
+    coveredBy: FieldValue.delete(),
+    coveredByEmployeeId: FieldValue.delete(),
+    coveredByEmployeeName: FieldValue.delete(),
+    resolvedBy: FieldValue.delete(),
+  });
+  for (const id of sourceIds) {
+    await db.collection('turnos').doc(id).update({
+      coverageDocId: FieldValue.delete(),
+      isExtended: false,
+      extensionEndTime: FieldValue.delete(),
+      adjustedEndTime: FieldValue.delete(),
+      isEarlyStart: false,
+      adjustedStartTime: FieldValue.delete(),
+    });
+  }
+}
+
+/** Acepta la convocatoria del snapshot con el proceso en UTC (como Cloud Functions). */
+async function resolveConvInUtc(convId) {
+  const snap = await db.collection('convocatorias_cobertura').doc(convId).get();
+  const prevTz = process.env.TZ;
+  process.env.TZ = 'UTC';
+  try {
+    await resolverCobertura(db, { id: convId, ...snap.data() });
+  } finally {
+    if (prevTz === undefined) delete process.env.TZ;
+    else process.env.TZ = prevTz;
+  }
+}
+
+const hmAr = (ts) => (ts?.toMillis ? fmtAr(ts.toMillis()).slice(6) : '-');
 
 const hours = (data) => calcTurnoHoursContrib(data)?.hsReales ?? 0;
 const hFmt = (h) => `${Math.floor(h)}:${String(Math.round((h % 1) * 60)).padStart(2, '0')} h`;
@@ -259,6 +306,43 @@ async function run() {
     report('P1.5', ok, ok
       ? `zombi retenido del 20/09 cerrado retroactivo en inicio + 12:59 (${fmtAr(realEnd)}), requiereRevision, liquida ${hFmt(hs)}`
       : `st=${z?.status} r=${z?.completionReason} rev=${z?.requiereRevision} end=${realEnd ? fmtAr(realEnd) : '-'} hs=${hs}`);
+  });
+
+  // P1c.1 — Playa 27/09 (Moreno AA, M 07–15): EXT Lizarraga + ADV Bustamante. En prod salieron 04–08 / 08–12.
+  await withCase(NUEVO_EDIFICIO, async () => {
+    const titularId = 'W4eC9clqG6qpY9llgj4m';
+    const extSrc = '8ONKDv6FzqTfC6DUieCY';
+    const advSrc = '81oeHt3N5H2byBVBDv0G';
+    const extCov = `ops_cov_${titularId}_hUo6Nmw7rdzVONiCKHgW`;
+    const advCov = `ops_cov_${titularId}_6B6w3gYy8kelK3rzN6O8`;
+    await undoExtAdvCoverage({ titularId, opsCovIds: [extCov, advCov], sourceIds: [extSrc, advSrc] });
+    await resolveConvInUtc('1MqazpSAfyFqCq4k2F6j');
+    await resolveConvInUtc('KOGfZyIPq5HT87SA8p5M');
+    const e = await shift(extCov);
+    const a = await shift(advCov);
+    const es = await shift(extSrc);
+    const as = await shift(advSrc);
+    const t = await shift(titularId);
+    const got = `EXT ${hmAr(e?.startTime)}–${hmAr(e?.endTime)} (fin ${hmAr(es?.extensionEndTime)})`
+      + ` · ADV ${hmAr(a?.startTime)}–${hmAr(a?.endTime)} (inicio ${hmAr(as?.adjustedStartTime)})`;
+    const ok = got === 'EXT 07:00–11:00 (fin 11:00) · ADV 11:00–15:00 (inicio 11:00)' && t?.coverageStatus === 'COVERED';
+    report('P1c.1', ok, ok ? `Playa 27/09 en UTC: ${got}` : `${got} st=${t?.coverageStatus}`);
+  });
+
+  // P1c.2 — Recepción 1 28/09 (Quiroga AA, M 07–15): ADV Ceballos. En prod salió 08–12.
+  await withCase(NUEVO_EDIFICIO, async () => {
+    const titularId = 'nPpF1zcL5I4t5z6cx0gi';
+    const advSrc = '5Zq2F1J6Dw5VQPFgRG4F';
+    const advCov = `ops_cov_${titularId}_F7bYgkiu9m7403dHnGOI`;
+    const bunkerCov = 'ops_cov_rMdDJxgdwpibFWC1ESKa_F7bYgkiu9m7403dHnGOI';
+    await undoExtAdvCoverage({ titularId, opsCovIds: [advCov, bunkerCov], sourceIds: [advSrc] });
+    await resolveConvInUtc('3XGqkSRdVCM229CJnWr3');
+    const a = await shift(advCov);
+    const as = await shift(advSrc);
+    const t = await shift(titularId);
+    const got = `ADV ${hmAr(a?.startTime)}–${hmAr(a?.endTime)} (inicio ${hmAr(as?.adjustedStartTime)})`;
+    const ok = got === 'ADV 11:00–15:00 (inicio 11:00)' && t?.coverageStatus === 'PARTIAL';
+    report('P1c.2', ok, ok ? `Recepción 1 28/09 en UTC: ${got}, titular PARTIAL` : `${got} st=${t?.coverageStatus}`);
   });
 
   const failed = results.filter((r) => !r.ok);

@@ -1736,6 +1736,65 @@ async function run() {
         ? 'CC off: cierra al fichar el relevo, sin avisos'
         : `st=${d?.status} r=${d?.completionReason} nov=${tr.nov} notif=${tr.notifs} push=${ccOffTokenCalls}`);
     }
+
+    // Caso 44 — Proceso en UTC (como Functions): EXT+ADV de un M 07–15 AR quedan 07–11 / 11–15 AR.
+    {
+      const s = await seedBase(`${runId}_c44`);
+      const arTs = (iso) => Timestamp.fromMillis(Date.parse(`${iso}-03:00`));
+      const titStart = arTs('2026-09-28T07:00:00');
+      const titEnd = arTs('2026-09-28T15:00:00');
+      await db.batch()
+        .update(db.collection('turnos').doc(s.titularId), { startTime: titStart, endTime: titEnd })
+        .update(db.collection('turnos').doc(s.extSourceId), {
+          code: 'N',
+          startTime: arTs('2026-09-27T23:00:00'),
+          endTime: arTs('2026-09-28T07:00:00'),
+          isPresent: true,
+          isCompleted: false,
+        })
+        .update(db.collection('turnos').doc(s.advSourceId), {
+          code: 'T',
+          startTime: arTs('2026-09-28T15:00:00'),
+          endTime: arTs('2026-09-28T23:00:00'),
+          isCompleted: false,
+        })
+        .commit();
+      const titular = { ...s.titular, startTime: titStart, endTime: titEnd };
+      const conv = { ...baseConvFields({ ...s, titular }) };
+      const prevTz = process.env.TZ;
+      process.env.TZ = 'UTC';
+      try {
+        await writeConvAndResolve({
+          ...conv,
+          type: 'EXTEND',
+          candidateEmployeeId: s.empExt,
+          candidateEmployeeName: 'Guardia EXT',
+          extendShiftId: s.extSourceId,
+        });
+        await writeConvAndResolve({
+          ...conv,
+          type: 'ADVANCE',
+          candidateEmployeeId: s.empAdv,
+          candidateEmployeeName: 'Guardia ADV',
+          advanceShiftId: s.advSourceId,
+        });
+      } finally {
+        if (prevTz === undefined) delete process.env.TZ;
+        else process.env.TZ = prevTz;
+      }
+      const hm = (t) => (t?.toMillis ? new Date(t.toMillis() - 3 * 3600000).toISOString().slice(11, 16) : '-');
+      const opsExt = (await db.collection('turnos').doc(`ops_cov_${s.titularId}_${s.empExt}`).get()).data();
+      const opsAdv = (await db.collection('turnos').doc(`ops_cov_${s.titularId}_${s.empAdv}`).get()).data();
+      const extSrc = (await db.collection('turnos').doc(s.extSourceId).get()).data();
+      const advSrc = (await db.collection('turnos').doc(s.advSourceId).get()).data();
+      const tit = (await db.collection('turnos').doc(s.titularId).get()).data();
+      const got = `ext ${hm(opsExt?.startTime)}-${hm(opsExt?.endTime)} fin ${hm(extSrc?.extensionEndTime)}`
+        + ` · adv ${hm(opsAdv?.startTime)}-${hm(opsAdv?.endTime)} inicio ${hm(advSrc?.adjustedStartTime)}`;
+      const ok =
+        got === 'ext 07:00-11:00 fin 11:00 · adv 11:00-15:00 inicio 11:00'
+        && tit?.coverageStatus === 'COVERED';
+      report(44, ok, ok ? `TZ=UTC: ${got}` : `${got} st=${tit?.coverageStatus}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;
