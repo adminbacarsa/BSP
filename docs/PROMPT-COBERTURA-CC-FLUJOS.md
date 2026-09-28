@@ -76,7 +76,9 @@ onTurnoAbsenciaDetectada
 | Claim | `coverageClaimConvocatoriaId` + `coverageClaimAt` (2 min) en `resolverCobertura` |
 | FULL | cierra vacantes, limpia claim, libera retención, RRHH `coberturaEstado: GESTIONADA` |
 
-**Orden backend:** `CASCADE_ORDER` en `eligibilityFilter.ts` = `RET → REF → ESC → EXTEND → ADVANCE → FT`  
+**Candidatos (P2):** una sola función, `buildCoverageCandidates` (`packages/ops-core/src/coverageCandidates.ts`, copia en `functions/src/coverage/coverageCandidates.ts`). La usan la cascada, `crearConvocatoriaCobertura`, la revalidación al aceptar y el CC. Descartan con `rejectReason` (el panel los muestra en «No disponibles»). Licencia = turno con código de licencia **o** doc en `ausencias` vigente ese día. EXT termina cuando empieza el hueco; ADV empieza cuando termina (±30 min). Mismo puesto antes que otro puesto del objetivo. Tope `COVERAGE_HARD_CAP_MS` (= `SHIFT_HARD_CAP_MS`). El ausente no entra. Zombi no entra. Sin dos coberturas solapadas ni dos huecos a la vez.
+
+**Orden backend:** `COVERAGE_CASCADE_ORDER` (la reexporta `CASCADE_ORDER`) = `RET → REF → ESC → EXTEND → ADVANCE → FT`. Cambiar el orden es cambiar esa constante.  
 **UI Manual STEPS:** INTERNO (RET·REF·ESC, 180s) → Ext+Adel (key `RETENCION`, 60s) → FT (180s)  
 **Retiro anticipado Auto:** `RET → REF → ESC → ADVANCE → FT` (**sin EXTEND**)  
 **Nota:** `SIN_TURNO` / `VOLANTE` existen en tipos/candidatos pero **no** en `CASCADE_ORDER` Auto actual (backlog).
@@ -158,7 +160,7 @@ onTurnoAbsenciaDetectada
 ### Flujo 5 — `applyCoverage` PARTIAL vs FULL
 
 - **Trigger:** `resolverCobertura` o front Manual `confirmCandidate` / `confirmDualTogether`.
-- **PARTIAL:** `coverageStatus: PARTIAL`, `operacionallyCovered: false`; Auto llama `ensureMissingDualLegConvocatoria`.
+- **PARTIAL:** `coverageStatus: PARTIAL`, `operacionallyCovered: false`; no cancela las demás convocatorias (FT incluidas). Auto llama `ensureMissingDualLegConvocatoria`.
 - **FULL:** COVERED; limpia `isSinCobertura`/`vacanteEscalada`; cierra `VACANTE_POR_AUSENCIA`; `releaseRetentionForAbsenceShift`; `ausencias.coberturaEstado: GESTIONADA`.
 - **Origen source:** RET `coverageUsed`; REF/ESC soft-delete; EXTEND `isExtended`; ADVANCE `isEarlyStart`; EXT/ADV `coverageHoursOnSource: true`.
 - **Edges:** Titular ausencia real mantiene `isAbsent`/`ABSENT`. `ALREADY_COVERED` cancela conv.
@@ -238,13 +240,13 @@ Colección `convocatorias_cobertura`. Estados: `PENDING | ESCALATED | ACCEPTED |
 | Acción | Efecto |
 |--------|--------|
 | Crear | Doc + notif + `CONVOCATORIA_ENVIADA` |
-| Aceptar (PENDING o ESCALATED) | `resolverCobertura` → Flujo 5 + cancel siblings + `COBERTURA_RESUELTA` |
+| Aceptar (PENDING o ESCALATED) | Revalida (licencia, solape, tope, hueco, contigüidad). Si falla: `REJECTED` + motivo y la cascada sigue. Si pasa: `resolverCobertura` → Flujo 5. FULL cancela el resto; PARTIAL no. |
 | Rechazar | `REJECTED` + avanzar cascada / partial |
 | Timeout cascada | `ESCALATED` + avanzar (sigue aceptando) |
 | Timeout LLEGADA_TARDE | `TIMEOUT` (± AA) |
 | Cancelar | Solo PENDING → `CANCELLED` (no avanza) |
 
-Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `getCandidatosCobertura`.
+Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`. (`getCandidatosCobertura` retirado; candidatos = `buildCoverageCandidates`.)
 
 ---
 
@@ -323,7 +325,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 - `autoCompletarTurnos` — único cierre automático + tope 12:59 / continuidad
 
 ### Callables
-`crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `getCandidatosCobertura`, `sesionOperador`, `marcarAusenciaOperaciones`, `revertirAusencia`, `notificarLlegadaTarde`, `registrarPresencia`, `processEarlyWithdrawalCallable`, `releaseInvalidRetentions`, `releaseTraceAbsences`
+`crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `cancelarConvocatoriaCobertura`, `sesionOperador`, `marcarAusenciaOperaciones`, `revertirAusencia`, `notificarLlegadaTarde`, `registrarPresencia`, `processEarlyWithdrawalCallable`, `releaseInvalidRetentions`, `releaseTraceAbsences`
 
 ### Internos (no callables)
 `applyCoverage`, `iniciarCascadaCobertura`, `resolverCobertura`, `retainOutgoingForGap`, `simularRespuestasConvocatorias`, `markShiftAbsent`
@@ -340,9 +342,9 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 | `coverageExtAdvSegments.ts` | `coverageExtAdvSegments.ts` |
 | `earlyWithdrawPolicy.ts` | `earlyWithdrawPolicy.ts` |
 
-**Solo front:** `CoverageSessionManager`, `coverageInternalCandidates`, `coverageGeo`, `opsExtAdvCandidates`, `opsConvocatoriaCobertura`, `opsDualCoverageApply`  
-**Solo backend:** `convocatoriasCobertura`, `eligibilityFilter`, `escalarVacanteSinCobertura`, `positionHasContinuity`, `earlyWithdrawalCore`, `earlyWithdrawCascade`  
-**Shared:** `packages/ops-core`, `packages/portal-core`
+**Solo front:** `CoverageSessionManager`, `coverageCandidateView`, `coverageInternalCandidates`, `coverageGeo`, `opsExtAdvCandidates`, `opsConvocatoriaCobertura`, `opsDualCoverageApply`  
+**Solo backend:** `convocatoriasCobertura`, `coverageCandidatesServer`, `eligibilityFilter`, `escalarVacanteSinCobertura`, `positionHasContinuity`, `earlyWithdrawalCore`, `earlyWithdrawCascade`  
+**Shared:** `packages/ops-core` (`buildCoverageCandidates`, copia byte-idéntica en `functions/src/coverage/coverageCandidates.ts`), `packages/portal-core`
 
 ---
 
@@ -369,6 +371,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 - [ ] Flujos: sin turno, retener sola, sintético, otros objetivos, &gt;30 km
 - [ ] Cascada Auto: sin turno/volante primero; fechas AR
 - [ ] Portal: alinear `getCheckInTiming` con ventanas servidor
+- [x] Candidatos únicos (`buildCoverageCandidates`) + revalidación al aceptar + PARTIAL no cancela
 - [ ] Prioridad EXT sobre retenido + segmentos HH:MM–HH:MM
 
 **Cerrado Fase 1–2:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12:59 con cierre único en server (P1), ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor.
