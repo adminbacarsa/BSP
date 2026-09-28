@@ -1,6 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.assertOperationsUpdatePermission = exports.resolvePanelUserForUid = exports.buildStaffModulesPayload = exports.moduleActionsFromRolePermissions = exports.fullStaffModulePermissions = exports.STAFF_APP_MODULE_KEYS = void 0;
+exports.STAFF_APP_MODULE_KEYS = void 0;
+exports.fullStaffModulePermissions = fullStaffModulePermissions;
+exports.moduleActionsFromRolePermissions = moduleActionsFromRolePermissions;
+exports.buildStaffModulesPayload = buildStaffModulesPayload;
+exports.resolvePanelUserForUid = resolvePanelUserForUid;
+exports.assertOperationsUpdatePermission = assertOperationsUpdatePermission;
 const functions = require("firebase-functions/v1");
 const role_util_1 = require("../common/role.util");
 exports.STAFF_APP_MODULE_KEYS = ['OPERATIONS', 'SUPERVISION', 'RRHH', 'PLANNING'];
@@ -18,7 +23,6 @@ function fullStaffModulePermissions() {
     }
     return out;
 }
-exports.fullStaffModulePermissions = fullStaffModulePermissions;
 function moduleActionsFromRolePermissions(permissions, moduleKey) {
     const raw = permissions[moduleKey];
     if (!Array.isArray(raw))
@@ -26,7 +30,6 @@ function moduleActionsFromRolePermissions(permissions, moduleKey) {
     const allowed = new Set([...BASE_ACTIONS, ...(MODULE_ONLY_ACTIONS[moduleKey] ?? [])]);
     return raw.filter((a) => typeof a === 'string' && allowed.has(a));
 }
-exports.moduleActionsFromRolePermissions = moduleActionsFromRolePermissions;
 function buildStaffModulesPayload(permissions) {
     const out = {};
     for (const key of exports.STAFF_APP_MODULE_KEYS) {
@@ -34,7 +37,6 @@ function buildStaffModulesPayload(permissions) {
     }
     return out;
 }
-exports.buildStaffModulesPayload = buildStaffModulesPayload;
 async function resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback = 'Operador') {
     const tokenRole = String(tokenRoleRaw ?? '').trim();
     const sys = await db.collection('system_users').doc(uid).get();
@@ -102,7 +104,6 @@ async function resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallbac
         operatorName,
     };
 }
-exports.resolvePanelUserForUid = resolvePanelUserForUid;
 async function assertOperationsUpdatePermission(db, uid, empresaId, tokenRoleRaw, operatorNameFallback) {
     const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback);
     if (!panel) {
@@ -126,5 +127,4 @@ async function assertOperationsUpdatePermission(db, uid, empresaId, tokenRoleRaw
     }
     return panel;
 }
-exports.assertOperationsUpdatePermission = assertOperationsUpdatePermission;
 //# sourceMappingURL=staffPermissions.js.map

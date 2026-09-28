@@ -2083,14 +2083,11 @@ function matchPlanningAutomateIntent(t) {
 function tryDeterministicPlanningAutomateReply(t) {
     if (!matchPlanningAutomateIntent(t))
         return null;
-    return ('**Automatizar planificación en COSP**\n\n' +
-        '1. **Planificación y Turnos** → elegí **Cliente** y **Objetivo** (SLA activo en el mes).\n\n' +
-        '2. Clic en **Automatizar** (barra de la grilla).\n\n' +
-        '3. El sistema calcula **viabilidad** (¿cierra dotación + CCT 200h + SLA vendidas?).\n\n' +
-        '4. Si es viable, **genera** el cronograma y **reprocesa** huecos/descansos automáticamente.\n\n' +
-        '5. Con **ajuste fino IA** activo (toggle en configuración del wizard), Gemini propone **correcciones puntuales** — no reemplaza todo el mes.\n\n' +
-        '6. Revisá el modal de **verificación de cobertura**, la grilla y **guardá**; luego **publicá** el cronograma.\n\n' +
-        'En laboratorio: `npm run emulators` (con Functions) y `GEMINI_API_KEY` en `apps/functions/.env`. Sin Functions no corre el paso IA.').slice(0, 7500);
+    return ('**Automatizar planificación: pausado**\n\n' +
+        'Por ahora la grilla de **Planificación y Turnos** no tiene botón **Automatizar**.\n\n' +
+        '1. Armá el cronograma a mano en la grilla (o copiando el mes anterior).\n\n' +
+        '2. **Guardá** y luego **publicá** para que Operaciones lo vea.\n\n' +
+        'Los motores automáticos se prueban en **Lab de casos** (menú **Más acciones** de la grilla, requiere permiso Auto Lab).').slice(0, 7500);
 }
 function tryDeterministicPlanificacionHowToReply(t) {
     if (!matchPlanificacionHowToIntent(t))

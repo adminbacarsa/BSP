@@ -22,6 +22,11 @@ export {
   isActionableOpsVacancy,
 } from './vacancyOps';
 export {
+  isGapSiblingVacancyDoc,
+  isCanonicalGapTitular,
+  buildSlaUnplannedGapDocId,
+} from './gapVacancy';
+export {
   NON_RELIEF_EXTRA_CODES,
   reliefShiftCode,
   reliefIneligibleReason,

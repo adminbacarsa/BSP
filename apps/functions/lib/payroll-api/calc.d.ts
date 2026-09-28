@@ -1,4 +1,6 @@
 import type { CycleRange } from './cycle';
+export declare const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>>;
+export declare const RRHH_TYPE_LABEL_TO_CODE: Record<string, string>;
 export interface RrhhNovedades {
     vacacionesDias: number;
     enfermedadDias: number;
@@ -38,6 +40,15 @@ export interface EmployeeLiquidacion {
         plusFeriado: number;
     };
     novedadesRRHH: RrhhNovedades;
+    totales?: number;
+    desglose?: {
+        plan: number;
+        ext: number;
+        adv: number;
+        cobertura: number;
+        ft: number;
+        tura: number;
+    };
     turnosCount: number;
     turnosConFichada: number;
     warnings: string[];
@@ -66,8 +77,14 @@ export interface LiquidacionSnapshot {
         turnosSinHorario: number;
         turnosBorrador: number;
         ausenciasContadas: number;
+        hoursCoreEnabled?: boolean;
     };
 }
+export declare const round: (n: number) => number;
+export declare const fmtCuil: (raw: any) => string | null;
+export declare const tsToDate: (val: any) => Date | null;
+export declare const overlapsDay: (rangeStart: Date, rangeEnd: Date, dayStr: string) => boolean;
+export declare const datesBetween: (start: Date, end: Date) => string[];
 export interface BuildSnapshotParams {
     cycle: CycleRange;
     empresaId: string;

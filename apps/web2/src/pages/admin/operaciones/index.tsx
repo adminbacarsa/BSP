@@ -106,7 +106,7 @@ const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
 const getGuardAvatarLabel = (shift: any, name: string): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref) return ref;
-    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return '!';
+    if (isActionableOpsVacancy(shift)) return '!';
     return (name[0] || '?').toUpperCase();
 };
 
@@ -114,7 +114,7 @@ const getGuardAvatarClass = (shift: any): string => {
     const ref = getRefuerzoLabel(shift);
     if (ref === 'RFZ') return 'bg-red-100 text-red-700';
     if (ref === 'TURA') return 'bg-violet-100 text-violet-700';
-    if (shift?.isUnassigned && isActionableOpsVacancy(shift)) return 'bg-rose-100 text-rose-600';
+    if (isActionableOpsVacancy(shift)) return 'bg-rose-100 text-rose-600';
     return 'bg-slate-200 text-slate-600';
 };
 
@@ -2318,23 +2318,7 @@ export default function OperacionesPage() {
                      (s.positionName || '').toLowerCase() === (novedad.positionName || '').toLowerCase())
                 );
                 if (vacShift) {
-                    // Materializar si virtual y abrir cobertura
-                    if (vacShift.isVirtual || !novedad.shiftId) {
-                        const newRef = doc(collection(db, 'turnos'));
-                        await setDoc(newRef, stampEmpresaId({
-                            clientId: vacShift.clientId, clientName: vacShift.clientName,
-                            objectiveId: vacShift.objectiveId, objectiveName: vacShift.objectiveName,
-                            positionName: vacShift.positionName,
-                            employeeId: 'VACANTE', employeeName: 'VACANTE',
-                            startTime: Timestamp.fromDate(vacShift.shiftDateObj),
-                            endTime: Timestamp.fromDate(vacShift.endDateObj),
-                            status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
-                            origin: 'SLA_VIRTUAL', createdAt: serverTimestamp(),
-                        }, String(vacShift.empresaId || novedad.empresaId || empresaId || '').trim()));
-                        setCoverageData({ isOpen: true, shift: { ...vacShift, id: newRef.id } });
-                    } else {
-                        setCoverageData({ isOpen: true, shift: vacShift });
-                    }
+                    setCoverageData({ isOpen: true, shift: vacShift });
                     logic.setViewTab('VACANTES');
                 } else {
                     logic.setViewTab('VACANTES');
@@ -3397,24 +3381,8 @@ export default function OperacionesPage() {
         }
         try {
             let targetId = shift.id;
-            if (shift.isVirtual || shift.id.startsWith('SLA_GAP') || shift.id.startsWith('V124_')) {
-                // Vacante virtual: no existe en Firestore, crear documento real
-                const newRef = doc(collection(db, 'turnos'));
-                targetId = newRef.id;
-                const newShiftData: any = stampEmpresaId({
-                    clientId: shift.clientId, clientName: shift.clientName,
-                    objectiveId: shift.objectiveId, objectiveName: shift.objectiveName,
-                    positionName: shift.positionName,
-                    employeeId: 'VACANTE', employeeName: 'VACANTE',
-                    // Fix 4: asegurar que el Date sea correcto antes de convertir a Timestamp
-                    // shiftDateObj es un Date local de Argentina — Timestamp.fromDate lo convierte a UTC correctamente
-                    startTime: Timestamp.fromDate(shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj)),
-                    endTime:   Timestamp.fromDate(shift.endDateObj   instanceof Date ? shift.endDateObj   : new Date(shift.endDateObj)),
-                    status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true,
-                    comments: 'Vacante de Contrato Reportada',
-                    createdAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
-                }, String(shift.empresaId || empresaId || '').trim());
-                await setDoc(newRef, newShiftData);
+            if (shift.isVirtual || String(shift.id || '').startsWith('SLA_GAP') || String(shift.id || '').startsWith('V124_') || String(shift.id || '').startsWith('gap_')) {
+                targetId = String(shift.id || '').trim();
             } else {
                 await updateDoc(doc(db, 'turnos', targetId), { status: 'REPORTED_TO_PLANNING', isReported: true, isReportedToPlanning: true });
             }

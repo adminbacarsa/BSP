@@ -1,9 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.REVERT_ABSENCE_WINDOW_MS = void 0;
 exports.revertirAusenciaShift = revertirAusenciaShift;
 const firestore_1 = require("firebase-admin/firestore");
 const coverageRetention_1 = require("../coverage/coverageRetention");
 const syncAusenciaCobertura_1 = require("../coverage/syncAusenciaCobertura");
+exports.REVERT_ABSENCE_WINDOW_MS = 60 * 60 * 1000;
 async function revertirAusenciaShift(db, input) {
     const shiftId = String(input.shiftId || '').trim();
     if (!shiftId)
@@ -15,7 +17,7 @@ async function revertirAusenciaShift(db, input) {
     const shift = snap.data();
     const startMs = shift.startTime?.toMillis?.() ?? 0;
     const nowMs = Date.now();
-    if (startMs && nowMs > startMs + 60 * 60 * 1000) {
+    if (startMs && nowMs > startMs + exports.REVERT_ABSENCE_WINDOW_MS) {
         return { success: false, reason: 'PAST_T60' };
     }
     const activeCovSnap = await db
@@ -64,6 +66,9 @@ async function revertirAusenciaShift(db, input) {
         }
     }
     await (0, coverageRetention_1.releaseRetentionForAbsenceShift)(db, shiftId, 'REVERTIR_AUSENCIA');
+    for (const vRef of await (0, syncAusenciaCobertura_1.findOpenAbsenceVacancyDocs)(db, shiftId)) {
+        await vRef.update((0, syncAusenciaCobertura_1.absenceVacancyClosePatch)('REVERTED', input.operatorUid || 'REVERTIR_AUSENCIA'));
+    }
     if (input.cancelCoverage === true && activeCov.length) {
         for (const cov of activeCov) {
             await cov.ref.update({
@@ -87,3 +92,4 @@ async function revertirAusenciaShift(db, input) {
     }
     return { success: true };
 }
+//# sourceMappingURL=revertirAusencia.js.map

@@ -459,7 +459,7 @@ export async function applyCoverage(
     );
   }
 
-  // Espejo de functions: cierra el turno VACANTE_POR_AUSENCIA que crea onGuardAbsenceDetected.
+  // Espejo de functions: cierra hermanos históricos VACANTE_POR_AUSENCIA (P3 no los crea).
   if (closeMode === 'FULL') {
     if (titular.isSinCobertura === true || titular.vacanteEscalada === true) {
       const realEmployee = String(titular.employeeId || '').trim() && titular.employeeId !== 'VACANTE';

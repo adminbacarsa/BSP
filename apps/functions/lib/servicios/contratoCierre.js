@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cerrarContratoSla = exports.reabrirContratoSla = exports.scheduledCerrarContratosVencidos = exports.cerrarContratosVencidos = void 0;
+exports.cerrarContratoSla = exports.reabrirContratoSla = exports.scheduledCerrarContratosVencidos = void 0;
+exports.cerrarContratosVencidos = cerrarContratosVencidos;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const functions = require("firebase-functions/v1");
@@ -50,7 +51,6 @@ async function cerrarContratosVencidos(db, opts = {}) {
     }
     return { closed: toClose.length, ids: toClose.map((d) => d.id) };
 }
-exports.cerrarContratosVencidos = cerrarContratosVencidos;
 exports.scheduledCerrarContratosVencidos = (0, scheduler_1.onSchedule)({ schedule: '20 0 * * *', timeZone: TZ, timeoutSeconds: 300, memory: '256MiB' }, async () => {
     const r = await cerrarContratosVencidos(admin.firestore());
     console.log(`[cerrarContratosVencidos] cerrados=${r.closed}`);

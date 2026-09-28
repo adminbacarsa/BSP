@@ -5,6 +5,8 @@ exports.syncAusenciaCoberturaGestionada = syncAusenciaCoberturaGestionada;
 exports.absentShiftCoveragePatch = absentShiftCoveragePatch;
 exports.isDualSiblingOpsCoverage = isDualSiblingOpsCoverage;
 exports.isTitularAlreadyCovered = isTitularAlreadyCovered;
+exports.findOpenAbsenceVacancyDocs = findOpenAbsenceVacancyDocs;
+exports.absenceVacancyClosePatch = absenceVacancyClosePatch;
 exports.buildOpsCoverageDocId = buildOpsCoverageDocId;
 exports.isSourceShiftConvertedForCoverage = isSourceShiftConvertedForCoverage;
 exports.clearSourceCoverageUsedPatch = clearSourceCoverageUsedPatch;
@@ -18,6 +20,7 @@ exports.applyCoverage = applyCoverage;
 exports.clearTitularCoveragePatch = clearTitularCoveragePatch;
 exports.anularOpsCoverageLeg = anularOpsCoverageLeg;
 const admin = require("firebase-admin");
+const simulableShift_1 = require("../common/simulableShift");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
 const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
 function coverageServerTime() {
@@ -103,6 +106,24 @@ function isTitularAlreadyCovered(data) {
     if (st === 'COVERED')
         return true;
     return false;
+}
+async function findOpenAbsenceVacancyDocs(db, titularShiftId) {
+    const snap = await db
+        .collection('turnos')
+        .where('causedByShiftId', '==', titularShiftId)
+        .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+        .limit(5)
+        .get();
+    return snap.docs.filter((d) => d.data().isDeleted !== true).map((d) => d.ref);
+}
+function absenceVacancyClosePatch(outcome, by) {
+    return {
+        isDeleted: true,
+        status: outcome === 'COVERED' ? 'COVERED' : 'CANCELLED',
+        deletedReason: outcome === 'COVERED' ? 'TITULAR_CUBIERTO' : 'AUSENCIA_REVERTIDA',
+        closedBy: by,
+        closedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
 }
 function buildOpsCoverageDocId(titularShiftId, employeeId) {
     return `ops_cov_${titularShiftId}_${employeeId}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
@@ -302,8 +323,7 @@ async function applyCoverage(db, batch, params) {
         }
         const srcData = srcSnap.data();
         const linkedToThis = String(srcData.coverageDocId || '').trim() === covDocId;
-        const sameCovOnSource = linkedToThis
-            && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
+        const sameCovOnSource = linkedToThis && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
         if (['REF', 'ESC', 'RET'].includes(ct) && !linkedToThis) {
             const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
             if (!gap || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, gap)) {
@@ -326,7 +346,6 @@ async function applyCoverage(db, batch, params) {
             adjustedEndTime: admin.firestore.FieldValue.delete(),
         };
         const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
-        const franco = srcData.isFranco === true || ['F', 'FF', 'FP'].includes(srcCode);
         if (sameCovOnSource && (ct === 'EXTEND' || ct === 'ADVANCE')) {
         }
         else if (ct === 'EXTEND' && params.extensionEndTime) {
@@ -348,6 +367,7 @@ async function applyCoverage(db, batch, params) {
             batch.update(db.collection('turnos').doc(sourceId), buildEscRefSourceConvertedPatch(srcData, covDocId));
         }
         else if (ct === 'FT') {
+            const franco = srcData.isFranco === true || (0, simulableShift_1.isFrancoShiftCode)(srcCode);
             batch.update(db.collection('turnos').doc(sourceId), {
                 ...usedBase,
                 ...clearAdvanceMarkers,
@@ -368,7 +388,9 @@ async function applyCoverage(db, batch, params) {
         }
     }
     const existingCovSnap = await db.collection('turnos').doc(covDocId).get();
-    const existingCov = existingCovSnap.exists ? existingCovSnap.data() : null;
+    const existingCov = existingCovSnap.exists
+        ? existingCovSnap.data()
+        : null;
     const realStartMs = existingCov?.realStartTime?.toMillis?.() ?? 0;
     const keepPresence = existingCov?.isPresent === true || realStartMs > 0;
     batch.set(db.collection('turnos').doc(covDocId), {
@@ -392,11 +414,13 @@ async function applyCoverage(db, batch, params) {
         coverageSuperseded: false,
         coverageHoursOnSource: ct === 'EXTEND' || ct === 'ADVANCE',
         empresaId: empresaId || null,
-        ...(keepPresence ? {} : {
-            status: 'PENDING',
-            isPresent: false,
-            isAwaitingCoverageCheckIn: ct !== 'EXTEND',
-        }),
+        ...(keepPresence
+            ? {}
+            : {
+                status: 'PENDING',
+                isPresent: false,
+                isAwaitingCoverageCheckIn: ct !== 'EXTEND',
+            }),
         ...(existingCov ? {} : { createdAt: coverageServerTime() }),
         ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     }, { merge: true });
@@ -421,6 +445,27 @@ async function applyCoverage(db, batch, params) {
         });
     }
     if (closeMode === 'FULL') {
+        if (titular.isSinCobertura === true || titular.vacanteEscalada === true) {
+            const realEmployee = String(titular.employeeId || '').trim() && titular.employeeId !== 'VACANTE';
+            batch.update(db.collection('turnos').doc(titularId), {
+                isSinCobertura: false,
+                vacanteEscalada: false,
+                ...(realEmployee ? { isUnassigned: false } : {}),
+            });
+            const escRef = db
+                .collection('novedades')
+                .doc(`escalada_${titularId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128)}`);
+            if ((await escRef.get()).exists) {
+                batch.update(escRef, {
+                    status: 'ATENDIDA',
+                    resolved: true,
+                    resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+                });
+            }
+        }
+        for (const ref of await findOpenAbsenceVacancyDocs(db, titularId)) {
+            batch.update(ref, absenceVacancyClosePatch('COVERED', params.resolvedBy || 'COVERAGE'));
+        }
         const { releaseRetentionForAbsenceShift } = await Promise.resolve().then(() => require('./coverageRetention'));
         await releaseRetentionForAbsenceShift(db, titularId, params.resolvedBy || 'COVERAGE');
     }

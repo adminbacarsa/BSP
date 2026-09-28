@@ -1,3 +1,5 @@
+import { isCanonicalGapTitular, isGapSiblingVacancyDoc } from './gapVacancy';
+
 export const VACANCY_DESCUBIERTO_RATIO = 0.55;
 
 export function getVacancyElapsedRatio(
@@ -31,6 +33,8 @@ export function isActionableOpsVacancy(
   s: Record<string, unknown> & { shiftDateObj?: Date; endDateObj?: Date; isUnassigned?: boolean },
   now: Date = new Date(),
 ): boolean {
+  if (isGapSiblingVacancyDoc(s)) return false;
+  if (isCanonicalGapTitular(s)) return true;
   if (!s?.isUnassigned) return false;
   if (s.isReportedToPlanning || s.status === 'REPORTED_TO_PLANNING' || s.isReported === true) return false;
   if (isVacancyDescubierto(s, now)) return false;

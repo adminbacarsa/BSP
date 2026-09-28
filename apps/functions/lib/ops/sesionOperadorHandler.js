@@ -68,7 +68,7 @@ async function closeSessionsByIds(db, ids, audit) {
     }
     await batch.commit();
 }
-async function handleSesionOperador(db, uid, data, tokenRole) {
+async function handleSesionOperador(db, uid, data, tokenRole, tokenEmail) {
     const action = String(data?.action || '').trim();
     const empresaId = String(data?.empresaId || '').trim();
     const writeOrigin = normalizeWriteOrigin(data?.writeOrigin);
@@ -78,7 +78,8 @@ async function handleSesionOperador(db, uid, data, tokenRole) {
     if (!validActions.includes(action)) {
         throw new functions.https.HttpsError('invalid-argument', 'action inválida.');
     }
-    const panel = await (0, staffPermissions_1.assertOperationsUpdatePermission)(db, uid, empresaId, tokenRole);
+    const emailName = String(tokenEmail || '').split('@')[0] || undefined;
+    const panel = await (0, staffPermissions_1.assertOperationsUpdatePermission)(db, uid, empresaId, tokenRole, emailName);
     const audit = auditFields(action, writeOrigin, uid);
     if (action === 'start') {
         const existingMine = await db
@@ -123,7 +124,12 @@ async function handleSesionOperador(db, uid, data, tokenRole) {
         return { success: true, action };
     }
     if (action === 'passToAuto') {
-        let ids = (await loadActiveSessions(db, empresaId)).map((s) => s.id);
+        const room = await loadActiveSessions(db, empresaId);
+        const roomPilot = room.find((s) => s.role === 'PILOTO') || pickCanonicalPilotSession(room);
+        if (!panel.isSuperAdmin && roomPilot && roomPilot.operatorId !== uid) {
+            throw new functions.https.HttpsError('permission-denied', 'Solo el piloto puede pasar la sala a Auto.');
+        }
+        let ids = room.map((s) => s.id);
         if (!ids.length) {
             const snap = await db
                 .collection('sesiones_operador')
@@ -198,6 +204,6 @@ exports.sesionOperadorCallable = functions.https.onCall(async (data, context) =>
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
     }
-    return handleSesionOperador(admin.firestore(), context.auth.uid, data, context.auth.token?.role);
+    return handleSesionOperador(admin.firestore(), context.auth.uid, data, context.auth.token?.role, context.auth.token?.email);
 });
 //# sourceMappingURL=sesionOperadorHandler.js.map

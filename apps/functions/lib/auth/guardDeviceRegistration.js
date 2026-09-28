@@ -390,12 +390,24 @@ function deviceTokenBindingStatus(bind) {
     }
     return { status: 'bound', deviceId };
 }
-exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, context) => {
+exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Debés iniciar sesión.');
     }
     const uid = context.auth.uid;
     const db = admin.firestore();
+    const localDeviceId = String(data?.deviceId ?? '').trim();
+    if (localDeviceId.length >= 8) {
+        try {
+            await (0, bindGuardDevice_1.assertCanRequestGuardDeviceRegistration)(db, uid, localDeviceId);
+        }
+        catch (err) {
+            if (err instanceof bindGuardDevice_1.GuardDeviceBindError) {
+                return { status: 'none', blockReason: err.code, message: err.message };
+            }
+            throw err;
+        }
+    }
     const reqSnap = await db.collection('device_registration_requests').doc(uid).get();
     if (!reqSnap.exists) {
         const bind = await db.collection('device_tokens').doc(uid).get();
@@ -428,6 +440,10 @@ exports.getGuardDeviceRegistrationStatus = functions.https.onCall(async (_data, 
         const approvedAtMs = d.approvedAt?.toMillis?.() ?? 0;
         const unboundAtMs = bindData.unboundAt?.toMillis?.() ?? 0;
         if (unboundAtMs > 0 && (approvedAtMs === 0 || unboundAtMs >= approvedAtMs)) {
+            return deviceTokenBindingStatus(bind);
+        }
+        const approvedDeviceId = String(d.requestedDeviceId ?? '').trim();
+        if (localDeviceId && approvedDeviceId && approvedDeviceId !== localDeviceId) {
             return deviceTokenBindingStatus(bind);
         }
         return {

@@ -4,7 +4,6 @@ exports.revertTitularAfterConvocadoNoLlego = revertTitularAfterConvocadoNoLlego;
 exports.cancelPendingConvocatoriasForTitular = cancelPendingConvocatoriasForTitular;
 const firestore_1 = require("firebase-admin/firestore");
 const syncAusenciaCobertura_1 = require("../coverage/syncAusenciaCobertura");
-/** Deshace cobertura activa del titular cuando el ops_cov no llegó. */
 async function revertTitularAfterConvocadoNoLlego(db, opsCov) {
     const titularId = String(opsCov.absenceShiftId || opsCov.coveredShiftId || '').trim();
     if (!titularId)
@@ -81,3 +80,4 @@ async function cancelPendingConvocatoriasForTitular(db, titularShiftId) {
     }
     return n;
 }
+//# sourceMappingURL=convocadoTitularRevert.js.map

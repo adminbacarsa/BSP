@@ -195,8 +195,8 @@ async function run() {
     report('T0.1', meta.objectiveId === 'uGccyya4SYft29gEeV8z' && !!titular, `snapshot ${meta.name} cargado (objetivo ${meta.objectiveName})`);
     report('T0.2', titular?.isAbsent === true && titular?.startTime instanceof admin.firestore.Timestamp,
       `titular Quevedo AA, Timestamps restaurados`);
-    report('T0.3', slaVirtual?.origin === 'SLA_VIRTUAL' && vpa?.origin === 'VACANTE_POR_AUSENCIA',
-      'reproduce las 3 representaciones del mismo hueco (AA + SLA_VIRTUAL + VACANTE_POR_AUSENCIA)');
+    report('T0.3', titular?.isAbsent === true && slaVirtual?.origin === 'SLA_VIRTUAL' && vpa?.origin === 'VACANTE_POR_AUSENCIA',
+      'snapshot histórico: titular AA + hermanos SLA_VIRTUAL/VPA (P3 los marca SUPERSEDED; VAC apunta al titular)');
     report('T0.4', zombie?.employeeId === titular?.employeeId,
       'incluye el turno M 20/09 de Quevedo usado como EXTEND de su propia ausencia');
     report('T0.5', diaz?.completionReason === 'AUTO_ZOMBIE_SHIFT_END',
@@ -491,6 +491,31 @@ async function run() {
     report('P2.3', okReject, okReject
       ? 'la ADVANCE de Ramos se rechaza al revalidar (NO_CONTIGUO) y la cascada sigue'
       : `st=${conv?.status} reason=${conv?.rejectionReason}`);
+  });
+
+  await withCase(CAPS, async () => {
+    const titular = await shift('LplWKivQhBKowL3vVKTj');
+    const slaVirtual = await shift('lXLFk2F33HRiAsQpmoqS');
+    const vpa = await shift('yDCPQSFsdMlqn6UhRX7J');
+    const gap = await import('../packages/ops-core/src/gapVacancy.ts');
+    const ok = titular?.isAbsent === true
+      && String(titular.employeeId || '') !== 'VACANTE'
+      && gap.isGapSiblingVacancyDoc(vpa)
+      && gap.isGapSiblingVacancyDoc(slaVirtual);
+    report('P3.1', ok, ok
+      ? 'CAPS 26/09: 1 representación (titular AA); VPA/SLA_VIRTUAL son hermanos'
+      : `titAbsent=${titular?.isAbsent} vpaSib=${gap.isGapSiblingVacancyDoc(vpa)}`);
+  });
+
+  await withCase(NUEVO_EDIFICIO, async () => {
+    const a = await shift('1KpNlPVZkaiMFC6tAnWV');
+    const b = await shift('1evQFKo3KVvMpe8MwtOL');
+    const gap = await import('../packages/ops-core/src/gapVacancy.ts');
+    const ok = gap.isGapSiblingVacancyDoc(a) && gap.isGapSiblingVacancyDoc(b)
+      && !!a?.causedByShiftId && !!b?.causedByShiftId;
+    report('P3.2', ok, ok
+      ? `Nuevo Edificio 28/09: VPA hermanos de ${a.causedByShiftId} y ${b.causedByShiftId}`
+      : `a=${a?.origin} b=${b?.origin} cause=${a?.causedByShiftId}/${b?.causedByShiftId}`);
   });
 
   const failed = results.filter((r) => !r.ok);

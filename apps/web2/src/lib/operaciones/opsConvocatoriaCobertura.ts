@@ -1,5 +1,4 @@
 import {
-  collection,
   doc,
   setDoc,
   serverTimestamp,
@@ -21,7 +20,7 @@ const toDate = (d: unknown): Date => {
   return new Date(d as string | number);
 };
 
-/** Turno real en Firestore para la vacante/ausencia (materializa virtuales). */
+/** Turno real en Firestore para la vacante/ausencia (id determinístico; sin SLA_VIRTUAL aleatorio). */
 export async function ensureRealAbsenceShiftId(
   absenceShift: Record<string, unknown>,
   empresaId: string,
@@ -30,12 +29,19 @@ export async function ensureRealAbsenceShiftId(
   const isVirtual =
     absenceShift.isVirtual === true
     || shiftId.startsWith('V124_')
-    || shiftId.startsWith('SLA_GAP');
+    || shiftId.startsWith('SLA_GAP')
+    || shiftId.startsWith('gap_');
   if (!isVirtual && shiftId) return shiftId;
-
-  const newRef = doc(collection(db, 'turnos'));
+  if (String(absenceShift.vacancyOrigin || '') === 'ABSENCE' && shiftId && !isVirtual) {
+    return shiftId;
+  }
+  if (!shiftId) {
+    throw new Error('VACANTE_SIN_ID');
+  }
+  const detId = shiftId.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 120);
+  const ref = doc(db, 'turnos', detId);
   await setDoc(
-    newRef,
+    ref,
     stampEmpresaId(
       {
         clientId: absenceShift.clientId || null,
@@ -48,17 +54,18 @@ export async function ensureRealAbsenceShiftId(
         code: absenceShift.code || 'T',
         startTime: Timestamp.fromDate(toDate(absenceShift.shiftDateObj)),
         endTime: Timestamp.fromDate(toDate(absenceShift.endDateObj)),
-        status: absenceShift.isAbsent ? 'ABSENT' : 'REPORTED_TO_PLANNING',
-        isAbsent: !!absenceShift.isAbsent,
+        status: 'UNCOVERED_REPORTED',
+        isUnassigned: true,
         isReported: true,
-        isReportedToPlanning: !!absenceShift.isReportedToPlanning,
-        origin: absenceShift.origin || 'SLA_VIRTUAL',
+        origin: 'SLA_UNPLANNED_GAP',
+        slaGapDocId: detId,
         createdAt: serverTimestamp(),
       },
       empresaId,
     ),
+    { merge: true },
   );
-  return newRef.id;
+  return detId;
 }
 
 export function convocatoriaTypeForInternalKind(

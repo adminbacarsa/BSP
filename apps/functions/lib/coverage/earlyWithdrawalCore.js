@@ -143,36 +143,21 @@ async function processEarlyWithdrawal(db, input) {
     let escalated = false;
     let retained = false;
     const shouldReplace = policy === 'REPLACE' || policy === 'AUTO_REPLACE';
+    const originalEnd = shift.endTime instanceof firestore_1.Timestamp
+        ? shift.endTime
+        : firestore_1.Timestamp.fromMillis(endMsVal);
     if (shouldReplace && endMsVal > nowMs + 60_000) {
-        const vacRef = db.collection('turnos').doc();
-        remainderShiftId = vacRef.id;
-        await vacRef.set({
-            clientId: shift.clientId || null,
-            clientName: shift.clientName || null,
-            objectiveId: objectiveId || null,
-            objectiveName: shift.objectiveName || '',
-            positionName: shift.positionName || '',
-            employeeId: 'VACANTE',
-            employeeName: 'VACANTE (REMANENTE)',
-            code: shift.code || 'M',
-            startTime: now,
-            endTime: shift.endTime instanceof firestore_1.Timestamp ? shift.endTime : firestore_1.Timestamp.fromMillis(endMsVal),
-            status: 'UNCOVERED_REPORTED',
-            isUnassigned: true,
-            isPresent: false,
-            isReported: true,
-            origin: 'INTERRUPTION',
-            originRef: shiftId,
-            causedByEmployeeId: employeeId,
-            causedByEmployeeName: shift.employeeName || '',
-            empresaId: empresaId || null,
-            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        remainderShiftId = shiftId;
+        await ref.update({
+            plannedEndTime: originalEnd,
+            remainderStartTime: now,
+            interrupted: true,
         });
         if (isAutoMode && empresaId) {
             const manual = await (0, opsManualMode_1.isEmpresaManualMode)(db, empresaId);
             if (!manual) {
                 await (0, earlyWithdrawCascade_1.iniciarEarlyWithdrawCascade)(db, {
-                    id: remainderShiftId,
+                    id: shiftId,
                     empresaId,
                     objectiveId,
                     objectiveName: String(shift.objectiveName || ''),
@@ -181,9 +166,7 @@ async function processEarlyWithdrawal(db, input) {
                     clientName: String(shift.clientName || ''),
                     code: String(shift.code || ''),
                     startTime: now,
-                    endTime: shift.endTime instanceof firestore_1.Timestamp
-                        ? shift.endTime
-                        : firestore_1.Timestamp.fromMillis(endMsVal),
+                    endTime: originalEnd,
                 }, 'AUTO');
                 cascadeStarted = true;
             }

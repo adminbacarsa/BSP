@@ -119,8 +119,8 @@ export function isTitularAlreadyCovered(data: Record<string, any> | undefined | 
 }
 
 /**
- * onGuardAbsenceDetected crea un turno VACANTE_POR_AUSENCIA aparte (push a admins). Nadie más lo
- * cierra: sin esto queda "DESCUBIERTO" en el CC aunque el titular ya esté cubierto o revertido.
+ * Cierra hermanos históricos VACANTE_POR_AUSENCIA (P3 ya no los crea).
+ * Sin esto quedan "DESCUBIERTO" en el CC aunque el titular ya esté cubierto o revertido.
  */
 export async function findOpenAbsenceVacancyDocs(
   db: admin.firestore.Firestore,

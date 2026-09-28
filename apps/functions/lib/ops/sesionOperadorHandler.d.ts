@@ -7,7 +7,7 @@ export type SesionOperadorRequest = {
     empresaId: string;
     writeOrigin?: WriteOrigin;
 };
-export declare function handleSesionOperador(db: Firestore, uid: string, data: SesionOperadorRequest, tokenRole?: unknown): Promise<{
+export declare function handleSesionOperador(db: Firestore, uid: string, data: SesionOperadorRequest, tokenRole?: unknown, tokenEmail?: unknown): Promise<{
     success: true;
     action: SesionOperadorAction;
 }>;

@@ -1,4 +1,5 @@
 import { type Firestore } from 'firebase-admin/firestore';
+export declare const REVERT_ABSENCE_WINDOW_MS: number;
 export type RevertirAusenciaInput = {
     shiftId: string;
     cancelCoverage?: boolean;

@@ -114,6 +114,8 @@ export function isPlanningScheduledCoverageShift(t: any): boolean {
   if (isOperationalOriginShift(t)) return false;
   const origin = String(t.origin || '').trim().toUpperCase();
   if (origin === 'INTERRUPTION') return false;
+  if (origin === 'VACANTE_POR_AUSENCIA' || origin === 'SLA_VIRTUAL' || origin === 'SLA_UNPLANNED_GAP') return false;
+  if (String(t.status || '').toUpperCase() === 'SUPERSEDED') return false;
   return true;
 }
 

@@ -27,6 +27,12 @@ export function isProformaVacancyShift(shift: {
   origin?: string;
 } | null | undefined): boolean {
   if (!shift) return false;
+  const st = String(shift.status ?? '').trim().toUpperCase();
+  if (st === 'SUPERSEDED') return false;
+  const origin = String(shift.origin ?? '').trim().toUpperCase();
+  if (origin === 'VACANTE_POR_AUSENCIA' || origin === 'SLA_VIRTUAL' || origin === 'SLA_UNPLANNED_GAP') {
+    return false;
+  }
   if (isSinCoberturaShift(shift)) return true;
   if (shift.isUnassigned === true) return true;
   const eid = String(shift.employeeId ?? '').trim();

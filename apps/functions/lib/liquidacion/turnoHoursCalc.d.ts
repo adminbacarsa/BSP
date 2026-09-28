@@ -9,4 +9,4 @@ export type TurnoHoursContrib = {
     monthKey: string;
 };
 export declare function monthKeyFromDate(d: Date): string;
-export declare function calcTurnoHoursContrib(data: Record<string, unknown>, holidays?: Set<string>): TurnoHoursContrib | null;
+export declare function calcTurnoHoursContrib(data: Record<string, unknown>, holidays?: Set<string>, hoursCoreEnabled?: boolean): TurnoHoursContrib | null;

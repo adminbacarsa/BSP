@@ -1,6 +1,10 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rebuildOpenMonthAllEmpresas = exports.runDueLedgerDirty = exports.markLedgerDirty = exports.rebuildHoursLedger = exports.parsePeriod = void 0;
+exports.parsePeriod = parsePeriod;
+exports.rebuildHoursLedger = rebuildHoursLedger;
+exports.markLedgerDirty = markLedgerDirty;
+exports.runDueLedgerDirty = runDueLedgerDirty;
+exports.rebuildOpenMonthAllEmpresas = rebuildOpenMonthAllEmpresas;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const bundledEngine_1 = require("./bundledEngine");
@@ -26,7 +30,6 @@ function parsePeriod(period, now = new Date()) {
     const ar = arParts(now);
     return { year: ar.year, month: ar.month, periodKey: `${ar.year}-${pad(ar.month)}` };
 }
-exports.parsePeriod = parsePeriod;
 function publishMap(docs) {
     const map = {};
     for (const d of docs) {
@@ -165,7 +168,6 @@ async function rebuildHoursLedger(opts) {
         counts: { days: dayRows.length, monthly: monthRows.length },
     };
 }
-exports.rebuildHoursLedger = rebuildHoursLedger;
 async function markLedgerDirty(opts) {
     const empresaId = String(opts.empresaId || '').trim();
     if (!empresaId)
@@ -183,7 +185,6 @@ async function markLedgerDirty(opts) {
         touchAt: firestore_1.Timestamp.now(),
     }, { merge: true });
 }
-exports.markLedgerDirty = markLedgerDirty;
 async function runDueLedgerDirty(limit = 20) {
     const db = admin.firestore();
     const snap = await db.collection('hours_ledger_dirty').where('dueAt', '<=', firestore_1.Timestamp.now()).limit(limit).get();
@@ -199,7 +200,6 @@ async function runDueLedgerDirty(limit = 20) {
     }
     return { processed: snap.size, months: seen.size };
 }
-exports.runDueLedgerDirty = runDueLedgerDirty;
 async function rebuildOpenMonthAllEmpresas() {
     const db = admin.firestore();
     const ar = arParts();
@@ -212,5 +212,4 @@ async function rebuildOpenMonthAllEmpresas() {
     }
     return { period, empresas: done };
 }
-exports.rebuildOpenMonthAllEmpresas = rebuildOpenMonthAllEmpresas;
 //# sourceMappingURL=rebuildHoursLedger.js.map
