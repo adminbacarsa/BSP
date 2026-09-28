@@ -3900,11 +3900,12 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
     const turnosLicencia = [];
     const batch = db.batch();
     let ops = 0;
+    const opCache = new simulableShift_1.ObjectiveOperationCache();
     for (const doc of snap.docs) {
         const t = doc.data();
         if (t.isAbsent || t.isPresent || t.isCompleted)
             continue;
-        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(t);
+        const skipSim = await (0, simulableShift_1.simulableShiftSkipReasonResolved)(db, t, opCache);
         if (skipSim) {
             if (skipSim === 'LICENCIA')
                 turnosLicencia.push(`${t.empleadoNombre || t.employeeId} (${t.code})`);
@@ -3932,7 +3933,7 @@ async function ejecutarAutoPresenciaCierre(ctx, args) {
         const t = doc.data();
         if (t.isAbsent || !t.isPresent || t.isCompleted)
             continue;
-        if ((0, simulableShift_1.simulableShiftSkipReason)(t))
+        if (await (0, simulableShift_1.simulableShiftSkipReasonResolved)(db, t, opCache))
             continue;
         const startSec = t.startTime?.seconds ?? 0;
         const endSec = t.endTime?.seconds ?? 0;

@@ -12,7 +12,7 @@ import {
   findEmployeeUid,
 } from './eligibilityFilter';
 import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
-import { simulableShiftSkipReason } from '../common/simulableShift';
+import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from '../common/simulableShift';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -490,6 +490,17 @@ async function avanzarCascadaOrPartialVacante(
   conv: ConvocatoriaCoberturaDoc & { id: string },
   reason: 'REJECTED' | 'TIMEOUT',
 ): Promise<void> {
+  if (String(conv.createdBy || '').toUpperCase() === 'MODO_DEMO') {
+    const inOp = await new ObjectiveOperationCache().isShiftInOperation(db, {
+      empresaId: conv.empresaId,
+      objectiveId: conv.objectiveId,
+      startTime: conv.startTime,
+    });
+    if (!inOp) {
+      console.log(`[avanzarCascada] skip Demo fuera de operación shift=${conv.shiftId}`);
+      return;
+    }
+  }
   if (conv.type === 'EXTEND' || conv.type === 'ADVANCE') {
     const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
     const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
@@ -1085,6 +1096,18 @@ export async function iniciarCascadaCobertura(
   shift: ShiftDataForCascade,
   createdBy = 'AUTO',
 ): Promise<void> {
+  if (String(createdBy || '').toUpperCase() === 'MODO_DEMO') {
+    const inOp = await new ObjectiveOperationCache().isShiftInOperation(db, {
+      empresaId: shift.empresaId,
+      objectiveId: shift.objectiveId,
+      startTime: shift.startTime,
+    });
+    if (!inOp) {
+      console.log(`[iniciarCascadaCobertura] skip Demo fuera de operación ${shift.id}`);
+      return;
+    }
+  }
+
   const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await import('./syncAusenciaCobertura');
 
   // Idempotencia: si el titular ya está cubierto, no reabrir cascada (modo demo incluido).
@@ -1176,6 +1199,7 @@ export async function iniciarCascadaCobertura(
 export async function simularRespuestasConvocatorias(
   db: admin.firestore.Firestore,
   empresaId: string,
+  opCache: ObjectiveOperationCache = new ObjectiveOperationCache(),
 ): Promise<number> {
   const THINK_TIME_MS = 90 * 1000; // guardia "piensa" 90 s antes de responder
   const now = Timestamp.now();
@@ -1197,7 +1221,11 @@ export async function simularRespuestasConvocatorias(
     const titularData = conv.shiftId
       ? (await db.collection('turnos').doc(conv.shiftId).get()).data()
       : null;
-    const skipSim = simulableShiftSkipReason(titularData as Record<string, unknown> | null);
+    const skipSim = await simulableShiftSkipReasonResolved(
+      db,
+      titularData as Record<string, unknown> | null,
+      opCache,
+    );
     if (skipSim) {
       console.log(`[simularRespuestasConvocatorias] skip ${convDoc.id}: titular ${conv.shiftId} ${skipSim}`);
       continue;

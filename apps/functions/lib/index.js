@@ -58,6 +58,7 @@ const runAjustarCrono_1 = require("./scheduling/runAjustarCrono");
 const runEquilibrarCrono_1 = require("./scheduling/runEquilibrarCrono");
 const planificacionEstadoKeys_1 = require("./assistant/planificacionEstadoKeys");
 const ccTurnoEligibility_1 = require("./ops/ccTurnoEligibility");
+const modoDemoRun_1 = require("./ops/modoDemoRun");
 const lookupClientByCuitHandler_1 = require("./afip/lookupClientByCuitHandler");
 const empresaAfipCredentialsHandler_1 = require("./afip/empresaAfipCredentialsHandler");
 const mobileAppHandlers_1 = require("./mobileApp/mobileAppHandlers");
@@ -663,264 +664,6 @@ async function executeAgentActionHandler(data, context) {
     throw new functions.https.HttpsError('internal', 'Acción no implementada.');
 }
 exports.executeAgentAction = functions.https.onCall(executeAgentActionHandler);
-async function runModoDemoForEmpresa(db, empresaId) {
-    const now = new Date();
-    const nowTs = admin.firestore.Timestamp.fromDate(now);
-    const windowStart = admin.firestore.Timestamp.fromDate(new Date(now.getTime() - 26 * 3600000));
-    const windowEnd = admin.firestore.Timestamp.fromDate(new Date(now.getTime() + 2 * 3600000));
-    const snap = await db.collection('turnos')
-        .where('empresaId', '==', empresaId)
-        .where('startTime', '>=', windowStart)
-        .where('startTime', '<=', windowEnd)
-        .limit(600)
-        .get();
-    const ccGate = new ccTurnoEligibility_1.CcObjectiveMonthGate();
-    const batch = db.batch();
-    let presencias = 0;
-    let ausenciasDemo = 0;
-    let batchOps = 0;
-    let skippedOutOfCc = 0;
-    const isVacant = (t) => !t.employeeId ||
-        t.employeeId === 'VACANTE' ||
-        t.employeeId === 'SIN_COBERTURA' ||
-        !!t.isUnassigned ||
-        !!t.isSinCobertura;
-    const skipBase = (t) => !(0, simulableShift_1.isSimulableShift)(t);
-    const WINDOW_BEFORE_MS = 15 * 60 * 1000;
-    const WINDOW_AFTER_MS = 5 * 60 * 1000;
-    const LATE_DELAY_MS = 12 * 60 * 1000;
-    const argentinaDayKeyFromMs = (ms) => {
-        const ar = new Date(ms - 3 * 60 * 60 * 1000);
-        return `${ar.getUTCFullYear()}-${String(ar.getUTCMonth() + 1).padStart(2, '0')}-${String(ar.getUTCDate()).padStart(2, '0')}`;
-    };
-    const shiftCategory = (empId, shiftId, startMs) => {
-        const dayStr = argentinaDayKeyFromMs(startMs);
-        const block = Math.floor(startMs / (6 * 3600000));
-        const seed = `${empresaId}|${dayStr}|b${block}|${shiftId}|${empId}`;
-        let h = 0;
-        for (let i = 0; i < seed.length; i++)
-            h = (h * 31 + seed.charCodeAt(i)) & 0xffffff;
-        const m = h % 10;
-        if (m === 0)
-            return 'absent';
-        if (m <= 3)
-            return 'late';
-        return 'puntual';
-    };
-    for (const doc of snap.docs) {
-        const t = doc.data();
-        if (skipBase(t) || isVacant(t))
-            continue;
-        if (!(await ccGate.isTurnoInCcScope(db, t))) {
-            skippedOutOfCc++;
-            continue;
-        }
-        if (t.isAbsent || t.isPresent || t.isCompleted)
-            continue;
-        const startMs = (t.startTime?.seconds ?? 0) * 1000;
-        const empId = String(t.employeeId || '');
-        const cat = shiftCategory(empId, doc.id, startMs);
-        const oid = String(t.objectiveId || '');
-        if (cat === 'absent')
-            continue;
-        if (cat === 'late') {
-            if (startMs > now.getTime() + 10 * 60 * 1000)
-                continue;
-            if (startMs < now.getTime() - 15 * 60 * 1000)
-                continue;
-            const lateTs = admin.firestore.Timestamp.fromMillis(startMs + LATE_DELAY_MS);
-            batch.update(doc.ref, {
-                isPresent: true,
-                status: 'PRESENT',
-                presentAt: lateTs,
-                realStartTime: lateTs,
-                autoPresencia: true,
-                llegadaTarde: true,
-                modoDemoAt: nowTs,
-            });
-            const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
-            batch.set(db.collection('novedades').doc(`demo_late_${safeId}`), {
-                type: 'LLEGADA_TARDE',
-                status: 'pending',
-                title: 'Llegada Tarde',
-                description: `${t.employeeName || 'Guardia'} llegó ${LATE_DELAY_MS / 60000} min tarde — ${t.objectiveName || ''}`,
-                shiftId: doc.id,
-                clientId: t.clientId || null,
-                objectiveId: oid || null,
-                objectiveName: t.objectiveName || null,
-                employeeId: empId || null,
-                employeeName: t.employeeName || null,
-                positionName: t.positionName || null,
-                empresaId,
-                createdAt: nowTs,
-                reportedBy: 'SISTEMA_AUTO',
-                source: 'MODO_DEMO',
-                modoDemoAt: nowTs,
-            }, { merge: true });
-            batchOps += 2;
-        }
-        else {
-            const isEarlyShift = t.isEarlyStart === true && !!t.adjustedStartTime;
-            const actualStartTs = isEarlyShift ? t.adjustedStartTime : t.startTime;
-            const actualStartMs = (actualStartTs?.seconds ?? 0) * 1000;
-            const shiftEndMs = (t.endTime?.seconds ?? 0) * 1000;
-            if (isEarlyShift) {
-                if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS)
-                    continue;
-                if (shiftEndMs && shiftEndMs < now.getTime())
-                    continue;
-            }
-            else {
-                if (actualStartMs > now.getTime() + WINDOW_BEFORE_MS)
-                    continue;
-                if (actualStartMs < now.getTime() - WINDOW_AFTER_MS)
-                    continue;
-            }
-            batch.update(doc.ref, {
-                isPresent: true,
-                status: 'PRESENT',
-                presentAt: actualStartTs,
-                realStartTime: actualStartTs,
-                autoPresencia: true,
-                modoDemoAt: nowTs,
-            });
-            batchOps += 1;
-        }
-        presencias++;
-    }
-    const covCreatedStart = admin.firestore.Timestamp.fromMillis(now.getTime() - 4 * 3600000);
-    const covSnap = await db
-        .collection('turnos')
-        .where('empresaId', '==', empresaId)
-        .where('origin', '==', 'OPERATIONS_COVERAGE')
-        .where('createdAt', '>=', covCreatedStart)
-        .limit(400)
-        .get();
-    for (const doc of covSnap.docs) {
-        const t = doc.data();
-        if (!(0, simulableShift_1.isSimulableShift)(t))
-            continue;
-        if (t.isPresent === true || t.isAbsent === true || t.isCompleted === true)
-            continue;
-        if (t.coverageSuperseded === true)
-            continue;
-        const createdMs = t.createdAt?.seconds
-            ? t.createdAt.seconds * 1000
-            : 0;
-        if (!createdMs)
-            continue;
-        const ageMin = (now.getTime() - createdMs) / 60000;
-        if (ageMin < 5 || ageMin > 40)
-            continue;
-        const hashVal = doc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
-        if (hashVal === 0)
-            continue;
-        const presentAt = admin.firestore.Timestamp.fromMillis(createdMs + 8 * 60 * 1000);
-        batch.update(doc.ref, {
-            isPresent: true,
-            status: 'PRESENT',
-            presentAt,
-            realStartTime: presentAt,
-            checkInTime: presentAt,
-            autoPresencia: true,
-            modoDemoAt: nowTs,
-        });
-        batchOps += 1;
-        presencias += 1;
-    }
-    const ABSENT_MIN_MS = 5 * 60 * 1000;
-    for (const doc of snap.docs) {
-        const t = doc.data();
-        if (skipBase(t) || isVacant(t))
-            continue;
-        if (!(await ccGate.isTurnoInCcScope(db, t))) {
-            skippedOutOfCc++;
-            continue;
-        }
-        if (t.isAbsent || t.isPresent || t.isCompleted)
-            continue;
-        const startMs = (t.startTime?.seconds ?? 0) * 1000;
-        if (startMs > now.getTime() - ABSENT_MIN_MS)
-            continue;
-        const empId = String(t.employeeId || '');
-        if (shiftCategory(empId, doc.id, startMs) !== 'absent')
-            continue;
-        batch.update(doc.ref, {
-            isAbsent: true,
-            status: 'ABSENT',
-            absenceType: 'AA',
-            absenceDetectedAt: nowTs,
-            absenceDetectedBy: 'MODO_DEMO',
-            modoDemoAt: nowTs,
-        });
-        const startMs2 = (t.startTime?.seconds ?? 0) * 1000;
-        const arDate2 = new Date(startMs2 - 3 * 60 * 60 * 1000);
-        const dateStr2 = `${arDate2.getUTCFullYear()}-${String(arDate2.getUTCMonth() + 1).padStart(2, '0')}-${String(arDate2.getUTCDate()).padStart(2, '0')}`;
-        const st2 = t.startTime?.toDate ? t.startTime.toDate() : new Date(startMs2);
-        const et2 = t.endTime?.seconds ? new Date((t.endTime.seconds) * 1000) : null;
-        const fmtT2 = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-        const horario2 = et2 ? `${fmtT2(st2)} - ${fmtT2(et2)}` : fmtT2(st2);
-        const safeId = doc.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100);
-        batch.set(db.collection('ausencias').doc(`demo_ausencia_${safeId}`), {
-            employeeId: empId,
-            employeeName: t.employeeName || '',
-            startDate: dateStr2,
-            endDate: dateStr2,
-            type: 'No Presentacion',
-            absenceType: 'AA',
-            origin: 'AUTO_DEMO',
-            shiftId: doc.id,
-            objectiveId: t.objectiveId || null,
-            objectiveName: t.objectiveName || '',
-            clientId: t.clientId || null,
-            empresaId,
-            positionName: t.positionName || '',
-            shiftCode: (t.code || '').toUpperCase() || null,
-            reason: `No presentacion al turno ${horario2} - ${t.objectiveName || ''} (${t.positionName || ''})`,
-            status: 'Confirmada',
-            hasCertificate: false,
-            createdAt: nowTs,
-            source: 'MODO_DEMO',
-            modoDemoAt: nowTs,
-        }, { merge: true });
-        const shiftCodeDemo = String(t.code || '').trim().toUpperCase();
-        batch.set(db.collection('novedades').doc(`demo_aus_${safeId}`), {
-            type: 'AUSENCIA_AUTO',
-            status: 'pending',
-            title: 'Ausencia Automática (Demo)',
-            description: `${t.employeeName || 'Empleado'} no se presentó — ${shiftCodeDemo || '—'} ${horario2} · ${t.positionName || 'Puesto'} · ${t.objectiveName || ''} (MODO DEMO)`,
-            shiftId: doc.id,
-            clientId: t.clientId || null,
-            objectiveId: t.objectiveId || null,
-            objectiveName: t.objectiveName || null,
-            employeeId: empId || null,
-            employeeName: t.employeeName || null,
-            positionName: t.positionName || null,
-            shiftCode: shiftCodeDemo || null,
-            empresaId,
-            createdAt: nowTs,
-            reportedBy: 'MODO_DEMO',
-            source: 'MODO_DEMO',
-            modoDemoAt: nowTs,
-        }, { merge: true });
-        batchOps += 3;
-        ausenciasDemo++;
-    }
-    if (batchOps > 0) {
-        await batch.commit();
-    }
-    let convRespuestas = 0;
-    try {
-        convRespuestas = await (0, convocatoriasCobertura_1.simularRespuestasConvocatorias)(db, empresaId);
-    }
-    catch (e8) {
-        console.warn('[modoDemoCron] simularRespuestas error:', e8?.message);
-    }
-    if (skippedOutOfCc > 0) {
-        console.log(`[modoDemoCron] ${empresaId}: omitidos ${skippedOutOfCc} turnos (sin SLA vigente o crono no publicado)`);
-    }
-    return { presencias, ausenciasDemo, convRespuestas };
-}
 exports.modoDemoCron = functions
     .runWith({ timeoutSeconds: 120, memory: '512MB' })
     .pubsub.schedule('every 5 minutes')
@@ -931,7 +674,7 @@ exports.modoDemoCron = functions
         return;
     for (const empDoc of empSnap.docs) {
         try {
-            const res = await runModoDemoForEmpresa(db, empDoc.id);
+            const res = await (0, modoDemoRun_1.runModoDemoForEmpresa)(db, empDoc.id);
             if (res.presencias + res.ausenciasDemo + res.convRespuestas > 0) {
                 console.log(`[modoDemoCron] ${empDoc.id}: pres=${res.presencias} absDemo=${res.ausenciasDemo} conv=${res.convRespuestas} (solo generador)`);
             }
@@ -964,6 +707,13 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
     if (!centroControlEnabled)
         return;
     const cascadeCreatedBy = String(after.absenceDetectedBy || '').toUpperCase() === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
+    if (cascadeCreatedBy === 'MODO_DEMO') {
+        const inOp = await new simulableShift_1.ObjectiveOperationCache().isShiftInOperation(db, after);
+        if (!inOp) {
+            console.log(`[onTurnoAbsenciaDetectada] Skip Demo: objetivo fuera de operación shift=${event.params.shiftId}`);
+            return;
+        }
+    }
     const titularRecord = { id: event.params.shiftId, ...after };
     try {
         await (0, coverageRetention_1.retainOutgoingForGap)(db, titularRecord, {
@@ -1052,11 +802,12 @@ exports.autoPresenciaYCierre = functions
     const turnosLicencia = [];
     const batch = db.batch();
     let ops = 0;
+    const opCache = new simulableShift_1.ObjectiveOperationCache();
     for (const doc of snap.docs) {
         const t = doc.data();
         if (t.isAbsent)
             continue;
-        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(t);
+        const skipSim = await (0, simulableShift_1.simulableShiftSkipReasonResolved)(db, t, opCache);
         if (skipSim) {
             if (skipSim === 'LICENCIA')
                 turnosLicencia.push(`${t.empleadoNombre ?? t.employeeId} (${t.code})`);
@@ -3832,7 +3583,9 @@ exports.scheduledHoursLedgerNightly = (0, scheduler_1.onSchedule)({
     const { rebuildOpenMonthAllEmpresas } = await Promise.resolve().then(() => require('./hoursLedger/rebuildHoursLedger'));
     await rebuildOpenMonthAllEmpresas();
 });
-exports.rebuildHoursLedger = functions.https.onCall(async (data, context) => {
+exports.rebuildHoursLedger = functions
+    .runWith({ timeoutSeconds: 540, memory: '1GB' })
+    .https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
     }

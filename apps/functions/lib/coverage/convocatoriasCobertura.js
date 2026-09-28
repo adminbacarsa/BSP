@@ -328,6 +328,17 @@ async function ensureMissingDualLegConvocatoria(db, conv) {
     });
 }
 async function avanzarCascadaOrPartialVacante(db, conv, reason) {
+    if (String(conv.createdBy || '').toUpperCase() === 'MODO_DEMO') {
+        const inOp = await new simulableShift_1.ObjectiveOperationCache().isShiftInOperation(db, {
+            empresaId: conv.empresaId,
+            objectiveId: conv.objectiveId,
+            startTime: conv.startTime,
+        });
+        if (!inOp) {
+            console.log(`[avanzarCascada] skip Demo fuera de operación shift=${conv.shiftId}`);
+            return;
+        }
+    }
     if (conv.type === 'EXTEND' || conv.type === 'ADVANCE') {
         const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
         const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
@@ -796,6 +807,17 @@ exports.cancelarConvocatoriaCobertura = functions
     return { success: true };
 });
 async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
+    if (String(createdBy || '').toUpperCase() === 'MODO_DEMO') {
+        const inOp = await new simulableShift_1.ObjectiveOperationCache().isShiftInOperation(db, {
+            empresaId: shift.empresaId,
+            objectiveId: shift.objectiveId,
+            startTime: shift.startTime,
+        });
+        if (!inOp) {
+            console.log(`[iniciarCascadaCobertura] skip Demo fuera de operación ${shift.id}`);
+            return;
+        }
+    }
     const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
     const titularSnap = await db.collection('turnos').doc(shift.id).get();
     const titularData = (titularSnap.data() || {});
@@ -873,7 +895,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         source: 'INICIAR_CASCADA',
     });
 }
-async function simularRespuestasConvocatorias(db, empresaId) {
+async function simularRespuestasConvocatorias(db, empresaId, opCache = new simulableShift_1.ObjectiveOperationCache()) {
     const THINK_TIME_MS = 90 * 1000;
     const now = firestore_1.Timestamp.now();
     const cutoffMs = now.toMillis() - THINK_TIME_MS;
@@ -891,7 +913,7 @@ async function simularRespuestasConvocatorias(db, empresaId) {
         const titularData = conv.shiftId
             ? (await db.collection('turnos').doc(conv.shiftId).get()).data()
             : null;
-        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(titularData);
+        const skipSim = await (0, simulableShift_1.simulableShiftSkipReasonResolved)(db, titularData, opCache);
         if (skipSim) {
             console.log(`[simularRespuestasConvocatorias] skip ${convDoc.id}: titular ${conv.shiftId} ${skipSim}`);
             continue;

@@ -2,6 +2,7 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { Timestamp } from 'firebase-admin/firestore';
 import { CandidateType } from './eligibilityFilter';
+import { ObjectiveOperationCache } from '../common/simulableShift';
 export type ConvocatoriaType = CandidateType | 'LLEGADA_TARDE';
 export interface ConvocatoriaCoberturaDoc {
     empresaId: string;
@@ -70,7 +71,7 @@ export interface ShiftDataForCascade {
     empresaId: string;
 }
 export declare function iniciarCascadaCobertura(db: admin.firestore.Firestore, shift: ShiftDataForCascade, createdBy?: string): Promise<void>;
-export declare function simularRespuestasConvocatorias(db: admin.firestore.Firestore, empresaId: string): Promise<number>;
+export declare function simularRespuestasConvocatorias(db: admin.firestore.Firestore, empresaId: string, opCache?: ObjectiveOperationCache): Promise<number>;
 export declare const checkConvocatoriaTimeouts: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare function crearConvocatoriaLlegadaTarde(db: admin.firestore.Firestore, shift: {
     id: string;

@@ -8,7 +8,7 @@ import {
   queryEmpleadosDocsScoped,
   turnoRowBelongsToEmpresa,
 } from './assistantEmpresaScope';
-import { simulableShiftSkipReason } from '../common/simulableShift';
+import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from '../common/simulableShift';
 import { aggregateLiquidacionEmpresaPeriodo } from './assistantLiquidacionAggregate';
 import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
 import type { AssistantPersona } from './resolveAssistantUser';
@@ -4546,13 +4546,13 @@ async function ejecutarAutoPresenciaCierre(
   const turnosLicencia: string[] = [];
   const batch = db.batch();
   let ops = 0;
+  const opCache = new ObjectiveOperationCache();
 
   // PASE 1: marcar presentes a los entrantes → actualizar índice virtual
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (t.isAbsent || t.isPresent || t.isCompleted) continue;
-    // Mismo filtro que el Demo: nunca presencia inventada sobre licencias/francos/ops_cov de registro.
-    const skipSim = simulableShiftSkipReason(t as Record<string, unknown>);
+    const skipSim = await simulableShiftSkipReasonResolved(db, t as Record<string, unknown>, opCache);
     if (skipSim) {
       if (skipSim === 'LICENCIA') turnosLicencia.push(`${t.empleadoNombre || t.employeeId} (${t.code})`);
       continue;
@@ -4580,7 +4580,7 @@ async function ejecutarAutoPresenciaCierre(
   for (const doc of snap.docs) {
     const t = doc.data() as any;
     if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
-    if (simulableShiftSkipReason(t as Record<string, unknown>)) continue;
+    if (await simulableShiftSkipReasonResolved(db, t as Record<string, unknown>, opCache)) continue;
     const startSec = t.startTime?.seconds ?? 0;
     const endSec   = t.endTime?.seconds   ?? 0;
     const endMs    = endSec * 1000;
