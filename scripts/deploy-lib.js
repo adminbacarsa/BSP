@@ -58,6 +58,9 @@ function runDeploy(projectRoot, args = []) {
 
   fs.mkdirSync(buildRoot, { recursive: true });
 
+  // dist de @cosp/hours-core antes de web2 (Next lee dist/) y antes de functions (prebuild lo vuelve a compilar y a vendorear).
+  run(`node "${path.join(__dirname, 'build-hours-core.mjs')}"`, projectRoot);
+
   // Evita ENOENT en Windows cuando Next intenta unlink sobre un .next a medias (AV / dev server).
   for (const dir of [dist, path.join(web2, '.next')]) {
     if (fs.existsSync(dir)) {

@@ -169,4 +169,10 @@ if (deployFunctions) {
 
 syncEnvLocal();
 process.env.COSP_LAB_ROOT = LAB_ROOT;
+console.log('\n▶ Compilando packages/hours-core antes de web2 y functions ...');
+const buildHours = spawnSync(process.execPath, [path.join(DEPLOY_DIR, 'scripts', 'build-hours-core.mjs')], {
+  cwd: DEPLOY_DIR,
+  stdio: 'inherit',
+});
+if (buildHours.status !== 0) process.exit(buildHours.status ?? 1);
 runDeploy(DEPLOY_DIR, args);

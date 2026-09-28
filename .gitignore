@@ -80,6 +80,10 @@ informe-directorio-*/
 scripts/_tmp-*
 scripts/generar-informe-directorio-*.py
 apps/functions/scripts/test-*.mjs
+!apps/functions/scripts/test-hours-core-packaging.mjs
+
+# @cosp/hours-core dentro de functions: lo genera prebuild (scripts/sync-hours-core-to-functions.mjs)
+apps/functions/vendor/
 apps/functions/scripts/fix-*.js
 apps/web2/deploy-prod.bat
 apps/web2/cap

@@ -21,6 +21,8 @@ export interface Empresa {
   brandColor?: string;
   assistantEnabled?: boolean;
   centroControlEnabled?: boolean;
+  /** true = consumidores usan @cosp/hours-core F1 (persona/puesto). Default false. */
+  hoursCoreEnabled?: boolean;
   pilotoAutoEnabled?: boolean;
   modoDemoEnabled?: boolean;
   migracionCompleta?: boolean;

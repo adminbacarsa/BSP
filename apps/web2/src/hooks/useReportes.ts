@@ -28,6 +28,11 @@ import {
 } from '@/lib/planificacion/planningTurnoCoalesce';
 import { calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
 import {
+    buildPersonaBook,
+    calculateLiquidationHoursStats as calculateLiquidationHoursStatsCore,
+    isHoursCoreEnabled,
+} from '@cosp/hours-core';
+import {
     fetchReportAjustesHoras,
     fetchReportAusencias,
     fetchReportPlanificacionEstados,
@@ -766,8 +771,11 @@ const getNightDuration = (start: Date, end: Date) => {
 export function calculateLiquidationHoursStats(
     shifts: any[],
     holidaysMap: Record<string, boolean> = {},
-    opts?: { usePlannedHours?: boolean },
+    opts?: { usePlannedHours?: boolean; hoursCoreEnabled?: boolean },
 ) {
+    if (opts?.hoursCoreEnabled === true) {
+        return calculateLiquidationHoursStatsCore(shifts, holidaysMap, opts);
+    }
     return calculateStatsExact(shifts, holidaysMap, opts);
 }
 
@@ -1259,6 +1267,7 @@ function shiftMatchesFetchScope(
 
 export const useReportes = (forcedClientId?: string | null) => {
     const { empresaId, empresa } = useEmpresa();
+    const hoursCoreEnabled = isHoursCoreEnabled(empresa);
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = useMemo(
         () => shouldScopeQueriesToEmpresa(empresaId, migracionCompleta),
@@ -1719,7 +1728,25 @@ export const useReportes = (forcedClientId?: string | null) => {
                 empGroups[s.employeeId].push(enrichShift(sWithFT));
             });
 
-            const empIds = Object.keys(empGroups);
+            const personaBook = hoursCoreEnabled
+                ? buildPersonaBook({
+                    turnos: allShiftsBase,
+                    ausencias: ausDocs
+                        .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                        .map((d) => ({ id: d.id, ...d.data() })),
+                    publishStatusMap,
+                    rangeStartYmd: dateRange.start,
+                    rangeEndYmd: dateRange.end,
+                    empNameById: empMap,
+                    holidays: holidaysData,
+                    usePlannedHours,
+                    publishFilter,
+                })
+                : null;
+
+            const empIds = personaBook
+                ? personaBook.employees.map((e) => e.employeeId)
+                : Object.keys(empGroups);
             const empRows: any[] = [];
             for (let i = 0; i < empIds.length; i++) {
                 const empId = empIds[i]!;
@@ -1729,13 +1756,18 @@ export const useReportes = (forcedClientId?: string | null) => {
                         `Liquidando legajos (${i + 1}/${empIds.length})`,
                     );
                 }
-                const shifts = prepareShiftsForEmployeeLiquidation(
-                    dedupeShiftsByAbsencePriority(
-                        propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
-                        { usePlannedHours },
-                    ),
-                );
-                const stats = calculateStatsExact(shifts, holidaysData, { usePlannedHours });
+                const bookEntry = personaBook?.byEmployee.get(empId);
+                const shifts = bookEntry
+                    ? bookEntry.shifts
+                    : prepareShiftsForEmployeeLiquidation(
+                        dedupeShiftsByAbsencePriority(
+                            propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
+                            { usePlannedHours },
+                        ),
+                    );
+                const stats = bookEntry
+                    ? bookEntry.stats
+                    : calculateLiquidationHoursStats(shifts, holidaysData, { usePlannedHours });
 
                 const ftCount = shifts.filter((s: any) => isFrancoTrabajadoShift(s)).length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;
@@ -1872,10 +1904,10 @@ export const useReportes = (forcedClientId?: string | null) => {
                 const vacantRawShifts = data.shifts.filter((s: any) => isReportVacancyShift(s, empMap));
                 const vacantHours = vacantRawShifts.reduce((acc: number, s: any) =>
                     acc + resolveShiftDurationHours(s, SHIFT_HOURS_LOOKUP, { forObjectiveBilling: true }), 0);
-                const stats = calculateStatsExact(
+                const stats = calculateLiquidationHoursStats(
                     staffedShifts.filter((s: any) => shouldBillShiftToObjective(s)),
                     holidaysData,
-                    { usePlannedHours },
+                    { usePlannedHours, hoursCoreEnabled },
                 );
                 const annotatedShifts = (() => {
                     const merged = [
