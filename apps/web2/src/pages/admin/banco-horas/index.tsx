@@ -1,5 +1,4 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { ChevronRight, Database, Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -7,31 +6,19 @@ import * as XLSX from 'xlsx';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { db, functions } from '@/lib/firebase';
+import { db } from '@/lib/firebase';
+import {
+  fetchHoursLedgerMonthly,
+  HOURS_LEDGER_PLAN_OPTIONS,
+  planHoursOf,
+  previewHoursLedgerMonth,
+  type HoursLedgerMonthRow,
+  type HoursLedgerPlanMode,
+} from '@/lib/hoursLedger/hoursLedgerRead';
 
-type PlanMode = 'published' | 'draft' | 'both';
+type PlanMode = HoursLedgerPlanMode;
 type Level = 'cliente' | 'objetivo' | 'puesto' | 'dia';
-
-type MonthRow = {
-  id?: string;
-  level: 'empresa' | 'cliente' | 'objetivo';
-  clientId: string;
-  clientName: string;
-  objectiveId: string;
-  objectiveName: string;
-  slaActive: number;
-  slaInactive: number;
-  slaClosed: number;
-  planPublished: number;
-  planDraft: number;
-  worked: number;
-  covered: number;
-  uncovered: number;
-  ft: number;
-  ext: number;
-  adv: number;
-  novedadPaga: number;
-};
+type MonthRow = HoursLedgerMonthRow;
 
 type DayRow = MonthRow & {
   date: string;
@@ -43,9 +30,7 @@ type DayRow = MonthRow & {
 const nf = (n: number) => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
 function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number }) {
-  if (mode === 'draft') return r.planDraft || 0;
-  if (mode === 'both') return (r.planPublished || 0) + (r.planDraft || 0);
-  return r.planPublished || 0;
+  return planHoursOf(mode, r);
 }
 
 export default function BancoHorasPage() {
@@ -70,16 +55,11 @@ export default function BancoHorasPage() {
     if (!empresaId) return;
     setBusy(true);
     try {
-      const snap = await getDocs(query(
-        collection(db, 'hours_ledger_monthly'),
-        where('empresaId', '==', empresaId),
-        where('periodKey', '==', periodKey),
-      ));
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as MonthRow));
-      setMonthly(rows);
+      const book = await fetchHoursLedgerMonthly(empresaId, periodKey);
+      setMonthly(book.monthly);
       setDays([]);
       setStack([]);
-      setSource(rows.length ? 'libro' : 'vacio');
+      setSource(book.source === 'libro' ? 'libro' : 'vacio');
     } catch (e) {
       console.error(e);
       toast.error('No se pudo leer el libro');
@@ -94,13 +74,11 @@ export default function BancoHorasPage() {
     if (!empresaId) return;
     setBusy(true);
     try {
-      const call = httpsCallable(functions, 'rebuildHoursLedger');
-      const res = await call({ empresaId, period: periodKey, dryRun: true });
-      const data = res.data as { monthly?: MonthRow[]; days?: DayRow[] };
-      setMonthly((data.monthly || []) as MonthRow[]);
-      setDays((data.days || []) as DayRow[]);
+      const book = await previewHoursLedgerMonth(empresaId, periodKey);
+      setMonthly(book.monthly);
+      setDays([]);
       setStack([]);
-      setSource('preview');
+      setSource(book.source === 'preview' ? 'preview' : 'vacio');
       toast.success('Vista previa (no se escribió en la base)');
     } catch (e: any) {
       console.error(e);
@@ -231,9 +209,7 @@ export default function BancoHorasPage() {
               if (y && m) { setYear(y); setMonth(m); }
             }} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold shadow-sm" />
             <select value={planMode} onChange={(e) => setPlanMode(e.target.value as PlanMode)} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold shadow-sm">
-              <option value="published">Publicadas</option>
-              <option value="draft">Solo borradores</option>
-              <option value="both">Publicadas + borradores</option>
+              {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {canRebuild && (
               <button type="button" onClick={() => void preview()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
