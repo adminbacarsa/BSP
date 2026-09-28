@@ -308,6 +308,7 @@ async function main() {
       })],
     },
     {
+      // Decisión Mauro H1 #3: CON relevo registrado (relievedBy) se completa la jornada.
       name: 'relevo-anticipado',
       shifts: [liqShift({
         id: 'early-out',
@@ -315,6 +316,19 @@ async function main() {
         endTime: secAt(2026, 5, 14, 15, 0),
         realStartTime: secAt(2026, 5, 14, 7, 0),
         realEndTime: secAt(2026, 5, 14, 14, 30),
+        relievedBy: 'emp-relevo',
+        relievedByName: 'Guardia Relevo',
+      })],
+    },
+    {
+      // Decisión Mauro H1 #3: SIN relevo registrado, la salida anticipada paga lo real.
+      name: 'salida-anticipada-sin-relevo',
+      shifts: [liqShift({
+        id: 'early-out-sin-relevo',
+        startTime: secAt(2026, 5, 23, 7, 0),
+        endTime: secAt(2026, 5, 23, 15, 0),
+        realStartTime: secAt(2026, 5, 23, 7, 0),
+        realEndTime: secAt(2026, 5, 23, 14, 30),
       })],
     },
     {
@@ -685,9 +699,11 @@ async function main() {
   });
   const clockH = (new Date('2026-05-10T15:10:00-03:00').getTime() - new Date('2026-05-10T07:04:00-03:00').getTime()) / 3600000;
 
-  const liqAdv = core.calculateLiquidationHoursStats(liqFixtures[1].shifts, {});
-  const liqRet = core.calculateLiquidationHoursStats(liqFixtures[2].shifts, {});
-  const liqEarly = core.calculateLiquidationHoursStats(liqFixtures[4].shifts, {});
+  const liqFixtureByName = (name: string) => liqFixtures.find((f) => f.name === name)!;
+  const liqAdv = core.calculateLiquidationHoursStats(liqFixtureByName('adelanto-autorizado').shifts, {});
+  const liqRet = core.calculateLiquidationHoursStats(liqFixtureByName('retencion-3min').shifts, {});
+  const liqEarly = core.calculateLiquidationHoursStats(liqFixtureByName('relevo-anticipado').shifts, {});
+  const liqEarlySinRelevo = core.calculateLiquidationHoursStats(liqFixtureByName('salida-anticipada-sin-relevo').shifts, {});
   const payAdv = core.accumulatePayrollTurnoContribution(payrollFixtures[4].data, payrollFixtures[4].ctx);
   const payRet = core.accumulatePayrollTurnoContribution(payrollFixtures[5].data, payrollFixtures[5].ctx);
   const payEarly = core.accumulatePayrollTurnoContribution(payrollFixtures[6].data, payrollFixtures[6].ctx);
@@ -810,7 +826,7 @@ async function main() {
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
   const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
-  const liqFt = core.calculateLiquidationHoursStats(liqFixtures[5].shifts, {});
+  const liqFt = core.calculateLiquidationHoursStats(liqFixtureByName('FT').shifts, {});
 
   const payExt = core.accumulatePayrollTurnoContribution({
     ...extPlan,
@@ -847,7 +863,8 @@ async function main() {
   }
   canon('liquidación adelanto', liqAdv.horasReales, 9);
   canon('liquidación retención 3 min', liqRet.horasReales, 8.05);
-  canon('liquidación relevo anticipado', liqEarly.horasReales, 8);
+  canon('liquidación relevo anticipado (con relevo registrado)', liqEarly.horasReales, 8);
+  canon('liquidación salida anticipada sin relevo (paga lo real)', liqEarlySinRelevo.horasReales, 7.5);
   canon('payrollApi adelanto (F0 8)', payAdv.hsReales, 9);
   canon('payrollApi desglose adv', payAdv.desglose.adv, 1);
   canon('payrollApi retención 3 min (F0 8)', payRet.hsReales, 8.05);

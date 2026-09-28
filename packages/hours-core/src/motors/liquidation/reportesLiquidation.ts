@@ -931,6 +931,9 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retención formal
             const isEarlyStartShift = d.isEarlyStart === true;
             const isRetentionShift  = d.isRetention === true || (d.retentionMinutes ?? 0) > 0;
+            // Decisión Mauro H1 #3: relevo registrado por `registrarPresencia` (RELEVO_PRESENTE /
+            // relievedBy) en el turno saliente. Sin ese registro, la salida anticipada no es un relevo.
+            const hasRegisteredRelevo = !!(d.relievedBy || d.relievedByName);
 
             const clampS = (real: Date, plan: Date): Date => {
                 if (isEarlyStartShift) return real; // adelanto autorizado -> hora real
@@ -943,7 +946,11 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const clampE = (real: Date, plan: Date): Date => {
                 if (!plan || isNaN(plan.getTime())) return real; // sin planificado -> usar real
-                if (real < plan)        return plan;         // relevo anticipado -> horas completas
+                if (real < plan) {
+                    // Decisión Mauro H1 #3: CON relevo registrado se completa la jornada;
+                    // SIN relevo, salida anticipada paga lo real.
+                    return hasRegisteredRelevo ? plan : real;
+                }
                 if (isRetentionShift)   return real;         // retencion formal -> hora real
                 if (authorizedEnd && authorizedEnd > plan) {
                     return real < authorizedEnd ? real : authorizedEnd; // extensión autorizada: solo lo trabajado
