@@ -925,13 +925,18 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (isAbsent || (!usePlannedHours && end > new Date())) return;
 
             // Regla de liquidación:
-            // - Inicio: siempre hora planificada (salvo adelanto explícito)
+            // - Inicio: adelanto autorizado → hora real; llegada tarde → hora real (descuenta, decisión
+            //   Mauro H1 #5 — la tolerancia T+5 ya la aplicó el servidor al fichar, no se reaplica aquí);
+            //   llegó a tiempo o antes sin autorización → hora planificada (sin regalo).
             // - Fin: hora planificada, salvo relevo anticipado (da horas completas) o retención formal
             const isEarlyStartShift = d.isEarlyStart === true;
             const isRetentionShift  = d.isRetention === true || (d.retentionMinutes ?? 0) > 0;
 
-            const clampS = (real: Date, plan: Date): Date =>
-                isEarlyStartShift ? real : plan;  // adelanto → hora real; normal → hora planificada
+            const clampS = (real: Date, plan: Date): Date => {
+                if (isEarlyStartShift) return real; // adelanto autorizado -> hora real
+                if (real.getTime() > plan.getTime()) return real; // llegada tarde -> descuenta
+                return plan; // llegó a tiempo o antes sin autorización -> hora planificada
+            };
 
             const plannedWindow = resolveLiquidationPlannedWindow(d, start, end);
             const authorizedEnd = plannedWindow.isExtDisplay ? plannedWindow.end : null;

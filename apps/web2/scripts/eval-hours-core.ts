@@ -795,6 +795,18 @@ async function main() {
   });
   const liqOverlapJornada = core.calculateLiquidationHoursStats([ovlA, ovlB], {});
 
+  // Decisión Mauro H1 #5: llegada tarde SÍ descuenta — cobra desde realStartTime (T+5 ya la aplicó el
+  // servidor al fichar). Plan 07:00-15:00, fichó 07:20 → 7h40 (no 8h planas).
+  const lateArrival = liqShift({
+    id: 'llegada-tarde',
+    employeeId: 'emp-llegada-tarde',
+    startTime: secAt(2026, 5, 22, 7, 0),
+    endTime: secAt(2026, 5, 22, 15, 0),
+    realStartTime: secAt(2026, 5, 22, 7, 20),
+    realEndTime: secAt(2026, 5, 22, 15, 0),
+  });
+  const liqLateArrival = core.calculateLiquidationHoursStats([lateArrival], {});
+
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
   const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
@@ -826,6 +838,7 @@ async function main() {
   } else {
     canonOk += 1;
   }
+  canon('persona llegada tarde descuenta (07:20 de 07:00, sale a horario)', liqLateArrival.horasReales, 7 + 40 / 60);
   canon('persona docs que se pisan en horario: una sola jornada', liqOverlapJornada.horasReales, 8);
   if (liqOverlapJornada.requiresReview) {
     canonFails.push('persona jornada única de 8h no debería marcar requiresReview');
