@@ -2,6 +2,21 @@ import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { toDate } from '../utils/dates';
 import { haversineKm, isWithinCheckInRadius } from '../geo/haversine';
 import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
+import {
+  checkInRejectMessage,
+  evaluateCheckInWindow,
+  isCoverageHoursOnSourceDoc,
+  timestampLikeToMillis,
+  type CheckInWindowRejectCode,
+} from './evaluateCheckInWindow';
+
+export {
+  evaluateCheckInWindow,
+  isCoverageHoursOnSourceDoc,
+  checkInRejectMessage,
+  timestampLikeToMillis,
+} from './evaluateCheckInWindow';
+export type { CheckInWindowResult, CheckInWindowRejectCode } from './evaluateCheckInWindow';
 
 export const PENDING_CHECKINS_STORAGE_KEY = 'pending_checkins';
 
@@ -26,12 +41,16 @@ export type CheckInTiming = {
   tooEarly: boolean;
   /** Hora límite de fichada (si aplica ventana extendida). */
   checkInDeadline?: Date | null;
+  /** Código de rechazo alineado al servidor (si !canCheckIn). */
+  rejectCode?: CheckInWindowRejectCode;
+  /** Mensaje claro para el guardia. */
+  rejectMessage?: string;
 };
 
 export type CheckInTimingOptions = {
   /** Lab/emulador con allowRemoteCheckIn: ventana amplia para no depender del minuto exacto del seed */
   relaxWindow?: boolean;
-  /** ETA local optimista si el backend aún no persistió etaMinutes. */
+  /** ETA local optimista si el backend aún no persistió lateArrivalEtaAt. */
   etaMinutesOverride?: number | null;
 };
 
@@ -41,12 +60,15 @@ type ShiftTimingFields = Shift & {
   lateArrivalConfirmed?: boolean;
   etaMinutes?: number;
   lateArrivalEtaMinutes?: number;
+  lateArrivalEtaAt?: unknown;
   isEarlyStart?: boolean;
   isAdvanced?: boolean;
   isExtended?: boolean;
   adjustedStartTime?: unknown;
   createdAt?: unknown;
+  coverageCreatedAt?: unknown;
   coverageHoursOnSource?: boolean;
+  coverageType?: string;
 };
 
 /** Cobertura urgente creada desde Operaciones (hueco por ausencia). */
@@ -55,26 +77,19 @@ export function isOperationsCoverageShift(shift: Pick<Shift, 'origin'> | null | 
 }
 
 /**
- * ops_cov EXTEND/ADVANCE de registro: las horas viven en el turno propio
- * (isExtended / isEarlyStart). No se ficha ni es hero.
+ * ops_cov EXTEND/ADVANCE de registro: paridad con isOpsCoverageHoursOnSourceDoc (functions).
  */
 export function isCoverageHoursOnSourceShift(
-  shift: (Pick<Shift, 'origin'> & { coverageHoursOnSource?: boolean }) | null | undefined,
+  shift:
+    | (Pick<Shift, 'origin'> & {
+        coverageHoursOnSource?: boolean;
+        coverageType?: string;
+      })
+    | null
+    | undefined,
 ): boolean {
-  if (!shift || shift.coverageHoursOnSource !== true) return false;
-  return isOperationsCoverageShift(shift);
-}
-
-function readEtaMinutes(shift: ShiftTimingFields, override?: number | null): number | null {
-  if (override != null && Number.isFinite(override) && override > 0) return Math.round(override);
-  const raw = shift.etaMinutes ?? shift.lateArrivalEtaMinutes;
-  if (raw == null) return null;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
-}
-
-function hasLateArrivalFlag(shift: ShiftTimingFields): boolean {
-  return !!(shift.lateArrivalAt || shift.lateArrivalConfirmed);
+  if (!shift) return false;
+  return isCoverageHoursOnSourceDoc(shift as Record<string, unknown>);
 }
 
 /** Ajusta HH:MM o Timestamp a Date del día del turno (zona AR). */
@@ -99,68 +114,79 @@ export function resolveAdjustedStartTime(
   return toDate(raw as never) ?? fallbackStart;
 }
 
-function isEarlyStartShift(shift: ShiftTimingFields): boolean {
-  if (shift.isEarlyStart === true || shift.isAdvanced === true) return true;
-  const origin = String(shift.origin || '').toUpperCase();
-  return origin === 'EARLY_START' || origin === 'ADVANCE';
-}
-
 function minutesBetween(from: Date, to: Date): number {
   return Math.round((from.getTime() - to.getTime()) / 60000);
 }
 
-function inWindow(now: Date, open: Date, close: Date): boolean {
-  const t = now.getTime();
-  return t >= open.getTime() && t <= close.getTime();
-}
-
-/** Ventana propia del turno (T−15…T+5 o extendida por llegada tarde). */
-function ownShiftWindowTiming(
+function shiftToRecord(
   s: ShiftTimingFields,
-  start: Date,
-  now: Date,
   options?: CheckInTimingOptions,
-): CheckInTiming {
-  const diffMinutes = minutesBetween(start, now);
-  const eta = readEtaMinutes(s, options?.etaMinutesOverride);
-  const lateFlag = hasLateArrivalFlag(s);
+): Record<string, unknown> {
+  const rec: Record<string, unknown> = { ...(s as unknown as Record<string, unknown>) };
 
-  if (lateFlag) {
-    const extensionMin = eta != null ? Math.min(eta, 60) : 30;
-    const open = new Date(start.getTime() - 15 * 60_000);
-    const close = new Date(start.getTime() + extensionMin * 60_000);
-    const canCheckIn = inWindow(now, open, close);
-    return {
-      diffMinutes,
-      canCheckIn,
-      canNotifyLate: false,
-      lateWindow: false,
-      tooEarly: now.getTime() < open.getTime(),
-      checkInDeadline: close,
-    };
+  // Normaliza adjustedStartTime HH:MM → Date (dato inconsistente; el server espera Timestamp).
+  const startDate = toDate(s.startTime);
+  if (typeof s.adjustedStartTime === 'string' && /^\d{1,2}:\d{2}$/.test(s.adjustedStartTime.trim())) {
+    const adj = resolveAdjustedStartTime(s, startDate);
+    if (adj) rec.adjustedStartTime = adj;
   }
 
-  const canCheckIn = diffMinutes <= 15 && diffMinutes >= -5;
-  const canNotifyLate = diffMinutes <= 60 && diffMinutes >= -5;
-  const tooEarly = diffMinutes > 15;
-  return {
-    diffMinutes,
-    canCheckIn,
-    canNotifyLate,
-    lateWindow: canNotifyLate,
-    tooEarly: tooEarly && !canCheckIn,
-    checkInDeadline: canCheckIn ? new Date(start.getTime() + 5 * 60_000) : null,
-  };
+  // Override optimista de ETA en minutos → lateArrivalEtaAt sintético si aún no llegó del server.
+  const override = options?.etaMinutesOverride;
+  if (
+    override != null &&
+    Number.isFinite(override) &&
+    override > 0 &&
+    !timestampLikeToMillis(rec.lateArrivalEtaAt)
+  ) {
+    const start = timestampLikeToMillis(rec.startTime);
+    if (start > 0) {
+      rec.lateArrivalEtaAt = start + Math.min(60, Math.round(override)) * 60_000;
+      rec.lateArrivalConfirmed = true;
+    }
+  }
+  return rec;
+}
+
+function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date | null {
+  const origin = String(shift.origin || '').toUpperCase();
+  const ct = String(shift.coverageType || '').toUpperCase();
+  const plannedStart = timestampLikeToMillis(shift.startTime);
+  if (!plannedStart) return null;
+
+  if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
+    const created =
+      timestampLikeToMillis(shift.createdAt) ||
+      timestampLikeToMillis(shift.coverageCreatedAt) ||
+      plannedStart;
+    return new Date(Math.max(created, plannedStart) + 60 * 60 * 1000);
+  }
+
+  if (shift.isEarlyStart === true) {
+    const adj = timestampLikeToMillis(shift.adjustedStartTime) || plannedStart;
+    const advClose = adj + 60 * 60 * 1000;
+    const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
+    const cap60 = plannedStart + 60 * 60 * 1000;
+    let ownClose = plannedStart + 5 * 60 * 1000;
+    if (etaAt > 0) ownClose = Math.min(etaAt, cap60);
+    else if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
+      ownClose = plannedStart + 30 * 60 * 1000;
+    }
+    if (nowMs >= adj - 15 * 60_000 && nowMs <= advClose) return new Date(advClose);
+    return new Date(ownClose);
+  }
+
+  const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
+  const cap60 = plannedStart + 60 * 60 * 1000;
+  if (etaAt > 0) return new Date(Math.min(etaAt, cap60));
+  if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
+    return new Date(plannedStart + 30 * 60 * 1000);
+  }
+  return new Date(plannedStart + 5 * 60 * 1000);
 }
 
 /**
- * Ventanas CC (portal):
- * - Normal: T−15…T+5
- * - Aviso tarde (lateArrivalAt / confirmed): hasta min(inicio+eta, T+60); sin eta → T+30
- * - OPERATIONS_COVERAGE (no registro): inicio−15 … max(createdAt, inicio)+60
- * - ADV (isEarlyStart): ventana adelanto OR ventana propia (normal/tarde)
- * - coverageHoursOnSource: no fichable (registro EXT/ADV)
- * - Ausente: no ficha
+ * Ventanas CC (portal) — canCheckIn alineado a evaluateServerCheckInWindow.
  */
 export function getCheckInTiming(
   shift: Shift,
@@ -170,6 +196,7 @@ export function getCheckInTiming(
   const s = shift as ShiftTimingFields;
   const start = toDate(s.startTime);
   const diffMinutes = start ? minutesBetween(start, now) : null;
+  const nowMs = now.getTime();
 
   const empty: CheckInTiming = {
     diffMinutes,
@@ -181,12 +208,19 @@ export function getCheckInTiming(
   };
 
   if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) {
-    return empty;
+    return {
+      ...empty,
+      rejectCode: 'ABSENT',
+      rejectMessage: checkInRejectMessage('ABSENT'),
+    };
   }
 
-  // Registro EXT/ADV: no se ficha (el presente va al turno propio).
   if (isCoverageHoursOnSourceShift(s)) {
-    return empty;
+    return {
+      ...empty,
+      rejectCode: 'TRACE_REGISTRATION',
+      rejectMessage: checkInRejectMessage('TRACE_REGISTRATION'),
+    };
   }
 
   if (s.isFranco && !s.isFrancoTrabajado && !isOperationsCoverageShift(s)) {
@@ -200,6 +234,13 @@ export function getCheckInTiming(
     const canCheckIn = !shiftEnded && diffMinutes <= 240 && diffMinutes >= -240;
     const tooEarly = diffMinutes > 240;
     const canNotifyLate = !shiftEnded && diffMinutes <= 60 && diffMinutes >= -5;
+    const rejectCode = shiftEnded
+      ? ('SHIFT_ENDED' as const)
+      : tooEarly
+        ? ('TOO_EARLY' as const)
+        : canCheckIn
+          ? undefined
+          : ('TOO_LATE' as const);
     return {
       diffMinutes,
       canCheckIn,
@@ -207,55 +248,47 @@ export function getCheckInTiming(
       lateWindow: canNotifyLate,
       tooEarly,
       checkInDeadline: null,
+      rejectCode,
+      rejectMessage: rejectCode ? checkInRejectMessage(rejectCode) : undefined,
     };
   }
 
-  // ADV / adelanto: ventana del adelanto O la del turno propio (normal / llegada tarde).
-  // AA solo si no llega a su horario propio — el adelanto es opcional.
-  if (isEarlyStartShift(s) && start) {
-    const adj = resolveAdjustedStartTime(s, start) ?? start;
-    const earlyOpen = new Date(adj.getTime() - 15 * 60_000);
-    const earlyClose = new Date(adj.getTime() + 60 * 60_000);
-    const inEarly = inWindow(now, earlyOpen, earlyClose);
-    const own = ownShiftWindowTiming(s, start, now, options);
-    const canCheckIn = inEarly || own.canCheckIn;
-    const deadlines: number[] = [];
-    if (inEarly) deadlines.push(earlyClose.getTime());
-    if (own.canCheckIn && own.checkInDeadline) deadlines.push(own.checkInDeadline.getTime());
-    const earliestOpen = Math.min(earlyOpen.getTime(), start.getTime() - 15 * 60_000);
-    return {
-      diffMinutes: inEarly ? minutesBetween(adj, now) : own.diffMinutes,
-      canCheckIn,
-      canNotifyLate: own.canNotifyLate,
-      lateWindow: own.lateWindow,
-      tooEarly: !canCheckIn && now.getTime() < earliestOpen,
-      checkInDeadline: deadlines.length > 0 ? new Date(Math.max(...deadlines)) : own.checkInDeadline ?? null,
-    };
+  const rec = shiftToRecord(s, options);
+  const windowEval = evaluateCheckInWindow(rec, nowMs);
+  const canCheckIn = windowEval.allowed === true;
+  const rejectCode = windowEval.rejectCode;
+  const tooEarly = rejectCode === 'TOO_EARLY';
+
+  // Aviso "llegué tarde" (UX portal): T−60…T+5 en turnos normales / early, no ops_cov puro.
+  const origin = String(s.origin || '').toUpperCase();
+  const ct = String(s.coverageType || '').toUpperCase();
+  const isOpsCov =
+    origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE';
+  let canNotifyLate = false;
+  if (
+    !isOpsCov &&
+    start &&
+    diffMinutes != null &&
+    rejectCode !== 'SHIFT_ENDED' &&
+    rejectCode !== 'ABSENT' &&
+    rejectCode !== 'TRACE_REGISTRATION'
+  ) {
+    canNotifyLate = diffMinutes <= 60 && diffMinutes >= -5 && !canCheckIn;
+    if (canCheckIn && !(s.lateArrivalAt || s.lateArrivalConfirmed)) {
+      canNotifyLate = diffMinutes <= 60 && diffMinutes >= -5;
+    }
   }
 
-  // Cobertura ops (urgencia real): inicio−15 … max(createdAt, inicio)+60
-  if (isOperationsCoverageShift(s) && start) {
-    const created = toDate(s.createdAt as never);
-    const anchor = created && created.getTime() > start.getTime() ? created : start;
-    const open = new Date(start.getTime() - 15 * 60_000);
-    const close = new Date(anchor.getTime() + 60 * 60_000);
-    const canCheckIn = inWindow(now, open, close);
-    const tooEarly = now.getTime() < open.getTime();
-    return {
-      diffMinutes,
-      canCheckIn,
-      canNotifyLate: false,
-      lateWindow: false,
-      tooEarly,
-      checkInDeadline: close,
-    };
-  }
-
-  if (!start || diffMinutes === null) {
-    return empty;
-  }
-
-  return ownShiftWindowTiming(s, start, now, options);
+  return {
+    diffMinutes,
+    canCheckIn,
+    canNotifyLate,
+    lateWindow: canNotifyLate,
+    tooEarly,
+    checkInDeadline: canCheckIn ? deadlineFromWindow(rec, nowMs) : null,
+    rejectCode,
+    rejectMessage: rejectCode ? checkInRejectMessage(rejectCode) : undefined,
+  };
 }
 
 /**
@@ -275,7 +308,6 @@ export function validateCheckInDistance(
   }
   const hasLat = objective.lat != null && Number(objective.lat) !== 0;
   const hasLng = objective.lng != null && Number(objective.lng) !== 0;
-  // Sin geolocalización configurada → se permite fichar (regla CC).
   if (!hasLat || !hasLng) {
     return { ok: true };
   }

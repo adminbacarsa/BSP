@@ -24,6 +24,7 @@ import { formatDateTimeAr, portalInboxDetailLines, toDate } from '@cosp/portal-c
 import { appAlert } from '@/lib/appAlert';
 import { ALERTAS_PAGE_SIZE, paginateAlertItems } from '../../src/lib/alertasPagination';
 import { respondCoberturaConvocatoria } from '../../src/lib/respondCoberturaConvocatoria';
+import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
 
 const DOMAIN_FILTERS = ['Todas', 'Cobertura', 'Planificación', 'Operaciones', 'Eventos', 'Permutas'] as const;
 type DomainFilter = (typeof DOMAIN_FILTERS)[number];
@@ -227,11 +228,12 @@ function AlertasScreenContent() {
 
   const onRespond = useCallback(
     (n: PortalInboxItem, response: 'ACCEPTED' | 'REJECTED') => {
+      if (busyId) return;
       const label = response === 'ACCEPTED' ? 'Aceptar' : 'Rechazar';
       appAlert(
         label,
         response === 'ACCEPTED'
-          ? '¿Confirmás que aceptás la cobertura?'
+          ? '¿Confirmás que aceptás la cobertura? Es vinculante.'
           : '¿Confirmás que rechazás la cobertura?',
         [
           { text: 'Cancelar', style: 'cancel' },
@@ -240,6 +242,7 @@ function AlertasScreenContent() {
             style: response === 'ACCEPTED' ? 'default' : 'destructive',
             onPress: () => {
               void (async () => {
+                if (busyId) return;
                 setBusyId(n.id);
                 try {
                   const convId = String(n.convocatoriaId || '').trim();
@@ -259,8 +262,27 @@ function AlertasScreenContent() {
                     try {
                       await respond(n.id, response);
                     } catch {
-                      /* cobertura ya aplicada; ocultar alerta igual */
                       await dismiss(n.id).catch(() => {});
+                    }
+                    const feedback = buildCoberturaRespondFeedback(response, {
+                      clientName: n.clientName,
+                      objectiveName: n.objectiveName,
+                      positionName: n.positionName,
+                      startTime: n.startTime,
+                      endTime: n.endTime,
+                      shiftCode: n.shiftCode,
+                    });
+                    if (response === 'ACCEPTED') {
+                      appAlert(feedback.title, feedback.message, [
+                        {
+                          text: 'Ver turno',
+                          onPress: () => {
+                            router.replace('/(tabs)?focus=cobertura' as Href);
+                          },
+                        },
+                      ]);
+                    } else {
+                      appAlert(feedback.title, feedback.message);
                     }
                     return;
                   }
@@ -279,7 +301,7 @@ function AlertasScreenContent() {
         ],
       );
     },
-    [respond, dismiss],
+    [respond, dismiss, busyId, router],
   );
 
   const onDismiss = useCallback(
@@ -560,17 +582,19 @@ function AlertasScreenContent() {
                 {isCoverage ? (
                   <>
                     <CommandButton
-                      label={busy ? '…' : 'Aceptar'}
+                      label={busy ? 'Enviando…' : 'Aceptar'}
                       variant="success"
                       onPress={() => onRespond(n, 'ACCEPTED')}
-                      disabled={busy}
+                      disabled={busy || !!busyId}
+                      loading={busy}
                       style={styles.btnFlex}
                     />
                     <CommandButton
-                      label={busy ? '…' : 'Rechazar'}
+                      label={busy ? 'Enviando…' : 'Rechazar'}
                       variant="danger"
                       onPress={() => onRespond(n, 'REJECTED')}
-                      disabled={busy}
+                      disabled={busy || !!busyId}
+                      loading={busy}
                       style={styles.btnFlex}
                     />
                   </>

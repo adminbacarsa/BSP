@@ -13,6 +13,7 @@ export type HeroShiftLike = {
   isAbsent?: boolean | null;
   status?: string | null;
   coverageHoursOnSource?: boolean | null;
+  coverageType?: string | null;
   startTime?: unknown;
   endTime?: unknown;
   [key: string]: unknown;
@@ -42,9 +43,12 @@ function isAbsentLikeShift(shift: HeroShiftLike): boolean {
   return status === 'ABSENT' || status === 'AUSENTE';
 }
 
+/** Paridad con isOpsCoverageHoursOnSourceDoc (functions / portal-core). */
 function isCoverageHoursOnSourceShift(shift: HeroShiftLike): boolean {
-  if (shift.coverageHoursOnSource !== true) return false;
-  return String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  if (String(shift.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
+  if (shift.coverageHoursOnSource === true) return true;
+  const ct = String(shift.coverageType || '').toUpperCase();
+  return ct === 'EXTEND' || ct === 'ADVANCE';
 }
 
 export function sortShiftsByStart<T extends HeroShiftLike>(shifts: T[]): T[] {

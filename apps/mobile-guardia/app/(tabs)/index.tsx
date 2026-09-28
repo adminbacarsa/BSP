@@ -55,6 +55,7 @@ import type { SolicitudEvento } from '@cosp/portal-types';
 import type { ConvocatoriaCobertura } from '../../src/lib/convocatoriasCobertura';
 import Constants from 'expo-constants';
 import { appAlert } from '@/lib/appAlert';
+import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
 
 export default function HoyScreen() {
   return (
@@ -137,8 +138,33 @@ function HoyScreenContent() {
   }
 
   async function onResponderCobertura(c: ConvocatoriaCobertura, acepta: boolean) {
-    const result = await responderCobertura(c.id, acepta ? 'ACCEPTED' : 'REJECTED');
-    appAlert(result.ok ? 'Listo' : 'Error', result.message);
+    if (coberturaBusyId) return;
+    const response = acepta ? 'ACCEPTED' : 'REJECTED';
+    const result = await responderCobertura(c.id, response);
+    if (!result.ok) {
+      appAlert('Cobertura', result.message);
+      return;
+    }
+    const feedback = buildCoberturaRespondFeedback(response, {
+      clientName: c.clientName,
+      objectiveName: c.objectiveName,
+      positionName: c.positionName,
+      startTime: c.startTime,
+      endTime: c.endTime,
+      shiftCode: c.shiftCode,
+    });
+    if (acepta) {
+      appAlert(feedback.title, feedback.message, [
+        {
+          text: 'Ver turno',
+          onPress: () => {
+            router.replace('/(tabs)?focus=cobertura' as never);
+          },
+        },
+      ]);
+    } else {
+      appAlert(feedback.title, feedback.message);
+    }
   }
 
   async function onSiVoyLlegadaTarde(c: ConvocatoriaCobertura, etaMinutes: number) {

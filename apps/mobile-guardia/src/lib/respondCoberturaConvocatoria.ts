@@ -45,7 +45,7 @@ export async function respondCoberturaConvocatoria(params: {
     return {
       ok: true,
       message:
-        params.response === 'ACCEPTED' ? 'Convocatoria aceptada' : 'Respuesta enviada',
+        params.response === 'ACCEPTED' ? 'Convocatoria aceptada' : 'Convocatoria rechazada',
     };
   } catch (e) {
     const classified = classifyCoberturaRespondError(e);

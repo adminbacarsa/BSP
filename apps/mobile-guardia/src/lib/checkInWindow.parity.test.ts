@@ -1,0 +1,280 @@
+/**
+ * Paridad evaluateCheckInWindow (portal-core) ↔ evaluateServerCheckInWindow (functions lib).
+ * Misma matriz de casos; resultados idénticos. Sin modificar functions.
+ *
+ * node --experimental-strip-types --test src/lib/checkInWindow.parity.test.ts
+ */
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import path from 'node:path';
+import {
+  evaluateCheckInWindow,
+  checkInRejectMessage,
+  isCoverageHoursOnSourceDoc,
+} from '../../../../packages/portal-core/src/checkIn/evaluateCheckInWindow.ts';
+
+const require = createRequire(import.meta.url);
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const functionsLib = path.resolve(
+  __dirname,
+  '../../../../apps/functions/lib/fichajes/checkInWindow.js',
+);
+const { evaluateServerCheckInWindow } = require(functionsLib) as {
+  evaluateServerCheckInWindow: (
+    shift: Record<string, unknown>,
+    nowMs: number,
+    opts?: { source?: string },
+  ) => {
+    allowed: boolean;
+    rejectCode?: string;
+    usePlannedStart?: boolean;
+    useAdjustedStart?: boolean;
+    lateMinutes?: number;
+  };
+};
+
+/** Timestamp-like compatible con functions (solo .toMillis). */
+function ts(iso: string): { toMillis: () => number } {
+  const ms = new Date(iso).getTime();
+  return { toMillis: () => ms };
+}
+
+function assertParity(
+  label: string,
+  shift: Record<string, unknown>,
+  nowMs: number,
+  opts?: { source?: string },
+) {
+  const portal = evaluateCheckInWindow(shift, nowMs, opts);
+  const server = evaluateServerCheckInWindow(shift, nowMs, opts);
+  assert.deepEqual(
+    {
+      allowed: portal.allowed,
+      rejectCode: portal.rejectCode,
+      usePlannedStart: portal.usePlannedStart,
+      useAdjustedStart: portal.useAdjustedStart,
+      lateMinutes: portal.lateMinutes,
+    },
+    {
+      allowed: server.allowed,
+      rejectCode: server.rejectCode,
+      usePlannedStart: server.usePlannedStart,
+      useAdjustedStart: server.useAdjustedStart,
+      lateMinutes: server.lateMinutes,
+    },
+    label,
+  );
+}
+
+describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => {
+  const day = '2026-09-14';
+
+  it('ausente → ABSENT', () => {
+    const shift = {
+      isAbsent: true,
+      status: 'ABSENT',
+      startTime: ts(`${day}T18:00:00-03:00`),
+      endTime: ts('2026-09-15T02:00:00-03:00'),
+    };
+    const now = new Date(`${day}T18:00:00-03:00`).getTime();
+    assertParity('absent', shift, now);
+    assert.equal(evaluateCheckInWindow(shift, now).rejectCode, 'ABSENT');
+  });
+
+  it('normal T−15…T+5 / TOO_EARLY / TOO_LATE', () => {
+    const start = `${day}T18:00:00-03:00`;
+    const shift = {
+      origin: 'PLANIFICADOR',
+      startTime: ts(start),
+      endTime: ts('2026-09-15T02:00:00-03:00'),
+    };
+    assertParity('too early', shift, new Date(`${day}T17:00:00-03:00`).getTime());
+    assertParity('in window', shift, new Date(`${day}T17:50:00-03:00`).getTime());
+    assertParity('on time+', shift, new Date(`${day}T18:03:00-03:00`).getTime());
+    assertParity('too late', shift, new Date(`${day}T18:10:00-03:00`).getTime());
+  });
+
+  it('lateArrivalEtaAt prioriza sobre minutos; cap T+60', () => {
+    const startIso = `${day}T17:00:00-03:00`;
+    const shift = {
+      startTime: ts(startIso),
+      endTime: ts('2026-09-15T01:00:00-03:00'),
+      lateArrivalConfirmed: true,
+      lateArrivalEtaAt: ts(`${day}T17:45:00-03:00`),
+    };
+    assertParity('eta ok', shift, new Date(`${day}T17:40:00-03:00`).getTime());
+    assertParity('eta passed', shift, new Date(`${day}T17:50:00-03:00`).getTime());
+
+    const withCap = {
+      ...shift,
+      lateArrivalEtaAt: ts(`${day}T19:00:00-03:00`), // > T+60
+    };
+    assertParity('cap 60', withCap, new Date(`${day}T17:55:00-03:00`).getTime());
+    assertParity('cap 60 late', withCap, new Date(`${day}T18:05:00-03:00`).getTime());
+  });
+
+  it('lateArrivalAt sin etaAt → tope T+30', () => {
+    const shift = {
+      startTime: ts(`${day}T17:00:00-03:00`),
+      endTime: ts('2026-09-15T01:00:00-03:00'),
+      lateArrivalAt: ts(`${day}T16:50:00-03:00`),
+    };
+    assertParity('t+30 ok', shift, new Date(`${day}T17:25:00-03:00`).getTime());
+    assertParity('t+30 late', shift, new Date(`${day}T17:35:00-03:00`).getTime());
+  });
+
+  it('OPERATIONS_COVERAGE: createdAt / coverageCreatedAt', () => {
+    const shift = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'FT',
+      startTime: ts(`${day}T15:00:00-03:00`),
+      endTime: ts(`${day}T23:00:00-03:00`),
+      createdAt: ts(`${day}T14:30:00-03:00`),
+    };
+    assertParity('ops early', shift, new Date(`${day}T14:40:00-03:00`).getTime());
+    assertParity('ops in', shift, new Date(`${day}T15:10:00-03:00`).getTime());
+    assertParity('ops late', shift, new Date(`${day}T16:05:00-03:00`).getTime());
+
+    const covCreated = {
+      origin: 'OPERATIONS_COVERAGE',
+      startTime: ts(`${day}T15:00:00-03:00`),
+      endTime: ts(`${day}T23:00:00-03:00`),
+      coverageCreatedAt: ts(`${day}T15:20:00-03:00`),
+    };
+    assertParity('coverageCreatedAt', covCreated, new Date(`${day}T16:10:00-03:00`).getTime());
+  });
+
+  it('SHIFT_ENDED después de endTime (retenido puede seguir en hero sin fichar)', () => {
+    const shift = {
+      origin: 'PLANIFICADOR',
+      isRetention: true,
+      isPresent: true,
+      startTime: ts(`${day}T06:00:00-03:00`),
+      endTime: ts(`${day}T14:00:00-03:00`),
+    };
+    assertParity('shift ended', shift, new Date(`${day}T15:30:00-03:00`).getTime());
+    assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T15:30:00-03:00`).getTime()).rejectCode, 'SHIFT_ENDED');
+  });
+
+  it('isEarlyStart: ventana ADV OR propia', () => {
+    const shift = {
+      isEarlyStart: true,
+      startTime: ts(`${day}T20:00:00-03:00`),
+      endTime: ts('2026-09-15T04:00:00-03:00'),
+      adjustedStartTime: ts(`${day}T18:00:00-03:00`),
+    };
+    assertParity('adv window', shift, new Date(`${day}T18:00:00-03:00`).getTime());
+    assertParity('between', shift, new Date(`${day}T19:20:00-03:00`).getTime());
+    assertParity('own window', shift, new Date(`${day}T19:50:00-03:00`).getTime());
+  });
+
+  it('source OPERATIONS/VIGI bypasea ventana', () => {
+    const shift = {
+      startTime: ts(`${day}T20:00:00-03:00`),
+      endTime: ts('2026-09-15T04:00:00-03:00'),
+    };
+    assertParity('ops source', shift, new Date(`${day}T12:00:00-03:00`).getTime(), {
+      source: 'OPERATIONS',
+    });
+  });
+
+  it('TRACE_REGISTRATION: coverageHoursOnSource y coverageType EXTEND/ADVANCE', () => {
+    const flagged = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageHoursOnSource: true,
+      startTime: ts(`${day}T08:00:00-03:00`),
+      endTime: ts(`${day}T12:00:00-03:00`),
+    };
+    assertParity('flag', flagged, new Date(`${day}T08:30:00-03:00`).getTime());
+    assert.equal(isCoverageHoursOnSourceDoc(flagged), true);
+
+    const byType = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'ADVANCE',
+      startTime: ts(`${day}T08:00:00-03:00`),
+      endTime: ts(`${day}T12:00:00-03:00`),
+    };
+    assertParity('by type ADVANCE', byType, new Date(`${day}T08:30:00-03:00`).getTime());
+    assert.equal(evaluateCheckInWindow(byType, new Date(`${day}T08:30:00-03:00`).getTime()).rejectCode, 'TRACE_REGISTRATION');
+  });
+});
+
+describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
+  it('Barrionuevo FT ops_cov (CAPS Angelelli 26/09): ventana ops + no es TRACE', () => {
+    // Hero FT ops_cov 15–23; cobertura real (no EXT/ADV de registro).
+    // Ventana server: start−15 … max(createdAt, start)+60 → cierre 16:00 con created 14:45.
+    const opsCov = {
+      id: 'ops_cov_lXLFk2F33HRiAsQpmoqS_hzHO3PUA0Bo5DwZwHlG2',
+      origin: 'OPERATIONS_COVERAGE',
+      code: 'FT',
+      startTime: ts('2026-09-26T15:00:00-03:00'),
+      endTime: ts('2026-09-26T23:00:00-03:00'),
+      createdAt: ts('2026-09-26T14:45:00-03:00'),
+      coverageCreatedAt: ts('2026-09-26T14:45:00-03:00'),
+    };
+    const inWindow = new Date('2026-09-26T15:20:00-03:00').getTime();
+    assertParity('barrionuevo in window', opsCov, inWindow);
+    const r = evaluateCheckInWindow(opsCov, inWindow);
+    assert.equal(r.allowed, true);
+    assert.equal(r.rejectCode, undefined);
+
+    const beforeOpen = new Date('2026-09-26T14:40:00-03:00').getTime();
+    assertParity('barrionuevo early', opsCov, beforeOpen);
+    assert.equal(evaluateCheckInWindow(opsCov, beforeOpen).rejectCode, 'TOO_EARLY');
+
+    // Pasado max(created,start)+60 aunque el turno siga — paridad server (TOO_LATE).
+    const afterOpsWindow = new Date('2026-09-26T16:30:00-03:00').getTime();
+    assertParity('barrionuevo after ops window', opsCov, afterOpsWindow);
+    assert.equal(evaluateCheckInWindow(opsCov, afterOpsWindow).rejectCode, 'TOO_LATE');
+
+    const afterEnd = new Date('2026-09-26T23:05:00-03:00').getTime();
+    assertParity('barrionuevo ended', opsCov, afterEnd);
+    assert.equal(evaluateCheckInWindow(opsCov, afterEnd).rejectCode, 'SHIFT_ENDED');
+  });
+
+  it('Nuevo Edificio 28/09 — ADVANCE Ceballos ops_cov con ventanas absurdas Demo: TRACE, sin romper', () => {
+    // Datos erróneos del Demo: franjas 08–12 y 16–20 en docs de registro ADVANCE.
+    // El portal no debe ofrecer fichar ni lanzar excepción.
+    const bogusMorning = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'ADVANCE',
+      coverageHoursOnSource: true,
+      startTime: ts('2026-09-28T08:00:00-03:00'),
+      endTime: ts('2026-09-28T12:00:00-03:00'),
+      createdAt: ts('2026-09-28T07:50:00-03:00'),
+    };
+    const bogusAfternoon = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'ADVANCE',
+      // Sin flag; detectado por coverageType (paridad isOpsCoverageHoursOnSourceDoc)
+      startTime: ts('2026-09-28T16:00:00-03:00'),
+      endTime: ts('2026-09-28T20:00:00-03:00'),
+      coverageCreatedAt: ts('2026-09-28T15:55:00-03:00'),
+    };
+
+    for (const [label, shift, nowIso] of [
+      ['am mid', bogusMorning, '2026-09-28T09:00:00-03:00'],
+      ['am early', bogusMorning, '2026-09-28T07:00:00-03:00'],
+      ['pm mid', bogusAfternoon, '2026-09-28T17:00:00-03:00'],
+      ['pm after end', bogusAfternoon, '2026-09-28T21:00:00-03:00'],
+    ] as const) {
+      const nowMs = new Date(nowIso).getTime();
+      assertParity(`ceballos ${label}`, shift, nowMs);
+      const r = evaluateCheckInWindow(shift, nowMs);
+      assert.equal(r.allowed, false);
+      assert.equal(r.rejectCode, 'TRACE_REGISTRATION');
+      assert.match(checkInRejectMessage(r.rejectCode), /extensión|adelanto/i);
+    }
+  });
+});
+
+describe('mensajes de rechazo UX', () => {
+  it('textos claros por código', () => {
+    assert.match(checkInRejectMessage('TOO_EARLY'), /temprano/i);
+    assert.match(checkInRejectMessage('SHIFT_ENDED'), /terminó/i);
+    assert.match(checkInRejectMessage('TRACE_REGISTRATION'), /extensión|adelanto/i);
+    assert.match(checkInRejectMessage('TOO_LATE'), /ventana/i);
+  });
+});
