@@ -4,6 +4,7 @@ exports.positionHasContinuityFromSlaDoc = positionHasContinuityFromSlaDoc;
 exports.loadPositionHasContinuity = loadPositionHasContinuity;
 const types_1 = require("../cerebro/types");
 const s1_leer_sla_1 = require("../cerebro/inteligencia-servicio/s1-leer-sla");
+const reliefEligibility_1 = require("../common/reliefEligibility");
 const TZ = 'America/Argentina/Cordoba';
 const CONTINUITY_WINDOW_MS = 30 * 60 * 1000;
 const normPos = (n) => String(n ?? '')
@@ -100,6 +101,8 @@ function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
     for (const need of needs) {
         if (!posMatch(need.puestoName, positionName))
             continue;
+        if (reliefEligibility_1.NON_RELIEF_EXTRA_CODES.has(String(need.banda || '').toUpperCase()))
+            continue;
         if (need.excludedDates?.includes(dateStr))
             continue;
         if (!need.diasSemana.includes(dayLetter))
@@ -121,7 +124,6 @@ async function loadPositionHasContinuity(db, objectiveId, positionName, shiftEnd
         .collection('servicios_sla')
         .where('objectiveId', '==', oid)
         .where('status', '==', 'active')
-        .limit(3)
         .get();
     for (const d of slaSnap.docs) {
         if (positionHasContinuityFromSlaDoc(d.data(), positionName, shiftEndTime)) {

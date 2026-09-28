@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.posMatchRelief = exports.RELEVO_GAP_ALIGN_MS = void 0;
 exports.findPresentOutgoingAlignedToGapStart = findPresentOutgoingAlignedToGapStart;
+const reliefEligibility_1 = require("../common/reliefEligibility");
 exports.RELEVO_GAP_ALIGN_MS = 30 * 60 * 1000;
 const normPos = (n) => String(n ?? '')
     .trim()
@@ -65,6 +66,8 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
         if (String(data.relievedBy || '').trim())
             return false;
         if (data.isAbsent || data.isVirtual === true)
+            return false;
+        if (!(0, reliefEligibility_1.isReliefEligibleShift)(data))
             return false;
         if (!(0, exports.posMatchRelief)(data.positionName, params.positionName))
             return false;

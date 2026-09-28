@@ -14,6 +14,8 @@ import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
+import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
 const registrarBitacora = async (action: string, details: string, extra?: { objectiveName?: string; clientName?: string }) => {
@@ -80,7 +82,10 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
     const now = new Date(); const start = toDate(incomingShift.shiftDateObj); const diffMin = (now.getTime() - start.getTime()) / 60000;
     let status = 'ON_TIME'; if (!incomingShift.isReten && diffMin > 5) status = 'LATE';
     const wasAbsent = incomingShift.isAbsent === true || incomingShift.absenceType === 'AA';
+    const incomingIsExtra = isExtraNonReliefShift(incomingShift);
     const activeGuards = logic.processedData.filter((s:any) => {
+        if (incomingIsExtra) return false;
+        if (!isReliefEligibleShift(s)) return false;
         if (s.objectiveId !== incomingShift.objectiveId) return false;
         if (String(s.positionName || '').trim().toLowerCase() !== String(incomingShift.positionName || '').trim().toLowerCase()) return false;
         if (!s.isPresent || s.isCompleted) return false;
@@ -119,10 +124,13 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         if (mode === 'override' && prevShiftId && onRelieved) onRelieved(prevShiftId);
         else onClose();
 
+        const effectiveMode = incomingIsExtra ? 'skip' : mode;
         toast.success(
-            mode === 'skip'
+            incomingIsExtra
+                ? (status === 'LATE' ? 'Ingreso tarde al sobreturno.' : 'Ingreso al sobreturno.')
+                : effectiveMode === 'skip'
                 ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
-                : mode === 'override'
+                : effectiveMode === 'override'
                     ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
                     : (status === 'LATE' ? 'Ingreso tarde — relevo automático FIFO.' : 'Ingreso — relevo automático FIFO.'),
         );
@@ -130,15 +138,15 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
         void registrarPresenciaOps({
             shiftId: incomingShift.id,
             source: 'OPERATIONS',
-            skipAutoRelevo: mode === 'skip',
-            overrideRelieveShiftId: mode === 'override' && prevShiftId ? prevShiftId : mode === 'skip' ? null : undefined,
+            skipAutoRelevo: effectiveMode === 'skip',
+            overrideRelieveShiftId: effectiveMode === 'override' && prevShiftId ? prevShiftId : effectiveMode === 'skip' ? null : undefined,
         }).then((res) => {
             if (res.alreadyPresent) {
                 toast.message('El turno ya estaba marcado presente.');
-            } else if (mode === 'auto' && res.relieved) {
+            } else if (effectiveMode === 'auto' && res.relieved) {
                 toast.success(`Relevó a ${res.relieved.employeeName} (FIFO).`);
                 onRelieved?.(res.relieved.shiftId);
-            } else if (mode === 'auto' && !res.relieved) {
+            } else if (effectiveMode === 'auto' && !res.relieved) {
                 toast.message('Presente OK — no había saliente para relevar.');
             }
         }).catch((e: any) => {
@@ -181,7 +189,9 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                         onClick={() => handleConfirm('auto')}
                         className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}
                     >
-                        {status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO'}
+                        {incomingIsExtra
+                            ? (status === 'LATE' ? 'DAR PRESENTE (TARDE)' : 'DAR PRESENTE')
+                            : (status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO')}
                     </button>
                     {activeGuards.length > 0 && (
                         <div className="space-y-2 mb-3">
@@ -1286,6 +1296,7 @@ export default function TacticalMapView() {
                                             <div className="flex-1 min-w-0">
                                                 <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                     {s.employeeName || 'Desconocido'}
+                                                    <ShiftCodeBadge shift={s} className="ml-1" />
                                                     <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.manualRetentionType ? 'bg-amber-100 text-amber-700' : s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
                                                         {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? 'RECARGO' : s.isPendingClose ? 'CIERRE PENDIENTE' : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
@@ -1323,9 +1334,13 @@ export default function TacticalMapView() {
                                                 <div className="flex-1 min-w-0">
                                                     <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                         {s.employeeName || 'Desconocido'}
+                                                        <ShiftCodeBadge shift={s} className="ml-1" />
                                                         <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700" title={lateBadge}>{lateBadge}</span>
                                                     </p>
                                                     <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                                    {isExtraNonReliefShift(s) && (
+                                                        <p className="text-[10px] font-bold text-amber-700 leading-tight">Sobreturno: llegó tarde a su propio turno.</p>
+                                                    )}
                                                 </div>
                                                 <div className="flex gap-1 shrink-0">
                                                     <button onClick={() => { setNotifPanelOpen(false); setHandoverData({isOpen:true, shift:s}); }} className="p-1.5 bg-amber-500 text-white rounded-lg hover:bg-amber-600" title="Dar presente (tarde)"><PlayCircle size={11}/></button>

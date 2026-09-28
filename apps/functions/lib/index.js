@@ -21,6 +21,7 @@ const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
 const coverageRetention_1 = require("./coverage/coverageRetention");
 const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
 const simulableShift_1 = require("./common/simulableShift");
+const reliefEligibility_1 = require("./common/reliefEligibility");
 const arClock_1 = require("./common/arClock");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
@@ -973,6 +974,10 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
     catch (e) {
         console.warn('[onTurnoAbsenciaDetectada] retención:', e?.message);
     }
+    if ((0, reliefEligibility_1.isExtraNonReliefShift)(after)) {
+        console.log(`[onTurnoAbsenciaDetectada] Turno extra sin franja vendida: sin cascada shift=${event.params.shiftId}`);
+        return;
+    }
     const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await (0, opsManualMode_1.isEmpresaManualMode)(db, empresaId));
     if (manual) {
         console.log(`[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`);
@@ -1032,11 +1037,13 @@ exports.autoPresenciaYCierre = functions
             isPresent: !!t.isPresent,
             isCompleted: !!t.isCompleted,
             isAbsent: !!t.isAbsent,
+            reliefEligible: (0, reliefEligibility_1.isReliefEligibleShift)(t),
         });
     }
     function hayRelevoPendiente(objectiveId, shiftEndMs) {
         const turnos = byObjective.get(objectiveId) ?? [];
-        return turnos.some(r => !r.isPresent && !r.isAbsent && !r.isCompleted &&
+        return turnos.some(r => r.reliefEligible &&
+            !r.isPresent && !r.isAbsent && !r.isCompleted &&
             Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
     }
     const presenciaMarcada = [];
@@ -1533,6 +1540,10 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
         await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'LATE_NOTICE').catch(() => { });
         await (0, relevoNotifications_1.applyLateReliefNoticeToOutgoing)(db, shiftId, shiftData, etaAt).catch(() => { });
         try {
+            const extraLate = (0, reliefEligibility_1.isExtraNonReliefShift)(shiftData);
+            const lateCode = String(shiftData.code || shiftData.type || '').trim().toUpperCase();
+            const lateWho = String(shiftData.employeeName || 'El guardia');
+            const lateWhere = String(shiftData.objectiveName || 'su puesto');
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',
                 shiftId,
@@ -1542,7 +1553,10 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
                 objectiveName: shiftData.objectiveName || '',
                 clientName: shiftData.clientName || '',
                 empresaId: shiftData.empresaId || null,
-                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                shiftCode: lateCode || null,
+                description: extraLate
+                    ? `${lateWho} avisó llegada tarde a su turno ${lateCode || 'extra'} en ${lateWhere}. Sobreturno: la franja del puesto no cambia.`
+                    : `${lateWho} avisó que llegará tarde a ${lateWhere}`,
                 createdAt: now,
                 status: 'unread',
                 viewed: false,
@@ -2364,7 +2378,7 @@ exports.detectarAusencias = functions
             continue;
         if (s.earlyRetentionAlertAt)
             continue;
-        if (s.lateArrivalAt || s.notifiedAbsent)
+        if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent)
             continue;
         const empId = shiftEmpresaId(s);
         const posName = (s.positionName || '').trim().toLowerCase();
@@ -2391,6 +2405,8 @@ exports.detectarAusencias = functions
         catch (e) {
             console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
         }
+        if ((0, reliefEligibility_1.isExtraNonReliefShift)(s))
+            continue;
         try {
             const presentSnap = await db.collection('turnos')
                 .where('empresaId', '==', empId)
@@ -2400,6 +2416,8 @@ exports.detectarAusencias = functions
             const toAlert = presentSnap.docs.filter(d => {
                 const dat = d.data();
                 if (dat.isCompleted === true)
+                    return false;
+                if ((0, reliefEligibility_1.isExtraNonReliefShift)(dat))
                     return false;
                 return (dat.positionName || '').trim().toLowerCase() === posName
                     && dat.employeeId !== s.employeeId;
@@ -2515,7 +2533,7 @@ exports.detectarAusencias = functions
             });
             return true;
         };
-        if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
+        if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
             const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
             const capMs = startMs + 60 * 60 * 1000;
             const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;

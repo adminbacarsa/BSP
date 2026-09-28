@@ -28,6 +28,7 @@ import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocato
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { isSimulableShift, simulableShiftSkipReason } from './common/simulableShift';
+import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEligibility';
 import { arPlanificacionEstadoKey } from './common/arClock';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
@@ -1156,6 +1157,14 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       console.warn('[onTurnoAbsenciaDetectada] retención:', (e as Error)?.message);
     }
 
+    // ESC/REF/RET ausente no abre hueco de SLA: no hay franja que cubrir.
+    if (isExtraNonReliefShift(after as Record<string, unknown>)) {
+      console.log(
+        `[onTurnoAbsenciaDetectada] Turno extra sin franja vendida: sin cascada shift=${event.params.shiftId}`,
+      );
+      return;
+    }
+
     const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await isEmpresaManualMode(db, empresaId));
     if (manual) {
       console.log(
@@ -1218,7 +1227,7 @@ export const autoPresenciaYCierre = functions
     // Índice: set de objetivoId con turno activo entrante (relevo aun no fichado)
     // Relevo = turno que empieza cerca del endTime del saliente y NO tiene presencia aún
     // Construimos mapa objectiveId → turnos de la ventana para el chequeo de relevo
-    const byObjective = new Map<string, Array<{ startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean }>>();
+    const byObjective = new Map<string, Array<{ startMs: number; endMs: number; isPresent: boolean; isCompleted: boolean; isAbsent: boolean; reliefEligible: boolean }>>();
     for (const doc of snap.docs) {
       const t = doc.data() as any;
       const oid = String(t.objectiveId || '');
@@ -1230,14 +1239,16 @@ export const autoPresenciaYCierre = functions
         isPresent: !!t.isPresent,
         isCompleted: !!t.isCompleted,
         isAbsent: !!t.isAbsent,
+        reliefEligible: isReliefEligibleShift(t as Record<string, unknown>),
       });
     }
 
-    // ¿Tiene relevo pendiente? = hay un turno en el mismo objetivo cuyo startTime está
-    // dentro de ±90 min del endTime del turno saliente Y ese relevo aún no fichó ni es ausente.
+    // ¿Tiene relevo pendiente? = turno elegible (no ESC/REF/RET) cuyo startTime está
+    // dentro de ±90 min del endTime del saliente y aún no fichó ni es ausente.
     function hayRelevoPendiente(objectiveId: string, shiftEndMs: number): boolean {
       const turnos = byObjective.get(objectiveId) ?? [];
       return turnos.some(r =>
+        r.reliefEligible &&
         !r.isPresent && !r.isAbsent && !r.isCompleted &&
         Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000,
       );
@@ -1830,6 +1841,10 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
 
         // Crear novedad para notificar al operador en CC
         try {
+            const extraLate = isExtraNonReliefShift(shiftData);
+            const lateCode = String(shiftData.code || shiftData.type || '').trim().toUpperCase();
+            const lateWho = String(shiftData.employeeName || 'El guardia');
+            const lateWhere = String(shiftData.objectiveName || 'su puesto');
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',
                 shiftId,
@@ -1839,7 +1854,10 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
                 objectiveName: shiftData.objectiveName || '',
                 clientName: shiftData.clientName || '',
                 empresaId: shiftData.empresaId || null,
-                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                shiftCode: lateCode || null,
+                description: extraLate
+                  ? `${lateWho} avisó llegada tarde a su turno ${lateCode || 'extra'} en ${lateWhere}. Sobreturno: la franja del puesto no cambia.`
+                  : `${lateWho} avisó que llegará tarde a ${lateWhere}`,
                 createdAt: now,
                 status: 'unread',
                 viewed: false,
@@ -2814,7 +2832,7 @@ export const detectarAusencias = functions
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
       if (SKIP_STATUSES.has(s.status || '')) continue;
       if (s.earlyRetentionAlertAt) continue;  // ya se procesÃ³
-      if (s.lateArrivalAt || s.notifiedAbsent) continue; // tiene aviso previo
+      if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent) continue; // tiene aviso previo
 
       const empId = shiftEmpresaId(s);
       const posName = (s.positionName || '').trim().toLowerCase();
@@ -2845,7 +2863,9 @@ export const detectarAusencias = functions
         console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
       }
 
-      // Buscar guardia saliente presente en el mismo puesto
+      // Buscar guardia saliente presente en el mismo puesto.
+      // Un ESC/REF/RET que no llegó no deja a nadie esperando relevo: es sobreturno.
+      if (isExtraNonReliefShift(s as Record<string, unknown>)) continue;
       try {
         const presentSnap = await db.collection('turnos')
           .where('empresaId', '==', empId)
@@ -2856,6 +2876,7 @@ export const detectarAusencias = functions
         const toAlert = presentSnap.docs.filter(d => {
           const dat = d.data();
           if (dat.isCompleted === true) return false;
+          if (isExtraNonReliefShift(dat as Record<string, unknown>)) return false;
           return (dat.positionName || '').trim().toLowerCase() === posName
             && dat.employeeId !== s.employeeId;
         });
@@ -2973,7 +2994,7 @@ export const detectarAusencias = functions
         return true;
       };
 
-      if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
+      if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
         const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
         const capMs = startMs + 60 * 60 * 1000;
         const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;

@@ -8,6 +8,7 @@ const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTardeConvocatorias");
 const relevoNotifications_1 = require("./relevoNotifications");
 const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
+const reliefEligibility_1 = require("../common/reliefEligibility");
 const shiftClose_1 = require("../scheduling/shiftClose");
 function normPos(n) {
     return String(n ?? '')
@@ -134,7 +135,7 @@ async function registrarPresencia(db, input) {
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,
-        lateArrivalAt: isLate && !shiftData.lateArrivalAt ? now : shiftData.lateArrivalAt ?? null,
+        lateArrivalAt: shiftData.lateArrivalAt ?? null,
         presenciaSource: source,
         presenciaAt: now,
     };
@@ -225,7 +226,8 @@ async function registrarPresencia(db, input) {
         .catch((e) => console.warn('[registrarPresencia] novedad ingreso:', e?.message));
     let relieved = null;
     const wantSkip = skipAutoRelevo === true ||
-        overrideRelieveShiftId === null;
+        overrideRelieveShiftId === null ||
+        !(0, reliefEligibility_1.isReliefEligibleShift)(shiftData);
     const wantOverride = typeof overrideRelieveShiftId === 'string' && overrideRelieveShiftId.trim().length > 0;
     if (!wantSkip) {
         try {
@@ -243,6 +245,7 @@ async function registrarPresencia(db, input) {
                         const od = ov.data();
                         if (od.isPresent &&
                             !od.isCompleted &&
+                            (0, reliefEligibility_1.isReliefEligibleShift)(od) &&
                             String(od.objectiveId || '') === objectiveId &&
                             normPos(od.positionName) === normPos(positionName) &&
                             ov.id !== shiftId) {
@@ -278,6 +281,8 @@ async function registrarPresencia(db, input) {
                         if (empId && dat.employeeId === empId)
                             return false;
                         if (String(dat.relievedBy || '').trim())
+                            return false;
+                        if (!(0, reliefEligibility_1.isReliefEligibleShift)(dat))
                             return false;
                         return true;
                     });

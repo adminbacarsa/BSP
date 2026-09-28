@@ -6,6 +6,7 @@ exports.notifyRetencionAvisoRelevoTarde = notifyRetencionAvisoRelevoTarde;
 exports.applyLateReliefNoticeToOutgoing = applyLateReliefNoticeToOutgoing;
 const firestore_1 = require("firebase-admin/firestore");
 const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
+const reliefEligibility_1 = require("../common/reliefEligibility");
 function formatHmArgentina(ms) {
     return new Intl.DateTimeFormat('es-AR', {
         hour: '2-digit',
@@ -74,6 +75,8 @@ async function notifyRetencionAvisoRelevoTarde(db, params) {
     }
 }
 async function applyLateReliefNoticeToOutgoing(db, incomingShiftId, shiftData, etaAt) {
+    if (!(0, reliefEligibility_1.isReliefEligibleShift)(shiftData))
+        return false;
     const gapStartMs = shiftData.startTime?.toMillis?.() ?? 0;
     const objectiveId = String(shiftData.objectiveId || '').trim();
     const positionName = shiftData.positionName;

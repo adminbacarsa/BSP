@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { retainOutgoingForGap } from './coverageRetention';
+import { isExtraNonReliefShift } from '../common/reliefEligibility';
 
 const normPos = (n: unknown): string =>
   String(n ?? '')
@@ -108,6 +109,11 @@ export async function escalarVacanteSinCobertura(
   const shift = shiftSnap.exists ? (shiftSnap.data() as Record<string, unknown>) : null;
 
   if (shift && (shift.operacionallyCovered === true || String(shift.coverageStatus || '').toUpperCase() === 'COVERED')) {
+    return { escalated: false, retained: false, retentionShiftIds: [], supervisorsNotified: 0 };
+  }
+
+  // ESC/REF/RET no son franja vendida: su falta no deja el puesto sin cobertura.
+  if (shift && isExtraNonReliefShift(shift)) {
     return { escalated: false, retained: false, retentionShiftIds: [], supervisorsNotified: 0 };
   }
 

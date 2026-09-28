@@ -1,5 +1,6 @@
 import { isOpsShiftHoy } from '@/hooks/useOperacionesMonitor';
 import { isObjectiveEligibleForCcMonth } from '@/lib/operaciones/ccObjectiveEligibility';
+import { isExtraNonReliefShift, opsShiftCodeBadge } from '@cosp/ops-core';
 
 const TZ_AR = 'America/Argentina/Cordoba';
 
@@ -59,7 +60,9 @@ export function novedadActorName(n: any): string {
 export function novedadHeadline(n: any): string {
     const actor = novedadActorName(n);
     const obj = String(n?.objectiveName || '').trim();
-    if (actor && obj) return `${actor} · ${obj}`;
+    const code = String(n?.shiftCode || n?.code || '').trim().toUpperCase();
+    const who = actor && code ? `${actor} · ${code}` : actor;
+    if (who && obj) return `${who} · ${obj}`;
     if (actor) return actor;
     if (obj) return obj;
     const title = String(n?.title || '').trim();
@@ -73,6 +76,12 @@ export function novedadSubline(n: any, processedData?: any[]): string {
     const pos = String(n?.positionName || '').trim();
     const actor = novedadActorName(n);
     const type = String(n?.type || '');
+    const shiftId = String(n?.shiftId || '').trim();
+    const linked = shiftId ? (processedData || []).find((s: any) => s.id === shiftId) : null;
+    if (linked && isExtraNonReliefShift(linked)) {
+        const code = opsShiftCodeBadge(linked)?.code || String(linked.code || '').toUpperCase();
+        return `${pos ? `${pos} · ` : ''}Turno ${code}: sobreturno. La franja del puesto no cambia.`;
+    }
 
     if (ABSENCE_ALERT_TYPES.has(type)) {
         const shiftId = String(n?.shiftId || '').trim();

@@ -3,6 +3,7 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { positionHasContinuityFromSlaDoc } from './positionHasContinuity';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
+import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
@@ -79,6 +80,10 @@ export async function retainOutgoingForGap(
 ): Promise<RetainOutgoingResult> {
   if (skipAbsencePipelineForShift(titularShift)) {
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'TRACE_REGISTRATION_SHIFT' };
+  }
+  // ESC/REF/RET ausente no deja hueco de SLA: la franja sigue cubierta por el titular.
+  if (!isReliefEligibleShift(titularShift)) {
+    return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EXTRA_SHIFT_NO_GAP' };
   }
 
   const absenceShiftId = String(titularShift.id || '').trim();

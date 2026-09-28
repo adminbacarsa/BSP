@@ -7,6 +7,7 @@ import {
 import { retainOutgoingForGap } from '../coverage/coverageRetention';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
+import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 import {
@@ -69,11 +70,15 @@ function shiftStartMs(data: FirebaseFirestore.DocumentData): number {
   return data.startTime?.toMillis?.() ?? 0;
 }
 
-/** Relevo válido: mismo puesto, start en [end−30m, end+2h], no compañero en curso (empezó antes de end−30m). */
+/**
+ * Relevo válido: turno que toma la franja del puesto (no ESC/REF/RET ni francos/licencias),
+ * mismo puesto, start en [end−30m, end+2h], no compañero en curso (empezó antes de end−30m).
+ */
 export function isValidReliefForOutgoing(
   incoming: FirebaseFirestore.DocumentData,
   outgoingEndMs: number,
 ): boolean {
+  if (!isReliefEligibleShift(incoming as Record<string, unknown>)) return false;
   const st = shiftStartMs(incoming);
   if (!st) return false;
   if (st < outgoingEndMs - RELEVO_ALIGN_MS) return false;
@@ -301,6 +306,14 @@ export async function runAutoCompletarTurnosPass(
       close(docSnap, shift, retained ? capAtMs : endTimeMs, 'TOPE_JORNADA_RETROACTIVO', {
         requiereRevision: true,
       });
+      continue;
+    }
+
+    // ESC/REF/RET son sobreturnos: no ocupan la franja del puesto, así que no esperan
+    // relevo ni se retienen. Cierran en su fin planificado (acotado al tope).
+    if (isExtraNonReliefShift(shift as Record<string, unknown>)) {
+      const cappedEnd = capAtMs > 0 ? Math.min(endTimeMs, capAtMs) : endTimeMs;
+      close(docSnap, shift, cappedEnd, cappedEnd < endTimeMs ? 'TOPE_JORNADA' : 'FIN_TURNO_EXTRA');
       continue;
     }
 

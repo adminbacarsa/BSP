@@ -11,8 +11,10 @@ const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("./positionHasContinuity");
 const coverageTraceShift_1 = require("./coverageTraceShift");
 const relevoOutgoingMatch_1 = require("../fichajes/relevoOutgoingMatch");
+const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftClose_1 = require("../scheduling/shiftClose");
 const GAP_ALIGN_MS = 30 * 60 * 1000;
-const RETENTION_MAX_TOTAL_MS = 12 * 60 * 60 * 1000;
+const RETENTION_MAX_TOTAL_MS = shiftClose_1.SHIFT_HARD_CAP_MS;
 exports.RETENTION_MAX_TOTAL_MS = RETENTION_MAX_TOTAL_MS;
 const normPos = (n) => String(n ?? '')
     .trim()
@@ -67,6 +69,9 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
     if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(titularShift)) {
         return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'TRACE_REGISTRATION_SHIFT' };
     }
+    if (!(0, reliefEligibility_1.isReliefEligibleShift)(titularShift)) {
+        return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EXTRA_SHIFT_NO_GAP' };
+    }
     const absenceShiftId = String(titularShift.id || '').trim();
     const objectiveId = String(titularShift.objectiveId || '').trim();
     const positionName = titularShift.positionName;
@@ -81,11 +86,12 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
         .where('isRetention', '==', true)
         .limit(5)
         .get();
-    if (!existing.empty) {
+    const activeRetained = existing.docs.filter((d) => d.data().isCompleted !== true);
+    if (activeRetained.length) {
         return {
             applied: false,
-            shiftIds: existing.docs.map((d) => d.id),
-            employeeNames: existing.docs.map((d) => String(d.data().employeeName || '')),
+            shiftIds: activeRetained.map((d) => d.id),
+            employeeNames: activeRetained.map((d) => String(d.data().employeeName || '')),
             skippedReason: 'ALREADY_RETAINED_FOR_GAP',
         };
     }
@@ -195,7 +201,10 @@ async function releaseRetentionForAbsenceShift(db, absenceShiftId, releasedBy) {
         return 0;
     const ordered = snap.docs
         .map((d) => ({ ref: d.ref, data: d.data() }))
+        .filter((row) => row.data.isCompleted !== true)
         .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
+    if (!ordered.length)
+        return 0;
     const batch = db.batch();
     const now = firestore_1.FieldValue.serverTimestamp();
     for (const row of ordered) {
@@ -226,6 +235,8 @@ async function releaseInvalidRetentionsRun(db, opts) {
         const shift = docSnap.data();
         if (empresaFilter && String(shift.empresaId || '') !== empresaFilter)
             continue;
+        if (shift.isCompleted === true)
+            continue;
         const endMs = shift.endTime?.toMillis?.() ?? 0;
         if (!endMs)
             continue;
@@ -235,11 +246,10 @@ async function releaseInvalidRetentionsRun(db, opts) {
                 .collection('servicios_sla')
                 .where('objectiveId', '==', oid)
                 .where('status', '==', 'active')
-                .limit(1)
                 .get();
-            slaCache.set(oid, slaSnap.empty ? null : slaSnap.docs[0].data());
+            slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
         }
-        const continuous = (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(slaCache.get(oid) || undefined, shift.positionName || '', new Date(endMs));
+        const continuous = (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', new Date(endMs)));
         if (continuous)
             continue;
         const reason = String(shift.retentionReason || '');
@@ -254,13 +264,16 @@ async function releaseInvalidRetentionsRun(db, opts) {
         });
         if (!dryRun) {
             await docSnap.ref.update({
+                ...(0, shiftClose_1.buildAutoClosePatch)(shift, {
+                    realEndMs: endMs,
+                    reason: 'SIN_CONTINUIDAD_SLA',
+                    now: firestore_1.Timestamp.now(),
+                    by: 'ADMIN_RELEASE_INVALID',
+                    extra: { requiereRevision: true },
+                }),
                 isRetention: false,
-                status: 'COMPLETED',
-                isCompleted: true,
-                isPresent: false,
                 retentionReleasedAt: firestore_1.FieldValue.serverTimestamp(),
                 releasedBy: 'ADMIN_RELEASE_INVALID',
-                completionReason: 'SIN_CONTINUIDAD_SLA',
             });
         }
     }
