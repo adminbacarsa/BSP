@@ -1,5 +1,6 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { ymCordobaParts } from '../assistant/planificacionEstadoKeys';
+import { buildSlaUnplannedGapDocId } from './slaGapId';
 
 const TZ = 'America/Argentina/Cordoba';
 
@@ -113,9 +114,13 @@ export async function detectPublishedSlaGapsForEmpresa(
 
           if (count >= qty) continue;
 
-          const gapId = `gap_${eid}_${objectiveId}_${normPos(posName)}_${dayStr}_${code}`
-            .replace(/[^a-zA-Z0-9_-]/g, '_')
-            .slice(0, 120);
+          const gapId = buildSlaUnplannedGapDocId({
+            empresaId: eid,
+            objectiveId,
+            positionName: posName,
+            dayYmd: dayStr,
+            bandCode: code,
+          });
           const gapRef = db.collection('sla_huecos_sin_plan').doc(gapId);
           const exist = await gapRef.get();
           if (exist.exists) continue;

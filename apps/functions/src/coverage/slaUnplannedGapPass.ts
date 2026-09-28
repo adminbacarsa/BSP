@@ -60,44 +60,23 @@ export async function advanceSlaUnplannedGap(
   }
 
   if (minutesUntil > 0) {
-    let shiftId = gap.ccVacancyShiftId || null;
-    if (!shiftId && gapRef) {
-      const vacRef = db.collection('turnos').doc();
-      shiftId = vacRef.id;
-      await vacRef.set({
-        empresaId: gap.empresaId,
-        clientId: gap.clientId || null,
-        clientName: gap.clientName || null,
-        objectiveId: gap.objectiveId,
-        objectiveName: gap.objectiveName || '',
-        positionName: gap.positionName,
-        employeeId: 'VACANTE',
-        employeeName: 'VACANTE (SLA SIN PLAN)',
-        code: gap.bandCode || 'M',
-        startTime: gap.gapStart,
-        endTime: gap.gapEnd,
-        status: 'UNCOVERED_REPORTED',
-        isUnassigned: true,
-        isPresent: false,
-        isReported: true,
-        origin: 'SLA_UNPLANNED_GAP',
-        originRef: gapId,
-        slaGapDocId: gapId,
-        createdAt: FieldValue.serverTimestamp(),
-      });
-      await gapRef.update({ ccVacancyShiftId: shiftId });
+    if (gapRef && !gap.ccVacancyShiftId) {
+      await gapRef.update({ ccVacancyShiftId: gapId });
     }
-    return { phase: 'CC_VACANCY', shiftId: shiftId || undefined };
+    return { phase: 'CC_VACANCY', shiftId: gapId || undefined };
   }
 
   if (!gap.retentionAppliedAt) {
-    const titularId = gap.ccVacancyShiftId;
-    if (titularId) {
-      const tSnap = await db.collection('turnos').doc(titularId).get();
-      if (tSnap.exists) {
-        await retainOutgoingForGap(db, { ...tSnap.data(), id: titularId });
-      }
-    }
+    await retainOutgoingForGap(db, {
+      id: gapId,
+      empresaId: gap.empresaId,
+      objectiveId: gap.objectiveId,
+      positionName: gap.positionName,
+      employeeId: 'VACANTE',
+      startTime: gap.gapStart,
+      endTime: gap.gapEnd,
+      code: gap.bandCode || 'M',
+    });
     if (gapRef) await gapRef.update({ retentionAppliedAt: now });
     return { phase: 'RETENTION_AT_GAP' };
   }

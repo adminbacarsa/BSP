@@ -786,6 +786,12 @@ function isSinCoberturaShift(shift) {
 }
 function isProformaVacancyShift(shift) {
   if (!shift) return false;
+  const st = String(shift.status ?? "").trim().toUpperCase();
+  if (st === "SUPERSEDED") return false;
+  const origin = String(shift.origin ?? "").trim().toUpperCase();
+  if (origin === "VACANTE_POR_AUSENCIA" || origin === "SLA_VIRTUAL" || origin === "SLA_UNPLANNED_GAP") {
+    return false;
+  }
   if (isSinCoberturaShift(shift)) return true;
   if (shift.isUnassigned === true) return true;
   const eid = String(shift.employeeId ?? "").trim();
@@ -1282,6 +1288,13 @@ var BAND_HOURS = {
 var JORNADA_DEFAULT_HS = 8;
 var FULL_CALENDAR_DAY_HS = 23.5;
 function isVacantShift(t) {
+  if (String(t?.status || "").toUpperCase() === "SUPERSEDED") return false;
+  const origin = String(t?.origin || "").toUpperCase();
+  if (origin === "VACANTE_POR_AUSENCIA" || origin === "SLA_VIRTUAL" || origin === "SLA_UNPLANNED_GAP") {
+    return false;
+  }
+  const id = String(t?.id || "");
+  if (id.startsWith("autodev_") || id.startsWith("autosinc_")) return false;
   const empNameU = String(t?.employeeName || "").trim().toUpperCase();
   return !t?.employeeId || t.employeeId === "VACANTE" || empNameU === "VACANTE" || empNameU.startsWith("VACANTE:") || !!t?.isUnassigned;
 }

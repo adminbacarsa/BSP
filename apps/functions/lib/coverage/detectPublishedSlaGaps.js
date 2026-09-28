@@ -4,6 +4,7 @@ exports.detectPublishedSlaGapsForEmpresa = detectPublishedSlaGapsForEmpresa;
 exports.runDetectPublishedSlaGaps = runDetectPublishedSlaGaps;
 const firestore_1 = require("firebase-admin/firestore");
 const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys");
+const slaGapId_1 = require("./slaGapId");
 const TZ = 'America/Argentina/Cordoba';
 function weekdayLetter(d) {
     const en = d.toLocaleDateString('en-US', { weekday: 'short', timeZone: TZ });
@@ -105,9 +106,13 @@ async function detectPublishedSlaGapsForEmpresa(db, empresaId, now = firestore_1
                     }).length;
                     if (count >= qty)
                         continue;
-                    const gapId = `gap_${eid}_${objectiveId}_${normPos(posName)}_${dayStr}_${code}`
-                        .replace(/[^a-zA-Z0-9_-]/g, '_')
-                        .slice(0, 120);
+                    const gapId = (0, slaGapId_1.buildSlaUnplannedGapDocId)({
+                        empresaId: eid,
+                        objectiveId,
+                        positionName: posName,
+                        dayYmd: dayStr,
+                        bandCode: code,
+                    });
                     const gapRef = db.collection('sla_huecos_sin_plan').doc(gapId);
                     const exist = await gapRef.get();
                     if (exist.exists)

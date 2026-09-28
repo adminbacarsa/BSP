@@ -24,8 +24,14 @@ export declare function absentShiftCoveragePatch(opts: {
 }): Record<string, unknown>;
 export declare function isDualSiblingOpsCoverage(existingType: string, incomingType: string): boolean;
 export declare function isTitularAlreadyCovered(data: Record<string, any> | undefined | null): boolean;
+export declare function findOpenAbsenceVacancyDocs(db: admin.firestore.Firestore, titularShiftId: string): Promise<admin.firestore.DocumentReference[]>;
+export declare function absenceVacancyClosePatch(outcome: 'COVERED' | 'REVERTED', by: string): Record<string, unknown>;
 export declare function buildOpsCoverageDocId(titularShiftId: string, employeeId: string): string;
+export declare const DELETED_REASON_CONVERTED_COVERAGE = "CONVERTIDO_EN_COBERTURA";
+export declare function isSourceShiftConvertedForCoverage(data: Record<string, unknown> | null | undefined): boolean;
 export declare function clearSourceCoverageUsedPatch(): Record<string, unknown>;
+export declare function buildEscRefSourceConvertedPatch(srcData: Record<string, unknown>, covDocId: string): Record<string, unknown>;
+export declare function buildRestoreSourceShiftAfterCoveragePatch(srcData: Record<string, unknown> | null | undefined): Record<string, unknown>;
 export declare function sourceShiftCoverageUsedPatch(opts: {
     titularShiftId: string;
     coverageDocId: string;
