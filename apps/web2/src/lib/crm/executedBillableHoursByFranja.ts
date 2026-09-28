@@ -49,6 +49,9 @@ export type FranjaShift = {
   startTime?: unknown;
   endTime?: unknown;
   startDate?: string;
+  scheduleDate?: string;
+  planningDate?: string;
+  fecha?: string;
   employeeName?: string;
   origin?: string;
   coverageType?: string;
@@ -206,8 +209,10 @@ function requestedHours(t: FranjaShift, code: string): number {
 }
 
 function ymdOf(t: FranjaShift): string {
-  const direct = String(t.startDate || '').slice(0, 10);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+  for (const field of ['scheduleDate', 'planningDate', 'fecha', 'startDate'] as const) {
+    const direct = String(t[field] || '').slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(direct)) return direct;
+  }
   const st = toDateSafe(t.startTime);
   if (st) return getDateKeyInTimezone(st);
   return '';
