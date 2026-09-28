@@ -127,4 +127,25 @@ describe('heroShift — bordes retención y turno propio + cobertura', () => {
     const now = new Date('2026-09-26T16:00:00-03:00');
     assert.equal(heroShift([propio, cov], now, { empDocId: 'e1' })?.id, 'ops-now');
   });
+
+  it('ops_cov ADVANCE/EXTEND de registro no es hero (Nuevo Edificio Demo)', () => {
+    const own = shift({
+      id: 'own-adv',
+      employeeId: 'e1',
+      code: 'T',
+      isEarlyStart: true,
+      startTime: '2026-09-28T16:00:00-03:00',
+      endTime: '2026-09-28T20:00:00-03:00',
+    });
+    const trace = shift({
+      id: 'ops_cov_adv_bogus',
+      employeeId: 'e1',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'ADVANCE',
+      startTime: '2026-09-28T08:00:00-03:00',
+      endTime: '2026-09-28T12:00:00-03:00',
+    });
+    const now = new Date('2026-09-28T09:00:00-03:00');
+    assert.equal(heroShift([trace, own], now, { empDocId: 'e1' })?.id, 'own-adv');
+  });
 });

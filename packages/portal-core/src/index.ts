@@ -19,12 +19,18 @@ export {
   parsePendingCheckins,
   validateCheckInDistance,
   resolveAdjustedStartTime,
+  evaluateCheckInWindow,
+  isCoverageHoursOnSourceDoc,
+  checkInRejectMessage,
+  timestampLikeToMillis,
 } from './checkIn/portalCheckIn';
 export type {
   PendingCheckInItem,
   PortalCheckInCoords,
   CheckInTiming,
   CheckInTimingOptions,
+  CheckInWindowResult,
+  CheckInWindowRejectCode,
 } from './checkIn/portalCheckIn';
 export {
   resolveCheckInUiStatus,
