@@ -4504,7 +4504,10 @@ export const scheduledHoursLedgerNightly = onScheduleV2(
   },
 );
 
-export const rebuildHoursLedger = functions.https.onCall(async (data, context) => {
+// Un mes completo de una empresa tarda más que el default de 60 s.
+export const rebuildHoursLedger = functions
+  .runWith({ timeoutSeconds: 540, memory: '1GB' as const })
+  .https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
   }

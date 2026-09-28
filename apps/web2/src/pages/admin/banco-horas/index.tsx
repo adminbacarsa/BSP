@@ -93,9 +93,11 @@ export default function BancoHorasPage() {
   const preview = async () => {
     if (!empresaId) return;
     setBusy(true);
+    const toastId = toast.loading('Calculando el mes… puede tardar unos minutos.');
     try {
-      const call = httpsCallable(functions, 'rebuildHoursLedger');
+      const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 560_000 });
       const res = await call({ empresaId, period: periodKey, dryRun: true });
+      toast.dismiss(toastId);
       const data = res.data as { monthly?: MonthRow[]; days?: DayRow[] };
       setMonthly((data.monthly || []) as MonthRow[]);
       setDays((data.days || []) as DayRow[]);
@@ -104,6 +106,7 @@ export default function BancoHorasPage() {
       toast.success('Vista previa (no se escribió en la base)');
     } catch (e: any) {
       console.error(e);
+      toast.dismiss(toastId);
       toast.error(e?.message || 'La vista previa falló');
     } finally {
       setBusy(false);
