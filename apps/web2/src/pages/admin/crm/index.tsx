@@ -998,7 +998,7 @@ export default function CRMPage() {
           }
 
           const [turnosRaw, sEmployees] = await Promise.all([
-            fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
+            fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs, migracionCompleta),
             getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
           ]);
           if (runId !== metricsRunRef.current) return;
@@ -1229,7 +1229,7 @@ export default function CRMPage() {
       bumpProgress(62, 'Cargando turnos…');
 
       const [turnosRaw, sEmployees] = await Promise.all([
-        fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs),
+        fetchCrmDashboardTurnos(empresaId, scopeEmpresa, turnoStart, turnoEnd, clientRefs, migracionCompleta),
         getDocs(empresaCollectionQuery('empleados', empresaId, scopeEmpresa) as ReturnType<typeof query>),
       ]);
       if (runId !== metricsRunRef.current) return;
@@ -2085,7 +2085,7 @@ export default function CRMPage() {
       const slaCodeHoursHint = buildSlaCodeHoursHintFromServices(servicesForProforma);
       const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(servicesForProforma);
 
-      const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa });
+      const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa, migracionCompleta });
       const turnosEnriched = enrichTurnosForProforma(turnosList, {
         clientId: selectedClient.id,
         objetivos: selectedClient.objetivos || [],
