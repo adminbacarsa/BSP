@@ -36,7 +36,8 @@ const {
   simularRespuestasConvocatorias,
   findBestCandidate,
 } = requireFn('./lib/coverage/convocatoriasCobertura.js');
-const { isSimulableShift, simulableShiftSkipReason } = requireFn('./lib/common/simulableShift.js');
+const { isSimulableShift, simulableShiftSkipReason, ObjectiveOperationCache, simulableShiftSkipReasonResolved } = requireFn('./lib/common/simulableShift.js');
+const { runModoDemoForEmpresa } = requireFn('./lib/ops/modoDemoRun.js');
 const {
   retainOutgoingForGap,
   releaseRetentionForAbsenceShift,
@@ -2267,6 +2268,115 @@ async function run() {
         empresaId: 'emp', objectiveId: 'obj', positionName: 'Puesto 1', dayYmd: '2026-09-28', bandCode: 'M',
       });
       report(56, id1 === id2 && String(id1).startsWith('gap_'), `id=${id1}`);
+    }
+
+    // Caso 57 — Demo solo simula en objetivos en operación (contrato abierto + cliente activo + cronograma publicado).
+    {
+      const prefix = `${runId}_c57`;
+      const empresaId = `${prefix}_emp`;
+      const clientId = `${prefix}_cli`;
+      const objIn = `${prefix}_in`;
+      const objOut = `${prefix}_out`;
+      const nowMs = Date.now();
+      const start = Timestamp.fromMillis(nowMs - 60 * 1000);
+      const end = Timestamp.fromMillis(nowMs + 8 * 3600000);
+      const utcDay = (y, m, d) => Timestamp.fromMillis(Date.UTC(y, m - 1, d));
+      const { year, month } = (() => {
+        const ar = new Date(nowMs - 3 * 3600000);
+        return { year: ar.getUTCFullYear(), month: ar.getUTCMonth() + 1 };
+      })();
+      await db.batch()
+        .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true, modoDemoEnabled: true })
+        .set(db.collection('clients').doc(clientId), { empresaId, name: 'Cliente demo', status: 'ACTIVE' })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_in`), {
+          empresaId, clientId, objectiveId: objIn, status: 'ACTIVE', closed: false,
+          startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 12, 31),
+        })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_out`), {
+          empresaId, clientId, objectiveId: objOut, status: 'ACTIVE', closed: true,
+          startDate: '2026-01-01', endDate: '2026-12-31',
+        })
+        .set(db.collection('planificacion_estados').doc(`${empresaId}_${objIn}_${year}_${month}`), {
+          empresaId, objectiveId: objIn, publishedAt: Timestamp.now(),
+        })
+        .set(db.collection('planificacion_estados').doc(`${empresaId}_${objOut}_${year}_${month}`), {
+          empresaId, objectiveId: objOut, publishedAt: Timestamp.now(),
+        })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_ended`), {
+          empresaId, clientId, objectiveId: `${prefix}_ended`, status: 'ACTIVE', closed: false,
+          startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 7, 31),
+        })
+        .set(db.collection('planificacion_estados').doc(`${empresaId}_${prefix}_ended_2026_9`), {
+          empresaId, objectiveId: `${prefix}_ended`, publishedAt: Timestamp.now(),
+        })
+        .set(db.collection('turnos').doc(`${prefix}_in`), {
+          empresaId, clientId, objectiveId: objIn, objectiveName: 'En operacion',
+          employeeId: `${prefix}_eIn`, employeeName: 'Guardia In', code: 'M',
+          positionName: 'P1', status: 'PENDING', draft: false,
+          startTime: start, endTime: end,
+        })
+        .set(db.collection('turnos').doc(`${prefix}_out`), {
+          empresaId, clientId, objectiveId: objOut, objectiveName: 'Fuera operacion',
+          employeeId: `${prefix}_eOut`, employeeName: 'Guardia Out', code: 'M',
+          positionName: 'P1', status: 'PENDING', draft: false,
+          startTime: start, endTime: end,
+        })
+        .commit();
+
+      const cache = new ObjectiveOperationCache();
+      const inShift = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
+      const outShift = (await db.collection('turnos').doc(`${prefix}_out`).get()).data();
+      const reasonIn = await simulableShiftSkipReasonResolved(db, inShift, cache);
+      const reasonOut = await simulableShiftSkipReasonResolved(db, outShift, cache);
+
+      const endedReason = await simulableShiftSkipReasonResolved(db, {
+        empresaId, objectiveId: `${prefix}_ended`, code: 'M',
+        startTime: Timestamp.fromMillis(Date.parse('2026-09-15T10:00:00-03:00')),
+      }, cache);
+
+      const oldCreated = Timestamp.fromMillis(nowMs - 10 * 60000);
+      await db.batch()
+        .set(db.collection('convocatorias_cobertura').doc(`${prefix}_convIn`), {
+          empresaId, shiftId: `${prefix}_in`, objectiveId: objIn, clientId,
+          type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
+          timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand`,
+          startTime: start,
+        })
+        .set(db.collection('convocatorias_cobertura').doc(`${prefix}_convOut`), {
+          empresaId, shiftId: `${prefix}_out`, objectiveId: objOut, clientId,
+          type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
+          timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand2`,
+          startTime: start,
+        })
+        .commit();
+
+      await runModoDemoForEmpresa(db, empresaId);
+      let inn = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
+      const touched = (s) => s?.isPresent === true || s?.isAbsent === true || !!s?.modoDemoAt;
+      if (!touched(inn)) {
+        await db.collection('turnos').doc(`${prefix}_in`).update({
+          startTime: Timestamp.fromMillis(nowMs - 10 * 60 * 1000),
+        });
+        await runModoDemoForEmpresa(db, empresaId);
+        inn = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
+      }
+      const outAfter = (await db.collection('turnos').doc(`${prefix}_out`).get()).data();
+      const convIn = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convIn`).get()).data();
+      const convOut = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convOut`).get()).data();
+      const ok =
+        reasonIn === null
+        && reasonOut === 'FUERA_OPERACION'
+        && endedReason === 'FUERA_OPERACION'
+        && touched(inn)
+        && outAfter?.isPresent !== true
+        && outAfter?.isAbsent !== true
+        && !outAfter?.modoDemoAt
+        && !outAfter?.realStartTime
+        && convIn?.status !== 'PENDING'
+        && convOut?.status === 'PENDING';
+      report(57, ok, ok
+        ? 'Demo simula en operación y no en contrato cerrado ni vencido 31/07 UTC'
+        : `in=${reasonIn}/${touched(inn)} out=${reasonOut} present=${outAfter?.isPresent} ended=${endedReason} convIn=${convIn?.status} convOut=${convOut?.status}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
