@@ -8,6 +8,8 @@ const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTardeConvocatorias");
 const relevoNotifications_1 = require("./relevoNotifications");
 const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
+const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftClose_1 = require("../scheduling/shiftClose");
 function normPos(n) {
     return String(n ?? '')
         .trim()
@@ -104,7 +106,7 @@ async function registrarPresencia(db, input) {
         || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
     let realStartTime;
     if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
-        realStartTime = nowTs;
+        realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : firestore_1.Timestamp.fromMillis(nowMs);
     }
     else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
         realStartTime =
@@ -127,7 +129,9 @@ async function registrarPresencia(db, input) {
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
         isLate,
-        lateMinutes: windowEval.lateMinutes ?? (isLate && scheduledStartMs ? Math.round((nowMs - scheduledStartMs) / 60000) : 0),
+        lateMinutes: isLate && scheduledStartMs
+            ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
+            : (windowEval.lateMinutes ?? 0),
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,
@@ -222,7 +226,8 @@ async function registrarPresencia(db, input) {
         .catch((e) => console.warn('[registrarPresencia] novedad ingreso:', e?.message));
     let relieved = null;
     const wantSkip = skipAutoRelevo === true ||
-        overrideRelieveShiftId === null;
+        overrideRelieveShiftId === null ||
+        !(0, reliefEligibility_1.isReliefEligibleShift)(shiftData);
     const wantOverride = typeof overrideRelieveShiftId === 'string' && overrideRelieveShiftId.trim().length > 0;
     if (!wantSkip) {
         try {
@@ -240,6 +245,7 @@ async function registrarPresencia(db, input) {
                         const od = ov.data();
                         if (od.isPresent &&
                             !od.isCompleted &&
+                            (0, reliefEligibility_1.isReliefEligibleShift)(od) &&
                             String(od.objectiveId || '') === objectiveId &&
                             normPos(od.positionName) === normPos(positionName) &&
                             ov.id !== shiftId) {
@@ -255,7 +261,6 @@ async function registrarPresencia(db, input) {
                             .where('empresaId', '==', empresaId)
                             .where('objectiveId', '==', objectiveId)
                             .where('isPresent', '==', true)
-                            .where('isCompleted', '==', false)
                             .get();
                     }
                     else {
@@ -263,11 +268,12 @@ async function registrarPresencia(db, input) {
                             .collection('turnos')
                             .where('objectiveId', '==', objectiveId)
                             .where('isPresent', '==', true)
-                            .where('isCompleted', '==', false)
                             .get();
                     }
                     const samePost = activeSnap.docs.filter((d) => {
                         const dat = d.data();
+                        if (dat.isCompleted === true)
+                            return false;
                         if (normPos(dat.positionName) !== normPos(positionName))
                             return false;
                         if (d.id === shiftId)
@@ -275,6 +281,8 @@ async function registrarPresencia(db, input) {
                         if (empId && dat.employeeId === empId)
                             return false;
                         if (String(dat.relievedBy || '').trim())
+                            return false;
+                        if (!(0, reliefEligibility_1.isReliefEligibleShift)(dat))
                             return false;
                         return true;
                     });
@@ -320,6 +328,7 @@ async function registrarPresencia(db, input) {
                     const outPosName = outData.positionName || '';
                     const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
                     const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
+                    await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
                     if (isEarlyRelevo && !wantOverride) {
                         await outDoc.ref.update({
                             relievedBy: empId || null,
@@ -332,11 +341,19 @@ async function registrarPresencia(db, input) {
                         });
                     }
                     else {
+                        const outClose = (0, shiftClose_1.buildAutoClosePatch)(outData, {
+                            realEndMs: nowMs,
+                            reason: 'RELEVO_PRESENTE',
+                            now: firestore_1.Timestamp.fromMillis(nowMs),
+                            by: 'RELEVO',
+                        });
                         await outDoc.ref.update({
                             isCompleted: true,
                             isPresent: false,
                             status: 'COMPLETED',
-                            realEndTime: firestore_1.Timestamp.fromMillis(nowMs),
+                            realEndTime: outClose.realEndTime,
+                            ...(outClose.retentionMinutes != null ? { retentionMinutes: outClose.retentionMinutes } : {}),
+                            ...(outClose.retentionEndedAt ? { retentionEndedAt: outClose.retentionEndedAt } : {}),
                             relievedBy: empId || null,
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),

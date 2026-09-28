@@ -21,6 +21,7 @@ const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
 const coverageRetention_1 = require("./coverage/coverageRetention");
 const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
 const simulableShift_1 = require("./common/simulableShift");
+const reliefEligibility_1 = require("./common/reliefEligibility");
 const arClock_1 = require("./common/arClock");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
@@ -973,6 +974,10 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
     catch (e) {
         console.warn('[onTurnoAbsenciaDetectada] retención:', e?.message);
     }
+    if ((0, reliefEligibility_1.isExtraNonReliefShift)(after)) {
+        console.log(`[onTurnoAbsenciaDetectada] Turno extra sin franja vendida: sin cascada shift=${event.params.shiftId}`);
+        return;
+    }
     const manual = cascadeCreatedBy !== 'MODO_DEMO' && (await (0, opsManualMode_1.isEmpresaManualMode)(db, empresaId));
     if (manual) {
         console.log(`[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`);
@@ -1032,11 +1037,13 @@ exports.autoPresenciaYCierre = functions
             isPresent: !!t.isPresent,
             isCompleted: !!t.isCompleted,
             isAbsent: !!t.isAbsent,
+            reliefEligible: (0, reliefEligibility_1.isReliefEligibleShift)(t),
         });
     }
     function hayRelevoPendiente(objectiveId, shiftEndMs) {
         const turnos = byObjective.get(objectiveId) ?? [];
-        return turnos.some(r => !r.isPresent && !r.isAbsent && !r.isCompleted &&
+        return turnos.some(r => r.reliefEligible &&
+            !r.isPresent && !r.isAbsent && !r.isCompleted &&
             Math.abs(r.startMs - shiftEndMs) <= 90 * 60 * 1000);
     }
     const presenciaMarcada = [];
@@ -2391,6 +2398,8 @@ exports.detectarAusencias = functions
         catch (e) {
             console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
         }
+        if ((0, reliefEligibility_1.isExtraNonReliefShift)(s))
+            continue;
         try {
             const presentSnap = await db.collection('turnos')
                 .where('empresaId', '==', empId)
@@ -2400,6 +2409,8 @@ exports.detectarAusencias = functions
             const toAlert = presentSnap.docs.filter(d => {
                 const dat = d.data();
                 if (dat.isCompleted === true)
+                    return false;
+                if ((0, reliefEligibility_1.isExtraNonReliefShift)(dat))
                     return false;
                 return (dat.positionName || '').trim().toLowerCase() === posName
                     && dat.employeeId !== s.employeeId;

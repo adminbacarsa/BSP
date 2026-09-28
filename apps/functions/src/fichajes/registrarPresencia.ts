@@ -5,6 +5,7 @@ import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
 import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
+import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { buildAutoClosePatch } from '../scheduling/shiftClose';
 
 export type PresenciaSource =
@@ -299,7 +300,9 @@ export async function registrarPresencia(
 
   const wantSkip =
     skipAutoRelevo === true ||
-    overrideRelieveShiftId === null;
+    overrideRelieveShiftId === null ||
+    // ESC/REF/RET es sobreturno: al fichar no releva a nadie del puesto.
+    !isReliefEligibleShift(shiftData as Record<string, unknown>);
   const wantOverride =
     typeof overrideRelieveShiftId === 'string' && overrideRelieveShiftId.trim().length > 0;
 
@@ -323,6 +326,7 @@ export async function registrarPresencia(
             if (
               od.isPresent &&
               !od.isCompleted &&
+              isReliefEligibleShift(od as Record<string, unknown>) &&
               String(od.objectiveId || '') === objectiveId &&
               normPos(od.positionName) === normPos(positionName) &&
               ov.id !== shiftId
@@ -355,6 +359,8 @@ export async function registrarPresencia(
             if (d.id === shiftId) return false;
             if (empId && dat.employeeId === empId) return false;
             if (String(dat.relievedBy || '').trim()) return false;
+            // Un ESC/REF/RET presente no es el saliente de la franja: no se lo releva.
+            if (!isReliefEligibleShift(dat as Record<string, unknown>)) return false;
             return true;
           });
 

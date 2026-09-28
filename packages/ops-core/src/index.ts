@@ -21,6 +21,14 @@ export {
   isVacancyDescubierto,
   isActionableOpsVacancy,
 } from './vacancyOps';
+export {
+  NON_RELIEF_EXTRA_CODES,
+  reliefShiftCode,
+  reliefIneligibleReason,
+  isReliefEligibleShift,
+  isExtraNonReliefShift,
+} from './reliefEligibility';
+export type { ReliefIneligibleReason } from './reliefEligibility';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';

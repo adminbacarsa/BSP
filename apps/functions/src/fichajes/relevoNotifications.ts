@@ -1,5 +1,6 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
+import { isReliefEligibleShift } from '../common/reliefEligibility';
 
 export function formatHmArgentina(ms: number): string {
   return new Intl.DateTimeFormat('es-AR', {
@@ -102,6 +103,9 @@ export async function applyLateReliefNoticeToOutgoing(
   shiftData: Record<string, unknown>,
   etaAt: Timestamp,
 ): Promise<boolean> {
+  // Un ESC/REF/RET que llega tarde no deja a nadie sin relevo: nadie queda retenido por él.
+  if (!isReliefEligibleShift(shiftData)) return false;
+
   const gapStartMs =
     (shiftData.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
   const objectiveId = String(shiftData.objectiveId || '').trim();

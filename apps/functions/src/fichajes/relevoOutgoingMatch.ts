@@ -1,4 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
+import { isReliefEligibleShift } from '../common/reliefEligibility';
 
 export const RELEVO_GAP_ALIGN_MS = 30 * 60 * 1000;
 
@@ -79,6 +80,8 @@ export async function findPresentOutgoingAlignedToGapStart(
       if (data.isCompleted === true) return false;
       if (String(data.relievedBy || '').trim()) return false;
       if (data.isAbsent || data.isVirtual === true) return false;
+      // Un ESC/REF/RET no tiene la franja del puesto: ni releva ni se lo retiene por el hueco.
+      if (!isReliefEligibleShift(data)) return false;
       if (!posMatchRelief(data.positionName, params.positionName)) return false;
       const eid = String(data.employeeId || '').trim();
       if (!eid || eid === 'VACANTE' || (absentEmpId && eid === absentEmpId)) return false;

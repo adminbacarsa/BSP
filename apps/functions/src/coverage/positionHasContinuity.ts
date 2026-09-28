@@ -1,6 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { normalizarSlaDeFirestore } from '../cerebro/types';
 import { leerSlaYDerivarCobertura } from '../cerebro/inteligencia-servicio/s1-leer-sla';
+import { NON_RELIEF_EXTRA_CODES } from '../common/reliefEligibility';
 
 const TZ = 'America/Argentina/Cordoba';
 const CONTINUITY_WINDOW_MS = 30 * 60 * 1000;
@@ -110,6 +111,8 @@ export function positionHasContinuityFromSlaDoc(
 
   for (const need of needs) {
     if (!posMatch(need.puestoName, positionName)) continue;
+    // ESC/REF/RET son sobreturnos: no abren la franja siguiente del puesto.
+    if (NON_RELIEF_EXTRA_CODES.has(String(need.banda || '').toUpperCase())) continue;
     if (need.excludedDates?.includes(dateStr)) continue;
     if (!need.diasSemana.includes(dayLetter)) continue;
     if (isBandExcludedOnDate(rawPos, dateStr, need.banda)) continue;

@@ -19,6 +19,7 @@ import {
   getVacancyElapsedRatio,
   isVacancyDescubierto,
   isActionableOpsVacancy,
+  isReliefEligibleShift,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -1298,7 +1299,9 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     if (other.id === s.id || other.isPresent || other.isCompleted) return false;
                     if (other.objectiveId !== s.objectiveId) return false;
                     if (normPosName(other.positionName) !== normPosName(s.positionName)) return false;
-                    if (!other.lateETA) return false;
+                    // ESC/REF/RET tarde no es el relevo del saliente.
+                    if (!isReliefEligibleShift(other)) return false;
+                    if (!other.lateETA && !other.lateArrivalAt && !other.lateArrivalConfirmed) return false;
                     const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
                     return otherStart >= endMs - 30 * 60000 && otherStart <= endMs + 4 * 60 * 60000;
                 });

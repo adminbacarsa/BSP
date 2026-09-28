@@ -6,6 +6,7 @@ exports.loadReemplazarRetiro2a3hFromSla = loadReemplazarRetiro2a3hFromSla;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const coverageRetention_1 = require("./coverageRetention");
+const reliefEligibility_1 = require("../common/reliefEligibility");
 const normPos = (n) => String(n ?? '')
     .trim()
     .toLowerCase()
@@ -80,6 +81,12 @@ async function escalarVacanteSinCobertura(db, params) {
     const shiftRef = db.collection('turnos').doc(shiftId);
     const shiftSnap = await shiftRef.get();
     const shift = shiftSnap.exists ? shiftSnap.data() : null;
+    if (shift && (shift.operacionallyCovered === true || String(shift.coverageStatus || '').toUpperCase() === 'COVERED')) {
+        return { escalated: false, retained: false, retentionShiftIds: [], supervisorsNotified: 0 };
+    }
+    if (shift && (0, reliefEligibility_1.isExtraNonReliefShift)(shift)) {
+        return { escalated: false, retained: false, retentionShiftIds: [], supervisorsNotified: 0 };
+    }
     const empresaId = String(params.empresaId || shift?.empresaId || '').trim() || null;
     const objectiveId = String(params.objectiveId || shift?.objectiveId || '').trim() || null;
     const objectiveName = String(params.objectiveName || shift?.objectiveName || '').trim();
