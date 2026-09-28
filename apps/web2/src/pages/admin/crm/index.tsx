@@ -357,6 +357,8 @@ export default function CRMPage() {
   const [clientListFilter, setClientListFilter] = useState<ClientListFilter>('all');
   const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
   const metricsRunRef = useRef(0);
+  const proformaRunRef = useRef(0);
+  const proformaGateRef = useRef<Promise<void>>(Promise.resolve());
   const clientsFetchGenRef = useRef(0);
   const metricsCache = useRef<Map<string, { metrics: any; trend: any[]; updatedAt: Date; footprint?: CrmSlaFootprint | null }>>(new Map());
   const periodMetricsRef = useRef<Map<string, {
@@ -450,10 +452,16 @@ export default function CRMPage() {
   const [proformaLayoutMode, setProformaLayoutMode] = useState<ProformaLayoutMode>('both');
   const [proformaBase, setProformaBase] = useState<ProformaBase>('requested');
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
-  const [proformaTotals, setProformaTotals] = useState({
-    planned: 0,
-    executed: 0,
-    sinCobertura: 0,
+  const [proformaTotals, setProformaTotals] = useState<{
+    planned: number | null;
+    executed: number | null;
+    sinCobertura: number | null;
+    loading: boolean;
+    estructurales: number;
+  }>({
+    planned: null,
+    executed: null,
+    sinCobertura: null,
     loading: false,
     estructurales: 0,
   });
@@ -2019,9 +2027,17 @@ export default function CRMPage() {
 
   const toggleExpandedKey = (k: string) => setExpandedKeys((prev) => ({ ...prev, [k]: !prev[k] }));
 
-  const calculateProformaTurnos = async () => {
+  const calculateProformaTurnos = () => {
+    const runId = ++proformaRunRef.current;
+    const job = proformaGateRef.current.then(() => calculateProformaTurnosBody(runId));
+    proformaGateRef.current = job.catch(() => undefined);
+  };
+
+  const calculateProformaTurnosBody = async (runId: number) => {
+    if (runId !== proformaRunRef.current) return;
     if (!selectedClient?.id) return;
     setProformaTotals((p) => ({ ...p, loading: true }));
+    const stale = () => runId !== proformaRunRef.current;
     try {
       const { start, end } = getProformaRange();
       const clientRef = {
@@ -2032,9 +2048,7 @@ export default function CRMPage() {
       };
 
       const servicesForProforma = await loadClientSlaForClient(clientRef, { empresaId, scopeEmpresa });
-      if (servicesForProforma.length !== clientServices.length) {
-        setClientServices(servicesForProforma);
-      }
+      if (stale()) return;
 
       const periodYmd = proformaStartDate && proformaEndDate
         ? { start: proformaStartDate, end: proformaEndDate }
@@ -2086,12 +2100,14 @@ export default function CRMPage() {
       const slaCodeHoursHintByObjective = buildSlaCodeHoursHintByObjectiveId(servicesForProforma);
 
       const turnosList = await loadClientTurnosForClient(clientRef, start, end, { empresaId, scopeEmpresa, migracionCompleta });
+      if (stale()) return;
       const turnosEnriched = enrichTurnosForProforma(turnosList, {
         clientId: selectedClient.id,
         objetivos: selectedClient.objetivos || [],
         slas: servicesForProforma,
       });
       const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);
+      if (stale()) return;
       const billedSolicitudIds = solicitudIdsBilledInRange(solicitudesRefuerzo, { start, end });
       const planned = { total: 0, byObjective: {} as any };
       const executed = { total: 0, byObjective: {} as any };
@@ -2249,24 +2265,10 @@ export default function CRMPage() {
         }))
         .sort((a: any, b: any) => b.totalHours - a.totalHours);
 
+      if (stale()) return;
       setProformaBreakdown(breakdown);
 
-      let empMeta: Record<string, { legajo?: string; name?: string }>;
-      if (Object.keys(sharedEmpMetaRef.current).length > 0) {
-        empMeta = { ...sharedEmpMetaRef.current };
-      } else {
-        const empSnap = await getDocs(
-          scopeEmpresa
-            ? query(collection(db, 'empleados'), where('empresaId', '==', empresaId))
-            : collection(db, 'empleados'),
-        );
-        empMeta = {};
-        empSnap.docs.forEach((d) => {
-          const data = d.data() as any;
-          if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-          registerEmployeeMetaAliases(empMeta, d.id, data);
-        });
-      }
+      const empMeta: Record<string, { legajo?: string; name?: string }> = { ...sharedEmpMetaRef.current };
       const turnoEmpIds = turnosEnriched.map((t) => String(t.employeeId ?? ''));
       // Batch lookup: reemplaza hasta 120 getDoc individuales por queries de 10 en paralelo
       const pendingEmpIds = [...new Set(turnoEmpIds.filter(
@@ -2277,9 +2279,14 @@ export default function CRMPage() {
         for (let i = 0; i < pendingEmpIds.length; i += 10) chunks.push(pendingEmpIds.slice(i, i + 10));
         await Promise.all(chunks.map(async (chunk) => {
           const snap = await getDocs(query(collection(db, 'empleados'), where('__name__', 'in', chunk)));
-          snap.docs.forEach((d) => registerEmployeeMetaAliases(empMeta, d.id, d.data() as any));
+          snap.docs.forEach((d) => {
+            const data = d.data() as any;
+            if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
+            registerEmployeeMetaAliases(empMeta, d.id, data);
+          });
         }));
       }
+      if (stale()) return;
       setEmpMetaMap(empMeta);
 
       const turnosRaw = turnosEnriched.filter((t) => {
@@ -2408,6 +2415,7 @@ export default function CRMPage() {
           });
         }));
       }
+      if (stale()) return;
       const eventosProforma = Array.from(evByEvento.entries()).map(([eventoId, ev]) => {
         const servicios = Array.from(ev.srvs.values());
         return { eventoId, eventoNombre: ev.nombre, servicios, totalHoras: servicios.reduce((a: number, s: any) => a + s.totalHoras, 0) };
@@ -2458,6 +2466,7 @@ export default function CRMPage() {
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
       ));
+      if (stale()) return;
       setProformaTotals({
         planned: plannedBase + Math.round(refuerzoHorasVendidas),
         executed: Math.round(franja.totalBillable),
@@ -2467,6 +2476,7 @@ export default function CRMPage() {
       });
     } catch (e) {
       console.error(e);
+      if (stale()) return;
       setProformaTotals((p) => ({ ...p, loading: false }));
       setProformaBundle(null);
       toast.error(`Error al calcular turnos${e instanceof Error && e.message ? `: ${e.message}` : ''}`);
@@ -2486,7 +2496,7 @@ export default function CRMPage() {
     if (!proformaActive || !selectedClient?.id) return;
     calculateProformaTurnos();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [proformaActive, selectedClient?.id, clientServices, clientPurchaseOrders, clientContracts, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
+  }, [proformaActive, selectedClient?.id, clientPurchaseOrders, clientContracts, proformaMonth, proformaYear, proformaStartDate, proformaEndDate, proformaDetailMode]);
 
   useEffect(() => {
     setProformaBundle((prev) => (prev ? { ...prev, layoutMode: proformaLayoutMode } : prev));
@@ -2542,8 +2552,8 @@ export default function CRMPage() {
     const { start, end } = getProformaRange();
     const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end, selectedClient.id));
     if (proformaBase === 'requested') return requested;
-    if (proformaBase === 'planned') return proformaTotals.planned;
-    return proformaTotals.executed;
+    if (proformaBase === 'planned') return proformaTotals.planned ?? 0;
+    return proformaTotals.executed ?? 0;
   }, [selectedClient, clientServices, proformaBase, proformaTotals, proformaBillingRows, proformaStartDate, proformaEndDate, proformaMonth, proformaYear]);
 
   const totalEstimate = useMemo(() => {
