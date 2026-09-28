@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase-admin/firestore';
+import { arHmOnDayMs, arHour } from '../common/arClock';
 
 export type VacancySplitTimes = {
   gap: { from: string; to: string };
@@ -51,22 +52,18 @@ function parseHm(hm: string): { h: number; m: number } {
   return { h: h || 0, m: m || 0 };
 }
 
-/** HH:mm anclado al día calendario del ancla; si to <= from, suma 1 día a `to`. */
+/** HH:mm en hora AR anclado al día calendario AR del ancla; si to <= from, `to` cae al día siguiente. */
 export function hhmmPairToTimestamps(
   anchor: Date,
   fromHm: string,
   toHm: string,
 ): { start: Timestamp; end: Timestamp } {
-  const a = new Date(anchor);
-  a.setHours(0, 0, 0, 0);
   const f = parseHm(fromHm);
   const t = parseHm(toHm);
-  const start = new Date(a);
-  start.setHours(f.h, f.m, 0, 0);
-  const end = new Date(a);
-  end.setHours(t.h, t.m, 0, 0);
-  if (end.getTime() <= start.getTime()) end.setDate(end.getDate() + 1);
-  return { start: Timestamp.fromDate(start), end: Timestamp.fromDate(end) };
+  const startMs = arHmOnDayMs(anchor.getTime(), f.h, f.m);
+  let endMs = arHmOnDayMs(anchor.getTime(), t.h, t.m);
+  if (endMs <= startMs) endMs += 24 * 60 * 60 * 1000;
+  return { start: Timestamp.fromMillis(startMs), end: Timestamp.fromMillis(endMs) };
 }
 
 export function resolveCoverageBandCode(opts: {
@@ -77,7 +74,7 @@ export function resolveCoverageBandCode(opts: {
   if (c && !['T', 'COBERTURA', ''].includes(c)) return c;
   const d = tsToDate(opts.startTime);
   if (!d) throw new Error('Falta código de banda del titular');
-  const h = d.getHours();
+  const h = arHour(d.getTime());
   if (h >= 6 && h < 14) return 'M';
   if (h >= 14 && h < 22) return 'T';
   return 'N';

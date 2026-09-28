@@ -18,6 +18,7 @@ import {
   gapWindowFromTitularShift,
   sourceShiftEligibleForCoverageGap,
 } from './coverageSourceShiftForGap';
+import { arDayBoundsMs } from '../common/arClock';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -348,9 +349,7 @@ export async function findBestCandidate(
   if (type === 'ADVANCE') {
     // Buscar el próximo turno planificado del objetivo para hoy
     const now = Timestamp.now();
-    const endOfDay = Timestamp.fromMillis(
-      new Date(new Date().setHours(23, 59, 59, 0)).getTime(),
-    );
+    const endOfDay = Timestamp.fromMillis(arDayBoundsMs(now.toMillis()).endMs);
     // Índice objectiveId+startTime; empresa e isCompleted en código (el campo falta en carga masiva).
     const next = await db.collection('turnos')
       .where('objectiveId', '==', conv.objectiveId)
@@ -388,11 +387,10 @@ export async function findBestCandidate(
     .limit(200)
     .get();
 
-  // Turnos de hoy para detectar quién ya tiene turno
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 0);
+  // Turnos de hoy (día AR) para detectar quién ya tiene turno
+  const todayBounds = arDayBoundsMs(Date.now());
+  const todayStart = new Date(todayBounds.startMs);
+  const todayEnd = new Date(todayBounds.endMs);
 
   const todayShiftsSnap = await db.collection('turnos')
     .where('objectiveId', '==', conv.objectiveId)
@@ -559,10 +557,9 @@ export async function dispararBroadcastFT(
     .limit(200)
     .get();
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date();
-  todayEnd.setHours(23, 59, 59, 0);
+  const todayBounds = arDayBoundsMs(Date.now());
+  const todayStart = new Date(todayBounds.startMs);
+  const todayEnd = new Date(todayBounds.endMs);
 
   const allTodaySnap = await db.collection('turnos')
     .where('empresaId', '==', conv.empresaId)
@@ -1295,8 +1292,9 @@ export const getCandidatosCobertura = functions
       .limit(200)
       .get();
 
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date(); todayEnd.setHours(23, 59, 59, 0);
+    const todayBounds = arDayBoundsMs(Date.now());
+    const todayStart = new Date(todayBounds.startMs);
+    const todayEnd = new Date(todayBounds.endMs);
 
     const allTodaySnap = await db.collection('turnos')
       .where('empresaId', '==', empresaId)
