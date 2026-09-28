@@ -1,21 +1,24 @@
 /**
- * Escaneo SOLO LECTURA de ops_cov EXT/ADV de pruebas_sa cuya ventana no es contigua
- * al turno propio (EXT empieza cuando termina el turno; ADV termina cuando empieza).
+ * Escaneo SOLO LECTURA de ops_cov EXT/ADV de pruebas_sa.
+ * La ventana se ancla al hueco del titular (absenceShiftId / titularShiftId)
+ * y al turno fuente vinculado (extendShiftId / advanceShiftId / coverageSourceShiftId).
+ * Franco, licencia, fuente en otro día o doble cobertura no proponen horario.
  *
  *   node scripts/scan-ops-cov-ventanas.mjs
  *   node scripts/scan-ops-cov-ventanas.mjs --apply
  *
- * --apply escribe (emulador, o prod solo con --allow-prod). No correrlo sin OK de Mauro.
+ * --apply escribe solo ventanas propuestas (emulador, o prod solo con --allow-prod).
+ * No anula ni toca prod sin OK de Mauro.
  */
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { assessOpsCovWindows, fmtWindow, gapShiftId, linkedSourceId, verdictLabel } from './opsCovVentana.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const requireFn = createRequire(path.join(__dirname, '../apps/functions/package.json'));
 const admin = requireFn('firebase-admin');
 
-const TOL_MS = 60 * 1000;
 const EMPRESA = 'pruebas_sa';
 const args = new Set(process.argv.slice(2));
 const apply = args.has('--apply');
@@ -27,13 +30,6 @@ function tsMs(v) {
   if (typeof v === 'object' && typeof v.__ts === 'number') return v.__ts;
   if (typeof v === 'object' && typeof v.seconds === 'number') return v.seconds * 1000;
   return 0;
-}
-
-function fmt(ms) {
-  if (!ms) return '—';
-  const d = new Date(ms - 3 * 3600000);
-  const p = (n) => String(n).padStart(2, '0');
-  return `${p(d.getUTCDate())}/${p(d.getUTCMonth() + 1)} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
 }
 
 if (!admin.apps.length) {
@@ -53,85 +49,96 @@ if (apply && !process.env.FIRESTORE_EMULATOR_HOST && !allowProd) {
 }
 
 const db = admin.firestore();
+const cache = new Map();
+
+async function loadShift(id) {
+  const key = String(id || '').trim();
+  if (!key) return null;
+  if (cache.has(key)) return cache.get(key);
+  const snap = await db.collection('turnos').doc(key).get();
+  const value = snap.exists ? { id: snap.id, ...snap.data() } : null;
+  cache.set(key, value);
+  return value;
+}
+
+function asEdge(shift) {
+  if (!shift) return null;
+  return {
+    startMs: tsMs(shift.startTime),
+    endMs: tsMs(shift.endTime),
+    realStartMs: tsMs(shift.realStartTime) || tsMs(shift.checkInTime) || 0,
+    code: shift.code || shift.shiftCode || '',
+    isFranco: shift.isFranco === true,
+    employeeName: shift.employeeName || '',
+    positionName: shift.positionName || '',
+  };
+}
 
 const snap = await db.collection('turnos')
   .where('empresaId', '==', EMPRESA)
   .where('origin', '==', 'OPERATIONS_COVERAGE')
   .get();
 
-const bad = [];
+const rows = [];
 for (const doc of snap.docs) {
   const t = doc.data();
   const type = String(t.coverageType || '').toUpperCase();
   if (type !== 'EXTEND' && type !== 'ADVANCE') continue;
   if (t.coverageSuperseded === true || t.isDeleted === true) continue;
-  const sourceId = String(t.sourceShiftId || '').trim();
-  if (!sourceId) {
-    bad.push({ id: doc.id, type, why: 'sin sourceShiftId', actual: '', proposed: '' });
-    continue;
+  const convId = String(t.assignedByConvocatoria || '').trim();
+  let conv = null;
+  if (convId) {
+    const convSnap = await db.collection('convocatorias_cobertura').doc(convId).get();
+    conv = convSnap.exists ? convSnap.data() : null;
   }
-  const srcSnap = await db.collection('turnos').doc(sourceId).get();
-  if (!srcSnap.exists) {
-    bad.push({ id: doc.id, type, why: 'turno propio inexistente', actual: '', proposed: '' });
-    continue;
-  }
-  const src = srcSnap.data();
-  const srcStart = tsMs(src.startTime);
-  const srcEnd = tsMs(src.endTime);
-  const covStart = tsMs(t.startTime);
-  const covEnd = tsMs(t.endTime);
-  const dur = covEnd - covStart;
-  let aligned = false;
-  let proposedStart = covStart;
-  let proposedEnd = covEnd;
-  if (type === 'EXTEND') {
-    aligned = Math.abs(covStart - srcEnd) <= TOL_MS;
-    proposedStart = srcEnd;
-    proposedEnd = srcEnd + dur;
-  } else {
-    aligned = Math.abs(covEnd - srcStart) <= TOL_MS;
-    proposedEnd = srcStart;
-    proposedStart = srcStart - dur;
-  }
-  if (aligned) continue;
-  bad.push({
+  const sourceId = linkedSourceId(t, conv);
+  const sourceDoc = sourceId ? await loadShift(sourceId) : null;
+  const gapId = gapShiftId(t);
+  const gapDoc = gapId ? await loadShift(gapId) : null;
+  rows.push({
     id: doc.id,
     type,
     name: t.employeeName || '',
+    employeeId: String(t.employeeId || '').trim(),
+    covStart: tsMs(t.startTime),
+    covEnd: tsMs(t.endTime),
     sourceId,
-    actual: `${fmt(covStart)}–${fmt(covEnd)}`,
-    proposed: `${fmt(proposedStart)}–${fmt(proposedEnd)}`,
-    proposedStart,
-    proposedEnd,
-    why: type === 'EXTEND' ? 'EXT no empieza en el fin del turno' : 'ADV no termina en el inicio del turno',
+    sourceMissing: !!sourceId && !sourceDoc,
+    source: asEdge(sourceDoc),
+    gap: asEdge(gapDoc),
   });
 }
 
-console.log(`${apply ? 'APPLY' : 'DRY-RUN'} ops_cov EXT/ADV desalineados en ${EMPRESA}: ${bad.length} de ${snap.size} ops_cov`);
-for (const row of bad) {
-  console.log(`${row.id}\t${row.type}\t${row.name || ''}\t${row.actual} → ${row.proposed}\t${row.why}`);
+const assessed = assessOpsCovWindows(rows).filter((row) => row.action !== 'ok');
+console.log(`${apply ? 'APPLY' : 'DRY-RUN'} ops_cov EXT/ADV a revisar en ${EMPRESA}: ${assessed.length} de ${rows.length}`);
+for (const row of assessed) {
+  const actual = fmtWindow(row.covStart, row.covEnd);
+  const motivo = row.reason ? `\t${row.reason}` : '';
+  console.log(`${row.id}\t${row.type}\t${row.name}\t${actual} → ${verdictLabel(row)}${motivo}`);
 }
 
-if (apply && bad.length) {
+if (apply) {
   const Timestamp = admin.firestore.Timestamp;
-  for (const row of bad) {
-    if (!row.proposedStart || !row.proposedEnd) continue;
+  let n = 0;
+  for (const row of assessed) {
+    if (row.action !== 'propose' || !row.proposedStart || !row.proposedEnd) continue;
     const batch = db.batch();
     batch.update(db.collection('turnos').doc(row.id), {
       startTime: Timestamp.fromMillis(row.proposedStart),
       endTime: Timestamp.fromMillis(row.proposedEnd),
     });
-    if (row.type === 'EXTEND') {
+    if (row.sourceId && row.type === 'EXTEND') {
       batch.update(db.collection('turnos').doc(row.sourceId), {
         extensionEndTime: Timestamp.fromMillis(row.proposedEnd),
         adjustedEndTime: Timestamp.fromMillis(row.proposedEnd),
       });
-    } else if (row.type === 'ADVANCE') {
+    } else if (row.sourceId && row.type === 'ADVANCE') {
       batch.update(db.collection('turnos').doc(row.sourceId), {
         adjustedStartTime: Timestamp.fromMillis(row.proposedStart),
       });
     }
     await batch.commit();
+    n += 1;
   }
-  console.log(`Corregidos ${bad.filter((r) => r.proposedStart).length} docs.`);
+  console.log(`Corregidos ${n} docs. ANULAR y REVISIÓN MANUAL no se escriben.`);
 }
