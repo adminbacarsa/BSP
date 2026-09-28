@@ -10,6 +10,7 @@ const BASE_ACTIONS = ['read', 'create', 'update', 'delete'] as const;
 const MODULE_ONLY_ACTIONS: Record<string, readonly string[]> = {
   PLANNING: ['publish', 'correct', 'auto_lab', 'assign_ft'],
   RRHH: ['adjust'],
+  HOURS_BANK: ['rebuild'],
 };
 
 export function fullStaffModulePermissions(): Record<StaffAppModuleKey, string[]> {
@@ -81,7 +82,7 @@ export async function resolvePanelUserForUid(
     permissions = fullStaffModulePermissions() as unknown as Record<string, string[]>;
     const superKeys = [
       'DASHBOARD', 'OPERATIONS', 'PLANNING', 'PLANNING_AI', 'RRHH', 'CLIENTS',
-      'SERVICES', 'REPORTS', 'ANALYSIS', 'ASSISTANT', 'CONFIG', 'SUPERVISION',
+      'SERVICES', 'REPORTS', 'ANALYSIS', 'HOURS_BANK', 'ASSISTANT', 'CONFIG', 'SUPERVISION',
     ];
     for (const k of superKeys) {
       if (!permissions[k]) {

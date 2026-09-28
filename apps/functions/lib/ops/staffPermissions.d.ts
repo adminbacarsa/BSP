@@ -12,5 +12,5 @@ export type ResolvedPanelUser = {
     permissions: Record<string, string[]>;
     operatorName: string;
 };
-export declare function resolvePanelUserForUid(db: Firestore, uid: string, tokenRoleRaw?: unknown): Promise<ResolvedPanelUser | null>;
-export declare function assertOperationsUpdatePermission(db: Firestore, uid: string, empresaId: string, tokenRoleRaw?: unknown): Promise<ResolvedPanelUser>;
+export declare function resolvePanelUserForUid(db: Firestore, uid: string, tokenRoleRaw?: unknown, operatorNameFallback?: string): Promise<ResolvedPanelUser | null>;
+export declare function assertOperationsUpdatePermission(db: Firestore, uid: string, empresaId: string, tokenRoleRaw?: unknown, operatorNameFallback?: string): Promise<ResolvedPanelUser>;

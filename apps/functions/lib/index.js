@@ -3825,11 +3825,10 @@ exports.rebuildHoursLedger = functions.https.onCall(async (data, context) => {
     const panel = await resolvePanelUserForUid(db(), context.auth.uid, context.auth.token?.role);
     if (!panel)
         throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado.');
-    const canRead = panel.isSuperAdmin
-        || (panel.permissions.REPORTS || []).includes('read')
-        || (panel.permissions.ANALYSIS || []).includes('read');
+    const hoursBank = panel.permissions.HOURS_BANK || [];
+    const canRead = panel.isSuperAdmin || hoursBank.includes('read');
     if (!canRead)
-        throw new functions.https.HttpsError('permission-denied', 'Se requiere lectura de Reportes o Análisis.');
+        throw new functions.https.HttpsError('permission-denied', 'Se requiere el módulo Banco de Horas (ver).');
     if (!dryRun && !panel.isSuperAdmin) {
         throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede guardar el libro.');
     }

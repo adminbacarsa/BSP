@@ -49,9 +49,11 @@ function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number })
 }
 
 export default function BancoHorasPage() {
-  const { canReadModule, isSuperAdmin, loading } = useAuth();
+  const { canReadModule, rolePermissions, isSuperAdmin, loading } = useAuth();
   const { empresaId } = useEmpresa();
-  const allowed = isSuperAdmin || canReadModule('REPORTS') || canReadModule('ANALYSIS');
+  const allowed = canReadModule('HOURS_BANK');
+  // `rebuild` habilita el botón; el callable solo guarda si el usuario es SuperAdmin.
+  const canRebuild = isSuperAdmin || (rolePermissions.HOURS_BANK || []).includes('rebuild');
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -192,7 +194,7 @@ export default function BancoHorasPage() {
   if (!loading && !allowed) {
     return (
       <DashboardLayout>
-        <div className="p-8 text-slate-500">No tenés permiso de Reportes ni de Análisis.</div>
+        <div className="p-8 text-slate-500">Tu rol no tiene el módulo Banco de Horas. Pedilo en Configuración → Roles.</div>
       </DashboardLayout>
     );
   }
@@ -233,9 +235,11 @@ export default function BancoHorasPage() {
               <option value="draft">Solo borradores</option>
               <option value="both">Publicadas + borradores</option>
             </select>
-            <button type="button" onClick={() => void preview()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
-              <RefreshCw size={14} className="inline mr-1" /> Vista previa
-            </button>
+            {canRebuild && (
+              <button type="button" onClick={() => void preview()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
+                <RefreshCw size={14} className="inline mr-1" /> Recalcular (vista previa)
+              </button>
+            )}
             <button type="button" onClick={exportExcel} disabled={!monthly.length} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black shadow-sm hover:bg-slate-50 disabled:opacity-40">
               <Download size={14} className="inline mr-1" /> Excel
             </button>
@@ -288,7 +292,9 @@ export default function BancoHorasPage() {
                   );
                 })}
                 {!visible.length && (
-                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400 font-bold">Sin filas. Usá Vista previa para calcular el mes sin guardar.</td></tr>
+                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400 font-bold">
+                    {canRebuild ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.' : 'Sin filas. El libro de este mes todavía no fue calculado.'}
+                  </td></tr>
                 )}
               </tbody>
             </table>

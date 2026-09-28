@@ -8,6 +8,7 @@ export const SYSTEM_MODULES = [
     { key: 'SERVICES', label: '📋 Servicios y SLA' },
     { key: 'REPORTS', label: '📈 Reportes y Liquidación' },
     { key: 'ANALYSIS', label: '🔬 Análisis Operativo' },
+    { key: 'HOURS_BANK', label: '🏦 Banco de Horas' },
     { key: 'SUPERVISION', label: '🛡️ Supervisión' },
     { key: 'ASSISTANT', label: '🤖 Asistente IA (globo)' },
     { key: 'API_KEYS', label: '🔑 Liquidaciones y API Keys' },
@@ -24,4 +25,5 @@ export const PERMISSION_ACTIONS: { key: string; label: string; onlyModules?: str
     { key: 'auto_lab', label: 'Auto Lab', onlyModules: ['PLANNING'] },
     { key: 'assign_ft', label: 'Franco FT', onlyModules: ['PLANNING'] },
     { key: 'adjust', label: 'Ajustar', onlyModules: ['RRHH'] },
+    { key: 'rebuild', label: 'Recalcular', onlyModules: ['HOURS_BANK'] },
 ];
