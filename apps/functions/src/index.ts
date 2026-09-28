@@ -2907,6 +2907,7 @@ export const detectarAusencias = functions
       if (shift.draft === true) continue;              // borrador no publicado
       if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
       if (SKIP_STATUSES.has(shift.status || '')) continue;
+      // Quien ya fichó (también llegada tarde sin aviso, T+5…T+30) queda isPresent: no AUTO_T30.
       if (shift.isPresent === true || shift.isCompleted === true) continue;
       if (shift.isUnassigned === true) continue;         // vacante → no es ausencia
       if (shift.isReportedToPlanning === true) continue; // ya gestionado

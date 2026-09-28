@@ -4,6 +4,7 @@ export type CheckInWindowResult = {
     usePlannedStart?: boolean;
     useAdjustedStart?: boolean;
     lateMinutes?: number;
+    lateNoNotice?: boolean;
 };
 export declare function evaluateServerCheckInWindow(shift: Record<string, unknown>, nowMs: number, opts?: {
     source?: string;

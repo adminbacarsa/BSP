@@ -19,17 +19,20 @@ function adjustedStartMs(shift) {
         return adj;
     return startMs(shift);
 }
+function hasPriorLateNotice(shift) {
+    const etaAt = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
+    if (etaAt > 0)
+        return true;
+    return shift.lateArrivalConfirmed === true || !!shift.lateArrivalAt;
+}
 function lateEtaDeadlineMs(shift, plannedStartMs) {
     const etaAt = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
     const cap60 = plannedStartMs + 60 * 60 * 1000;
     if (etaAt > 0)
         return Math.min(etaAt, cap60);
-    if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
-        return plannedStartMs + 30 * 60 * 1000;
-    }
-    return plannedStartMs + 5 * 60 * 1000;
+    return plannedStartMs + 30 * 60 * 1000;
 }
-function finishAllowed(anchorStartMs, nowMs, useAdjustedStart) {
+function finishAllowed(anchorStartMs, nowMs, useAdjustedStart, lateNoNoticeEligible = false) {
     const onTimeEnd = anchorStartMs + 5 * 60 * 1000;
     if (nowMs <= onTimeEnd) {
         return {
@@ -45,6 +48,7 @@ function finishAllowed(anchorStartMs, nowMs, useAdjustedStart) {
         usePlannedStart: false,
         useAdjustedStart,
         lateMinutes,
+        ...(lateNoNoticeEligible && lateMinutes > 0 ? { lateNoNotice: true } : {}),
     };
 }
 function evaluateServerCheckInWindow(shift, nowMs, opts) {
@@ -95,7 +99,7 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
         if (inAdv) {
             return finishAllowed(advStart, nowMs, true);
         }
-        return finishAllowed(plannedStart, nowMs, false);
+        return finishAllowed(plannedStart, nowMs, false, !hasPriorLateNotice(shift));
     }
     const windowStart = plannedStart - 15 * 60 * 1000;
     const windowEnd = lateEtaDeadlineMs(shift, plannedStart);
@@ -103,6 +107,6 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
         return { allowed: false, rejectCode: 'TOO_EARLY' };
     if (nowMs > windowEnd)
         return { allowed: false, rejectCode: 'TOO_LATE' };
-    return finishAllowed(plannedStart, nowMs, false);
+    return finishAllowed(plannedStart, nowMs, false, !hasPriorLateNotice(shift));
 }
 //# sourceMappingURL=checkInWindow.js.map

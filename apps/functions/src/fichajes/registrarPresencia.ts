@@ -540,6 +540,36 @@ export async function registrarPresencia(
     })();
   }
 
+  if (windowEval.lateNoNotice === true) {
+    const mins = windowEval.lateMinutes ?? 0;
+    try {
+      const existingNov = await db.collection('novedades').where('shiftId', '==', shiftId).limit(25).get();
+      const already = existingNov.docs.some((d) => d.data()?.type === 'LLEGADA_TARDE');
+      if (!already) {
+        await db.collection('novedades').add({
+          type: 'LLEGADA_TARDE',
+          title: 'Llegada Tarde',
+          shiftId,
+          employeeId: empId,
+          employeeName: shiftData.employeeName || '',
+          objectiveId: shiftData.objectiveId || '',
+          objectiveName: shiftData.objectiveName || '',
+          clientName: shiftData.clientName || '',
+          positionName: shiftData.positionName || null,
+          empresaId: shiftData.empresaId || null,
+          lateMinutes: mins,
+          description: `${shiftData.employeeName || 'El guardia'} llegó ${mins} min tarde — ${shiftData.objectiveName || ''}`.trim(),
+          createdAt: now,
+          status: 'unread',
+          viewed: false,
+          source,
+        });
+      }
+    } catch (e) {
+      console.warn('[registrarPresencia] novedad LLEGADA_TARDE:', (e as Error)?.message);
+    }
+  }
+
   // AA → LT en background
   if (shiftData.absenceType === 'AA') {
     void (async () => {
