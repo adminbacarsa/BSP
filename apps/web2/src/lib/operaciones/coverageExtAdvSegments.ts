@@ -2,6 +2,7 @@ import { Timestamp } from 'firebase/firestore';
 import { resolveVacancySplitSegmentTimes } from '@/lib/planificacion/vacancyCoverage';
 import type { VacancyPositionSla } from '@/lib/planificacion/vacancySplitBands';
 import { positionStructureFromServices } from '@/lib/operaciones/opsDualCoverageApply';
+import { arHmOnYmdMs, arHour, arYmd } from '@/lib/arClock';
 
 const toDate = (d: unknown): Date => {
   if (!d) return new Date();
@@ -17,10 +18,10 @@ function parseHm(hm: string): { h: number; m: number } {
   return { h: h || 0, m: m || 0 };
 }
 
+/** HH:mm en hora AR sobre el día calendario AR `dateStr`. */
 export function hhmmOnDateToTimestamp(dateStr: string, hm: string): Timestamp {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  const { h, min } = { h: parseHm(hm).h, min: parseHm(hm).m };
-  return Timestamp.fromDate(new Date(y, m - 1, d, h, min, 0, 0));
+  const { h, m } = parseHm(hm);
+  return Timestamp.fromMillis(arHmOnYmdMs(dateStr, h, m));
 }
 
 export function hhmmRangeOnDateToTimestamps(
@@ -31,13 +32,7 @@ export function hhmmRangeOnDateToTimestamps(
   const start = hhmmOnDateToTimestamp(dateStr, fromHm);
   let end = hhmmOnDateToTimestamp(dateStr, toHm);
   if (end.toMillis() <= start.toMillis()) {
-    const d = toDate(start);
-    d.setDate(d.getDate() + 1);
-    end = Timestamp.fromDate(d);
-    end = hhmmOnDateToTimestamp(
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-      toHm,
-    );
+    end = Timestamp.fromMillis(end.toMillis() + 24 * 60 * 60 * 1000);
   }
   return { start, end };
 }
@@ -48,8 +43,7 @@ export function resolveCoverageBandCode(opts: {
 }): string {
   const c = String(opts.code || '').trim().toUpperCase();
   if (c && !['T', 'COBERTURA', ''].includes(c)) return c;
-  const d = toDate(opts.startTime);
-  const h = d.getHours();
+  const h = arHour(toDate(opts.startTime).getTime());
   if (h >= 6 && h < 14) return 'M';
   if (h >= 14 && h < 22) return 'T';
   return 'N';
@@ -76,7 +70,7 @@ export function computeDualExtAdvPlan(input: {
   employees: unknown[];
 }): DualExtAdvPlan {
   const absence = input.absenceShift;
-  const dateStr = toDate(absence.shiftDateObj).toLocaleDateString('en-CA');
+  const dateStr = arYmd(toDate(absence.shiftDateObj ?? absence.startTime).getTime());
   const gapBand = resolveCoverageBandCode({
     code: absence.code as string,
     startTime: absence.shiftDateObj ?? absence.startTime,

@@ -8,6 +8,7 @@ import {
   cospPositionMatches,
   normalizeCospPositionName,
 } from '@/lib/cosp/coverageSemantics';
+import { AR_OFFSET_MS, arHmOnYmdMs, arHour, arYmd } from '@/lib/arClock';
 
 const toDate = (d: unknown): Date => {
   if (!d) return new Date();
@@ -19,9 +20,13 @@ const toDate = (d: unknown): Date => {
 };
 
 const fmtHHmm = (d: unknown): string => {
-  const dt = toDate(d);
-  return `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+  const ms = toDate(d).getTime();
+  const h = arHour(ms);
+  const m = new Date(ms - AR_OFFSET_MS).getUTCMinutes();
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 };
+
+const arYmdFrom = (d: unknown): string => arYmd(toDate(d).getTime());
 
 export const normOpsPosName = normalizeCospPositionName;
 
@@ -54,7 +59,7 @@ export function buildOpsShiftsMap(
   const ingest = (sh: any) => {
     if (!sh?.employeeId || sh.employeeId === 'VACANTE') return;
     if (String(sh.objectiveId ?? '').trim() !== String(objectiveId).trim()) return;
-    const d = toDate(sh.shiftDateObj).toLocaleDateString('en-CA');
+    const d = arYmdFrom(sh.shiftDateObj);
     if (d !== dateStr) return;
     const key = `${sh.employeeId}_${dateStr}`;
     const row = {
@@ -113,10 +118,7 @@ function coveragePatchFromPlanningChange(
   }
   if (change.isEarlyStart && typeof change.adjustedStartTime === 'string' && /^\d{1,2}:\d{2}$/.test(change.adjustedStartTime)) {
     const [ah, am] = change.adjustedStartTime.split(':').map(Number);
-    const [y, m, d] = dateStr.split('-').map(Number);
-    const adj = new Date(y, m - 1, d);
-    adj.setHours(ah || 0, am || 0, 0, 0);
-    patch.adjustedStartTime = Timestamp.fromDate(adj);
+    patch.adjustedStartTime = Timestamp.fromMillis(arHmOnYmdMs(dateStr, ah || 0, am || 0));
   }
   if (change.isExtended && !patch.isRetention) {
     patch.isRetention = true;
@@ -142,7 +144,7 @@ export function buildOpsDualCoverageTurnoPatches(input: OpsDualCoverageInput): {
   coveredByLabel: string;
 } {
   const absence = input.absenceShift;
-  const dateStr = toDate(absence.shiftDateObj).toLocaleDateString('en-CA');
+  const dateStr = arYmdFrom(absence.shiftDateObj);
   const positionStructure = positionStructureFromServices(
     input.servicesSLA,
     absence.objectiveId,
@@ -179,9 +181,7 @@ export function buildOpsDualCoverageTurnoPatches(input: OpsDualCoverageInput): {
     secondExtExtraHours: null,
     positionStructure,
     authorizeFrancoTrabajado: true,
-    extApplyDateStr: extShift
-      ? toDate(extShift.shiftDateObj).toLocaleDateString('en-CA')
-      : dateStr,
+    extApplyDateStr: extShift ? arYmdFrom(extShift.shiftDateObj) : dateStr,
   };
 
   const changes = applyOperationalGapCloseToChanges({}, gapInput, {
