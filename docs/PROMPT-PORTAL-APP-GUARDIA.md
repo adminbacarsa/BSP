@@ -85,8 +85,9 @@ flowchart TB
 
 | Caso | UI `getCheckInTiming` | Server `evaluateServerCheckInWindow` |
 |------|----------------------|--------------------------------------|
-| Normal | **T−15 … T+5** | Igual; reject `TOO_EARLY` / `TOO_LATE` |
-| Aviso tarde | Hasta **min(inicio+eta, T+60)**; sin eta → **T+30** | Prioriza `lateArrivalEtaAt`; si no, confirmed → T+30 |
+| Normal a tiempo | **T−15 … T+5** botón **Presente** | Igual |
+| Sin aviso, llegada tarde | **T+5 … T+30** botón **Llegada tarde** («Llegás N min tarde; queda registrado.»). Flag `lateNoNotice` | Igual; `registrarPresencia` crea novedad `LLEGADA_TARDE` (minutos). **T+31** → `TOO_LATE` |
+| Aviso tarde | Hasta **min(inicio+eta, T+60)**; sin eta → **T+30**. El botón sigue **Presente** | Prioriza `lateArrivalEtaAt`; si no, confirmed → T+30. Sin `lateNoNotice` |
 | Aviso «Voy tarde» | `canNotifyLate`: **T−60 … T+5** | Callable `notificarLlegadaTarde` |
 | `OPERATIONS_COVERAGE` (no registro) | inicio−15 … max(createdAt, inicio)+60 | Igual espíritu |
 | ADV (`isEarlyStart`) | Ventana adelanto **OR** propia | Igual |
@@ -112,7 +113,7 @@ Credenciales → `PortalAuthContext` / `deviceVerified`. Otro device → `/devic
 `useEmployeeShifts`: `turnos` + `ausencias` + `planificacion_estados`. Filtro `isShiftVisibleToEmployee`: oculta draft, ausente-like, `coverageHoursOnSource`; operativos (`RETEN`, `OPERATIONS_COVERAGE`, `EVENTO`/`EV`, `resolvedBy=OPERACIONES`) siempre; planificados solo con mes publicado.
 
 ### Flujo 4 — Fichar presente
-UI `getCheckInTiming` + GPS 80 m → `requestCheckIn` → `registrarPresencia`. Efecto: `isPresent`, `PRESENT`, cancela ¿Venís?, relevo FIFO, novedad `INGRESO_AUTOREGISTRO`, notif `CHECKIN_CONFIRMADO`.
+UI `getCheckInTiming` + GPS 80 m → `requestCheckIn` → `registrarPresencia`. Efecto: `isPresent`, `PRESENT`, cancela ¿Venís?, relevo FIFO, novedad `INGRESO_AUTOREGISTRO`, notif `CHECKIN_CONFIRMADO`. Entre T+5 y T+30 **sin aviso** el botón es **Llegada tarde** y además se escribe novedad `LLEGADA_TARDE` con los minutos (`lateNoNotice`). Con aviso previo la ventana sigue la ETA (tope T+60) y el botón queda **Presente**.
 
 ### Flujo 5 — Cola offline
 Sin red: `pending_checkins` (AsyncStorage / web storage) → flush al reconectar con idempotencyKey.
