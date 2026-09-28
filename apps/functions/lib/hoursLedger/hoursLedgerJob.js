@@ -4,6 +4,7 @@ exports.stepHoursLedgerJob = exports.enqueueOpenMonthAllEmpresas = exports.retry
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const jobPlan_1 = require("./jobPlan");
+const bundledEngine_1 = require("./bundledEngine");
 const rebuildHoursLedger_1 = require("./rebuildHoursLedger");
 const JOBS = 'hours_ledger_jobs';
 const LOCK_MS = 4 * 60 * 1000;
@@ -285,18 +286,26 @@ async function finalizeJob(ref) {
         objectives = monthly.docs.map((d) => d.data()).filter((d) => d.level === 'objetivo');
     }
     const persona = await (0, rebuildHoursLedger_1.personaOfMonth)(empresaId, period);
-    const weightSum = Object.values(persona.weights).reduce((s, n) => s + n, 0);
-    if (persona.worked > 0 && weightSum > 0) {
-        for (const m of objectives) {
-            const w = persona.weights[String(m.objectiveId || '')] || 0;
-            m.worked = Math.round((persona.worked * (w / weightSum)) * 10) / 10;
-        }
-        const assigned = objectives.reduce((s, m) => s + (Number(m.worked) || 0), 0);
-        const drift = Math.round((persona.worked - assigned) * 10) / 10;
-        if (objectives[0] && drift)
-            objectives[0].worked = Math.round((objectives[0].worked + drift) * 10) / 10;
+    const inOperation = new Set(objectives.filter((m) => (Number(m.slaActive) || 0) > 0).map((m) => String(m.objectiveId || '')));
+    const shares = (0, bundledEngine_1.assignWorkedShares)(persona.worked, persona.weights, inOperation);
+    const shareById = new Map(shares.rows.map((row) => [row.objectiveId, row]));
+    for (const m of objectives) {
+        const row = shareById.get(String(m.objectiveId || ''));
+        m.worked = row?.worked || 0;
+        m.workedOutside = row?.workedOutside || 0;
     }
-    const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
+    for (const row of shares.rows) {
+        if (objectives.some((m) => String(m.objectiveId || '') === row.objectiveId))
+            continue;
+        if (!(row.worked > 0) && !(row.workedOutside > 0))
+            continue;
+        objectives.push({
+            empresaId, periodKey: period, level: 'objetivo', clientId: '', clientName: '',
+            objectiveId: row.objectiveId, objectiveName: row.objectiveId,
+            worked: row.worked, workedOutside: row.workedOutside,
+        });
+    }
+    const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
     const blank = () => Object.fromEntries(keys.map((k) => [k, 0]));
     const add = (a, b) => {
         for (const k of keys)
@@ -317,7 +326,8 @@ async function finalizeJob(ref) {
         }
         add(c, m);
     }
-    empresa.worked = persona.worked || empresa.worked;
+    empresa.worked = shares.worked;
+    empresa.workedOutside = shares.workedOutside;
     const empresaDoc = {
         empresaId, periodKey: period, level: 'empresa', clientId: '', clientName: '', objectiveId: '', objectiveName: '',
         ...empresa,
@@ -340,13 +350,13 @@ async function finalizeJob(ref) {
             const batch = db.batch();
             objectives.slice(i, i + 400).forEach((m) => {
                 const id = [empresaId, 'obj', m.objectiveId, period].join('_').replace(/[/\s#?[\]]+/g, '_').slice(0, 700);
-                batch.set(db.collection('hours_ledger_monthly').doc(id), { worked: m.worked, updatedAt: new Date().toISOString() }, { merge: true });
+                batch.set(db.collection('hours_ledger_monthly').doc(id), { worked: m.worked, workedOutside: m.workedOutside || 0, updatedAt: new Date().toISOString() }, { merge: true });
             });
             await batch.commit();
         }
         await (0, rebuildHoursLedger_1.rollupStoredMonth)(empresaId, period);
         const empresaRef = db.collection('hours_ledger_monthly').doc([empresaId, 'empresa', period].join('_'));
-        await empresaRef.set({ worked: empresa.worked, updatedAt: new Date().toISOString() }, { merge: true });
+        await empresaRef.set({ worked: empresa.worked, workedOutside: empresa.workedOutside, updatedAt: new Date().toISOString() }, { merge: true });
     }
 }
 //# sourceMappingURL=hoursLedgerJob.js.map

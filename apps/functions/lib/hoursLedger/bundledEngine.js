@@ -19,6 +19,7 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 // scripts/hours-ledger/engineEntry.ts
 var engineEntry_exports = {};
 __export(engineEntry_exports, {
+  assignWorkedShares: () => assignWorkedShares,
   buildLedgerMonth: () => buildLedgerMonth,
   jornadaPagada: () => jornadaPagada,
   personaMonthWorked: () => personaMonthWorked,
@@ -1510,23 +1511,23 @@ function buildDemandaByObjective(opts) {
     deltaSla: 0,
     deltaPlan: 0
   });
-  const r13 = (n) => Math.round(n * 10) / 10;
+  const r14 = (n) => Math.round(n * 10) / 10;
   return {
     rows,
     totals: {
       ...totals,
-      slaHours: r13(totals.slaHours),
-      planHours: r13(totals.planHours),
-      extHours: r13(totals.extHours),
-      adelHours: r13(totals.adelHours),
-      ftHours: r13(totals.ftHours),
-      opsHours: r13(totals.opsHours),
-      vacantHours: r13(totals.vacantHours),
-      absenceHours: r13(totals.absenceHours),
-      absenceCoveredHours: r13(totals.absenceCoveredHours),
-      resultante: r13(totals.resultante),
-      deltaSla: r13(totals.deltaSla),
-      deltaPlan: r13(totals.deltaPlan)
+      slaHours: r14(totals.slaHours),
+      planHours: r14(totals.planHours),
+      extHours: r14(totals.extHours),
+      adelHours: r14(totals.adelHours),
+      ftHours: r14(totals.ftHours),
+      opsHours: r14(totals.opsHours),
+      vacantHours: r14(totals.vacantHours),
+      absenceHours: r14(totals.absenceHours),
+      absenceCoveredHours: r14(totals.absenceCoveredHours),
+      resultante: r14(totals.resultante),
+      deltaSla: r14(totals.deltaSla),
+      deltaPlan: r14(totals.deltaPlan)
     }
   };
 }
@@ -3507,6 +3508,21 @@ function classifySlaBucket(input, policy = SLA_POLICY) {
   if (!input.hasPublishedPlan && !policy.slaCountsWithoutPublishedPlan) return "withoutPlan";
   return "active";
 }
+var r12 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+function assignWorkedShares(total, weights, inOperation) {
+  const entries = Object.entries(weights).filter(([, w]) => w > 0);
+  const weightSum = entries.reduce((s, [, w]) => s + w, 0);
+  const rows = entries.map(([objectiveId, w]) => {
+    const share = weightSum > 0 ? r12(total * (w / weightSum)) : 0;
+    const inside = inOperation.has(objectiveId);
+    return { objectiveId, worked: inside ? share : 0, workedOutside: inside ? 0 : share };
+  });
+  const worked = r12(rows.reduce((s, row) => s + row.worked, 0));
+  let workedOutside = r12(rows.reduce((s, row) => s + row.workedOutside, 0));
+  const gap = r12(total - worked - workedOutside);
+  workedOutside = r12(workedOutside + gap);
+  return { worked, workedOutside, rows };
+}
 
 // scripts/hours-ledger/engineEntry.ts
 var METRIC_KEYS = [
@@ -3517,6 +3533,7 @@ var METRIC_KEYS = [
   "planPublished",
   "planDraft",
   "worked",
+  "workedOutside",
   "covered",
   "uncovered",
   "ft",
@@ -3537,7 +3554,7 @@ var PAID_CODE = {
   "PERMISO GREMIAL": "PG",
   GREMIAL: "PG"
 };
-var r12 = (n) => Math.round((Number(n) || 0) * 10) / 10;
+var r13 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 function pad(n) {
   return String(n).padStart(2, "0");
 }
@@ -3621,6 +3638,7 @@ function blankMetrics() {
     planPublished: 0,
     planDraft: 0,
     worked: 0,
+    workedOutside: 0,
     covered: 0,
     uncovered: 0,
     ft: 0,
@@ -3630,10 +3648,21 @@ function blankMetrics() {
   };
 }
 function addMetrics(a, b) {
-  for (const k of METRIC_KEYS) a[k] = r12((Number(a[k]) || 0) + (Number(b[k]) || 0));
+  for (const k of METRIC_KEYS) a[k] = r13((Number(a[k]) || 0) + (Number(b[k]) || 0));
 }
 function paidCode(raw) {
   return PAID_CODE[String(raw || "").trim().toUpperCase()] || "";
+}
+function weightHours(t) {
+  const a = instantMs(t?.realStartTime) ?? instantMs(t?.checkInTime);
+  const b = instantMs(t?.realEndTime) ?? instantMs(t?.checkOutTime);
+  if (a != null && b != null && b !== a) {
+    let dur = (b - a) / 36e5;
+    if (dur < 0) dur += 24;
+    if (dur > 0 && dur <= 24) return dur;
+  }
+  const h = Number(t?.hours) || 0;
+  return h > 0 ? h : 0;
 }
 function instantMs(value) {
   if (value == null || value === "") return null;
@@ -3717,15 +3746,15 @@ function personaMonthWorked(input) {
   const weights = {};
   for (const t of active) {
     const oid = String(t.objectiveId || "").trim();
-    const hs = Number(t.hours) || 0;
+    const hs = weightHours(t);
     if (!oid || !(hs > 0)) continue;
     weights[oid] = (weights[oid] || 0) + hs;
   }
-  return { worked: r12(worked), weights };
+  return { worked: r13(worked), weights };
 }
 function planHoursOf(mode, row) {
   if (mode === "draft") return row.planDraft;
-  if (mode === "both") return r12(row.planPublished + row.planDraft);
+  if (mode === "both") return r13(row.planPublished + row.planDraft);
   return row.planPublished;
 }
 function buildLedgerMonth(input) {
@@ -3862,11 +3891,11 @@ function buildLedgerMonth(input) {
       list.forEach((p, i) => {
         const pid = puestoSlug(String(p?.name || p?.code || ""), String(p?.id || i));
         const row = touch(oid, pid, String(p?.name || p?.code || pid), day, item.srv);
-        const part = i === list.length - 1 ? r12(h - share * (list.length - 1)) : r12(share);
-        if (item.bucket === "active") row.slaActive = r12(row.slaActive + part);
-        else if (item.bucket === "inactive") row.slaInactive = r12(row.slaInactive + part);
-        else if (item.bucket === "withoutPlan") row.slaWithoutPlan = r12(row.slaWithoutPlan + part);
-        else row.slaClosed = r12(row.slaClosed + part);
+        const part = i === list.length - 1 ? r13(h - share * (list.length - 1)) : r13(share);
+        if (item.bucket === "active") row.slaActive = r13(row.slaActive + part);
+        else if (item.bucket === "inactive") row.slaInactive = r13(row.slaInactive + part);
+        else if (item.bucket === "withoutPlan") row.slaWithoutPlan = r13(row.slaWithoutPlan + part);
+        else row.slaClosed = r13(row.slaClosed + part);
       });
     }
   }
@@ -3884,7 +3913,7 @@ function buildLedgerMonth(input) {
         if (emp && paidDay.has(key)) continue;
         if (emp) paidDay.add(key);
         const row2 = touch(oid, "novedad", "Novedad", day2, null);
-        row2.novedadPaga = r12(row2.novedadPaga + jornadaPagada(t));
+        row2.novedadPaga = r13(row2.novedadPaga + jornadaPagada(t));
         continue;
       }
       const hs = calcPlanificadorShiftHours(t);
@@ -3893,8 +3922,8 @@ function buildLedgerMonth(input) {
       const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
       const pid = puestoSlug(String(t.positionName || ""), String(t.positionId || t.positionName || "puesto"));
       const row = touch(oid, pid, String(t.positionName || pid), day, null);
-      row[field] = r12(row[field] + hs);
-      if (code === "FT" || t.isFrancoTrabajado) row.ft = r12(row.ft + hs);
+      row[field] = r13(row[field] + hs);
+      if (code === "FT" || t.isFrancoTrabajado) row.ft = r13(row.ft + hs);
     }
   };
   planOn(publishedTurnos, "planPublished");
@@ -3912,7 +3941,7 @@ function buildLedgerMonth(input) {
       if (emp && paidDay.has(key)) continue;
       if (emp) paidDay.add(key);
       const row = touch(oid, "novedad", "Novedad", day, null);
-      row.novedadPaga = r12(row.novedadPaga + 8);
+      row.novedadPaga = r13(row.novedadPaga + 8);
       if (a.objectiveName) row.objectiveName = String(a.objectiveName);
     }
   }
@@ -3922,28 +3951,28 @@ function buildLedgerMonth(input) {
     if (only && !only.has(oid)) continue;
     const pid = puestoSlug(b.positionName, b.positionName);
     const row = touch(oid, pid, b.positionName || pid, b.date, null);
-    row.covered = r12(row.covered + b.covered);
+    row.covered = r13(row.covered + b.covered);
     row.objectiveName = b.objectiveName || row.objectiveName;
   }
   for (const r of demPub.rows) {
     if (r.ftHours) {
       const row = touch(r.id, "ft", "FT", ymd(year, month, 1), null);
-      row.ft = r12(r.ftHours);
+      row.ft = r13(r.ftHours);
       row.objectiveName = r.name || row.objectiveName;
       row.clientName = r.client || row.clientName;
     }
     if (r.extHours) {
       const row = touch(r.id, "ext", "EXT", ymd(year, month, 1), null);
-      row.ext = r12(r.extHours);
+      row.ext = r13(r.extHours);
     }
     if (r.adelHours) {
       const row = touch(r.id, "adv", "ADV", ymd(year, month, 1), null);
-      row.adv = r12(r.adelHours);
+      row.adv = r13(r.adelHours);
     }
   }
   const days = [...daysMap.values()].filter((d) => {
     if (only && !only.has(d.objectiveId) && d.objectiveId !== "_sin_objetivo") return false;
-    return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
+    return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft || d.worked || d.workedOutside || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
   });
   const byObj = /* @__PURE__ */ new Map();
   const ensureObj = (d) => {
@@ -3984,10 +4013,10 @@ function buildLedgerMonth(input) {
       ...blankMetrics()
     };
     const m = ensureObj(stub);
-    if (item.bucket === "active") m.slaActive = r12(item.hours);
-    else if (item.bucket === "inactive") m.slaInactive = r12(m.slaInactive + item.hours);
-    else if (item.bucket === "withoutPlan") m.slaWithoutPlan = r12(m.slaWithoutPlan + item.hours);
-    else m.slaClosed = r12(m.slaClosed + item.hours);
+    if (item.bucket === "active") m.slaActive = r13(item.hours);
+    else if (item.bucket === "inactive") m.slaInactive = r13(m.slaInactive + item.hours);
+    else if (item.bucket === "withoutPlan") m.slaWithoutPlan = r13(m.slaWithoutPlan + item.hours);
+    else m.slaClosed = r13(m.slaClosed + item.hours);
   }
   for (const r of demPub.rows) {
     const m = ensureObj({
@@ -4002,10 +4031,10 @@ function buildLedgerMonth(input) {
       puestoName: "_",
       ...blankMetrics()
     });
-    m.planPublished = r12(coveragePlannedFromDemandaRow(r));
-    m.ft = r12(r.ftHours);
-    m.ext = r12(r.extHours);
-    m.adv = r12(r.adelHours);
+    m.planPublished = r13(coveragePlannedFromDemandaRow(r));
+    m.ft = r13(r.ftHours);
+    m.ext = r13(r.extHours);
+    m.adv = r13(r.adelHours);
     const who = resolveClient(r.id, null);
     if (who.clientId) {
       m.clientId = who.clientId;
@@ -4025,37 +4054,46 @@ function buildLedgerMonth(input) {
       puestoName: "_",
       ...blankMetrics()
     });
-    m.planDraft = r12(coveragePlannedFromDemandaRow(r));
+    m.planDraft = r13(coveragePlannedFromDemandaRow(r));
     const who = resolveClient(r.id, null);
     if (who.clientId) {
       m.clientId = who.clientId;
       m.clientName = who.clientName || m.clientName;
     }
   }
-  let fichadaWeight = 0;
-  const weights = /* @__PURE__ */ new Map();
-  for (const [oid, hs] of Object.entries(persona.weights)) {
-    if (!(hs > 0)) continue;
-    weights.set(oid, hs);
-    fichadaWeight += hs;
-  }
-  if (worked > 0 && fichadaWeight > 0) {
-    for (const [oid, w] of weights) {
-      const m = byObj.get(oid);
-      if (!m) continue;
-      m.worked = r12(worked * (w / fichadaWeight));
+  const inOperation = /* @__PURE__ */ new Set();
+  for (const item of chosen.values()) {
+    if (item.bucket === "active" || item.bucket === "closed") {
+      inOperation.add(String(item.srv.objectiveId || ""));
     }
-    const assigned = [...byObj.values()].reduce((s, m) => s + m.worked, 0);
-    const drift = r12(worked - assigned);
-    const first = byObj.values().next().value;
-    if (first && drift) first.worked = r12(first.worked + drift);
+  }
+  const shares = assignWorkedShares(worked, persona.weights, inOperation);
+  for (const row of shares.rows) {
+    let m = byObj.get(row.objectiveId);
+    if (!m) {
+      const who = resolveClient(row.objectiveId, null);
+      m = {
+        empresaId,
+        periodKey,
+        level: "objetivo",
+        clientId: who.clientId,
+        clientName: who.clientName,
+        objectiveId: row.objectiveId,
+        objectiveName: row.objectiveId,
+        hoursCoreEnabled,
+        ...blankMetrics()
+      };
+      byObj.set(row.objectiveId, m);
+    }
+    m.worked = row.worked;
+    m.workedOutside = row.workedOutside;
   }
   for (const d of days) {
     const m = byObj.get(d.objectiveId);
     if (!m) continue;
-    m.covered = r12(m.covered + d.covered);
-    m.uncovered = r12(m.uncovered + d.uncovered);
-    m.novedadPaga = r12(m.novedadPaga + d.novedadPaga);
+    m.covered = r13(m.covered + d.covered);
+    m.uncovered = r13(m.uncovered + d.uncovered);
+    m.novedadPaga = r13(m.novedadPaga + d.novedadPaga);
   }
   for (const m of byObj.values()) {
     if (!(m.worked > 0)) continue;
@@ -4064,20 +4102,32 @@ function buildLedgerMonth(input) {
     if (!objDays.length || !(weight > 0)) continue;
     let acc = 0;
     objDays.forEach((d, i) => {
-      const part = i === objDays.length - 1 ? r12(m.worked - acc) : r12(m.worked * ((d.planPublished + d.planDraft + d.covered) / weight));
+      const part = i === objDays.length - 1 ? r13(m.worked - acc) : r13(m.worked * ((d.planPublished + d.planDraft + d.covered) / weight));
       d.worked = part;
-      acc = r12(acc + part);
+      acc = r13(acc + part);
     });
   }
-  for (const m of byObj.values()) m.slaActive = r12(m.slaActive + m.slaClosed);
-  for (const d of days) d.slaActive = r12(d.slaActive + d.slaClosed);
+  for (const m of byObj.values()) {
+    if (!(m.workedOutside > 0)) continue;
+    const objDays = days.filter((d) => d.objectiveId === m.objectiveId);
+    const weight = objDays.reduce((s, d) => s + d.planPublished + d.planDraft + d.covered, 0);
+    if (!objDays.length || !(weight > 0)) continue;
+    let acc = 0;
+    objDays.forEach((d, i) => {
+      const part = i === objDays.length - 1 ? r13(m.workedOutside - acc) : r13(m.workedOutside * ((d.planPublished + d.planDraft + d.covered) / weight));
+      d.workedOutside = part;
+      acc = r13(acc + part);
+    });
+  }
+  for (const m of byObj.values()) m.slaActive = r13(m.slaActive + m.slaClosed);
+  for (const d of days) d.slaActive = r13(d.slaActive + d.slaClosed);
   for (const m of byObj.values()) {
     if (!(m.slaActive > 0)) {
       m.covered = 0;
       m.uncovered = 0;
     } else {
-      m.covered = r12(Math.min(Math.max(0, m.covered), m.slaActive));
-      m.uncovered = r12(Math.max(0, m.slaActive - m.covered));
+      m.covered = r13(Math.min(Math.max(0, m.covered), m.slaActive));
+      m.uncovered = r13(Math.max(0, m.slaActive - m.covered));
     }
   }
   const daysByObj = /* @__PURE__ */ new Map();
@@ -4099,9 +4149,9 @@ function buildLedgerMonth(input) {
     if (slaSum > 0 && Math.abs(slaSum - m.slaActive) > 0.05) {
       let acc = 0;
       objDays.forEach((d, i) => {
-        const part = i === objDays.length - 1 ? r12(m.slaActive - acc) : r12(m.slaActive * ((d.slaActive || 0) / slaSum));
+        const part = i === objDays.length - 1 ? r13(m.slaActive - acc) : r13(m.slaActive * ((d.slaActive || 0) / slaSum));
         d.slaActive = Math.max(0, part);
-        acc = r12(acc + d.slaActive);
+        acc = r13(acc + d.slaActive);
       });
     } else if (!(slaSum > 0) && objDays[0]) {
       objDays[0].slaActive = m.slaActive;
@@ -4109,17 +4159,17 @@ function buildLedgerMonth(input) {
     const base = objDays.reduce((s, d) => s + (d.slaActive || 0), 0) || 1;
     let accC = 0;
     objDays.forEach((d, i) => {
-      const cov = i === objDays.length - 1 ? r12(m.covered - accC) : r12(m.covered * ((d.slaActive || 0) / base));
-      d.covered = r12(Math.min(Math.max(0, cov), d.slaActive || 0));
-      d.uncovered = r12(Math.max(0, (d.slaActive || 0) - d.covered));
-      accC = r12(accC + d.covered);
+      const cov = i === objDays.length - 1 ? r13(m.covered - accC) : r13(m.covered * ((d.slaActive || 0) / base));
+      d.covered = r13(Math.min(Math.max(0, cov), d.slaActive || 0));
+      d.uncovered = r13(Math.max(0, (d.slaActive || 0) - d.covered));
+      accC = r13(accC + d.covered);
     });
     const sumPair = objDays.reduce((s, d) => s + d.covered + d.uncovered, 0);
-    const driftPair = r12(m.slaActive - sumPair);
+    const driftPair = r13(m.slaActive - sumPair);
     if (objDays.length && driftPair) {
       const last = objDays[objDays.length - 1];
-      last.slaActive = r12(last.slaActive + driftPair);
-      last.uncovered = r12(last.uncovered + driftPair);
+      last.slaActive = r13(last.slaActive + driftPair);
+      last.uncovered = r13(last.uncovered + driftPair);
     }
   }
   if (only) {
@@ -4128,11 +4178,12 @@ function buildLedgerMonth(input) {
     }
   }
   const monthlyObjs = [...byObj.values()].filter(
-    (m) => m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
+    (m) => m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft || m.worked || m.workedOutside || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
   );
   const empresa = blankMetrics();
   for (const m of monthlyObjs) addMetrics(empresa, m);
-  empresa.worked = worked;
+  const outsideGap = r13(worked - empresa.worked - empresa.workedOutside);
+  if (outsideGap) empresa.workedOutside = r13(empresa.workedOutside + outsideGap);
   const empresaDoc = {
     empresaId,
     periodKey,
@@ -4172,6 +4223,7 @@ function buildLedgerMonth(input) {
 }
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
+  assignWorkedShares,
   buildLedgerMonth,
   jornadaPagada,
   personaMonthWorked,

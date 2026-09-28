@@ -1,5 +1,15 @@
 export type LedgerPlanMode = 'published' | 'draft' | 'both';
 
+export function assignWorkedShares(
+  total: number,
+  weights: Record<string, number>,
+  inOperation: ReadonlySet<string>,
+): {
+  worked: number;
+  workedOutside: number;
+  rows: Array<{ objectiveId: string; worked: number; workedOutside: number }>;
+};
+
 export function planHoursOf(
   mode: LedgerPlanMode,
   row: { planPublished: number; planDraft: number },

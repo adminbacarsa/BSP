@@ -1,4 +1,4 @@
-import { SLA_POLICY, classifySlaBucket } from './slaPolicy.ts';
+import { SLA_POLICY, assignWorkedShares, classifySlaBucket, objectiveInOperation } from './slaPolicy.ts';
 
 const base = { closed: false, contractActive: true, clientActive: true, hasPublishedPlan: true };
 const shopping = { ...base, hasPublishedPlan: false };
@@ -20,4 +20,12 @@ if (classifySlaBucket(shopping, { ...SLA_POLICY, slaCountsWithoutPublishedPlan: 
 if (classifySlaBucket(inactivo, { ...SLA_POLICY, slaCountsInactiveClient: true }) !== 'active') {
   throw new Error('el flag prende al cliente inactivo');
 }
+if (!objectiveInOperation(['active'])) throw new Error('operación cuenta');
+if (!objectiveInOperation(['closed'])) throw new Error('cerrado vigente cuenta');
+if (objectiveInOperation(['inactive'])) throw new Error('inactivo no es operación');
+if (objectiveInOperation(['withoutPlan'])) throw new Error('sin plan no es operación');
+if (objectiveInOperation([])) throw new Error('sin contrato no es operación');
+const split = assignWorkedShares(100, { op: 1, demo: 1 }, new Set(['op']));
+if (split.worked !== 50 || split.workedOutside !== 50) throw new Error('reparto trabajadas');
+if (split.worked + split.workedOutside !== 100) throw new Error('la persona no se pierde');
 console.log('sla-policy ok');

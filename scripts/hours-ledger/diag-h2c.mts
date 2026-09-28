@@ -123,6 +123,13 @@ console.log('NAMED', JSON.stringify(named.map((m) => ({
   inact: Math.round(m.slaInactive),
   cerr: Math.round(m.slaClosed),
   sinPlan: Math.round(m.slaWithoutPlan || 0),
+  worked: Math.round(m.worked || 0),
+  fuera: Math.round(m.workedOutside || 0),
+}))));
+const objs = built.monthly.filter((m) => m.level === 'objetivo');
+const topOut = [...objs].filter((m) => m.workedOutside > 0).sort((a, b) => b.workedOutside - a.workedOutside).slice(0, 8);
+console.log('FUERA', JSON.stringify(topOut.map((m) => ({
+  name: m.objectiveName, worked: Math.round(m.worked), fuera: Math.round(m.workedOutside), sla: Math.round(m.slaActive),
 }))));
 console.log('ENGINE', JSON.stringify({
   levels,
@@ -137,6 +144,7 @@ console.log('ENGINE', JSON.stringify({
   novedadPaga: Math.round(t.novedadPaga),
   planPublished: Math.round(t.planPublished),
   worked: Math.round(t.worked),
+  workedOutside: Math.round(t.workedOutside || 0),
 }));
 const bad = built.monthly.filter((m) => m.level === 'objetivo' && Math.abs((m.covered + m.uncovered) - m.slaActive) > 0.5);
 bad.sort((a, b) => (b.covered + b.uncovered - b.slaActive) - (a.covered + a.uncovered - a.slaActive));

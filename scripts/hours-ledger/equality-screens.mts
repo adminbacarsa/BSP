@@ -33,6 +33,10 @@ function officialFromEmpresa(row: any) {
     sla: Math.round(Number(row?.slaActive) || 0),
     planPublished: Math.round(Number(row?.planPublished) || 0),
     worked: Math.round(Number(row?.worked) || 0),
+    workedOutside: Math.round(Number(row?.workedOutside) || 0),
+    covered: Math.round(Number(row?.covered) || 0),
+    uncovered: Math.round(Number(row?.uncovered) || 0),
+    novedadPaga: Math.round(Number(row?.novedadPaga) || 0),
   };
 }
 
@@ -58,13 +62,14 @@ const screens = [
   { name: 'CRM', ...official },
   { name: 'Análisis', ...official },
   { name: 'Dashboard', ...official },
-  { name: 'Estado de cronogramas', sla: official.sla, planPublished: official.planPublished, worked: official.worked },
-  { name: 'Prefactura', sla: official.sla, planPublished: official.planPublished, worked: null },
+  { name: 'Estado de cronogramas', ...official },
+  { name: 'Prefactura', ...official, worked: null, workedOutside: null },
 ];
 const equal = screens.every((s) =>
   s.sla === official.sla
   && s.planPublished === official.planPublished
-  && (s.worked == null || s.worked === official.worked),
+  && (s.worked == null || s.worked === official.worked)
+  && (s.workedOutside == null || s.workedOutside === official.workedOutside),
 );
 
 console.log(JSON.stringify({ empresaId, period, source, official, screens, equal }, null, 2));

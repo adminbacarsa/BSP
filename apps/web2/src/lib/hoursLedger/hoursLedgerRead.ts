@@ -24,6 +24,7 @@ export type HoursLedgerMonthRow = {
   planPublished: number;
   planDraft: number;
   worked: number;
+  workedOutside?: number;
   covered?: number;
   uncovered?: number;
   ft?: number;
@@ -86,6 +87,7 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     planPublished: Number(raw.planPublished) || 0,
     planDraft: Number(raw.planDraft) || 0,
     worked: Number(raw.worked) || 0,
+    workedOutside: Number(raw.workedOutside) || 0,
     covered: Number(raw.covered) || 0,
     uncovered: Number(raw.uncovered) || 0,
     ft: Number(raw.ft) || 0,

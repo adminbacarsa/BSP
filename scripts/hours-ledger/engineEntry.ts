@@ -17,7 +17,9 @@ import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
 } from '../../packages/hours-core/src/index';
-import { classifySlaBucket } from './slaPolicy';
+import { assignWorkedShares, classifySlaBucket } from './slaPolicy';
+
+export { assignWorkedShares };
 
 export type LedgerPlanMode = 'published' | 'draft' | 'both';
 
@@ -38,6 +40,7 @@ export type LedgerDay = {
   planPublished: number;
   planDraft: number;
   worked: number;
+  workedOutside: number;
   covered: number;
   uncovered: number;
   ft: number;
@@ -61,6 +64,7 @@ export type LedgerMonth = {
   planPublished: number;
   planDraft: number;
   worked: number;
+  workedOutside: number;
   covered: number;
   uncovered: number;
   ft: number;
@@ -90,7 +94,7 @@ export type LedgerBuildInput = {
 };
 
 const METRIC_KEYS = [
-  'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked',
+  'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
   'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
 ] as const;
 
@@ -197,7 +201,7 @@ function puestoSlug(name: string, id: string) {
 function blankMetrics() {
   return {
     slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0,
-    planPublished: 0, planDraft: 0, worked: 0,
+    planPublished: 0, planDraft: 0, worked: 0, workedOutside: 0,
     covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
   };
 }
@@ -208,6 +212,19 @@ function addMetrics(a: ReturnType<typeof blankMetrics>, b: Partial<ReturnType<ty
 
 function paidCode(raw: unknown): string {
   return PAID_CODE[String(raw || '').trim().toUpperCase()] || '';
+}
+
+/** Peso para repartir trabajadas. No cambia el total de persona. */
+function weightHours(t: any): number {
+  const a = instantMs(t?.realStartTime) ?? instantMs(t?.checkInTime);
+  const b = instantMs(t?.realEndTime) ?? instantMs(t?.checkOutTime);
+  if (a != null && b != null && b !== a) {
+    let dur = (b - a) / 3600000;
+    if (dur < 0) dur += 24;
+    if (dur > 0 && dur <= 24) return dur;
+  }
+  const h = Number(t?.hours) || 0;
+  return h > 0 ? h : 0;
 }
 
 function instantMs(value: unknown): number | null {
@@ -304,7 +321,7 @@ export function personaMonthWorked(input: {
   const weights: Record<string, number> = {};
   for (const t of active) {
     const oid = String(t.objectiveId || '').trim();
-    const hs = Number(t.hours) || 0;
+    const hs = weightHours(t);
     if (!oid || !(hs > 0)) continue;
     weights[oid] = (weights[oid] || 0) + hs;
   }
@@ -555,6 +572,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   const days = [...daysMap.values()].filter((d) => {
     if (only && !only.has(d.objectiveId) && d.objectiveId !== '_sin_objetivo') return false;
     return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft
+      || d.worked || d.workedOutside
       || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
   });
 
@@ -625,23 +643,27 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
-  let fichadaWeight = 0;
-  const weights = new Map<string, number>();
-  for (const [oid, hs] of Object.entries(persona.weights)) {
-    if (!(hs > 0)) continue;
-    weights.set(oid, hs);
-    fichadaWeight += hs;
-  }
-  if (worked > 0 && fichadaWeight > 0) {
-    for (const [oid, w] of weights) {
-      const m = byObj.get(oid);
-      if (!m) continue;
-      m.worked = r1(worked * (w / fichadaWeight));
+  const inOperation = new Set<string>();
+  for (const item of chosen.values()) {
+    if (item.bucket === 'active' || item.bucket === 'closed') {
+      inOperation.add(String(item.srv.objectiveId || ''));
     }
-    const assigned = [...byObj.values()].reduce((s, m) => s + m.worked, 0);
-    const drift = r1(worked - assigned);
-    const first = byObj.values().next().value as LedgerMonth | undefined;
-    if (first && drift) first.worked = r1(first.worked + drift);
+  }
+  const shares = assignWorkedShares(worked, persona.weights, inOperation);
+  for (const row of shares.rows) {
+    let m = byObj.get(row.objectiveId);
+    if (!m) {
+      const who = resolveClient(row.objectiveId, null);
+      m = {
+        empresaId, periodKey, level: 'objetivo',
+        clientId: who.clientId, clientName: who.clientName,
+        objectiveId: row.objectiveId, objectiveName: row.objectiveId,
+        hoursCoreEnabled, ...blankMetrics(),
+      };
+      byObj.set(row.objectiveId, m);
+    }
+    m.worked = row.worked;
+    m.workedOutside = row.workedOutside;
   }
 
   for (const d of days) {
@@ -663,6 +685,20 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
         ? r1(m.worked - acc)
         : r1(m.worked * ((d.planPublished + d.planDraft + d.covered) / weight));
       d.worked = part;
+      acc = r1(acc + part);
+    });
+  }
+  for (const m of byObj.values()) {
+    if (!(m.workedOutside > 0)) continue;
+    const objDays = days.filter((d) => d.objectiveId === m.objectiveId);
+    const weight = objDays.reduce((s, d) => s + d.planPublished + d.planDraft + d.covered, 0);
+    if (!objDays.length || !(weight > 0)) continue;
+    let acc = 0;
+    objDays.forEach((d, i) => {
+      const part = i === objDays.length - 1
+        ? r1(m.workedOutside - acc)
+        : r1(m.workedOutside * ((d.planPublished + d.planDraft + d.covered) / weight));
+      d.workedOutside = part;
       acc = r1(acc + part);
     });
   }
@@ -726,12 +762,13 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
 
   const monthlyObjs = [...byObj.values()].filter((m) =>
     m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft
-    || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga,
+    || m.worked || m.workedOutside || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga,
   );
 
   const empresa = blankMetrics();
   for (const m of monthlyObjs) addMetrics(empresa, m);
-  empresa.worked = worked;
+  const outsideGap = r1(worked - empresa.worked - empresa.workedOutside);
+  if (outsideGap) empresa.workedOutside = r1(empresa.workedOutside + outsideGap);
 
   const empresaDoc: LedgerMonth = {
     empresaId, periodKey, level: 'empresa',
