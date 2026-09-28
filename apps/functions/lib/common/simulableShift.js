@@ -95,9 +95,7 @@ function clientIsActive(data) {
     const u = String(data.status ?? 'ACTIVO').trim().toUpperCase();
     return u === 'ACTIVO' || u === 'ACTIVE' || u === '';
 }
-function slaOpenRange(data) {
-    if (data.closed === true)
-        return null;
+function slaMonthRange(data) {
     if (!contractActive(data.status))
         return null;
     const startRaw = contractCalendarYmd(data.startDate);
@@ -178,7 +176,7 @@ class ObjectiveOperationCache {
                     continue;
                 if (!clientId && !clientIsActive(undefined))
                     continue;
-                const range = slaOpenRange(data);
+                const range = slaMonthRange(data);
                 if (!range)
                     continue;
                 if (!overlapsMonth(range.start, range.end, year, month))

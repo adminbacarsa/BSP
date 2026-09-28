@@ -2,7 +2,8 @@
  * P1d — el Demo inventó presencia en objetivos que ese día no estaban en operación.
  *
  * Barrido: turnos de pruebas_sa con inicio desde el 01/08/2026 AR, en un objetivo
- * fuera de operación ESE día, con marca de Demo (modoDemoAt o autoPresencia) y sin
+ * que ESE día no tiene SLA activo o cerrado vigente (cliente activo) con cronograma
+ * publicado, con marca de Demo (modoDemoAt o autoPresencia) y sin
  * fichada real de guardia (checkInMethod / checkInSource / presenciaSource de portal
  * u operador). Revierte la presencia simulada y el cierre, y guarda el estado previo
  * en p1dRevertedFrom. No borra el turno. No toca bacarsa ni licencias/francos.

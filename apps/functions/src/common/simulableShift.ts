@@ -123,8 +123,12 @@ function clientIsActive(data: Record<string, unknown> | undefined): boolean {
   return u === 'ACTIVO' || u === 'ACTIVE' || u === '';
 }
 
-function slaOpenRange(data: Record<string, unknown>): { start: string; end: string } | null {
-  if (data.closed === true) return null;
+/**
+ * Rango del SLA del mes (libro de horas: bucket activo o cerrado).
+ * `closed: true` entra si el status sigue activo y el día cae en la vigencia.
+ * Status inactivo/cancelado no entra.
+ */
+function slaMonthRange(data: Record<string, unknown>): { start: string; end: string } | null {
   if (!contractActive(data.status)) return null;
   const startRaw = contractCalendarYmd(data.startDate);
   const endRaw = contractCalendarYmd(data.endDate);
@@ -169,9 +173,9 @@ type MonthOp = {
 type SlaDoc = { data: () => Record<string, unknown> };
 
 /**
- * En operación ese día = contrato `servicios_sla` abierto (no `closed`), status activo,
- * vigente el día calendario AR del turno, cliente activo y cronograma PUBLICADO del mes.
- * Cache por empresa (SLA + clientes) y por empresa/objetivo/mes (publicado + rangos).
+ * Universo Demo = SLA del mes del Banco de Horas: contrato activo vigente ese día,
+ * o cerrado cuya vigencia incluye ese día, cliente activo y cronograma PUBLICADO.
+ * Borrador (sin `publishedAt`) no se simula. Cache por empresa/objetivo/mes.
  */
 export class ObjectiveOperationCache {
   private slasByEmpresa = new Map<string, SlaDoc[]>();
@@ -220,7 +224,7 @@ export class ObjectiveOperationCache {
         const client = clientId ? clients.get(clientId) : undefined;
         if (clientId && clients.has(clientId) && !clientIsActive(client)) continue;
         if (!clientId && !clientIsActive(undefined)) continue;
-        const range = slaOpenRange(data);
+        const range = slaMonthRange(data);
         if (!range) continue;
         if (!overlapsMonth(range.start, range.end, year, month)) continue;
         ranges.push(range);

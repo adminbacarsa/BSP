@@ -2270,13 +2270,14 @@ async function run() {
       report(56, id1 === id2 && String(id1).startsWith('gap_'), `id=${id1}`);
     }
 
-    // Caso 57 — Demo solo simula en objetivos en operación (contrato abierto + cliente activo + cronograma publicado).
+    // Caso 57 — Demo: SLA activo o cerrado vigente ese día + cronograma publicado. Borrador y vencido, no.
     {
       const prefix = `${runId}_c57`;
       const empresaId = `${prefix}_emp`;
       const clientId = `${prefix}_cli`;
       const objIn = `${prefix}_in`;
-      const objOut = `${prefix}_out`;
+      const objClosed = `${prefix}_closed`;
+      const objDraft = `${prefix}_draft`;
       const nowMs = Date.now();
       const start = Timestamp.fromMillis(nowMs - 60 * 1000);
       const end = Timestamp.fromMillis(nowMs + 8 * 3600000);
@@ -2285,6 +2286,12 @@ async function run() {
         const ar = new Date(nowMs - 3 * 3600000);
         return { year: ar.getUTCFullYear(), month: ar.getUTCMonth() + 1 };
       })();
+      const shiftBase = (objectiveId, name, emp) => ({
+        empresaId, clientId, objectiveId, objectiveName: name,
+        employeeId: emp, employeeName: name, code: 'M',
+        positionName: 'P1', status: 'PENDING', draft: false,
+        startTime: start, endTime: end,
+      });
       await db.batch()
         .set(db.collection('empresas').doc(empresaId), { centroControlEnabled: true, modoDemoEnabled: true })
         .set(db.collection('clients').doc(clientId), { empresaId, name: 'Cliente demo', status: 'ACTIVE' })
@@ -2292,91 +2299,98 @@ async function run() {
           empresaId, clientId, objectiveId: objIn, status: 'ACTIVE', closed: false,
           startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 12, 31),
         })
-        .set(db.collection('servicios_sla').doc(`${prefix}_sla_out`), {
-          empresaId, clientId, objectiveId: objOut, status: 'ACTIVE', closed: true,
-          startDate: '2026-01-01', endDate: '2026-12-31',
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_closed`), {
+          empresaId, clientId, objectiveId: objClosed, status: 'ACTIVE', closed: true,
+          startDate: utcDay(2026, 9, 1), endDate: utcDay(2026, 9, 30),
+        })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_peaje`), {
+          empresaId, clientId, objectiveId: `${prefix}_peaje`, status: 'ACTIVE', closed: true,
+          startDate: '2026-09-24', endDate: '2026-09-25',
+        })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_draft`), {
+          empresaId, clientId, objectiveId: objDraft, status: 'ACTIVE', closed: false,
+          startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 12, 31),
+        })
+        .set(db.collection('servicios_sla').doc(`${prefix}_sla_ended`), {
+          empresaId, clientId, objectiveId: `${prefix}_ended`, status: 'ACTIVE', closed: true,
+          startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 7, 31),
         })
         .set(db.collection('planificacion_estados').doc(`${empresaId}_${objIn}_${year}_${month}`), {
           empresaId, objectiveId: objIn, publishedAt: Timestamp.now(),
         })
-        .set(db.collection('planificacion_estados').doc(`${empresaId}_${objOut}_${year}_${month}`), {
-          empresaId, objectiveId: objOut, publishedAt: Timestamp.now(),
+        .set(db.collection('planificacion_estados').doc(`${empresaId}_${objClosed}_${year}_${month}`), {
+          empresaId, objectiveId: objClosed, publishedAt: Timestamp.now(),
         })
-        .set(db.collection('servicios_sla').doc(`${prefix}_sla_ended`), {
-          empresaId, clientId, objectiveId: `${prefix}_ended`, status: 'ACTIVE', closed: false,
-          startDate: utcDay(2026, 1, 1), endDate: utcDay(2026, 7, 31),
+        .set(db.collection('planificacion_estados').doc(`${empresaId}_${prefix}_peaje_2026_9`), {
+          empresaId, objectiveId: `${prefix}_peaje`, publishedAt: Timestamp.now(),
         })
         .set(db.collection('planificacion_estados').doc(`${empresaId}_${prefix}_ended_2026_9`), {
           empresaId, objectiveId: `${prefix}_ended`, publishedAt: Timestamp.now(),
         })
-        .set(db.collection('turnos').doc(`${prefix}_in`), {
-          empresaId, clientId, objectiveId: objIn, objectiveName: 'En operacion',
-          employeeId: `${prefix}_eIn`, employeeName: 'Guardia In', code: 'M',
-          positionName: 'P1', status: 'PENDING', draft: false,
-          startTime: start, endTime: end,
-        })
-        .set(db.collection('turnos').doc(`${prefix}_out`), {
-          empresaId, clientId, objectiveId: objOut, objectiveName: 'Fuera operacion',
-          employeeId: `${prefix}_eOut`, employeeName: 'Guardia Out', code: 'M',
-          positionName: 'P1', status: 'PENDING', draft: false,
-          startTime: start, endTime: end,
-        })
+        .set(db.collection('turnos').doc(`${prefix}_in`), shiftBase(objIn, 'Abierto', `${prefix}_eIn`))
+        .set(db.collection('turnos').doc(`${prefix}_closed`), shiftBase(objClosed, 'Cerrado mes', `${prefix}_eCl`))
+        .set(db.collection('turnos').doc(`${prefix}_draft`), shiftBase(objDraft, 'Borrador', `${prefix}_eDr`))
         .commit();
 
       const cache = new ObjectiveOperationCache();
-      const inShift = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
-      const outShift = (await db.collection('turnos').doc(`${prefix}_out`).get()).data();
-      const reasonIn = await simulableShiftSkipReasonResolved(db, inShift, cache);
-      const reasonOut = await simulableShiftSkipReasonResolved(db, outShift, cache);
-
+      const reasonOf = async (id) => simulableShiftSkipReasonResolved(
+        db,
+        (await db.collection('turnos').doc(id).get()).data(),
+        cache,
+      );
+      const reasonIn = await reasonOf(`${prefix}_in`);
+      const reasonClosed = await reasonOf(`${prefix}_closed`);
+      const reasonDraft = await reasonOf(`${prefix}_draft`);
+      const peajeDay = (ymd) => simulableShiftSkipReasonResolved(db, {
+        empresaId, objectiveId: `${prefix}_peaje`, code: 'M',
+        startTime: Timestamp.fromMillis(Date.parse(`${ymd}T10:00:00-03:00`)),
+      }, cache);
+      const peaje24 = await peajeDay('2026-09-24');
+      const peaje26 = await peajeDay('2026-09-26');
       const endedReason = await simulableShiftSkipReasonResolved(db, {
         empresaId, objectiveId: `${prefix}_ended`, code: 'M',
         startTime: Timestamp.fromMillis(Date.parse('2026-09-15T10:00:00-03:00')),
       }, cache);
 
       const oldCreated = Timestamp.fromMillis(nowMs - 10 * 60000);
-      await db.batch()
-        .set(db.collection('convocatorias_cobertura').doc(`${prefix}_convIn`), {
-          empresaId, shiftId: `${prefix}_in`, objectiveId: objIn, clientId,
-          type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
-          timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand`,
-          startTime: start,
-        })
-        .set(db.collection('convocatorias_cobertura').doc(`${prefix}_convOut`), {
-          empresaId, shiftId: `${prefix}_out`, objectiveId: objOut, clientId,
-          type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
-          timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand2`,
-          startTime: start,
-        })
-        .commit();
+      const conv = (id, shiftId, objectiveId) => db.collection('convocatorias_cobertura').doc(id).set({
+        empresaId, shiftId, objectiveId, clientId,
+        type: 'RET', status: 'PENDING', createdBy: 'MODO_DEMO', createdAt: oldCreated,
+        timeoutAt: Timestamp.now(), candidateEmployeeId: `${prefix}_cand`,
+        startTime: start,
+      });
+      await conv(`${prefix}_convIn`, `${prefix}_in`, objIn);
+      await conv(`${prefix}_convClosed`, `${prefix}_closed`, objClosed);
+      await conv(`${prefix}_convDraft`, `${prefix}_draft`, objDraft);
 
-      await runModoDemoForEmpresa(db, empresaId);
-      let inn = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
       const touched = (s) => s?.isPresent === true || s?.isAbsent === true || !!s?.modoDemoAt;
-      if (!touched(inn)) {
-        await db.collection('turnos').doc(`${prefix}_in`).update({
+      const ensureTouched = async (id) => {
+        let s = (await db.collection('turnos').doc(id).get()).data();
+        if (touched(s)) return s;
+        await db.collection('turnos').doc(id).update({
           startTime: Timestamp.fromMillis(nowMs - 10 * 60 * 1000),
         });
         await runModoDemoForEmpresa(db, empresaId);
-        inn = (await db.collection('turnos').doc(`${prefix}_in`).get()).data();
-      }
-      const outAfter = (await db.collection('turnos').doc(`${prefix}_out`).get()).data();
+        return (await db.collection('turnos').doc(id).get()).data();
+      };
+      await runModoDemoForEmpresa(db, empresaId);
+      const inn = await ensureTouched(`${prefix}_in`);
+      const closedAfter = await ensureTouched(`${prefix}_closed`);
+      const draftAfter = (await db.collection('turnos').doc(`${prefix}_draft`).get()).data();
       const convIn = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convIn`).get()).data();
-      const convOut = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convOut`).get()).data();
+      const convClosed = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convClosed`).get()).data();
+      const convDraft = (await db.collection('convocatorias_cobertura').doc(`${prefix}_convDraft`).get()).data();
+      const draftClean = draftAfter?.isPresent !== true && draftAfter?.isAbsent !== true
+        && !draftAfter?.modoDemoAt && !draftAfter?.realStartTime;
       const ok =
-        reasonIn === null
-        && reasonOut === 'FUERA_OPERACION'
-        && endedReason === 'FUERA_OPERACION'
-        && touched(inn)
-        && outAfter?.isPresent !== true
-        && outAfter?.isAbsent !== true
-        && !outAfter?.modoDemoAt
-        && !outAfter?.realStartTime
-        && convIn?.status !== 'PENDING'
-        && convOut?.status === 'PENDING';
+        reasonIn === null && reasonClosed === null && reasonDraft === 'FUERA_OPERACION'
+        && peaje24 === null && peaje26 === 'FUERA_OPERACION' && endedReason === 'FUERA_OPERACION'
+        && touched(inn) && touched(closedAfter) && draftClean
+        && convIn?.status !== 'PENDING' && convClosed?.status !== 'PENDING'
+        && convDraft?.status === 'PENDING';
       report(57, ok, ok
-        ? 'Demo simula en operación y no en contrato cerrado ni vencido 31/07 UTC'
-        : `in=${reasonIn}/${touched(inn)} out=${reasonOut} present=${outAfter?.isPresent} ended=${endedReason} convIn=${convIn?.status} convOut=${convOut?.status}`);
+        ? 'Demo simula SLA abierto y cerrado vigente (24/09 sí, 26/09 no); borrador y vencido 31/07 no'
+        : `in=${reasonIn}/${touched(inn)} closed=${reasonClosed}/${touched(closedAfter)} draft=${reasonDraft} peaje=${peaje24}/${peaje26} ended=${endedReason} convD=${convDraft?.status}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
