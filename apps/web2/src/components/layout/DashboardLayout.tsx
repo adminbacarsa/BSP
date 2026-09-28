@@ -10,7 +10,7 @@ import { signOut } from 'firebase/auth';
 import { PageHeaderProvider, usePageHeader } from '@/context/PageHeaderContext';
 import {
   Menu, X, LogOut, Briefcase, BarChart3, Users,
-  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, GraduationCap, Lock
+  Settings, Calendar, LayoutDashboard, Radio, ShieldCheck, Activity, AlertCircle, BookOpen, Building2, ChevronDown, TrendingUp, Shield, FlaskConical, ClipboardList, GraduationCap, Lock, Database
 } from 'lucide-react';
 import { getStoredTheme, type AppTheme } from '@/lib/themeManager';
 import { applyCompanyTheme } from '@/lib/companyTheme';
@@ -737,6 +737,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
               style={getLinkStyle('/admin/analisis')}>
               <TrendingUp size={18} className="shrink-0" />
               {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Análisis</span>}
+            </Link>
+          )}
+
+          {(canReadModule('REPORTS') || canReadModule('ANALYSIS')) && (
+            <Link href="/admin/banco-horas" prefetch={false} title="Banco de Horas"
+              className={getLinkHoverClass('/admin/banco-horas')}
+              style={getLinkStyle('/admin/banco-horas')}>
+              <Database size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Banco de Horas</span>}
             </Link>
           )}
 

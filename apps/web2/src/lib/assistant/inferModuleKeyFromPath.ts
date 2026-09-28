@@ -5,6 +5,7 @@
 const ADMIN_PREFIXES: [string, string][] = [
   ['/admin/configuracion', 'CONFIG'],
   ['/admin/analisis', 'ANALYSIS'],
+  ['/admin/banco-horas', 'ANALYSIS'],
   ['/admin/reportes', 'REPORTS'],
   ['/admin/servicios', 'SERVICES'],
   ['/admin/crm', 'CLIENTS'],
