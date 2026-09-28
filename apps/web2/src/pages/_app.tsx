@@ -49,6 +49,11 @@ const TrainingGate = dynamic(
   { ssr: false },
 );
 
+const NewVersionNotice = dynamic(
+  () => import('@/components/system/NewVersionNotice').then((m) => m.NewVersionNotice),
+  { ssr: false },
+);
+
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
   const showTrainingCoach = router.pathname.startsWith('/admin');
@@ -101,6 +106,7 @@ export default function App({ Component, pageProps }: AppProps) {
         {showAssistant && <AssistantWrapper />}
         {showTrainingCoach && <TrainingCoachBubble />}
         {showTrainingCoach && <TrainingGate />}
+        <NewVersionNotice />
         {/* Abajo a la derecha: arriba al centro tapaba los controles del CC (Demo/Auto/Manual, contadores). */}
         <Toaster position="bottom-right" richColors closeButton visibleToasts={3} duration={3000} gap={8} offset={16} />
       </ToastProvider>

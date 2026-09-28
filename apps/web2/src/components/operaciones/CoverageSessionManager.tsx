@@ -16,6 +16,7 @@ import {
   getDocs, limit, query, where,
 } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { setAppBusy } from '@/lib/appBusyState';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import {
   absentShiftCoveragePatch,
@@ -318,6 +319,12 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
     Object.values(timerRefs.current).forEach(clearInterval);
     Object.values(unsubRefs.current).forEach(fn => fn());
   }, []);
+
+  // Con protocolo de cobertura abierto no se recarga por versión nueva.
+  useEffect(() => {
+    setAppBusy('coverage-protocol', sessions.length > 0, 'protocolo de cobertura abierto');
+    return () => setAppBusy('coverage-protocol', false);
+  }, [sessions.length]);
 
   if (sessions.length === 0) return null;
 

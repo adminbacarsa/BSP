@@ -15,6 +15,8 @@ _pdfgen/
 apps/web2/out_local_backup/
 apps/web2/out_prod/
 apps/web2/public/app/
+# Generado por next.config.js en cada build (hash del commit publicado).
+apps/web2/public/version.json
 
 # --- Credenciales (nunca commitear) ---
 service-account.json

@@ -4,6 +4,7 @@ import { db, onSnapshotFresh } from '@/lib/firebase';
 // Todos los avisos de este hook son eventos automáticos: van a Alertas/bitácora, no a toast.
 import { silentToast as toast } from '@/lib/ui/silentToast';
 import { stampEmpresaId } from '@/lib/multiempresa';
+import { useStaleBuild } from '@/hooks/useStaleBuild';
 
 export interface AutoMonitorProps {
   isActive: boolean;
@@ -47,13 +48,16 @@ const createNovedad = (type: string, title: string, description: string, shiftDa
   }, String(shiftData.empresaId || empresaId || '').trim())).catch(() => {});
 
 export const useAutoMonitor = ({
-  isActive,
+  isActive: isActiveProp,
   pipelineRoutine,
   fullAuto,
   empresaId,
   activeOperatorId,
   processedData,
 }: AutoMonitorProps) => {
+  // Pestaña vieja tras un deploy: sin escrituras automáticas hasta que recargue.
+  const staleBuild = useStaleBuild();
+  const isActive = isActiveProp && !staleBuild;
   const mountTime = useRef(Date.now());
   const processedIds = useRef(new Set<string>());
   // Primera ejecución = baseline silencioso: marca el estado actual como ya visto

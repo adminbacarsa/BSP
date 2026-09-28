@@ -42,6 +42,12 @@ const manifest = {
 };
 fs.writeFileSync(path.join(__dirname, 'public', 'manifest.json'), JSON.stringify(manifest, null, 2));
 
+// Lo lee NewVersionNotice para saber si la pestaña abierta quedó vieja tras un deploy.
+fs.writeFileSync(
+  path.join(__dirname, 'public', 'version.json'),
+  JSON.stringify({ hash: gitHash, builtAt: buildTime, version: appVersion }, null, 2),
+);
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // COOP/COEP: habilitan SharedArrayBuffer → onnxruntime-web → bg removal (@imgly)

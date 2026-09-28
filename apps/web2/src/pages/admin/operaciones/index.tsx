@@ -16,6 +16,7 @@ import { toast } from 'sonner';
 import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
+import { useStaleBuild } from '@/hooks/useStaleBuild';
 import { useOperatorSession } from '@/hooks/useOperatorSession';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -1712,6 +1713,9 @@ export default function OperacionesPage() {
     const ccAutoOn = opsCaps.isAuto;
     const ccManualOn = opsCaps.isManual;
 
+    // Pestaña vieja tras un deploy: sin auto-acciones hasta que recargue.
+    const staleBuild = useStaleBuild();
+
     useAutoMonitor({
         isActive: centroControlEnabled,
         pipelineRoutine: opsCaps.pipelineRoutine,
@@ -1724,6 +1728,7 @@ export default function OperacionesPage() {
     // Auto-inicio de guardia para rol OPERADOR cuando data está lista (no en modo Demo)
     const autoStartedRef = useRef(false);
     useEffect(() => {
+        if (staleBuild) return;
         if (!centroControlEnabled) return;
         if (!isCCOperator) return;
         if (modoDemoActivo) return;
@@ -1733,7 +1738,7 @@ export default function OperacionesPage() {
         if (autoStartedRef.current) return;
         autoStartedRef.current = true;
         session.startSession().catch(e => console.warn('[CC auto-start]', e));
-    }, [centroControlEnabled, isCCOperator, modoDemoActivo, logic.isReady, session.loading, session.isMySession]);
+    }, [staleBuild, centroControlEnabled, isCCOperator, modoDemoActivo, logic.isReady, session.loading, session.isMySession]);
 
     // Audit log: registra cada vez que el modo automático cambia (operador entra/sale de guardia)
     const prevAutoModeRef = useRef<boolean | null>(null);

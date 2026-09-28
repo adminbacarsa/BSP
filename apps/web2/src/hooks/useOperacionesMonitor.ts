@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
 import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { useStaleBuild } from '@/hooks/useStaleBuild';
 import { toast } from 'sonner';
 import { silentToast as opsEventToast } from '@/lib/ui/silentToast';
 import { getAuth } from 'firebase/auth';
@@ -239,6 +240,8 @@ const countPresentOnSlot = (
 ).length;
 
 export const useOperacionesMonitor = (forcedClientId?: string | null) => {
+    // Pestaña vieja tras un deploy: sigue leyendo, pero no genera novedades ni turnos sola.
+    const staleBuild = useStaleBuild();
     const [now, setNow] = useState(new Date());
     const [rawShifts, setRawShifts] = useState<any[]>([]);
     // RFZ/TURA se guardan con startTime/endTime como string ISO (no Timestamp), por lo que el
@@ -1140,6 +1143,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     const alertedVacancyIds = useRef<Set<string>>(new Set());
     const autoAbsentedIds = useRef<Set<string>>(new Set());
     useEffect(() => {
+        if (staleBuild) return;
         const virtualVacs = processedData.filter((s: any) => s.isVirtual && isSameDay(s.shiftDateObj, now));
         if (!virtualVacs.length) return;
         const nowMs = now.getTime();
@@ -1371,7 +1375,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 })
                 .catch(e => console.warn('[retentionLarga:check]', e));
         }
-    }, [processedData, empresaId]);
+    }, [processedData, empresaId, staleBuild]);
 
     // isStable: se activa una sola vez cuando processedData se estabiliza después de isReady.
     // NO vuelve a false — evita que updates de Firestore muestren la pantalla de carga repetidamente.
