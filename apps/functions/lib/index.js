@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.resolveStaffProfile = exports.sesionOperador = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = exports.activateDevice = void 0;
-exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = void 0;
+exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.cerrarContratoSla = exports.reabrirContratoSla = exports.scheduledCerrarContratosVencidos = exports.resolveStaffProfile = exports.sesionOperador = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
+exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = exports.checkConvocatoriaTimeouts = void 0;
+exports.rebuildHoursLedger = exports.scheduledHoursLedgerNightly = exports.scheduledHoursLedgerDirty = exports.onClientWriteHoursLedger = exports.onAusenciaWriteHoursLedger = exports.onPlanifWriteHoursLedger = exports.onSlaWriteHoursLedger = exports.onTurnoWriteHoursLedger = exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -20,6 +20,8 @@ const main_1 = require("./main");
 const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
 const coverageRetention_1 = require("./coverage/coverageRetention");
 const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
+const simulableShift_1 = require("./common/simulableShift");
+const arClock_1 = require("./common/arClock");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
 const cancelLlegadaTardeConvocatorias_1 = require("./attendance/cancelLlegadaTardeConvocatorias");
@@ -682,7 +684,7 @@ async function runModoDemoForEmpresa(db, empresaId) {
         t.employeeId === 'SIN_COBERTURA' ||
         !!t.isUnassigned ||
         !!t.isSinCobertura;
-    const skipBase = (t) => t.draft === true || t.isFranco === true || t.isVirtual;
+    const skipBase = (t) => !(0, simulableShift_1.isSimulableShift)(t);
     const WINDOW_BEFORE_MS = 15 * 60 * 1000;
     const WINDOW_AFTER_MS = 5 * 60 * 1000;
     const LATE_DELAY_MS = 12 * 60 * 1000;
@@ -795,6 +797,8 @@ async function runModoDemoForEmpresa(db, empresaId) {
         .get();
     for (const doc of covSnap.docs) {
         const t = doc.data();
+        if (!(0, simulableShift_1.isSimulableShift)(t))
+            continue;
         if (t.isPresent === true || t.isAbsent === true || t.isCompleted === true)
             continue;
         if (t.coverageSuperseded === true)
@@ -1038,12 +1042,19 @@ exports.autoPresenciaYCierre = functions
     const presenciaMarcada = [];
     const turnosCerrados = [];
     const turnosEnRetencion = [];
+    const turnosLicencia = [];
     const batch = db.batch();
     let ops = 0;
     for (const doc of snap.docs) {
         const t = doc.data();
-        if (t.isAbsent || t.isVirtual)
+        if (t.isAbsent)
             continue;
+        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(t);
+        if (skipSim) {
+            if (skipSim === 'LICENCIA')
+                turnosLicencia.push(`${t.empleadoNombre ?? t.employeeId} (${t.code})`);
+            continue;
+        }
         const startMs = (t.startTime?.seconds ?? 0) * 1000;
         const endMs = (t.endTime?.seconds ?? 0) * 1000;
         const objectiveId = String(t.objectiveId || '');
@@ -1051,7 +1062,7 @@ exports.autoPresenciaYCierre = functions
         if (startMs <= now.getTime() && !t.isPresent && !t.isAbsent && !t.isCompleted) {
             presenciaMarcada.push(label);
             if (!dryRun) {
-                batch.update(doc.ref, { isPresent: true, presentAt: nowTs, autoPresencia: true });
+                batch.update(doc.ref, { isPresent: true, status: 'PRESENT', presentAt: nowTs, autoPresencia: true });
                 ops++;
             }
         }
@@ -1090,10 +1101,11 @@ exports.autoPresenciaYCierre = functions
         presenciaMarcada: presenciaMarcada.length,
         turnosCerrados: turnosCerrados.length,
         turnosEnRetencion: turnosEnRetencion.length,
-        detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion },
+        turnosLicencia: turnosLicencia.length,
+        detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion, turnosLicencia },
         mensaje: dryRun
-            ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente).`
-            : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado).`,
+            ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente, ${turnosLicencia.length} en licencia sin tocar).`
+            : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado) · ${turnosLicencia.length} en licencia sin tocar.`,
     };
 });
 const ALLOWED_PLANNING_AI_ROLES = ['admin', 'SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP', 'Manager', 'Scheduler', 'ADMIN_EMPRESA', 'ADMIN_PRUEBA'];
@@ -1327,6 +1339,10 @@ exports.requestCheckIn = functions.https.onCall(async (data, context) => {
 });
 exports.sesionOperador = sesionOperadorHandler_1.sesionOperadorCallable;
 exports.resolveStaffProfile = resolveStaffProfileHandler_1.resolveStaffProfileCallable;
+var contratoCierre_1 = require("./servicios/contratoCierre");
+Object.defineProperty(exports, "scheduledCerrarContratosVencidos", { enumerable: true, get: function () { return contratoCierre_1.scheduledCerrarContratosVencidos; } });
+Object.defineProperty(exports, "reabrirContratoSla", { enumerable: true, get: function () { return contratoCierre_1.reabrirContratoSla; } });
+Object.defineProperty(exports, "cerrarContratoSla", { enumerable: true, get: function () { return contratoCierre_1.cerrarContratoSla; } });
 exports.marcarAusenciaOperaciones = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
         throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
@@ -2262,10 +2278,6 @@ exports.autoCompletarTurnos = functions
     .onRun(async () => {
     const db = admin.firestore();
     const cc = await (0, centroControlGuard_1.loadCentroControlState)(db);
-    if (!cc.anyEnabled) {
-        console.log('[autoCompletarTurnos] Centro de Control desactivado en todas las empresas');
-        return null;
-    }
     const now = admin.firestore.Timestamp.now();
     const pass = await (0, autoCompletarTurnosCore_1.runAutoCompletarTurnosPass)(db, {
         isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
@@ -2381,10 +2393,11 @@ exports.detectarAusencias = functions
                 .where('empresaId', '==', empId)
                 .where('objectiveId', '==', s.objectiveId)
                 .where('isPresent', '==', true)
-                .where('isCompleted', '==', false)
                 .get();
             const toAlert = presentSnap.docs.filter(d => {
                 const dat = d.data();
+                if (dat.isCompleted === true)
+                    return false;
                 return (dat.positionName || '').trim().toLowerCase() === posName
                     && dat.employeeId !== s.employeeId;
             });
@@ -2596,8 +2609,7 @@ exports.gestionarVacantes = functions
         if (!isOps && sh.objectiveId) {
             const startMs = sh.startTime?.toMillis?.() ?? 0;
             if (startMs) {
-                const d = new Date(startMs);
-                planKeySet.add(`${sh.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`);
+                planKeySet.add((0, arClock_1.arPlanificacionEstadoKey)(String(sh.objectiveId), startMs));
             }
         }
     }
@@ -2634,8 +2646,7 @@ exports.gestionarVacantes = functions
             if (!isOps && shift.objectiveId) {
                 const startMs2 = shift.startTime?.toMillis?.() ?? 0;
                 if (startMs2) {
-                    const d = new Date(startMs2);
-                    const planKey = `${shift.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
+                    const planKey = (0, arClock_1.arPlanificacionEstadoKey)(String(shift.objectiveId), startMs2);
                     if (!publishedPlanKeys.has(planKey))
                         continue;
                 }
@@ -3742,4 +3753,90 @@ exports.geocodeAddressProxy = functions.https.onCall(async (data, _context) => {
         throw new functions.https.HttpsError('unavailable', e.message || 'Nominatim no disponible');
     }
 });
+function ledgerSourceData(event) {
+    const after = event.data?.after?.exists ? event.data.after.data() : undefined;
+    const before = event.data?.before?.exists ? event.data.before.data() : undefined;
+    return after || before;
+}
+async function touchLedger(data, docId) {
+    if (!data)
+        return;
+    const { markLedgerDirty } = await Promise.resolve().then(() => require('./hoursLedger/rebuildHoursLedger'));
+    const empresaId = String(data.empresaId || '').trim();
+    if (!empresaId)
+        return;
+    let objectiveId = String(data.objectiveId || data.objetivoId || '').trim();
+    let periodKey;
+    const y = Number(data.year ?? data.año);
+    const m = Number(data.month ?? data.mes);
+    if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
+        periodKey = `${y}-${String(m).padStart(2, '0')}`;
+    }
+    const parsed = String(docId || '').match(/^(.*)_(\d{4})_(\d{1,2})$/);
+    if (parsed) {
+        if (!objectiveId)
+            objectiveId = parsed[1];
+        if (!periodKey)
+            periodKey = `${parsed[2]}-${String(Number(parsed[3])).padStart(2, '0')}`;
+    }
+    await markLedgerDirty({ empresaId, objectiveId, periodKey });
+}
+const ledgerTriggerOpts = {
+    region: 'us-central1',
+    timeoutSeconds: 60,
+    memory: '256MiB',
+};
+exports.onTurnoWriteHoursLedger = (0, firestore_1.onDocumentWritten)({ document: 'turnos/{id}', ...ledgerTriggerOpts }, async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); });
+exports.onSlaWriteHoursLedger = (0, firestore_1.onDocumentWritten)({ document: 'servicios_sla/{id}', ...ledgerTriggerOpts }, async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); });
+exports.onPlanifWriteHoursLedger = (0, firestore_1.onDocumentWritten)({ document: 'planificacion_estados/{id}', ...ledgerTriggerOpts }, async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); });
+exports.onAusenciaWriteHoursLedger = (0, firestore_1.onDocumentWritten)({ document: 'ausencias/{id}', ...ledgerTriggerOpts }, async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); });
+exports.onClientWriteHoursLedger = (0, firestore_1.onDocumentWritten)({ document: 'clients/{id}', ...ledgerTriggerOpts }, async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); });
+exports.scheduledHoursLedgerDirty = (0, scheduler_1.onSchedule)({
+    schedule: '*/10 * * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+}, async () => {
+    const { runDueLedgerDirty } = await Promise.resolve().then(() => require('./hoursLedger/rebuildHoursLedger'));
+    await runDueLedgerDirty(12);
+});
+exports.scheduledHoursLedgerNightly = (0, scheduler_1.onSchedule)({
+    schedule: '40 3 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+}, async () => {
+    const { rebuildOpenMonthAllEmpresas } = await Promise.resolve().then(() => require('./hoursLedger/rebuildHoursLedger'));
+    await rebuildOpenMonthAllEmpresas();
+});
+exports.rebuildHoursLedger = functions.https.onCall(async (data, context) => {
+    if (!context.auth?.uid) {
+        throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+    }
+    const empresaId = String(data?.empresaId || '').trim();
+    const period = String(data?.period || '').trim();
+    const dryRun = data?.dryRun !== false;
+    const { resolvePanelUserForUid } = await Promise.resolve().then(() => require('./ops/staffPermissions'));
+    const panel = await resolvePanelUserForUid(db(), context.auth.uid, context.auth.token?.role);
+    if (!panel)
+        throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado.');
+    const canRead = panel.isSuperAdmin
+        || (panel.permissions.REPORTS || []).includes('read')
+        || (panel.permissions.ANALYSIS || []).includes('read');
+    if (!canRead)
+        throw new functions.https.HttpsError('permission-denied', 'Se requiere lectura de Reportes o Análisis.');
+    if (!dryRun && !panel.isSuperAdmin) {
+        throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede guardar el libro.');
+    }
+    if (!panel.isSuperAdmin && !panel.allEmpresas && panel.empresaId && panel.empresaId !== empresaId) {
+        throw new functions.https.HttpsError('permission-denied', 'Empresa no permitida.');
+    }
+    const { rebuildHoursLedger: run } = await Promise.resolve().then(() => require('./hoursLedger/rebuildHoursLedger'));
+    return run({ empresaId, period, dryRun });
+});
+function db() {
+    return admin.firestore();
+}
 //# sourceMappingURL=index.js.map

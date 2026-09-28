@@ -32,6 +32,7 @@ export declare const limpiarBaseDeDatos: functions.HttpsFunction & functions.Run
 export declare const requestCheckIn: functions.HttpsFunction & functions.Runnable<any>;
 export declare const sesionOperador: functions.HttpsFunction & functions.Runnable<any>;
 export declare const resolveStaffProfile: functions.HttpsFunction & functions.Runnable<any>;
+export { scheduledCerrarContratosVencidos, reabrirContratoSla, cerrarContratoSla } from './servicios/contratoCierre';
 export declare const marcarAusenciaOperaciones: functions.HttpsFunction & functions.Runnable<any>;
 export declare const revertirAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const registrarPresencia: functions.HttpsFunction & functions.Runnable<any>;
@@ -122,3 +123,21 @@ export declare const onAusenciaCertificado: functions.CloudFunction<functions.Ch
 export declare const cleanupSlaDevueltas: functions.HttpsFunction;
 export declare const setEmployeePortalPassword: functions.HttpsFunction & functions.Runnable<any>;
 export declare const geocodeAddressProxy: functions.HttpsFunction & functions.Runnable<any>;
+export declare const onTurnoWriteHoursLedger: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    id: string;
+}>>;
+export declare const onSlaWriteHoursLedger: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    id: string;
+}>>;
+export declare const onPlanifWriteHoursLedger: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    id: string;
+}>>;
+export declare const onAusenciaWriteHoursLedger: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    id: string;
+}>>;
+export declare const onClientWriteHoursLedger: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    id: string;
+}>>;
+export declare const scheduledHoursLedgerDirty: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const scheduledHoursLedgerNightly: import("firebase-functions/v2/scheduler").ScheduleFunction;
+export declare const rebuildHoursLedger: functions.HttpsFunction & functions.Runnable<any>;

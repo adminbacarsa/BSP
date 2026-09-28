@@ -761,6 +761,20 @@ service cloud.firestore {
       allow delete: if tenantAdminDelete();
     }
 
+    // Libro de horas (H2a). Escritura solo Admin SDK. No reemplaza hours_balances hasta H2b.
+    match /hours_ledger/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+    match /hours_ledger_monthly/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+    match /hours_ledger_dirty/{docId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+    }
+
     match /grupos_objetivos/{grupoId} {
       allow read:   if tenantAdminRead();
       allow create: if tenantAdminCreate();
