@@ -1,12 +1,18 @@
-/**
- * Fase 0 — paridad LEGACY (apps/web2 + apps/functions) vs @cosp/hours-core.
- * No unifica motores. También verifica las dos formas de período (CCT 26→25 y mes calendario)
+﻿/**
+ * eval:hours-core
+ * (a) Paridad consumidor ↔ @cosp/hours-core donde el motor no cambió de intención.
+ * (b) Cánones Fase 1 donde el número se movió a propósito (libro persona).
+ * Las fixtures F0 de payroll y turnoHoursCalc comparan contra copias F0 congeladas
+ * (eval-hours-core-legacy/) y solo exigen paridad en casos que el canon no movió.
+ * También verifica las dos formas de período (CCT 26→25 y mes calendario)
  * sobre turnos ya filtrados: calculateLiquidationHoursStats no recorta fechas.
  *
  * useReportes: dateRange inicial = getCctPayrollPeriodByOffset(0);
  * generateReports arma startDate/endDate y fetchReportTurnos filtra startTime en ese rango
  * ANTES de llamar calculateLiquidationHoursStats.
  */
+export {};
+
 process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||= 'eval-hours-core';
 process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN ||= 'eval.firebaseapp.com';
 process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'eval-hours-core';
@@ -18,6 +24,29 @@ type Diff = { consumer: string; fixture: string; legacy: unknown; core: unknown 
 
 const diffs: Diff[] = [];
 let ok = 0;
+const canonFails: string[] = [];
+let canonOk = 0;
+
+function canon(label: string, got: number, expected: number, tol = 0.02) {
+  if (Number.isFinite(got) && Math.abs(got - expected) <= tol) {
+    canonOk += 1;
+    return;
+  }
+  canonFails.push(`${label}: obtuvo ${got}, canon ${expected}`);
+}
+
+function pick<T extends Record<string, unknown>>(obj: T | null, keys: string[]): Record<string, unknown> | null {
+  if (!obj) return null;
+  const out: Record<string, unknown> = {};
+  for (const k of keys) {
+    let v = obj[k];
+    if (k === 'warnings' && Array.isArray(v)) {
+      v = v.map((w) => String(w).replace(/[\u2014\u2013\u00d4\u00c7\u00f6]/g, '-').replace(/—|–|—/g, '-'));
+    }
+    out[k] = v;
+  }
+  return out;
+}
 
 function near(a: unknown, b: unknown): boolean {
   if (typeof a === 'number' && typeof b === 'number') {
@@ -63,8 +92,9 @@ async function main() {
   const legacyFichada = await import('../src/lib/crm/fichadaHours');
   const legacyAnalisis = await import('../src/lib/analisis/analisisQueries');
   const legacyReportes = await import('../src/hooks/useReportes');
-  const legacyTurno = await import('../../functions/src/liquidacion/turnoHoursCalc');
+  const legacyTurnoF0 = await import('./eval-hours-core-legacy/turnoHoursCalcF0');
   const legacyPayroll = await import('./eval-hours-core-legacy/payrollTurnoFromCalc');
+  const proformaGridLib = await import('../src/lib/crm/proformaGrid');
   const periodLib = await import('../src/lib/cctPayrollPeriod');
   const core = await import('@cosp/hours-core');
 
@@ -166,7 +196,15 @@ async function main() {
     },
   ];
 
+  const coalesceMovedByCanon = new Set(['duplicada-8-mas-8-extendida', 'base-8-mas-tramo-4']);
   for (const cell of cells) {
+    if (coalesceMovedByCanon.has(cell.name)) {
+      // Canon F1: celda una vez. Paridad F0 vs copia congelada.
+      check('planning.coalescePlannedCellBillableHours (F0)', cell.name,
+        legacyCoalesce.coalescePlannedCellBillableHours(cell.turnos, slaHint),
+        core.coalescePlannedCellBillableHoursF0(cell.turnos, slaHint));
+      continue;
+    }
     check('planning.coalescePlannedCellBillableHours', cell.name,
       legacyCoalesce.coalescePlannedCellBillableHours(cell.turnos, slaHint),
       core.coalescePlannedCellBillableHours(cell.turnos, slaHint));
@@ -309,9 +347,15 @@ async function main() {
   ];
 
   for (const fx of liqFixtures) {
-    check('liquidation.calculateLiquidationHoursStats', fx.name,
-      legacyReportes.calculateLiquidationHoursStats(fx.shifts, holidayMap, fx.opts),
-      core.calculateLiquidationHoursStats(fx.shifts, holidayMap, fx.opts));
+    const legacy = legacyReportes.calculateLiquidationHoursStats(fx.shifts, holidayMap, fx.opts) as Record<string, unknown>;
+    const coreF0 = core.calculateLiquidationHoursStatsF0(fx.shifts, holidayMap, fx.opts) as Record<string, unknown>;
+    const liqKeys = [
+      'horasTeoricas', 'horasReales', 'horasSimples', 'extra50', 'extra100',
+      'totalDiurnas', 'totalNocturnas', 'plusFeriado',
+    ];
+    check('liquidation.calculateLiquidationHoursStats (F0 parity)', fx.name,
+      pick(legacy, liqKeys),
+      pick(coreF0, liqKeys));
   }
 
   const techoShifts = Array.from({ length: 26 }, (_, i) => {
@@ -327,9 +371,7 @@ async function main() {
       realEndTime: end,
     });
   });
-  check('liquidation.calculateLiquidationHoursStats', 'techo-26x8',
-    legacyReportes.calculateLiquidationHoursStats(techoShifts, {}),
-    core.calculateLiquidationHoursStats(techoShifts, {}));
+  // Techo 204→200: sin paridad F0; se verifica como canon F1 abajo.
   check('liquidation.liquidacion200FromWorkedHours', '208',
     legacyReportes.liquidacion200FromWorkedHours(208),
     core.liquidacion200FromWorkedHours(208));
@@ -410,11 +452,14 @@ async function main() {
     },
   ];
 
+  const turnoKeys = ['hsTeoricas', 'hsReales', 'diurnas', 'nocturnas', 'al100FT', 'plusFeriado', 'isFT', 'monthKey'];
+  const turnoMovedByCanon = new Set(['FT', 'noche-22-06']);
   for (const fx of turnoFixtures) {
+    if (turnoMovedByCanon.has(fx.name)) continue;
     const h = fx.holidays ?? new Set<string>();
-    check('server.calcTurnoHoursContrib', fx.name,
-      legacyTurno.calcTurnoHoursContrib(fx.data, h),
-      core.calcTurnoHoursContrib(fx.data, h));
+    check('server.calcTurnoHoursContrib (F0 vs persona, sin delta)', fx.name,
+      pick(legacyTurnoF0.calcTurnoHoursContrib(fx.data, h) as Record<string, unknown> | null, turnoKeys),
+      pick(core.calcTurnoHoursContribF0(fx.data, h) as Record<string, unknown> | null, turnoKeys));
   }
 
   const payrollFixtures: Array<{ name: string; data: Record<string, unknown>; ctx: { hoursMode: 'planned' | 'real'; holidays: Set<string>; turnoId?: string } }> = [
@@ -535,10 +580,13 @@ async function main() {
     },
   ];
 
+  const payrollKeys = ['hsTeoricas', 'hsReales', 'diurnas', 'nocturnas', 'al100FT', 'plusFeriado', 'warnings', 'skipped'];
+  const payrollMovedByCanon = new Set(['adelanto-real-06', 'retencion-3min', 'relevo-14-30']);
   for (const fx of payrollFixtures) {
-    check('server.accumulatePayrollTurnoContribution', fx.name,
-      legacyPayroll.accumulatePayrollTurnoContributionLegacy(fx.data, fx.ctx),
-      core.accumulatePayrollTurnoContribution(fx.data, fx.ctx));
+    if (payrollMovedByCanon.has(fx.name)) continue;
+    check('server.accumulatePayrollTurnoContribution (F0 vs persona, sin delta)', fx.name,
+      pick(legacyPayroll.accumulatePayrollTurnoContributionLegacy(fx.data, fx.ctx) as unknown as Record<string, unknown>, payrollKeys),
+      pick(core.accumulatePayrollTurnoContributionF0(fx.data, fx.ctx) as unknown as Record<string, unknown>, payrollKeys));
   }
 
   const periodFails: string[] = [];
@@ -581,8 +629,8 @@ async function main() {
   const calEnd = '2026-05-31';
   const cctShifts = pool.filter((s) => inInclusive(s, cct.start, cct.end));
   const calShifts = pool.filter((s) => inInclusive(s, calStart, calEnd));
-  const cctDays = cctShifts.map((s) => s._ymd).sort();
-  const calDays = calShifts.map((s) => s._ymd).sort();
+  const cctDays = cctShifts.map((s) => String((s as { _ymd?: string })._ymd)).sort();
+  const calDays = calShifts.map((s) => String((s as { _ymd?: string })._ymd)).sort();
   const expectCct = ['2026-04-26', '2026-05-10', '2026-05-25'];
   const expectCal = ['2026-05-10', '2026-05-25', '2026-05-26', '2026-05-31'];
   if (cctDays.join(',') !== expectCct.join(',')) {
@@ -598,12 +646,13 @@ async function main() {
   }
 
   const strip = (rows: any[]) => rows.map(({ _ymd, _i, ...rest }) => rest);
+  const periodLiqKeys = ['horasTeoricas', 'horasReales', 'horasSimples', 'extra50', 'extra100'];
   check('liquidation.periodo-CCT-26-25', 'cierre-2026-05',
-    legacyReportes.calculateLiquidationHoursStats(strip(cctShifts), {}),
-    core.calculateLiquidationHoursStats(strip(cctShifts), {}));
+    pick(legacyReportes.calculateLiquidationHoursStats(strip(cctShifts), {}) as Record<string, unknown>, periodLiqKeys),
+    pick(core.calculateLiquidationHoursStatsF0(strip(cctShifts), {}) as Record<string, unknown>, periodLiqKeys));
   check('liquidation.periodo-calendario', '2026-05-01-a-31',
-    legacyReportes.calculateLiquidationHoursStats(strip(calShifts), {}),
-    core.calculateLiquidationHoursStats(strip(calShifts), {}));
+    pick(legacyReportes.calculateLiquidationHoursStats(strip(calShifts), {}) as Record<string, unknown>, periodLiqKeys),
+    pick(core.calculateLiquidationHoursStatsF0(strip(calShifts), {}) as Record<string, unknown>, periodLiqKeys));
 
   const statsCct = core.calculateLiquidationHoursStats(strip(cctShifts), {});
   const statsCal = core.calculateLiquidationHoursStats(strip(calShifts), {});
@@ -667,16 +716,94 @@ async function main() {
   console.log(`pool sin recorte: turnos=${pool.length} horasReales=${statsAll.horasReales} (el motor no aplica el período)`);
   console.log(`solo CCT: ${onlyCct.join(', ')} | solo calendario: ${onlyCal.join(', ')}`);
   console.log('useReportes: dateRange inicial = getCctPayrollPeriodByOffset(0); fetch por startTime entre esas fechas.');
-  console.log('--- divergencias entre consumidores (informativo, no falla F0) ---');
-  console.log(`coalesce celda duplicada 8+8 isExtended = ${coalesceDup} | tramo 8+4 = ${coalesceTramo} | billable ext 15-19 = ${billableExt} | SLA recon (sin extra) = ${slaReconExt}`);
-  console.log(`fichada M banda = ${fichadaM} | D12 = ${fichadaD12} | M fichado 07:04-15:10 sigue banda = ${fichadaClock} | reloj puro = ${round4(clockH)}`);
-  console.log(`liq adelanto horasReales=${round4(liqAdv.horasReales)} | payroll ±5 hsReales=${round4(payAdv.hsReales)}`);
-  console.log(`liq retención 3min horasReales=${round4(liqRet.horasReales)} | payroll ±5 hsReales=${round4(payRet.hsReales)}`);
-  console.log(`liq relevo anticipado horasReales=${round4(liqEarly.horasReales)} | payroll ±5 hsReales=${round4(payEarly.hsReales)}`);
-  console.log(`turnoHoursCalc noche nocturnas=${turnoNight ? round4(turnoNight.nocturnas) : 'null'} | payroll ART nocturnas=${round4(payNight.nocturnas)} | mismo intervalo en getUTCHours (servidor UTC) ≈ ${round4(utcNightMins / 60)}`);
-  console.log(`turnoHoursCalc FT al100=${turnoFt ? turnoFt.al100FT : 'null'} hsReales=${turnoFt ? turnoFt.hsReales : 'null'} | payroll FT al100=${payFt.al100FT} hsReales=${payFt.hsReales}`);
-  console.log(`techo stats 26×8: horasReales=${techoStats.horasReales} horasSimples=${techoStats.horasSimples} extra50=${techoStats.extra50} (baseLimit 204) | liquidacion200 simples=${bolsa200.horasSimples} excedente50=${bolsa200.excedente50}`);
+  const payAdvF0 = legacyPayroll.accumulatePayrollTurnoContributionLegacy(payrollFixtures[4].data, payrollFixtures[4].ctx);
+  const payRetF0 = legacyPayroll.accumulatePayrollTurnoContributionLegacy(payrollFixtures[5].data, payrollFixtures[5].ctx);
+  const payEarlyF0 = legacyPayroll.accumulatePayrollTurnoContributionLegacy(payrollFixtures[6].data, payrollFixtures[6].ctx);
+  const turnoFtF0 = legacyTurnoF0.calcTurnoHoursContrib(turnoFixtures[3].data, new Set());
 
+  const extPlan = {
+    employeeId: 'emp-ext',
+    code: 'M',
+    hours: 8,
+    isExtended: true,
+    adjustedEndTime: '19:00',
+    segmentFromTime: '15:00',
+    segmentToTime: '19:00',
+    extExtraHours: 4,
+    coverageSegmentRole: 'EXTENSION',
+  };
+  const extWorked = liqShift({
+    ...extPlan,
+    id: 'ext-base',
+    startTime: secAt(2026, 5, 18, 7, 0),
+    endTime: secAt(2026, 5, 18, 15, 0),
+    realStartTime: secAt(2026, 5, 18, 7, 0),
+    realEndTime: secAt(2026, 5, 18, 19, 0),
+  });
+  const extOpsCov = liqShift({
+    id: 'ops_cov_titular_emp-ext',
+    employeeId: 'emp-ext',
+    code: 'T',
+    origin: 'OPERATIONS_COVERAGE',
+    coverageType: 'EXTEND',
+    coverageHoursOnSource: true,
+    startTime: secAt(2026, 5, 18, 15, 0),
+    endTime: secAt(2026, 5, 18, 19, 0),
+    realStartTime: secAt(2026, 5, 18, 15, 0),
+    realEndTime: secAt(2026, 5, 18, 19, 0),
+  });
+  const extLeftAtBand = { ...extWorked, id: 'ext-left', realEndTime: secAt(2026, 5, 18, 15, 0) };
+  const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
+  const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
+  const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
+  const liqFt = core.calculateLiquidationHoursStats(liqFixtures[5].shifts, {});
+
+  const payExt = core.accumulatePayrollTurnoContribution({
+    ...extPlan,
+    startTime: artIso('2026-05-18', '07:00'),
+    endTime: artIso('2026-05-18', '15:00'),
+    realStartTime: artIso('2026-05-18', '07:00'),
+    realEndTime: artIso('2026-05-18', '19:00'),
+  }, { hoursMode: 'real', holidays: new Set(), turnoId: 'pay-ext' });
+
+  canon('planning coalesce celda duplicada (antes 16)', coalesceDup, 8);
+  canon('planning coalesce base 8 + tramo 4 (antes 20)', coalesceTramo, 12);
+  canon('planning billable M + ext 15-19', billableExt, 12);
+  canon('SLA recon franja vendida sin extra', slaReconExt, 8);
+  canon('persona techo 26×8 horasSimples (antes 204)', techoStats.horasSimples, 200);
+  canon('persona techo 26×8 extra50 (antes 4)', techoStats.extra50, 8);
+  canon('persona TOTALES M 07-15 + ext hasta 19', liqExt.totales, 12);
+  canon('persona desglose plan', liqExt.desglose.plan, 8);
+  canon('persona desglose ext', liqExt.desglose.ext, 4);
+  canon('persona celda turno + ops_cov (nunca 16)', liqExtWithOpsCov.totales, 12);
+  canon('persona ext autorizada pero salió 15:00', liqExtLeft.totales, 8);
+  canon('persona FT desglose.ft', liqFt.desglose.ft, 8);
+  canon('liquidación adelanto', liqAdv.horasReales, 9);
+  canon('liquidación retención 3 min', liqRet.horasReales, 8.05);
+  canon('liquidación relevo anticipado', liqEarly.horasReales, 8);
+  canon('payrollApi adelanto (F0 8)', payAdv.hsReales, 9);
+  canon('payrollApi desglose adv', payAdv.desglose.adv, 1);
+  canon('payrollApi retención 3 min (F0 8)', payRet.hsReales, 8.05);
+  canon('payrollApi relevo anticipado (F0 7,5)', payEarly.hsReales, 8);
+  canon('payrollApi ext autorizada 07-19', payExt.hsReales, 12);
+  canon('payrollApi desglose ext', payExt.desglose.ext, 4);
+  canon('payrollApi FT al100', payFt.al100FT, 8);
+  canon('calcTurnoHoursContrib FT al100 (F0 0)', turnoFt?.al100FT ?? NaN, 8);
+  canon('calcTurnoHoursContrib nocturnas ART', turnoNight?.nocturnas ?? NaN, 8);
+  canon('payroll nocturnas ART', payNight.nocturnas, 8);
+  canon('fichada CRM banda M sigue 8', fichadaClock, 8);
+  console.log('--- cánones Fase 1 (F0 → F1) ---');
+  console.log(`celda duplicada 16 → ${coalesceDup} | base+tramo 20 → ${coalesceTramo} | billable ext = ${billableExt} | SLA recon = ${slaReconExt}`);
+  console.log(`techo 26×8: horasSimples 204 → ${techoStats.horasSimples} | extra50 4 → ${techoStats.extra50} | liquidacion200 simples=${bolsa200.horasSimples}`);
+  console.log(`persona M+ext: totales=${liqExt.totales} plan=${liqExt.desglose.plan} ext=${liqExt.desglose.ext} | +ops_cov=${liqExtWithOpsCov.totales} | salió 15:00=${liqExtLeft.totales}`);
+  console.log(`payrollApi adelanto ${payAdvF0.hsReales} → ${payAdv.hsReales} | retención ${payRetF0.hsReales} → ${round4(payRet.hsReales)} | relevo ${payEarlyF0.hsReales} → ${payEarly.hsReales} | ext ${round4(payExt.hsReales)}`);
+  console.log(`calcTurnoHoursContrib FT al100 ${turnoFtF0 ? turnoFtF0.al100FT : 'null'} → ${turnoFt ? turnoFt.al100FT : 'null'} | nocturnas ART ${turnoNight ? round4(turnoNight.nocturnas) : 'null'} (F0 en proceso UTC ≈ ${round4(utcNightMins / 60)})`);
+  console.log(`fichada CRM M=${fichadaM} D12=${fichadaD12} reloj 07:04-15:10=${fichadaClock} (reloj ${round4(clockH)})`);
+
+  if (canonFails.length) {
+    console.error(`eval:hours-core FALLO cánones (${canonFails.length}):`);
+    for (const c of canonFails) console.error(`  - ${c}`);
+  }
   if (periodFails.length) {
     console.error('eval:hours-core FALLO períodos:');
     for (const p of periodFails) console.error(`  - ${p}`);
@@ -689,9 +816,9 @@ async function main() {
       console.error(`    core  =${JSON.stringify(d.core)}`);
     }
   }
-  if (periodFails.length || diffs.length) process.exit(1);
+  if (periodFails.length || diffs.length || canonFails.length) process.exit(1);
 
-  console.log(`eval:hours-core OK — 0 diferencias (${ok} checks)`);
+  console.log(`eval:hours-core OK — 0 diferencias (${ok} checks de paridad, ${canonOk} cánones F1)`);
 }
 
 main().catch((err) => {

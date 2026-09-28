@@ -1,16 +1,9 @@
-import { Timestamp } from 'firebase-admin/firestore';
-import {
-  calcTurnoHoursContrib as calcTurnoHoursContribCore,
-  monthKeyFromDate as monthKeyFromDateCore,
-} from '@cosp/hours-core';
-
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'PG', 'A', 'E', 'AA', 'RET']);
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 const TRUE_NON_WORK = new Set(['F', 'FF', 'FP', 'AA', 'FT']);
 
 function tsToDate(val: unknown): Date | null {
   if (!val) return null;
-  if (val instanceof Timestamp) return val.toDate();
   if (typeof val === 'object' && val !== null && 'toDate' in val && typeof (val as { toDate: () => Date }).toDate === 'function') {
     return (val as { toDate: () => Date }).toDate();
   }
@@ -60,8 +53,7 @@ export function monthKeyFromDate(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
-/** Legacy F0 (±5 min, FT en no-trabajo → 0). */
-function calcTurnoHoursContribLegacy(
+export function calcTurnoHoursContrib(
   data: Record<string, unknown>,
   holidays: Set<string> = new Set(),
 ): TurnoHoursContrib | null {
@@ -141,30 +133,4 @@ function calcTurnoHoursContribLegacy(
     isFT,
     monthKey,
   };
-}
-
-/**
- * @param hoursCoreEnabled — si true usa motor F1 de @cosp/hours-core (clamp Liquidación, FT al 100).
- * Default false = legado F0.
- */
-export function calcTurnoHoursContrib(
-  data: Record<string, unknown>,
-  holidays: Set<string> = new Set(),
-  hoursCoreEnabled = false,
-): TurnoHoursContrib | null {
-  if (hoursCoreEnabled) {
-    const c = calcTurnoHoursContribCore(data, holidays);
-    if (!c) return null;
-    return {
-      hsTeoricas: c.hsTeoricas,
-      hsReales: c.hsReales,
-      diurnas: c.diurnas,
-      nocturnas: c.nocturnas,
-      al100FT: c.al100FT,
-      plusFeriado: c.plusFeriado,
-      isFT: c.isFT,
-      monthKey: c.monthKey || monthKeyFromDateCore(tsToDate(data.startTime) || new Date()),
-    };
-  }
-  return calcTurnoHoursContribLegacy(data, holidays);
 }

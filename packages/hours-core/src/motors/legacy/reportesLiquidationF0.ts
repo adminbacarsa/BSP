@@ -8,7 +8,7 @@ import { calcPlanningBillableShiftHours } from '../planning/planningScheduledHou
 import {
   coalescePlannedCellBillableHours,
   coalescePlannedTurnosForCell,
-} from '../planning/planningTurnoCoalesce';
+} from './planningTurnoCoalesceF0';
 import { isEmployeeOnLeave, RRHH_ABSENCE_TYPES } from '../planning/leaveCoverage';
 
 function planificacionPublishLookupKey(objectiveId: string, year: number, month: number): string {
@@ -372,7 +372,7 @@ export function mapAbsenceStatusLabel(status?: string | null): string {
 }
 
 function shiftCalendarDateKey(shift: any): string {
-    const start = parseShiftInstant(shift?.startTime);
+    const start = shift?.startTime?.toDate?.();
     if (!start) return '';
     return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
 }
@@ -736,7 +736,7 @@ const getNightDuration = (start: Date, end: Date) => {
     // Seguridad anti-loop (max 24hs)
     let safety = 0;
     while (current.getTime() < endTime && safety < 1440) {
-        const h = new Date(current.getTime() - 3 * 3600 * 1000).getUTCHours();
+        const h = current.getHours();
         if (h >= 21 || h < 6) durationMins++;
         current.setMinutes(current.getMinutes() + 1);
         safety++;
@@ -773,12 +773,6 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let horasRealesCobertura = 0;
     let horasRealesDespliegue = 0;
     let turnosConDatosReales = 0;
-    let desglosePlan = 0;
-    let desgloseExt = 0;
-    let desgloseAdv = 0;
-    let desgloseCobertura = 0;
-    let desgloseFt = 0;
-    let desgloseTura = 0;
 
     sortedDocs.forEach(d => {
         try {
@@ -862,16 +856,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const clampS = (real: Date, plan: Date): Date =>
                 isEarlyStartShift ? real : plan;  // adelanto → hora real; normal → hora planificada
 
-            const plannedWindow = resolveLiquidationPlannedWindow(d, start, end);
-            const authorizedEnd = plannedWindow.isExtDisplay ? plannedWindow.end : null;
-
             const clampE = (real: Date, plan: Date): Date => {
                 if (!plan || isNaN(plan.getTime())) return real; // sin planificado -> usar real
                 if (real < plan)        return plan;         // relevo anticipado -> horas completas
                 if (isRetentionShift)   return real;         // retencion formal -> hora real
-                if (authorizedEnd && authorizedEnd > plan) {
-                    return real < authorizedEnd ? real : authorizedEnd; // extensión autorizada: solo lo trabajado
-                }
                 return plan;                                  // salida tardia sin retencion -> clampear
             };
 
@@ -904,28 +892,6 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (isFT && worked > 0) horasFTReal += worked;
             horasRealesTotal += worked;
             if (worked > 0) {
-                const codeUp = rawCode.includes('/') ? rawCode.split('/')[0] : rawCode;
-                const band = SHIFT_HOURS_LOOKUP[codeUp] > 0 ? SHIFT_HOURS_LOOKUP[codeUp] : Math.max(0, duration);
-                const planPart = Math.min(worked, band || worked);
-                const extraPart = Math.max(0, Math.round((worked - planPart) * 100) / 100);
-                const origin = String(d.origin || '').toUpperCase();
-                const isCobertura = origin === 'OPERATIONS_COVERAGE'
-                    && d.coverageHoursOnSource !== true
-                    && !['EXTEND', 'ADVANCE'].includes(String(d.coverageType || '').toUpperCase());
-                if (isFT) desgloseFt += worked;
-                else if (codeUp === 'TURA' || codeUp === 'RFZ') desgloseTura += worked;
-                else if (isCobertura) desgloseCobertura += worked;
-                else if (d.isEarlyStart === true) {
-                    desglosePlan += planPart;
-                    desgloseAdv += extraPart;
-                } else if (d.isExtended === true || d.isRetention === true || String(d.coverageSegmentRole || '').toUpperCase() === 'EXTENSION') {
-                    desglosePlan += planPart;
-                    desgloseExt += extraPart;
-                } else {
-                    desglosePlan += worked;
-                }
-            }
-            if (worked > 0) {
                 if (isDespliegue && !isFT) horasRealesDespliegue += worked;
                 else horasRealesCobertura += worked;
             }
@@ -942,10 +908,11 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         }
     });
 
-    const baseLimit = 200; // techo CCT persona (no 204)
+    const baseLimit = 204; // CCT 422/05 SUVICO
     // Fix 2: extra50 solo sobre horas regulares (excluye FT real para no empujarlas al 50%)
     const regularReal = Math.max(0, horasRealesTotal - horasFTReal);
     const excess = Math.max(0, regularReal - baseLimit);
+    // horasSimples = total real capeado a 204 (para HORAS TOTALES display)
     const horasSimples = Math.min(Math.max(0, horasRealesTotal), baseLimit);
     const horasCobertura = hoursTotalOperativas + hoursFT;
     const horasTeoricas = horasCobertura + horasDespliegue;
@@ -966,17 +933,5 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         extra100: horasFTReal, // Fix 1: usar horas FT reales, no teóricas
         plusFeriado: hoursFeriado,
         horasExtra: Math.max(0, horasRealesTotal - horasTeoricas),
-        /** Número principal del libro persona (trabajadas, incluye FT). */
-        totales: horasRealesTotal,
-        /** Columna de seguimiento; no es el número principal. */
-        planificadas: horasTeoricas,
-        desglose: {
-            plan: desglosePlan,
-            ext: desgloseExt,
-            adv: desgloseAdv,
-            cobertura: desgloseCobertura,
-            ft: desgloseFt,
-            tura: desgloseTura,
-        },
     };
 };

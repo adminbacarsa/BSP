@@ -56,6 +56,7 @@ const tscCandidates = [
   path.join(srcRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
   path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
   path.join(repoRoot, 'apps', 'functions', 'node_modules', 'typescript', 'bin', 'tsc'),
+  path.join(repoRoot, 'apps', 'web2', 'node_modules', 'typescript', 'bin', 'tsc'),
 ];
 const tscJs = tscCandidates.find((p) => fs.existsSync(p));
 const args = tscJs
@@ -64,7 +65,7 @@ const args = tscJs
 
 const r = args
   ? spawnSync(process.execPath, args, { cwd: destRoot, stdio: 'inherit' })
-  : spawnSync('npx', ['--yes', 'tsc', '-p', path.join(destRoot, 'tsconfig.json')], {
+  : spawnSync('npx', ['--yes', '-p', 'typescript', 'tsc', '-p', path.join(destRoot, 'tsconfig.json')], {
       cwd: destRoot,
       stdio: 'inherit',
       shell: true,

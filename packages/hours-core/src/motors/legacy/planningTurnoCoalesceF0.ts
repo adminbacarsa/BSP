@@ -1,4 +1,4 @@
-import { calcPlanningBillableShiftHours } from './planningScheduledHours';
+import { calcPlanningBillableShiftHours } from '../planning/planningScheduledHours';
 
 function turnoContributesCoverageMerge(t: any): boolean {
   if (!t) return false;
@@ -9,7 +9,7 @@ function turnoContributesCoverageMerge(t: any): boolean {
   return Number.isFinite(ex) && ex > 0;
 }
 
-/** Fusiona varios turnos del mismo emp/obj/día (p. ej. ext + base en docs distintos). */
+/** Fusiona varios turnos del mismo emp/obj/d├¡a (p. ej. ext + base en docs distintos). */
 export function coalescePlannedTurnosForCell(
   turnos: any[],
   slaCodeHoursHint?: Record<string, number>,
@@ -60,6 +60,10 @@ export function coalescePlannedCellBillableHours(
   const merged = coalescePlannedTurnosForCell(turnos, slaCodeHoursHint);
   if (!merged) return Math.round(maxH * 100) / 100;
   const mergedH = calcPlanningBillableShiftHours(merged, slaCodeHoursHint);
-  // Celda legajo×día una vez: base + tramo extra, nunca la suma de turno + ops_cov (16 / 20).
+  const splitCoverage = turnos.length > 1 && turnos.some(turnoContributesCoverageMerge);
+  if (splitCoverage) {
+    const sumH = perTurno.reduce((a, b) => a + b, 0);
+    return Math.round(Math.max(mergedH, sumH) * 100) / 100;
+  }
   return Math.round(Math.max(maxH, mergedH) * 100) / 100;
 }

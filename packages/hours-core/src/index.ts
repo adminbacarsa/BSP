@@ -11,9 +11,30 @@ export {
   getNightDuration as payrollGetNightDuration,
   clampStart as payrollClampStart,
   clampEnd as payrollClampEnd,
+  personaClampStart,
+  personaClampEnd,
   type PayrollTurnoAccumCtx,
   type PayrollTurnoContribution,
+  type PersonaHoursBreakdown,
 } from './motors/server/payrollTurnoAccumulator';
+
+/** Motores F0 congelados (paridad / delta). No usar en consumidores F1. */
+export {
+  calculateLiquidationHoursStats as calculateLiquidationHoursStatsF0,
+  liquidacion200FromWorkedHours as liquidacion200FromWorkedHoursF0,
+} from './motors/legacy/reportesLiquidationF0';
+
+export {
+  accumulatePayrollTurnoContribution as accumulatePayrollTurnoContributionF0,
+} from './motors/legacy/payrollTurnoAccumulatorF0';
+
+export {
+  calcTurnoHoursContrib as calcTurnoHoursContribF0,
+} from './motors/legacy/turnoHoursCalcF0';
+
+export {
+  coalescePlannedCellBillableHours as coalescePlannedCellBillableHoursF0,
+} from './motors/legacy/planningTurnoCoalesceF0';
 
 export {
   fichadaHoursForShift,
@@ -89,3 +110,8 @@ export {
   shouldBillShiftToObjective,
   PAID_LEAVE_CODES,
 } from './motors/liquidation/reportesLiquidation';
+
+export {
+  isHoursCoreEnabled,
+  HOURS_CORE_FLAG_FIELD,
+} from './flag';

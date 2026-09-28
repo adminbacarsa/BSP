@@ -32,10 +32,17 @@ export async function updateLiquidacionOnTurnoComplete(
   if (after.isCompleted !== true) return;
 
   const holidays = await loadHolidays(db);
-  const contrib = calcTurnoHoursContrib(after as Record<string, unknown>, holidays);
+  const empresaId = String(after.empresaId ?? 'bacarsa').trim() || 'bacarsa';
+  let hoursCoreEnabled = false;
+  try {
+    const empSnap = await db.collection('empresas').doc(empresaId).get();
+    hoursCoreEnabled = empSnap.data()?.hoursCoreEnabled === true;
+  } catch {
+    hoursCoreEnabled = false;
+  }
+  const contrib = calcTurnoHoursContrib(after as Record<string, unknown>, holidays, hoursCoreEnabled);
   if (!contrib) return;
 
-  const empresaId = String(after.empresaId ?? 'bacarsa').trim() || 'bacarsa';
   const employeeId = String(after.employeeId ?? '').trim();
   if (!employeeId || employeeId === 'VACANTE') return;
 

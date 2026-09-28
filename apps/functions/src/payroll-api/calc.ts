@@ -26,6 +26,10 @@ import {
     queryEmpleadosDocsScoped,
     tenantEmpresaIdsMatch,
 } from '../assistant/assistantEmpresaScope';
+import {
+    accumulatePayrollTurnoContribution,
+    isHoursCoreEnabled,
+} from '@cosp/hours-core';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 /** Códigos que no aportan jornada laboral “normal” (FT se trata aparte). */
@@ -96,6 +100,16 @@ export interface EmployeeLiquidacion {
         plusFeriado: number;
     };
     novedadesRRHH: RrhhNovedades;
+    /** Libro persona F1 (solo si hoursCoreEnabled). */
+    totales?: number;
+    desglose?: {
+        plan: number;
+        ext: number;
+        adv: number;
+        cobertura: number;
+        ft: number;
+        tura: number;
+    };
     turnosCount: number;
     turnosConFichada: number;
     warnings: string[];
@@ -229,6 +243,9 @@ export async function buildLiquidacionSnapshot(
 
     const { scopeEmpresa, migracionCompleta } = await resolveAssistantEmpresaScope(db, empresaId);
 
+    const empresaSnap = await db.collection('empresas').doc(empresaId).get();
+    const hoursCoreEnabled = isHoursCoreEnabled(empresaSnap.data() as { hoursCoreEnabled?: boolean } | undefined);
+
     // 1) Empleados (con scope multiempresa alineado al resto de COSP).
     const empDocs = await queryEmpleadosDocsScoped(db, empresaId, scopeEmpresa, 5000);
     const empMap = new Map<string, FirebaseFirestore.DocumentData>();
@@ -300,6 +317,15 @@ export async function buildLiquidacionSnapshot(
         nocturnas: number;
         al100FT: number;
         plusFeriado: number;
+        totales: number;
+        desglose: {
+            plan: number;
+            ext: number;
+            adv: number;
+            cobertura: number;
+            ft: number;
+            tura: number;
+        };
         turnosCount: number;
         turnosConFichada: number;
         warnings: string[];
@@ -316,6 +342,7 @@ export async function buildLiquidacionSnapshot(
         turnosSinHorario: 0,
         turnosBorrador: 0,
         ausenciasContadas: 0,
+        hoursCoreEnabled,
     };
 
     const isOperationalTurno = (data: any): boolean =>
@@ -337,6 +364,8 @@ export async function buildLiquidacionSnapshot(
             nocturnas: 0,
             al100FT: 0,
             plusFeriado: 0,
+            totales: 0,
+            desglose: { plan: 0, ext: 0, adv: 0, cobertura: 0, ft: 0, tura: 0 },
             turnosCount: 0,
             turnosConFichada: 0,
             warnings: [],
@@ -397,6 +426,37 @@ export async function buildLiquidacionSnapshot(
         const a = getAcc(empId);
         a.turnosCount++;
         diagnostics.turnosContados++;
+
+        if (hoursCoreEnabled) {
+            const contrib = accumulatePayrollTurnoContribution(data, {
+                hoursMode,
+                holidays,
+                turnoId: doc.id,
+            });
+            if (contrib.warnings.some((w) => w.includes('sin startTime'))) {
+                diagnostics.turnosSinHorario++;
+            }
+            a.warnings.push(...contrib.warnings);
+            if (contrib.skipped && contrib.hsTeoricas === 0 && contrib.al100FT === 0) {
+                a.hsTeoricas += contrib.hsTeoricas;
+                return;
+            }
+            a.hsTeoricas += contrib.hsTeoricas;
+            a.hsReales += contrib.hsReales;
+            a.diurnas += contrib.diurnas;
+            a.nocturnas += contrib.nocturnas;
+            a.al100FT += contrib.al100FT;
+            a.plusFeriado += contrib.plusFeriado;
+            a.totales += contrib.desglose.totales;
+            a.desglose.plan += contrib.desglose.plan;
+            a.desglose.ext += contrib.desglose.ext;
+            a.desglose.adv += contrib.desglose.adv;
+            a.desglose.cobertura += contrib.desglose.cobertura;
+            a.desglose.ft += contrib.desglose.ft;
+            a.desglose.tura += contrib.desglose.tura;
+            if (!contrib.skipped) a.turnosConFichada++;
+            return;
+        }
 
         let start = tsToDate(data.startTime);
         let end = tsToDate(data.endTime);
@@ -570,6 +630,19 @@ export async function buildLiquidacionSnapshot(
                 plusFeriado: round(a.plusFeriado),
             },
             novedadesRRHH: a.rrhh,
+            ...(hoursCoreEnabled
+                ? {
+                    totales: round(a.totales),
+                    desglose: {
+                        plan: round(a.desglose.plan),
+                        ext: round(a.desglose.ext),
+                        adv: round(a.desglose.adv),
+                        cobertura: round(a.desglose.cobertura),
+                        ft: round(a.desglose.ft),
+                        tura: round(a.desglose.tura),
+                    },
+                }
+                : {}),
             turnosCount: a.turnosCount,
             turnosConFichada: a.turnosConFichada,
             warnings: a.warnings,

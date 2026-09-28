@@ -128,3 +128,15 @@ Factura lo que el cliente pidió: franjas SLA cubiertas. Cada franja M/T/N cuent
 - PERSONA (Liquidación, payrollApi, `calcTurnoHoursContrib`): siguen agregando días **26→25**. Cambian las horas del día, no la ventana.
 - PUESTO (prefactura, SLA, KPIs): siguen agregando **1…fin**. Cambian la regla de la franja (tope, sin extra por ausencia), no la ventana.
 - Cerrar un libro no congela el otro.
+
+## H1 — libro PERSONA detrás de `hoursCoreEnabled`
+
+Flag por empresa: `empresas/{id}.hoursCoreEnabled` (`isHoursCoreEnabled`, default `false`). Solo libro PERSONA; PUESTO (prefactura, `proformaGrid`, CRM, `hours_balances`, Análisis) queda para H2.
+
+| Consumidor | Flag OFF | Flag ON |
+| --- | --- | --- |
+| Reportes → Liquidación (`useReportes`) | `calculateStatsExact` local (techo 204) | `calculateLiquidationHoursStats` del paquete |
+| `payrollApi` (`payroll-api/calc.ts`) | acumulador inline legacy | motor persona del paquete |
+| `calcTurnoHoursContrib` (trigger liquidación) | cálculo inline legacy | motor persona del paquete |
+
+Con el flag apagado el número de producción no cambia: las copias `*F0` en `motors/legacy/` y el eval (`npm run eval:hours-core`) lo verifican contra los consumidores.
