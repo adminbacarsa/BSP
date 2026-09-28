@@ -37,6 +37,58 @@ function run(cmd, cwd, env = {}) {
   }
 }
 
+function runCaptured(cmd, cwd, env = {}) {
+  console.log(`\n▶ ${cmd}`);
+  const result = spawnSync(cmd, {
+    cwd,
+    shell: true,
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  return { status: result.status ?? 1, text: `${result.stdout || ''}\n${result.stderr || ''}` };
+}
+
+/** Nombres de functions que el CLI reportó como fallidas (aunque el exit code sea 0). */
+function failedFunctionNames(text) {
+  const names = new Set();
+  for (const line of String(text || '').split(/\r?\n/)) {
+    if (!/fail/i.test(line)) continue;
+    const bracket = line.match(/functions\[([^\](]+)/i);
+    const prose = line.match(/Failed to update function\s+([A-Za-z0-9_]+)/i);
+    const hit = bracket?.[1] || prose?.[1];
+    if (hit) names.add(hit.trim());
+  }
+  const block = String(text || '').match(/following functions:\s*([\s\S]*?)(?:\r?\n\r?\n|$)/i);
+  if (block) {
+    for (const line of block[1].split(/\r?\n/)) {
+      const named = line.match(/([A-Za-z0-9_]+)\s*\(/);
+      if (named) names.add(named[1]);
+    }
+  }
+  return [...names];
+}
+
+function deployFunctions(projectRoot, env) {
+  const first = runCaptured('firebase deploy --only functions --force', projectRoot, env);
+  let failed = failedFunctionNames(first.text);
+  if (first.status !== 0 && failed.length === 0) {
+    console.error('\n✗ Falló el deploy de functions.');
+    process.exit(first.status);
+  }
+  if (!failed.length) return;
+  console.error(`\n✗ Functions que fallaron: ${failed.join(', ')}. Reintento único.`);
+  const only = failed.map((name) => `functions:${name}`).join(',');
+  const second = runCaptured(`firebase deploy --only "${only}" --force`, projectRoot, env);
+  failed = failedFunctionNames(second.text);
+  if (second.status !== 0 || failed.length) {
+    const still = failed.length ? failed : ['(el CLI no nombró la function)'];
+    console.error(`\n✗ Siguen fallando: ${still.join(', ')}`);
+    process.exit(second.status && second.status !== 0 ? second.status : 1);
+  }
+}
+
 /**
  * @param {string} projectRoot — raíz del repo donde correr build + firebase
  * @param {string[]} args — flags: --functions, --rules, --all (ver deploy-flags.js)
@@ -115,8 +167,10 @@ function runDeploy(projectRoot, args = []) {
     withFunctions && !process.env.FUNCTIONS_DISCOVERY_TIMEOUT
       ? { FUNCTIONS_DISCOVERY_TIMEOUT: '120' }
       : {};
-  if (nonHosting.length) {
-    run(`firebase deploy --only "${nonHosting.join(',')}" --force`, projectRoot, functionsDeployEnv);
+  const rulesTargets = nonHosting.filter((target) => target !== 'functions');
+  if (withFunctions) deployFunctions(projectRoot, functionsDeployEnv);
+  if (rulesTargets.length) {
+    run(`firebase deploy --only "${rulesTargets.join(',')}" --force`, projectRoot);
   }
   if (flags.withHosting) run('firebase deploy --only hosting --force', projectRoot);
 
