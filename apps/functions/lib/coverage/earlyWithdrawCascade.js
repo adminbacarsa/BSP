@@ -3,9 +3,10 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.iniciarEarlyWithdrawCascade = iniciarEarlyWithdrawCascade;
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
+const coverageCandidates_1 = require("./coverageCandidates");
 const convocatoriasCobertura_1 = require("./convocatoriasCobertura");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
-const EARLY_WITHDRAW_CASCADE = ['RET', 'REF', 'ESC', 'ADVANCE', 'FT'];
+const EARLY_WITHDRAW_CASCADE = coverageCandidates_1.COVERAGE_CASCADE_ORDER.filter((t) => t !== 'EXTEND');
 async function iniciarEarlyWithdrawCascade(db, shift, createdBy = 'AUTO') {
     const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
     const titularSnap = await db.collection('turnos').doc(shift.id).get();

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.checkConvocatoriaTimeouts = exports.getCandidatosCobertura = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = void 0;
+exports.checkConvocatoriaTimeouts = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = void 0;
 exports.crearConvocatoriaDoc = crearConvocatoriaDoc;
 exports.findBestCandidate = findBestCandidate;
 exports.dispararBroadcastFT = dispararBroadcastFT;
@@ -16,7 +16,7 @@ const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
-const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
+const simulableShift_1 = require("../common/simulableShift");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -195,286 +195,38 @@ async function crearConvocatoriaDoc(db, data) {
     return ref.id;
 }
 async function findBestCandidate(db, conv, type) {
-    const ctx = {
-        objectiveId: conv.objectiveId,
-        clientId: conv.clientId,
-        aptitudesRequeridas: conv.aptitudesRequeridas || [],
-    };
-    if (type === 'EXTEND') {
-        const active = await db.collection('turnos')
-            .where('objectiveId', '==', conv.objectiveId)
-            .where('empresaId', '==', conv.empresaId)
-            .where('isPresent', '==', true)
-            .where('isCompleted', '==', false)
-            .limit(10)
-            .get();
-        for (const d of active.docs) {
-            const t = d.data();
-            const code = String(t.code || '').toUpperCase();
-            if (code !== 'M' && code !== 'T' && code !== 'N')
-                continue;
-            const empSnap = await db.collection('empleados').doc(t.employeeId).get();
-            if (!empSnap.exists)
-                continue;
-            const emp = empSnap.data();
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'EXTEND');
-            if (check.eligible) {
-                return {
-                    id: t.employeeId,
-                    name: t.employeeName || '',
-                    uid: emp.uid,
-                    extendShiftId: d.id,
-                };
-            }
-        }
+    if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP')
         return null;
-    }
-    if (type === 'ADVANCE') {
-        const now = firestore_1.Timestamp.now();
-        const endOfDay = firestore_1.Timestamp.fromMillis(new Date(new Date().setHours(23, 59, 59, 0)).getTime());
-        const next = await db.collection('turnos')
-            .where('objectiveId', '==', conv.objectiveId)
-            .where('empresaId', '==', conv.empresaId)
-            .where('startTime', '>', now)
-            .where('startTime', '<=', endOfDay)
-            .where('isCompleted', '==', false)
-            .orderBy('startTime')
-            .limit(5)
-            .get();
-        for (const d of next.docs) {
-            const t = d.data();
-            if (!t.employeeId || t.employeeId === 'VACANTE')
-                continue;
-            const empSnap = await db.collection('empleados').doc(t.employeeId).get();
-            if (!empSnap.exists)
-                continue;
-            const emp = empSnap.data();
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'ADVANCE');
-            if (check.eligible) {
-                return {
-                    id: t.employeeId,
-                    name: t.employeeName || '',
-                    uid: emp.uid,
-                    advanceShiftId: d.id,
-                };
-            }
-        }
+    const { findBestCoverageCandidate } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
+    const found = await findBestCoverageCandidate(db, conv, type);
+    if (!found)
         return null;
-    }
-    const empSnap = await db.collection('empleados')
-        .where('empresaId', '==', conv.empresaId)
-        .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
-        .limit(200)
-        .get();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 0);
-    const todayShiftsSnap = await db.collection('turnos')
-        .where('objectiveId', '==', conv.objectiveId)
-        .where('empresaId', '==', conv.empresaId)
-        .where('startTime', '>=', firestore_1.Timestamp.fromDate(todayStart))
-        .where('startTime', '<=', firestore_1.Timestamp.fromDate(todayEnd))
-        .limit(100)
-        .get();
-    const shiftsByEmp = new Map();
-    for (const d of todayShiftsSnap.docs) {
-        const t = d.data();
-        if (t.employeeId)
-            shiftsByEmp.set(t.employeeId, String(t.code || ''));
-    }
-    const allTodaySnap = await db.collection('turnos')
-        .where('empresaId', '==', conv.empresaId)
-        .where('startTime', '>=', firestore_1.Timestamp.fromDate(todayStart))
-        .where('startTime', '<=', firestore_1.Timestamp.fromDate(todayEnd))
-        .limit(500)
-        .get();
-    const busyEmpIds = new Set();
-    const francoEmpIds = new Set();
-    const retEmpIds = new Map();
-    for (const d of allTodaySnap.docs) {
-        const t = d.data();
-        if (!t.employeeId || t.employeeId === 'VACANTE')
-            continue;
-        const code = String(t.code || '').toUpperCase();
-        if (['F', 'FF', 'FP'].includes(code)) {
-            francoEmpIds.add(t.employeeId);
-        }
-        else if (code === 'RET') {
-            if (t.objectiveId === conv.objectiveId) {
-                retEmpIds.set(t.employeeId, d.id);
-            }
-        }
-        else if (!['FT'].includes(code)) {
-            busyEmpIds.add(t.employeeId);
-        }
-    }
-    const activeConvSnap = await db.collection('convocatorias_cobertura')
-        .where('empresaId', '==', conv.empresaId)
-        .where('status', 'in', ['PENDING', 'ESCALATED'])
-        .get();
-    const alreadyConvocadoIds = new Set();
-    for (const d of activeConvSnap.docs) {
-        const c = d.data();
-        if (c.shiftId !== conv.shiftId && c.candidateEmployeeId) {
-            alreadyConvocadoIds.add(String(c.candidateEmployeeId));
-        }
-    }
-    let gap = (0, coverageSourceShiftForGap_1.gapWindowFromConvocatoria)(conv);
-    if (!gap && conv.shiftId) {
-        const titSnap = await db.collection('turnos').doc(conv.shiftId).get();
-        if (titSnap.exists) {
-            gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titSnap.data());
-        }
-    }
-    if (type === 'REF' || type === 'ESC') {
-        if (!gap)
-            return null;
-        const want = type;
-        for (const d of todayShiftsSnap.docs) {
-            const t = d.data();
-            const code = String(t.code || '').toUpperCase();
-            if (code !== want)
-                continue;
-            if (t.isAbsent || !t.employeeId)
-                continue;
-            if (t.coverageUsed === true)
-                continue;
-            if (gap && !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(t, gap))
-                continue;
-            if (alreadyConvocadoIds.has(String(t.employeeId)))
-                continue;
-            const empSnap = await db.collection('empleados').doc(t.employeeId).get();
-            if (!empSnap.exists)
-                continue;
-            const emp = empSnap.data();
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET');
-            if (!check.eligible)
-                continue;
-            const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, t.employeeId, emp);
-            return {
-                id: t.employeeId,
-                name: t.employeeName || `${emp.lastName || ''} ${emp.firstName || ''}`.trim(),
-                uid: uid || undefined,
-                candidateShiftId: d.id,
-            };
-        }
-        return null;
-    }
-    for (const empDoc of empSnap.docs) {
-        const emp = empDoc.data();
-        const empId = empDoc.id;
-        if (type === 'RET') {
-            if (!retEmpIds.has(empId))
-                continue;
-            const retShiftId = retEmpIds.get(empId);
-            if (retShiftId && gap) {
-                const retSnap = await db.collection('turnos').doc(retShiftId).get();
-                if (!retSnap.exists)
-                    continue;
-                const retData = retSnap.data();
-                if (retData.coverageUsed === true)
-                    continue;
-                if (!(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(retData, gap))
-                    continue;
-            }
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'RET');
-            if (check.eligible) {
-                const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                return {
-                    id: empId,
-                    name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,
-                    uid: uid || undefined,
-                    ...(retShiftId ? { candidateShiftId: retShiftId } : {}),
-                };
-            }
-        }
-        if (type === 'VOLANTE') {
-            if (busyEmpIds.has(empId) || alreadyConvocadoIds.has(empId))
-                continue;
-            if (!(emp.volante || []).includes(conv.objectiveId))
-                continue;
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'VOLANTE');
-            if (check.eligible) {
-                const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                return { id: empId, name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId, uid: uid || undefined };
-            }
-        }
-        if (type === 'SIN_TURNO_CON_EXP') {
-            if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId) || alreadyConvocadoIds.has(empId))
-                continue;
-            const isTitular = emp.preferredObjectiveId === conv.objectiveId;
-            const hasExp = !!(emp.experienciaObjetivos || {})[conv.objectiveId];
-            if (!isTitular && !hasExp)
-                continue;
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'SIN_TURNO_CON_EXP');
-            if (check.eligible) {
-                const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                return { id: empId, name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId, uid: uid || undefined };
-            }
-        }
-        if (type === 'SIN_TURNO') {
-            if (busyEmpIds.has(empId) || francoEmpIds.has(empId) || retEmpIds.has(empId) || alreadyConvocadoIds.has(empId))
-                continue;
-            const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'SIN_TURNO');
-            if (check.eligible) {
-                const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empId, emp);
-                return { id: empId, name: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId, uid: uid || undefined };
-            }
-        }
-    }
-    return null;
+    const { row, uid } = found;
+    const base = { id: row.employeeId, name: row.employeeName, uid };
+    if (type === 'EXTEND')
+        return { ...base, extendShiftId: row.sourceShiftId };
+    if (type === 'ADVANCE')
+        return { ...base, advanceShiftId: row.sourceShiftId };
+    return { ...base, candidateShiftId: row.sourceShiftId || undefined };
 }
 async function dispararBroadcastFT(db, conv) {
-    const ctx = { objectiveId: conv.objectiveId, clientId: conv.clientId, aptitudesRequeridas: conv.aptitudesRequeridas };
-    const empSnap = await db.collection('empleados')
-        .where('empresaId', '==', conv.empresaId)
-        .where('status', 'in', ['ACTIVE', 'active', 'activo', 'ACTIVO'])
-        .limit(200)
-        .get();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 0);
-    const allTodaySnap = await db.collection('turnos')
-        .where('empresaId', '==', conv.empresaId)
-        .where('startTime', '>=', firestore_1.Timestamp.fromDate(todayStart))
-        .where('startTime', '<=', firestore_1.Timestamp.fromDate(todayEnd))
-        .limit(500)
-        .get();
-    const francoShiftByEmp = new Map();
-    for (const d of allTodaySnap.docs) {
-        const t = d.data();
-        if (!t.employeeId)
-            continue;
-        const code = String(t.code || '').toUpperCase();
-        if (['F', 'FF', 'FP'].includes(code))
-            francoShiftByEmp.set(t.employeeId, d.id);
-    }
-    const batch = [];
-    for (const empDoc of empSnap.docs) {
-        if (!francoShiftByEmp.has(empDoc.id))
-            continue;
-        const emp = empDoc.data();
-        const check = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, 'FT');
-        if (!check.eligible)
-            continue;
-        const uid = await (0, eligibilityFilter_1.findEmployeeUid)(db, empDoc.id, emp);
-        batch.push(crearConvocatoriaDoc(db, {
-            ...conv,
+    const { listFtCandidates } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
+    const rows = await listFtCandidates(db, conv, 5);
+    if (rows.length === 0)
+        return;
+    await Promise.all(rows.map(({ row, uid }) => {
+        const { extendShiftId: _extendShiftId, advanceShiftId: _advanceShiftId, candidateShiftId: _candidateShiftId, ftShiftId: _ftShiftId, ...rest } = conv;
+        return crearConvocatoriaDoc(db, {
+            ...rest,
             type: 'FT',
-            cascadeStep: 6,
-            candidateEmployeeId: empDoc.id,
-            candidateEmployeeName: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empDoc.id,
-            candidateUid: uid || undefined,
-            ftShiftId: francoShiftByEmp.get(empDoc.id),
-            createdBy: 'AUTO',
-        }));
-        if (batch.length >= 5)
-            break;
-    }
-    if (batch.length > 0)
-        await Promise.all(batch);
+            cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('FT'),
+            candidateEmployeeId: row.employeeId,
+            candidateEmployeeName: row.employeeName,
+            candidateUid: uid,
+            ftShiftId: row.sourceShiftId,
+            createdBy: conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO',
+        });
+    }));
 }
 function dualSiblingConvType(type) {
     const u = String(type || '').toUpperCase();
@@ -634,7 +386,7 @@ async function resolverCobertura(db, conv) {
     });
     if (!claim.ok) {
         console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
-        return;
+        return { ok: false, message: 'El hueco ya fue cubierto.' };
     }
     const claimHeld = !!claim.heldClaim && !claim.already;
     const releaseClaim = async () => {
@@ -647,6 +399,27 @@ async function resolverCobertura(db, conv) {
             console.warn('[resolverCobertura] release claim:', err.message);
         }
     };
+    const { revalidateAcceptance } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
+    const check = await revalidateAcceptance(db, conv, 'accept');
+    if (!check.ok) {
+        const huecoCubierto = check.reason === 'HUECO_CUBIERTO';
+        await convRef.update({
+            status: huecoCubierto ? 'CANCELLED' : 'REJECTED',
+            respondedAt: firestore_1.Timestamp.now(),
+            rejectionReason: check.reason || 'NO_DISPONIBLE',
+            rejectionMessage: check.message || 'No se puede tomar esta cobertura.',
+            ...(huecoCubierto ? { cancelReason: 'ALREADY_COVERED', cancelledAt: firestore_1.FieldValue.serverTimestamp() } : {}),
+        });
+        await releaseClaim();
+        if (!huecoCubierto)
+            await avanzarCascadaOrPartialVacante(db, conv, 'REJECTED');
+        return { ok: false, message: check.message || 'No se puede tomar esta cobertura.' };
+    }
+    await convRef.update({
+        status: 'ACCEPTED',
+        respondedAt: firestore_1.Timestamp.now(),
+        resolvedAt: firestore_1.Timestamp.now(),
+    });
     const batch = db.batch();
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
         : conv.createdBy === 'AUTO' ? 'AUTO'
@@ -745,18 +518,16 @@ async function resolverCobertura(db, conv) {
                 empresaId: conv.empresaId || null,
             }, batch);
         }
-        const [pendingSnap, escalatedSnap] = await Promise.all([
-            db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
-            db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
-        ]);
-        const siblingKeepType = titularCloseMode === 'PARTIAL' ? dualSiblingConvType(String(conv.type)) : null;
-        for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
-            if (d.id === conv.id)
-                continue;
-            if (siblingKeepType && String(d.data().type || '').toUpperCase() === siblingKeepType) {
-                continue;
+        if (titularCloseMode === 'FULL') {
+            const [pendingSnap, escalatedSnap] = await Promise.all([
+                db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
+                db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'ESCALATED').get(),
+            ]);
+            for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
+                if (d.id === conv.id)
+                    continue;
+                batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
             }
-            batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
         }
         const novedadRef = db.collection('novedades').doc();
         const typeLabel = {
@@ -794,6 +565,7 @@ async function resolverCobertura(db, conv) {
             && (conv.type === 'EXTEND' || conv.type === 'ADVANCE')) {
             await ensureMissingDualLegConvocatoria(db, conv);
         }
+        return { ok: true };
     }
     catch (e) {
         if (e instanceof CoverageApplyError && e.code === 'ALREADY_COVERED') {
@@ -805,7 +577,7 @@ async function resolverCobertura(db, conv) {
                 cancelledAt: firestore_1.FieldValue.serverTimestamp(),
             });
             await errBatch.commit();
-            return;
+            return { ok: false, message: 'El hueco ya fue cubierto.' };
         }
         console.error(`[resolverCobertura] error conv=${conv.id}:`, e.message);
         throw e;
@@ -835,14 +607,25 @@ exports.crearConvocatoriaCobertura = functions
         throw new functions.https.HttpsError('not-found', 'Empleado no encontrado.');
     }
     const emp = empSnap.data();
-    const ctx = {
+    const { revalidateAcceptance } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
+    const check = await revalidateAcceptance(db, {
+        empresaId,
+        shiftId,
         objectiveId: String(shift.objectiveId || ''),
         clientId: String(shift.clientId || ''),
-        aptitudesRequeridas: [],
-    };
-    const eligibility = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, type);
-    if (!eligibility.eligible) {
-        throw new functions.https.HttpsError('failed-precondition', `Candidato no elegible: ${eligibility.reason}`);
+        positionName: String(shift.positionName || ''),
+        shiftCode: String(shift.code || ''),
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        type,
+        candidateEmployeeId,
+        extendShiftId,
+        advanceShiftId,
+        candidateShiftId,
+        ftShiftId,
+    }, 'select');
+    if (!check.ok) {
+        throw new functions.https.HttpsError('failed-precondition', check.message || 'Candidato no elegible.');
     }
     const existing = await db.collection('convocatorias_cobertura')
         .where('shiftId', '==', shiftId)
@@ -942,12 +725,10 @@ exports.responderConvocatoriaCobertura = functions
         return { success: true };
     }
     if (response === 'ACCEPTED') {
-        await convRef.update({
-            status: 'ACCEPTED',
-            respondedAt: now,
-            resolvedAt: now,
-        });
-        await resolverCobertura(db, { ...conv, id: convocatoriaId });
+        const result = await resolverCobertura(db, { ...conv, id: convocatoriaId });
+        if (!result.ok) {
+            throw new functions.https.HttpsError('failed-precondition', result.message || 'No se puede tomar esta cobertura.');
+        }
     }
     else {
         await convRef.update({
@@ -992,82 +773,6 @@ exports.cancelarConvocatoriaCobertura = functions
         cancelledBy: context.auth.uid,
     });
     return { success: true };
-});
-exports.getCandidatosCobertura = functions
-    .runWith({ timeoutSeconds: 60, memory: '256MB' })
-    .https.onCall(async (data, context) => {
-    if (!context.auth?.uid)
-        throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
-    const db = admin.firestore();
-    const { shiftId, empresaId, type } = data;
-    const shiftSnap = await db.collection('turnos').doc(shiftId).get();
-    if (!shiftSnap.exists)
-        throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
-    const shift = shiftSnap.data();
-    const ctx = {
-        objectiveId: String(shift.objectiveId || ''),
-        clientId: String(shift.clientId || ''),
-        aptitudesRequeridas: [],
-    };
-    const empSnap = await db.collection('empleados')
-        .where('empresaId', '==', empresaId)
-        .where('status', '==', 'ACTIVE')
-        .limit(200)
-        .get();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todayEnd = new Date();
-    todayEnd.setHours(23, 59, 59, 0);
-    const allTodaySnap = await db.collection('turnos')
-        .where('empresaId', '==', empresaId)
-        .where('startTime', '>=', firestore_1.Timestamp.fromDate(todayStart))
-        .where('startTime', '<=', firestore_1.Timestamp.fromDate(todayEnd))
-        .limit(500)
-        .get();
-    const empShiftCode = new Map();
-    for (const d of allTodaySnap.docs) {
-        const t = d.data();
-        if (t.employeeId)
-            empShiftCode.set(t.employeeId, String(t.code || ''));
-    }
-    const results = [];
-    for (const empDoc of empSnap.docs) {
-        const emp = empDoc.data();
-        const empId = empDoc.id;
-        const shiftCode = empShiftCode.get(empId);
-        let derivedType = null;
-        if (shiftCode === 'RET' && shift.objectiveId === emp.preferredObjectiveId) {
-            derivedType = 'RET';
-        }
-        else if (shiftCode && ['F', 'FF', 'FP'].includes(shiftCode)) {
-            derivedType = 'FT';
-        }
-        else if (!shiftCode) {
-            derivedType = (emp.volante || []).includes(shift.objectiveId)
-                ? 'VOLANTE'
-                : (emp.preferredObjectiveId === shift.objectiveId || !!(emp.experienciaObjetivos || {})[shift.objectiveId])
-                    ? 'SIN_TURNO_CON_EXP'
-                    : 'SIN_TURNO';
-        }
-        if (!derivedType)
-            continue;
-        if (type && derivedType !== type)
-            continue;
-        const eligibility = (0, eligibilityFilter_1.checkEligibility)(emp, ctx, derivedType);
-        results.push({
-            employeeId: empId,
-            employeeName: `${emp.lastName || ''} ${emp.firstName || ''}`.trim() || empId,
-            candidateType: derivedType,
-            eligibility,
-        });
-    }
-    const order = ['RET', 'VOLANTE', 'SIN_TURNO_CON_EXP', 'SIN_TURNO', 'FT'];
-    results.sort((a, b) => {
-        if (a.eligibility.eligible !== b.eligibility.eligible)
-            return a.eligibility.eligible ? -1 : 1;
-        return order.indexOf(a.candidateType) - order.indexOf(b.candidateType);
-    });
-    return { candidates: results };
 });
 async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
     const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
@@ -1162,6 +867,14 @@ async function simularRespuestasConvocatorias(db, empresaId) {
         const createdMs = conv.createdAt instanceof firestore_1.Timestamp ? conv.createdAt.toMillis() : 0;
         if (createdMs > cutoffMs)
             continue;
+        const titularData = conv.shiftId
+            ? (await db.collection('turnos').doc(conv.shiftId).get()).data()
+            : null;
+        const skipSim = (0, simulableShift_1.simulableShiftSkipReason)(titularData);
+        if (skipSim) {
+            console.log(`[simularRespuestasConvocatorias] skip ${convDoc.id}: titular ${conv.shiftId} ${skipSim}`);
+            continue;
+        }
         const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;
         const accept = hashVal <= 7;
         try {
@@ -1203,13 +916,15 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
                 await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
                 const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
                 const alreadyHandled = !!(sh?.isPresent || sh?.isCompleted || sh?.lateArrivalAt || sh?.lateArrivalConfirmed);
-                if (!alreadyHandled && !(0, coverageTraceShift_1.skipAbsencePipelineForShift)(sh)) {
+                const startMs = sh?.startTime?.toMillis?.() ?? 0;
+                const pastNoNoticeDeadline = startMs > 0 && now.toMillis() >= startMs + 30 * 60 * 1000;
+                if (!alreadyHandled && pastNoNoticeDeadline && !(0, coverageTraceShift_1.skipAbsencePipelineForShift)(sh)) {
                     await (0, markShiftAbsent_1.markShiftAbsent)(db, conv.shiftId, {
                         reason: 'LLEGADA_TARDE_TIMEOUT',
                         by: 'SYSTEM_SCHEDULER',
                     });
                 }
-                console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout → ausente ${conv.shiftId}`);
+                console.log(`[checkConvocatoriaTimeouts] LLEGADA_TARDE timeout ${conv.shiftId}`);
             }
             else {
                 await d.ref.update({ status: 'ESCALATED', escalatedAt: now });

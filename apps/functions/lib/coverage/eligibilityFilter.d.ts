@@ -12,10 +12,6 @@ export interface EligibilityResult {
     reason?: string;
 }
 export declare function checkEligibility(employee: Record<string, any>, ctx: EligibilityContext, candidateType: CandidateType, distanceKm?: number): EligibilityResult;
-export declare function deriveCandidateType(employee: Record<string, any>, objectiveId: string, todayShifts: {
-    employeeId: string;
-    code?: string;
-}[]): CandidateType | null;
 export declare const CASCADE_ORDER: CandidateType[];
 export declare function nextCascadeStep(current: CandidateType): CandidateType | null;
 export declare function getUrgency(startTime: Timestamp | {

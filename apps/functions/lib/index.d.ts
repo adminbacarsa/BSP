@@ -39,7 +39,7 @@ export declare const registrarFichadaManual: functions.HttpsFunction & functions
 export declare const reportarAusencia: functions.HttpsFunction & functions.Runnable<any>;
 export declare const notificarLlegadaTarde: functions.HttpsFunction & functions.Runnable<any>;
 export { getSwapPeople, getSwapCandidates, createSwapRequest, respondSwapRequest, confirmSwapRequest, cancelSwapRequest, approveSwapRequest, rejectSwapRequestSupervisor, } from './swap/swapPortal';
-export { crearConvocatoriaCobertura, responderConvocatoriaCobertura, cancelarConvocatoriaCobertura, getCandidatosCobertura, checkConvocatoriaTimeouts, } from './coverage/convocatoriasCobertura';
+export { crearConvocatoriaCobertura, responderConvocatoriaCobertura, cancelarConvocatoriaCobertura, checkConvocatoriaTimeouts, } from './coverage/convocatoriasCobertura';
 export { respondEventoConvocatoria } from './eventos/eventoPortalCallables';
 export declare const createPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export declare const activateDevice: functions.HttpsFunction & functions.Runnable<any>;
