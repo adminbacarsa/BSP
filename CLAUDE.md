@@ -313,6 +313,12 @@ Cuando un empleado falta, el sistema busca reemplazante en este orden (menor a m
 
 Todos los candidatos deben ser del mismo objetivo. La banda a cubrir es la del empleado ausente (M cubre M, N cubre N, etc.).
 
+### Relevo de franja
+
+`isReliefEligibleShift` (`packages/ops-core/src/reliefEligibility.ts`, espejo `apps/functions/src/common/reliefEligibility.ts`): un turno **ESC**, **REF** o **RET** planificado no releva al saliente de la banda vendida. Sí relevan los turnos de puesto (M/T/N/D12/N12) y la cobertura `origin: OPERATIONS_COVERAGE` que no es registro EXT/ADV (`coverageHoursOnSource`). Francos, licencias y borradores tampoco relevan. El Centro de Comando muestra el código junto al nombre (`ShiftCodeBadge`).
+
+La fichada tarde no escribe `lateArrivalAt`. Ese campo lo deja `notificarLlegadaTarde` o la convocatoria `LLEGADA_TARDE`. Sin aviso, el monitor marca TARDE SIN AVISO.
+
 ---
 
 ## 7. Entorno y configuración
