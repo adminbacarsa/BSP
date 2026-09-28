@@ -28,6 +28,7 @@ import {
 } from '@/lib/planificacion/planningTurnoCoalesce';
 import { calcPlanningBillableShiftHours } from '@/lib/planificacion/planningScheduledHours';
 import {
+    buildPersonaBook,
     calculateLiquidationHoursStats as calculateLiquidationHoursStatsCore,
     isHoursCoreEnabled,
 } from '@cosp/hours-core';
@@ -1727,7 +1728,25 @@ export const useReportes = (forcedClientId?: string | null) => {
                 empGroups[s.employeeId].push(enrichShift(sWithFT));
             });
 
-            const empIds = Object.keys(empGroups);
+            const personaBook = hoursCoreEnabled
+                ? buildPersonaBook({
+                    turnos: allShiftsBase,
+                    ausencias: ausDocs
+                        .filter((d) => belongsToEmpresaView(d.data(), empresaId, migracionCompleta))
+                        .map((d) => ({ id: d.id, ...d.data() })),
+                    publishStatusMap,
+                    rangeStartYmd: dateRange.start,
+                    rangeEndYmd: dateRange.end,
+                    empNameById: empMap,
+                    holidays: holidaysData,
+                    usePlannedHours,
+                    publishFilter,
+                })
+                : null;
+
+            const empIds = personaBook
+                ? personaBook.employees.map((e) => e.employeeId)
+                : Object.keys(empGroups);
             const empRows: any[] = [];
             for (let i = 0; i < empIds.length; i++) {
                 const empId = empIds[i]!;
@@ -1737,16 +1756,18 @@ export const useReportes = (forcedClientId?: string | null) => {
                         `Liquidando legajos (${i + 1}/${empIds.length})`,
                     );
                 }
-                const shifts = prepareShiftsForEmployeeLiquidation(
-                    dedupeShiftsByAbsencePriority(
-                        propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
-                        { usePlannedHours },
-                    ),
-                );
-                const stats = calculateLiquidationHoursStats(shifts, holidaysData, {
-                    usePlannedHours,
-                    hoursCoreEnabled,
-                });
+                const bookEntry = personaBook?.byEmployee.get(empId);
+                const shifts = bookEntry
+                    ? bookEntry.shifts
+                    : prepareShiftsForEmployeeLiquidation(
+                        dedupeShiftsByAbsencePriority(
+                            propagateFrancoTrabajadoFlags(empGroups[empId], { usePlannedHours }),
+                            { usePlannedHours },
+                        ),
+                    );
+                const stats = bookEntry
+                    ? bookEntry.stats
+                    : calculateLiquidationHoursStats(shifts, holidaysData, { usePlannedHours });
 
                 const ftCount = shifts.filter((s: any) => isFrancoTrabajadoShift(s)).length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;

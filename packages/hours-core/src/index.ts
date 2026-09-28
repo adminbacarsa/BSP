@@ -108,8 +108,28 @@ export {
   prepareShiftsForEmployeeLiquidation,
   resolveShiftDurationHours,
   shouldBillShiftToObjective,
+  shiftCalendarDateKey as personaShiftDateKey,
+  isShiftEligibleForReports,
   PAID_LEAVE_CODES,
+  type ReportPublishFilter,
 } from './motors/liquidation/reportesLiquidation';
+
+export {
+  buildPersonaBook,
+  computePersonaEmployeeLiquidation,
+  personaEmployeeDisplayName,
+  personaCalendarDateStr,
+  buildPersonaPublishStatusMap,
+  personaStatsToPayrollFigures,
+  sumPersonaAjustesHoras,
+  type PersonaBook,
+  type PersonaBookEmployee,
+  type PersonaBookInput,
+  type PersonaLiquidationStats,
+  type PersonaPayrollFigures,
+} from './persona/personaBook';
+
+export { arYmd, arYearMonth, arMinutesOfDay, withArClock, ymdAddDays } from './time/ar';
 
 export {
   isHoursCoreEnabled,

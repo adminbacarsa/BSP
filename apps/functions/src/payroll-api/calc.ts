@@ -26,6 +26,8 @@ import {
     queryEmpleadosDocsScoped,
     tenantEmpresaIdsMatch,
 } from '../assistant/assistantEmpresaScope';
+import { isHoursCoreEnabled } from '@cosp/hours-core';
+import { buildLiquidacionSnapshotPersona } from './calcPersona';
 
 const PAID_LEAVE = new Set(['V', 'L', 'PG', 'E', 'A']);
 /** Códigos que no aportan jornada laboral “normal” (FT se trata aparte). */
@@ -34,7 +36,7 @@ const SHIFT_HOURS_FALLBACK: Record<string, number> = {
     M: 8, T: 8, N: 8, D12: 12, N12: 12, PU: 12, GU: 8, FT: 8, EN: 9, RO: 10, EV: 8,
 };
 
-const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
+export const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
     V: 'vacacionesDias',
     L: 'licenciaEspecialDias',
     E: 'enfermedadDias',
@@ -44,7 +46,7 @@ const RRHH_CODE_MAP: Record<string, keyof Omit<RrhhNovedades, 'otrosDias'>> = {
     RA: 'retiroAnticipadoDias',
 };
 
-const RRHH_TYPE_LABEL_TO_CODE: Record<string, string> = {
+export const RRHH_TYPE_LABEL_TO_CODE: Record<string, string> = {
     VACACIONES: 'V',
     ENFERMEDAD: 'E',
     ART: 'A',
@@ -96,6 +98,16 @@ export interface EmployeeLiquidacion {
         plusFeriado: number;
     };
     novedadesRRHH: RrhhNovedades;
+    /** Libro persona (solo con hoursCoreEnabled). */
+    totales?: number;
+    desglose?: {
+        plan: number;
+        ext: number;
+        adv: number;
+        cobertura: number;
+        ft: number;
+        tura: number;
+    };
     turnosCount: number;
     turnosConFichada: number;
     warnings: string[];
@@ -122,18 +134,19 @@ export interface LiquidacionSnapshot {
         turnosSinHorario: number;
         turnosBorrador: number;
         ausenciasContadas: number;
+        hoursCoreEnabled?: boolean;
     };
 }
 
-const round = (n: number): number => Math.round(n * 100) / 100;
-const fmtCuil = (raw: any): string | null => {
+export const round = (n: number): number => Math.round(n * 100) / 100;
+export const fmtCuil = (raw: any): string | null => {
     if (!raw) return null;
     const s = String(raw).replace(/[^0-9]/g, '');
     if (s.length === 11) return `${s.slice(0, 2)}-${s.slice(2, 10)}-${s.slice(10)}`;
     return String(raw);
 };
 
-const tsToDate = (val: any): Date | null => {
+export const tsToDate = (val: any): Date | null => {
     if (!val) return null;
     if (val instanceof admin.firestore.Timestamp) return val.toDate();
     if (typeof val.toDate === 'function') return val.toDate();
@@ -186,13 +199,13 @@ const clampStart = (real: Date, plan: Date, tolMin = 5): Date =>
 const clampEnd = (real: Date, plan: Date, tolMin = 5): Date =>
     Math.abs((real.getTime() - plan.getTime()) / 60000) <= tolMin ? plan : real;
 
-const overlapsDay = (rangeStart: Date, rangeEnd: Date, dayStr: string): boolean => {
+export const overlapsDay = (rangeStart: Date, rangeEnd: Date, dayStr: string): boolean => {
     const dayStart = new Date(`${dayStr}T00:00:00.000-03:00`);
     const dayEnd = new Date(`${dayStr}T23:59:59.999-03:00`);
     return rangeStart.getTime() <= dayEnd.getTime() && rangeEnd.getTime() >= dayStart.getTime();
 };
 
-const datesBetween = (start: Date, end: Date): string[] => {
+export const datesBetween = (start: Date, end: Date): string[] => {
     const out: string[] = [];
     let curKey = dateKeyAR(start);
     const endKey = dateKeyAR(end);
@@ -228,6 +241,21 @@ export async function buildLiquidacionSnapshot(
     const hoursMode: 'planned' | 'real' = params.hoursMode === 'planned' ? 'planned' : 'real';
 
     const { scopeEmpresa, migracionCompleta } = await resolveAssistantEmpresaScope(db, empresaId);
+
+    const empresaSnap = await db.collection('empresas').doc(empresaId).get();
+    if (isHoursCoreEnabled(empresaSnap.data() as { hoursCoreEnabled?: boolean } | undefined)) {
+        return buildLiquidacionSnapshotPersona({
+            db,
+            cycle,
+            empresaId,
+            scopeEmpresa,
+            migracionCompleta,
+            clientIdFilter: params.clientIdFilter,
+            page,
+            pageSize,
+            hoursMode,
+        });
+    }
 
     // 1) Empleados (con scope multiempresa alineado al resto de COSP).
     const empDocs = await queryEmpleadosDocsScoped(db, empresaId, scopeEmpresa, 5000);

@@ -850,6 +850,52 @@ async function main() {
   });
   const liqFtFullDayFichada = core.calculateLiquidationHoursStats([ftFullDayFichada], {});
 
+  // Decisión Mauro H1 #1: payrollApi usa el mismo motor por persona que Reportes → Liquidación
+  // (buildPersonaBook + calculateLiquidationHoursStats). `personaStatsToPayrollFigures` es una
+  // traducción 1:1 de esa fila al contrato de la API: no puede introducir una fórmula distinta.
+  const personaTurnos = [
+    {
+      id: 'persona-emp1-m',
+      employeeId: 'persona-emp1',
+      objectiveId: 'obj-1',
+      code: 'M',
+      status: 'completed',
+      startTime: artIso('2026-05-19', '07:00'),
+      endTime: artIso('2026-05-19', '15:00'),
+      realStartTime: artIso('2026-05-19', '07:00'),
+      realEndTime: artIso('2026-05-19', '15:00'),
+    },
+    {
+      id: 'persona-emp2-ft',
+      employeeId: 'persona-emp2',
+      objectiveId: 'obj-1',
+      code: 'FT',
+      isFrancoTrabajado: true,
+      status: 'completed',
+      startTime: artIso('2026-05-19', '07:00'),
+      endTime: artIso('2026-05-19', '15:00'),
+      realStartTime: artIso('2026-05-19', '07:00'),
+      realEndTime: artIso('2026-05-19', '15:00'),
+    },
+  ];
+  const personaBook = core.buildPersonaBook({
+    turnos: personaTurnos,
+    ausencias: [],
+    publishStatusMap: { 'obj-1_2026_5': true },
+    rangeStartYmd: '2026-05-01',
+    rangeEndYmd: '2026-05-31',
+    empNameById: { 'persona-emp1': 'Uno, Legajo', 'persona-emp2': 'Dos, Legajo' },
+    holidays: {},
+    usePlannedHours: false,
+    publishFilter: 'published',
+  });
+  const persona1 = personaBook.byEmployee.get('persona-emp1')!;
+  const persona2 = personaBook.byEmployee.get('persona-emp2')!;
+  const figures1 = core.personaStatsToPayrollFigures(persona1, 0);
+  const figures2 = core.personaStatsToPayrollFigures(persona2, 0);
+  const desgloseSum2 = figures2.desglose.plan + figures2.desglose.ext + figures2.desglose.adv
+    + figures2.desglose.cobertura + figures2.desglose.ft + figures2.desglose.tura;
+
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
   const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
@@ -884,6 +930,11 @@ async function main() {
   canon('persona llegada tarde descuenta (07:20 de 07:00, sale a horario)', liqLateArrival.horasReales, 7 + 40 / 60);
   canon('persona FT dia completo con ventana explicita (hours=12), nunca 24h', liqFtFullDayWithHours.horasReales, 12);
   canon('persona FT dia completo sin ventana, fichada 14.5h tope 12:59', liqFtFullDayFichada.horasReales, 12 + 59 / 60);
+  canon('payrollApi=Reportes: buildPersonaBook emp1 M 8h', persona1.stats.horasReales, 8);
+  canon('payrollApi=Reportes: buildPersonaBook emp2 FT 8h', persona2.stats.horasReales, 8);
+  canon('payrollApi=Reportes: figures.acumulado.hsReales === stats.horasReales (emp1)', figures1.acumulado.hsReales, persona1.stats.horasReales);
+  canon('payrollApi=Reportes: figures.acumulado.hsReales === stats.horasReales (emp2 FT)', figures2.acumulado.hsReales, persona2.stats.horasReales);
+  canon('payrollApi=Reportes: desglose reconstruye totales (emp2 FT)', desgloseSum2, figures2.totales);
   canon('persona docs que se pisan en horario: una sola jornada', liqOverlapJornada.horasReales, 8);
   if (liqOverlapJornada.requiresReview) {
     canonFails.push('persona jornada única de 8h no debería marcar requiresReview');
