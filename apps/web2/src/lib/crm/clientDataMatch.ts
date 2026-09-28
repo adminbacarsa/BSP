@@ -2,6 +2,7 @@ import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore
 import { db } from '@/lib/firebase';
 import { belongsToEmpresaView, empresaCollectionQuery, getClientIdAliases, tenantEmpresaIdsMatch } from '@/lib/multiempresa';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
+import { isFirestoreIndexError } from '@/lib/crm/firestoreIndexError';
 
 export type ClientRef = {
   id: string;
@@ -59,24 +60,41 @@ function turnoBelongsToEmpresa(
   return belongsToEmpresaView(data, empresaId, opts?.migracionCompleta !== false);
 }
 
+export { isFirestoreIndexError } from '@/lib/crm/firestoreIndexError';
+
 async function fetchTurnosByObjectiveIds(
   objectiveIds: string[],
   addIfInRange: (id: string, data: Record<string, unknown>) => void,
   padStart: Date,
   padEnd: Date,
+  empresaId: string,
 ): Promise<void> {
   const ids = [...new Set(objectiveIds.map((x) => String(x).trim()).filter(Boolean))];
+  const empresa = String(empresaId || '').trim();
   const chunks: string[][] = [];
   for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
   await Promise.all(chunks.map(async (chunk) => {
-    // Índice existente: objectiveId ASC, startTime ASC. empresaId se filtra al leer.
-    const snap = await getDocs(query(
-      collection(db, 'turnos'),
-      where('objectiveId', 'in', chunk),
-      where('startTime', '>=', Timestamp.fromDate(padStart)),
-      where('startTime', '<=', Timestamp.fromDate(padEnd)),
-    ));
-    snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+    const start = Timestamp.fromDate(padStart);
+    const end = Timestamp.fromDate(padEnd);
+    try {
+      const constraints = [
+        ...(empresa ? [where('empresaId', '==', empresa)] : []),
+        where('objectiveId', 'in', chunk),
+        where('startTime', '>=', start),
+        where('startTime', '<=', end),
+      ];
+      const snap = await getDocs(query(collection(db, 'turnos'), ...constraints));
+      snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+    } catch (error) {
+      if (!empresa || !isFirestoreIndexError(error)) throw error;
+      const snap = await getDocs(query(
+        collection(db, 'turnos'),
+        where('objectiveId', 'in', chunk),
+        where('startTime', '>=', start),
+        where('startTime', '<=', end),
+      ));
+      snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+    }
   }));
 }
 
@@ -454,7 +472,13 @@ async function loadPeriodTurnosUncached(
   padEnd.setHours(23, 59, 59, 999);
 
   if (objectiveIds.length > 0) {
-    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, padStart, padEnd);
+    await fetchTurnosByObjectiveIds(
+      objectiveIds,
+      addIfInRange,
+      padStart,
+      padEnd,
+      String(opts?.empresaId ?? '').trim(),
+    );
     await fetchRefuerzoTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
   } else {
     const aliases = collectClientIdAliases(clients);
