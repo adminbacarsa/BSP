@@ -91,7 +91,8 @@
     "stop:lab": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-cosp-lab.ps1",
     "stop:lab:all": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/stop-cosp-lab.ps1 -All",
     "eval:sla-closed-rules": "node scripts/eval-sla-closed-rules-e2e.mjs",
-    "eval:plan-key-tz": "node scripts/eval-plan-key-tz.mjs"
+    "eval:plan-key-tz": "node scripts/eval-plan-key-tz.mjs",
+    "eval:turnos-close-reason-rules": "node scripts/eval-turnos-close-reason-rules-e2e.mjs"
   },
   "keywords": [
     "firebase",

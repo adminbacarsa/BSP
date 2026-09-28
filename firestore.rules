@@ -237,12 +237,44 @@ service cloud.firestore {
       return isSuperAdmin() || (docEmpresaId(data) == userEmpresaId() && userEmpresaId() != '');
     }
 
+    // Cierres automáticos que P1 sacó del navegador: hoy los escribe solo el server
+    // (autoCompletarTurnos / registrarPresencia, Admin SDK, que no pasa por reglas).
+    // Una pestaña vieja sin recargar seguiría cerrando turnos con estos motivos.
+    function retiredFrontCloseReasons() {
+      return [
+        'AUTO_SHIFT_END',
+        'AUTO_SHIFT_END_CUSTOM',
+        'AUTO_ZOMBIE_SHIFT_END',
+        'AUTO_ZOMBIE_12H',
+        'AUTO_COVERAGE_COMPLETE',
+        'AUTO_OVERTIME_LIMIT',
+        'AUTO_MANUAL_RETENTION_END',
+        'AUTO_END_CF_RETENTION_TIMEOUT'
+      ];
+    }
+
+    function noRetiredCloseReasonCreate() {
+      return !(request.resource.data.get('completionReason', '') in retiredFrontCloseReasons())
+        && !(request.resource.data.get('autoCloseReason', '') in retiredFrontCloseReasons());
+    }
+
+    // Solo mira los campos que trae la escritura: cualquier otra actualización del turno
+    // (cierre manual del CC, fichada del guardia) pasa igual, aunque el documento ya
+    // guarde un motivo retirado de un cierre viejo.
+    function noRetiredCloseReasonUpdate() {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      return (!changed.hasAny(['completionReason'])
+          || !(request.resource.data.get('completionReason', '') in retiredFrontCloseReasons()))
+        && (!changed.hasAny(['autoCloseReason'])
+          || !(request.resource.data.get('autoCloseReason', '') in retiredFrontCloseReasons()));
+    }
+
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
         || (request.auth != null && !isAdmin())
         || clientUserMatchesTurno(resource.data);
-      allow create: if tenantAdminCreate();
-      allow update: if tenantAdminUpdate();
+      allow create: if tenantAdminCreate() && noRetiredCloseReasonCreate();
+      allow update: if tenantAdminUpdate() && noRetiredCloseReasonUpdate();
       allow delete: if tenantAdminDelete();
     }
 
