@@ -34,6 +34,7 @@ const {
   resolverCobertura,
   iniciarCascadaCobertura,
   simularRespuestasConvocatorias,
+  findBestCandidate,
 } = requireFn('./lib/coverage/convocatoriasCobertura.js');
 const { isSimulableShift, simulableShiftSkipReason } = requireFn('./lib/common/simulableShift.js');
 const {
@@ -554,12 +555,15 @@ async function run() {
       await db.collection('turnos').doc(s.extSourceId).update({
         isPresent: true,
         isCompleted: false,
+        code: 'N',
+        startTime: tsAt(2026, 9, 22, 23, 0),
+        endTime: tsAt(2026, 9, 23, 7, 0),
       });
-      const advStart = Timestamp.fromMillis(Date.now() + 45 * 60 * 1000);
       await db.collection('turnos').doc(s.advSourceId).update({
         isCompleted: false,
-        startTime: advStart,
-        endTime: Timestamp.fromMillis(advStart.toMillis() + 8 * 3600000),
+        isPresent: false,
+        startTime: tsAt(2026, 9, 23, 15, 0),
+        endTime: tsAt(2026, 9, 23, 23, 0),
       });
       await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empExt, 'Guardia EXT');
       await seedEmpleadoMinimal(s.empresaId, s.objectiveId, s.empAdv, 'Guardia ADV');
@@ -1903,6 +1907,169 @@ async function run() {
       report(46, ok, ok
         ? 'V PRESENT queda abierto (WAIT LICENCIA_PRESENTE); el M de control sí cierra por tope'
         : `V=${accionV?.kind}/${accionV?.reason} st=${vAfter?.status} end=${vAfter?.realEndTime ? 'sí' : 'no'} nov=${novV.size} · M=${accionM?.kind}/${mAfter?.completionReason}`);
+    }
+
+    // Caso 47 — licencia solo en ausencias (sin turno V): no es candidato de nada.
+    {
+      const s = await seedBase(`${runId}_c47`);
+      const francoId = `${runId}_c47_franco`;
+      const libreId = `${runId}_c47_libre`;
+      await db.collection('turnos').doc(francoId).set({
+        employeeId: `${runId}_c47_lic`,
+        employeeName: 'Con licencia RRHH',
+        code: 'F',
+        objectiveId: s.objectiveId,
+        empresaId: s.empresaId,
+        startTime: tsAt(2026, 9, 23, 0, 0),
+        endTime: tsAt(2026, 9, 23, 23, 59),
+      });
+      await db.collection('turnos').doc(libreId).set({
+        employeeId: `${runId}_c47_ok`,
+        employeeName: 'Franco libre',
+        code: 'F',
+        objectiveId: s.objectiveId,
+        empresaId: s.empresaId,
+        startTime: tsAt(2026, 9, 23, 0, 0),
+        endTime: tsAt(2026, 9, 23, 23, 59),
+      });
+      await db.collection('ausencias').add({
+        employeeId: `${runId}_c47_lic`,
+        empresaId: s.empresaId,
+        absenceType: 'V',
+        startDate: '2026-09-23',
+        endDate: '2026-09-23',
+        status: 'Confirmada',
+      });
+      await seedEmpleadoMinimal(s.empresaId, s.objectiveId, `${runId}_c47_lic`, 'Con licencia');
+      await seedEmpleadoMinimal(s.empresaId, s.objectiveId, `${runId}_c47_ok`, 'Franco libre');
+      const conv = {
+        empresaId: s.empresaId,
+        shiftId: s.titularId,
+        objectiveId: s.objectiveId,
+        shiftCode: 'M',
+        startTime: s.titular.startTime,
+        endTime: s.titular.endTime,
+      };
+      const ft = await findBestCandidate(db, conv, 'FT');
+      const ext = await findBestCandidate(db, conv, 'EXTEND');
+      const ok = ft?.id === `${runId}_c47_ok` && ext?.id !== `${runId}_c47_lic`;
+      report(47, ok, ok
+        ? 'licencia solo en ausencias queda fuera; el franco sin licencia sí entra a FT'
+        : `ft=${ft?.id} ext=${ext?.id}`);
+    }
+
+    // Caso 48 — el ausente y su zombi no cubren su propia vacante.
+    {
+      const s = await seedBase(`${runId}_c48`);
+      const zombieId = `${runId}_c48_zom`;
+      await db.collection('turnos').doc(zombieId).set({
+        employeeId: s.empTitular,
+        employeeName: 'Titular Test',
+        code: 'M',
+        objectiveId: s.objectiveId,
+        empresaId: s.empresaId,
+        status: 'PRESENT',
+        isPresent: true,
+        isCompleted: false,
+        startTime: tsAt(2026, 9, 20, 7, 0),
+        endTime: tsAt(2026, 9, 20, 15, 0),
+      });
+      await db.collection('turnos').doc(s.extSourceId).update({
+        isPresent: true,
+        isCompleted: false,
+        code: 'N',
+        startTime: tsAt(2026, 9, 22, 23, 0),
+        endTime: tsAt(2026, 9, 23, 7, 0),
+      });
+      const best = await findBestCandidate(db, {
+        empresaId: s.empresaId,
+        shiftId: s.titularId,
+        objectiveId: s.objectiveId,
+        shiftCode: 'M',
+        startTime: s.titular.startTime,
+        endTime: s.titular.endTime,
+      }, 'EXTEND');
+      const ok = best?.id === s.empExt && best?.extendShiftId === s.extSourceId;
+      report(48, ok, ok
+        ? 'EXT es el turno que termina a las 07:00; el zombi del ausente no entra'
+        : `id=${best?.id} ext=${best?.extendShiftId}`);
+    }
+
+    // Caso 49 — PARTIAL no cancela las FT pendientes.
+    {
+      const s = await seedBase(`${runId}_c49`);
+      await db.collection('turnos').doc(s.extSourceId).update({
+        isPresent: true,
+        isCompleted: false,
+        code: 'N',
+        startTime: tsAt(2026, 9, 22, 23, 0),
+        endTime: tsAt(2026, 9, 23, 7, 0),
+      });
+      const ftRef = db.collection('convocatorias_cobertura').doc();
+      await ftRef.set({
+        ...baseConvFields(s),
+        type: 'FT',
+        status: 'PENDING',
+        candidateEmployeeId: s.empRef,
+        candidateEmployeeName: 'FT pendiente',
+        timeoutAt: Timestamp.now(),
+      });
+      await writeConvAndResolve({
+        ...baseConvFields(s),
+        type: 'EXTEND',
+        candidateEmployeeId: s.empExt,
+        candidateEmployeeName: 'Guardia EXT',
+        extendShiftId: s.extSourceId,
+      });
+      const ft = (await ftRef.get()).data();
+      const tit = (await db.collection('turnos').doc(s.titularId).get()).data();
+      const ok = ft?.status === 'PENDING' && tit?.coverageStatus === 'PARTIAL';
+      report(49, ok, ok
+        ? 'EXT PARTIAL deja la FT pendiente'
+        : `ft=${ft?.status} tit=${tit?.coverageStatus}`);
+    }
+
+    // Caso 50 — el mismo guardia no adelanta dos huecos; el segundo se rechaza.
+    {
+      const s = await seedBase(`${runId}_c50`);
+      const gap2 = `${runId}_c50_gap2`;
+      await db.collection('turnos').doc(gap2).set({
+        ...s.titular,
+        employeeId: `${runId}_c50_otro`,
+        employeeName: 'Otro ausente',
+        positionName: 'Bunker',
+        code: 'M1',
+        startTime: tsAt(2026, 9, 23, 7, 0),
+        endTime: tsAt(2026, 9, 23, 17, 0),
+      });
+      await writeConvAndResolve({
+        ...baseConvFields(s),
+        type: 'ADVANCE',
+        candidateEmployeeId: s.empAdv,
+        candidateEmployeeName: 'Guardia ADV',
+        advanceShiftId: s.advSourceId,
+      });
+      const conv2 = db.collection('convocatorias_cobertura').doc();
+      const doc2 = {
+        ...baseConvFields(s),
+        shiftId: gap2,
+        shiftCode: 'M1',
+        positionName: 'Bunker',
+        startTime: tsAt(2026, 9, 23, 7, 0),
+        endTime: tsAt(2026, 9, 23, 17, 0),
+        type: 'ADVANCE',
+        candidateEmployeeId: s.empAdv,
+        candidateEmployeeName: 'Guardia ADV',
+        advanceShiftId: s.advSourceId,
+        status: 'PENDING',
+      };
+      await conv2.set(doc2);
+      const result = await resolverCobertura(db, { id: conv2.id, ...doc2 });
+      const after = (await conv2.get()).data();
+      const ok = result.ok === false && after?.status === 'REJECTED';
+      report(50, ok, ok
+        ? `segundo hueco rechazado (${after?.rejectionReason})`
+        : `ok=${result.ok} st=${after?.status} reason=${after?.rejectionReason}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

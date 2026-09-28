@@ -43,7 +43,8 @@ const CEJAS_V = {
 };
 
 const { revertirAusenciaShift, REVERT_ABSENCE_WINDOW_MS } = requireFn('./lib/attendance/revertirAusencia.js');
-const { resolverCobertura } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const { resolverCobertura, findBestCandidate } = requireFn('./lib/coverage/convocatoriasCobertura.js');
+const coverageCandidates = await import('../packages/ops-core/src/coverageCandidates.ts');
 const webRevert = await import('../apps/web2/src/lib/operaciones/revertAbsenceWindow.ts');
 
 const results = [];
@@ -339,6 +340,14 @@ async function run() {
     const extCov = `ops_cov_${titularId}_hUo6Nmw7rdzVONiCKHgW`;
     const advCov = `ops_cov_${titularId}_6B6w3gYy8kelK3rzN6O8`;
     await undoExtAdvCoverage({ titularId, opsCovIds: [extCov, advCov], sourceIds: [extSrc, advSrc] });
+    await db.collection('turnos').doc(extSrc).update({
+      isPresent: true,
+      isCompleted: false,
+      code: 'N',
+      startTime: Timestamp.fromMillis(Date.parse('2026-09-26T23:00:00-03:00')),
+      endTime: Timestamp.fromMillis(Date.parse('2026-09-27T07:00:00-03:00')),
+    });
+    await db.collection('turnos').doc(advSrc).update({ isCompleted: false, isPresent: false });
     await resolveConvInUtc('1MqazpSAfyFqCq4k2F6j');
     await resolveConvInUtc('KOGfZyIPq5HT87SA8p5M');
     const e = await shift(extCov);
@@ -411,6 +420,77 @@ async function run() {
     report('P1b.4', okPass, okPass
       ? 'tras la pasada real las licencias siguen abiertas, sin realEndTime ni novedad de tope (las corrige RRHH)'
       : `v27=${f27?.status}/${f27?.completionReason} v28=${f28?.status}/${f28?.completionReason} nov=${nov.exists}`);
+  });
+
+  await withCase(CAPS, async () => {
+    const titular = await shift(QUEVEDO_T);
+    const best = await findBestCandidate(db, {
+      empresaId: titular.empresaId,
+      shiftId: QUEVEDO_T,
+      objectiveId: titular.objectiveId,
+      positionName: titular.positionName,
+      shiftCode: titular.code,
+      startTime: titular.startTime,
+      endTime: titular.endTime,
+    }, 'EXTEND');
+    const ok = !best || best.id !== titular.employeeId;
+    report('P2.1', ok, ok
+      ? `Quevedo no es EXT de su propia vacante${best ? ` (entra ${best.name})` : ''}`
+      : `eligió al ausente ${best?.id}`);
+  });
+
+  await withCase(NUEVO_EDIFICIO, async () => {
+    const quiroga = await shift('nPpF1zcL5I4t5z6cx0gi');
+    const ramos = await shift('rMdDJxgdwpibFWC1ESKa');
+    const ceb = await shift('5Zq2F1J6Dw5VQPFgRG4F');
+    const nowMs = Date.parse('2026-09-28T08:00:00-03:00');
+    const asGap = (t) => ({
+      titularShiftId: t.id,
+      absentEmployeeId: t.employeeId,
+      objectiveId: t.objectiveId,
+      positionName: t.positionName,
+      startMs: t.startTime.toMillis(),
+      endMs: t.endTime.toMillis(),
+      band: t.code,
+    });
+    const asShift = (t) => ({
+      id: t.id,
+      employeeId: t.employeeId,
+      employeeName: t.employeeName,
+      code: t.code,
+      objectiveId: t.objectiveId,
+      positionName: t.positionName,
+      startMs: t.startTime.toMillis(),
+      endMs: t.endTime.toMillis(),
+      isPresent: t.isPresent === true,
+      isCompleted: t.isCompleted === true,
+      isAbsent: t.isAbsent === true,
+    });
+    const q = coverageCandidates.buildCoverageCandidates({
+      nowMs, gap: asGap(quiroga), shifts: [asShift(quiroga), asShift(ceb)],
+    });
+    const r = coverageCandidates.buildCoverageCandidates({
+      nowMs, gap: asGap(ramos), shifts: [asShift(ramos), asShift(ceb)],
+    });
+    const qRow = q.byType.ADVANCE.find((row) => row.employeeId === ceb.employeeId);
+    const rRow = r.byType.ADVANCE.find((row) => row.employeeId === ceb.employeeId);
+    const ok = qRow?.eligible === true && qRow.otherPosition === true
+      && rRow?.eligible === false && rRow?.rejectReason === 'NO_CONTIGUO';
+    report('P2.2', ok, ok
+      ? 'Ceballos es ADVANCE de Quiroga (otro puesto) y no de Ramos (no contiguo)'
+      : `Q=${qRow?.eligible}/${qRow?.rejectReason} R=${rRow?.eligible}/${rRow?.rejectReason}`);
+
+    await undoExtAdvCoverage({
+      titularId: ramos.id,
+      opsCovIds: [`ops_cov_${ramos.id}_${ceb.employeeId}`],
+      sourceIds: [ceb.id],
+    });
+    await resolveConvInUtc('wLgfVPdXc2vj3AnMT7V9');
+    const conv = (await db.collection('convocatorias_cobertura').doc('wLgfVPdXc2vj3AnMT7V9').get()).data();
+    const okReject = conv?.status === 'REJECTED' && conv?.rejectionReason === 'NO_CONTIGUO';
+    report('P2.3', okReject, okReject
+      ? 'la ADVANCE de Ramos se rechaza al revalidar (NO_CONTIGUO) y la cascada sigue'
+      : `st=${conv?.status} reason=${conv?.rejectionReason}`);
   });
 
   const failed = results.filter((r) => !r.ok);
