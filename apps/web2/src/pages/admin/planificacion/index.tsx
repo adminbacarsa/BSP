@@ -145,7 +145,6 @@ import {
 } from '@/lib/slaPlanningMatch';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
-import { rebuildHoursBalanceForObjectiveMonth } from '@/lib/hoursBalance';
 import { useAuth } from '@/context/AuthContext';
 import { toast } from 'sonner';
 import {
@@ -6672,19 +6671,7 @@ export default function PlanificacionPage() {
                     console.warn('[plan] post-save', postErr);
                     toast.warning('Turnos guardados; historial o notificaciones pendientes de sincronizar.');
                 });
-                if (empresaId && selectedObjective) {
-                    const y = currentDate.getFullYear();
-                    const m = currentDate.getMonth() + 1;
-                    const oid = selectedObjective;
-                    void rebuildHoursBalanceForObjectiveMonth({
-                        empresaId,
-                        objectiveId: oid,
-                        year: y,
-                        month: m,
-                        scopeEmpresa,
-                        rebuiltFrom: 'planning',
-                    }).catch((err) => console.warn('[plan] hours_balances', err));
-                }
+                /* H2b: el libro lo escribe Functions; Planificación ya no persiste hours_balances. */
             } catch(e) {
                 console.error(e);
                 restorePendingOnFailure();
