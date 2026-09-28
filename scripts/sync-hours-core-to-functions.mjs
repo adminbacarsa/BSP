@@ -54,9 +54,10 @@ fs.writeFileSync(path.join(destRoot, 'package.json'), `${JSON.stringify(vendorPk
 
 const tscCandidates = [
   path.join(srcRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
-  path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
   path.join(repoRoot, 'apps', 'functions', 'node_modules', 'typescript', 'bin', 'tsc'),
   path.join(repoRoot, 'apps', 'web2', 'node_modules', 'typescript', 'bin', 'tsc'),
+  // El de la raíz es TypeScript 6 y rechaza moduleResolution=node: último recurso.
+  path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
 ];
 const tscJs = tscCandidates.find((p) => fs.existsSync(p));
 const args = tscJs
