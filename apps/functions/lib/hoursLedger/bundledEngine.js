@@ -20,6 +20,8 @@ var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: tru
 var engineEntry_exports = {};
 __export(engineEntry_exports, {
   buildLedgerMonth: () => buildLedgerMonth,
+  jornadaPagada: () => jornadaPagada,
+  personaMonthWorked: () => personaMonthWorked,
   planHoursOf: () => planHoursOf
 });
 module.exports = __toCommonJS(engineEntry_exports);
@@ -3491,8 +3493,49 @@ function buildPersonaBook(input) {
   return { rawShifts, enrichShift, employees, byEmployee };
 }
 
+// scripts/hours-ledger/slaPolicy.ts
+var SLA_POLICY = {
+  /** (a) Contrato activo sin cronograma publicado entra al SLA activo. Hoy: sí (Shopping Villa María 2 400). */
+  slaCountsWithoutPublishedPlan: true,
+  /** (b) Contrato activo de un cliente inactivo entra al SLA activo. Hoy: no (Lotería CET Río Ceballos 720). */
+  slaCountsInactiveClient: false
+};
+function classifySlaBucket(input, policy = SLA_POLICY) {
+  if (input.closed && input.contractActive) return "closed";
+  if (!input.contractActive) return "inactive";
+  if (!input.clientActive && !policy.slaCountsInactiveClient) return "inactive";
+  if (!input.hasPublishedPlan && !policy.slaCountsWithoutPublishedPlan) return "skip";
+  return "active";
+}
+
 // scripts/hours-ledger/engineEntry.ts
-var PAID = /* @__PURE__ */ new Set(["V", "L", "E", "A", "PG"]);
+var METRIC_KEYS = [
+  "slaActive",
+  "slaInactive",
+  "slaClosed",
+  "planPublished",
+  "planDraft",
+  "worked",
+  "covered",
+  "uncovered",
+  "ft",
+  "ext",
+  "adv",
+  "novedadPaga"
+];
+var PAID_CODE = {
+  V: "V",
+  VACACIONES: "V",
+  L: "L",
+  LICENCIA: "L",
+  E: "E",
+  ENFERMEDAD: "E",
+  A: "A",
+  AUTORIZADA: "A",
+  PG: "PG",
+  "PERMISO GREMIAL": "PG",
+  GREMIAL: "PG"
+};
 var r12 = (n) => Math.round((Number(n) || 0) * 10) / 10;
 function pad(n) {
   return String(n).padStart(2, "0");
@@ -3585,9 +3628,98 @@ function blankMetrics() {
   };
 }
 function addMetrics(a, b) {
-  Object.keys(a).forEach((k) => {
-    a[k] = r12(a[k] + (Number(b[k]) || 0));
+  for (const k of METRIC_KEYS) a[k] = r12((Number(a[k]) || 0) + (Number(b[k]) || 0));
+}
+function paidCode(raw) {
+  return PAID_CODE[String(raw || "").trim().toUpperCase()] || "";
+}
+function instantMs(value) {
+  if (value == null || value === "") return null;
+  if (typeof value === "string") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const o = value;
+  if (typeof o.toDate === "function") {
+    const d = o.toDate();
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const sec = o.seconds ?? o._seconds;
+  return typeof sec === "number" ? sec * 1e3 : null;
+}
+function jornadaPagada(t) {
+  const h = Number(t?.hours);
+  if (h === 8 || h === 9 || h === 12) return h;
+  const a = instantMs(t?.startTime);
+  const b = instantMs(t?.endTime);
+  if (a != null && b != null && b !== a) {
+    let dur = (b - a) / 36e5;
+    if (dur <= 0) dur += 24;
+    if (dur >= 11 && dur <= 13) return 12;
+    return 8;
+  }
+  const band = String(t?.band || t?.baseCode || t?.shiftBand || "").toUpperCase();
+  if (band === "D12" || band === "N12" || band === "PU") return 12;
+  return 8;
+}
+function daysInRange(start, end, periodKey) {
+  const s = start.slice(0, 10);
+  const e = (end || start).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return [];
+  const out = [];
+  let [y, m, d] = s.split("-").map(Number);
+  for (let i = 0; i < 62; i++) {
+    const key = ymd(y, m, d);
+    if (key > e) break;
+    if (key.startsWith(periodKey)) out.push(key);
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    y = next.getUTCFullYear();
+    m = next.getUTCMonth() + 1;
+    d = next.getUTCDate();
+  }
+  return out;
+}
+function personaMonthWorked(input) {
+  const active = (input.turnos || []).filter((t) => {
+    const st = String(t.status || "");
+    return st !== "Canceled" && st !== "CANCELED";
   });
+  let worked = 0;
+  if (input.hoursCoreEnabled) {
+    const persona = buildPersonaBook({
+      turnos: active,
+      ausencias: input.ausencias || [],
+      publishStatusMap: input.publishStatusMap,
+      rangeStartYmd: ymd(input.year, input.month, 1),
+      rangeEndYmd: ymd(input.year, input.month, lastDay(input.year, input.month)),
+      empNameById: input.empNameById,
+      holidays: {},
+      usePlannedHours: false,
+      publishFilter: "published"
+    });
+    for (const e of persona.employees) worked += Number(e.stats?.horasReales) || 0;
+  } else {
+    const byEmp = /* @__PURE__ */ new Map();
+    for (const t of active) {
+      const id = String(t.employeeId || "").trim();
+      if (!id || id === "VACANTE" || !input.empNameById[id]) continue;
+      const list = byEmp.get(id) || [];
+      list.push(t);
+      byEmp.set(id, list);
+    }
+    for (const shifts of byEmp.values()) {
+      const stats = calculateLiquidationHoursStats(shifts, {}, { usePlannedHours: false });
+      worked += Number(stats?.horasReales) || 0;
+    }
+  }
+  const weights = {};
+  for (const t of active) {
+    const oid = String(t.objectiveId || "").trim();
+    const hs = Number(t.hours) || 0;
+    if (!oid || !(hs > 0)) continue;
+    weights[oid] = (weights[oid] || 0) + hs;
+  }
+  return { worked: r12(worked), weights };
 }
 function planHoursOf(mode, row) {
   if (mode === "draft") return row.planDraft;
@@ -3595,8 +3727,20 @@ function planHoursOf(mode, row) {
   return row.planPublished;
 }
 function buildLedgerMonth(input) {
-  const { empresaId, year, month, hoursCoreEnabled, clients, slas, turnos, ausencias, publishStatusMap, empNameById } = input;
+  const { empresaId, year, month, hoursCoreEnabled, clients, slas, publishStatusMap, empNameById } = input;
   const periodKey = monthKey(year, month);
+  const only = input.onlyObjectiveIds?.length ? new Set(input.onlyObjectiveIds.map((id) => String(id))) : null;
+  const turnos = input.turnos;
+  const ausencias = only ? input.ausencias.filter((a) => {
+    const oid = String(a.objectiveId || "").trim();
+    if (!oid) return input.includeUnscopedPaidAbsences === true;
+    return only.has(oid);
+  }) : input.ausencias;
+  const suffix = `_${year}_${month}`;
+  const publishedObj = /* @__PURE__ */ new Set();
+  for (const [k, v] of Object.entries(publishStatusMap)) {
+    if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
+  }
   const { start, end } = arRange(year, month);
   const clientById = new Map(clients.map((c) => [String(c.id), c]));
   const normName2 = (v) => String(v ?? "").trim().toLowerCase().normalize("NFD").replace(new RegExp("\\p{Mn}", "gu"), "");
@@ -3637,6 +3781,7 @@ function buildLedgerMonth(input) {
   const consider = (srv, bucket) => {
     const oid = String(srv.objectiveId || "").trim();
     if (!oid) return;
+    if (only && !only.has(oid)) return;
     const startS = dateStr(srv.startDate);
     const endS = dateStr(srv.endDate);
     if (!overlapsMonth(startS, endS, year, month)) return;
@@ -3650,10 +3795,14 @@ function buildLedgerMonth(input) {
     const active = contractActive(srv.status);
     const who = resolveClient(String(srv.objectiveId || ""), srv);
     const activoCli = who.client ? clientActivo(who.client.status) : clientActivo(void 0);
-    if (closed && active) consider(srv, "closed");
-    else if (!active) consider(srv, "inactive");
-    else if (!activoCli) consider(srv, "inactive");
-    else consider(srv, "active");
+    const bucket = classifySlaBucket({
+      closed,
+      contractActive: active,
+      clientActive: activoCli,
+      hasPublishedPlan: publishedObj.has(String(srv.objectiveId || "").trim())
+    });
+    if (bucket === "skip") continue;
+    consider(srv, bucket);
   }
   for (const row of chosen.values()) row.hours = prorate(row.srv, year, month);
   const prepared = slas.map((s) => ({ ...s, positions: positionsOf(s) }));
@@ -3664,11 +3813,6 @@ function buildLedgerMonth(input) {
     const st = String(t.status || "");
     return st !== "Canceled" && st !== "CANCELED";
   });
-  const suffix = `_${year}_${month}`;
-  const publishedObj = /* @__PURE__ */ new Set();
-  for (const [k, v] of Object.entries(publishStatusMap)) {
-    if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
-  }
   const publishedTurnos = activeTurnos.filter((t) => t.draft !== true && publishedObj.has(String(t.objectiveId || "")));
   const draftTurnos = activeTurnos.filter((t) => t.draft === true || !publishedObj.has(String(t.objectiveId || "")));
   const demandaOf = (list) => buildDemandaByObjective({
@@ -3682,35 +3826,8 @@ function buildLedgerMonth(input) {
   });
   const demPub = demandaOf(publishedTurnos);
   const demDraft = demandaOf(draftTurnos);
-  let worked = 0;
-  if (hoursCoreEnabled) {
-    const persona = buildPersonaBook({
-      turnos: activeTurnos,
-      ausencias,
-      publishStatusMap,
-      rangeStartYmd: ymd(year, month, 1),
-      rangeEndYmd: ymd(year, month, lastDay(year, month)),
-      empNameById,
-      holidays: {},
-      usePlannedHours: false,
-      publishFilter: "published"
-    });
-    for (const e of persona.employees) worked += Number(e.stats?.horasReales) || 0;
-  } else {
-    const byEmp = /* @__PURE__ */ new Map();
-    for (const t of activeTurnos) {
-      const id = String(t.employeeId || "").trim();
-      if (!id || id === "VACANTE" || !empNameById[id]) continue;
-      const list = byEmp.get(id) || [];
-      list.push(t);
-      byEmp.set(id, list);
-    }
-    for (const shifts of byEmp.values()) {
-      const stats = calculateLiquidationHoursStats(shifts, {}, { usePlannedHours: false });
-      worked += Number(stats?.horasReales) || 0;
-    }
-  }
-  worked = r12(worked);
+  const persona = input.skipPersona ? { worked: 0, weights: {} } : personaMonthWorked({ turnos, ausencias, publishStatusMap, year, month, hoursCoreEnabled, empNameById });
+  const worked = persona.worked;
   const franja = executedBillableHoursByFranja(activeTurnos);
   const daysMap = /* @__PURE__ */ new Map();
   const touch = (objectiveId, puestoId, puestoName, date, sla) => {
@@ -3751,37 +3868,59 @@ function buildLedgerMonth(input) {
       });
     }
   }
+  const paidDay = /* @__PURE__ */ new Set();
   const planOn = (list, field) => {
     for (const t of list) {
       const oid = String(t.objectiveId || "").trim();
       if (!oid) continue;
-      const hs = calcPlanificadorShiftHours(t);
-      if (!(hs > 0)) continue;
       const code = String(t.code || t.type || "").toUpperCase();
-      if (PAID.has(code)) {
-        const day2 = dateStr(t.startTime) || ymd(year, month, 1);
-        const row2 = touch(oid, "novedad", "Novedad", day2.slice(0, 10) > periodKey ? ymd(year, month, 1) : (dateStr(t.scheduleDate) || day2).slice(0, 10), null);
-        row2.novedadPaga = r12(row2.novedadPaga + hs);
+      if (paidCode(code)) {
+        const when2 = (dateStr(t.scheduleDate) || dateStr(t.startTime) || ymd(year, month, 1)).slice(0, 10);
+        const day2 = when2.startsWith(periodKey) ? when2 : ymd(year, month, 1);
+        const emp = String(t.employeeId || "");
+        const key = `${emp}|${day2}`;
+        if (emp && paidDay.has(key)) continue;
+        if (emp) paidDay.add(key);
+        const row2 = touch(oid, "novedad", "Novedad", day2, null);
+        row2.novedadPaga = r12(row2.novedadPaga + jornadaPagada(t));
         continue;
       }
+      const hs = calcPlanificadorShiftHours(t);
+      if (!(hs > 0)) continue;
       const when = dateStr(t.startTime);
       const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
       const pid = puestoSlug(String(t.positionName || ""), String(t.positionId || t.positionName || "puesto"));
       const row = touch(oid, pid, String(t.positionName || pid), day, null);
       row[field] = r12(row[field] + hs);
-      const codeU = code;
-      if (codeU === "FT" || t.isFrancoTrabajado) row.ft = r12(row.ft + hs);
+      if (code === "FT" || t.isFrancoTrabajado) row.ft = r12(row.ft + hs);
     }
   };
   planOn(publishedTurnos, "planPublished");
   planOn(draftTurnos, "planDraft");
+  for (const a of ausencias) {
+    if (!paidCode(a.type || a.codigo || a.code)) continue;
+    const st = String(a.status || "").toLowerCase();
+    if (st.includes("rechaz") || st.includes("injust")) continue;
+    const oid = String(a.objectiveId || "").trim() || "_sin_objetivo";
+    const start2 = dateStr(a.startDate) || dateStr(a.fecha);
+    const end2 = dateStr(a.endDate) || start2;
+    for (const day of daysInRange(start2, end2, periodKey)) {
+      const emp = String(a.employeeId || "");
+      const key = `${emp}|${day}`;
+      if (emp && paidDay.has(key)) continue;
+      if (emp) paidDay.add(key);
+      const row = touch(oid, "novedad", "Novedad", day, null);
+      row.novedadPaga = r12(row.novedadPaga + 8);
+      if (a.objectiveName) row.objectiveName = String(a.objectiveName);
+    }
+  }
   for (const b of franja.buckets) {
     const oid = String(b.objectiveId || "").trim();
     if (!oid || !b.date?.startsWith(periodKey)) continue;
+    if (only && !only.has(oid)) continue;
     const pid = puestoSlug(b.positionName, b.positionName);
     const row = touch(oid, pid, b.positionName || pid, b.date, null);
     row.covered = r12(row.covered + b.covered);
-    row.uncovered = r12(row.uncovered + b.uncovered);
     row.objectiveName = b.objectiveName || row.objectiveName;
   }
   for (const r of demPub.rows) {
@@ -3800,9 +3939,10 @@ function buildLedgerMonth(input) {
       row.adv = r12(r.adelHours);
     }
   }
-  const days = [...daysMap.values()].filter(
-    (d) => d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga
-  );
+  const days = [...daysMap.values()].filter((d) => {
+    if (only && !only.has(d.objectiveId) && d.objectiveId !== "_sin_objetivo") return false;
+    return d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
+  });
   const byObj = /* @__PURE__ */ new Map();
   const ensureObj = (d) => {
     let m = byObj.get(d.objectiveId);
@@ -3891,12 +4031,9 @@ function buildLedgerMonth(input) {
   }
   let fichadaWeight = 0;
   const weights = /* @__PURE__ */ new Map();
-  for (const t of activeTurnos) {
-    const oid = String(t.objectiveId || "").trim();
-    if (!oid) continue;
-    const hs = Number(t.hours) || 0;
+  for (const [oid, hs] of Object.entries(persona.weights)) {
     if (!(hs > 0)) continue;
-    weights.set(oid, (weights.get(oid) || 0) + hs);
+    weights.set(oid, hs);
     fichadaWeight += hs;
   }
   if (worked > 0 && fichadaWeight > 0) {
@@ -3928,6 +4065,62 @@ function buildLedgerMonth(input) {
       d.worked = part;
       acc = r12(acc + part);
     });
+  }
+  for (const m of byObj.values()) {
+    if (!(m.slaActive > 0)) {
+      m.covered = 0;
+      m.uncovered = 0;
+    } else {
+      m.covered = r12(Math.min(Math.max(0, m.covered), m.slaActive));
+      m.uncovered = r12(Math.max(0, m.slaActive - m.covered));
+    }
+  }
+  const daysByObj = /* @__PURE__ */ new Map();
+  for (const d of days) {
+    const list = daysByObj.get(d.objectiveId) || [];
+    list.push(d);
+    daysByObj.set(d.objectiveId, list);
+  }
+  for (const [oid, objDays] of daysByObj) {
+    const m = byObj.get(oid);
+    if (!m || !(m.slaActive > 0)) {
+      for (const d of objDays) {
+        d.covered = 0;
+        d.uncovered = 0;
+      }
+      continue;
+    }
+    const slaSum = objDays.reduce((s, d) => s + (d.slaActive || 0), 0);
+    if (slaSum > 0 && Math.abs(slaSum - m.slaActive) > 0.05) {
+      let acc = 0;
+      objDays.forEach((d, i) => {
+        const part = i === objDays.length - 1 ? r12(m.slaActive - acc) : r12(m.slaActive * ((d.slaActive || 0) / slaSum));
+        d.slaActive = Math.max(0, part);
+        acc = r12(acc + d.slaActive);
+      });
+    } else if (!(slaSum > 0) && objDays[0]) {
+      objDays[0].slaActive = m.slaActive;
+    }
+    const base = objDays.reduce((s, d) => s + (d.slaActive || 0), 0) || 1;
+    let accC = 0;
+    objDays.forEach((d, i) => {
+      const cov = i === objDays.length - 1 ? r12(m.covered - accC) : r12(m.covered * ((d.slaActive || 0) / base));
+      d.covered = r12(Math.min(Math.max(0, cov), d.slaActive || 0));
+      d.uncovered = r12(Math.max(0, (d.slaActive || 0) - d.covered));
+      accC = r12(accC + d.covered);
+    });
+    const sumPair = objDays.reduce((s, d) => s + d.covered + d.uncovered, 0);
+    const driftPair = r12(m.slaActive - sumPair);
+    if (objDays.length && driftPair) {
+      const last = objDays[objDays.length - 1];
+      last.slaActive = r12(last.slaActive + driftPair);
+      last.uncovered = r12(last.uncovered + driftPair);
+    }
+  }
+  if (only) {
+    for (const id of [...byObj.keys()]) {
+      if (!only.has(id) && id !== "_sin_objetivo") byObj.delete(id);
+    }
   }
   const monthlyObjs = [...byObj.values()].filter(
     (m) => m.slaActive || m.slaInactive || m.slaClosed || m.planPublished || m.planDraft || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
@@ -3975,5 +4168,7 @@ function buildLedgerMonth(input) {
 // Annotate the CommonJS export names for ESM import in node:
 0 && (module.exports = {
   buildLedgerMonth,
+  jornadaPagada,
+  personaMonthWorked,
   planHoursOf
 });

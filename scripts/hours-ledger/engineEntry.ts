@@ -17,6 +17,7 @@ import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
 } from '../../packages/hours-core/src/index';
+import { classifySlaBucket } from './slaPolicy';
 
 export type LedgerPlanMode = 'published' | 'draft' | 'both';
 
@@ -78,9 +79,27 @@ export type LedgerBuildInput = {
   ausencias: any[];
   publishStatusMap: Record<string, boolean>;
   empNameById: Record<string, string>;
+  /** Si viene, el resultado solo incluye esos objetivos (una tanda). */
+  onlyObjectiveIds?: string[];
+  /** La tanda no corre el motor de persona; el cierre del job lo hace una vez. */
+  skipPersona?: boolean;
+  /** Ausencias pagas sin objectiveId. Solo el build completo o la primera tanda. */
+  includeUnscopedPaidAbsences?: boolean;
 };
 
-const PAID = new Set(['V', 'L', 'E', 'A', 'PG']);
+const METRIC_KEYS = [
+  'slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked',
+  'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+] as const;
+
+const PAID_CODE: Record<string, 'V' | 'L' | 'E' | 'A' | 'PG'> = {
+  V: 'V', VACACIONES: 'V',
+  L: 'L', LICENCIA: 'L',
+  E: 'E', ENFERMEDAD: 'E',
+  A: 'A', AUTORIZADA: 'A',
+  PG: 'PG', 'PERMISO GREMIAL': 'PG', GREMIAL: 'PG',
+};
+
 const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
 function pad(n: number) {
@@ -182,9 +201,112 @@ function blankMetrics() {
 }
 
 function addMetrics(a: ReturnType<typeof blankMetrics>, b: Partial<ReturnType<typeof blankMetrics>>) {
-  (Object.keys(a) as (keyof ReturnType<typeof blankMetrics>)[]).forEach((k) => {
-    a[k] = r1(a[k] + (Number(b[k]) || 0));
+  for (const k of METRIC_KEYS) a[k] = r1((Number(a[k]) || 0) + (Number(b[k]) || 0));
+}
+
+function paidCode(raw: unknown): string {
+  return PAID_CODE[String(raw || '').trim().toUpperCase()] || '';
+}
+
+function instantMs(value: unknown): number | null {
+  if (value == null || value === '') return null;
+  if (typeof value === 'string') {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const o = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
+  if (typeof o.toDate === 'function') {
+    const d = o.toDate();
+    return Number.isNaN(d.getTime()) ? null : d.getTime();
+  }
+  const sec = o.seconds ?? o._seconds;
+  return typeof sec === 'number' ? sec * 1000 : null;
+}
+
+/** Jornada paga: 8 o 12 h del turno. Nunca 24 h de calendario. */
+export function jornadaPagada(t: any): number {
+  const h = Number(t?.hours);
+  if (h === 8 || h === 9 || h === 12) return h;
+  const a = instantMs(t?.startTime);
+  const b = instantMs(t?.endTime);
+  if (a != null && b != null && b !== a) {
+    let dur = (b - a) / 3600000;
+    if (dur <= 0) dur += 24;
+    if (dur >= 11 && dur <= 13) return 12;
+    return 8;
+  }
+  const band = String(t?.band || t?.baseCode || t?.shiftBand || '').toUpperCase();
+  if (band === 'D12' || band === 'N12' || band === 'PU') return 12;
+  return 8;
+}
+
+function daysInRange(start: string, end: string, periodKey: string): string[] {
+  const s = start.slice(0, 10);
+  const e = (end || start).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return [];
+  const out: string[] = [];
+  let [y, m, d] = s.split('-').map(Number);
+  for (let i = 0; i < 62; i++) {
+    const key = ymd(y, m, d);
+    if (key > e) break;
+    if (key.startsWith(periodKey)) out.push(key);
+    const next = new Date(Date.UTC(y, m - 1, d + 1));
+    y = next.getUTCFullYear();
+    m = next.getUTCMonth() + 1;
+    d = next.getUTCDate();
+  }
+  return out;
+}
+
+export function personaMonthWorked(input: {
+  turnos: any[];
+  ausencias: any[];
+  publishStatusMap: Record<string, boolean>;
+  year: number;
+  month: number;
+  hoursCoreEnabled: boolean;
+  empNameById: Record<string, string>;
+}): { worked: number; weights: Record<string, number> } {
+  const active = (input.turnos || []).filter((t) => {
+    const st = String(t.status || '');
+    return st !== 'Canceled' && st !== 'CANCELED';
   });
+  let worked = 0;
+  if (input.hoursCoreEnabled) {
+    const persona = buildPersonaBook({
+      turnos: active,
+      ausencias: input.ausencias || [],
+      publishStatusMap: input.publishStatusMap,
+      rangeStartYmd: ymd(input.year, input.month, 1),
+      rangeEndYmd: ymd(input.year, input.month, lastDay(input.year, input.month)),
+      empNameById: input.empNameById,
+      holidays: {},
+      usePlannedHours: false,
+      publishFilter: 'published',
+    });
+    for (const e of persona.employees) worked += Number(e.stats?.horasReales) || 0;
+  } else {
+    const byEmp = new Map<string, any[]>();
+    for (const t of active) {
+      const id = String(t.employeeId || '').trim();
+      if (!id || id === 'VACANTE' || !input.empNameById[id]) continue;
+      const list = byEmp.get(id) || [];
+      list.push(t);
+      byEmp.set(id, list);
+    }
+    for (const shifts of byEmp.values()) {
+      const stats = calculateLiquidationHoursStatsF0(shifts, {}, { usePlannedHours: false });
+      worked += Number(stats?.horasReales) || 0;
+    }
+  }
+  const weights: Record<string, number> = {};
+  for (const t of active) {
+    const oid = String(t.objectiveId || '').trim();
+    const hs = Number(t.hours) || 0;
+    if (!oid || !(hs > 0)) continue;
+    weights[oid] = (weights[oid] || 0) + hs;
+  }
+  return { worked: r1(worked), weights };
 }
 
 export function planHoursOf(mode: LedgerPlanMode, row: { planPublished: number; planDraft: number }) {
@@ -198,8 +320,22 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   monthly: LedgerMonth[];
   totals: ReturnType<typeof blankMetrics>;
 } {
-  const { empresaId, year, month, hoursCoreEnabled, clients, slas, turnos, ausencias, publishStatusMap, empNameById } = input;
+  const { empresaId, year, month, hoursCoreEnabled, clients, slas, publishStatusMap, empNameById } = input;
   const periodKey = monthKey(year, month);
+  const only = input.onlyObjectiveIds?.length ? new Set(input.onlyObjectiveIds.map((id) => String(id))) : null;
+  const turnos = input.turnos;
+  const ausencias = only
+    ? input.ausencias.filter((a) => {
+      const oid = String(a.objectiveId || '').trim();
+      if (!oid) return input.includeUnscopedPaidAbsences === true;
+      return only.has(oid);
+    })
+    : input.ausencias;
+  const suffix = `_${year}_${month}`;
+  const publishedObj = new Set<string>();
+  for (const [k, v] of Object.entries(publishStatusMap)) {
+    if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
+  }
   const { start, end } = arRange(year, month);
   const clientById = new Map(clients.map((c) => [String(c.id), c]));
 
@@ -246,6 +382,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   const consider = (srv: any, bucket: Bucket) => {
     const oid = String(srv.objectiveId || '').trim();
     if (!oid) return;
+    if (only && !only.has(oid)) return;
     const startS = dateStr(srv.startDate);
     const endS = dateStr(srv.endDate);
     if (!overlapsMonth(startS, endS, year, month)) return;
@@ -260,10 +397,14 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     const active = contractActive(srv.status);
     const who = resolveClient(String(srv.objectiveId || ''), srv);
     const activoCli = who.client ? clientActivo(who.client.status) : clientActivo(undefined);
-    if (closed && active) consider(srv, 'closed');
-    else if (!active) consider(srv, 'inactive');
-    else if (!activoCli) consider(srv, 'inactive');
-    else consider(srv, 'active');
+    const bucket = classifySlaBucket({
+      closed,
+      contractActive: active,
+      clientActive: activoCli,
+      hasPublishedPlan: publishedObj.has(String(srv.objectiveId || '').trim()),
+    });
+    if (bucket === 'skip') continue;
+    consider(srv, bucket);
   }
   for (const row of chosen.values()) row.hours = prorate(row.srv, year, month);
 
@@ -275,11 +416,6 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     const st = String(t.status || '');
     return st !== 'Canceled' && st !== 'CANCELED';
   });
-  const suffix = `_${year}_${month}`;
-  const publishedObj = new Set<string>();
-  for (const [k, v] of Object.entries(publishStatusMap)) {
-    if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
-  }
   const publishedTurnos = activeTurnos.filter((t) => t.draft !== true && publishedObj.has(String(t.objectiveId || '')));
   const draftTurnos = activeTurnos.filter((t) => t.draft === true || !publishedObj.has(String(t.objectiveId || '')));
 
@@ -295,35 +431,10 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   const demPub = demandaOf(publishedTurnos);
   const demDraft = demandaOf(draftTurnos);
 
-  let worked = 0;
-  if (hoursCoreEnabled) {
-    const persona = buildPersonaBook({
-      turnos: activeTurnos,
-      ausencias,
-      publishStatusMap,
-      rangeStartYmd: ymd(year, month, 1),
-      rangeEndYmd: ymd(year, month, lastDay(year, month)),
-      empNameById,
-      holidays: {},
-      usePlannedHours: false,
-      publishFilter: 'published',
-    });
-    for (const e of persona.employees) worked += Number(e.stats?.horasReales) || 0;
-  } else {
-    const byEmp = new Map<string, any[]>();
-    for (const t of activeTurnos) {
-      const id = String(t.employeeId || '').trim();
-      if (!id || id === 'VACANTE' || !empNameById[id]) continue;
-      const list = byEmp.get(id) || [];
-      list.push(t);
-      byEmp.set(id, list);
-    }
-    for (const shifts of byEmp.values()) {
-      const stats = calculateLiquidationHoursStatsF0(shifts, {}, { usePlannedHours: false });
-      worked += Number(stats?.horasReales) || 0;
-    }
-  }
-  worked = r1(worked);
+  const persona = input.skipPersona
+    ? { worked: 0, weights: {} as Record<string, number> }
+    : personaMonthWorked({ turnos, ausencias, publishStatusMap, year, month, hoursCoreEnabled, empNameById });
+  const worked = persona.worked;
 
   const franja = executedBillableHoursByFranja(activeTurnos);
   const daysMap = new Map<string, LedgerDay>();
@@ -364,38 +475,61 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
+  const paidDay = new Set<string>();
   const planOn = (list: any[], field: 'planPublished' | 'planDraft') => {
     for (const t of list) {
       const oid = String(t.objectiveId || '').trim();
       if (!oid) continue;
-      const hs = calcPlanificadorShiftHours(t);
-      if (!(hs > 0)) continue;
       const code = String(t.code || t.type || '').toUpperCase();
-      if (PAID.has(code)) {
-        const day = dateStr(t.startTime) || ymd(year, month, 1);
-        const row = touch(oid, 'novedad', 'Novedad', day.slice(0, 10) > periodKey ? ymd(year, month, 1) : (dateStr(t.scheduleDate) || day).slice(0, 10), null);
-        row.novedadPaga = r1(row.novedadPaga + hs);
+      if (paidCode(code)) {
+        const when = (dateStr(t.scheduleDate) || dateStr(t.startTime) || ymd(year, month, 1)).slice(0, 10);
+        const day = when.startsWith(periodKey) ? when : ymd(year, month, 1);
+        const emp = String(t.employeeId || '');
+        const key = `${emp}|${day}`;
+        if (emp && paidDay.has(key)) continue;
+        if (emp) paidDay.add(key);
+        const row = touch(oid, 'novedad', 'Novedad', day, null);
+        row.novedadPaga = r1(row.novedadPaga + jornadaPagada(t));
         continue;
       }
+      const hs = calcPlanificadorShiftHours(t);
+      if (!(hs > 0)) continue;
       const when = dateStr(t.startTime);
       const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
       const pid = puestoSlug(String(t.positionName || ''), String(t.positionId || t.positionName || 'puesto'));
       const row = touch(oid, pid, String(t.positionName || pid), day, null);
       row[field] = r1(row[field] + hs);
-      const codeU = code;
-      if (codeU === 'FT' || t.isFrancoTrabajado) row.ft = r1(row.ft + hs);
+      if (code === 'FT' || t.isFrancoTrabajado) row.ft = r1(row.ft + hs);
     }
   };
   planOn(publishedTurnos, 'planPublished');
   planOn(draftTurnos, 'planDraft');
 
+  for (const a of ausencias) {
+    if (!paidCode(a.type || a.codigo || a.code)) continue;
+    const st = String(a.status || '').toLowerCase();
+    if (st.includes('rechaz') || st.includes('injust')) continue;
+    const oid = String(a.objectiveId || '').trim() || '_sin_objetivo';
+    const start = dateStr(a.startDate) || dateStr(a.fecha);
+    const end = dateStr(a.endDate) || start;
+    for (const day of daysInRange(start, end, periodKey)) {
+      const emp = String(a.employeeId || '');
+      const key = `${emp}|${day}`;
+      if (emp && paidDay.has(key)) continue;
+      if (emp) paidDay.add(key);
+      const row = touch(oid, 'novedad', 'Novedad', day, null);
+      row.novedadPaga = r1(row.novedadPaga + 8);
+      if (a.objectiveName) row.objectiveName = String(a.objectiveName);
+    }
+  }
+
   for (const b of franja.buckets) {
     const oid = String(b.objectiveId || '').trim();
     if (!oid || !b.date?.startsWith(periodKey)) continue;
+    if (only && !only.has(oid)) continue;
     const pid = puestoSlug(b.positionName, b.positionName);
     const row = touch(oid, pid, b.positionName || pid, b.date, null);
     row.covered = r1(row.covered + b.covered);
-    row.uncovered = r1(row.uncovered + b.uncovered);
     row.objectiveName = b.objectiveName || row.objectiveName;
   }
 
@@ -416,10 +550,11 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
-  const days = [...daysMap.values()].filter((d) =>
-    d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft
-    || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga,
-  );
+  const days = [...daysMap.values()].filter((d) => {
+    if (only && !only.has(d.objectiveId) && d.objectiveId !== '_sin_objetivo') return false;
+    return d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft
+      || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
+  });
 
   const byObj = new Map<string, LedgerMonth>();
   const ensureObj = (d: LedgerDay) => {
@@ -489,12 +624,9 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
 
   let fichadaWeight = 0;
   const weights = new Map<string, number>();
-  for (const t of activeTurnos) {
-    const oid = String(t.objectiveId || '').trim();
-    if (!oid) continue;
-    const hs = Number(t.hours) || 0;
+  for (const [oid, hs] of Object.entries(persona.weights)) {
     if (!(hs > 0)) continue;
-    weights.set(oid, (weights.get(oid) || 0) + hs);
+    weights.set(oid, hs);
     fichadaWeight += hs;
   }
   if (worked > 0 && fichadaWeight > 0) {
@@ -530,6 +662,60 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       d.worked = part;
       acc = r1(acc + part);
     });
+  }
+
+  for (const m of byObj.values()) {
+    if (!(m.slaActive > 0)) {
+      m.covered = 0;
+      m.uncovered = 0;
+    } else {
+      m.covered = r1(Math.min(Math.max(0, m.covered), m.slaActive));
+      m.uncovered = r1(Math.max(0, m.slaActive - m.covered));
+    }
+  }
+  const daysByObj = new Map<string, LedgerDay[]>();
+  for (const d of days) {
+    const list = daysByObj.get(d.objectiveId) || [];
+    list.push(d);
+    daysByObj.set(d.objectiveId, list);
+  }
+  for (const [oid, objDays] of daysByObj) {
+    const m = byObj.get(oid);
+    if (!m || !(m.slaActive > 0)) {
+      for (const d of objDays) { d.covered = 0; d.uncovered = 0; }
+      continue;
+    }
+    const slaSum = objDays.reduce((s, d) => s + (d.slaActive || 0), 0);
+    if (slaSum > 0 && Math.abs(slaSum - m.slaActive) > 0.05) {
+      let acc = 0;
+      objDays.forEach((d, i) => {
+        const part = i === objDays.length - 1 ? r1(m.slaActive - acc) : r1(m.slaActive * ((d.slaActive || 0) / slaSum));
+        d.slaActive = Math.max(0, part);
+        acc = r1(acc + d.slaActive);
+      });
+    } else if (!(slaSum > 0) && objDays[0]) {
+      objDays[0].slaActive = m.slaActive;
+    }
+    const base = objDays.reduce((s, d) => s + (d.slaActive || 0), 0) || 1;
+    let accC = 0;
+    objDays.forEach((d, i) => {
+      const cov = i === objDays.length - 1 ? r1(m.covered - accC) : r1(m.covered * ((d.slaActive || 0) / base));
+      d.covered = r1(Math.min(Math.max(0, cov), d.slaActive || 0));
+      d.uncovered = r1(Math.max(0, (d.slaActive || 0) - d.covered));
+      accC = r1(accC + d.covered);
+    });
+    const sumPair = objDays.reduce((s, d) => s + d.covered + d.uncovered, 0);
+    const driftPair = r1(m.slaActive - sumPair);
+    if (objDays.length && driftPair) {
+      const last = objDays[objDays.length - 1];
+      last.slaActive = r1(last.slaActive + driftPair);
+      last.uncovered = r1(last.uncovered + driftPair);
+    }
+  }
+  if (only) {
+    for (const id of [...byObj.keys()]) {
+      if (!only.has(id) && id !== '_sin_objetivo') byObj.delete(id);
+    }
   }
 
   const monthlyObjs = [...byObj.values()].filter((m) =>
