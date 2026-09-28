@@ -113,6 +113,7 @@ import {
     fetchPlanificacionPublishStatus,
     fetchMergedPlanificacionEstadoData,
 } from '@/lib/multiempresa';
+import { isClientOperational } from '@/lib/crm/clientLifecycle';
 import { toYyyyMmDd } from '@/lib/firestoreDates';
 import { readSessionJson, writeSessionJson } from '@/lib/persistSession';
 import {
@@ -4878,7 +4879,8 @@ export default function PlanificacionPage() {
             dataSyncRef.current.clients = true;
             checkSynced();
             const rows = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
+            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta))
+                .filter((c) => isClientOperational((c as { status?: unknown }).status)));
         }, (e) => console.error('[plan] clients error:', e));
         const unsubAg = onSnapshot(collection(db, 'convenios_colectivos'), snap => setAgreements(snap.docs.map(d => ({ id: d.id, ...d.data() }))), (e) => console.error('[plan] convenios error:', e));
         const unsubE = onSnapshot(empleadosQ, snap => {

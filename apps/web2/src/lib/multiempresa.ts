@@ -9,6 +9,7 @@ import {
 } from 'firebase/firestore';
 import { auth, db, getDb } from './firebase';
 import { objectiveMatchKeys } from './slaPlanningMatch';
+import { clientPhysicalDeleteBlockMessage, type ClientRelatedPresence } from './crm/clientLifecycle';
 
 /** Colecciones que participan en el aislamiento por empresa */
 const COLECCIONES = [
@@ -570,14 +571,50 @@ export async function deleteSlaWithRelatedDataForEmpresa(
   return { deletedTurnos, deletedAusencias, deletedNovedades };
 }
 
-async function deleteDocsInBatches(refs: { ref: DocumentReference }[]): Promise<number> {
-  return deleteRefsInBatches(refs.map((r) => r.ref));
+function objectiveIdsOnClient(data: Record<string, unknown>): string[] {
+  const raw = (data.objetivos || data.objectives) as unknown;
+  if (!Array.isArray(raw)) return [];
+  const ids = new Set<string>();
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const o = row as { id?: unknown; objectiveId?: unknown };
+    const id = String(o.id ?? o.objectiveId ?? '').trim();
+    if (id) ids.add(id);
+  }
+  return [...ids];
 }
 
-/**
- * Elimina un cliente de la empresa activa y sus turnos/SLA del mismo tenant.
- * Si hay turnos/SLA de otra empresa con el mismo clientId (ID compartido legacy), no los borra.
- */
+async function collectionHasMatch(colName: string, field: string, value: string): Promise<boolean> {
+  const id = String(value ?? '').trim();
+  if (!id) return false;
+  const snap = await getDocs(query(collection(db, colName), where(field, '==', id), limit(1)));
+  return !snap.empty;
+}
+
+/** Presencia (no conteo) de datos que impiden borrar el cliente. */
+export async function loadClientRelatedPresence(
+  clientId: string,
+  clientData: Record<string, unknown>,
+): Promise<ClientRelatedPresence> {
+  const id = String(clientId ?? '').trim();
+  let turnos = await collectionHasMatch('turnos', 'clientId', id);
+  if (!turnos) {
+    const objectiveIds = objectiveIdsOnClient(clientData);
+    for (let i = 0; i < objectiveIds.length && !turnos; i += 8) {
+      const chunk = objectiveIds.slice(i, i + 8);
+      const hits = await Promise.all(
+        chunk.map((oid) => collectionHasMatch('turnos', 'objectiveId', oid)),
+      );
+      turnos = hits.some(Boolean);
+    }
+  }
+  const [serviciosSla, ordenesCompra] = await Promise.all([
+    collectionHasMatch('servicios_sla', 'clientId', id),
+    collectionHasMatch('ordenes_compra', 'clientId', id),
+  ]);
+  return { turnos, serviciosSla, ordenesCompra };
+}
+
 /**
  * Re-etiqueta turnos y SLA del mismo clientId que aún tienen otra empresaId
  * (p. ej. copia incompleta: cliente prueba_sa, SLA siguen en bacarsa).
@@ -775,16 +812,58 @@ export async function updateClientForEmpresa(
   return resolved.collection;
 }
 
+export async function deactivateClientForEmpresa(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+  actor: { uid?: string; name?: string },
+  access?: TenantAccessOpts,
+): Promise<void> {
+  const by = String(actor?.uid ?? '').trim() || 'desconocido';
+  await updateClientForEmpresa(
+    clientId,
+    {
+      status: 'INACTIVE',
+      inactivatedAt: new Date().toISOString(),
+      inactivatedBy: by,
+      ...(actor?.name ? { inactivatedByName: String(actor.name) } : {}),
+    },
+    empresaId,
+    migracionCompleta,
+    access,
+  );
+}
+
+export async function reactivateClientForEmpresa(
+  clientId: string,
+  empresaId: string,
+  migracionCompleta: boolean,
+  actor: { uid?: string; name?: string },
+  access?: TenantAccessOpts,
+): Promise<void> {
+  const by = String(actor?.uid ?? '').trim() || 'desconocido';
+  await updateClientForEmpresa(
+    clientId,
+    {
+      status: 'ACTIVE',
+      reactivatedAt: new Date().toISOString(),
+      reactivatedBy: by,
+    },
+    empresaId,
+    migracionCompleta,
+    access,
+  );
+}
+
+/**
+ * Borrado físico del documento de cliente. No toca turnos, SLA ni órdenes:
+ * si existe alguno, lanza un error y no borra nada.
+ */
 export async function deleteClientForEmpresa(
   clientId: string,
   empresaId: string,
   migracionCompleta: boolean,
-): Promise<{
-  deletedTurnos: number;
-  deletedSla: number;
-  foreignTurnosLeft: number;
-  foreignSlaLeft: number;
-}> {
+): Promise<void> {
   const resolved = await resolveClientDocument(clientId);
   if (!resolved) {
     throw new Error(
@@ -799,34 +878,11 @@ export async function deleteClientForEmpresa(
     );
   }
 
-  const [turnosSnap, slaSnap] = await Promise.all([
-    getDocs(query(collection(db, 'turnos'), where('clientId', '==', clientId))),
-    getDocs(query(collection(db, 'servicios_sla'), where('clientId', '==', clientId))),
-  ]);
-
-  const turnosOwned = turnosSnap.docs.filter((d) =>
-    isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const slaOwned = slaSnap.docs.filter((d) =>
-    isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const turnosForeign = turnosSnap.docs.filter((d) =>
-    !isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-  const slaForeign = slaSnap.docs.filter((d) =>
-    !isTenantWriteOwner(d.data(), empresaId, migracionCompleta),
-  );
-
-  const deletedTurnos = await deleteDocsInBatches(turnosOwned.map((d) => ({ ref: d.ref })));
-  const deletedSla = await deleteDocsInBatches(slaOwned.map((d) => ({ ref: d.ref })));
+  const related = await loadClientRelatedPresence(clientId, clientData);
+  const block = clientPhysicalDeleteBlockMessage(String(clientData.name ?? ''), related);
+  if (block) throw new Error(block);
 
   await deleteDoc(doc(db, resolved.collection, clientId));
-  return {
-    deletedTurnos,
-    deletedSla,
-    foreignTurnosLeft: turnosForeign.length,
-    foreignSlaLeft: slaForeign.length,
-  };
 }
 
 export function filterRowsByEmpresa<T extends { empresaId?: unknown }>(

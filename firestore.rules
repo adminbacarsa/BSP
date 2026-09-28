@@ -314,7 +314,9 @@ service cloud.firestore {
         || (isClientUser() && clientUserClientId() == clientId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
-      allow delete: if tenantAdminDelete();
+      // Baja normal = update status INACTIVE. El documento solo lo borra SuperAdmin,
+      // y la app lo rechaza si hay turnos, servicios_sla u ordenes_compra.
+      allow delete: if isSuperAdmin();
     }
 
     match /contracts/{contractId} {
