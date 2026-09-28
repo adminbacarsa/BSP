@@ -106,12 +106,16 @@ export function buildInformeAnalitico(opts: {
     tieneHistorial: boolean;
     modo?: 'con_indice' | 'sin_indice';
   };
+  /** Totales oficiales del libro (H2b). El desglose de novedades sigue saliendo de la malla. */
+  ledgerHours?: { sla?: number; planPublished?: number; worked?: number };
 }): InformeAnalitico {
-  const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa } = opts;
-  const hsVendidas = r1(d.slaHours);
+  const { plantel, demandaTotals: d, ausenciasStats, turnos, bolsa, ledgerHours } = opts;
+  const hsVendidas = r1(ledgerHours?.sla != null ? ledgerHours.sla : d.slaHours);
   const hsPlanBase = r1(d.planHours);
   const hsExtras50 = r1(d.extHours + d.adelHours);
-  const hsPlanificadas = coveragePlannedBillableHours(d.planHours, d.extHours, d.adelHours);
+  const hsPlanificadas = ledgerHours?.planPublished != null
+    ? r1(ledgerHours.planPublished)
+    : coveragePlannedBillableHours(d.planHours, d.extHours, d.adelHours);
   const hsFT100 = r1(d.ftHours);
   const hsOps = r1(d.opsHours);
   const hsVacante = r1(d.vacantHours);
@@ -131,7 +135,7 @@ export function buildInformeAnalitico(opts: {
   hsPendientesFichada = r1(hsPendientesFichada);
 
   const liq = sumPlantelLiquidationHours(turnos);
-  const hsLiquidadas = liq.horasReales;
+  const hsLiquidadas = ledgerHours?.worked != null ? r1(ledgerHours.worked) : liq.horasReales;
   const hsLiquidadasCobertura = liq.horasRealesCobertura;
   const hsLiquidadasDespliegue = liq.horasRealesDespliegue;
   const hsRealizadas = hsLiquidadas;
