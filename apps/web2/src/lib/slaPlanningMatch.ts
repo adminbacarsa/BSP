@@ -1,5 +1,5 @@
 import { slaCoversCalendarMonth, toYyyyMmDd } from '@/lib/firestoreDates';
-import { filterSlaRowsByEmpresa } from '@/lib/multiempresa';
+import { filterSlaRowsByEmpresa } from '@/lib/tenantScope';
 import { calculateSlaHoursForMonth } from '@/lib/servicios/slaHoursCalculator';
 import { paxBoostDeltaForDate } from '@/lib/servicios/paxBoostRanges';
 import type { ServicePosition } from '@/services/slaService';

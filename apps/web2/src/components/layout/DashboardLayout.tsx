@@ -740,7 +740,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {(canReadModule('REPORTS') || canReadModule('ANALYSIS')) && (
+          {canReadModule('HOURS_BANK') && (
             <Link href="/admin/banco-horas" prefetch={false} title="Banco de Horas"
               className={getLinkHoverClass('/admin/banco-horas')}
               style={getLinkStyle('/admin/banco-horas')}>

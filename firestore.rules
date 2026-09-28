@@ -772,6 +772,8 @@ service cloud.firestore {
     }
 
     // Libro de horas (H2a). Escritura solo Admin SDK. No reemplaza hours_balances hasta H2b.
+    // Lectura: admin del tenant. Las reglas de este repo no leen roles/{id}.permissions, así que el
+    // permiso del módulo HOURS_BANK se aplica en la app y en el callable rebuildHoursLedger.
     match /hours_ledger/{docId} {
       allow read: if tenantAdminRead();
       allow write: if false;

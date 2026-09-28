@@ -5,7 +5,7 @@
 const ADMIN_PREFIXES: [string, string][] = [
   ['/admin/configuracion', 'CONFIG'],
   ['/admin/analisis', 'ANALYSIS'],
-  ['/admin/banco-horas', 'ANALYSIS'],
+  ['/admin/banco-horas', 'HOURS_BANK'],
   ['/admin/reportes', 'REPORTS'],
   ['/admin/servicios', 'SERVICES'],
   ['/admin/crm', 'CLIENTS'],
@@ -38,6 +38,7 @@ const MODULE_TITLE_ES: Record<string, string> = {
   SERVICES: 'Servicios',
   REPORTS: 'Reportes',
   ANALYSIS: 'Análisis',
+  HOURS_BANK: 'Banco de Horas',
   CONFIG: 'Configuración',
   EMPLOYEE_PORTAL: 'Portal empleado',
   CLIENT_PORTAL: 'Portal cliente',

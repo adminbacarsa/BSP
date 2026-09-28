@@ -1,11 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.STAFF_APP_MODULE_KEYS = void 0;
-exports.fullStaffModulePermissions = fullStaffModulePermissions;
-exports.moduleActionsFromRolePermissions = moduleActionsFromRolePermissions;
-exports.buildStaffModulesPayload = buildStaffModulesPayload;
-exports.resolvePanelUserForUid = resolvePanelUserForUid;
-exports.assertOperationsUpdatePermission = assertOperationsUpdatePermission;
+exports.assertOperationsUpdatePermission = exports.resolvePanelUserForUid = exports.buildStaffModulesPayload = exports.moduleActionsFromRolePermissions = exports.fullStaffModulePermissions = exports.STAFF_APP_MODULE_KEYS = void 0;
 const functions = require("firebase-functions/v1");
 const role_util_1 = require("../common/role.util");
 exports.STAFF_APP_MODULE_KEYS = ['OPERATIONS', 'SUPERVISION', 'RRHH', 'PLANNING'];
@@ -13,6 +8,7 @@ const BASE_ACTIONS = ['read', 'create', 'update', 'delete'];
 const MODULE_ONLY_ACTIONS = {
     PLANNING: ['publish', 'correct', 'auto_lab', 'assign_ft'],
     RRHH: ['adjust'],
+    HOURS_BANK: ['rebuild'],
 };
 function fullStaffModulePermissions() {
     const out = {};
@@ -22,6 +18,7 @@ function fullStaffModulePermissions() {
     }
     return out;
 }
+exports.fullStaffModulePermissions = fullStaffModulePermissions;
 function moduleActionsFromRolePermissions(permissions, moduleKey) {
     const raw = permissions[moduleKey];
     if (!Array.isArray(raw))
@@ -29,6 +26,7 @@ function moduleActionsFromRolePermissions(permissions, moduleKey) {
     const allowed = new Set([...BASE_ACTIONS, ...(MODULE_ONLY_ACTIONS[moduleKey] ?? [])]);
     return raw.filter((a) => typeof a === 'string' && allowed.has(a));
 }
+exports.moduleActionsFromRolePermissions = moduleActionsFromRolePermissions;
 function buildStaffModulesPayload(permissions) {
     const out = {};
     for (const key of exports.STAFF_APP_MODULE_KEYS) {
@@ -36,11 +34,22 @@ function buildStaffModulesPayload(permissions) {
     }
     return out;
 }
-async function resolvePanelUserForUid(db, uid, tokenRoleRaw) {
+exports.buildStaffModulesPayload = buildStaffModulesPayload;
+async function resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback = 'Operador') {
     const tokenRole = String(tokenRoleRaw ?? '').trim();
     const sys = await db.collection('system_users').doc(uid).get();
-    if (!sys.exists)
-        return null;
+    if (!sys.exists) {
+        if (!(0, role_util_1.isSuperAdminRole)(tokenRole))
+            return null;
+        return {
+            isSuperAdmin: true,
+            allEmpresas: true,
+            empresaId: '',
+            roleName: tokenRole,
+            permissions: fullStaffModulePermissions(),
+            operatorName: operatorNameFallback,
+        };
+    }
     const data = sys.data() ?? {};
     const role = String(data.role || '').trim();
     const allEmpresas = data.allEmpresas === true;
@@ -50,7 +59,7 @@ async function resolvePanelUserForUid(db, uid, tokenRoleRaw) {
         permissions = fullStaffModulePermissions();
         const superKeys = [
             'DASHBOARD', 'OPERATIONS', 'PLANNING', 'PLANNING_AI', 'RRHH', 'CLIENTS',
-            'SERVICES', 'REPORTS', 'ANALYSIS', 'ASSISTANT', 'CONFIG', 'SUPERVISION',
+            'SERVICES', 'REPORTS', 'ANALYSIS', 'HOURS_BANK', 'ASSISTANT', 'CONFIG', 'SUPERVISION',
         ];
         for (const k of superKeys) {
             if (!permissions[k]) {
@@ -93,8 +102,9 @@ async function resolvePanelUserForUid(db, uid, tokenRoleRaw) {
         operatorName,
     };
 }
-async function assertOperationsUpdatePermission(db, uid, empresaId, tokenRoleRaw) {
-    const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw);
+exports.resolvePanelUserForUid = resolvePanelUserForUid;
+async function assertOperationsUpdatePermission(db, uid, empresaId, tokenRoleRaw, operatorNameFallback) {
+    const panel = await resolvePanelUserForUid(db, uid, tokenRoleRaw, operatorNameFallback);
     if (!panel) {
         throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado en el panel.');
     }
@@ -116,4 +126,5 @@ async function assertOperationsUpdatePermission(db, uid, empresaId, tokenRoleRaw
     }
     return panel;
 }
+exports.assertOperationsUpdatePermission = assertOperationsUpdatePermission;
 //# sourceMappingURL=staffPermissions.js.map

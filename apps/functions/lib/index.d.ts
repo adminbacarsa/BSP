@@ -49,6 +49,8 @@ export { requestGuardDeviceRegistration, approveGuardDeviceRegistration, rejectG
 export declare const createClientPortalAccess: functions.HttpsFunction & functions.Runnable<any>;
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
+export { syncTurnoClientOwner } from './integrity/syncTurnoClientOwner';
+export { scheduledIntegrityScan } from './integrity/integrityScan';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
 export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';
