@@ -135,7 +135,7 @@ async function registrarPresencia(db, input) {
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,
-        lateArrivalAt: isLate && !shiftData.lateArrivalAt ? now : shiftData.lateArrivalAt ?? null,
+        lateArrivalAt: shiftData.lateArrivalAt ?? null,
         presenciaSource: source,
         presenciaAt: now,
     };

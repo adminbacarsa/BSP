@@ -1841,6 +1841,10 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
 
         // Crear novedad para notificar al operador en CC
         try {
+            const extraLate = isExtraNonReliefShift(shiftData);
+            const lateCode = String(shiftData.code || shiftData.type || '').trim().toUpperCase();
+            const lateWho = String(shiftData.employeeName || 'El guardia');
+            const lateWhere = String(shiftData.objectiveName || 'su puesto');
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',
                 shiftId,
@@ -1850,7 +1854,10 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
                 objectiveName: shiftData.objectiveName || '',
                 clientName: shiftData.clientName || '',
                 empresaId: shiftData.empresaId || null,
-                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                shiftCode: lateCode || null,
+                description: extraLate
+                  ? `${lateWho} avisó llegada tarde a su turno ${lateCode || 'extra'} en ${lateWhere}. Sobreturno: la franja del puesto no cambia.`
+                  : `${lateWho} avisó que llegará tarde a ${lateWhere}`,
                 createdAt: now,
                 status: 'unread',
                 viewed: false,
@@ -2825,7 +2832,7 @@ export const detectarAusencias = functions
       if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
       if (SKIP_STATUSES.has(s.status || '')) continue;
       if (s.earlyRetentionAlertAt) continue;  // ya se procesÃ³
-      if (s.lateArrivalAt || s.notifiedAbsent) continue; // tiene aviso previo
+      if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent) continue; // tiene aviso previo
 
       const empId = shiftEmpresaId(s);
       const posName = (s.positionName || '').trim().toLowerCase();
@@ -2986,7 +2993,7 @@ export const detectarAusencias = functions
         return true;
       };
 
-      if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
+      if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
         const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
         const capMs = startMs + 60 * 60 * 1000;
         const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;

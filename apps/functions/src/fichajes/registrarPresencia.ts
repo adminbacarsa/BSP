@@ -201,7 +201,9 @@ export async function registrarPresencia(
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,
-    lateArrivalAt: isLate && !shiftData.lateArrivalAt ? now : shiftData.lateArrivalAt ?? null,
+    // La fichada tarde no es un aviso: `lateArrivalAt` solo lo escribe notificarLlegadaTarde
+    // o la convocatoria LLEGADA_TARDE. Si lo estampamos acá, el CC lee TARDE AVISADA sin aviso.
+    lateArrivalAt: shiftData.lateArrivalAt ?? null,
     presenciaSource: source,
     presenciaAt: now,
   };

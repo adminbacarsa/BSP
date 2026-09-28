@@ -34,8 +34,19 @@ function toMs(v: unknown): number {
   return 0;
 }
 
+/**
+ * Aviso de llegada tarde ya registrado en el turno.
+ * El portal escribe `lateArrivalAt`; la convocatoria LLEGADA_TARDE escribe
+ * `lateArrivalConfirmed` + ETA; el CC viejo a veces solo deja `lateETA`.
+ * Cualquiera de esos es TARDE AVISADA (no TARDE SIN AVISO).
+ */
 export function hasLateArrivalNotice(shift: Record<string, unknown>): boolean {
-  return !!(shift.lateArrivalAt || shift.lateArrivalConfirmed);
+  if (shift.lateArrivalAt || shift.lateArrivalConfirmed === true) return true;
+  if (String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') return true;
+  if (String(shift.lateETA || '').trim()) return true;
+  if (shift.lateArrivalEtaAt) return true;
+  const mins = Number(shift.lateArrivalEtaMinutes);
+  return Number.isFinite(mins) && mins > 0;
 }
 
 export function readLateEtaMinutes(shift: Record<string, unknown>): number | null {

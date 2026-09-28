@@ -1540,6 +1540,10 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
         await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'LATE_NOTICE').catch(() => { });
         await (0, relevoNotifications_1.applyLateReliefNoticeToOutgoing)(db, shiftId, shiftData, etaAt).catch(() => { });
         try {
+            const extraLate = (0, reliefEligibility_1.isExtraNonReliefShift)(shiftData);
+            const lateCode = String(shiftData.code || shiftData.type || '').trim().toUpperCase();
+            const lateWho = String(shiftData.employeeName || 'El guardia');
+            const lateWhere = String(shiftData.objectiveName || 'su puesto');
             await db.collection('novedades').add({
                 type: 'LLEGADA_TARDE_AVISO',
                 shiftId,
@@ -1549,7 +1553,10 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
                 objectiveName: shiftData.objectiveName || '',
                 clientName: shiftData.clientName || '',
                 empresaId: shiftData.empresaId || null,
-                description: (shiftData.employeeName || 'El guardia') + ' aviso que llegara tarde a ' + (shiftData.objectiveName || 'su puesto'),
+                shiftCode: lateCode || null,
+                description: extraLate
+                    ? `${lateWho} avisó llegada tarde a su turno ${lateCode || 'extra'} en ${lateWhere}. Sobreturno: la franja del puesto no cambia.`
+                    : `${lateWho} avisó que llegará tarde a ${lateWhere}`,
                 createdAt: now,
                 status: 'unread',
                 viewed: false,
@@ -2371,7 +2378,7 @@ exports.detectarAusencias = functions
             continue;
         if (s.earlyRetentionAlertAt)
             continue;
-        if (s.lateArrivalAt || s.notifiedAbsent)
+        if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent)
             continue;
         const empId = shiftEmpresaId(s);
         const posName = (s.positionName || '').trim().toLowerCase();
@@ -2526,7 +2533,7 @@ exports.detectarAusencias = functions
             });
             return true;
         };
-        if (shift.lateArrivalAt || shift.lateArrivalConfirmed) {
+        if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
             const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
             const capMs = startMs + 60 * 60 * 1000;
             const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;
