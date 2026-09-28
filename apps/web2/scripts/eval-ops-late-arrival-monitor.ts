@@ -81,4 +81,35 @@ const eligible = true;
   );
 }
 
+// Caso 5: solo lateETA (aviso viejo del CC) → TARDE AVISADA, no SIN AVISO
+{
+  const startMs = arDate('2026-09-28T16:00:00-03:00');
+  const nowMs = arDate('2026-09-28T16:20:00-03:00');
+  const shift = { code: 'ESC', lateETA: '16:40' };
+  const st = computeOpsLateArrivalMonitorState({ shift, startMs, nowMs, eligible });
+  report(
+    '5-lateETA-es-aviso',
+    st.isLateNotified && !st.isLateUnnotified,
+    JSON.stringify(st),
+  );
+}
+
+// Caso 6: convocatoria LLEGADA_TARDE (confirmed + eta, sin lateArrivalAt)
+{
+  const startMs = arDate('2026-09-28T16:00:00-03:00');
+  const nowMs = arDate('2026-09-28T16:12:00-03:00');
+  const shift = {
+    code: 'ESC',
+    lateArrivalConfirmed: true,
+    lateArrivalEtaMinutes: 25,
+    lateArrivalEtaAt: { seconds: Math.floor(startMs / 1000) + 25 * 60 },
+  };
+  const st = computeOpsLateArrivalMonitorState({ shift, startMs, nowMs, eligible });
+  report(
+    '6-confirmed-sin-lateArrivalAt',
+    st.isLateNotified && !st.isLateUnnotified,
+    JSON.stringify(st),
+  );
+}
+
 console.log('\nFin eval ops late arrival monitor');
