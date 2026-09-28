@@ -137,6 +137,7 @@ export const INFO_NOVEDAD_TYPES = new Set([
 export const HIDDEN_FROM_OPS_ALERTS_TYPES = new Set([
     'TURNO_COMPLETADO_AUTO',
     'CONVOCATORIA_ENVIADA',
+    'INTEGRIDAD_DATOS',
 ]);
 
 /**

@@ -34,6 +34,8 @@ import {
   belongsToEmpresaView,
   slaBelongsToEmpresa,
   deleteClientForEmpresa,
+  deactivateClientForEmpresa,
+  reactivateClientForEmpresa,
   assertClientWritableForEmpresa,
   assertDocBelongsToEmpresa,
   queryAndDeleteForEmpresa,
@@ -78,6 +80,7 @@ import {
   RefreshCw,
   Search,
   Send,
+  PowerOff,
   ShieldCheck,
   Trash2,
   TrendingUp,
@@ -88,6 +91,7 @@ import {
 import ProformaPanel from '@/components/crm/ProformaPanel';
 import CrmDashboardSummary from '@/components/crm/CrmDashboardSummary';
 import CrmClientListCard from '@/components/crm/CrmClientListCard';
+import { isClientInactive, isClientOperational } from '@/lib/crm/clientLifecycle';
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { resolveObjectiveDisplayName, formatProformaObjectiveLabel } from '@/lib/crm/objectiveIdentity';
 import {
@@ -365,7 +369,7 @@ export default function CRMPage() {
   const [rangeMonth, setRangeMonth] = useState(new Date().getMonth());
   const [rangeYear, setRangeYear] = useState(new Date().getFullYear());
   const [clientListSort, setClientListSort] = useState<ClientListSort>('name');
-  const [clientListFilter, setClientListFilter] = useState<ClientListFilter>('all');
+  const [clientListFilter, setClientListFilter] = useState<ClientListFilter>('activos');
   const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
   const metricsRunRef = useRef(0);
   const proformaRunRef = useRef(0);
@@ -698,15 +702,59 @@ export default function CRMPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, selectedClient?.id, empresaId, migracionCompleta, isSuperAdmin, allEmpresas]);
 
-  const clientDeleteToast = (
-    name: string,
-    r: { deletedTurnos: number; deletedSla: number; foreignTurnosLeft: number; foreignSlaLeft: number },
-  ) => {
-    let msg = `"${name}" eliminado (${r.deletedTurnos} turnos, ${r.deletedSla} SLA)`;
-    if (r.foreignTurnosLeft > 0 || r.foreignSlaLeft > 0) {
-      msg += `. Quedaron ${r.foreignTurnosLeft} turno(s) y ${r.foreignSlaLeft} SLA de otra empresa (ID compartido; Bacarsa no se tocó).`;
+  const clientActor = () => ({
+    uid: authUser?.uid || '',
+    name: currentUserName,
+  });
+
+  const handleDeactivateClient = async (c: { id: string; name?: string }) => {
+    if (!confirm(
+      `¿Desactivar a "${c.name || 'este cliente'}"?\n` +
+      'Deja de aparecer en las listas operativas. Los turnos, SLA y órdenes de compra no se borran.',
+    )) return;
+    try {
+      await assertClientWritable(c.id, c.name, 'eliminar');
+      await deactivateClientForEmpresa(c.id, empresaId, migracionCompleta, clientActor(), tenantAccess);
+      toast.success(`"${c.name || 'Cliente'}" desactivado`);
+      if (selectedClient?.id === c.id) {
+        setSelectedClient({ ...selectedClient, status: 'INACTIVE' });
+      }
+      fetchClients();
+    } catch (e: unknown) {
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al desactivar el cliente'));
     }
-    return msg;
+  };
+
+  const handleReactivateClient = async (c: { id: string; name?: string }) => {
+    try {
+      await assertClientWritable(c.id, c.name);
+      await reactivateClientForEmpresa(c.id, empresaId, migracionCompleta, clientActor(), tenantAccess);
+      toast.success(`"${c.name || 'Cliente'}" reactivado`);
+      if (selectedClient?.id === c.id) {
+        setSelectedClient({ ...selectedClient, status: 'ACTIVE' });
+      }
+      fetchClients();
+    } catch (e: unknown) {
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al reactivar el cliente'));
+    }
+  };
+
+  const handlePurgeClient = async (c: { id: string; name?: string }, after?: () => void) => {
+    const empresaLabel = empresa?.name || empresaId;
+    if (!confirm(
+      `¿Eliminar definitivamente a "${c.name || 'este cliente'}"?\n` +
+      `Empresa: ${empresaLabel}\n` +
+      'Solo si no tiene turnos, servicios SLA ni órdenes de compra. Esos datos no se borran: si existen, la eliminación se bloquea.',
+    )) return;
+    try {
+      await assertClientWritable(c.id, c.name, 'eliminar');
+      await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
+      toast.success(`"${c.name || 'Cliente'}" eliminado`);
+      after?.();
+      fetchClients();
+    } catch (e: unknown) {
+      toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
+    }
   };
 
   const fetchClients = async () => {
@@ -1817,7 +1865,9 @@ export default function CRMPage() {
   const clientsForList = useMemo(() => {
     let list = [...clients];
     if (clientListFilter === 'activos') {
-      list = list.filter((c) => isClientStatusActivo(c.status));
+      list = list.filter((c) => isClientOperational(c.status));
+    } else if (clientListFilter === 'inactivos') {
+      list = list.filter((c) => isClientInactive(c.status));
     } else if (clientListFilter === 'con_sla') {
       list = list.filter((c) => (clientMetricsMap[c.id]?.sla || 0) > 0);
     } else if (clientListFilter === 'sla_sin_plan') {
@@ -2668,7 +2718,11 @@ export default function CRMPage() {
                   ? 'Ningún cliente sin fichadas (con SLA o plan) en este período.'
               : clientListFilter === 'con_sla'
               ? 'Ningún cliente con horas SLA en este período. Elegí otro mes o usá filtro «Todos».'
-              : 'Sin clientes para mostrar.'
+              : clientListFilter === 'inactivos'
+                ? 'No hay clientes inactivos.'
+                : clientListFilter === 'activos'
+                  ? 'No hay clientes activos. Usá el filtro «Inactivos» o «Todos».'
+                  : 'Sin clientes para mostrar.'
           }
           searchPlaceholder="Buscar cliente..."
           searchFn={(c, q) => (c.name || '').toLowerCase().includes(q)}
@@ -2796,21 +2850,25 @@ export default function CRMPage() {
                   </div>
                 </div>
                 <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-200 dark:border-slate-700">
+                  {canDeleteClient(c) && isClientOperational(c.status) && (
+                    <button
+                      onClick={() => { void handleDeactivateClient(c); }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-200 font-black text-xs uppercase hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                    >
+                      <PowerOff size={13}/> Desactivar
+                    </button>
+                  )}
+                  {canDeleteClient(c) && isClientInactive(c.status) && (
+                    <button
+                      onClick={() => { void handleReactivateClient(c); }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 font-black text-xs uppercase hover:bg-emerald-100 transition-colors"
+                    >
+                      <RefreshCw size={13}/> Reactivar
+                    </button>
+                  )}
                   {isSuperAdmin && canDeleteClient(c) && (
                     <button
-                      onClick={async () => {
-                        const empresaLabel = empresa?.name || empresaId;
-                        if (!confirm(`¿Eliminar permanentemente a "${c.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
-                        try {
-                          await assertClientWritable(c.id, c.name, 'eliminar');
-                          const result = await deleteClientForEmpresa(c.id, empresaId, migracionCompleta);
-                          toast.success(clientDeleteToast(c.name, result));
-                          fetchClients();
-                          close();
-                        } catch (e: unknown) {
-                          toast.error(isTenantIsolationError(e) ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
-                        }
-                      }}
+                      onClick={() => { void handlePurgeClient(c, close); }}
                       className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-rose-50 dark:bg-rose-900/20 text-rose-600 dark:text-rose-400 font-black text-xs uppercase hover:bg-rose-100 dark:hover:bg-rose-900/30 transition-colors"
                     >
                       <Trash2 size={13}/> Eliminar
@@ -2883,30 +2941,33 @@ export default function CRMPage() {
                 </div>
                 <h2 className="text-2xl font-black text-slate-800 leading-tight">{selectedClient.name}</h2>
                 <p className="text-[10px] font-black text-slate-300 uppercase mt-2">{selectedClient.taxId}</p>
+                {canDeleteClient(selectedClient) && isClientOperational(selectedClient.status) && (
+                  <button
+                    onClick={() => { void handleDeactivateClient(selectedClient); }}
+                    className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-black uppercase transition-colors"
+                  >
+                    <PowerOff size={13}/> Desactivar cliente
+                  </button>
+                )}
+                {canDeleteClient(selectedClient) && isClientInactive(selectedClient.status) && (
+                  <button
+                    onClick={() => { void handleReactivateClient(selectedClient); }}
+                    className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-emerald-200 text-emerald-700 hover:bg-emerald-50 text-xs font-black uppercase transition-colors"
+                  >
+                    <RefreshCw size={13}/> Reactivar cliente
+                  </button>
+                )}
                 {isSuperAdmin && canDeleteClient(selectedClient) && (
                   <button
-                    onClick={async () => {
-                      const empresaLabel = empresa?.name || empresaId;
-                      if (!confirm(`¿Eliminar permanentemente a "${selectedClient.name}"?\nEmpresa: ${empresaLabel}\nSe eliminarán turnos y SLA solo de esta empresa.`)) return;
-                      try {
-                        await assertClientWritable(selectedClient.id, selectedClient.name, 'eliminar');
-                        const result = await deleteClientForEmpresa(
-                          selectedClient.id,
-                          empresaId,
-                          migracionCompleta,
-                        );
-                        toast.success(clientDeleteToast(selectedClient.name, result));
+                    onClick={() => {
+                      void handlePurgeClient(selectedClient, () => {
                         setSelectedClient(null);
                         setView('list');
-                        fetchClients();
-                      } catch (e: unknown) {
-                        console.error(e);
-                        toast.error(e instanceof TenantIsolationError ? e.message : (e instanceof Error ? e.message : 'Error al eliminar el cliente'));
-                      }
+                      });
                     }}
-                    className="mt-6 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-500 hover:bg-rose-50 text-xs font-black uppercase transition-colors"
+                    className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 text-rose-500 hover:bg-rose-50 text-xs font-black uppercase transition-colors"
                   >
-                    <Trash2 size={13}/> Eliminar cliente
+                    <Trash2 size={13}/> Eliminar definitivamente
                   </button>
                 )}
               </div>

@@ -18,7 +18,7 @@ const MONTHS_ES = [
   'Septiembre', 'Octubre', 'Noviembre', 'Diciembre',
 ];
 
-export type ClientListFilter = 'all' | 'activos' | 'con_sla' | 'burn_alerta' | 'sla_sin_plan' | 'hueco_plan' | 'sin_fichadas';
+export type ClientListFilter = 'all' | 'activos' | 'inactivos' | 'con_sla' | 'burn_alerta' | 'sla_sin_plan' | 'hueco_plan' | 'sin_fichadas';
 export type ClientListSort = 'name' | 'burn_desc' | 'sla_desc' | 'plan_gap';
 
 export type CrmTrendPoint = {
@@ -348,6 +348,7 @@ export default function CrmDashboardSummary({
         >
           <option value="all">Todos ({clientsCount})</option>
           <option value="activos">Solo activos</option>
+          <option value="inactivos">Inactivos</option>
           <option value="con_sla">Con SLA en período ({conSlaCount})</option>
           <option value="sla_sin_plan">SLA sin plan ({commercial.clientsSlaNoPlan})</option>
           <option value="hueco_plan">Hueco de cobertura ({commercial.clientsUnderplanned})</option>

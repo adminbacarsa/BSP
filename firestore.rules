@@ -225,6 +225,14 @@ service cloud.firestore {
       );
     }
 
+    // Portal guardia: hero e historial leen turnos con where employeeId == legajo o uid.
+    // Alertas no leen turnos (user_notifications). client_users siguen por clientId.
+    function employeeReadsOwnTurno(data) {
+      return request.auth != null
+        && data.get('employeeId', '') != ''
+        && empleadoDocOwnedByAuth(data.get('employeeId', ''));
+    }
+
     function eventoActivoReadable(data) {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
@@ -271,7 +279,7 @@ service cloud.firestore {
 
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
+        || employeeReadsOwnTurno(resource.data)
         || clientUserMatchesTurno(resource.data);
       allow create: if tenantAdminCreate() && noRetiredCloseReasonCreate();
       allow update: if tenantAdminUpdate() && noRetiredCloseReasonUpdate();
@@ -314,7 +322,9 @@ service cloud.firestore {
         || (isClientUser() && clientUserClientId() == clientId);
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate();
-      allow delete: if tenantAdminDelete();
+      // Baja normal = update status INACTIVE. El documento solo lo borra SuperAdmin,
+      // y la app lo rechaza si hay turnos, servicios_sla u ordenes_compra.
+      allow delete: if isSuperAdmin();
     }
 
     match /contracts/{contractId} {
@@ -808,6 +818,11 @@ service cloud.firestore {
 
     // API Keys de integraciones — solo lectura de metadata (no del hash).
     // Escritura exclusivamente vía Admin SDK (callables createPayrollApiKey / revokePayrollApiKey).
+    match /integrity_reports/{reportId} {
+      allow read: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
+      allow write: if false;
+    }
+
     match /integraciones_api/{keyId} {
       allow read:  if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
       allow write: if false;

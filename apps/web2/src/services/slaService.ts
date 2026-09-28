@@ -2,6 +2,7 @@
 import { db, getDocsOnce } from '@/lib/firebase';
 import { collection, addDoc, getDocs, doc, updateDoc, query, orderBy, where } from 'firebase/firestore';
 import { empresaScopedQuery, filterSlaRowsByEmpresa, filterRowsByEmpresa, updateDocForEmpresa, stampEmpresaId } from '@/lib/multiempresa';
+import { isClientOperational } from '@/lib/crm/clientLifecycle';
 
 // Definición de Turno (variante)
 export interface ShiftVariant {
@@ -309,11 +310,12 @@ export const slaService = {
           name: data.name || data.fantasyName || 'Sin Nombre',
           objectives: data.objetivos || data.objectives || [],
           empresaId: data.empresaId,
+          status: data.status,
         };
       }),
         opts?.empresaId || '',
         scope,
-      );
+      ).filter((c) => isClientOperational(c.status));
     } catch (e) {
       if (opts?.scopeEmpresa && opts.empresaId) {
         try {
@@ -326,11 +328,14 @@ export const slaService = {
                 name: data.name || data.fantasyName || 'Sin Nombre',
                 objectives: data.objetivos || data.objectives || [],
                 empresaId: data.empresaId,
+                status: data.status,
               };
             }),
             opts.empresaId,
             true,
-          ).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+          )
+            .filter((c) => isClientOperational(c.status))
+            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
         } catch {
           /* fall through */
         }

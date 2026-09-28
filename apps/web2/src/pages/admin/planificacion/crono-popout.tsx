@@ -12,6 +12,7 @@ import {
     filterRowsByEmpresa,
     shouldScopeQueriesToEmpresa,
 } from '@/lib/multiempresa';
+import { isClientOperational } from '@/lib/crm/clientLifecycle';
 import { buildAbsencesMapFromDocs } from '@/lib/planificacion/absenceCodes';
 import { cronoCompareDateKey, dateFromMonthParam, monthParamFromDate } from '@/lib/planificacion/cronoCompareUtils';
 import { CronoComparePanel } from '@/components/planificacion/CronoComparePanel';
@@ -66,7 +67,8 @@ export default function CronoPopoutPage() {
 
         const unsubC = onSnapshotFresh(clientsQ, (snap) => {
             const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta)));
+            setClients(dedupeClientsById(filterRowsByEmpresa(rows, empresaId, scopeEmpresa, migracionCompleta))
+                .filter((c) => isClientOperational((c as { status?: unknown }).status)));
         });
 
         const unsubE = onSnapshotFresh(empleadosQ, (snap) => {
