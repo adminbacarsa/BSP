@@ -1137,7 +1137,7 @@ async function run() {
       report(24, ok, ok ? 'presente + realStart + late 18' : `late=${sh?.lateMinutes} real=${realMs}`);
     }
 
-    // Caso 25 — T+10 sin aviso → rechazada ventana
+    // Caso 25 — T+10 sin aviso → permitida (llegada tarde, lateNoNotice)
     {
       const prefix = `${runId}_c25`;
       const start = tsAt(2026, 9, 24, 9, 0);
@@ -1153,7 +1153,8 @@ async function run() {
         nowMs,
         { source: 'PORTAL_GPS' },
       );
-      report(25, win.allowed === false, win.allowed === false ? 'rechazada ventana T+10' : `allowed=${win.allowed}`);
+      const ok = win.allowed === true && win.lateNoNotice === true && win.lateMinutes === 10;
+      report(25, ok, ok ? 'T+10 sin aviso permitida' : `allowed=${win.allowed} lateNoNotice=${win.lateNoNotice} min=${win.lateMinutes}`);
     }
 
     // Caso 26 — RET convocado sin fichar → CONVOCADO_NO_LLEGO + relanzar (Auto)
@@ -2070,6 +2071,131 @@ async function run() {
       report(50, ok, ok
         ? `segundo hueco rechazado (${after?.rejectionReason})`
         : `ok=${result.ok} st=${after?.status} reason=${after?.rejectionReason}`);
+    }
+
+    // Caso 51 — sin aviso, fichada T+16 permitida + novedad LLEGADA_TARDE (sin duplicar).
+    {
+      const prefix = `${runId}_c51`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 28, 16, 0);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        employeeName: 'Gaitan Ignacio',
+        objectiveId: `${prefix}_obj`,
+        objectiveName: 'Objetivo',
+        positionName: 'P1',
+        code: 'ESC',
+        startTime: start,
+        endTime: tsAt(2026, 9, 29, 0, 0),
+        status: 'PENDING',
+      });
+      const at16 = start.toMillis() + 16 * 60 * 1000;
+      const win = evaluateServerCheckInWindow(
+        (await db.collection('turnos').doc(shiftId).get()).data(),
+        at16,
+        { source: 'PORTAL_GPS' },
+      );
+      const recordedAt = new Date(at16).toISOString();
+      await registrarPresencia(db, { shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e`, recordedAt });
+      await registrarPresencia(db, { shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e`, recordedAt });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).get();
+      const lt = nov.docs.filter((d) => d.data()?.type === 'LLEGADA_TARDE');
+      const ok =
+        win.allowed === true
+        && win.lateNoNotice === true
+        && win.lateMinutes === 16
+        && sh?.isPresent === true
+        && lt.length === 1
+        && lt[0].data()?.lateMinutes === 16;
+      report(51, ok, ok
+        ? 'T+16 sin aviso presente + LLEGADA_TARDE'
+        : `allowed=${win.allowed} lateNoNotice=${win.lateNoNotice} min=${win.lateMinutes} present=${sh?.isPresent} nov=${lt.length}`);
+    }
+
+    // Caso 52 — sin aviso, T+31 rechazada (sigue AUTO_T30 / TOO_LATE).
+    {
+      const prefix = `${runId}_c52`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 28, 16, 0);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        employeeName: 'Gaitan Ignacio',
+        objectiveId: `${prefix}_obj`,
+        positionName: 'P1',
+        code: 'ESC',
+        startTime: start,
+        endTime: tsAt(2026, 9, 29, 0, 0),
+        status: 'PENDING',
+      });
+      const at31 = start.toMillis() + 31 * 60 * 1000;
+      const win = evaluateServerCheckInWindow(
+        (await db.collection('turnos').doc(shiftId).get()).data(),
+        at31,
+        { source: 'PORTAL_GPS' },
+      );
+      let threw = '';
+      try {
+        await registrarPresencia(db, {
+          shiftId,
+          source: 'PORTAL_GPS',
+          empId: `${prefix}_e`,
+          recordedAt: new Date(at31).toISOString(),
+        });
+      } catch (e) {
+        threw = (e && e.message) || '';
+      }
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = win.allowed === false && win.rejectCode === 'TOO_LATE' && threw === 'TOO_LATE' && sh?.isPresent !== true;
+      report(52, ok, ok ? 'T+31 sin aviso rechazada' : `code=${win.rejectCode} threw=${threw} present=${sh?.isPresent}`);
+    }
+
+    // Caso 53 — con aviso (ETA) T+16 sigue la ventana del aviso: permitida, sin lateNoNotice ni LLEGADA_TARDE.
+    {
+      const prefix = `${runId}_c53`;
+      const shiftId = `${prefix}_sh`;
+      const start = tsAt(2026, 9, 28, 16, 0);
+      const etaAt = Timestamp.fromMillis(start.toMillis() + 45 * 60 * 1000);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        employeeName: 'Gaitan Ignacio',
+        objectiveId: `${prefix}_obj`,
+        objectiveName: 'Objetivo',
+        positionName: 'P1',
+        code: 'ESC',
+        startTime: start,
+        endTime: tsAt(2026, 9, 29, 0, 0),
+        status: 'PENDING',
+        lateArrivalAt: Timestamp.fromMillis(start.toMillis() - 10 * 60 * 1000),
+        lateArrivalEtaMinutes: 45,
+        lateArrivalEtaAt: etaAt,
+      });
+      const at16 = start.toMillis() + 16 * 60 * 1000;
+      const win = evaluateServerCheckInWindow(
+        (await db.collection('turnos').doc(shiftId).get()).data(),
+        at16,
+        { source: 'PORTAL_GPS' },
+      );
+      await registrarPresencia(db, {
+        shiftId,
+        source: 'PORTAL_GPS',
+        empId: `${prefix}_e`,
+        recordedAt: new Date(at16).toISOString(),
+      });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).get();
+      const lt = nov.docs.filter((d) => d.data()?.type === 'LLEGADA_TARDE');
+      const ok =
+        win.allowed === true
+        && win.lateNoNotice !== true
+        && sh?.isPresent === true
+        && lt.length === 0;
+      report(53, ok, ok
+        ? 'con aviso T+16 presente, sin novedad LLEGADA_TARDE'
+        : `allowed=${win.allowed} lateNoNotice=${win.lateNoNotice} present=${sh?.isPresent} nov=${lt.length}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);
