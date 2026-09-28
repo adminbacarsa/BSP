@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.rebuildOpenMonthAllEmpresas = exports.runDueLedgerDirty = exports.markLedgerDirty = exports.rebuildHoursLedger = exports.parsePeriod = void 0;
+exports.rebuildOpenMonthAllEmpresas = exports.personaOfMonth = exports.rollupStoredMonth = exports.rebuildObjectives = exports.runDueLedgerDirty = exports.markLedgerDirty = exports.rebuildHoursLedger = exports.parsePeriod = void 0;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const bundledEngine_1 = require("./bundledEngine");
@@ -46,7 +46,7 @@ function publishMap(docs) {
 function docId(parts) {
     return parts.join('_').replace(/[/\s#?[\]]+/g, '_').slice(0, 700);
 }
-async function loadMonth(empresaId, year, month) {
+async function loadMonth(empresaId, year, month, opts) {
     const db = admin.firestore();
     const start = new Date(`${year}-${pad(month)}-01T00:00:00.000-03:00`);
     const endDay = new Date(year, month, 0).getDate();
@@ -83,6 +83,9 @@ async function loadMonth(empresaId, year, month) {
         ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
         publishStatusMap: publishMap(planifSnap.docs),
         empNameById,
+        onlyObjectiveIds: opts?.objectiveIds,
+        skipPersona: opts?.skipPersona === true,
+        includeUnscopedPaidAbsences: opts?.includeUnscopedPaidAbsences,
     });
     return built;
 }
@@ -187,30 +190,177 @@ exports.markLedgerDirty = markLedgerDirty;
 async function runDueLedgerDirty(limit = 20) {
     const db = admin.firestore();
     const snap = await db.collection('hours_ledger_dirty').where('dueAt', '<=', firestore_1.Timestamp.now()).limit(limit).get();
-    const seen = new Set();
+    if (snap.empty)
+        return { processed: 0, months: 0 };
+    const groups = new Map();
     for (const d of snap.docs) {
         const data = d.data();
-        const key = `${data.empresaId}|${data.periodKey}`;
-        if (!seen.has(key)) {
-            seen.add(key);
-            await rebuildHoursLedger({ empresaId: String(data.empresaId), period: String(data.periodKey), dryRun: false });
-        }
-        await d.ref.delete();
+        const empresaId = String(data.empresaId || '');
+        const period = String(data.periodKey || '');
+        const key = `${empresaId}|${period}`;
+        const g = groups.get(key) || { empresaId, period, ids: new Set(), full: false, refs: [] };
+        const oid = String(data.objectiveId || '');
+        if (!oid || oid === '_empresa')
+            g.full = true;
+        else
+            g.ids.add(oid);
+        g.refs.push(d.ref);
+        groups.set(key, g);
     }
-    return { processed: snap.size, months: seen.size };
+    for (const g of groups.values()) {
+        if (g.full || g.ids.size === 0) {
+            const { enqueueHoursLedgerJob } = await Promise.resolve().then(() => require('./hoursLedgerJob'));
+            await enqueueHoursLedgerJob({ empresaId: g.empresaId, period: g.period, dryRun: false, createdBy: 'sucio' });
+        }
+        else {
+            await rebuildObjectives({
+                empresaId: g.empresaId,
+                period: g.period,
+                objectiveIds: [...g.ids],
+                dryRun: false,
+            });
+            await rollupStoredMonth(g.empresaId, g.period);
+        }
+        for (const ref of g.refs)
+            await ref.delete();
+    }
+    const { stepHoursLedgerJob } = await Promise.resolve().then(() => require('./hoursLedgerJob'));
+    const stuck = await db.collection('hours_ledger_jobs').where('status', 'in', ['QUEUED', 'RUNNING']).limit(3).get();
+    for (const d of stuck.docs) {
+        const lock = typeof d.data().lockUntil?.toMillis === 'function' ? d.data().lockUntil.toMillis() : 0;
+        if (lock < Date.now())
+            await stepHoursLedgerJob(d.id);
+    }
+    return { processed: snap.size, months: groups.size };
 }
 exports.runDueLedgerDirty = runDueLedgerDirty;
-async function rebuildOpenMonthAllEmpresas() {
-    const db = admin.firestore();
-    const ar = arParts();
-    const period = `${ar.year}-${pad(ar.month)}`;
-    const empresas = await db.collection('empresas').get();
-    const done = [];
-    for (const e of empresas.docs) {
-        await rebuildHoursLedger({ empresaId: e.id, period, dryRun: false });
-        done.push(e.id);
+async function rebuildObjectives(opts) {
+    const empresaId = String(opts.empresaId || '').trim();
+    const ids = [...new Set(opts.objectiveIds.map((id) => String(id || '').trim()).filter(Boolean))];
+    const { year, month, periodKey } = parsePeriod(opts.period || '');
+    const dryRun = opts.dryRun !== false;
+    const built = await loadMonth(empresaId, year, month, {
+        objectiveIds: ids,
+        skipPersona: true,
+        includeUnscopedPaidAbsences: opts.includeUnscopedPaidAbsences === true,
+    });
+    const objectives = built.monthly.filter((m) => m.level === 'objetivo');
+    const now = new Date().toISOString();
+    const dayRows = built.days.map((d) => {
+        const id = docId([empresaId, d.objectiveId, d.puestoId, d.date]);
+        return { id, data: { ...d, id, updatedAt: now } };
+    });
+    const monthRows = objectives.map((m) => {
+        const id = docId([empresaId, 'obj', m.objectiveId, periodKey]);
+        return { id, data: { ...m, id, updatedAt: now } };
+    });
+    if (!dryRun) {
+        await preserveWorked(monthRows);
+        await commitWrites(dayRows.map((r) => ({ ref: admin.firestore().collection(DAY_COL).doc(r.id), data: r.data })));
+        await commitWrites(monthRows.map((r) => ({ ref: admin.firestore().collection(MONTH_COL).doc(r.id), data: r.data })));
     }
-    return { period, empresas: done };
+    return { periodKey, objectives, days: built.days, dryRun };
+}
+exports.rebuildObjectives = rebuildObjectives;
+async function preserveWorked(monthRows) {
+    const db = admin.firestore();
+    for (let i = 0; i < monthRows.length; i += 100) {
+        const slice = monthRows.slice(i, i + 100);
+        const prev = await db.getAll(...slice.map((r) => db.collection(MONTH_COL).doc(r.id)));
+        prev.forEach((snap, idx) => {
+            if (!snap.exists)
+                return;
+            const worked = Number(snap.data()?.worked) || 0;
+            if (worked > 0)
+                slice[idx].data.worked = worked;
+        });
+    }
+}
+async function rollupStoredMonth(empresaId, periodKey) {
+    const db = admin.firestore();
+    const snap = await db.collection(MONTH_COL).where('empresaId', '==', empresaId).where('periodKey', '==', periodKey).get();
+    const objectives = snap.docs.map((d) => d.data()).filter((d) => d.level === 'objetivo');
+    const prevEmpresa = snap.docs.find((d) => d.data().level === 'empresa')?.data();
+    const now = new Date().toISOString();
+    const blank = () => ({
+        slaActive: 0, slaInactive: 0, slaClosed: 0, planPublished: 0, planDraft: 0, worked: 0,
+        covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
+    });
+    const keys = Object.keys(blank());
+    const add = (a, b) => {
+        for (const k of keys)
+            a[k] = Math.round(((Number(a[k]) || 0) + (Number(b[k]) || 0)) * 10) / 10;
+    };
+    const byClient = new Map();
+    const empresa = blank();
+    for (const m of objectives) {
+        add(empresa, m);
+        const cid = String(m.clientId || '_sin_cliente');
+        let c = byClient.get(cid);
+        if (!c) {
+            c = {
+                empresaId, periodKey, level: 'cliente', clientId: m.clientId || '', clientName: m.clientName || 'Sin cliente',
+                objectiveId: '', objectiveName: '', hoursCoreEnabled: prevEmpresa?.hoursCoreEnabled === true, ...blank(),
+            };
+            byClient.set(cid, c);
+        }
+        add(c, m);
+    }
+    empresa.worked = Number(prevEmpresa?.worked) || empresa.worked;
+    const empresaIdDoc = docId([empresaId, 'empresa', periodKey]);
+    const rows = [
+        {
+            id: empresaIdDoc,
+            data: {
+                empresaId, periodKey, level: 'empresa', clientId: '', clientName: '', objectiveId: '', objectiveName: '',
+                hoursCoreEnabled: prevEmpresa?.hoursCoreEnabled === true, ...empresa, id: empresaIdDoc, updatedAt: now,
+            },
+        },
+        ...[...byClient.entries()].map(([cid, c]) => {
+            const id = docId([empresaId, 'cli', cid === '_sin_cliente' ? 'sin' : cid, periodKey]);
+            return { id, data: { ...c, id, updatedAt: now } };
+        }),
+    ];
+    await commitWrites(rows.map((r) => ({ ref: db.collection(MONTH_COL).doc(r.id), data: r.data })));
+    const keep = new Set([...rows.map((r) => r.id), ...snap.docs.filter((d) => d.data().level === 'objetivo').map((d) => d.id)]);
+    await deleteStale(MONTH_COL, empresaId, periodKey, keep);
+}
+exports.rollupStoredMonth = rollupStoredMonth;
+async function personaOfMonth(empresaId, period) {
+    const { year, month } = parsePeriod(period);
+    const db = admin.firestore();
+    const start = new Date(`${year}-${pad(month)}-01T00:00:00.000-03:00`);
+    const endDay = new Date(year, month, 0).getDate();
+    const end = new Date(`${year}-${pad(month)}-${pad(endDay)}T23:59:59.999-03:00`);
+    const [empresaSnap, empSnap, ausSnap, planifSnap, turnosSnap] = await Promise.all([
+        db.collection('empresas').doc(empresaId).get(),
+        db.collection('empleados').where('empresaId', '==', empresaId).get(),
+        db.collection('ausencias').where('empresaId', '==', empresaId).get(),
+        db.collection('planificacion_estados').where('empresaId', '==', empresaId).get(),
+        db.collection('turnos').where('empresaId', '==', empresaId).where('startTime', '>=', firestore_1.Timestamp.fromDate(start)).where('startTime', '<=', firestore_1.Timestamp.fromDate(end)).get(),
+    ]);
+    const empNameById = {};
+    empSnap.docs.forEach((d) => {
+        const e = d.data();
+        const st = String(e.status || '').toLowerCase();
+        if (st === 'inactive' || st === 'inactivo')
+            return;
+        empNameById[d.id] = String(e.nombre || e.name || e.displayName || d.id);
+    });
+    return (0, bundledEngine_1.personaMonthWorked)({
+        turnos: turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+        publishStatusMap: publishMap(planifSnap.docs),
+        year,
+        month,
+        hoursCoreEnabled: empresaSnap.data()?.hoursCoreEnabled === true,
+        empNameById,
+    });
+}
+exports.personaOfMonth = personaOfMonth;
+async function rebuildOpenMonthAllEmpresas() {
+    const { enqueueOpenMonthAllEmpresas } = await Promise.resolve().then(() => require('./hoursLedgerJob'));
+    return enqueueOpenMonthAllEmpresas();
 }
 exports.rebuildOpenMonthAllEmpresas = rebuildOpenMonthAllEmpresas;
 //# sourceMappingURL=rebuildHoursLedger.js.map

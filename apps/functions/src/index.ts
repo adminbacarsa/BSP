@@ -4421,7 +4421,8 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
 
 /**
  * Libro de horas (H2a). No escribe hours_balances.
- * Debounce: cada cambio deja hours_ledger_dirty con dueAt +2 min; el cron de 10 min rearma el mes.
+ * Debounce: cada cambio deja hours_ledger_dirty (objetivo + período, dueAt +2 min).
+ * El cron de 10 min recalcula solo esos objetivos. El nocturno encola el mes por tandas.
  */
 function ledgerSourceData(event: { data?: { after?: { exists: boolean; data: () => Record<string, unknown> }; before?: { exists: boolean; data: () => Record<string, unknown> } } }) {
   const after = event.data?.after?.exists ? event.data.after.data() : undefined;
@@ -4524,9 +4525,36 @@ export const rebuildHoursLedger = functions.https.onCall(async (data, context) =
   if (!panel.isSuperAdmin && !panel.allEmpresas && panel.empresaId && panel.empresaId !== empresaId) {
     throw new functions.https.HttpsError('permission-denied', 'Empresa no permitida.');
   }
-  const { rebuildHoursLedger: run } = await import('./hoursLedger/rebuildHoursLedger');
-  return run({ empresaId, period, dryRun });
+  if (data?.retry && data?.jobId) {
+    const { retryHoursLedgerJob } = await import('./hoursLedger/hoursLedgerJob');
+    return retryHoursLedgerJob(String(data.jobId));
+  }
+  if (data?.sync === true) {
+    const { rebuildHoursLedger: run } = await import('./hoursLedger/rebuildHoursLedger');
+    return run({ empresaId, period, dryRun });
+  }
+  const { enqueueHoursLedgerJob } = await import('./hoursLedger/hoursLedgerJob');
+  const who = String(context.auth.token?.name || context.auth.token?.email || context.auth.uid);
+  return enqueueHoursLedgerJob({
+    empresaId,
+    period,
+    dryRun,
+    createdBy: who,
+    uid: context.auth.uid,
+    force: data?.force === true,
+  });
 });
+
+export const processHoursLedgerJob = onDocumentWrittenV2(
+  { document: 'hours_ledger_jobs/{jobId}', region: 'us-central1', timeoutSeconds: 300, memory: '1GiB' },
+  async (event) => {
+    if (!event.data?.after?.exists) return;
+    const status = String(event.data.after.data()?.status || '');
+    if (status === 'DONE' || status === 'ERROR') return;
+    const { stepHoursLedgerJob } = await import('./hoursLedger/hoursLedgerJob');
+    await stepHoursLedgerJob(event.params.jobId);
+  },
+);
 
 function db() {
   return admin.firestore();

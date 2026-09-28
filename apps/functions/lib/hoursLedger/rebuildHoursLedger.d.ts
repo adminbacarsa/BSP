@@ -29,7 +29,24 @@ export declare function runDueLedgerDirty(limit?: number): Promise<{
     processed: number;
     months: number;
 }>;
+export declare function rebuildObjectives(opts: {
+    empresaId: string;
+    period?: string;
+    objectiveIds: string[];
+    dryRun?: boolean;
+    includeUnscopedPaidAbsences?: boolean;
+}): Promise<{
+    periodKey: string;
+    objectives: any[];
+    days: any[];
+    dryRun: boolean;
+}>;
+export declare function rollupStoredMonth(empresaId: string, periodKey: string): Promise<void>;
+export declare function personaOfMonth(empresaId: string, period: string): Promise<{
+    worked: number;
+    weights: Record<string, number>;
+}>;
 export declare function rebuildOpenMonthAllEmpresas(): Promise<{
     period: string;
-    empresas: string[];
+    jobs: string[];
 }>;
