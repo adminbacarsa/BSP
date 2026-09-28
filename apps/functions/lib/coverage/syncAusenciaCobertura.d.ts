@@ -66,5 +66,11 @@ export type ApplyCoverageParams = {
     extensionEndTime?: admin.firestore.Timestamp | null;
     adjustedStartTime?: admin.firestore.Timestamp | null;
     coveredByLabel?: string | null;
+    preserveSiblingOpsCov?: boolean;
 };
 export declare function applyCoverage(db: admin.firestore.Firestore, batch: admin.firestore.WriteBatch, params: ApplyCoverageParams): Promise<string>;
+export declare function clearTitularCoveragePatch(): Record<string, unknown>;
+export declare function anularOpsCoverageLeg(db: admin.firestore.Firestore, batch: admin.firestore.WriteBatch, opts: {
+    opsCovId: string;
+    reason: string;
+}): Promise<void>;

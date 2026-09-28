@@ -15,6 +15,8 @@ exports.isActiveOpsCoverageDoc = isActiveOpsCoverageDoc;
 exports.supersedeOpsCoveragesForAbsence = supersedeOpsCoveragesForAbsence;
 exports.opsCoverageLinkFields = opsCoverageLinkFields;
 exports.applyCoverage = applyCoverage;
+exports.clearTitularCoveragePatch = clearTitularCoveragePatch;
+exports.anularOpsCoverageLeg = anularOpsCoverageLeg;
 const admin = require("firebase-admin");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
 const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
@@ -264,10 +266,11 @@ async function applyCoverage(db, batch, params) {
         }
     }
     const dualLeg = ctEarly === 'EXTEND' || ctEarly === 'ADVANCE';
+    const onlySupersedeCoverageType = params.preserveSiblingOpsCov || dualLeg ? ctEarly : null;
     await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
         keepDocId: covDocId,
         supersededBy: params.convocatoriaId || params.resolvedBy,
-        onlySupersedeCoverageType: dualLeg ? ctEarly : null,
+        onlySupersedeCoverageType,
     });
     const linkFields = opsCoverageLinkFields(titular, titularId);
     let bandCode;
@@ -298,9 +301,10 @@ async function applyCoverage(db, batch, params) {
             throw new CoverageApplyError('NOT_FOUND', 'Turno origen no encontrado');
         }
         const srcData = srcSnap.data();
-        const sameCovOnSource = String(srcData.coverageDocId || '').trim() === covDocId
+        const linkedToThis = String(srcData.coverageDocId || '').trim() === covDocId;
+        const sameCovOnSource = linkedToThis
             && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
-        if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
+        if (['REF', 'ESC', 'RET'].includes(ct) && !linkedToThis) {
             const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
             if (!gap || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, gap)) {
                 throw new CoverageApplyError('INVALID_SOURCE', 'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.');
@@ -314,7 +318,16 @@ async function applyCoverage(db, batch, params) {
             coversEmployeeName: titular.employeeName || null,
             coversObjectiveName: titular.objectiveName || null,
         });
-        if (sameCovOnSource) {
+        const clearAdvanceMarkers = {
+            isEarlyStart: false,
+            adjustedStartTime: admin.firestore.FieldValue.delete(),
+            isExtended: false,
+            extensionEndTime: admin.firestore.FieldValue.delete(),
+            adjustedEndTime: admin.firestore.FieldValue.delete(),
+        };
+        const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
+        const franco = srcData.isFranco === true || ['F', 'FF', 'FP'].includes(srcCode);
+        if (sameCovOnSource && (ct === 'EXTEND' || ct === 'ADVANCE')) {
         }
         else if (ct === 'EXTEND' && params.extensionEndTime) {
             batch.update(db.collection('turnos').doc(sourceId), {
@@ -334,10 +347,30 @@ async function applyCoverage(db, batch, params) {
         else if (ct === 'ESC' || ct === 'REF') {
             batch.update(db.collection('turnos').doc(sourceId), buildEscRefSourceConvertedPatch(srcData, covDocId));
         }
+        else if (ct === 'FT') {
+            batch.update(db.collection('turnos').doc(sourceId), {
+                ...usedBase,
+                ...clearAdvanceMarkers,
+                isFranco: false,
+                isFrancoTrabajado: true,
+                code: 'FT',
+                ...(franco ? { comments: `Franco Trabajado (cobertura ${covDocId})` } : {}),
+            });
+        }
+        else if (ct === 'RET') {
+            batch.update(db.collection('turnos').doc(sourceId), {
+                ...usedBase,
+                ...clearAdvanceMarkers,
+            });
+        }
         else {
             batch.update(db.collection('turnos').doc(sourceId), usedBase);
         }
     }
+    const existingCovSnap = await db.collection('turnos').doc(covDocId).get();
+    const existingCov = existingCovSnap.exists ? existingCovSnap.data() : null;
+    const realStartMs = existingCov?.realStartTime?.toMillis?.() ?? 0;
+    const keepPresence = existingCov?.isPresent === true || realStartMs > 0;
     batch.set(db.collection('turnos').doc(covDocId), {
         employeeId: params.candidateEmployeeId,
         employeeName: params.candidateEmployeeName,
@@ -351,18 +384,20 @@ async function applyCoverage(db, batch, params) {
         type: ct === 'FT' ? 'FT' : bandCode,
         startTime: startTs,
         endTime: endTs,
-        status: 'PENDING',
         origin: 'OPERATIONS_COVERAGE',
         resolvedBy: params.resolvedBy,
         coverageType: ct,
         ...linkFields,
         sourceShiftId: sourceId || null,
-        isPresent: false,
-        isAwaitingCoverageCheckIn: ct !== 'EXTEND',
         coverageSuperseded: false,
-        ...(ct === 'EXTEND' || ct === 'ADVANCE' ? { coverageHoursOnSource: true } : {}),
+        coverageHoursOnSource: ct === 'EXTEND' || ct === 'ADVANCE',
         empresaId: empresaId || null,
-        createdAt: coverageServerTime(),
+        ...(keepPresence ? {} : {
+            status: 'PENDING',
+            isPresent: false,
+            isAwaitingCoverageCheckIn: ct !== 'EXTEND',
+        }),
+        ...(existingCov ? {} : { createdAt: coverageServerTime() }),
         ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     }, { merge: true });
     const closeMode = params.titularCloseMode ?? 'FULL';
@@ -390,5 +425,64 @@ async function applyCoverage(db, batch, params) {
         await releaseRetentionForAbsenceShift(db, titularId, params.resolvedBy || 'COVERAGE');
     }
     return covDocId;
+}
+function clearTitularCoveragePatch() {
+    const del = admin.firestore.FieldValue.delete();
+    return {
+        coverageType: del,
+        coverageStatus: del,
+        coverageDocId: del,
+        coveredByEmployeeId: del,
+        coveredByEmployeeName: del,
+        coveredAt: del,
+        operacionallyCovered: false,
+        coverageConvocatoriaId: del,
+        coverageClaimConvocatoriaId: del,
+    };
+}
+async function anularOpsCoverageLeg(db, batch, opts) {
+    const id = String(opts.opsCovId || '').trim();
+    const covSnap = await db.collection('turnos').doc(id).get();
+    if (!covSnap.exists)
+        throw new CoverageApplyError('NOT_FOUND', 'ops_cov no encontrado');
+    const cov = covSnap.data();
+    if (!isActiveOpsCoverageDoc(cov))
+        return;
+    batch.update(covSnap.ref, {
+        coverageSuperseded: true,
+        coverageSupersededAt: admin.firestore.FieldValue.serverTimestamp(),
+        coverageSupersededReason: opts.reason,
+        status: 'CANCELLED',
+    });
+    const titularId = String(cov.absenceShiftId || cov.coveredShiftId || '').trim();
+    const sourceId = String(cov.sourceShiftId || '').trim();
+    const siblingSnap = titularId
+        ? await db.collection('turnos').where('absenceShiftId', '==', titularId).limit(20).get()
+        : null;
+    const otherOnGap = (siblingSnap?.docs || []).filter((d) => d.id !== id && isActiveOpsCoverageDoc(d.data()));
+    if (titularId && otherOnGap.length === 0) {
+        batch.update(db.collection('turnos').doc(titularId), clearTitularCoveragePatch());
+    }
+    if (!sourceId)
+        return;
+    const srcSnap = await db.collection('turnos').doc(sourceId).get();
+    if (!srcSnap.exists)
+        return;
+    const src = srcSnap.data();
+    const bySource = await db.collection('turnos').where('sourceShiftId', '==', sourceId).limit(20).get();
+    const otherOnSource = bySource.docs.filter((d) => d.id !== id && isActiveOpsCoverageDoc(d.data()));
+    if (otherOnSource.length > 0) {
+        if (String(src.coverageDocId || '') === id) {
+            batch.update(srcSnap.ref, { coverageDocId: otherOnSource[0].id });
+        }
+        return;
+    }
+    if (String(src.coverageDocId || '') === id || src.coverageUsed === true) {
+        batch.update(srcSnap.ref, {
+            ...buildRestoreSourceShiftAfterCoveragePatch(src),
+            isEarlyStart: false,
+            adjustedStartTime: admin.firestore.FieldValue.delete(),
+        });
+    }
 }
 //# sourceMappingURL=syncAusenciaCobertura.js.map
