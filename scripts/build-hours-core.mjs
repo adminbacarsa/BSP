@@ -12,11 +12,12 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const pkgDir = path.join(repoRoot, 'packages', 'hours-core');
 const tsconfig = path.join(pkgDir, 'tsconfig.json');
 
+// El tsc de la raíz es TypeScript 6 y rechaza moduleResolution=node del paquete; primero el del paquete (5.x).
 const tscCandidates = [
-  path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
-  path.join(repoRoot, 'apps', 'web2', 'node_modules', 'typescript', 'bin', 'tsc'),
-  path.join(repoRoot, 'apps', 'functions', 'node_modules', 'typescript', 'bin', 'tsc'),
   path.join(pkgDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+  path.join(repoRoot, 'apps', 'functions', 'node_modules', 'typescript', 'bin', 'tsc'),
+  path.join(repoRoot, 'apps', 'web2', 'node_modules', 'typescript', 'bin', 'tsc'),
+  path.join(repoRoot, 'node_modules', 'typescript', 'bin', 'tsc'),
 ];
 const tscJs = tscCandidates.find((p) => fs.existsSync(p));
 if (!tscJs) {
