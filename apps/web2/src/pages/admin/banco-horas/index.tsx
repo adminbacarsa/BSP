@@ -284,7 +284,9 @@ export default function BancoHorasPage() {
     ['Trab. fuera', empresa?.workedOutside],
     ['Cubiertas', empresa?.covered],
     ['Descubiertas', empresa?.uncovered],
-    ['FT / EXT / ADV', (empresa?.ft || 0) + (empresa?.ext || 0) + (empresa?.adv || 0)],
+    ['FT', empresa?.ft],
+    ['EXT', empresa?.ext],
+    ['ADV', empresa?.adv],
     ['Novedades pagas', empresa?.novedadPaga],
   ] as const;
 

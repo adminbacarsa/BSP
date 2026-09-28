@@ -21,7 +21,8 @@ WriteBatch.prototype.commit = deny('batch');
 Firestore.prototype.runTransaction = deny('tx');
 Firestore.prototype.recursiveDelete = deny('recursiveDelete');
 
-const { buildLedgerMonth } = await import('./engineEntry.ts');
+const { buildLedgerMonth, personaMonthWorked } = await import('./engineEntry.ts');
+const { buildPersonaBook } = await import('../../packages/hours-core/src/index.ts');
 
 if (!admin.apps.length) {
   admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'comtroldata' });
@@ -182,6 +183,8 @@ console.log('BAD_OBJ', bad.length, 'BAD_CLIENT', badClient.length, 'BAD_DAY', ba
 if (Math.round(t.slaActive) !== 11309) throw new Error(`SLA del mes ${Math.round(t.slaActive)} != 11309`);
 if (Math.round(t.slaClosed) !== 32) throw new Error(`SLA cerrado ${Math.round(t.slaClosed)} != 32`);
 if (Math.abs((t.covered + t.uncovered) - t.slaActive) > 1) throw new Error('invariante empresa');
+const relief = built.monthly.filter((m) => m.level === 'objetivo').reduce((s, m) => s + (Number(m.reliefHours) || 0), 0);
+if (t.covered > t.worked + relief + 1) throw new Error(`cubiertas ${Math.round(t.covered)} > trabajadas ${Math.round(t.worked)} + relevo ${Math.round(relief)}`);
 if (bad.length || badClient.length || badDay.length) throw new Error('invariante grano');
 if (!(t.novedadPaga > 0)) throw new Error('novedad paga sigue en 0');
 if (!clients.length || clients.some((c) => c.level !== 'cliente')) throw new Error('sin rollup cliente');
@@ -192,7 +195,79 @@ const full = {
 for (const k of Object.keys(full) as (keyof typeof full)[]) {
   if (Math.abs(full[k] - chunk[k]) > 1) throw new Error(`tanda ${k} ${chunk[k]} != ${full[k]}`);
 }
-console.log('INVARIANT_OK', JSON.stringify(full));
+console.log('INVARIANT_OK', JSON.stringify({ ...full, worked: Math.round(t.worked), relief: Math.round(relief) }));
+const from = new Date('2026-09-01T00:00:00.000-03:00').getTime();
+const until = new Date('2026-09-28T23:59:59.999-03:00').getTime();
+const instant = (v: any) => {
+  if (!v) return null;
+  if (typeof v.toDate === 'function') return v.toDate().getTime();
+  if (typeof v.seconds === 'number') return v.seconds * 1000;
+  if (typeof v === 'string') { const n = new Date(v).getTime(); return Number.isNaN(n) ? null : n; }
+  return null;
+};
+const monthTurnos = turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+const rangeTurnos = monthTurnos.filter((t) => {
+  const ms = instant(t.startTime);
+  return ms != null && ms >= from && ms <= until;
+});
+const liq = buildPersonaBook({
+  turnos: rangeTurnos,
+  ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  publishStatusMap: publishMap(planifSnap.docs),
+  rangeStartYmd: '2026-09-01',
+  rangeEndYmd: '2026-09-28',
+  empNameById,
+  holidays: {},
+  usePlannedHours: false,
+  publishFilter: 'published',
+});
+const sumStats = (k: string) => liq.employees.reduce((s, e) => s + (Number((e.stats as any)[k]) || 0), 0);
+const liqFtByEmp = new Map<string, number>();
+for (const e of liq.employees) liqFtByEmp.set(e.employeeId, Number(e.stats.extra100) || 0);
+const persona = personaMonthWorked({
+  turnos: monthTurnos,
+  ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+  publishStatusMap: publishMap(planifSnap.docs),
+  year, month,
+  hoursCoreEnabled: empresaSnap.data()?.hoursCoreEnabled === true,
+  empNameById,
+});
+const bookFtByEmp = new Map<string, number>();
+for (const p of persona.parts) {
+  if (p.date < '2026-09-01' || p.date > '2026-09-28') continue;
+  bookFtByEmp.set(p.employeeId, (bookFtByEmp.get(p.employeeId) || 0) + p.ft);
+}
+let badEmp = 0;
+for (const [id, ft] of liqFtByEmp) {
+  if (Math.abs(ft - (bookFtByEmp.get(id) || 0)) > 0.2) badEmp += 1;
+}
+const days = built.days.filter((d) => d.date >= '2026-09-01' && d.date <= '2026-09-28');
+const book = {
+  ft: days.reduce((s, d) => s + d.ft, 0),
+  ext: days.reduce((s, d) => s + d.ext, 0),
+  adv: days.reduce((s, d) => s + d.adv, 0),
+  worked: days.reduce((s, d) => s + d.worked, 0),
+  workedOutside: days.reduce((s, d) => s + d.workedOutside, 0),
+};
+const row = (name: string, liquidacion: number, libro: number | null, nota: string) => ({
+  name, liquidacion: Math.round(liquidacion * 10) / 10, libro: libro == null ? null : Math.round(libro * 10) / 10, nota,
+});
+const table = [
+  row('Turnos', liq.employees.reduce((s, e) => s + e.shifts.length, 0), null, 'la liquidación cuenta turnos; el libro no'),
+  row('Hs. teóricas', sumStats('horasTeoricas'), t.planPublished, 'el libro muestra el plan publicado, no las teóricas'),
+  row('Hs. reales', sumStats('horasReales'), book.worked + book.workedOutside, 'reales = trabajadas en operación + fuera, días 1-28'),
+  row('Diurnas', sumStats('totalDiurnas'), null, 'no está en el libro'),
+  row('Nocturnas', sumStats('totalNocturnas'), null, 'no está en el libro'),
+  row('Al 50%', sumStats('extra50'), null, 'exceso sobre 200 h; no está en el libro'),
+  row('Al 100% (FT)', sumStats('extra100'), book.ft, 'misma fichada del motor'),
+  row('Plus feriado', sumStats('plusFeriado'), null, 'no está en el libro'),
+  row('EXT', liq.employees.reduce((s, e) => s + (Number(e.stats.desglose?.ext) || 0), 0), book.ext, 'desglose del motor'),
+  row('ADV', liq.employees.reduce((s, e) => s + (Number(e.stats.desglose?.adv) || 0), 0), book.adv, 'desglose del motor'),
+];
+console.log('RECONCILE', JSON.stringify(table, null, 2));
+console.log('FT_LEGAJOS', badEmp, 'de', liqFtByEmp.size);
+if (Math.abs(book.ft - sumStats('extra100')) > 1) throw new Error(`FT libro ${book.ft} != liquidación ${sumStats('extra100')}`);
+if (badEmp) throw new Error(`FT no cierra en ${badEmp} legajos`);
 console.log('BAD_OBJ', bad.length);
 for (const m of bad.slice(0, 15)) {
   console.log([

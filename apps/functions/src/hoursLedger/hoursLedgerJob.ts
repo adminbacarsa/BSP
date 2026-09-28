@@ -309,6 +309,30 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
       worked: row.worked, workedOutside: row.workedOutside,
     });
   }
+  const liq = new Map<string, { ft: number; ext: number; adv: number }>();
+  for (const p of persona.parts || []) {
+    const oid = String(p.objectiveId || '').trim();
+    if (!oid) continue;
+    const cur = liq.get(oid) || { ft: 0, ext: 0, adv: 0 };
+    cur.ft += p.ft || 0;
+    cur.ext += p.ext || 0;
+    cur.adv += p.adv || 0;
+    liq.set(oid, cur);
+  }
+  const r1 = (n: number) => Math.round(n * 10) / 10;
+  for (const m of objectives) {
+    const p = liq.get(String(m.objectiveId || ''));
+    if (p) {
+      m.ft = r1(p.ft);
+      m.ext = r1(p.ext);
+      m.adv = r1(p.adv);
+    }
+    const relief = Number(m.reliefHours) || 0;
+    if ((Number(m.slaActive) || 0) > 0 && Number(m.covered) > Number(m.worked) + relief + 0.05) {
+      m.covered = r1(Number(m.worked) + relief);
+      m.uncovered = r1(Math.max(0, Number(m.slaActive) - Number(m.covered)));
+    }
+  }
   const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
   const blank = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
   const add = (a: Record<string, number>, b: Record<string, any>) => {
@@ -353,7 +377,12 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
       const batch = db.batch();
       objectives.slice(i, i + 400).forEach((m) => {
         const id = [empresaId, 'obj', m.objectiveId, period].join('_').replace(/[/\s#?[\]]+/g, '_').slice(0, 700);
-        batch.set(db.collection('hours_ledger_monthly').doc(id), { worked: m.worked, workedOutside: m.workedOutside || 0, updatedAt: new Date().toISOString() }, { merge: true });
+        batch.set(db.collection('hours_ledger_monthly').doc(id), {
+          worked: m.worked, workedOutside: m.workedOutside || 0,
+          ft: m.ft || 0, ext: m.ext || 0, adv: m.adv || 0,
+          covered: m.covered || 0, uncovered: m.uncovered || 0,
+          updatedAt: new Date().toISOString(),
+        }, { merge: true });
       });
       await batch.commit();
     }

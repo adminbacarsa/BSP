@@ -45,6 +45,15 @@ export declare function rollupStoredMonth(empresaId: string, periodKey: string):
 export declare function personaOfMonth(empresaId: string, period: string): Promise<{
     worked: number;
     weights: Record<string, number>;
+    parts: {
+        employeeId: string;
+        objectiveId: string;
+        date: string;
+        worked: number;
+        ft: number;
+        ext: number;
+        adv: number;
+    }[];
 }>;
 export declare function rebuildOpenMonthAllEmpresas(): Promise<{
     period: string;

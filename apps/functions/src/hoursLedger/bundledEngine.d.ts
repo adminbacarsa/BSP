@@ -23,7 +23,11 @@ export function personaMonthWorked(input: {
   month: number;
   hoursCoreEnabled: boolean;
   empNameById: Record<string, string>;
-}): { worked: number; weights: Record<string, number> };
+}): {
+  worked: number;
+  weights: Record<string, number>;
+  parts: Array<{ employeeId: string; objectiveId: string; date: string; worked: number; ft: number; ext: number; adv: number }>;
+};
 
 export function buildLedgerMonth(input: {
   empresaId: string;
