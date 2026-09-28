@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
+import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -310,7 +311,8 @@ export function OperacionesMapPopup({
                       {refuerzoLabel}
                     </span>
                   )}
-                  {displayName}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
+                  <ShiftCodeBadge shift={shift} />
                 </span>
                 <span
                   style={{
@@ -340,11 +342,14 @@ export function OperacionesMapPopup({
                     fontSize: '10px',
                     color: '#64748b',
                     overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    minWidth: 0,
                   }}
                 >
-                  {shift.positionName || '—'}
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{shift.positionName || '—'}</span>
+                  <ShiftCodeBadge shift={shift} />
                 </span>
                 <span
                   style={{
