@@ -4,6 +4,7 @@ import {
   isCoverageHoursOnSourceShift,
   isOperationsCoverageShift,
   validateCheckInDistance,
+  checkInRejectMessage,
 } from './portalCheckIn';
 import type { Shift } from '@cosp/portal-types';
 import { isShiftVisibleToEmployee } from '../shifts/employeeShiftVisibility';
@@ -12,7 +13,7 @@ function shift(partial: Partial<Shift> & Pick<Shift, 'id'> & Record<string, unkn
   return partial as Shift;
 }
 
-describe('getCheckInTiming — ventanas CC', () => {
+describe('getCheckInTiming — ventanas CC (paridad server)', () => {
   const now = new Date('2026-09-14T18:00:00-03:00');
 
   it('detecta OPERATIONS_COVERAGE', () => {
@@ -31,6 +32,7 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(t.diffMinutes).toBe(120);
     expect(t.canCheckIn).toBe(false);
     expect(t.tooEarly).toBe(true);
+    expect(t.rejectCode).toBe('TOO_EARLY');
     expect(t.canNotifyLate).toBe(false);
   });
 
@@ -60,14 +62,14 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(t.lateWindow).toBe(true);
   });
 
-  it('con lateArrivalAt + etaMinutes: canCheckIn hasta min(inicio+eta, T+60)', () => {
+  it('con lateArrivalAt + lateArrivalEtaAt: canCheckIn hasta min(etaAt, T+60)', () => {
     const start = new Date('2026-09-14T17:50:00-03:00');
     const s = shift({
       id: 'late-eta',
       startTime: start,
       endTime: new Date('2026-09-15T01:50:00-03:00'),
       lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
-      etaMinutes: 30,
+      lateArrivalEtaAt: new Date(start.getTime() + 30 * 60_000),
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
@@ -75,7 +77,7 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(t.checkInDeadline?.getTime()).toBe(start.getTime() + 30 * 60_000);
   });
 
-  it('con lateArrivalConfirmed sin eta: ventana hasta T+30', () => {
+  it('con lateArrivalConfirmed sin etaAt: ventana hasta T+30 (paridad server)', () => {
     const start = new Date('2026-09-14T17:40:00-03:00');
     const s = shift({
       id: 'late-30',
@@ -87,6 +89,7 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(t.canCheckIn).toBe(true);
     const after = getCheckInTiming(s, new Date('2026-09-14T18:15:00-03:00'));
     expect(after.canCheckIn).toBe(false);
+    expect(after.rejectCode).toBe('TOO_LATE');
   });
 
   it('OPERATIONS_COVERAGE: desde inicio−15 hasta max(createdAt, inicio)+60', () => {
@@ -111,7 +114,7 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(late.canCheckIn).toBe(false);
   });
 
-  it('OPERATIONS_COVERAGE: si createdAt > start, el tope usa createdAt+60', () => {
+  it('OPERATIONS_COVERAGE: coverageCreatedAt si no hay createdAt', () => {
     const start = new Date('2026-09-14T17:00:00-03:00');
     const created = new Date('2026-09-14T17:30:00-03:00');
     const s = shift({
@@ -119,7 +122,7 @@ describe('getCheckInTiming — ventanas CC', () => {
       origin: 'OPERATIONS_COVERAGE',
       startTime: start,
       endTime: new Date('2026-09-15T01:00:00-03:00'),
-      createdAt: created,
+      coverageCreatedAt: created,
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
@@ -142,8 +145,6 @@ describe('getCheckInTiming — ventanas CC', () => {
   });
 
   it('ADV: si no llegó al adelanto, igual puede fichar en ventana propia T−15…T+5', () => {
-    // Adelanto 14:00 (ventana cierra 15:00); turno propio 20:00.
-    // now = 19:50 → fuera del adelanto, dentro de T−15 del propio.
     const s = shift({
       id: 'adv-own',
       startTime: new Date('2026-09-14T20:00:00-03:00'),
@@ -155,13 +156,12 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(atOwnWindow.canCheckIn).toBe(true);
     expect(atOwnWindow.canNotifyLate).toBe(true);
 
-    // Entre fin adelanto y apertura propia, pero dentro de T−60: no ficha, sí puede avisar.
     const between = getCheckInTiming(s, new Date('2026-09-14T19:20:00-03:00'));
     expect(between.canCheckIn).toBe(false);
     expect(between.canNotifyLate).toBe(true);
   });
 
-  it('ADV + lateArrivalAt: ventana propia extendida por eta sigue habilitada', () => {
+  it('ADV + lateArrivalEtaAt: ventana propia extendida', () => {
     const start = new Date('2026-09-14T17:50:00-03:00');
     const s = shift({
       id: 'adv-late',
@@ -170,13 +170,13 @@ describe('getCheckInTiming — ventanas CC', () => {
       isEarlyStart: true,
       adjustedStartTime: '12:00',
       lateArrivalAt: new Date('2026-09-14T17:40:00-03:00'),
-      etaMinutes: 30,
+      lateArrivalEtaAt: new Date(start.getTime() + 30 * 60_000),
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
   });
 
-  it('coverageHoursOnSource: no fichable (registro EXT/ADV)', () => {
+  it('coverageHoursOnSource / coverageType EXTEND|ADVANCE: no fichable', () => {
     const s = shift({
       id: 'reg1',
       origin: 'OPERATIONS_COVERAGE',
@@ -188,8 +188,33 @@ describe('getCheckInTiming — ventanas CC', () => {
     expect(isCoverageHoursOnSourceShift(s)).toBe(true);
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(false);
-    expect(t.canNotifyLate).toBe(false);
+    expect(t.rejectCode).toBe('TRACE_REGISTRATION');
+    expect(t.rejectMessage).toBe(checkInRejectMessage('TRACE_REGISTRATION'));
     expect(isShiftVisibleToEmployee(s as never, new Set(['any']))).toBe(false);
+
+    const byType = shift({
+      id: 'reg2',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'ADVANCE',
+      startTime: new Date('2026-09-14T18:00:00-03:00'),
+      endTime: new Date('2026-09-15T02:00:00-03:00'),
+    });
+    expect(isCoverageHoursOnSourceShift(byType)).toBe(true);
+    expect(getCheckInTiming(byType, now).rejectCode).toBe('TRACE_REGISTRATION');
+  });
+
+  it('SHIFT_ENDED: mensaje claro; retenido no ficha', () => {
+    const s = shift({
+      id: 'ended',
+      isRetention: true,
+      isPresent: true,
+      startTime: new Date('2026-09-14T06:00:00-03:00'),
+      endTime: new Date('2026-09-14T14:00:00-03:00'),
+    });
+    const t = getCheckInTiming(s, now);
+    expect(t.canCheckIn).toBe(false);
+    expect(t.rejectCode).toBe('SHIFT_ENDED');
+    expect(t.rejectMessage).toMatch(/terminó/i);
   });
 
   it('ausente: no puede fichar', () => {
@@ -202,6 +227,7 @@ describe('getCheckInTiming — ventanas CC', () => {
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(false);
+    expect(t.rejectCode).toBe('ABSENT');
     expect(t.canNotifyLate).toBe(false);
   });
 });

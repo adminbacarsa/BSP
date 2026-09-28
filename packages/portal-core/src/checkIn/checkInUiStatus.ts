@@ -10,7 +10,10 @@ export type CheckInUiStatus =
   | 'rejected'
   | 'present'
   | 'late_notified'
-  | 'late_window';
+  | 'late_window'
+  | 'shift_ended'
+  | 'trace_registration'
+  | 'blocked';
 
 export type CheckInUiStatusView = {
   status: CheckInUiStatus;
@@ -111,6 +114,34 @@ export function resolveCheckInUiStatus(
     };
   }
 
+  // Rechazos de ventana alineados al servidor (prioridad sobre late/ready).
+  if (timing?.rejectCode === 'TRACE_REGISTRATION') {
+    return {
+      status: 'trace_registration',
+      title: 'Registro de extensión/adelanto',
+      subtitle: timing.rejectMessage ?? 'No se ficha este turno; ficha el propio.',
+      tone: 'neutral',
+    };
+  }
+
+  if (timing?.rejectCode === 'SHIFT_ENDED') {
+    return {
+      status: 'shift_ended',
+      title: 'Turno terminado',
+      subtitle: timing.rejectMessage ?? 'El turno ya terminó; no se puede fichar.',
+      tone: 'neutral',
+    };
+  }
+
+  if (timing?.rejectCode === 'ABSENT') {
+    return {
+      status: 'blocked',
+      title: 'Turno ausente',
+      subtitle: timing.rejectMessage ?? 'No se puede fichar.',
+      tone: 'danger',
+    };
+  }
+
   if (shift.lateArrivalAt || (shift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed) {
     const deadline = timing?.checkInDeadline;
     const until =
@@ -127,13 +158,13 @@ export function resolveCheckInUiStatus(
 
   const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
 
-  if (timing?.tooEarly) {
+  if (timing?.tooEarly || timing?.rejectCode === 'TOO_EARLY') {
     return {
       status: 'too_early',
       title: 'Aún no podés fichar',
-      subtitle: timing.canNotifyLate
+      subtitle: timing?.canNotifyLate
         ? 'Disponible desde 15 min antes · podés avisar llegada tarde'
-        : 'Disponible desde 15 min antes del inicio',
+        : timing?.rejectMessage ?? 'Disponible desde 15 min antes del inicio',
       tone: 'neutral',
     };
   }
@@ -144,7 +175,7 @@ export function resolveCheckInUiStatus(
       title: timing.canNotifyLate ? 'Podés avisar llegada tarde' : 'Fuera de ventana de fichada',
       subtitle: timing.canNotifyLate
         ? 'Indicá demora de 15, 30 o 60 min'
-        : 'Contactá a operaciones si hace falta',
+        : timing.rejectMessage ?? 'Contactá a operaciones si hace falta',
       tone: 'warning',
     };
   }
@@ -159,6 +190,24 @@ export function resolveCheckInUiStatus(
           ? 'Al llegar al objetivo, marcá presente con GPS'
           : 'Usá el botón con GPS en el puesto',
       tone: 'info',
+    };
+  }
+
+  if (timing?.rejectCode === 'TOO_LATE') {
+    return {
+      status: 'blocked',
+      title: 'Fuera de ventana de fichada',
+      subtitle: timing.rejectMessage ?? 'Contactá a operaciones si hace falta.',
+      tone: 'warning',
+    };
+  }
+
+  if (timing?.rejectMessage) {
+    return {
+      status: 'blocked',
+      title: 'No se puede fichar',
+      subtitle: timing.rejectMessage,
+      tone: 'neutral',
     };
   }
 
