@@ -225,6 +225,14 @@ service cloud.firestore {
       );
     }
 
+    // Portal guardia: hero e historial leen turnos con where employeeId == legajo o uid.
+    // Alertas no leen turnos (user_notifications). client_users siguen por clientId.
+    function employeeReadsOwnTurno(data) {
+      return request.auth != null
+        && data.get('employeeId', '') != ''
+        && empleadoDocOwnedByAuth(data.get('employeeId', ''));
+    }
+
     function eventoActivoReadable(data) {
       return data.status == 'activo' || data.status == 'abierto' || data.status == 'en_curso';
     }
@@ -271,7 +279,7 @@ service cloud.firestore {
 
     match /turnos/{shiftId} {
       allow read: if tenantAdminRead()
-        || (request.auth != null && !isAdmin())
+        || employeeReadsOwnTurno(resource.data)
         || clientUserMatchesTurno(resource.data);
       allow create: if tenantAdminCreate() && noRetiredCloseReasonCreate();
       allow update: if tenantAdminUpdate() && noRetiredCloseReasonUpdate();
