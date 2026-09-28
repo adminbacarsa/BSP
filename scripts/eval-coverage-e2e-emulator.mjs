@@ -1440,9 +1440,12 @@ async function run() {
       );
       report(
         35,
-        p1.phase === 'PLANNING_INBOX' && planNov.exists && p2.phase === 'CC_VACANCY' && !!p2.shiftId,
-        `p1=${p1.phase} p2=${p2.phase}`,
+        p1.phase === 'PLANNING_INBOX' && planNov.exists && p2.phase === 'CC_VACANCY' && p2.shiftId === `${gapId}_2`,
+        `p1=${p1.phase} p2=${p2.phase} shiftId=${p2.shiftId}`,
       );
+      const copied = await db.collection('turnos').where('origin', '==', 'SLA_UNPLANNED_GAP').limit(5).get();
+      const copiedThis = copied.docs.filter((d) => String(d.data()?.originRef || d.data()?.slaGapDocId || '').includes(prefix));
+      report(35.1, copiedThis.length === 0, `copias turnos SLA_UNPLANNED_GAP=${copiedThis.length}`);
     }
 
     // Caso 36 — FT applyCoverage (titular vacante + franco fuente)
@@ -2196,6 +2199,74 @@ async function run() {
       report(53, ok, ok
         ? 'con aviso T+16 presente, sin novedad LLEGADA_TARDE'
         : `allowed=${win.allowed} lateNoNotice=${win.lateNoNotice} present=${sh?.isPresent} nov=${lt.length}`);
+    }
+
+    // Caso 54 — una ausencia = solo el titular (sin hermano VACANTE_POR_AUSENCIA).
+    {
+      const { stampTitularAbsenceVacancyMark } = requireFn('./lib/notifications/onGuardAbsenceDetected.js');
+      const prefix = `${runId}_c54`;
+      const shiftId = `${prefix}_sh`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        employeeName: 'Ausente',
+        objectiveId: `${prefix}_obj`,
+        positionName: 'P1',
+        code: 'M',
+        isAbsent: true,
+        status: 'ABSENT',
+        startTime: Timestamp.now(),
+        endTime: Timestamp.fromMillis(Date.now() + 8 * 3600000),
+      });
+      const a = await stampTitularAbsenceVacancyMark(db, shiftId);
+      const b = await stampTitularAbsenceVacancyMark(db, shiftId);
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const vpa = await db.collection('turnos')
+        .where('causedByShiftId', '==', shiftId)
+        .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+        .get();
+      report(
+        54,
+        a === 'STAMPED' && b === 'SKIPPED' && vpa.empty && sh?.vacancyOrigin === 'ABSENCE',
+        `a=${a} b=${b} vpa=${vpa.size} origin=${sh?.vacancyOrigin}`,
+      );
+    }
+
+    // Caso 55 — carrera de trigger: una sola marca en el titular.
+    {
+      const { stampTitularAbsenceVacancyMark } = requireFn('./lib/notifications/onGuardAbsenceDetected.js');
+      const prefix = `${runId}_c55`;
+      const shiftId = `${prefix}_sh`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`,
+        employeeId: `${prefix}_e`,
+        isAbsent: true,
+        startTime: Timestamp.now(),
+        endTime: Timestamp.fromMillis(Date.now() + 8 * 3600000),
+      });
+      const raced = await Promise.all([
+        stampTitularAbsenceVacancyMark(db, shiftId),
+        stampTitularAbsenceVacancyMark(db, shiftId),
+        stampTitularAbsenceVacancyMark(db, shiftId),
+      ]);
+      const stamped = raced.filter((x) => x === 'STAMPED').length;
+      const vpa = await db.collection('turnos')
+        .where('causedByShiftId', '==', shiftId)
+        .where('origin', '==', 'VACANTE_POR_AUSENCIA')
+        .get();
+      report(55, stamped === 1 && vpa.empty, `stamped=${stamped} vpa=${vpa.size}`);
+    }
+
+    // Caso 56 — falta de plan = un solo id gap_ ; el pass no copia a turnos.
+    {
+      const { buildSlaUnplannedGapDocId } = requireFn('./lib/coverage/slaGapId.js');
+      const id1 = buildSlaUnplannedGapDocId({
+        empresaId: 'emp', objectiveId: 'obj', positionName: 'Puesto 1', dayYmd: '2026-09-28', bandCode: 'M',
+      });
+      const id2 = buildSlaUnplannedGapDocId({
+        empresaId: 'emp', objectiveId: 'obj', positionName: 'Puesto 1', dayYmd: '2026-09-28', bandCode: 'M',
+      });
+      report(56, id1 === id2 && String(id1).startsWith('gap_'), `id=${id1}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

@@ -161,7 +161,7 @@ onTurnoAbsenciaDetectada
 
 - **Trigger:** `resolverCobertura` o front Manual `confirmCandidate` / `confirmDualTogether`.
 - **PARTIAL:** `coverageStatus: PARTIAL`, `operacionallyCovered: false`; no cancela las demás convocatorias (FT incluidas). Auto llama `ensureMissingDualLegConvocatoria`.
-- **FULL:** COVERED; limpia `isSinCobertura`/`vacanteEscalada`; cierra `VACANTE_POR_AUSENCIA`; `releaseRetentionForAbsenceShift`; `ausencias.coberturaEstado: GESTIONADA`.
+- **FULL:** COVERED; limpia `isSinCobertura`/`vacanteEscalada`; cierra hermanos históricos `VACANTE_POR_AUSENCIA` si existen; `releaseRetentionForAbsenceShift`; `ausencias.coberturaEstado: GESTIONADA`.
 - **Origen source:** RET `coverageUsed`; REF/ESC soft-delete; EXTEND `isExtended`; ADVANCE `isEarlyStart`; EXT/ADV `coverageHoursOnSource: true`.
 - **Edges:** Titular ausencia real mantiene `isAbsent`/`ABSENT`. `ALREADY_COVERED` cancela conv.
 
@@ -220,7 +220,7 @@ onTurnoAbsenciaDetectada
 - **Callable:** `processEarlyWithdrawalCallable` → `processEarlyWithdrawal`.
 - **Policy:** &lt;2h + compañeros → NO_REPLACE; solo/&gt;3h → REPLACE; 2–3h → flag SLA `reemplazarRetiro2a3h` (null: Manual `OPERATOR_CHOICE`, Auto REPLACE).
 - **Cascada remanente:** solo Auto + !Manual; orden **sin EXTEND**; ADVANCE máx gap 4h.
-- Cierra saliente `EARLY_WITHDRAW`; ausencia parcial; vacante `origin: INTERRUPTION` si REPLACE; audit `BAJA_*`.
+- Cierra saliente `EARLY_WITHDRAW`; ausencia parcial; **sin** doc `INTERRUPTION`; cascada Auto sobre el **titular recortado** (`remainderShiftId` = id del titular, ventana `now`→fin planificado).
 
 **Archivos:** `earlyWithdrawalCore.ts`, `earlyWithdrawCascade.ts`, `earlyWithdrawPolicy.ts`
 
@@ -231,7 +231,7 @@ onTurnoAbsenciaDetectada
 - Vacantes `isUnassigned` o `employeeId==='VACANTE'`; ventana start [now−12h, now+4h]; planning no-ops solo si `planificacion_estados` publicado.
 - **Ya iniciada / T−1h:** protocolo + `VACANTE_PROTOCOLO_COBERTURA`; cascada si !Manual.
 - **T−3h:** `isReportedToPlanning` + `VACANTE_A_PLANIFICACION`.
-- Pases: `runDetectPublishedSlaGaps`, `runSlaUnplannedGapPass` (retención huecos SLA).
+- Pases: `runDetectPublishedSlaGaps` escribe **un** doc `sla_huecos_sin_plan` id `gap_{empresa}_{obj}_{puesto}_{yyyy-mm-dd}_{banda}`; `runSlaUnplannedGapPass` avanza fases **sin copiar a `turnos`**.
 
 **Archivos:** `index.ts` (`gestionarVacantes`), `slaUnplannedGapPass.ts`, `detectPublishedSlaGaps.ts`
 
@@ -364,7 +364,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 7. Timeout convocatoria 3 min → ESCALATED; primero que acepta gana (salvo dual).
 8. Cascada agotada → `escalarVacanteSinCobertura` (+ intento retención previo).
 9. CC off → sin cascada/novedades cobertura; el cierre automático corre igual en silencioso (tope 12:59 incluido).
-10. Elegibilidad: mismo objetivo, geo ~15 km (ampliable 30), solape source↔hueco, aptitudes.
+11. Un hueco = una fila: titular AA, o `sla_huecos_sin_plan/gap_*`, o titular recortado (retiro). No clonar a `VACANTE_POR_AUSENCIA` / `SLA_VIRTUAL` aleatorio.
 
 ---
 
@@ -378,7 +378,7 @@ Callables: `crearConvocatoriaCobertura`, `responderConvocatoriaCobertura`, `canc
 - [x] Candidatos únicos (`buildCoverageCandidates`) + revalidación al aceptar + PARTIAL no cancela
 - [ ] Prioridad EXT sobre retenido + segmentos HH:MM–HH:MM
 
-**Cerrado Fase 1–2:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12:59 con cierre único en server (P1), ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor.
+**Cerrado Fase 1–2 + P3:** escritor único, dual Ext+Adel, REF/ESC callable, retención backend, cascada bloqueada Manual, continuidad/tope 12:59 con cierre único en server (P1), ops_cov EXT/ADV excluidos, `markShiftAbsent` unificado, llegada tarde, fichada servidor, **una representación por hueco** (titular AA / `sla_huecos_sin_plan` `gap_*` / titular recortado; sin hermano `VACANTE_POR_AUSENCIA` ni copia `SLA_UNPLANNED_GAP` a `turnos`). Limpieza histórica: `scripts/dedupe-vacantes-hueco.mjs`.
 
 **E2E:** `node scripts/eval-coverage-e2e-emulator.mjs`
 
