@@ -5,6 +5,7 @@
   "scripts": {
     "predev": "node scripts/update-emulator-host.js",
     "dev": "next dev -p 3001 -H 0.0.0.0",
+    "prebuild": "node ../../scripts/build-hours-core.mjs",
     "build": "next build",
     "start": "next start",
     "eval:guard-capacity": "npx tsx scripts/eval-guard-capacity.ts",
