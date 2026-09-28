@@ -167,6 +167,23 @@
       ]
     },
     {
+      "collectionGroup": "hours_ledger",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "periodKey", "order": "ASCENDING" },
+        { "fieldPath": "objectiveId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "hours_ledger_monthly",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "periodKey", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "turnos",
       "queryScope": "COLLECTION",
       "fields": [

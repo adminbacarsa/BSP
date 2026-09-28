@@ -4396,3 +4396,116 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
     throw new functions.https.HttpsError('unavailable', e.message || 'Nominatim no disponible');
   }
 });
+
+/**
+ * Libro de horas (H2a). No escribe hours_balances.
+ * Debounce: cada cambio deja hours_ledger_dirty con dueAt +2 min; el cron de 10 min rearma el mes.
+ */
+function ledgerSourceData(event: { data?: { after?: { exists: boolean; data: () => Record<string, unknown> }; before?: { exists: boolean; data: () => Record<string, unknown> } } }) {
+  const after = event.data?.after?.exists ? event.data.after.data() : undefined;
+  const before = event.data?.before?.exists ? event.data.before.data() : undefined;
+  return after || before;
+}
+
+async function touchLedger(data: Record<string, unknown> | undefined, docId?: string) {
+  if (!data) return;
+  const { markLedgerDirty } = await import('./hoursLedger/rebuildHoursLedger');
+  const empresaId = String(data.empresaId || '').trim();
+  if (!empresaId) return;
+  let objectiveId = String(data.objectiveId || data.objetivoId || '').trim();
+  let periodKey: string | undefined;
+  const y = Number(data.year ?? data.año);
+  const m = Number(data.month ?? data.mes);
+  if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
+    periodKey = `${y}-${String(m).padStart(2, '0')}`;
+  }
+  const parsed = String(docId || '').match(/^(.*)_(\d{4})_(\d{1,2})$/);
+  if (parsed) {
+    if (!objectiveId) objectiveId = parsed[1];
+    if (!periodKey) periodKey = `${parsed[2]}-${String(Number(parsed[3])).padStart(2, '0')}`;
+  }
+  await markLedgerDirty({ empresaId, objectiveId, periodKey });
+}
+
+const ledgerTriggerOpts = {
+  region: 'us-central1' as const,
+  timeoutSeconds: 60,
+  memory: '256MiB' as const,
+};
+
+export const onTurnoWriteHoursLedger = onDocumentWrittenV2(
+  { document: 'turnos/{id}', ...ledgerTriggerOpts },
+  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+);
+export const onSlaWriteHoursLedger = onDocumentWrittenV2(
+  { document: 'servicios_sla/{id}', ...ledgerTriggerOpts },
+  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+);
+export const onPlanifWriteHoursLedger = onDocumentWrittenV2(
+  { document: 'planificacion_estados/{id}', ...ledgerTriggerOpts },
+  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+);
+export const onAusenciaWriteHoursLedger = onDocumentWrittenV2(
+  { document: 'ausencias/{id}', ...ledgerTriggerOpts },
+  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+);
+export const onClientWriteHoursLedger = onDocumentWrittenV2(
+  { document: 'clients/{id}', ...ledgerTriggerOpts },
+  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+);
+
+export const scheduledHoursLedgerDirty = onScheduleV2(
+  {
+    schedule: '*/10 * * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { runDueLedgerDirty } = await import('./hoursLedger/rebuildHoursLedger');
+    await runDueLedgerDirty(12);
+  },
+);
+
+export const scheduledHoursLedgerNightly = onScheduleV2(
+  {
+    schedule: '40 3 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 540,
+    memory: '1GiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const { rebuildOpenMonthAllEmpresas } = await import('./hoursLedger/rebuildHoursLedger');
+    await rebuildOpenMonthAllEmpresas();
+  },
+);
+
+export const rebuildHoursLedger = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const empresaId = String(data?.empresaId || '').trim();
+  const period = String(data?.period || '').trim();
+  const dryRun = data?.dryRun !== false;
+  const { resolvePanelUserForUid } = await import('./ops/staffPermissions');
+  const panel = await resolvePanelUserForUid(db(), context.auth.uid, context.auth.token?.role);
+  if (!panel) throw new functions.https.HttpsError('permission-denied', 'Usuario no autorizado.');
+  const canRead = panel.isSuperAdmin
+    || (panel.permissions.REPORTS || []).includes('read')
+    || (panel.permissions.ANALYSIS || []).includes('read');
+  if (!canRead) throw new functions.https.HttpsError('permission-denied', 'Se requiere lectura de Reportes o Análisis.');
+  if (!dryRun && !panel.isSuperAdmin) {
+    throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede guardar el libro.');
+  }
+  if (!panel.isSuperAdmin && !panel.allEmpresas && panel.empresaId && panel.empresaId !== empresaId) {
+    throw new functions.https.HttpsError('permission-denied', 'Empresa no permitida.');
+  }
+  const { rebuildHoursLedger: run } = await import('./hoursLedger/rebuildHoursLedger');
+  return run({ empresaId, period, dryRun });
+});
+
+function db() {
+  return admin.firestore();
+}

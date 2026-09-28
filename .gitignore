@@ -17,6 +17,8 @@ apps/web2/out_prod/
 apps/web2/public/app/
 # Generado por next.config.js en cada build (hash del commit publicado).
 apps/web2/public/version.json
+# Motor del libro: lo genera scripts/bundle-hours-ledger.mjs y se copia a functions/lib.
+apps/functions/src/hoursLedger/bundledEngine.js
 
 # --- Credenciales (nunca commitear) ---
 service-account.json
