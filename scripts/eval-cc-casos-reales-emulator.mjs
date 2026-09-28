@@ -169,12 +169,12 @@ async function undoExtAdvCoverage({ titularId, opsCovIds, sourceIds }) {
 async function resolveConvInUtc(convId) {
   const snap = await db.collection('convocatorias_cobertura').doc(convId).get();
   const prevTz = process.env.TZ;
+  const prevZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   process.env.TZ = 'UTC';
   try {
     await resolverCobertura(db, { id: convId, ...snap.data() });
   } finally {
-    if (prevTz === undefined) delete process.env.TZ;
-    else process.env.TZ = prevTz;
+    process.env.TZ = prevTz || prevZone || 'America/Argentina/Buenos_Aires';
   }
 }
 

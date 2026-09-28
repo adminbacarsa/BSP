@@ -1771,6 +1771,7 @@ async function run() {
       const titular = { ...s.titular, startTime: titStart, endTime: titEnd };
       const conv = { ...baseConvFields({ ...s, titular }) };
       const prevTz = process.env.TZ;
+      const prevZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
       process.env.TZ = 'UTC';
       try {
         await writeConvAndResolve({
@@ -1788,8 +1789,7 @@ async function run() {
           advanceShiftId: s.advSourceId,
         });
       } finally {
-        if (prevTz === undefined) delete process.env.TZ;
-        else process.env.TZ = prevTz;
+        process.env.TZ = prevTz || prevZone || 'America/Argentina/Buenos_Aires';
       }
       const hm = (t) => (t?.toMillis ? new Date(t.toMillis() - 3 * 3600000).toISOString().slice(11, 16) : '-');
       const opsExt = (await db.collection('turnos').doc(`ops_cov_${s.titularId}_${s.empExt}`).get()).data();

@@ -138,30 +138,39 @@ async function avanzarCascada(db, conv, reason) {
         resolved: false,
         createdAt: firestore_1.FieldValue.serverTimestamp(),
     });
+    const { extendShiftId: _prevExt, advanceShiftId: _prevAdv, candidateShiftId: _prevCand, ftShiftId: _prevFt, ...convRest } = conv;
     await crearConvocatoriaDoc(db, {
-        ...conv,
+        ...convRest,
         type: nextType,
         cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(nextType),
         candidateEmployeeId: candidate.id,
         candidateEmployeeName: candidate.name,
-        candidateUid: candidate.uid,
-        extendShiftId: candidate.extendShiftId,
-        advanceShiftId: candidate.advanceShiftId,
-        candidateShiftId: candidate.candidateShiftId,
+        ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
+        ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
+        ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
+        ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
         createdBy: 'AUTO',
     });
+}
+function withoutUndefined(data) {
+    const out = {};
+    for (const [key, value] of Object.entries(data)) {
+        if (value !== undefined)
+            out[key] = value;
+    }
+    return out;
 }
 async function crearConvocatoriaDoc(db, data) {
     const now = firestore_1.Timestamp.now();
     const timeoutAt = firestore_1.Timestamp.fromMillis(now.toMillis() + TIMEOUT_MINUTES * 60 * 1000);
     const urgency = (0, eligibilityFilter_1.getUrgency)(data.startTime);
-    const docData = {
+    const docData = withoutUndefined({
         ...data,
         urgency,
         status: 'PENDING',
         timeoutAt,
         createdAt: now,
-    };
+    });
     const ref = await db.collection('convocatorias_cobertura').add(docData);
     await crearNotifConvocatoria(db, { ...docData, id: ref.id });
     const typeLabel = {
@@ -243,9 +252,21 @@ async function extAdvSiblingAccepted(db, absenceShiftId, current) {
         .where('shiftId', '==', absenceShiftId)
         .where('type', '==', other)
         .where('status', '==', 'ACCEPTED')
-        .limit(1)
+        .limit(5)
         .get();
-    return !snap.empty;
+    if (snap.empty)
+        return false;
+    const { buildOpsCoverageDocId } = await Promise.resolve().then(() => require('./syncAusenciaCobertura'));
+    for (const d of snap.docs) {
+        const employeeId = String(d.data().candidateEmployeeId || '').trim();
+        if (!employeeId)
+            continue;
+        const ops = await db.collection('turnos').doc(buildOpsCoverageDocId(absenceShiftId, employeeId)).get();
+        const data = ops.data();
+        if (ops.exists && data?.coverageSuperseded !== true && data?.isDeleted !== true)
+            return true;
+    }
+    return false;
 }
 async function hasActiveConvocatoriaForType(db, shiftId, convType) {
     const [pending, escalated] = await Promise.all([
@@ -833,7 +854,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
             cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(type),
             candidateEmployeeId: candidate.id,
             candidateEmployeeName: candidate.name,
-            candidateUid: candidate.uid,
+            ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
             ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
             ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
             ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),

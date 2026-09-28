@@ -216,21 +216,42 @@ async function avanzarCascada(
     createdAt: FieldValue.serverTimestamp(),
   });
 
+  const {
+    extendShiftId: _prevExt,
+    advanceShiftId: _prevAdv,
+    candidateShiftId: _prevCand,
+    ftShiftId: _prevFt,
+    ...convRest
+  } = conv as ConvocatoriaCoberturaDoc & {
+    extendShiftId?: string;
+    advanceShiftId?: string;
+    candidateShiftId?: string;
+    ftShiftId?: string;
+  };
   await crearConvocatoriaDoc(db, {
-    ...conv,
+    ...convRest,
     type: nextType,
     cascadeStep: CASCADE_ORDER.indexOf(nextType),
     candidateEmployeeId: candidate.id,
     candidateEmployeeName: candidate.name,
-    candidateUid: candidate.uid,
-    extendShiftId: candidate.extendShiftId,
-    advanceShiftId: candidate.advanceShiftId,
-    candidateShiftId: candidate.candidateShiftId,
+    ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
+    ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
+    ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
+    ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
     createdBy: 'AUTO',
   });
 }
 
 // ─── Helper: crear doc convocatoria + notificación ───────────────────────────
+
+/** Firestore rechaza `undefined`. Se omiten esas claves; `null` se conserva. */
+function withoutUndefined<T extends Record<string, unknown>>(data: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out as T;
+}
 
 export async function crearConvocatoriaDoc(
   db: admin.firestore.Firestore,
@@ -244,13 +265,13 @@ export async function crearConvocatoriaDoc(
 
   const urgency = getUrgency(data.startTime);
 
-  const docData: ConvocatoriaCoberturaDoc = {
+  const docData = withoutUndefined({
     ...data,
     urgency,
-    status: 'PENDING',
+    status: 'PENDING' as const,
     timeoutAt,
     createdAt: now,
-  };
+  }) as ConvocatoriaCoberturaDoc;
 
   const ref = await db.collection('convocatorias_cobertura').add(docData);
   await crearNotifConvocatoria(db, { ...docData, id: ref.id });
@@ -370,9 +391,18 @@ async function extAdvSiblingAccepted(
     .where('shiftId', '==', absenceShiftId)
     .where('type', '==', other)
     .where('status', '==', 'ACCEPTED')
-    .limit(1)
+    .limit(5)
     .get();
-  return !snap.empty;
+  if (snap.empty) return false;
+  const { buildOpsCoverageDocId } = await import('./syncAusenciaCobertura');
+  for (const d of snap.docs) {
+    const employeeId = String(d.data().candidateEmployeeId || '').trim();
+    if (!employeeId) continue;
+    const ops = await db.collection('turnos').doc(buildOpsCoverageDocId(absenceShiftId, employeeId)).get();
+    const data = ops.data();
+    if (ops.exists && data?.coverageSuperseded !== true && data?.isDeleted !== true) return true;
+  }
+  return false;
 }
 
 async function hasActiveConvocatoriaForType(
@@ -1120,7 +1150,7 @@ export async function iniciarCascadaCobertura(
       cascadeStep: CASCADE_ORDER.indexOf(type),
       candidateEmployeeId: candidate.id,
       candidateEmployeeName: candidate.name,
-      candidateUid: candidate.uid,
+      ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
       ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
       ...(candidate.extendShiftId ? { extendShiftId: candidate.extendShiftId } : {}),
       ...(candidate.advanceShiftId ? { advanceShiftId: candidate.advanceShiftId } : {}),
