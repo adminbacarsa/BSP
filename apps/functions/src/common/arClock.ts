@@ -28,6 +28,18 @@ export function arHmOnYmdMs(ymd: string, h: number, m: number): number {
   return Date.UTC(y, (mo || 1) - 1, d || 1) + AR_OFFSET_MS + (h * 60 + m) * 60 * 1000;
 }
 
+/** Año y mes (1–12) del día calendario AR de `ms`. */
+export function arYearMonth(ms: number): { year: number; month: number } {
+  const d = new Date(ms - AR_OFFSET_MS);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
+/** Clave de `planificacion_estados`: `{objectiveId}_{year}_{month}` en calendario AR. */
+export function arPlanificacionEstadoKey(objectiveId: string, ms: number): string {
+  const { year, month } = arYearMonth(ms);
+  return `${objectiveId}_${year}_${month}`;
+}
+
 /** Día calendario AR que contiene `ms`: 00:00:00 a 23:59:59 AR. */
 export function arDayBoundsMs(ms: number): { startMs: number; endMs: number } {
   const startMs = arMidnightMs(ms);

@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { arPlanificacionEstadoKey } from '../common/arClock';
 
 const TZ = 'America/Argentina/Cordoba';
 
@@ -16,8 +17,7 @@ async function isPlanningPublishedForShift(
 ): Promise<boolean> {
   const oid = String(objectiveId || '').trim();
   if (!oid || !startMsVal) return false;
-  const d = new Date(startMsVal);
-  const planKey = `${oid}_${d.getFullYear()}_${d.getMonth() + 1}`;
+  const planKey = arPlanificacionEstadoKey(oid, startMsVal);
   const pub = await db.collection('planificacion_estados').doc(planKey).get();
   if (!pub.exists) return false;
   const publishedAt = pub.data()?.publishedAt;

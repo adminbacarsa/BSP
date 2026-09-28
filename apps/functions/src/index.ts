@@ -28,6 +28,7 @@ import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocato
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { isSimulableShift, simulableShiftSkipReason } from './common/simulableShift';
+import { arPlanificacionEstadoKey } from './common/arClock';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
@@ -3074,8 +3075,7 @@ export const gestionarVacantes = functions
       if (!isOps && sh.objectiveId) {
         const startMs = sh.startTime?.toMillis?.() ?? 0;
         if (startMs) {
-          const d = new Date(startMs);
-          planKeySet.add(`${sh.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`);
+          planKeySet.add(arPlanificacionEstadoKey(String(sh.objectiveId), startMs));
         }
       }
     }
@@ -3112,8 +3112,7 @@ export const gestionarVacantes = functions
         if (!isOps && shift.objectiveId) {
           const startMs2 = shift.startTime?.toMillis?.() ?? 0;
           if (startMs2) {
-            const d = new Date(startMs2);
-            const planKey = `${shift.objectiveId}_${d.getFullYear()}_${d.getMonth() + 1}`;
+            const planKey = arPlanificacionEstadoKey(String(shift.objectiveId), startMs2);
             if (!publishedPlanKeys.has(planKey)) continue;
           }
         }
