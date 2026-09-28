@@ -19,6 +19,7 @@ import {
   sourceShiftEligibleForCoverageGap,
 } from './coverageSourceShiftForGap';
 import { arDayBoundsMs } from '../common/arClock';
+import { simulableShiftSkipReason } from '../common/simulableShift';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -1484,6 +1485,16 @@ export async function simularRespuestasConvocatorias(
     const conv = convDoc.data() as ConvocatoriaCoberturaDoc;
     const createdMs = conv.createdAt instanceof Timestamp ? conv.createdAt.toMillis() : 0;
     if (createdMs > cutoffMs) continue; // aún en el tiempo de "pensado"
+
+    // Mismo filtro que el resto del Demo: no se simula nada sobre licencias, francos ni trazas EXT/ADV.
+    const titularData = conv.shiftId
+      ? (await db.collection('turnos').doc(conv.shiftId).get()).data()
+      : null;
+    const skipSim = simulableShiftSkipReason(titularData as Record<string, unknown> | null);
+    if (skipSim) {
+      console.log(`[simularRespuestasConvocatorias] skip ${convDoc.id}: titular ${conv.shiftId} ${skipSim}`);
+      continue;
+    }
 
     // Determinístico por id: chars % 10 → 0-7 acepta (80%), 8-9 rechaza (20%)
     const hashVal = convDoc.id.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % 10;

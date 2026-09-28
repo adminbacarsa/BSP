@@ -8,6 +8,7 @@ import {
   queryEmpleadosDocsScoped,
   turnoRowBelongsToEmpresa,
 } from './assistantEmpresaScope';
+import { simulableShiftSkipReason } from '../common/simulableShift';
 import { aggregateLiquidacionEmpresaPeriodo } from './assistantLiquidacionAggregate';
 import { slaHorasVendidasMesCalendario } from './assistantSlaHours';
 import type { AssistantPersona } from './resolveAssistantUser';
@@ -4542,13 +4543,20 @@ async function ejecutarAutoPresenciaCierre(
   const presenciaMarcada: string[] = [];
   const turnosCerrados: string[] = [];
   const turnosEnRetencion: string[] = [];
+  const turnosLicencia: string[] = [];
   const batch = db.batch();
   let ops = 0;
 
   // PASE 1: marcar presentes a los entrantes → actualizar índice virtual
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isAbsent || t.isVirtual || t.isPresent || t.isCompleted || t.isAbsent) continue;
+    if (t.isAbsent || t.isPresent || t.isCompleted) continue;
+    // Mismo filtro que el Demo: nunca presencia inventada sobre licencias/francos/ops_cov de registro.
+    const skipSim = simulableShiftSkipReason(t as Record<string, unknown>);
+    if (skipSim) {
+      if (skipSim === 'LICENCIA') turnosLicencia.push(`${t.empleadoNombre || t.employeeId} (${t.code})`);
+      continue;
+    }
     const startSec = t.startTime?.seconds ?? 0;
     const endSec   = t.endTime?.seconds   ?? 0;
     const startMs  = startSec * 1000;
@@ -4571,7 +4579,8 @@ async function ejecutarAutoPresenciaCierre(
   // PASE 2: cerrar salientes (con índice ya actualizado por pase 1)
   for (const doc of snap.docs) {
     const t = doc.data() as any;
-    if (t.isAbsent || t.isVirtual || !t.isPresent || t.isCompleted) continue;
+    if (t.isAbsent || !t.isPresent || t.isCompleted) continue;
+    if (simulableShiftSkipReason(t as Record<string, unknown>)) continue;
     const startSec = t.startTime?.seconds ?? 0;
     const endSec   = t.endTime?.seconds   ?? 0;
     const endMs    = endSec * 1000;
@@ -4621,9 +4630,10 @@ async function ejecutarAutoPresenciaCierre(
   if (!dryRun && ops > 0) await batch.commit();
 
   const modo = dryRun ? 'SIMULACIÓN' : 'EJECUTADO';
+  const licenciaTxt = turnosLicencia.length > 0 ? ` ${turnosLicencia.length} turno(s) en licencia sin tocar.` : '';
   const resumen = dryRun
-    ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}`
-    : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.`;
+    ? `[${modo}] Se marcarían ${presenciaMarcada.length} presencia(s) y cerrarían ${turnosCerrados.length} turno(s).${turnosEnRetencion.length > 0 ? ` ${turnosEnRetencion.length} turno(s) en retención por relevo pendiente.` : ''}${licenciaTxt}`
+    : `[${modo}] ${presenciaMarcada.length} presencia(s) marcadas · ${turnosCerrados.length} turno(s) cerrados${turnosEnRetencion.length > 0 ? ` · ${turnosEnRetencion.length} en retención` : ''}.${licenciaTxt}`;
 
   return {
     modo,
@@ -4631,9 +4641,11 @@ async function ejecutarAutoPresenciaCierre(
     presencias_a_marcar: presenciaMarcada.length,
     turnos_a_cerrar: turnosCerrados.length,
     turnos_en_retencion: turnosEnRetencion.length,
+    turnos_en_licencia: turnosLicencia.length,
     detalle_presencias: presenciaMarcada,
     detalle_cierres: turnosCerrados,
     detalle_retencion: turnosEnRetencion,
+    detalle_licencia: turnosLicencia,
     resumen,
     instruccion: dryRun
       ? 'Para ejecutar los cambios reales, respondé "ejecutá" o "activá modo demo".'

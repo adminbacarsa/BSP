@@ -27,6 +27,7 @@ import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
+import { isSimulableShift, simulableShiftSkipReason } from './common/simulableShift';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
@@ -856,7 +857,7 @@ async function runModoDemoForEmpresa(
     t.employeeId === 'SIN_COBERTURA' ||
     !!t.isUnassigned ||
     !!t.isSinCobertura;
-  const skipBase = (t: any) => t.draft === true || t.isFranco === true || t.isVirtual;
+  const skipBase = (t: any) => !isSimulableShift(t as Record<string, unknown>);
 
   // Comportamiento demo rotativo (no fijo por legajo): ~60% puntual, ~30% tarde, ~10% ausente.
   // La semilla incluye día AR + franja de 6h + turno → cambian los ausentes entre días y bloques.
@@ -964,6 +965,7 @@ async function runModoDemoForEmpresa(
     .get();
   for (const doc of covSnap.docs) {
     const t = doc.data() as Record<string, unknown>;
+    if (!isSimulableShift(t)) continue;
     if (t.isPresent === true || t.isAbsent === true || t.isCompleted === true) continue;
     if (t.coverageSuperseded === true) continue;
     const createdMs = (t.createdAt as { seconds?: number })?.seconds
@@ -1243,12 +1245,19 @@ export const autoPresenciaYCierre = functions
     const presenciaMarcada: string[] = [];
     const turnosCerrados: string[] = [];
     const turnosEnRetencion: string[] = [];
+    const turnosLicencia: string[] = [];
     const batch = db.batch();
     let ops = 0;
 
     for (const doc of snap.docs) {
       const t = doc.data() as any;
-      if (t.isAbsent || t.isVirtual) continue;
+      if (t.isAbsent) continue;
+      // Mismo filtro que el Demo: nunca presencia inventada sobre licencias/francos/ops_cov de registro.
+      const skipSim = simulableShiftSkipReason(t as Record<string, unknown>);
+      if (skipSim) {
+        if (skipSim === 'LICENCIA') turnosLicencia.push(`${t.empleadoNombre ?? t.employeeId} (${t.code})`);
+        continue;
+      }
       const startMs = (t.startTime?.seconds ?? 0) * 1000;
       const endMs   = (t.endTime?.seconds   ?? 0) * 1000;
       const objectiveId = String(t.objectiveId || '');
@@ -1299,10 +1308,11 @@ export const autoPresenciaYCierre = functions
       presenciaMarcada: presenciaMarcada.length,
       turnosCerrados: turnosCerrados.length,
       turnosEnRetencion: turnosEnRetencion.length,
-      detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion },
+      turnosLicencia: turnosLicencia.length,
+      detalle: { presenciaMarcada, turnosCerrados, turnosEnRetencion, turnosLicencia },
       mensaje: dryRun
-        ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente).`
-        : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado).`,
+        ? `[DRY RUN] Se marcarían ${presenciaMarcada.length} presencias, cerrarían ${turnosCerrados.length} turnos (${turnosEnRetencion.length} en retención por relevo pendiente, ${turnosLicencia.length} en licencia sin tocar).`
+        : `✓ ${presenciaMarcada.length} presencias marcadas · ${turnosCerrados.length} turnos cerrados · ${turnosEnRetencion.length} en retención (relevo esperado) · ${turnosLicencia.length} en licencia sin tocar.`,
     };
   });
 
