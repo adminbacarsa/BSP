@@ -6,6 +6,7 @@ import {
 } from '../coverage/positionHasContinuity';
 import { retainOutgoingForGap } from '../coverage/coverageRetention';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { isLicenseShiftCode } from '../common/simulableShift';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 import {
@@ -260,6 +261,13 @@ export async function runAutoCompletarTurnosPass(
     const ccOff = !ctx.isEnabled(shift.empresaId);
     if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) continue;
     if ((shift.status || '') === 'INTERRUPTED') continue;
+
+    // Una licencia no es jornada: si quedó PRESENT (simulación vieja, carga manual) se deja
+    // abierta para que RRHH la corrija, nunca se cierra por tope ni se le inventa realEndTime.
+    if (isLicenseShiftCode(shift.code)) {
+      actions.push(describe(docSnap.id, shift, 'WAIT', 'LICENCIA_PRESENTE'));
+      continue;
+    }
 
     const endTimeMs = shiftEndMs(shift);
     if (!endTimeMs) continue;
