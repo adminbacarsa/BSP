@@ -20,6 +20,7 @@ export type HoursLedgerMonthRow = {
   slaActive: number;
   slaInactive: number;
   slaClosed: number;
+  slaWithoutPlan?: number;
   planPublished: number;
   planDraft: number;
   worked: number;
@@ -81,6 +82,7 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     slaActive: Number(raw.slaActive) || 0,
     slaInactive: Number(raw.slaInactive) || 0,
     slaClosed: Number(raw.slaClosed) || 0,
+    slaWithoutPlan: Number(raw.slaWithoutPlan) || 0,
     planPublished: Number(raw.planPublished) || 0,
     planDraft: Number(raw.planDraft) || 0,
     worked: Number(raw.worked) || 0,

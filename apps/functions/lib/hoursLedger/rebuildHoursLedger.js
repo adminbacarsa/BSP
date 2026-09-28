@@ -283,7 +283,7 @@ async function rollupStoredMonth(empresaId, periodKey) {
     const prevEmpresa = snap.docs.find((d) => d.data().level === 'empresa')?.data();
     const now = new Date().toISOString();
     const blank = () => ({
-        slaActive: 0, slaInactive: 0, slaClosed: 0, planPublished: 0, planDraft: 0, worked: 0,
+        slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0, planPublished: 0, planDraft: 0, worked: 0,
         covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
     });
     const keys = Object.keys(blank());

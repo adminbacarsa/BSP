@@ -296,7 +296,7 @@ async function finalizeJob(ref) {
         if (objectives[0] && drift)
             objectives[0].worked = Math.round((objectives[0].worked + drift) * 10) / 10;
     }
-    const keys = ['slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
+    const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
     const blank = () => Object.fromEntries(keys.map((k) => [k, 0]));
     const add = (a, b) => {
         for (const k of keys)

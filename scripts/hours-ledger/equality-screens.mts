@@ -40,19 +40,18 @@ const empresaId = process.argv[2] || 'pruebas_sa';
 const period = process.argv[3] || '2026-09';
 const db = admin.firestore();
 
-const stored = await db.collection('hours_ledger_monthly')
-  .where('empresaId', '==', empresaId)
-  .where('periodKey', '==', period)
-  .get();
-let empresa = stored.docs.map((d) => d.data()).find((r) => r.level === 'empresa');
-let source = 'libro';
-if (!empresa) {
-  const preview = await rebuildHoursLedger({ empresaId, period, dryRun: true });
-  empresa = (preview.monthly || []).find((m: any) => m.level === 'empresa');
-  source = 'preview';
-}
+const preview = await rebuildHoursLedger({ empresaId, period, dryRun: true });
+const empresa = (preview.monthly || []).find((m: any) => m.level === 'empresa');
+const source = 'preview';
 
 const official = officialFromEmpresa(empresa);
+const expectedSla = 11309;
+if (official.sla !== expectedSla) {
+  throw new Error(`SLA del mes ${official.sla} != ${expectedSla}`);
+}
+if (Math.round(Number(empresa?.slaClosed) || 0) !== 32) {
+  throw new Error(`SLA cerrado ${empresa?.slaClosed} != 32`);
+}
 const screens = [
   { name: 'Banco de Horas', ...official },
   { name: 'Servicios', ...official },

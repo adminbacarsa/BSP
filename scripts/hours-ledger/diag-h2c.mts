@@ -116,9 +116,20 @@ const built = buildLedgerMonth({
 const levels: Record<string, number> = {};
 for (const m of built.monthly) levels[m.level] = (levels[m.level] || 0) + 1;
 const t = built.totals;
+const named = built.monthly.filter((m) => m.level === 'objetivo' && /ceb|villa|tadicor|peaje|loter/i.test(`${m.objectiveName} ${m.clientName}`));
+console.log('NAMED', JSON.stringify(named.map((m) => ({
+  name: m.objectiveName,
+  sla: Math.round(m.slaActive),
+  inact: Math.round(m.slaInactive),
+  cerr: Math.round(m.slaClosed),
+  sinPlan: Math.round(m.slaWithoutPlan || 0),
+}))));
 console.log('ENGINE', JSON.stringify({
   levels,
   slaActive: Math.round(t.slaActive),
+  slaInactive: Math.round(t.slaInactive),
+  slaClosed: Math.round(t.slaClosed),
+  slaWithoutPlan: Math.round(t.slaWithoutPlan || 0),
   covered: Math.round(t.covered),
   uncovered: Math.round(t.uncovered),
   sum: Math.round(t.covered + t.uncovered),
@@ -160,7 +171,8 @@ const chunk = {
 };
 console.log('CHUNKS', JSON.stringify(chunk));
 console.log('BAD_OBJ', bad.length, 'BAD_CLIENT', badClient.length, 'BAD_DAY', badDay.length, 'CLIENTS', clients.length);
-if (Math.round(t.slaActive) !== 12957) throw new Error('SLA activo se movió');
+if (Math.round(t.slaActive) !== 11309) throw new Error(`SLA del mes ${Math.round(t.slaActive)} != 11309`);
+if (Math.round(t.slaClosed) !== 32) throw new Error(`SLA cerrado ${Math.round(t.slaClosed)} != 32`);
 if (Math.abs((t.covered + t.uncovered) - t.slaActive) > 1) throw new Error('invariante empresa');
 if (bad.length || badClient.length || badDay.length) throw new Error('invariante grano');
 if (!(t.novedadPaga > 0)) throw new Error('novedad paga sigue en 0');

@@ -34,6 +34,7 @@ export type LedgerDay = {
   slaActive: number;
   slaInactive: number;
   slaClosed: number;
+  slaWithoutPlan: number;
   planPublished: number;
   planDraft: number;
   worked: number;
@@ -56,6 +57,7 @@ export type LedgerMonth = {
   slaActive: number;
   slaInactive: number;
   slaClosed: number;
+  slaWithoutPlan: number;
   planPublished: number;
   planDraft: number;
   worked: number;
@@ -88,7 +90,7 @@ export type LedgerBuildInput = {
 };
 
 const METRIC_KEYS = [
-  'slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked',
+  'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked',
   'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
 ] as const;
 
@@ -194,7 +196,7 @@ function puestoSlug(name: string, id: string) {
 
 function blankMetrics() {
   return {
-    slaActive: 0, slaInactive: 0, slaClosed: 0,
+    slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0,
     planPublished: 0, planDraft: 0, worked: 0,
     covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
   };
@@ -376,7 +378,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     return { clientId: fromSla, clientName: String(sla?.clientName || ''), client: undefined as any };
   };
 
-  type Bucket = 'active' | 'inactive' | 'closed';
+  type Bucket = 'active' | 'inactive' | 'closed' | 'withoutPlan';
   const chosen = new Map<string, { srv: any; bucket: Bucket; hours: number }>();
 
   const consider = (srv: any, bucket: Bucket) => {
@@ -403,7 +405,6 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       clientActive: activoCli,
       hasPublishedPlan: publishedObj.has(String(srv.objectiveId || '').trim()),
     });
-    if (bucket === 'skip') continue;
     consider(srv, bucket);
   }
   for (const row of chosen.values()) row.hours = prorate(row.srv, year, month);
@@ -470,6 +471,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
         const part = i === list.length - 1 ? r1(h - share * (list.length - 1)) : r1(share);
         if (item.bucket === 'active') row.slaActive = r1(row.slaActive + part);
         else if (item.bucket === 'inactive') row.slaInactive = r1(row.slaInactive + part);
+        else if (item.bucket === 'withoutPlan') row.slaWithoutPlan = r1(row.slaWithoutPlan + part);
         else row.slaClosed = r1(row.slaClosed + part);
       });
     }
@@ -552,7 +554,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
 
   const days = [...daysMap.values()].filter((d) => {
     if (only && !only.has(d.objectiveId) && d.objectiveId !== '_sin_objetivo') return false;
-    return d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft
+    return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft
       || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
   });
 
@@ -587,6 +589,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     const m = ensureObj(stub);
     if (item.bucket === 'active') m.slaActive = r1(item.hours);
     else if (item.bucket === 'inactive') m.slaInactive = r1(m.slaInactive + item.hours);
+    else if (item.bucket === 'withoutPlan') m.slaWithoutPlan = r1(m.slaWithoutPlan + item.hours);
     else m.slaClosed = r1(m.slaClosed + item.hours);
   }
 
@@ -664,6 +667,9 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     });
   }
 
+  for (const m of byObj.values()) m.slaActive = r1(m.slaActive + m.slaClosed);
+  for (const d of days) d.slaActive = r1(d.slaActive + d.slaClosed);
+
   for (const m of byObj.values()) {
     if (!(m.slaActive > 0)) {
       m.covered = 0;
@@ -719,7 +725,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   }
 
   const monthlyObjs = [...byObj.values()].filter((m) =>
-    m.slaActive || m.slaInactive || m.slaClosed || m.planPublished || m.planDraft
+    m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft
     || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga,
   );
 

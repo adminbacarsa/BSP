@@ -3495,16 +3495,16 @@ function buildPersonaBook(input) {
 
 // scripts/hours-ledger/slaPolicy.ts
 var SLA_POLICY = {
-  /** (a) Contrato activo sin cronograma publicado entra al SLA activo. Hoy: sí (Shopping Villa María 2 400). */
-  slaCountsWithoutPublishedPlan: true,
-  /** (b) Contrato activo de un cliente inactivo entra al SLA activo. Hoy: no (Lotería CET Río Ceballos 720). */
+  /** Contrato activo sin cronograma publicado. Hoy no entra al total (Shopping Villa María). */
+  slaCountsWithoutPublishedPlan: false,
+  /** Contrato de un cliente inactivo. Hoy no entra al total. */
   slaCountsInactiveClient: false
 };
 function classifySlaBucket(input, policy = SLA_POLICY) {
-  if (input.closed && input.contractActive) return "closed";
   if (!input.contractActive) return "inactive";
+  if (input.closed) return "closed";
   if (!input.clientActive && !policy.slaCountsInactiveClient) return "inactive";
-  if (!input.hasPublishedPlan && !policy.slaCountsWithoutPublishedPlan) return "skip";
+  if (!input.hasPublishedPlan && !policy.slaCountsWithoutPublishedPlan) return "withoutPlan";
   return "active";
 }
 
@@ -3513,6 +3513,7 @@ var METRIC_KEYS = [
   "slaActive",
   "slaInactive",
   "slaClosed",
+  "slaWithoutPlan",
   "planPublished",
   "planDraft",
   "worked",
@@ -3616,6 +3617,7 @@ function blankMetrics() {
     slaActive: 0,
     slaInactive: 0,
     slaClosed: 0,
+    slaWithoutPlan: 0,
     planPublished: 0,
     planDraft: 0,
     worked: 0,
@@ -3801,7 +3803,6 @@ function buildLedgerMonth(input) {
       clientActive: activoCli,
       hasPublishedPlan: publishedObj.has(String(srv.objectiveId || "").trim())
     });
-    if (bucket === "skip") continue;
     consider(srv, bucket);
   }
   for (const row of chosen.values()) row.hours = prorate(row.srv, year, month);
@@ -3864,6 +3865,7 @@ function buildLedgerMonth(input) {
         const part = i === list.length - 1 ? r12(h - share * (list.length - 1)) : r12(share);
         if (item.bucket === "active") row.slaActive = r12(row.slaActive + part);
         else if (item.bucket === "inactive") row.slaInactive = r12(row.slaInactive + part);
+        else if (item.bucket === "withoutPlan") row.slaWithoutPlan = r12(row.slaWithoutPlan + part);
         else row.slaClosed = r12(row.slaClosed + part);
       });
     }
@@ -3941,7 +3943,7 @@ function buildLedgerMonth(input) {
   }
   const days = [...daysMap.values()].filter((d) => {
     if (only && !only.has(d.objectiveId) && d.objectiveId !== "_sin_objetivo") return false;
-    return d.slaActive || d.slaInactive || d.slaClosed || d.planPublished || d.planDraft || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
+    return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
   });
   const byObj = /* @__PURE__ */ new Map();
   const ensureObj = (d) => {
@@ -3984,6 +3986,7 @@ function buildLedgerMonth(input) {
     const m = ensureObj(stub);
     if (item.bucket === "active") m.slaActive = r12(item.hours);
     else if (item.bucket === "inactive") m.slaInactive = r12(m.slaInactive + item.hours);
+    else if (item.bucket === "withoutPlan") m.slaWithoutPlan = r12(m.slaWithoutPlan + item.hours);
     else m.slaClosed = r12(m.slaClosed + item.hours);
   }
   for (const r of demPub.rows) {
@@ -4066,6 +4069,8 @@ function buildLedgerMonth(input) {
       acc = r12(acc + part);
     });
   }
+  for (const m of byObj.values()) m.slaActive = r12(m.slaActive + m.slaClosed);
+  for (const d of days) d.slaActive = r12(d.slaActive + d.slaClosed);
   for (const m of byObj.values()) {
     if (!(m.slaActive > 0)) {
       m.covered = 0;
@@ -4123,7 +4128,7 @@ function buildLedgerMonth(input) {
     }
   }
   const monthlyObjs = [...byObj.values()].filter(
-    (m) => m.slaActive || m.slaInactive || m.slaClosed || m.planPublished || m.planDraft || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
+    (m) => m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft || m.worked || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
   );
   const empresa = blankMetrics();
   for (const m of monthlyObjs) addMetrics(empresa, m);

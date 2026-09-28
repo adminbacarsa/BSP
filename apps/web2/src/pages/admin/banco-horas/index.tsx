@@ -37,7 +37,7 @@ function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number })
   return planHoursOf(mode, r);
 }
 
-const SUM_KEYS = ['slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'] as const;
+const SUM_KEYS = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'] as const;
 
 function groupClients(objectives: MonthRow[]): MonthRow[] {
   const map = new Map<string, MonthRow>();
@@ -200,6 +200,7 @@ export default function BancoHorasPage() {
           prev.slaActive += d.slaActive || 0;
           prev.slaInactive += d.slaInactive || 0;
           prev.slaClosed += d.slaClosed || 0;
+          prev.slaWithoutPlan = (prev.slaWithoutPlan || 0) + (d.slaWithoutPlan || 0);
           prev.planPublished += d.planPublished || 0;
           prev.planDraft += d.planDraft || 0;
           prev.worked += d.worked || 0;
@@ -247,6 +248,7 @@ export default function BancoHorasPage() {
       'SLA activo': Math.round(r.slaActive || 0),
       'SLA inactivo': Math.round(r.slaInactive || 0),
       'SLA cerrado': Math.round(r.slaClosed || 0),
+      'Sin plan': Math.round(r.slaWithoutPlan || 0),
       'Plan publicado': Math.round(r.planPublished || 0),
       'Plan borrador': Math.round(r.planDraft || 0),
       Trabajadas: Math.round(r.worked || 0),
@@ -274,6 +276,7 @@ export default function BancoHorasPage() {
     ['SLA activo', empresa?.slaActive],
     ['SLA inactivo', empresa?.slaInactive],
     ['SLA cerrado', empresa?.slaClosed],
+    ['Sin plan', empresa?.slaWithoutPlan],
     ['Plan', empresa ? planOf(planMode, empresa) : 0],
     ['Trabajadas', empresa?.worked],
     ['Cubiertas', empresa?.covered],
@@ -363,7 +366,7 @@ export default function BancoHorasPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400">
                 <tr>
-                  {['Nombre', 'SLA', 'Inactivo', 'Cerrado', 'Plan', 'Trabajadas', 'Cubiertas', 'Descubiertas', 'FT', 'EXT', 'ADV', 'Nov. paga'].map((h) => (
+                  {['Nombre', 'SLA', 'Inactivo', 'Cerrado', 'Sin plan', 'Plan', 'Trabajadas', 'Cubiertas', 'Descubiertas', 'FT', 'EXT', 'ADV', 'Nov. paga'].map((h) => (
                     <th key={h} className="text-right first:text-left px-3 py-2 font-black">{h}</th>
                   ))}
                 </tr>
@@ -379,14 +382,14 @@ export default function BancoHorasPage() {
                           <button type="button" className="hover:text-indigo-600" onClick={() => void openRow(r)}>{name}</button>
                         ) : name}
                       </td>
-                      {[r.slaActive, r.slaInactive, r.slaClosed, planOf(planMode, r), r.worked, r.covered, r.uncovered, r.ft, r.ext, r.adv, r.novedadPaga].map((n, i) => (
+                      {[r.slaActive, r.slaInactive, r.slaClosed, r.slaWithoutPlan, planOf(planMode, r), r.worked, r.covered, r.uncovered, r.ft, r.ext, r.adv, r.novedadPaga].map((n, i) => (
                         <td key={i} className="px-3 py-2 text-right tabular-nums text-slate-600">{nf(n)}</td>
                       ))}
                     </tr>
                   );
                 })}
                 {!visible.length && (
-                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400 font-bold">
+                  <tr><td colSpan={13} className="px-4 py-8 text-center text-slate-400 font-bold">
                     {empresa
                       ? 'El libro tiene totales de empresa, pero no hay detalle para este nivel.'
                       : canRebuild

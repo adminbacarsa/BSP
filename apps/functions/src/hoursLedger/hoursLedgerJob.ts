@@ -301,7 +301,7 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
     const drift = Math.round((persona.worked - assigned) * 10) / 10;
     if (objectives[0] && drift) objectives[0].worked = Math.round((objectives[0].worked + drift) * 10) / 10;
   }
-  const keys = ['slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
+  const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
   const blank = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
   const add = (a: Record<string, number>, b: Record<string, any>) => {
     for (const k of keys) a[k] = Math.round(((a[k] || 0) + (Number(b[k]) || 0)) * 10) / 10;
