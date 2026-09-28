@@ -102,18 +102,19 @@ export function CoberturaConvocatoriasBanner({
             </Text>
             <View style={styles.rowBtns}>
               <CommandButton
-                label="Acepto"
+                label={busy ? 'Enviando…' : 'Acepto'}
                 variant="success"
                 onPress={() => onAccept(c)}
-                disabled={busy}
+                disabled={!!busyId}
                 loading={busy}
                 style={styles.btnFlex}
               />
               <CommandButton
-                label="No puedo"
+                label={busy ? 'Enviando…' : 'No puedo'}
                 variant="secondary"
                 onPress={() => onReject(c)}
-                disabled={busy}
+                disabled={!!busyId}
+                loading={busy}
                 style={styles.btnFlex}
               />
             </View>
