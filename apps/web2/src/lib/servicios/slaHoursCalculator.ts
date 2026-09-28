@@ -71,7 +71,8 @@ export function isArgentineHoliday(dateStr: string): boolean {
   return (AR_FERIADOS_VARIABLES[year] ?? []).includes(norm);
 }
 
-import { isPositionActiveOnDate, type ServicePosition, type ShiftVariant } from '@/services/slaService';
+import { isPositionActiveOnDate } from '@/lib/servicios/slaPositionActive';
+import type { ServicePosition, ShiftVariant } from '@/services/slaService';
 import {
   resolveEncargadoScheduleMode,
   encargadoRotatingPatternMonthHours,

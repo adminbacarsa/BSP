@@ -3,32 +3,15 @@ import { db } from '@/lib/firebase';
 import { belongsToEmpresaView, empresaCollectionQuery, getClientIdAliases, tenantEmpresaIdsMatch } from '@/lib/multiempresa';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { isFirestoreIndexError } from '@/lib/crm/firestoreIndexError';
+import {
+  clientRowMatchesClient,
+  normalizeClientName,
+  objectiveIdsForClient,
+  type ClientRef,
+} from '@/lib/crm/clientRowMatch';
 
-export type ClientRef = {
-  id: string;
-  name?: string;
-  legalName?: string;
-  objetivos?: Array<{ id?: string; name?: string }>;
-};
-
-function normalizeClientName(value: unknown): string {
-  return String(value ?? '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Mn}/gu, '');
-}
-
-function objectiveIdsForClient(client: ClientRef): Set<string> {
-  const ids = new Set<string>();
-  for (const o of client.objetivos || []) {
-    const id = String(o.id ?? '').trim();
-    const name = String(o.name ?? '').trim();
-    if (id) ids.add(id);
-    if (name) ids.add(name);
-  }
-  return ids;
-}
+// La coincidencia pura (sin Firebase) vive en clientRowMatch.ts; se re-exporta para los imports existentes.
+export { clientRowMatchesClient, type ClientRef } from '@/lib/crm/clientRowMatch';
 
 /**
  * Ids reales para `objectiveId in`. El nombre del objetivo no es un id:
@@ -125,27 +108,6 @@ async function fetchRefuerzoTurnosByObjectiveIds(
       }
     }));
   }
-}
-
-export function clientRowMatchesClient(row: Record<string, unknown>, client: ClientRef): boolean {
-  const aliases = new Set(getClientIdAliases(client.id));
-  const rowCid = String(row.clientId ?? '').trim();
-  if (rowCid && aliases.has(rowCid)) return true;
-
-  const objectiveIds = objectiveIdsForClient(client);
-  const rowOid = String(row.objectiveId ?? '').trim();
-  if (rowOid && objectiveIds.has(rowOid)) return true;
-
-  const clientNames = [client.name, client.legalName]
-    .map(normalizeClientName)
-    .filter(Boolean);
-  if (clientNames.length === 0) return false;
-
-  const rowNames = [row.clientName, row.client, row.name]
-    .map(normalizeClientName)
-    .filter(Boolean);
-
-  return rowNames.some((rn) => clientNames.some((cn) => rn === cn || rn.includes(cn) || cn.includes(rn)));
 }
 
 export function resolveCanonicalClientIdFromList(

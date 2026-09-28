@@ -1,13 +1,10 @@
-import { Timestamp } from 'firebase/firestore';
+// Sin `firebase/firestore`: este helper también corre en Functions (motor del libro de horas).
+// Los Timestamp del SDK cliente y del Admin SDK entran por duck typing (`toDate` / `seconds`).
 
 /** Normaliza fechas Firestore (Timestamp, {seconds}, string) a YYYY-MM-DD para comparar rangos. */
 export function toYyyyMmDd(value: unknown): string {
   if (value == null) return '';
   if (typeof value === 'string') return value.trim().slice(0, 10);
-  if (value instanceof Timestamp) {
-    const d = value.toDate();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
   if (value instanceof Date) {
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
   }
@@ -25,7 +22,8 @@ export function toYyyyMmDd(value: unknown): string {
     }
     const sec = o.seconds ?? o._seconds;
     if (typeof sec === 'number') {
-      const d = new Timestamp(sec, o.nanoseconds ?? o._nanoseconds ?? 0).toDate();
+      const nanos = o.nanoseconds ?? o._nanoseconds ?? 0;
+      const d = new Date(sec * 1000 + Math.floor(nanos / 1e6));
       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
   }
