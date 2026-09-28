@@ -323,6 +323,13 @@ export function resolveEmployeeDisplayName(
 }
 
 export function isVacantShift(t: any): boolean {
+  if (String(t?.status || '').toUpperCase() === 'SUPERSEDED') return false;
+  const origin = String(t?.origin || '').toUpperCase();
+  if (origin === 'VACANTE_POR_AUSENCIA' || origin === 'SLA_VIRTUAL' || origin === 'SLA_UNPLANNED_GAP') {
+    return false;
+  }
+  const id = String(t?.id || '');
+  if (id.startsWith('autodev_') || id.startsWith('autosinc_')) return false;
   const empNameU = String(t?.employeeName || '').trim().toUpperCase();
   return (
     !t?.employeeId ||

@@ -20,6 +20,9 @@ import {
   isVacancyDescubierto,
   isActionableOpsVacancy,
   isReliefEligibleShift,
+  isGapSiblingVacancyDoc,
+  isCanonicalGapTitular,
+  buildSlaUnplannedGapDocId,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -477,6 +480,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (shift.draft === true) return null;
             if (suppressedTuraIds.has(shift.id)) return null;
             if (isOpsCoverageHoursOnSourceDoc(shift as Record<string, unknown>)) return null;
+            if (isGapSiblingVacancyDoc(shift)) return null;
             // COVERED: solo descartar si es una vacante real (employeeId=VACANTE)
             // Si es una ausencia, mantener en processedData para tracking RRHH
             if (shift.status === 'COVERED' && !shift.isAbsent && (!shift.employeeId || shift.employeeId === 'VACANTE')) return null;
@@ -668,6 +672,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence)
                             ? 'ABSENCE'
                             : 'NO_PLANNING';
+                    const dayYmd = now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Cordoba' });
                     relevantDefinitions.forEach((slot: any) => {
                         // Respetar dias habilitados del turno (ej: RONDIN solo L-V)
                         if (slot.days && Array.isArray(slot.days) && slot.days.length > 0) {
@@ -681,14 +686,24 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
                             // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
                             const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
-                            // Capacidad requerida según SLA (quantity del puesto)
+                            const titularOnSlot = allPosShifts.filter((s: any) => {
+                                if (!isCanonicalGapTitular(s) || !s.shiftDateObj || !s.endDateObj) return false;
+                                return Math.min(s.endDateObj.getTime(), end.getTime()) > Math.max(s.shiftDateObj.getTime(), start.getTime());
+                            }).length;
                             const requiredCount = pos.quantity || 1;
-                            const missing = Math.max(0, requiredCount - coveredCount);
+                            const missing = Math.max(0, requiredCount - coveredCount - titularOnSlot);
 
                             // Generar una tarjeta de vacante por cada puesto faltante
                             for (let i = 0; i < missing; i++) {
+                                const gapId = buildSlaUnplannedGapDocId({
+                                    empresaId: String(sla.empresaId || empresaId || ''),
+                                    objectiveId: sla.objectiveId,
+                                    positionName: pos.name,
+                                    dayYmd,
+                                    bandCode: slot.code,
+                                });
                                 virtualVacancies.push({
-                                    id: `V124_${sla.objectiveId}_${pos.name}_${slot.code}_${i}`,
+                                    id: missing > 1 ? `${gapId}_${i}` : gapId,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
                                     vacancyOrigin: slotVacancyOrigin,
                                     vacancyBand: (slot.name || slot.code).toUpperCase(),
@@ -777,6 +792,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         // Para cada slot con ausentes: generar tantas vacantes como el déficit
                         absentSlotMap.forEach((refShift: any) => {
                             if (refShift.plannedOperativelyCovered || refShift.coverageStatus === 'COVERED') return;
+                            if (isCanonicalGapTitular(refShift) && refShift.id && !String(refShift.id).startsWith('gap_')) return;
                             const coveredOnSlot = posShifts.filter((cover: any) =>
                                 shiftCoversVacancySlot(cover, refShift.shiftDateObj, refShift.endDateObj, pos.name)
                             ).length;
@@ -1011,7 +1027,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         });
 
         return [...visibleRealShifts, ...filteredVirtualVacancies].sort((a:any, b:any) => a.shiftDateObj - b.shiftDateObj);
-    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap]);
+    }, [mergedRawShifts, now, employees, objectives, servicesSLA, publishStatusMap, empresaId]);
 
     const filteredObjectives = useMemo(() => {
         let list = selectedClientId ? objectives.filter((o: any) => o.clientId === selectedClientId) : objectives;
@@ -1166,34 +1182,17 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 alertedVacancyIds.current.add(autoKey);
                 getDocs(query(collection(db, 'novedades'), where('virtualVacancyId', '==', v.id), where('type', '==', 'VACANTE_A_PLANIFICACION'), limit(1)))
                     .then(async snap => {
-                        if (!snap.empty) return; // ya fue procesada antes
+                        if (!snap.empty) return;
                         const shiftEmpresaId = String(v.empresaId || empresaId || '').trim();
-                        // ID determinístico: si dos PCs corren simultáneamente, setDoc con el mismo ID
-                        // es idempotente — el segundo setDoc sobreescribe con los mismos datos,
-                        // evitando duplicados en Firestore.
                         const safeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-                        const newRef = doc(db, 'turnos', `autodev_${safeId}`);
-                        await setDoc(newRef, stampEmpresaId({
-                            clientId: v.clientId, clientName: v.clientName,
-                            objectiveId: v.objectiveId, objectiveName: v.objectiveName,
-                            positionName: v.positionName,
-                            employeeId: 'VACANTE', employeeName: 'VACANTE',
-                            startTime: Timestamp.fromDate(v.shiftDateObj),
-                            endTime: Timestamp.fromDate(v.endDateObj),
-                            status: 'REPORTED_TO_PLANNING', isReported: true,
-                            isReportedToPlanning: true, reportedBy: 'SYSTEM_AUTO',
-                            reportedAt: serverTimestamp(), origin: 'SLA_VIRTUAL',
-                            createdAt: serverTimestamp(),
-                        }, shiftEmpresaId));
                         const cuando = minutesUntil > 0
                             ? `Faltan ${Math.round(minutesUntil)} min.`
                             : `Turno inició hace ${Math.round(Math.abs(minutesUntil))} min (sin cobertura).`;
-                        // Novedad con ID determinístico para el mismo motivo
                         const novedadRef = doc(db, 'novedades', `autodev_nov_${safeId}`);
                         await setDoc(novedadRef, stampEmpresaId({
                             type: 'VACANTE_A_PLANIFICACION', status: 'ATENDIDA',
                             autoProcessed: true,
-                            virtualVacancyId: v.id, shiftId: newRef.id,
+                            virtualVacancyId: v.id, shiftId: v.id,
                             objectiveId: v.objectiveId, objectiveName: v.objectiveName || '',
                             clientId: v.clientId || null, positionName: v.positionName || '',
                             description: `[AUTO] Vacante sin cubrir devuelta a Planificación: ${v.positionName} en ${v.objectiveName}. ${cuando}`,
@@ -1204,43 +1203,8 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     .catch(e => console.warn('[autoAlertVacante:plan]', e));
             }
 
-            // ── PASO 3: T+120 → auto-declarar SIN COBERTURA ─────────────────
-            // Si pasaron 2h desde el inicio del turno y sigue sin cobertura,
-            // se crea un doc "autosinc_*" en turnos con isSinCobertura:true.
-            // Ese doc cuenta como cobertura en el SLA (suprime la vacante virtual)
-            // y deshabilita las acciones CUBRIR. Motivo: ausencia o falta de planificacion.
             if (minutesUntil <= -120) {
-                const sinCobKey = `${v.id}_SIN_COBERTURA_FINAL`;
-                if (!alertedVacancyIds.current.has(sinCobKey)) {
-                    alertedVacancyIds.current.add(sinCobKey);
-                    const sinCobSafeId = v.id.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
-                    const sinCobRef = doc(db, 'turnos', `autosinc_${sinCobSafeId}`);
-                    const sinCobEmpresaId = String(v.empresaId || empresaId || '').trim();
-                    getDoc(sinCobRef).then(snap => {
-                        if (snap.exists()) return; // ya declarado
-                        const motivo = v.vacancyOrigin === 'ABSENCE'
-                            ? `Ausencia sin cobertura — ${v.positionName} en ${v.objectiveName}`
-                            : `Falta de planificacion — ${v.positionName} en ${v.objectiveName}`;
-                        setDoc(sinCobRef, stampEmpresaId({
-                            clientId: v.clientId, clientName: v.clientName,
-                            objectiveId: v.objectiveId, objectiveName: v.objectiveName,
-                            positionName: v.positionName,
-                            employeeId: 'SIN_COBERTURA', employeeName: 'SIN COBERTURA',
-                            startTime: Timestamp.fromDate(v.shiftDateObj),
-                            endTime: Timestamp.fromDate(v.endDateObj),
-                            status: 'SIN_COBERTURA', isSinCobertura: true,
-                            vacancyOrigin: v.vacancyOrigin || 'NO_PLANNING',
-                            motivo,
-                            createdAt: serverTimestamp(),
-                        }, sinCobEmpresaId))
-                        .then(() => opsEventToast.info(`Sin cobertura: ${v.positionName} en ${v.objectiveName}`))
-                        .catch(e => {
-                            alertedVacancyIds.current.delete(sinCobKey);
-                            console.warn('[autoSinCobertura]', e);
-                        });
-                    }).catch(() => alertedVacancyIds.current.delete(sinCobKey));
-                }
-                continue; // no generar alerta PROTOCOLO para vacantes ya vencidas
+                continue;
             }
 
             // ── PASO 2: alerta PROTOCOLO para el operador (solo ≤60 min) ────
