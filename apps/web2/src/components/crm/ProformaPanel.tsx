@@ -28,7 +28,7 @@ export type ProformaPanelProps = {
   proformaLayoutMode: ProformaLayoutMode;
   proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
-  proformaTotals: { planned: number; executed: number; sinCobertura: number; loading: boolean; estructurales?: number };
+  proformaTotals: { planned: number | null; executed: number | null; sinCobertura: number | null; loading: boolean; estructurales?: number };
   proformaBreakdown: any[];
   proformaBundle: ProformaExportBundle | null;
   baseHours: number;
@@ -55,6 +55,11 @@ export type ProformaPanelProps = {
   contractBillingMixed?: boolean;
   detailModeOverride?: boolean;
 };
+
+function formatProformaHours(value: number | null | undefined, loading: boolean): string {
+  if (loading || value == null || Number.isNaN(value)) return '—';
+  return `${value} hs`;
+}
 
 export default function ProformaPanel(props: ProformaPanelProps) {
   const {
@@ -308,13 +313,27 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                   <Loader2 size={14} className="animate-spin" /> Calculando...
                 </span>
               )}
-              <span className="text-[10px] font-bold text-slate-400">
+              <span className="text-[10px] font-bold text-slate-400 inline-flex flex-wrap items-baseline gap-x-1">
                 {proformaDetailMode === 'sin_cobertura' ? (
-                  <>Sin cobertura (ops): {proformaTotals.sinCobertura} hs · huecos declarados en Operaciones</>
+                  <>
+                    <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.sinCobertura, proformaTotals.loading)}</span>
+                    <span>Sin cobertura (ops). Huecos declarados en Operaciones.</span>
+                  </>
                 ) : proformaDetailMode === 'executed' ? (
-                  <>Ejecutado (fichaje): {proformaTotals.executed} hs · requiere realStart/realEnd del guardia</>
+                  <>
+                    <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.executed, proformaTotals.loading)}</span>
+                    <span>Ejecutado (fichaje).</span>
+                    <span className="font-medium">Requiere fichaje realStart/realEnd del guardia.</span>
+                  </>
                 ) : (
-                  <>Plan: {proformaTotals.planned} hs · Ejec: {proformaTotals.executed} hs · Sin cob: {proformaTotals.sinCobertura} hs</>
+                  <>
+                    <span>Plan</span>
+                    <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.planned, proformaTotals.loading)}</span>
+                    <span>Ejec</span>
+                    <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.executed, proformaTotals.loading)}</span>
+                    <span>Sin cob</span>
+                    <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.sinCobertura, proformaTotals.loading)}</span>
+                  </>
                 )}
                 {(proformaTotals.estructurales ?? 0) > 0 && (
                   <> · {proformaTotals.estructurales} refuerzo{proformaTotals.estructurales === 1 ? '' : 's'} estructural{proformaTotals.estructurales === 1 ? '' : 'es'} ya incluido{proformaTotals.estructurales === 1 ? '' : 's'} en el SLA</>

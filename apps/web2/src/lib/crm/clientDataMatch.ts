@@ -29,28 +29,55 @@ function objectiveIdsForClient(client: ClientRef): Set<string> {
   return ids;
 }
 
+/**
+ * Ids reales para `objectiveId in`. El nombre del objetivo no es un id:
+ * meterlo en la consulta trae documentos ajenos o lecturas vacías.
+ */
+export function objectiveIdsForTurnoQuery(clients: ClientRef[]): string[] {
+  const ids = new Set<string>();
+  for (const client of clients) {
+    for (const o of client.objetivos || []) {
+      const id = String(o.id ?? '').trim();
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids];
+}
+
+export type TurnoQueryOpts = {
+  empresaId?: string;
+  scopeEmpresa?: boolean;
+  migracionCompleta?: boolean;
+};
+
+function turnoBelongsToEmpresa(
+  data: { empresaId?: unknown },
+  opts?: TurnoQueryOpts,
+): boolean {
+  const empresaId = String(opts?.empresaId ?? '').trim();
+  if (!empresaId) return false;
+  return belongsToEmpresaView(data, empresaId, opts?.migracionCompleta !== false);
+}
+
 async function fetchTurnosByObjectiveIds(
   objectiveIds: string[],
   addIfInRange: (id: string, data: Record<string, unknown>) => void,
-  padStart?: Date,
-  padEnd?: Date,
+  padStart: Date,
+  padEnd: Date,
 ): Promise<void> {
   const ids = [...new Set(objectiveIds.map((x) => String(x).trim()).filter(Boolean))];
-  for (let i = 0; i < ids.length; i += 10) {
-    const chunk = ids.slice(i, i + 10);
-    // Con rango de fechas disponible limitamos las lecturas al período relevante.
-    // Requiere índice compuesto en Firestore: objectiveId ASC, startTime ASC.
-    const q = padStart && padEnd
-      ? query(
-          collection(db, 'turnos'),
-          where('objectiveId', 'in', chunk),
-          where('startTime', '>=', Timestamp.fromDate(padStart)),
-          where('startTime', '<=', Timestamp.fromDate(padEnd)),
-        )
-      : query(collection(db, 'turnos'), where('objectiveId', 'in', chunk));
-    const snap = await getDocs(q);
+  const chunks: string[][] = [];
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10));
+  await Promise.all(chunks.map(async (chunk) => {
+    // Índice existente: objectiveId ASC, startTime ASC. empresaId se filtra al leer.
+    const snap = await getDocs(query(
+      collection(db, 'turnos'),
+      where('objectiveId', 'in', chunk),
+      where('startTime', '>=', Timestamp.fromDate(padStart)),
+      where('startTime', '<=', Timestamp.fromDate(padEnd)),
+    ));
     snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
-  }
+  }));
 }
 
 /** RFZ/TURA guardan startTime ISO + fecha YYYY-MM-DD — no entran en query por Timestamp. */
@@ -300,103 +327,166 @@ function toDateSafe(val: unknown): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+type PeriodTurnoCacheEntry = {
+  empresaId: string;
+  startMs: number;
+  endMs: number;
+  objectiveKey: string;
+  rows: any[];
+  at: number;
+};
+
+const periodTurnoCache: PeriodTurnoCacheEntry[] = [];
+const periodTurnoInflight = new Map<string, Promise<any[]>>();
+const PERIOD_TURNO_CACHE_MS = 90_000;
+
+function periodCacheKey(empresaId: string, start: Date, end: Date, objectiveIds: string[]): string {
+  return `${empresaId}|${start.getTime()}|${end.getTime()}|${[...objectiveIds].sort().join(',')}`;
+}
+
+function takeCachedPeriodTurnos(
+  empresaId: string,
+  start: Date,
+  end: Date,
+  objectiveIds: string[],
+): any[] | null {
+  const now = Date.now();
+  const wanted = new Set(objectiveIds);
+  for (let i = periodTurnoCache.length - 1; i >= 0; i -= 1) {
+    const entry = periodTurnoCache[i];
+    if (now - entry.at > PERIOD_TURNO_CACHE_MS) {
+      periodTurnoCache.splice(i, 1);
+      continue;
+    }
+    if (entry.empresaId !== empresaId) continue;
+    if (entry.startMs > start.getTime() || entry.endMs < end.getTime()) continue;
+    const have = new Set(entry.objectiveKey.split(',').filter(Boolean));
+    if (wanted.size === 0) {
+      if (entry.objectiveKey !== '') continue;
+    } else if (![...wanted].every((id) => have.has(id))) {
+      continue;
+    }
+    const rangeStartKey = getDateKeyInTimezone(start);
+    const rangeEndKey = getDateKeyInTimezone(end);
+    return entry.rows.filter((row) => {
+      if (wanted.size > 0 && !wanted.has(String(row.objectiveId ?? '').trim())) return false;
+      const st = toDateSafe(row.startTime);
+      const scheduleKey = resolveTurnoScheduleDateKey(row) || (st ? getDateKeyInTimezone(st) : null);
+      const inRangeByStart = !!st && st >= start && st <= end;
+      const inRangeBySchedule = !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
+      return inRangeByStart || inRangeBySchedule;
+    });
+  }
+  return null;
+}
+
 /**
- * Turnos del período para pre-factura / CRM.
- * 1) Por clientId (aliases legacy).
- * 2) Por objectiveId de la ficha CRM (cronogramas con clientId viejo).
- * 3) Respaldo por rango + match cliente/objetivo.
+ * Una sola estrategia de lectura para KPIs y prefactura:
+ * objectiveId real (lotes de 10) + startTime del período, siempre filtrado por empresa.
+ * Sin nombres en el `in`, sin segunda pasada por clientId y sin barrido de toda la empresa.
+ * TURA/RFZ con startTime texto se suman por `fecha` (no entran en la query por Timestamp).
+ */
+export async function loadPeriodTurnosForClients(
+  clients: ClientRef[],
+  start: Date,
+  end: Date,
+  opts?: TurnoQueryOpts,
+): Promise<any[]> {
+  const empresaId = String(opts?.empresaId ?? '').trim();
+  const objectiveIds = objectiveIdsForTurnoQuery(clients);
+  const key = periodCacheKey(empresaId, start, end, objectiveIds);
+  const cached = takeCachedPeriodTurnos(empresaId, start, end, objectiveIds);
+  if (cached) return cached;
+
+  const inflight = periodTurnoInflight.get(key);
+  if (inflight) return inflight;
+
+  const job = loadPeriodTurnosUncached(clients, start, end, opts, objectiveIds).then((rows) => {
+    periodTurnoCache.push({
+      empresaId,
+      startMs: start.getTime(),
+      endMs: end.getTime(),
+      objectiveKey: [...objectiveIds].sort().join(','),
+      rows,
+      at: Date.now(),
+    });
+    return rows;
+  }).finally(() => {
+    periodTurnoInflight.delete(key);
+  });
+  periodTurnoInflight.set(key, job);
+  return job;
+}
+
+async function loadPeriodTurnosUncached(
+  clients: ClientRef[],
+  start: Date,
+  end: Date,
+  opts: TurnoQueryOpts | undefined,
+  objectiveIds: string[],
+): Promise<any[]> {
+  const byId = new Map<string, any>();
+  const rangeStartKey = getDateKeyInTimezone(start);
+  const rangeEndKey = getDateKeyInTimezone(end);
+  const clientById = new Map(clients.map((c) => [c.id, c]));
+
+  const addIfInRange = (id: string, data: Record<string, unknown>) => {
+    if (!turnoBelongsToEmpresa(data, opts)) return;
+    const st = toDateSafe(data.startTime);
+    const scheduleKey =
+      resolveTurnoScheduleDateKey(data) || (st ? getDateKeyInTimezone(st) : null);
+    const inRangeByStart = !!st && st >= start && st <= end;
+    const inRangeBySchedule =
+      !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
+    if (!inRangeByStart && !inRangeBySchedule) return;
+    const matched = clients.find((c) => clientRowMatchesClient(data, c));
+    if (!matched) return;
+    const rowCid = String(data.clientId ?? '').trim();
+    const canonical = rowCid && clientById.has(rowCid) ? rowCid : matched.id;
+    byId.set(id, { id, ...data, clientId: rowCid || canonical });
+  };
+
+  // Pad para nocturnos. La query es por startTime (ops_cov no tiene scheduleDate).
+  const padStart = new Date(start);
+  const padEnd = new Date(end);
+  padStart.setDate(padStart.getDate() - 2);
+  padEnd.setDate(padEnd.getDate() + 2);
+  padEnd.setHours(23, 59, 59, 999);
+
+  if (objectiveIds.length > 0) {
+    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, padStart, padEnd);
+    await fetchRefuerzoTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
+  } else {
+    const aliases = collectClientIdAliases(clients);
+    for (let i = 0; i < aliases.length; i += 10) {
+      const chunk = aliases.slice(i, i + 10);
+      const snap = await getDocs(query(
+        collection(db, 'turnos'),
+        where('clientId', 'in', chunk),
+        where('startTime', '>=', Timestamp.fromDate(padStart)),
+        where('startTime', '<=', Timestamp.fromDate(padEnd)),
+      ));
+      snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
+    }
+  }
+
+  return [...byId.values()];
+}
+
+/**
+ * Turnos del período para prefactura. Misma lectura que el dashboard (`loadPeriodTurnosForClients`).
  */
 export async function loadClientTurnosForClient(
   client: ClientRef,
   start: Date,
   end: Date,
-  opts?: { empresaId?: string; scopeEmpresa?: boolean },
+  opts?: TurnoQueryOpts,
 ): Promise<any[]> {
-  const byId = new Map<string, any>();
-  const aliases = getClientIdAliases(client.id);
-  const objectiveIds = [...objectiveIdsForClient(client)];
-
-  const rangeStartKey = getDateKeyInTimezone(start);
-  const rangeEndKey = getDateKeyInTimezone(end);
-
-  const addIfInRange = (id: string, data: Record<string, unknown>) => {
-    const st = toDateSafe(data.startTime);
-    const scheduleKey =
-      resolveTurnoScheduleDateKey(data as Record<string, unknown>) || (st ? getDateKeyInTimezone(st) : null);
-    const inRangeByStart = !!st && st >= start && st <= end;
-    const inRangeBySchedule =
-      !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
-    if (!inRangeByStart && !inRangeBySchedule) return;
-    const rowCid = String(data.clientId ?? '').trim();
-    byId.set(id, { id, ...data, clientId: rowCid || client.id });
-  };
-
-  // Carga por rango de startTime. Los ops_cov no tienen scheduleDate: si la query
-  // fuera por esa fecha, la cobertura no entraría en la prefactura.
-  // Índice (clientId, startTime) ya existe en firestore.indexes.json.
-  // Pad de 1 día para cubrir turnos nocturnos que empiezan fuera del rango exacto.
-  const padStart = new Date(start); padStart.setDate(padStart.getDate() - 1);
-  const padEnd   = new Date(end);   padEnd.setDate(padEnd.getDate() + 1);
-  await Promise.all(
-    aliases.map(async (cid) => {
-      const snap = await getDocs(query(
-        collection(db, 'turnos'),
-        where('clientId', '==', cid),
-        where('startTime', '>=', Timestamp.fromDate(padStart)),
-        where('startTime', '<=', Timestamp.fromDate(padEnd)),
-      ));
-      snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
-    }),
-  );
-
-  if (objectiveIds.length > 0) {
-    await fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
-    await fetchRefuerzoTurnosByObjectiveIds(objectiveIds, addIfInRange, start, end);
-  }
-
-  const empresaId = String(opts?.empresaId ?? '').trim();
-  const scopeEmpresa = opts?.scopeEmpresa === true && !!empresaId;
-  const q = query(
-    empresaCollectionQuery('turnos', empresaId, scopeEmpresa) as ReturnType<typeof query>,
-    where('startTime', '>=', Timestamp.fromDate(start)),
-    where('startTime', '<=', Timestamp.fromDate(end)),
-  );
-
-  const snap = await getDocs(q);
-  snap.docs.forEach((d) => {
-    const data = d.data() as Record<string, unknown>;
-    if (!clientRowMatchesClient(data, client)) return;
-    addIfInRange(d.id, data);
-  });
-
-  return [...byId.values()];
-}
-
-function turnoInDashboardRange(
-  data: Record<string, unknown>,
-  rangeStart: Date | null,
-  rangeEnd: Date | null,
-): boolean {
-  if (!rangeStart || !rangeEnd) return true;
-  const padStart = new Date(rangeStart);
-  const padEnd = new Date(rangeEnd);
-  padStart.setDate(padStart.getDate() - 2);
-  padEnd.setDate(padEnd.getDate() + 2);
-  padEnd.setHours(23, 59, 59, 999);
-  const rangeStartKey = getDateKeyInTimezone(padStart);
-  const rangeEndKey = getDateKeyInTimezone(padEnd);
-  const st = toDateSafe(data.startTime);
-  const scheduleKey =
-    resolveTurnoScheduleDateKey(data) || (st ? getDateKeyInTimezone(st) : null);
-  const inRangeByStart = !!st && st >= padStart && st <= padEnd;
-  const inRangeBySchedule =
-    !!scheduleKey && scheduleKey >= rangeStartKey && scheduleKey <= rangeEndKey;
-  return inRangeByStart || inRangeBySchedule;
+  return loadPeriodTurnosForClients([client], start, end, opts);
 }
 
 /**
- * Turnos del dashboard CRM — misma estrategia que pre-factura (clientId + objectiveId + rango),
- * sin depender de índice compuesto clientId+startTime.
+ * Turnos del dashboard CRM. Reutiliza la misma lectura que la prefactura.
  */
 export async function fetchCrmDashboardTurnos(
   empresaId: string,
@@ -404,74 +494,13 @@ export async function fetchCrmDashboardTurnos(
   rangeStart: Date | null,
   rangeEnd: Date | null,
   clientRefs: ClientRef[],
+  migracionCompleta = true,
 ): Promise<any[]> {
-  const byId = new Map<string, any>();
   const start = rangeStart ? new Date(rangeStart) : new Date(2000, 0, 1);
   const end = rangeEnd ? new Date(rangeEnd) : new Date(2099, 11, 31, 23, 59, 59, 999);
-  const padStart = new Date(start);
-  const padEnd = new Date(end);
-  padStart.setDate(padStart.getDate() - 2);
-  padEnd.setDate(padEnd.getDate() + 2);
-  padEnd.setHours(23, 59, 59, 999);
-
-  const addIfInRange = (id: string, data: Record<string, unknown>) => {
-    if (!turnoInDashboardRange(data, rangeStart, rangeEnd)) return;
-    byId.set(id, { id, ...data });
-  };
-
-  const aliases = collectClientIdAliases(clientRefs);
-  const objectiveIds = [
-    ...new Set(clientRefs.flatMap((c) => [...objectiveIdsForClient(c)])),
-  ];
-
-  const col = empresaCollectionQuery('turnos', empresaId, scopeEmpresa);
-  const batchQueries: Promise<void>[] = [];
-
-  for (let i = 0; i < aliases.length; i += 10) {
-    const chunk = aliases.slice(i, i + 10);
-    const withRange = rangeStart && rangeEnd
-      ? query(
-          col as ReturnType<typeof query>,
-          where('clientId', 'in', chunk),
-          where('startTime', '>=', Timestamp.fromDate(padStart)),
-          where('startTime', '<=', Timestamp.fromDate(padEnd)),
-        )
-      : query(col as ReturnType<typeof query>, where('clientId', 'in', chunk));
-    batchQueries.push(
-      getDocs(withRange)
-        .then((snap) => {
-          snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
-        })
-        .catch((err) => {
-          console.warn('CRM dashboard: turnos por clientId', err);
-          return getDocs(query(col as ReturnType<typeof query>, where('clientId', 'in', chunk))).then((snap) => {
-            snap.docs.forEach((d) => addIfInRange(d.id, d.data() as Record<string, unknown>));
-          });
-        }),
-    );
-  }
-
-  if (objectiveIds.length > 0) {
-    batchQueries.push(fetchTurnosByObjectiveIds(objectiveIds, addIfInRange, padStart, padEnd));
-  }
-
-  await Promise.all(batchQueries);
-
-  try {
-    const ranged = query(
-      col as ReturnType<typeof query>,
-      where('startTime', '>=', Timestamp.fromDate(padStart)),
-      where('startTime', '<=', Timestamp.fromDate(padEnd)),
-    );
-    const snap = await getDocs(ranged);
-    snap.docs.forEach((d) => {
-      const data = d.data() as Record<string, unknown>;
-      if (!clientRefs.some((c) => clientRowMatchesClient(data, c))) return;
-      addIfInRange(d.id, data);
-    });
-  } catch (err) {
-    console.warn('CRM dashboard: turnos por rango', err);
-  }
-
-  return [...byId.values()];
+  return loadPeriodTurnosForClients(clientRefs, start, end, {
+    empresaId,
+    scopeEmpresa,
+    migracionCompleta,
+  });
 }

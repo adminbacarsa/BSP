@@ -152,7 +152,7 @@ export default function CrmDashboardSummary({
           )}
           {metricsUpdatedAt && !calculatingMetrics && (
             <span className="text-[9px] font-medium text-slate-400">
-              {metricsUpdatedAt.toLocaleString('es-AR', {
+              Actualizado {metricsUpdatedAt.toLocaleString('es-AR', {
                 day: '2-digit',
                 month: '2-digit',
                 hour: '2-digit',
