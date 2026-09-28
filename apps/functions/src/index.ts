@@ -2532,6 +2532,7 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
 export { onNovedadCreated } from './notifications/onNovedadCreated';
 export { onTurnoWrite } from './notifications/onTurnoWrite';
 export { syncTurnoClientOwner } from './integrity/syncTurnoClientOwner';
+export { scheduledIntegrityScan } from './integrity/integrityScan';
 export { onCronogramaPublished } from './notifications/onCronogramaPublished';
 export { onEmployeeNotificationCreated } from './notifications/onEmployeeNotificationCreated';
 export { onVacanteCorrectionCreated } from './notifications/onVacanteCorrectionCreated';

@@ -810,6 +810,11 @@ service cloud.firestore {
 
     // API Keys de integraciones — solo lectura de metadata (no del hash).
     // Escritura exclusivamente vía Admin SDK (callables createPayrollApiKey / revokePayrollApiKey).
+    match /integrity_reports/{reportId} {
+      allow read: if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
+      allow write: if false;
+    }
+
     match /integraciones_api/{keyId} {
       allow read:  if isSuperAdmin() || (isAdmin() && tenantMatches(resource.data));
       allow write: if false;

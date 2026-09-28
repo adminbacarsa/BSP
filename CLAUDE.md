@@ -109,6 +109,7 @@ cronoapp/
 | `hours_balances` | Extracto mensual por objetivo: SLA (debe), plan (turno cubierto, sin novedades), reales, FT/ext (costo), resultante cobertura (plan+ext/adel+ops), saldos. Doc id = `{empresaId}_{objectiveId}_{yyyy-mm}` |
 | `roles` | Permisos por módulo. Estructura: `{ permissions: { MODULE_KEY: ['read','create',...] } }` |
 | `payroll_settings` | Modo de horas publicado al endpoint de liquidación (`hoursMode: planned \| real`). Doc id = `empresaId`. |
+| `integrity_reports` | Informe nocturno (03:30 AR, `scheduledIntegrityScan`) por empresa. Doc id = `{empresaId}_{yyyy-mm-dd}`. Solo reporta. Si hay hallazgos, novedad `INTEGRIDAD_DATOS` (oculta en el monitor de Ops). |
 
 ### Períodos de horas (no mezclar)
 
@@ -457,4 +458,4 @@ Variable opcional: `COSP_DEPLOY_DIR` (default `../cronoapp-deploy`).
 - `useOperacionesMonitor.ts` — lógica central de operaciones en tiempo real. Muy compleja.
 - `firestore.rules` — reglas de seguridad. Cambios incorrectos pueden bloquear usuarios.
 - `planificacion_estados` — controla qué planificación está publicada. No borrar documentos.
-- **Borrados en CRM** (`crm/index.tsx`) — hoy `deleteDoc(clients/{id})` **no** borra en cascada `turnos` ni `servicios_sla`; cualquier limpieza debe ser **explícita** (batch, callable o trigger).
+- **Baja de clientes CRM** (`crm/index.tsx` + `deleteClientForEmpresa`) — desactivar es `status: INACTIVE` + `inactivatedAt` / `inactivatedBy`. El borrado físico es solo SuperAdmin (`firestore.rules`) y solo si el cliente no tiene turnos, `servicios_sla` ni `ordenes_compra`; si tiene, se bloquea. No hay cascade sobre turnos ni contratos.
