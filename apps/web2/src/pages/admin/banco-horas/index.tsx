@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { ChevronRight, Database, Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -6,15 +6,19 @@ import * as XLSX from 'xlsx';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { db } from '@/lib/firebase';
+import { db, functions } from '@/lib/firebase';
 import {
   fetchHoursLedgerMonthly,
   HOURS_LEDGER_PLAN_OPTIONS,
   planHoursOf,
   previewHoursLedgerMonth,
+  hoursLedgerJobDocId,
+  watchHoursLedgerJob,
+  type HoursLedgerJobView,
   type HoursLedgerMonthRow,
   type HoursLedgerPlanMode,
 } from '@/lib/hoursLedger/hoursLedgerRead';
+import { httpsCallable } from 'firebase/functions';
 
 type PlanMode = HoursLedgerPlanMode;
 type Level = 'cliente' | 'objetivo' | 'puesto' | 'dia';
@@ -33,6 +37,37 @@ function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number })
   return planHoursOf(mode, r);
 }
 
+const SUM_KEYS = ['slaActive', 'slaInactive', 'slaClosed', 'planPublished', 'planDraft', 'worked', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'] as const;
+
+function groupClients(objectives: MonthRow[]): MonthRow[] {
+  const map = new Map<string, MonthRow>();
+  for (const o of objectives) {
+    const id = o.clientId || '_sin_cliente';
+    const prev = map.get(id);
+    if (!prev) {
+      map.set(id, {
+        ...o,
+        id,
+        level: 'cliente',
+        clientId: o.clientId,
+        clientName: o.clientName || 'Sin cliente',
+        objectiveId: '',
+        objectiveName: '',
+      });
+      continue;
+    }
+    for (const k of SUM_KEYS) prev[k] = (Number(prev[k]) || 0) + (Number(o[k]) || 0);
+  }
+  return [...map.values()];
+}
+
+function when(iso: string) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
 export default function BancoHorasPage() {
   const { canReadModule, rolePermissions, isSuperAdmin, loading } = useAuth();
   const { empresaId } = useEmpresa();
@@ -48,11 +83,15 @@ export default function BancoHorasPage() {
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState<'vacio' | 'libro' | 'preview'>('vacio');
   const [stack, setStack] = useState<Array<{ level: Level; id: string; label: string }>>([]);
+  const [job, setJob] = useState<HoursLedgerJobView | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const kicked = useRef('');
 
   const periodKey = `${year}-${String(month).padStart(2, '0')}`;
 
   const loadStored = useCallback(async () => {
     if (!empresaId) return;
+    setLoaded(false);
     setBusy(true);
     try {
       const book = await fetchHoursLedgerMonthly(empresaId, periodKey);
@@ -65,10 +104,39 @@ export default function BancoHorasPage() {
       toast.error('No se pudo leer el libro');
     } finally {
       setBusy(false);
+      setLoaded(true);
     }
   }, [empresaId, periodKey]);
 
   useEffect(() => { void loadStored(); }, [loadStored]);
+
+  useEffect(() => {
+    if (!empresaId) return;
+    return watchHoursLedgerJob(empresaId, periodKey, true, (raw) => {
+      if (!raw) { setJob(null); return; }
+      const total = Number(raw.total) || 0;
+      const processed = Number(raw.processed) || 0;
+      setJob({
+        status: String(raw.status || ''),
+        total,
+        processed,
+        currentObjectiveName: String(raw.currentObjectiveName || ''),
+        error: String(raw.error || ''),
+        createdBy: String(raw.createdBy || ''),
+        finishedAt: String(raw.finishedAt || ''),
+        dryRun: raw.dryRun !== false,
+        failed: Array.isArray(raw.failed) ? raw.failed as HoursLedgerJobView['failed'] : [],
+      });
+    });
+  }, [empresaId, periodKey]);
+
+  useEffect(() => {
+    if (!loaded || !empresaId || source !== 'vacio') return;
+    const key = `${empresaId}|${periodKey}`;
+    if (kicked.current === key) return;
+    kicked.current = key;
+    void preview();
+  }, [loaded, empresaId, periodKey, source]);
 
   const preview = async () => {
     if (!empresaId) return;
@@ -88,14 +156,39 @@ export default function BancoHorasPage() {
     }
   };
 
+  const retryFailed = async () => {
+    if (!empresaId) return;
+    setBusy(true);
+    try {
+      const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 60000 });
+      await call({
+        empresaId,
+        period: periodKey,
+        dryRun: true,
+        retry: true,
+        jobId: hoursLedgerJobDocId(empresaId, periodKey, true),
+      });
+      const book = await previewHoursLedgerMonth(empresaId, periodKey);
+      setMonthly(book.monthly);
+      setSource(book.source === 'preview' ? 'preview' : 'vacio');
+      toast.success('Se reintentaron las tandas fallidas');
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo reintentar');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const empresa = monthly.find((r) => r.level === 'empresa');
-  const clients = monthly.filter((r) => r.level === 'cliente');
+  const storedClients = monthly.filter((r) => r.level === 'cliente');
+  const objectives = monthly.filter((r) => r.level === 'objetivo');
+  const clients = storedClients.length ? storedClients : groupClients(objectives);
   const current = stack[stack.length - 1];
 
   const visible = useMemo(() => {
     if (!current) return clients;
     if (current.level === 'cliente') {
-      return monthly.filter((r) => r.level === 'objetivo' && r.clientId === current.id);
+      return monthly.filter((r) => r.level === 'objetivo' && (r.clientId || '_sin_cliente') === current.id);
     }
     if (current.level === 'objetivo') {
       const puestos = new Map<string, DayRow>();
@@ -216,11 +309,36 @@ export default function BancoHorasPage() {
                 <RefreshCw size={14} className="inline mr-1" /> Recalcular (vista previa)
               </button>
             )}
+            {!!job?.failed?.length && (
+              <button type="button" onClick={() => void retryFailed()} className="rounded-2xl border border-amber-300 bg-amber-50 text-amber-800 px-4 py-2 text-sm font-black shadow-sm">
+                Reintentar lo fallido
+              </button>
+            )}
             <button type="button" onClick={exportExcel} disabled={!monthly.length} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black shadow-sm hover:bg-slate-50 disabled:opacity-40">
               <Download size={14} className="inline mr-1" /> Excel
             </button>
           </div>
         </div>
+
+        {job && (job.status === 'QUEUED' || job.status === 'RUNNING' || job.status === 'DONE' || job.status === 'ERROR') && (
+          <div className="rounded-3xl bg-white shadow-sm border border-slate-100 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-black text-slate-600">
+              <span>
+                {job.status === 'QUEUED' || job.status === 'RUNNING' ? 'Calculando…' : job.status === 'ERROR' ? 'Terminó con errores' : 'Último recálculo'}
+                {job.total ? ` · ${job.processed} de ${job.total} objetivos` : ''}
+              </span>
+              <span className="text-slate-400 font-bold">
+                {job.createdBy || ''}{job.finishedAt ? ` · ${when(job.finishedAt)}` : ''}
+              </span>
+            </div>
+            <div className="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full bg-indigo-500 transition-all" style={{ width: `${job.total ? Math.round((100 * job.processed) / job.total) : (job.status === 'DONE' ? 100 : 8)}%` }} />
+            </div>
+            {(job.currentObjectiveName || job.error) && (
+              <p className="mt-1 text-[11px] font-bold text-slate-400 truncate">{job.currentObjectiveName || job.error}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {cards.map(([label, value]) => (
@@ -269,7 +387,11 @@ export default function BancoHorasPage() {
                 })}
                 {!visible.length && (
                   <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400 font-bold">
-                    {canRebuild ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.' : 'Sin filas. El libro de este mes todavía no fue calculado.'}
+                    {empresa
+                      ? 'El libro tiene totales de empresa, pero no hay detalle para este nivel.'
+                      : canRebuild
+                        ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.'
+                        : 'Sin filas. El libro de este mes todavía no fue calculado.'}
                   </td></tr>
                 )}
               </tbody>
