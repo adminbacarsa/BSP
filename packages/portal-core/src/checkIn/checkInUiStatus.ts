@@ -1,5 +1,6 @@
 import type { Shift } from '@cosp/portal-types';
 import type { CheckInTiming } from './portalCheckIn';
+import { lateNoNoticeCheckInCopy } from './evaluateCheckInWindow';
 import { toDate, formatTimeAr } from '../utils/dates';
 
 export type CheckInUiStatus =
@@ -11,6 +12,7 @@ export type CheckInUiStatus =
   | 'present'
   | 'late_notified'
   | 'late_window'
+  | 'late_no_notice'
   | 'shift_ended'
   | 'trace_registration'
   | 'blocked';
@@ -20,6 +22,8 @@ export type CheckInUiStatusView = {
   title: string;
   subtitle?: string;
   tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+  /** Texto del botón de fichada cuando no es «Presente». */
+  actionLabel?: string;
 };
 
 function normRequestStatus(raw?: string): string {
@@ -177,6 +181,17 @@ export function resolveCheckInUiStatus(
         ? 'Indicá demora de 15, 30 o 60 min'
         : timing.rejectMessage ?? 'Contactá a operaciones si hace falta',
       tone: 'warning',
+    };
+  }
+
+  if (timing?.canCheckIn && timing.lateNoNotice) {
+    const copy = lateNoNoticeCheckInCopy(timing.lateMinutes ?? 0);
+    return {
+      status: 'late_no_notice',
+      title: copy.title,
+      subtitle: copy.subtitle,
+      tone: 'warning',
+      actionLabel: copy.actionLabel,
     };
   }
 

@@ -13,6 +13,7 @@ import {
   evaluateCheckInWindow,
   checkInRejectMessage,
   isCoverageHoursOnSourceDoc,
+  lateNoNoticeCheckInCopy,
 } from '../../../../packages/portal-core/src/checkIn/evaluateCheckInWindow.ts';
 
 const require = createRequire(import.meta.url);
@@ -32,6 +33,7 @@ const { evaluateServerCheckInWindow } = require(functionsLib) as {
     usePlannedStart?: boolean;
     useAdjustedStart?: boolean;
     lateMinutes?: number;
+    lateNoNotice?: boolean;
   };
 };
 
@@ -56,6 +58,7 @@ function assertParity(
       usePlannedStart: portal.usePlannedStart,
       useAdjustedStart: portal.useAdjustedStart,
       lateMinutes: portal.lateMinutes,
+      lateNoNotice: portal.lateNoNotice,
     },
     {
       allowed: server.allowed,
@@ -63,6 +66,7 @@ function assertParity(
       usePlannedStart: server.usePlannedStart,
       useAdjustedStart: server.useAdjustedStart,
       lateMinutes: server.lateMinutes,
+      lateNoNotice: server.lateNoNotice,
     },
     label,
   );
@@ -83,7 +87,7 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assert.equal(evaluateCheckInWindow(shift, now).rejectCode, 'ABSENT');
   });
 
-  it('normal T−15…T+5 / TOO_EARLY / TOO_LATE', () => {
+  it('normal T−15…T+30: a tiempo hasta T+5; T+5…T+30 sin aviso; T+31 TOO_LATE', () => {
     const start = `${day}T18:00:00-03:00`;
     const shift = {
       origin: 'PLANIFICADOR',
@@ -93,7 +97,15 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assertParity('too early', shift, new Date(`${day}T17:00:00-03:00`).getTime());
     assertParity('in window', shift, new Date(`${day}T17:50:00-03:00`).getTime());
     assertParity('on time+', shift, new Date(`${day}T18:03:00-03:00`).getTime());
-    assertParity('too late', shift, new Date(`${day}T18:10:00-03:00`).getTime());
+    const t16 = new Date(`${day}T18:16:00-03:00`).getTime();
+    assertParity('t+16 no notice', shift, t16);
+    const late = evaluateCheckInWindow(shift, t16);
+    assert.equal(late.allowed, true);
+    assert.equal(late.lateNoNotice, true);
+    assert.equal(late.lateMinutes, 16);
+    const t31 = new Date(`${day}T18:31:00-03:00`).getTime();
+    assertParity('t+31', shift, t31);
+    assert.equal(evaluateCheckInWindow(shift, t31).rejectCode, 'TOO_LATE');
   });
 
   it('lateArrivalEtaAt prioriza sobre minutos; cap T+60', () => {
@@ -104,7 +116,9 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
       lateArrivalConfirmed: true,
       lateArrivalEtaAt: ts(`${day}T17:45:00-03:00`),
     };
-    assertParity('eta ok', shift, new Date(`${day}T17:40:00-03:00`).getTime());
+    const etaOk = new Date(`${day}T17:40:00-03:00`).getTime();
+    assertParity('eta ok', shift, etaOk);
+    assert.equal(evaluateCheckInWindow(shift, etaOk).lateNoNotice, undefined);
     assertParity('eta passed', shift, new Date(`${day}T17:50:00-03:00`).getTime());
 
     const withCap = {
@@ -267,6 +281,37 @@ describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
       assert.equal(r.rejectCode, 'TRACE_REGISTRATION');
       assert.match(checkInRejectMessage(r.rejectCode), /extensión|adelanto/i);
     }
+  });
+});
+
+describe('UI llegada tarde sin aviso (T+5…T+30)', () => {
+  it('Gaitan ESC 16:00: T+16 sin aviso habilita Llegada tarde; con ETA no', () => {
+    const shift = {
+      origin: 'PLANIFICADOR',
+      code: 'ESC',
+      startTime: ts('2026-09-28T16:00:00-03:00'),
+      endTime: ts('2026-09-29T00:00:00-03:00'),
+    };
+    const at16 = new Date('2026-09-28T16:16:00-03:00').getTime();
+    assertParity('gaitan t+16', shift, at16);
+    const r = evaluateCheckInWindow(shift, at16);
+    assert.equal(r.allowed, true);
+    assert.equal(r.lateNoNotice, true);
+    assert.equal(r.lateMinutes, 16);
+    const copy = lateNoNoticeCheckInCopy(r.lateMinutes ?? 0);
+    assert.equal(copy.actionLabel, 'Llegada tarde');
+    assert.equal(copy.title, 'Llegada tarde');
+    assert.equal(copy.subtitle, 'Llegás 16 min tarde; queda registrado.');
+
+    const noticed = {
+      ...shift,
+      lateArrivalAt: ts('2026-09-28T15:50:00-03:00'),
+      lateArrivalEtaAt: ts('2026-09-28T16:45:00-03:00'),
+    };
+    assertParity('gaitan con aviso', noticed, at16);
+    const withNotice = evaluateCheckInWindow(noticed, at16);
+    assert.equal(withNotice.allowed, true);
+    assert.equal(withNotice.lateNoNotice, undefined);
   });
 });
 

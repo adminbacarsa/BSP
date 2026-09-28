@@ -45,6 +45,9 @@ export type CheckInTiming = {
   rejectCode?: CheckInWindowRejectCode;
   /** Mensaje claro para el guardia. */
   rejectMessage?: string;
+  /** T+5…T+30 sin aviso previo: el botón es «Llegada tarde». */
+  lateNoNotice?: boolean;
+  lateMinutes?: number;
 };
 
 export type CheckInTimingOptions = {
@@ -167,11 +170,8 @@ function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date
     const advClose = adj + 60 * 60 * 1000;
     const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
     const cap60 = plannedStart + 60 * 60 * 1000;
-    let ownClose = plannedStart + 5 * 60 * 1000;
+    let ownClose = plannedStart + 30 * 60 * 1000;
     if (etaAt > 0) ownClose = Math.min(etaAt, cap60);
-    else if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
-      ownClose = plannedStart + 30 * 60 * 1000;
-    }
     if (nowMs >= adj - 15 * 60_000 && nowMs <= advClose) return new Date(advClose);
     return new Date(ownClose);
   }
@@ -179,10 +179,7 @@ function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date
   const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
   const cap60 = plannedStart + 60 * 60 * 1000;
   if (etaAt > 0) return new Date(Math.min(etaAt, cap60));
-  if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
-    return new Date(plannedStart + 30 * 60 * 1000);
-  }
-  return new Date(plannedStart + 5 * 60 * 1000);
+  return new Date(plannedStart + 30 * 60 * 1000);
 }
 
 /**
@@ -288,6 +285,8 @@ export function getCheckInTiming(
     checkInDeadline: canCheckIn ? deadlineFromWindow(rec, nowMs) : null,
     rejectCode,
     rejectMessage: rejectCode ? checkInRejectMessage(rejectCode) : undefined,
+    lateNoNotice: windowEval.lateNoNotice === true,
+    lateMinutes: windowEval.lateMinutes,
   };
 }
 

@@ -17,6 +17,8 @@ export type CheckInWindowResult = {
   usePlannedStart?: boolean;
   useAdjustedStart?: boolean;
   lateMinutes?: number;
+  /** Entre T+5 y T+30 sin aviso previo: la fichada es llegada tarde (novedad LLEGADA_TARDE). */
+  lateNoNotice?: boolean;
 };
 
 /** ops_cov EXT/ADV de registro — mismo criterio que isOpsCoverageHoursOnSourceDoc (functions). */
@@ -92,21 +94,25 @@ function adjustedStartMs(shift: Record<string, unknown>): number {
   return startMs(shift);
 }
 
-/** Fin ventana propia: lateArrivalEtaAt → T+30 con aviso → T+5. Cap T+60. */
+function hasPriorLateNotice(shift: Record<string, unknown>): boolean {
+  const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
+  if (etaAt > 0) return true;
+  return shift.lateArrivalConfirmed === true || !!shift.lateArrivalAt;
+}
+
+/** Fin ventana propia: min(eta, T+60) si hay ETA; con aviso sin ETA o sin aviso → T+30. */
 function lateEtaDeadlineMs(shift: Record<string, unknown>, plannedStartMs: number): number {
   const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
   const cap60 = plannedStartMs + 60 * 60 * 1000;
   if (etaAt > 0) return Math.min(etaAt, cap60);
-  if (shift.lateArrivalConfirmed === true || shift.lateArrivalAt) {
-    return plannedStartMs + 30 * 60 * 1000;
-  }
-  return plannedStartMs + 5 * 60 * 1000;
+  return plannedStartMs + 30 * 60 * 1000;
 }
 
 function finishAllowed(
   anchorStartMs: number,
   nowMs: number,
   useAdjustedStart: boolean,
+  lateNoNoticeEligible = false,
 ): CheckInWindowResult {
   const onTimeEnd = anchorStartMs + 5 * 60 * 1000;
   if (nowMs <= onTimeEnd) {
@@ -123,6 +129,7 @@ function finishAllowed(
     usePlannedStart: false,
     useAdjustedStart,
     lateMinutes,
+    ...(lateNoNoticeEligible && lateMinutes > 0 ? { lateNoNotice: true } : {}),
   };
 }
 
@@ -183,14 +190,27 @@ export function evaluateCheckInWindow(
     if (inAdv) {
       return finishAllowed(advStart, nowMs, true);
     }
-    return finishAllowed(plannedStart, nowMs, false);
+    return finishAllowed(plannedStart, nowMs, false, !hasPriorLateNotice(shift));
   }
 
   const windowStart = plannedStart - 15 * 60 * 1000;
   const windowEnd = lateEtaDeadlineMs(shift, plannedStart);
   if (nowMs < windowStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
   if (nowMs > windowEnd) return { allowed: false, rejectCode: 'TOO_LATE' };
-  return finishAllowed(plannedStart, nowMs, false);
+  return finishAllowed(plannedStart, nowMs, false, !hasPriorLateNotice(shift));
+}
+
+/** Botón y texto del tramo T+5…T+30 sin aviso (portal). */
+export function lateNoNoticeCheckInCopy(lateMinutes: number): {
+  title: string;
+  subtitle: string;
+  actionLabel: string;
+} {
+  return {
+    title: 'Llegada tarde',
+    subtitle: `Llegás ${lateMinutes} min tarde; queda registrado.`,
+    actionLabel: 'Llegada tarde',
+  };
 }
 
 /** Mensajes UX para rechazo de ventana (portal guardia). */

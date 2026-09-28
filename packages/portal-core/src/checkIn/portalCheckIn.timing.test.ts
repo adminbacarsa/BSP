@@ -217,6 +217,25 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(t.rejectMessage).toMatch(/terminó/i);
   });
 
+  it('sin aviso: T+16 puede fichar (llegada tarde); T+31 queda fuera', () => {
+    const start = new Date('2026-09-28T16:00:00-03:00');
+    const s = shift({
+      id: 'gaitan-esc',
+      code: 'ESC',
+      origin: 'PLANIFICADOR',
+      startTime: start,
+      endTime: new Date('2026-09-29T00:00:00-03:00'),
+    });
+    const at16 = getCheckInTiming(s, new Date('2026-09-28T16:16:00-03:00'));
+    expect(at16.canCheckIn).toBe(true);
+    expect(at16.lateNoNotice).toBe(true);
+    expect(at16.lateMinutes).toBe(16);
+    expect(at16.checkInDeadline?.getTime()).toBe(start.getTime() + 30 * 60_000);
+    const at31 = getCheckInTiming(s, new Date('2026-09-28T16:31:00-03:00'));
+    expect(at31.canCheckIn).toBe(false);
+    expect(at31.rejectCode).toBe('TOO_LATE');
+  });
+
   it('ausente: no puede fichar', () => {
     const s = shift({
       id: 'abs1',

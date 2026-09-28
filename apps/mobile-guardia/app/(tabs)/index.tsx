@@ -494,8 +494,8 @@ function HoyScreenContent() {
                   <View style={styles.heroActions}>
                     {portalFeatures.checkIn && canCheckIn ? (
                       <CommandButton
-                        label="Presente"
-                        variant="success"
+                        label={checkInStatusView.actionLabel || 'Presente'}
+                        variant={checkInStatusView.actionLabel ? 'onHero' : 'success'}
                         loading={busyShiftId === mainShift?.id}
                         onPress={onCheckIn}
                       />
