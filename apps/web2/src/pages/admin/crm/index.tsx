@@ -133,14 +133,15 @@ import type { ProformaExportBundle } from '@/lib/crm/proformaTypes';
 import { exportProformaCsv, exportProformaExcel, exportProformaPdf } from '@/lib/crm/proformaExport';
 import { lookupClientByCuitFromAfip, type AfipClientLookupResult } from '@/services/afipClientLookup';
 import { callableErrorText } from '@/lib/callableError';
+import { fetchHoursBalances, sumBalancesByClient, overlayLiveSlaOnBalanceRows } from '@/lib/hoursBalance';
 import {
-  fetchHoursBalances,
-  persistHoursBalances,
-  persistHoursBalancesFromTurnos,
-  sumBalancesByClient,
-  overlayLiveSlaOnBalanceRows,
-  buildHoursBalanceMonth,
-} from '@/lib/hoursBalance';
+  byClientMetricsFromLedger,
+  HOURS_LEDGER_PLAN_OPTIONS,
+  loadHoursLedgerOrPreview,
+  officialHoursFromEmpresa,
+  periodKeyOf,
+  type HoursLedgerPlanMode,
+} from '@/lib/hoursLedger/hoursLedgerRead';
 import {
   calculateMonthlyBreakdown,
 } from '@/lib/servicios/slaHoursCalculator';
@@ -368,6 +369,7 @@ export default function CRMPage() {
   const [rangeMode, setRangeMode] = useState<RangeMode>('month');
   const [rangeMonth, setRangeMonth] = useState(new Date().getMonth());
   const [rangeYear, setRangeYear] = useState(new Date().getFullYear());
+  const [planMode, setPlanMode] = useState<HoursLedgerPlanMode>('published');
   const [clientListSort, setClientListSort] = useState<ClientListSort>('name');
   const [clientListFilter, setClientListFilter] = useState<ClientListFilter>('activos');
   const [metricsUpdatedAt, setMetricsUpdatedAt] = useState<Date | null>(null);
@@ -993,6 +995,45 @@ export default function CRMPage() {
       setMetricsLoadProgress({ pct, label });
     };
     const snapRef = doc(db, 'crm_metrics_snapshot', cacheKey);
+    if (rangeMode === 'month' && empresaId) {
+      try {
+        bumpProgress(20, 'Leyendo el libro de horas…');
+        const book = await loadHoursLedgerOrPreview(empresaId, selectedPeriodKey);
+        if (book.empresa && runId === metricsRunRef.current) {
+          const official = officialHoursFromEmpresa(book.empresa);
+          const byClient = byClientMetricsFromLedger(book, planMode);
+          const { metrics } = storePeriodMetrics(selectedPeriodKey, byClient);
+          const { start, end } = getRangeDates();
+          const slaRows = await fetchSlaRowsForCrmDashboard(
+            clients.map((c) => ({ id: c.id, name: c.name, legalName: c.legalName, objetivos: c.objetivos || [] })),
+            { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), migracionCompleta },
+          );
+          const footprint = slaFootprintFromServices(slaRows, start, end);
+          const trend = trendSeriesFromBuckets(bucketsEarly);
+          setClientMetricsMap(metrics);
+          setGlobalMetrics({
+            totalSold: official.sla,
+            totalPlanned: planMode === 'draft'
+              ? official.planDraft
+              : planMode === 'both'
+                ? official.planPublished + official.planDraft
+                : official.planPublished,
+            totalExecuted: official.worked,
+            criticalClients: [],
+          });
+          setCrmTrendSeries(trend);
+          setSlaFootprint(footprint);
+          const now = new Date();
+          setMetricsUpdatedAt(now);
+          metricsCache.current.set(cacheKey, { metrics, trend, updatedAt: now, footprint });
+          setCalculatingMetrics(false);
+          setMetricsLoadProgress(null);
+          return;
+        }
+      } catch (err) {
+        console.warn('[crm] libro de horas', err);
+      }
+    }
     if (rangeMode !== 'all' && empresaId) {
       try {
         const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
@@ -1207,9 +1248,7 @@ export default function CRMPage() {
                     rebuiltFrom: 'crm-bootstrap',
                   }).filter((r) => miss.has(r.objectiveId));
                 });
-                if (gapRows.length > 0) {
-                  await persistHoursBalances(gapRows);
-                }
+                /* H2b: el libro lo escribe Functions; no persistimos hours_balances. */
               } catch (err) {
                 console.warn('[crm] hours_balances huecos', err);
               }
@@ -1422,15 +1461,7 @@ export default function CRMPage() {
       const now = new Date();
       setMetricsUpdatedAt(now);
       metricsCache.current.set(cacheKey, { metrics, trend: trendSeries, updatedAt: now, footprint });
-      if (empresaId && slaRows.length && allTurnos.length) {
-        void persistHoursBalancesFromTurnos({
-          empresaId,
-          services: slaRows as any,
-          turnos: allTurnos,
-          months: buckets.map((b) => ({ year: b.start.getFullYear(), month: b.start.getMonth() + 1 })),
-          rebuiltFrom: 'crm-bootstrap',
-        }).catch((err) => console.warn('[crm] hours_balances bootstrap', err));
-      }
+      /* H2b: el extracto hours_balances ya no se escribe desde CRM. */
       setDoc(snapRef, {
         empresaId,
         computedAt: serverTimestamp(),
@@ -1860,7 +1891,7 @@ export default function CRMPage() {
     }
     void calculateDashboardMetrics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clients, rangeMode, rangeMonth, rangeYear, empresaId, migracionCompleta]);
+  }, [clients, rangeMode, rangeMonth, rangeYear, empresaId, migracionCompleta, planMode]);
 
   const clientsForList = useMemo(() => {
     let list = [...clients];
@@ -2492,9 +2523,20 @@ export default function CRMPage() {
       }
 
       const slaHoursByObjectiveId: Record<string, number> = {};
-      for (const srv of vigenteSlas) {
-        const oid = String((srv as any).objectiveId ?? '').trim();
-        if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
+      const sameCalendarMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
+      if (sameCalendarMonth && empresaId) {
+        try {
+          const book = await loadHoursLedgerOrPreview(empresaId, periodKeyOf(start.getFullYear(), start.getMonth() + 1));
+          for (const o of book.objectives) {
+            if (o.objectiveId) slaHoursByObjectiveId[o.objectiveId] = Math.round(o.slaActive || 0);
+          }
+        } catch { /* si el libro no responde, se usa el SLA vivo de abajo */ }
+      }
+      if (!Object.keys(slaHoursByObjectiveId).length) {
+        for (const srv of vigenteSlas) {
+          const oid = String((srv as any).objectiveId ?? '').trim();
+          if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
+        }
       }
       const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
       const startKey = getDateKeyInTimezone(start);
@@ -2746,6 +2788,15 @@ export default function CRMPage() {
               onRangeModeChange={setRangeMode}
               onRangeMonthChange={setRangeMonth}
               onRangeYearChange={setRangeYear}
+              extraControls={(
+                <select
+                  value={planMode}
+                  onChange={(e) => { metricsCache.current.clear(); setPlanMode(e.target.value as HoursLedgerPlanMode); }}
+                  className="rounded-2xl border border-slate-200 px-3 py-2 text-[10px] font-black shadow-sm"
+                >
+                  {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </select>
+              )}
               totalSold={globalMetrics.totalSold}
               totalPlanned={globalMetrics.totalPlanned}
               totalExecuted={globalMetrics.totalExecuted}
