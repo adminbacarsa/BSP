@@ -168,19 +168,40 @@ export function propagateFrancoTrabajadoFlags(shifts: any[], opts?: { usePlanned
     ));
 }
 
+/** Mismo tope que `shiftClose.ts` (12:59) — relevo tolerado, nunca una jornada de 13h ni 24h. */
+const FT_FULL_DAY_HARD_CAP_HOURS = 12 + 59 / 60;
+
+/**
+ * Decisión Mauro H1 #4: FT de día completo (placeholder 00:00–23:59) nunca liquida 24 h. Usa la
+ * ventana de cobertura explícita (`shift.hours`, seteada por Ops al asignar la cobertura) o, si no
+ * hay, la fichada real (`realStartTime`/`realEndTime` o `checkInTime`/`checkOutTime`) con tope 12:59.
+ */
 function resolveFtLiquidationHours(shift: any, fallback = 8): number {
     const startSec = shift.startTime?.seconds ?? shift.startTime?._seconds ?? 0;
     const endSec = shift.endTime?.seconds ?? shift.endTime?._seconds ?? 0;
-    if (startSec && endSec) {
-        const span = Math.max(0, (endSec - startSec) / 3600);
-        if (span > 0 && span < 23.5) return span;
+    const rawSpanH = startSec && endSec ? Math.max(0, (endSec - startSec) / 3600) : 0;
+    if (rawSpanH > 0 && rawSpanH < 23.5) return rawSpanH;
+
+    const explicitHours = Number(shift.hours);
+    if (Number.isFinite(explicitHours) && explicitHours > 0 && explicitHours < 23.5) {
+        return Math.min(explicitHours, FT_FULL_DAY_HARD_CAP_HOURS);
     }
+
+    const rStart = shift.realStartTime?.seconds ? new Date(shift.realStartTime.seconds * 1000)
+        : shift.checkInTime?.seconds ? new Date(shift.checkInTime.seconds * 1000) : null;
+    const rEnd = shift.realEndTime?.seconds ? new Date(shift.realEndTime.seconds * 1000)
+        : shift.checkOutTime?.seconds ? new Date(shift.checkOutTime.seconds * 1000) : null;
+    if (rStart && rEnd) {
+        const fichadaH = (rEnd.getTime() - rStart.getTime()) / 3600000;
+        if (fichadaH > 0) return Math.min(fichadaH, FT_FULL_DAY_HARD_CAP_HOURS);
+    }
+
     const code = String(shift.code || '').trim().toUpperCase();
     if (code && code !== 'F' && code !== 'FT') {
         const fromLookup = SHIFT_HOURS_LOOKUP[code];
-        if (fromLookup && fromLookup > 0) return fromLookup;
+        if (fromLookup && fromLookup > 0) return Math.min(fromLookup, FT_FULL_DAY_HARD_CAP_HOURS);
     }
-    return fallback > 0 && fallback < 23.5 ? fallback : 8;
+    return Math.min(fallback > 0 && fallback < 23.5 ? fallback : 8, FT_FULL_DAY_HARD_CAP_HOURS);
 }
 
 function shiftEndedForLiquidation(shift: any): boolean {
@@ -904,7 +925,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             const day = Math.max(0, duration - night);
             const dateKey = getArgentinaDate(d.startTime);
             const isFeriado = holidaysMap[dateKey];
-            if (isFT && (duration <= 0 || duration >= 23.5)) {
+            // Decisión Mauro H1 #4: placeholder de día completo (00:00–23:59) — nunca 24 h, ni en
+            // teóricas (`duration`) ni en la fichada real (`worked`, más abajo).
+            const isFtFullDayPlaceholder = isFT && (duration <= 0 || duration >= 23.5);
+            if (isFtFullDayPlaceholder) {
                 duration = resolveFtLiquidationHours(d, duration > 0 && duration < 23.5 ? duration : 8);
             }
 
@@ -971,7 +995,8 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (rStart && rEnd) {
                 const rDur = (rEnd.getTime() - rStart.getTime()) / 3600000;
                 if (rDur >= 0) {
-                    worked = Math.min(rDur, 24); // Fix 3: cap a 24h en lugar de descartar
+                    // Fix 3: cap a 24h en lugar de descartar; FT de día completo, tope 12:59 (decisión #4).
+                    worked = Math.min(rDur, isFtFullDayPlaceholder ? FT_FULL_DAY_HARD_CAP_HOURS : 24);
                     turnosConDatosReales++;
                 }
             } else if (isFT && !francoDocSkipIds.has(d.id)) {

@@ -823,6 +823,33 @@ async function main() {
   });
   const liqLateArrival = core.calculateLiquidationHoursStats([lateArrival], {});
 
+  // Decisión Mauro H1 #4: FT de día completo (00:00–23:59) nunca liquida 24h.
+  // (a) Con ventana de cobertura explícita (`hours`, ej. cubrió un D12) → esa ventana.
+  const ftFullDayWithHours = liqShift({
+    id: 'ft-fullday-hours',
+    employeeId: 'emp-ft-fullday-a',
+    code: 'FT',
+    isFrancoTrabajado: true,
+    hours: 12,
+    startTime: artIso('2026-05-24', '00:00'),
+    endTime: artIso('2026-05-24', '23:59'),
+    realStartTime: undefined,
+    realEndTime: undefined,
+  });
+  const liqFtFullDayWithHours = core.calculateLiquidationHoursStats([ftFullDayWithHours], {});
+  // (b) Sin ventana explícita, con fichada real 07:00-21:30 (14.5h) → tope 12:59, no 14.5 ni 24.
+  const ftFullDayFichada = liqShift({
+    id: 'ft-fullday-fichada',
+    employeeId: 'emp-ft-fullday-b',
+    code: 'FT',
+    isFrancoTrabajado: true,
+    startTime: artIso('2026-05-25', '00:00'),
+    endTime: artIso('2026-05-25', '23:59'),
+    realStartTime: artIso('2026-05-25', '07:00'),
+    realEndTime: artIso('2026-05-25', '21:30'),
+  });
+  const liqFtFullDayFichada = core.calculateLiquidationHoursStats([ftFullDayFichada], {});
+
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
   const liqExtLeft = core.calculateLiquidationHoursStats([extLeftAtBand], {});
@@ -855,6 +882,8 @@ async function main() {
     canonOk += 1;
   }
   canon('persona llegada tarde descuenta (07:20 de 07:00, sale a horario)', liqLateArrival.horasReales, 7 + 40 / 60);
+  canon('persona FT dia completo con ventana explicita (hours=12), nunca 24h', liqFtFullDayWithHours.horasReales, 12);
+  canon('persona FT dia completo sin ventana, fichada 14.5h tope 12:59', liqFtFullDayFichada.horasReales, 12 + 59 / 60);
   canon('persona docs que se pisan en horario: una sola jornada', liqOverlapJornada.horasReales, 8);
   if (liqOverlapJornada.requiresReview) {
     canonFails.push('persona jornada única de 8h no debería marcar requiresReview');
