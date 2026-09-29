@@ -299,7 +299,10 @@ export async function rollupStoredMonth(empresaId: string, periodKey: string) {
   const now = new Date().toISOString();
   const blank = () => ({
     slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0, planPublished: 0, planDraft: 0, worked: 0, workedOutside: 0,
-    covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
+    covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0, novedadPagaOutside: 0,
+    licV: 0, licE: 0, licL: 0, licA: 0, licPG: 0, licSUS: 0, licSGS: 0,
+    ausenciaHoras: 0, ausenciaHorasOutside: 0, ausenciaTurnos: 0, ausenciaTurnosOutside: 0, ausenciaLegajos: 0,
+    uncoveredAusencia: 0, uncoveredRetiro: 0, uncoveredFaltaPlan: 0,
   });
   const keys = Object.keys(blank());
   const add = (a: Record<string, number>, b: Record<string, unknown>) => {
