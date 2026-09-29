@@ -500,7 +500,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "grupoId", "order": "ASCENDING" },
-        { "fieldPath": "estado", "order": "ASCENDING" }
+        { "fieldPath": "disponibilidad", "order": "ASCENDING" }
       ]
     },
     {

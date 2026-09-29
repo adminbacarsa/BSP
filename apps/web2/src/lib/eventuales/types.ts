@@ -1,6 +1,15 @@
 export type ModalidadLaboral = 'INDETERMINADO' | 'EVENTUAL' | 'PLAZO_FIJO';
 
-export type BolsaEstado = 'ACTIVA' | 'BAJA' | 'EFECTIVIZADO';
+/** En la bolsa. Independiente del alta o la baja en ARCA. */
+export type BolsaDisponibilidad = 'DISPONIBLE' | 'NO_DISPONIBLE';
+
+export type EstadoArcaBolsa = 'ALTA' | 'BAJA';
+
+export interface ArcaHistorialItem {
+  estado: EstadoArcaBolsa;
+  fecha: string;
+  origen: 'IMPORT_PLANILLA' | 'CONTRATO' | 'EFECTIVIZACION';
+}
 
 export type ContratoEventualEstado =
   | 'BORRADOR'

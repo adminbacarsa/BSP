@@ -135,8 +135,10 @@ grupos_eventuales/{grupoId}: {
 eventuales_bolsa/{cuil}: {
   grupoId, cuil, dni, nombre,
   primerIngreso?: string;
-  estado: 'ACTIVA' | 'BAJA' | 'EFECTIVIZADO';   // BAJA = histórico, no asignable
-  asignable: boolean;
+  disponibilidad: 'DISPONIBLE' | 'NO_DISPONIBLE';  // en la bolsa, no es el alta ARCA
+  estadoArca: 'ALTA' | 'BAJA';
+  arcaHistorial: Array<{ estado: 'ALTA' | 'BAJA', fecha, origen }>;
+  requiereAltaNueva?: boolean;           // BAJA en ARCA: asignable, pero no trabaja sin alta nueva
   riesgoEncadenamiento?: boolean;
   legajos: Array<{ empresaId, employeeId, modalidad }>;
 }
@@ -199,7 +201,7 @@ Pasar a planta permanente es en la **misma empresa** y el **mismo legajo**. Func
 - `modalidad: INDETERMINADO` y `fechaEfectivizacion`.
 - `startDate` queda en el **1º ingreso** (la antigüedad no se reinicia).
 - Los contratos eventuales abiertos de esa empresa pasan a `FINALIZADO`. Si estaban en `ALTA_ARCA` o `VIGENTE`, queda pendiente la baja ARCA de ese contrato.
-- Sale de la bolsa de esa empresa. Si no le queda un legajo eventual en otra empresa del grupo, la ficha pasa a `EFECTIVIZADO` y deja de ser asignable. Si sigue eventual en la otra, solo se quita este vínculo.
+- Sale de la bolsa de esa empresa. Si no le queda un legajo eventual en otra empresa del grupo, `disponibilidad` pasa a `NO_DISPONIBLE`. Si sigue eventual en la otra, solo se quita este vínculo.
 - ARCA: modificación de modalidad **pendiente** (no hay web service, §1.1). No se inventa el código 14/102.
 
 Quien ya es `INDETERMINADO` no se efectiviza de nuevo.
@@ -223,14 +225,18 @@ Se extiende `credenciales_publicas/{empDocId}` (un doc por legajo / empresa pres
 
 ## 4. Migración de la planilla (Fase B, solo dry-run)
 
-Script `scripts/import-eventuales-planilla.mjs`. **No escribe.** `--apply` termina sin tocar Firestore hasta un OK de Mauro. Match por CUIL con dígito verificador contra `empleados` de `bacarsa` y `grupos_bacar_sa`. El detalle con datos personales va a `scripts/out/` (gitignored).
+Script `scripts/import-eventuales-planilla.mjs`. **No escribe.** `--apply` termina sin tocar Firestore hasta un OK de Mauro. El cotejo es por CUIL y por número de legajo contra `empleados` de **bacarsa** y **pruebas_sa** (la segunda es otra empresa del panel, no un período de prueba). El detalle con datos personales va a `scripts/out/` (gitignored).
 
-| Estado en la planilla | Qué hace |
-|------------------------|----------|
-| 1. ACTIVO | Entra a `eventuales_bolsa` (ACTIVA) y el legajo queda `EVENTUAL`. Si el CUIL no existe, el legajo nuevo sería de `bacarsa`. Si existe, no se duplica. |
-| 2. EFECTIVIZADOS | **No entran a la bolsa.** Solo se informa si el legajo existe y si ya tiene `modalidad: INDETERMINADO` con fecha de efectivización. |
-| 3. BAJA | Bolsa en estado `BAJA`, histórico, no asignable. No crea legajo. |
-| 4. GOLONDRINA | Bolsa asignable con `riesgoEncadenamiento`. No crea legajo. |
+En la planilla, ACTIVO y BAJA son el **estado en ARCA**, no si la persona está en la bolsa. Los dos entran `DISPONIBLE`.
+
+| Estado en la planilla | Bolsa | ARCA |
+|------------------------|-------|------|
+| 1. ACTIVO | `DISPONIBLE` | `ALTA`, fecha = 1º ingreso |
+| 3. BAJA | `DISPONIBLE` (antes de trabajar hace falta un alta nueva) | `BAJA`, fecha = última baja. El historial guarda el alta previa si hay 1º ingreso |
+| 4. GOLONDRINA | `DISPONIBLE` + `riesgoEncadenamiento` | Igual que el resto: `BAJA` si hay fecha de baja; si no, `ALTA` |
+| 2. EFECTIVIZADOS | No entran | Planta permanente |
+
+No se sube como eventual si el CUIL o el legajo ya es planta permanente (`modalidad` `INDETERMINADO`, o sin modalidad y activo), si ya está cargado en `pruebas_sa`, o si el legajo/CUIL está repetido en la planilla (se informa el repetido; queda la primera fila). El reporte separa, por empresa, planta permanente / eventual / no existe.
 
 ---
 

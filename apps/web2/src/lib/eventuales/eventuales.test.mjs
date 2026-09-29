@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { cuilCheckDigit, normalizeCuil } from './cuil.mjs';
 import { planEfectivizacion, causaContratoValida } from './efectivizacion.mjs';
-import { classifyEstadoActual, planImportRow } from './planilla.mjs';
+import { classifyEstadoActual, planImportRow, repetidosEnPlanilla } from './planilla.mjs';
 
 function cuilValidoDesde(first10) {
   return first10 + cuilCheckDigit(first10);
@@ -35,28 +35,68 @@ describe('clasificación de planilla', () => {
     assert.equal(fuera.legajoExiste, true);
     assert.equal(fuera.indeterminadoConFecha, true);
 
-    const activoNuevo = planImportRow({ estadoRaw: '1. ACTIVO', cuilRaw: cuil, matches: [] });
-    assert.equal(activoNuevo.creaLegajo, true);
-    assert.equal(activoNuevo.modalidadLegajo, 'EVENTUAL');
-    assert.equal(activoNuevo.empresaAlta, 'bacarsa');
-
-    const activoExiste = planImportRow({
+    const activoNuevo = planImportRow({
       estadoRaw: '1. ACTIVO',
       cuilRaw: cuil,
-      matches: [{ employeeId: 'e2', empresaId: 'bacarsa' }],
+      ingreso: '2026-02-15',
+      matches: [],
     });
-    assert.equal(activoExiste.creaLegajo, false);
-    assert.equal(activoExiste.legajoExiste, true);
+    assert.equal(activoNuevo.entraBolsa, true);
+    assert.equal(activoNuevo.disponibilidad, 'DISPONIBLE');
+    assert.equal(activoNuevo.estadoArca, 'ALTA');
+    assert.equal(activoNuevo.fechaArca, '2026-02-15');
+    assert.equal(activoNuevo.creaLegajo, true);
+    assert.equal(activoNuevo.empresaAlta, 'bacarsa');
 
-    const baja = planImportRow({ estadoRaw: '3. BAJA', cuilRaw: cuil, matches: [] });
-    assert.equal(baja.bolsaEstado, 'BAJA');
-    assert.equal(baja.asignable, false);
-    assert.equal(baja.creaLegajo, false);
+    const baja = planImportRow({
+      estadoRaw: '3. BAJA',
+      cuilRaw: cuil,
+      ingreso: '2025-01-01',
+      fechaBaja: '2025-06-01',
+      matches: [],
+    });
+    assert.equal(baja.disponibilidad, 'DISPONIBLE');
+    assert.equal(baja.estadoArca, 'BAJA');
+    assert.equal(baja.fechaArca, '2025-06-01');
+    assert.equal(baja.requiereAltaNueva, true);
+    assert.equal(baja.arcaHistorial.length, 2);
+    assert.equal(baja.creaLegajo, true);
 
-    const gol = planImportRow({ estadoRaw: '4. GOLONDRINA', cuilRaw: cuil, matches: [] });
+    const gol = planImportRow({
+      estadoRaw: '4. GOLONDRINA',
+      cuilRaw: cuil,
+      ingreso: '2024-01-01',
+      fechaBaja: '2024-08-01',
+      matches: [],
+    });
     assert.equal(gol.riesgoEncadenamiento, true);
-    assert.equal(gol.entraBolsa, true);
-    assert.equal(gol.creaLegajo, false);
+    assert.equal(gol.estadoArca, 'BAJA');
+    assert.equal(gol.disponibilidad, 'DISPONIBLE');
+
+    const permanente = planImportRow({
+      estadoRaw: '1. ACTIVO',
+      cuilRaw: cuil,
+      matches: [{ employeeId: 'e2', empresaId: 'bacarsa', modalidad: '', status: 'activo' }],
+    });
+    assert.equal(permanente.bucket, 'DUPLICADO_PLANTA');
+    assert.equal(permanente.entraBolsa, false);
+    assert.equal(permanente.porEmpresa.bacarsa, 'PLANTA_PERMANENTE');
+    assert.equal(permanente.porEmpresa.pruebas_sa, 'NO_EXISTE');
+
+    const enPruebas = planImportRow({
+      estadoRaw: '1. ACTIVO',
+      cuilRaw: cuil,
+      matches: [{ employeeId: 'e3', empresaId: 'pruebas_sa', modalidad: 'EVENTUAL', status: 'activo' }],
+    });
+    assert.equal(enPruebas.bucket, 'YA_EN_PRUEBAS_SA');
+    assert.equal(enPruebas.entraBolsa, false);
+    assert.equal(enPruebas.porEmpresa.pruebas_sa, 'EVENTUAL');
+
+    const flags = repetidosEnPlanilla([
+      { legajo: '100', cuilRaw: cuil },
+      { legajo: '100', cuilRaw: cuilValidoDesde('2011111111') },
+    ]);
+    assert.deepEqual(flags, [false, true]);
 
     assert.equal(planImportRow({ estadoRaw: '1. ACTIVO', cuilRaw: '20-1', matches: [] }).bucket, 'CUIL_INVALIDO');
   });
@@ -92,7 +132,7 @@ describe('efectivización', () => {
     assert.deepEqual(plan.contratosCerrados.map((c) => c.id), ['c1']);
     assert.equal(plan.contratosCerrados[0].arcaBajaPendiente, true);
     assert.equal(plan.bolsa.accion, 'SALIR');
-    assert.equal(plan.bolsa.asignable, false);
+    assert.equal(plan.bolsa.disponibilidad, 'NO_DISPONIBLE');
     assert.equal(plan.arca.tipo, 'MODIFICACION_MODALIDAD');
     assert.equal(plan.arca.estado, 'PENDIENTE');
   });

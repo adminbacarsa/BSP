@@ -53,15 +53,13 @@ export function planEfectivizacion(input) {
       ? {
           cuil: input.bolsaCuil,
           accion: 'QUITAR_LEGAJO',
-          estado: 'ACTIVA',
-          asignable: true,
+          disponibilidad: 'DISPONIBLE',
           legajos: legajosRestantes,
         }
       : {
           cuil: input.bolsaCuil,
           accion: 'SALIR',
-          estado: 'EFECTIVIZADO',
-          asignable: false,
+          disponibilidad: 'NO_DISPONIBLE',
           legajos: legajosRestantes,
         },
     arca: {
