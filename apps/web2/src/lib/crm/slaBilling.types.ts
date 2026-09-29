@@ -9,7 +9,8 @@
  * - empresaId, clientId
  * - ocNumber: string (número oficial del cliente)
  * - startDate, endDate: YYYY-MM-DD
- * - status: 'ACTIVE' | 'INACTIVE' (soft delete)
+ * - status: 'ACTIVE' | 'INACTIVE' (soft delete) | 'CANCELLED' (anulada; no se borra)
+ * - cancelledAt / cancelledBy: solo si status es CANCELLED
  * - authorizedHours?: number (techo global del período)
  * - authorizedAmount?: number (techo en ARS, opcional si facturan por monto)
  * - currency?: 'ARS'
@@ -40,7 +41,7 @@ export type PurchaseOrder = {
   ocNumber: string;
   startDate: string;
   endDate: string;
-  status: 'ACTIVE' | 'INACTIVE';
+  status: 'ACTIVE' | 'INACTIVE' | 'CANCELLED';
   authorizedHours?: number;
   authorizedAmount?: number;
   currency?: 'ARS';
@@ -48,6 +49,8 @@ export type PurchaseOrder = {
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
 };
 
 export type SlaBillingFields = {

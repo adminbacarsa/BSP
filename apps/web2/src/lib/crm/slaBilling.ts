@@ -89,7 +89,7 @@ export function billingModeLabel(mode: SlaBillingMode): string {
 }
 
 function ocCoversPeriod(oc: PurchaseOrder, startYmd: string, endYmd: string): boolean {
-  if (oc.status === 'INACTIVE') return false;
+  if (oc.status === 'INACTIVE' || oc.status === 'CANCELLED') return false;
   return oc.startDate <= endYmd && oc.endDate >= startYmd;
 }
 
