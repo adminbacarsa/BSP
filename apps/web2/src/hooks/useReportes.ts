@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { db, getDocsOnce } from '@/lib/firebase';
 import { collection, getDocs, query, where, Timestamp, orderBy, limit } from 'firebase/firestore';
 import { toast } from 'sonner';
@@ -1081,7 +1081,7 @@ export function buildPayrollExportPayload(
     rows: any[],
     opts: { start: string; end: string; empresaId?: string; publishFilter: ReportPublishFilter },
 ) {
-    const bolsa = (r: any) => Math.max(0, r.horasReales ?? 0);
+    const bolsa = (r: any) => Math.max(0, (r.horasReales ?? 0) - (r.extra100 ?? 0));
     return {
         exportVersion: '1',
         source: 'COSP_REPORTES_UI',
@@ -1298,6 +1298,7 @@ export const useReportes = (forcedClientId?: string | null) => {
     const [auditLogs, setAuditLogs] = useState<any[]>([]);
 
     const [empMap, setEmpMap] = useState<Record<string, string>>({});
+    const activeEmpIdsRef = useRef<Set<string>>(new Set());
     const [empMetaMap, setEmpMetaMap] = useState<Record<string, {
         name: string;
         legajo: string;
@@ -1348,6 +1349,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 ]);
                 
                 const emps: any = {};
+                const activeIds = new Set<string>();
                 const empsMeta: Record<string, {
                     name: string;
                     legajo: string;
@@ -1359,6 +1361,8 @@ export const useReportes = (forcedClientId?: string | null) => {
                     const data = d.data();
                     const name = data.name || (data.firstName ? `${data.lastName}, ${data.firstName}` : 'Sin Nombre');
                     emps[d.id] = name;
+                    const st = String(data.status || '').toLowerCase();
+                    if (st !== 'inactive' && st !== 'inactivo') activeIds.add(d.id);
                     empsMeta[d.id] = {
                         name,
                         legajo: String(data.fileNumber || data.legajo || '').trim(),
@@ -1369,6 +1373,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                 });
                 setEmpMap(emps);
                 setEmpMetaMap(empsMeta);
+                activeEmpIdsRef.current = activeIds;
                 
                 const objs: any = {};
                 const clis: any = {};
@@ -1728,6 +1733,11 @@ export const useReportes = (forcedClientId?: string | null) => {
                 empGroups[s.employeeId].push(enrichShift(sWithFT));
             });
 
+            const personaNames: Record<string, string> = {};
+            for (const [id, name] of Object.entries(empMap)) {
+                if (!activeEmpIdsRef.current.has(id)) continue;
+                personaNames[id] = String(name);
+            }
             const personaBook = hoursCoreEnabled
                 ? buildPersonaBook({
                     turnos: allShiftsBase,
@@ -1737,7 +1747,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     publishStatusMap,
                     rangeStartYmd: dateRange.start,
                     rangeEndYmd: dateRange.end,
-                    empNameById: empMap,
+                    empNameById: personaNames,
                     holidays: holidaysData,
                     usePlannedHours,
                     publishFilter,
@@ -1767,7 +1777,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     );
                 const stats = bookEntry
                     ? bookEntry.stats
-                    : calculateLiquidationHoursStats(shifts, holidaysData, { usePlannedHours });
+                    : calculateLiquidationHoursStats(shifts, holidaysData, { usePlannedHours, hoursCoreEnabled });
 
                 const ftCount = shifts.filter((s: any) => isFrancoTrabajadoShift(s)).length;
                 const ffCount = shifts.filter((s:any) => s.isFrancoCompensatorio || s.code === 'FF').length;

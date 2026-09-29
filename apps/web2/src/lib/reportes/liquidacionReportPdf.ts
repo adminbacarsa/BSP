@@ -5,6 +5,7 @@
  */
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import { liquidacionPayColumns } from '@/lib/reportes/liquidacionPayColumns';
 
 export type LiquidacionPdfRow = {
   id?: string;
@@ -120,12 +121,13 @@ type LetterGroup = {
   rows: LiquidacionPdfRow[];
   shifts: number;
   teoricas: number;
-  reales: number;
+  normales: number;
+  al50: number;
+  ft: number;
+  plusFeriado: number;
+  total: number;
   diurnas: number;
   nocturnas: number;
-  extra50: number;
-  extra100: number;
-  plusFeriado: number;
 };
 
 function groupByLetter(rows: LiquidacionPdfRow[]): LetterGroup[] {
@@ -147,14 +149,15 @@ function groupByLetter(rows: LiquidacionPdfRow[]): LetterGroup[] {
     return {
       letter,
       rows: list,
-      shifts: list.reduce((a, r) => a + n(r.shiftsTotal ?? r.shifts), 0),
-      teoricas: list.reduce((a, r) => a + n(r.horasTeoricas ?? r.total), 0),
-      reales: list.reduce((a, r) => a + n(r.horasReales), 0),
-      diurnas: list.reduce((a, r) => a + n(r.diurnas), 0),
-      nocturnas: list.reduce((a, r) => a + n(r.nocturnas), 0),
-      extra50: list.reduce((a, r) => a + n(r.extra50), 0),
-      extra100: list.reduce((a, r) => a + n(r.extra100), 0),
-      plusFeriado: list.reduce((a, r) => a + n(r.plusFeriado), 0),
+      shifts: list.reduce((a, r) => a + liquidacionPayColumns(r).turnos, 0),
+      teoricas: list.reduce((a, r) => a + liquidacionPayColumns(r).teoricas, 0),
+      normales: list.reduce((a, r) => a + liquidacionPayColumns(r).normales, 0),
+      al50: list.reduce((a, r) => a + liquidacionPayColumns(r).al50, 0),
+      ft: list.reduce((a, r) => a + liquidacionPayColumns(r).ft, 0),
+      plusFeriado: list.reduce((a, r) => a + liquidacionPayColumns(r).plusFeriado, 0),
+      total: list.reduce((a, r) => a + liquidacionPayColumns(r).total, 0),
+      diurnas: list.reduce((a, r) => a + liquidacionPayColumns(r).diurnas, 0),
+      nocturnas: list.reduce((a, r) => a + liquidacionPayColumns(r).nocturnas, 0),
     };
   });
 }
@@ -215,20 +218,22 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
   const publishLbl = pdfSafe(String(opts.publishFilterLabel || '').trim());
   const hoursMode = opts.usePlannedHours ? 'Horas planificadas' : 'Horas reales fichadas';
 
+  const payRows = rows.map((r) => liquidacionPayColumns(r));
   const groups = groupByLetter(rows);
   const k = opts.kpis;
 
-  const grand = {
+  const grand = payRows.reduce((acc, pay) => ({
     legajos: rows.length,
-    shifts: rows.reduce((a, r) => a + n(r.shiftsTotal ?? r.shifts), 0),
-    teoricas: rows.reduce((a, r) => a + n(r.horasTeoricas ?? r.total), 0),
-    reales: rows.reduce((a, r) => a + n(r.horasReales), 0),
-    diurnas: rows.reduce((a, r) => a + n(r.diurnas), 0),
-    nocturnas: rows.reduce((a, r) => a + n(r.nocturnas), 0),
-    extra50: rows.reduce((a, r) => a + n(r.extra50), 0),
-    extra100: rows.reduce((a, r) => a + n(r.extra100), 0),
-    plusFeriado: rows.reduce((a, r) => a + n(r.plusFeriado), 0),
-  };
+    shifts: acc.shifts + pay.turnos,
+    teoricas: acc.teoricas + pay.teoricas,
+    normales: acc.normales + pay.normales,
+    al50: acc.al50 + pay.al50,
+    ft: acc.ft + pay.ft,
+    plusFeriado: acc.plusFeriado + pay.plusFeriado,
+    total: acc.total + pay.total,
+    diurnas: acc.diurnas + pay.diurnas,
+    nocturnas: acc.nocturnas + pay.nocturnas,
+  }), { legajos: rows.length, shifts: 0, teoricas: 0, normales: 0, al50: 0, ft: 0, plusFeriado: 0, total: 0, diurnas: 0, nocturnas: 0 });
 
   const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
@@ -276,7 +281,9 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
       ['Reales cobertura (hs)', fmtHs(k.realesCob), 'Trabajadas cobertura'],
       ['Reales fuera (hs)', fmtHs(k.realesFuera), 'RET + REF + ESC reales'],
       ['Al 50% (hs)', fmtHs(k.al50), 'Excedente CCT'],
-      ['Al 100% / FT (hs)', fmtHs(k.al100 ?? grand.extra100), 'Franco trabajado / 100%'],
+      ['Al 100% / FT (hs)', fmtHs(k.al100 ?? grand.ft), 'Franco trabajado, pago aparte'],
+      ['Hs. normales', fmtHs(grand.normales), 'Bolsa hasta 200 h, sin FT'],
+      ['Total trabajado', fmtHs(grand.total), 'Normales + al 50% + FT'],
       ['Plus feriado (hs)', fmtHs(k.plusFeriado ?? grand.plusFeriado), 'Recargo feriado'],
     ],
     styles: { fontSize: 8, cellPadding: 2, font: 'helvetica' },
@@ -306,7 +313,7 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
   doc.setFontSize(7.5);
   doc.setTextColor(100, 116, 139);
   doc.text(
-    pdfSafe('Columnas: Teor. = hs teoricas | Real = hs reales | D/N = diurnas/nocturnas | Notas = FT/FF/Vac'),
+    pdfSafe('Total = normales + al 50% + FT. Diurnas y nocturnas desglosan el total, no se suman.'),
     14,
     41,
   );
@@ -317,12 +324,13 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
     'Empleado',
     'Turnos',
     'Teor.',
-    'Real',
-    'Diurnas',
-    'Noct.',
+    'Normales',
     '50%',
-    '100%',
-    'Plus F.',
+    'FT',
+    'Plus',
+    'TOTAL',
+    'Diur.',
+    'Noct.',
     'Notas',
   ];
 
@@ -338,7 +346,7 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
     body.push([
       {
         content: pdfSafe(`  ${g.letter}  (${g.rows.length} legajos)`),
-        colSpan: 11,
+        colSpan: 12,
         styles: {
           fillColor: [241, 245, 249],
           textColor: [15, 23, 42],
@@ -348,17 +356,19 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
       },
     ]);
     for (const r of g.rows) {
+      const pay = liquidacionPayColumns(r);
       body.push([
         pdfSafe(String(r.legajo || '-')),
         pdfSafe(String(r.name || '-')),
-        fmtInt(r.shiftsTotal ?? r.shifts),
-        fmtHs(r.horasTeoricas ?? r.total),
-        fmtHs(r.horasReales),
-        fmtHs(r.diurnas),
-        fmtHs(r.nocturnas),
-        fmtHs(r.extra50),
-        fmtHs(r.extra100),
-        fmtHs(r.plusFeriado),
+        fmtInt(pay.turnos),
+        fmtHs(pay.teoricas),
+        fmtHs(pay.normales),
+        fmtHs(pay.al50),
+        fmtHs(pay.ft),
+        fmtHs(pay.plusFeriado),
+        fmtHs(pay.total),
+        fmtHs(pay.diurnas),
+        fmtHs(pay.nocturnas),
         pdfSafe(notesFor(r) || '-'),
       ]);
     }
@@ -370,12 +380,13 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
       },
       fmtInt(g.shifts),
       fmtHs(g.teoricas),
-      fmtHs(g.reales),
+      fmtHs(g.normales),
+      fmtHs(g.al50),
+      fmtHs(g.ft),
+      fmtHs(g.plusFeriado),
+      fmtHs(g.total),
       fmtHs(g.diurnas),
       fmtHs(g.nocturnas),
-      fmtHs(g.extra50),
-      fmtHs(g.extra100),
-      fmtHs(g.plusFeriado),
       '',
     ]);
   }
@@ -389,12 +400,13 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
       { content: 'TOTAL GENERAL', colSpan: 2, styles: { fontStyle: 'bold' } },
       fmtInt(grand.shifts),
       fmtHs(grand.teoricas),
-      fmtHs(grand.reales),
+      fmtHs(grand.normales),
+      fmtHs(grand.al50),
+      fmtHs(grand.ft),
+      fmtHs(grand.plusFeriado),
+      fmtHs(grand.total),
       fmtHs(grand.diurnas),
       fmtHs(grand.nocturnas),
-      fmtHs(grand.extra50),
-      fmtHs(grand.extra100),
-      fmtHs(grand.plusFeriado),
       `${grand.legajos} leg.`,
     ]] as any,
     styles: { fontSize: 6.5, cellPadding: 1.1, font: 'helvetica', overflow: 'linebreak' },
@@ -402,16 +414,17 @@ export function exportLiquidacionReportPdf(opts: LiquidacionPdfOpts): void {
     footStyles: { fillColor: [15, 23, 42], textColor: 255, fontStyle: 'bold', fontSize: 7 },
     columnStyles: {
       0: { cellWidth: 16, fontSize: 6 },
-      1: { cellWidth: 52 },
+      1: { cellWidth: 42 },
       2: { cellWidth: 12, halign: 'center' },
       3: { cellWidth: 16, halign: 'right' },
       4: { cellWidth: 16, halign: 'right' },
-      5: { cellWidth: 16, halign: 'right' },
+      5: { cellWidth: 14, halign: 'right' },
       6: { cellWidth: 14, halign: 'right' },
       7: { cellWidth: 14, halign: 'right' },
-      8: { cellWidth: 14, halign: 'right' },
+      8: { cellWidth: 16, halign: 'right' },
       9: { cellWidth: 14, halign: 'right' },
-      10: { cellWidth: 18, fontSize: 6 },
+      10: { cellWidth: 14, halign: 'right' },
+      11: { cellWidth: 18, fontSize: 6 },
     },
     theme: 'grid',
     margin: { left: 10, right: 10, top: 32, bottom: 14 },

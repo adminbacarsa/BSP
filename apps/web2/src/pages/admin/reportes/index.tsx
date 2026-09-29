@@ -32,6 +32,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { exportServiciosReportPdf } from '@/lib/reportes/serviciosReportPdf';
 import { exportLiquidacionReportPdf } from '@/lib/reportes/liquidacionReportPdf';
+import { liquidacionPayColumns } from '@/lib/reportes/liquidacionPayColumns';
 import {
     formatCctPeriodLabel,
     formatCctPeriodRangeDisplay,
@@ -829,23 +830,18 @@ export default function ReportsPage() {
 
     const renderEmployeeTable = () => {
         const rows = sortedEmployeeReport;
-        const sourceRows = liqTableSearch.trim()
-            ? employeeReport.filter((row) => {
-                const q = liqTableSearch.trim().toLowerCase();
-                return `${row.name} ${row.legajo || ''}`.toLowerCase().includes(q);
-            })
-            : employeeReport;
-        const grandTotal = sourceRows.reduce((acc, curr) => ({
-            shifts: acc.shifts + curr.shifts,
-            total: acc.total + curr.total,
-            horasReales: acc.horasReales + (curr.horasReales ?? 0),
-            horasExtra: acc.horasExtra + (curr.horasExtra || 0),
-            diurnas: acc.diurnas + curr.diurnas,
-            nocturnas: acc.nocturnas + curr.nocturnas,
-            extra50: acc.extra50 + curr.extra50,
-            extra100: acc.extra100 + curr.extra100,
-            plusFeriado: acc.plusFeriado + curr.plusFeriado
-        }), { shifts: 0, total: 0, horasReales: 0, horasExtra: 0, diurnas: 0, nocturnas: 0, extra50: 0, extra100: 0, plusFeriado: 0 });
+        const payRows = rows.map((row) => ({ row, pay: liquidacionPayColumns(row) }));
+        const grandPay = payRows.reduce((acc, { pay }) => ({
+            turnos: acc.turnos + pay.turnos,
+            teoricas: acc.teoricas + pay.teoricas,
+            normales: acc.normales + pay.normales,
+            al50: acc.al50 + pay.al50,
+            ft: acc.ft + pay.ft,
+            plusFeriado: acc.plusFeriado + pay.plusFeriado,
+            total: acc.total + pay.total,
+            diurnas: acc.diurnas + pay.diurnas,
+            nocturnas: acc.nocturnas + pay.nocturnas,
+        }), { turnos: 0, teoricas: 0, normales: 0, al50: 0, ft: 0, plusFeriado: 0, total: 0, diurnas: 0, nocturnas: 0 });
 
         return (
             <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden print-container">
@@ -881,13 +877,25 @@ export default function ReportsPage() {
                             <option value="name">Orden: Apellido</option>
                             <option value="legajo">Orden: Legajo</option>
                         </select>
-                        <button onClick={() => downloadCSV(rows, 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
+                        <button onClick={() => downloadCSV(payRows.map(({ row, pay }) => ({
+                            legajo: row.legajo || '',
+                            empleado: row.name,
+                            turnos: pay.turnos,
+                            hs_teoricas: pay.teoricas.toFixed(1),
+                            hs_normales: pay.normales.toFixed(1),
+                            al_50: pay.al50.toFixed(1),
+                            al_100_ft: pay.ft.toFixed(1),
+                            plus_feriado: pay.plusFeriado.toFixed(1),
+                            total_trabajado: pay.total.toFixed(1),
+                            diurnas_del_total: pay.diurnas.toFixed(1),
+                            nocturnas_del_total: pay.nocturnas.toFixed(1),
+                        })), 'reporte_empleados')} aria-label="Descargar CSV de empleados" className="p-2 bg-white border rounded hover:bg-slate-100 text-slate-500"><Download size={16} aria-hidden="true"/></button>
                         <button
                             type="button"
                             onClick={() => {
                                 try {
                                     const sum = (key: string) =>
-                                        sourceRows.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
+                                        rows.reduce((a, c) => a + (Number((c as any)[key]) || 0), 0);
                                     const planCob = sum('horasCobertura');
                                     const planFuera = sum('horasDespliegue');
                                     const realCob = sum('horasRealesCobertura');
@@ -904,14 +912,14 @@ export default function ReportsPage() {
                                             : 'publicados + borrador',
                                         usePlannedHours,
                                         kpis: {
-                                            legajos: sourceRows.length,
+                                            legajos: rows.length,
                                             planCobertura: planCob > 0 || planFuera > 0 ? planCob : planTotalFallback,
                                             fueraCob: planFuera,
                                             realesCob: realCob > 0 || realFuera > 0 ? realCob : realTotalFallback,
                                             realesFuera: realFuera,
-                                            al50: sum('extra50'),
-                                            al100: sum('extra100'),
-                                            plusFeriado: sum('plusFeriado'),
+                                            al50: grandPay.al50,
+                                            al100: grandPay.ft,
+                                            plusFeriado: grandPay.plusFeriado,
                                             turnos: sum('shifts') || sum('shiftsTotal'),
                                         },
                                     });
@@ -932,11 +940,11 @@ export default function ReportsPage() {
                 </div>
                 <div className="px-4 pt-3 pb-1 flex flex-wrap gap-x-4 gap-y-1 no-print" aria-label="Referencias de columnas">
                     {[
-                        { color: 'bg-amber-400',  label: 'Diurnas' },
-                        { color: 'bg-violet-500', label: 'Nocturnas' },
-                        { color: 'bg-orange-400', label: 'Al 50%' },
-                        { color: 'bg-rose-500',   label: 'Al 100% (Feriado trabajado)' },
-                        { color: 'bg-emerald-500',label: 'Plus Feriado' },
+                        { color: 'bg-indigo-500', label: 'Hs. normales (hasta 200, sin FT)' },
+                        { color: 'bg-orange-400', label: 'Al 50% (excedente de la bolsa)' },
+                        { color: 'bg-rose-500',   label: 'Al 100% (FT, se paga aparte)' },
+                        { color: 'bg-emerald-500',label: 'Plus feriado' },
+                        { color: 'bg-slate-400',  label: 'Diurnas y nocturnas: desglose del total, no se suman' },
                     ].map(({ color, label }) => (
                         <span key={label} className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
                             <span className={`w-2.5 h-2.5 rounded-sm ${color} flex-shrink-0`} aria-hidden="true"/>
@@ -952,18 +960,18 @@ export default function ReportsPage() {
                                 <th className="p-4">Empleado</th>
                                 <th className="p-4 text-center">Turnos</th>
                                 <th className="p-4 text-center text-slate-400">Hs. Teóricas</th>
-                                <th className="p-4 text-center text-indigo-600">Hs. Reales</th>
-                                <th className="p-4 text-center text-amber-500">Diurnas</th>
-                                <th className="p-4 text-center text-violet-600">Nocturnas</th>
+                                <th className="p-4 text-center text-indigo-600">Hs. normales</th>
                                 <th className="p-4 text-center text-orange-500">Al 50%</th>
                                 <th className="p-4 text-center text-rose-600">Al 100% (FT)</th>
-                                <th className="p-4 text-center text-emerald-600">Plus Feriado</th>
+                                <th className="p-4 text-center text-emerald-600">Plus feriado</th>
+                                <th className="p-4 text-center text-slate-800">Total trabajado</th>
+                                <th className="p-4 text-center text-amber-500" title="Desglose del total, no se suma">Diurnas</th>
+                                <th className="p-4 text-center text-violet-600" title="Desglose del total, no se suma">Nocturnas</th>
                                 <th className="p-4 text-center no-print">Ver</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y">
-                            {rows.map(row => {
-                                const horasReales = row.horasReales ?? 0;
+                            {payRows.map(({ row, pay }) => {
                                 return (
                                 <tr key={row.id} className="hover:bg-indigo-50/30 cursor-pointer group" onClick={() => { setDetailItem(row); setDetailFilterTimeFrom(''); setDetailFilterTimeTo(''); setDetailFilterEmployee(''); setDetailFilterObjective(''); setDetailFilterStatus(''); setDetailDaySearch(''); setDetailAdvancedOpen(false); }}>
                                     <td className="p-4 font-mono text-xs text-slate-500">{row.legajo || '—'}</td>
@@ -984,14 +992,15 @@ export default function ReportsPage() {
                                             </div>
                                         )}
                                     </td>
-                                    <td className="p-4 text-center">{row.shifts}</td>
-                                    <td className="p-4 text-center text-slate-400">{row.total.toFixed(1)}</td>
-                                    <td className="p-4 text-center font-black text-indigo-600 text-lg">{horasReales.toFixed(1)}</td>
-                                    <td className="p-4 text-center font-bold text-amber-500">{row.diurnas.toFixed(1)}</td>
-                                    <td className="p-4 text-center font-bold text-violet-600">{row.nocturnas.toFixed(1)}</td>
-                                    <td className="p-4 text-center font-bold text-orange-500 bg-orange-50/30">{row.extra50 > 0 ? row.extra50.toFixed(1) : <span className="text-slate-300">—</span>}</td>
-                                    <td className="p-4 text-center font-bold text-rose-600 bg-rose-50/30">{row.extra100 > 0 ? row.extra100.toFixed(1) : <span className="text-slate-300">—</span>}</td>
-                                    <td className="p-4 text-center font-bold text-emerald-600">{row.plusFeriado > 0 ? row.plusFeriado.toFixed(1) : <span className="text-slate-300">—</span>}</td>
+                                    <td className="p-4 text-center">{pay.turnos}</td>
+                                    <td className="p-4 text-center text-slate-400">{pay.teoricas.toFixed(1)}</td>
+                                    <td className="p-4 text-center font-bold text-indigo-600">{pay.normales.toFixed(1)}</td>
+                                    <td className="p-4 text-center font-bold text-orange-500 bg-orange-50/30">{pay.al50 > 0 ? pay.al50.toFixed(1) : <span className="text-slate-300">—</span>}</td>
+                                    <td className="p-4 text-center font-bold text-rose-600 bg-rose-50/30">{pay.ft > 0 ? pay.ft.toFixed(1) : <span className="text-slate-300">—</span>}</td>
+                                    <td className="p-4 text-center font-bold text-emerald-600">{pay.plusFeriado > 0 ? pay.plusFeriado.toFixed(1) : <span className="text-slate-300">—</span>}</td>
+                                    <td className="p-4 text-center font-black text-slate-800 text-lg">{pay.total.toFixed(1)}</td>
+                                    <td className="p-4 text-center text-amber-600/80 text-xs" title="Desglose del total">{pay.diurnas.toFixed(1)}</td>
+                                    <td className="p-4 text-center text-violet-600/80 text-xs" title="Desglose del total">{pay.nocturnas.toFixed(1)}</td>
                                     <td className="p-4 text-center text-slate-300 group-hover:text-indigo-600 no-print"><ChevronRight size={16}/></td>
                                 </tr>
                                 );
@@ -1000,14 +1009,15 @@ export default function ReportsPage() {
                         <tfoot className="bg-slate-900 text-white font-black text-xs uppercase print:bg-gray-200 print:text-black">
                             <tr>
                                 <td colSpan={2} className="p-4 text-right">TOTAL GENERAL</td>
-                                <td className="p-4 text-center">{grandTotal.shifts}</td>
-                                <td className="p-4 text-center text-slate-400 print:text-black">{grandTotal.total.toFixed(1)}</td>
-                                <td className="p-4 text-center text-emerald-400 print:text-black">{grandTotal.horasReales.toFixed(1)}</td>
-                                <td className="p-4 text-center text-amber-400 print:text-black">{grandTotal.diurnas.toFixed(1)}</td>
-                                <td className="p-4 text-center text-violet-300 print:text-black">{grandTotal.nocturnas.toFixed(1)}</td>
-                                <td className="p-4 text-center text-orange-400 print:text-black">{grandTotal.extra50.toFixed(1)}</td>
-                                <td className="p-4 text-center text-rose-400 print:text-black">{grandTotal.extra100.toFixed(1)}</td>
-                                <td className="p-4 text-center text-emerald-400 print:text-black">{grandTotal.plusFeriado.toFixed(1)}</td>
+                                <td className="p-4 text-center">{grandPay.turnos}</td>
+                                <td className="p-4 text-center text-slate-400 print:text-black">{grandPay.teoricas.toFixed(1)}</td>
+                                <td className="p-4 text-center">{grandPay.normales.toFixed(1)}</td>
+                                <td className="p-4 text-center text-orange-400 print:text-black">{grandPay.al50.toFixed(1)}</td>
+                                <td className="p-4 text-center text-rose-400 print:text-black">{grandPay.ft.toFixed(1)}</td>
+                                <td className="p-4 text-center text-emerald-400 print:text-black">{grandPay.plusFeriado.toFixed(1)}</td>
+                                <td className="p-4 text-center">{grandPay.total.toFixed(1)}</td>
+                                <td className="p-4 text-center text-amber-400 print:text-black">{grandPay.diurnas.toFixed(1)}</td>
+                                <td className="p-4 text-center text-violet-300 print:text-black">{grandPay.nocturnas.toFixed(1)}</td>
                                 <td className="no-print"></td>
                             </tr>
                         </tfoot>
