@@ -274,6 +274,15 @@ async function registerNativePush(params: {
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#312e81',
     });
+    await Notifications.setNotificationChannelAsync('alertas_turno', {
+      name: 'Avisos de turno',
+      description: 'Llegada, ¿Venís? y convocatorias de cobertura',
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: 'default',
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#D32F2F',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
   }
 
   const current = await Notifications.getPermissionsAsync();

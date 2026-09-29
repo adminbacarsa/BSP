@@ -14,6 +14,7 @@ import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from
 import { resolveTuraExtensionOperacionesTarget } from '@/lib/refuerzo/turaContiguity';
 import { registrarPresenciaOps } from '@/services/registrarPresenciaOps';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
@@ -1298,6 +1299,7 @@ export default function TacticalMapView() {
                                                     </span>
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                                {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                             </div>
                                             <div className="flex gap-1 shrink-0">
                                                 {s.isPresent ? (<>
@@ -1334,6 +1336,7 @@ export default function TacticalMapView() {
                                                         <span className="ml-1.5 text-[9px] font-black px-1.5 rounded bg-amber-100 text-amber-700" title={lateBadge}>{lateBadge}</span>
                                                     </p>
                                                     <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                                {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                                     {isExtraNonReliefShift(s) && (
                                                         <p className="text-[10px] font-bold text-amber-700 leading-tight">Sobreturno: llegó tarde a su propio turno.</p>
                                                     )}

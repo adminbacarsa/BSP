@@ -1,8 +1,8 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.checkConvocatoriaTimeouts = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = exports.rejectSwapRequestSupervisor = exports.approveSwapRequest = exports.cancelSwapRequest = exports.confirmSwapRequest = exports.respondSwapRequest = exports.createSwapRequest = exports.getSwapCandidates = exports.getSwapPeople = exports.notificarLlegadaTarde = exports.reportarAusencia = exports.registrarFichadaManual = exports.registrarPresencia = exports.revertirAusencia = exports.marcarAusenciaOperaciones = exports.cerrarContratoSla = exports.reabrirContratoSla = exports.scheduledCerrarContratosVencidos = exports.resolveStaffProfile = exports.sesionOperador = exports.requestCheckIn = exports.limpiarBaseDeDatos = exports.syncSystemUserClaims = exports.crearUsuarioSistema = exports.runEquilibrarCrono = exports.runAjustarCrono = exports.runAutoSchedule = exports.vplanRun = exports.optimizePlanningGemini = exports.autoPresenciaYCierre = exports.onTurnoAbsenciaDetectada = exports.modoDemoCron = exports.executeAgentAction = exports.chatPlatformAssistant = exports.checkSystemHealth = exports.platformHealthCheck = exports.manageAgreements = exports.managePatterns = exports.manageAbsences = exports.manageSystemUsers = exports.manageEmployees = exports.manageHierarchy = exports.manageData = exports.auditShift = exports.manageShifts = exports.scheduleShift = exports.createUser = void 0;
-exports.saveMobileAppConfig = exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.scheduledIntegrityScan = exports.syncTurnoClientOwner = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = void 0;
-exports.processHoursLedgerJob = exports.rebuildHoursLedger = exports.scheduledHoursLedgerNightly = exports.scheduledHoursLedgerDirty = exports.onClientWriteHoursLedger = exports.onAusenciaWriteHoursLedger = exports.onPlanifWriteHoursLedger = exports.onSlaWriteHoursLedger = exports.onTurnoWriteHoursLedger = exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = void 0;
+exports.getMobileAppConfig = exports.getEmpresaAfipConfig = exports.saveEmpresaAfipCredentials = exports.lookupClientByCuit = exports.updateBackupSchedule = exports.scheduledBackup = exports.tagTurnosArchiveTier = exports.releaseTraceAbsences = exports.releaseInvalidRetentions = exports.revertConvocadoFalseAbsences = exports.processEarlyWithdrawalCallable = exports.scheduledTagTurnosArchiveTier = exports.scheduledArrivalNotices = exports.onAusenciaCreatedFromPortal = exports.processEmpresaMigrateJob = exports.migrateEmpresaData = exports.processRestoreJob = exports.restoreBackup = exports.deleteBackup = exports.syncBackups = exports.triggerBackup = exports.gestionarVacantes = exports.detectarAusencias = exports.autoCompletarTurnos = exports.sendTestNotification = exports.getPayrollSnapshotInternal = exports.revokePayrollApiKey = exports.createPayrollApiKey = exports.payrollApi = exports.flushShiftNotifDigests = exports.onSolicitudEventoCreated = exports.onGuardAbsenceDetected = exports.onVacanteCorrectionCreated = exports.onEmployeeNotificationCreated = exports.onCronogramaPublished = exports.scheduledIntegrityScan = exports.syncTurnoClientOwner = exports.onTurnoWrite = exports.onNovedadCreated = exports.createClientPortalAccess = exports.listPendingGuardDeviceRegistrations = exports.getGuardDeviceRegistrationStatus = exports.unbindGuardDevice = exports.rejectGuardDeviceRegistration = exports.approveGuardDeviceRegistration = exports.requestGuardDeviceRegistration = exports.activateAndSetPassword = exports.activateDevice = exports.createPortalAccess = exports.respondEventoConvocatoria = void 0;
+exports.processHoursLedgerJob = exports.rebuildHoursLedger = exports.scheduledHoursLedgerNightly = exports.scheduledHoursLedgerDirty = exports.onClientWriteHoursLedger = exports.onAusenciaWriteHoursLedger = exports.onPlanifWriteHoursLedger = exports.onSlaWriteHoursLedger = exports.onTurnoWriteHoursLedger = exports.geocodeAddressProxy = exports.setEmployeePortalPassword = exports.cleanupSlaDevueltas = exports.onAusenciaCertificado = exports.scheduledAutoInjustificada = exports.refreshMobileAppBuildStatus = exports.triggerMobileAppPreviewBuild = exports.syncMobileAppEasEnv = exports.saveMobileAppConfig = void 0;
 require("./bootstrap-env");
 const functions = require("firebase-functions/v1");
 const https_1 = require("firebase-functions/v2/https");
@@ -2105,97 +2105,6 @@ exports.detectarAusencias = functions
     }
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
-    const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
-    const earlyTo = admin.firestore.Timestamp.fromMillis(nowMs);
-    const earlySnap = await db.collection('turnos')
-        .where('startTime', '>=', earlyFrom)
-        .where('startTime', '<=', earlyTo)
-        .get();
-    for (const earlyDoc of earlySnap.docs) {
-        const s = earlyDoc.data();
-        if (!cc.isEnabled(s.empresaId))
-            continue;
-        if (cc.isDemo(s.empresaId))
-            continue;
-        if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent)
-            continue;
-        if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(s))
-            continue;
-        if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE')
-            continue;
-        if (SKIP_CODES.has((s.code || '').toUpperCase()))
-            continue;
-        if (SKIP_STATUSES.has(s.status || ''))
-            continue;
-        if (s.earlyRetentionAlertAt)
-            continue;
-        if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent)
-            continue;
-        const empId = shiftEmpresaId(s);
-        const posName = (s.positionName || '').trim().toLowerCase();
-        if (!s.objectiveId || !posName || !empId)
-            continue;
-        await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
-        try {
-            const empUidSnap = await db.collection('empleados').doc(s.employeeId).get();
-            const empUid = empUidSnap.data()?.uid;
-            await (0, convocatoriasCobertura_1.crearConvocatoriaLlegadaTarde)(db, {
-                id: earlyDoc.id,
-                empresaId: empId,
-                objectiveId: s.objectiveId,
-                objectiveName: s.objectiveName || '',
-                clientId: s.clientId || '',
-                shiftCode: (s.code || '').toUpperCase(),
-                startTime: s.startTime,
-                endTime: s.endTime,
-                employeeId: s.employeeId,
-                employeeName: s.employeeName || '',
-                employeeUid: empUid,
-            });
-        }
-        catch (e) {
-            console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
-        }
-        if ((0, reliefEligibility_1.isExtraNonReliefShift)(s))
-            continue;
-        try {
-            const presentSnap = await db.collection('turnos')
-                .where('empresaId', '==', empId)
-                .where('objectiveId', '==', s.objectiveId)
-                .where('isPresent', '==', true)
-                .get();
-            const toAlert = presentSnap.docs.filter(d => {
-                const dat = d.data();
-                if (dat.isCompleted === true)
-                    return false;
-                if ((0, reliefEligibility_1.isExtraNonReliefShift)(dat))
-                    return false;
-                return (dat.positionName || '').trim().toLowerCase() === posName
-                    && dat.employeeId !== s.employeeId;
-            });
-            for (const retDoc of toAlert) {
-                const retData = retDoc.data();
-                const retTokens = await getEmployeeTokens(db, retData.employeeId);
-                if (retTokens.length > 0) {
-                    await admin.messaging().sendEachForMulticast({
-                        tokens: retTokens,
-                        notification: {
-                            title: 'â³ El entrante aÃºn no llegÃ³',
-                            body: `${s.employeeName || 'El guardia siguiente'} no marcÃ³ presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
-                        },
-                        webpush: {
-                            notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                            fcmOptions: { link: '/app/' },
-                        },
-                    }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
-                }
-                console.log(`[detectarAusencias] Alerta temprana enviada a ${retData.employeeName} (saliente en ${s.objectiveName})`);
-            }
-        }
-        catch (e) {
-            console.warn('[detectarAusencias] Error en alerta temprana retenciÃ³n:', e);
-        }
-    }
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
     const snap = await db.collection('turnos')
@@ -2989,6 +2898,22 @@ exports.onAusenciaCreatedFromPortal = functions
         empresaId,
     });
     return null;
+});
+exports.scheduledArrivalNotices = (0, scheduler_1.onSchedule)({
+    schedule: 'every 1 minutes',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 120,
+    memory: '512MiB',
+    region: 'us-central1',
+}, async () => {
+    const db = admin.firestore();
+    const cc = await (0, centroControlGuard_1.loadCentroControlState)(db);
+    if (!cc.anyEnabled)
+        return;
+    const { runShiftArrivalNotices } = await Promise.resolve().then(() => require('./attendance/arrivalNotices'));
+    const sent = await runShiftArrivalNotices(db, admin.firestore.Timestamp.now(), cc);
+    if (sent > 0)
+        console.log(`[scheduledArrivalNotices] avisos=${sent}`);
 });
 exports.scheduledTagTurnosArchiveTier = (0, scheduler_1.onSchedule)({
     schedule: '15 4 * * *',

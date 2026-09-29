@@ -113,7 +113,7 @@ Credenciales → `PortalAuthContext` / `deviceVerified`. Otro device → `/devic
 `useEmployeeShifts`: `turnos` + `ausencias` + `planificacion_estados`. Filtro `isShiftVisibleToEmployee`: oculta draft, ausente-like, `coverageHoursOnSource`; operativos (`RETEN`, `OPERATIONS_COVERAGE`, `EVENTO`/`EV`, `resolvedBy=OPERACIONES`) siempre; planificados solo con mes publicado.
 
 ### Flujo 4 — Fichar presente
-UI `getCheckInTiming` + GPS 80 m → `requestCheckIn` → `registrarPresencia`. Efecto: `isPresent`, `PRESENT`, cancela ¿Venís?, relevo FIFO, novedad `INGRESO_AUTOREGISTRO`, notif `CHECKIN_CONFIRMADO`. Entre T+5 y T+30 **sin aviso** el botón es **Llegada tarde** y además se escribe novedad `LLEGADA_TARDE` con los minutos (`lateNoNotice`). Con aviso previo la ventana sigue la ETA (tope T+60) y el botón queda **Presente**.
+UI `getCheckInTiming` + GPS 80 m → `requestCheckIn` → `registrarPresencia`. Efecto: `isPresent`, `PRESENT`, `checkInAt` (hora real), cancela ¿Venís?, relevo FIFO, novedad `INGRESO_AUTOREGISTRO`, notif `CHECKIN_CONFIRMADO`. Pago: `realStartTime` = inicio planificado si fichó hasta T+5; desde T+6 la hora real y `lateMinutes`. La tarjeta muestra «Ingresó HH:MM (N min tarde)» con `checkInAt`. Entre T+5 y T+30 **sin aviso** el botón es **Llegada tarde** y además se escribe novedad `LLEGADA_TARDE` con los minutos (`lateNoNotice`). Con aviso previo la ventana sigue la ETA (tope T+60) y el botón queda **Presente**. Aviso push: T−5 «¿estás llegando?» y ¿Venís? en el minuto de T (`scheduledArrivalNotices`, canal Android `alertas_turno`).
 
 ### Flujo 5 — Cola offline
 Sin red: `pending_checkins` (AsyncStorage / web storage) → flush al reconectar con idempotencyKey.

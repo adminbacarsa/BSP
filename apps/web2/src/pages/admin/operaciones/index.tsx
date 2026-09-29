@@ -70,6 +70,8 @@ import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal'
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
+import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
@@ -1227,6 +1229,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
                 </div>
+                {shift.isPresent && formatIngresoLine(shift) && (
+                    <p className="text-[9px] font-bold text-emerald-700 truncate">{formatIngresoLine(shift)}</p>
+                )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
                         Cubre: {coveringEmployeeName}
@@ -1303,6 +1308,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
+                {shift.isPresent && formatIngresoLine(shift) && (
+                    <p className="text-[10px] font-bold text-emerald-700 mb-1.5 pl-10">{formatIngresoLine(shift)}</p>
+                )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
                         Cubre: {coveringEmployeeName}

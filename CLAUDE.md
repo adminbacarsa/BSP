@@ -324,6 +324,10 @@ Todos los candidatos deben ser del mismo objetivo. La banda a cubrir es la del e
 
 La fichada tarde no escribe `lateArrivalAt`. Ese campo lo deja `notificarLlegadaTarde` o la convocatoria `LLEGADA_TARDE`. Sin aviso, el monitor marca TARDE SIN AVISO.
 
+**Aviso de llegada (P5b):** `scheduledArrivalNotices` cada **1 min** (no el cron de 5). A **T−5**: «Tu turno empieza a las HH:MM en {cliente · objetivo · puesto}, ¿estás llegando?» (`AVISO_TURNO_PROXIMO`, flag `preStartArrivalNoticeAt`). A **T** (gracia 70 s): ¿Venís? (`LLEGADA_TARDE`, flag `earlyRetentionAlertAt`). Idempotente. Solo CC ON, no Demo, y objetivo en operación publicado (mismo universo P1d). Push de turno: FCM `priority: high`, Android `channelId: alertas_turno` (lo crea la app), APNs `interruption-level: time-sensitive`.
+
+**Fichada:** `checkInAt` = hora real (auditoría). `realStartTime` para pago: hasta **T+5** inicio planificado; desde **T+6** la fichada y `lateMinutes`. CC y tarjeta del guardia: «Ingresó HH:MM (N min tarde)» con `checkInAt`.
+
 ---
 
 ## 7. Entorno y configuración

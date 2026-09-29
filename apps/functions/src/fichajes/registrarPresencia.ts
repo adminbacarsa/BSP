@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { evaluateServerCheckInWindow } from './checkInWindow';
+import { resolveCheckInPayClock } from './checkInPay';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTardeConvocatorias';
 import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
@@ -167,37 +168,36 @@ export async function registrarPresencia(
 
   const scheduledStartTs = shiftData.startTime ?? null;
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-  const isLate = (windowEval.lateMinutes ?? 0) > 0
-    || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
-
+  const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
+  const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
+    ? adjustedStartMs
+    : scheduledStartMs;
+  const pay = resolveCheckInPayClock({
+    nowMs,
+    plannedStartMs: payAnchorMs,
+    windowLateMinutes: windowEval.lateMinutes ?? 0,
+  });
+  const isLate = pay.isLate;
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
-  if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
-    // Presente anticipado: el turno arranca a la hora planificada (igual que la fichada GPS), no al click.
-    realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : Timestamp.fromMillis(nowMs);
-  } else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
-    realStartTime =
-      windowEval.usePlannedStart
-        ? shiftData.adjustedStartTime
-        : Timestamp.fromMillis(nowMs);
-  } else if (windowEval.usePlannedStart && scheduledStartTs) {
+  if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+    realStartTime = shiftData.adjustedStartTime;
+  } else if (!pay.isLate && scheduledStartTs) {
     realStartTime = scheduledStartTs;
   } else {
-    realStartTime = Timestamp.fromMillis(nowMs);
+    realStartTime = Timestamp.fromMillis(pay.realStartMs);
   }
 
   const incomingPatch: Record<string, unknown> = {
     isPresent: true,
     status: 'PRESENT',
     checkInTime: now,
+    checkInAt: Timestamp.fromMillis(pay.checkInAtMs),
     realStartTime,
     checkInMethod: source,
     checkInCoords: coords || null,
     checkInRecordedAt: recordedAt || null,
     isLate,
-    // Ops/VIGI no traen lateMinutes de la ventana: la tardanza siempre se mide contra el inicio planificado.
-    lateMinutes: isLate && scheduledStartMs
-      ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
-      : (windowEval.lateMinutes ?? 0),
+    lateMinutes: pay.lateMinutes,
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,
