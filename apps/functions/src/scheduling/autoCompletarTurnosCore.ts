@@ -8,6 +8,7 @@ import { retainOutgoingForGap } from '../coverage/coverageRetention';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
+import { relieverFor, seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { guardFirstName } from '../common/pushGreeting';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
@@ -78,13 +79,48 @@ function shiftStartMs(data: FirebaseFirestore.DocumentData): number {
 export function isValidReliefForOutgoing(
   incoming: FirebaseFirestore.DocumentData,
   outgoingEndMs: number,
+  outgoing?: FirebaseFirestore.DocumentData,
 ): boolean {
   if (!isReliefEligibleShift(incoming as Record<string, unknown>)) return false;
   const st = shiftStartMs(incoming);
   if (!st) return false;
   if (st < outgoingEndMs - RELEVO_ALIGN_MS) return false;
   if (st > outgoingEndMs + RELEVO_WINDOW_AFTER_MS) return false;
+  if (outgoing && seriesHandoffKind(seriesCodeOf(outgoing), seriesCodeOf(incoming)) === 'REJECT') return false;
   return true;
+}
+
+function pickSeriesRelief(
+  outgoingId: string,
+  outgoing: FirebaseFirestore.DocumentData,
+  endTimeMs: number,
+  docs: QueryDocumentSnapshot[],
+  pred: (d: QueryDocumentSnapshot) => boolean,
+): QueryDocumentSnapshot | undefined {
+  const hits = docs.filter(
+    (d) => pred(d) && isValidReliefForOutgoing(d.data(), endTimeMs, outgoing),
+  );
+  if (!hits.length) return undefined;
+  const winner = relieverFor(
+    {
+      id: outgoingId,
+      ...(outgoing as Record<string, unknown>),
+      startMs: shiftStartMs(outgoing),
+      endMs: endTimeMs,
+    },
+    hits.map((d) => ({
+      id: d.id,
+      ...(d.data() as Record<string, unknown>),
+      startMs: shiftStartMs(d.data()),
+      endMs: shiftEndMs(d.data()),
+    })),
+    {
+      earliestIncomingMs: endTimeMs - RELEVO_ALIGN_MS,
+      latestIncomingMs: endTimeMs + RELEVO_WINDOW_AFTER_MS,
+    },
+  );
+  if (!winner?.id) return undefined;
+  return hits.find((d) => d.id === String(winner.id));
 }
 
 export function isReliefPresent(incoming: FirebaseFirestore.DocumentData): boolean {
@@ -233,7 +269,7 @@ export async function runAutoCompletarTurnosPass(
       slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
     }
     return (slaCache.get(oid) || []).some((sla) =>
-      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', end),
+      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', end, seriesCodeOf(shift)),
     );
   }
 
@@ -357,25 +393,20 @@ export async function runAutoCompletarTurnosPass(
         && !isOpsCoverageHoursOnSourceDoc(d.data() as Record<string, unknown>),
     );
 
-    const relievePresent = relieveDocs.find((d) => {
+    const relievePresent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => {
       if (reliefIncomingClaimed.has(d.id)) return false;
       if (reliefBusyForOther(d.data(), docSnap.id)) return false;
-      const data = d.data();
-      return isReliefPresent(data) && isValidReliefForOutgoing(data, endTimeMs);
+      return isReliefPresent(d.data());
     });
 
     const relievePending =
-      relieveDocs.find((d) => {
-        const data = d.data();
-        return !reliefPendingClaimed.has(d.id) && isReliefPending(data) && isValidReliefForOutgoing(data, endTimeMs);
-      })
-      ?? relieveDocs.find((d) => isReliefPending(d.data()) && isValidReliefForOutgoing(d.data(), endTimeMs));
+      pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
+        !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()))
+      ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()));
     if (relievePending) reliefPendingClaimed.add(relievePending.id);
 
-    const relieveAbsent = relieveDocs.find((d) => {
-      const data = d.data();
-      return isReliefAbsent(data) && isValidReliefForOutgoing(data, endTimeMs);
-    });
+    const relieveAbsent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
+      isReliefAbsent(d.data()));
 
     if (relievePresent) {
       reliefIncomingClaimed.add(relievePresent.id);

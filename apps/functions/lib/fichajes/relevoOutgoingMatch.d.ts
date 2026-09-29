@@ -12,4 +12,5 @@ export declare function findPresentOutgoingAlignedToGapStart(db: Firestore, para
     excludeShiftIds?: string[];
     excludeEmployeeId?: string;
     absenceShiftId?: string;
+    incoming?: Record<string, unknown>;
 }): Promise<OutgoingReliefPick | null>;

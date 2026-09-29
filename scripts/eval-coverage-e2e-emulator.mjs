@@ -2563,7 +2563,7 @@ async function run() {
       });
       await db.collection('turnos').doc(inId).set({
         empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 2',
-        employeeId: `${prefix}_inE`, employeeName: 'Bosio', code: 'M', status: 'PENDING',
+        employeeId: `${prefix}_inE`, employeeName: 'Bosio', code: 'T', status: 'PENDING',
         startTime: Timestamp.fromMillis(inStart),
         endTime: Timestamp.fromMillis(inStart + 4 * 60 * 60 * 1000),
       });
@@ -2613,7 +2613,7 @@ async function run() {
       const startId = `${prefix}_start`;
       await db.collection('turnos').doc(gapId).set({
         empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
-        employeeId: `${prefix}_gapE`, employeeName: 'Fantini', code: 'M',
+        employeeId: `${prefix}_gapE`, employeeName: 'Entrante T', code: 'T',
         startTime: Timestamp.fromMillis(gap),
         endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
         isAbsent: true, status: 'ABSENT',
@@ -2718,6 +2718,148 @@ async function run() {
         && forced.success === true && sh?.isAbsent !== true;
       report(70, ok, ok ? 'cubierta: revierte cancelando la cobertura'
         : `blocked=${blocked.reason} forced=${forced.reason} absent=${sh?.isAbsent}`);
+    }
+
+    // Caso 71 — Baez M lo releva T (Guerrero), no M3 (Farias). Sin T, Baez queda retenido.
+    {
+      const prefix = `${runId}_c71`;
+      const gap = Date.now() + 13 * 60 * 1000;
+      const baez = `${prefix}_baez`;
+      const farias = `${prefix}_farias`;
+      const guerrero = `${prefix}_guerrero`;
+      const base = {
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+      };
+      await db.collection('turnos').doc(baez).set({
+        ...base, employeeId: `${prefix}_baezE`, employeeName: 'Baez', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(gap - 75 * 60 * 1000),
+        endTime: Timestamp.fromMillis(gap),
+        checkInTime: Timestamp.fromMillis(gap - 70 * 60 * 1000),
+      });
+      await db.collection('turnos').doc(farias).set({
+        ...base, employeeId: `${prefix}_fariasE`, employeeName: 'Farias', code: 'M3', status: 'PENDING',
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
+      });
+      await db.collection('turnos').doc(guerrero).set({
+        ...base, employeeId: `${prefix}_gueE`, employeeName: 'Guerrero', code: 'T',
+        status: 'ABSENT', isAbsent: true,
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 150 * 60 * 1000),
+      });
+      const fichada = await registrarPresencia(db, {
+        shiftId: farias, source: 'PORTAL_GPS', empId: `${prefix}_fariasE`,
+        recordedAt: new Date(gap - 13 * 60 * 1000).toISOString(),
+      });
+      const baezAfter = (await db.collection('turnos').doc(baez).get()).data();
+      const ret = await retainOutgoingForGap(db, {
+        id: guerrero, ...(await db.collection('turnos').doc(guerrero).get()).data(),
+      }, { sendPush: false });
+      const baezRet = (await db.collection('turnos').doc(baez).get()).data();
+      const ok = !fichada.relieved
+        && !baezAfter?.relievedBy
+        && ret.applied === true
+        && ret.shiftIds.includes(baez)
+        && baezRet?.isRetention === true;
+      report(71, ok, ok ? 'Farias M3 no releva a Baez M; Baez queda retenido por Guerrero T'
+        : `relieved=${fichada.relieved?.employeeName} by=${baezAfter?.relievedBy} ret=${ret.shiftIds?.join(',') || ret.skippedReason}`);
+    }
+
+    // Caso 72 — Fantini M2 lo releva Fontana T2, no un T de otra serie
+    {
+      const prefix = `${runId}_c72`;
+      const start = Date.now() - 60 * 1000;
+      const fantini = `${prefix}_fantini`;
+      const decoy = `${prefix}_decoy`;
+      const fontana = `${prefix}_fontana`;
+      const base = {
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+      };
+      await db.collection('turnos').doc(fantini).set({
+        ...base, employeeId: `${prefix}_fanE`, employeeName: 'Fantini', code: 'M2',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(start - 4 * 60 * 60 * 1000),
+        endTime: Timestamp.fromMillis(start),
+      });
+      await db.collection('turnos').doc(decoy).set({
+        ...base, employeeId: `${prefix}_decE`, employeeName: 'Decoy', code: 'T', status: 'PENDING',
+        startTime: Timestamp.fromMillis(start),
+        endTime: Timestamp.fromMillis(start + 4 * 60 * 60 * 1000),
+      });
+      await db.collection('turnos').doc(fontana).set({
+        ...base, employeeId: `${prefix}_fonE`, employeeName: 'Fontana', code: 'T2', status: 'PENDING',
+        startTime: Timestamp.fromMillis(start),
+        endTime: Timestamp.fromMillis(start + 4 * 60 * 60 * 1000),
+      });
+      const wrong = await registrarPresencia(db, { shiftId: decoy, source: 'PORTAL_GPS', empId: `${prefix}_decE` });
+      const mid = (await db.collection('turnos').doc(fantini).get()).data();
+      const right = await registrarPresencia(db, { shiftId: fontana, source: 'PORTAL_GPS', empId: `${prefix}_fonE` });
+      const end = (await db.collection('turnos').doc(fantini).get()).data();
+      const ok = !wrong.relieved && !mid?.relievedBy
+        && right.relieved?.employeeName === 'Fantini'
+        && String(end?.relievedBy || '') === `${prefix}_fonE`;
+      report(72, ok, ok ? 'Fontana T2 releva a Fantini M2; el T suelto no'
+        : `wrong=${wrong.relieved?.employeeName} right=${right.relieved?.employeeName} by=${end?.relievedBy}`);
+    }
+
+    // Caso 73 — serie sin sufijo: M lo releva T, no M3
+    {
+      const prefix = `${runId}_c73`;
+      const start = Date.now() - 60 * 1000;
+      const sal = `${prefix}_m`;
+      const m3 = `${prefix}_m3`;
+      const tarde = `${prefix}_t`;
+      const base = {
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+      };
+      await db.collection('turnos').doc(sal).set({
+        ...base, employeeId: `${prefix}_mE`, employeeName: 'Manana', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(start - 4 * 60 * 60 * 1000),
+        endTime: Timestamp.fromMillis(start),
+      });
+      await db.collection('turnos').doc(m3).set({
+        ...base, employeeId: `${prefix}_m3E`, employeeName: 'Serie3', code: 'M3', status: 'PENDING',
+        startTime: Timestamp.fromMillis(start),
+        endTime: Timestamp.fromMillis(start + 4 * 60 * 60 * 1000),
+      });
+      await db.collection('turnos').doc(tarde).set({
+        ...base, employeeId: `${prefix}_tE`, employeeName: 'Tarde', code: 'T', status: 'PENDING',
+        startTime: Timestamp.fromMillis(start),
+        endTime: Timestamp.fromMillis(start + 8 * 60 * 60 * 1000),
+      });
+      const wrong = await registrarPresencia(db, { shiftId: m3, source: 'PORTAL_GPS', empId: `${prefix}_m3E` });
+      const mid = (await db.collection('turnos').doc(sal).get()).data();
+      const right = await registrarPresencia(db, { shiftId: tarde, source: 'PORTAL_GPS', empId: `${prefix}_tE` });
+      const ok = !wrong.relieved && !mid?.relievedBy && right.relieved?.employeeName === 'Manana';
+      report(73, ok, ok ? 'M lo releva T, no M3' : `wrong=${wrong.relieved?.employeeName} right=${right.relieved?.employeeName}`);
+    }
+
+    // Caso 74 — sin código reconocible: el relevo vuelve al horario
+    {
+      const prefix = `${runId}_c74`;
+      const start = Date.now() - 60 * 1000;
+      const sal = `${prefix}_out`;
+      const inn = `${prefix}_in`;
+      const base = {
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+      };
+      await db.collection('turnos').doc(sal).set({
+        ...base, employeeId: `${prefix}_outE`, employeeName: 'Saliente', code: 'CUSTOM',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(start - 4 * 60 * 60 * 1000),
+        endTime: Timestamp.fromMillis(start),
+      });
+      await db.collection('turnos').doc(inn).set({
+        ...base, employeeId: `${prefix}_inE`, employeeName: 'Entrante', code: 'LIBRE', status: 'PENDING',
+        startTime: Timestamp.fromMillis(start),
+        endTime: Timestamp.fromMillis(start + 4 * 60 * 60 * 1000),
+      });
+      const res = await registrarPresencia(db, { shiftId: inn, source: 'PORTAL_GPS', empId: `${prefix}_inE` });
+      const out = (await db.collection('turnos').doc(sal).get()).data();
+      const ok = res.relieved?.employeeName === 'Saliente' && String(out?.relievedBy || '') === `${prefix}_inE`;
+      report(74, ok, ok ? 'sin serie, releva por horario' : `relieved=${res.relieved?.employeeName} by=${out?.relievedBy}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

@@ -1443,7 +1443,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             <div className="text-[9px] font-black uppercase tracking-wide text-orange-700">Retención en puesto</div>
             <div className="text-sm font-bold mt-0.5">{liveRetentionPick.employeeName}</div>
             <div className="text-[10px] text-orange-800/80 mt-0.5">
-              Último en fichar en este puesto · visible en pestaña RET hasta relevo
+              Saliente de esta serie · queda en RET hasta que llegue el relevo
             </div>
           </div>
         )}

@@ -5,6 +5,7 @@ exports.loadPositionHasContinuity = loadPositionHasContinuity;
 const types_1 = require("../cerebro/types");
 const s1_leer_sla_1 = require("../cerebro/inteligencia-servicio/s1-leer-sla");
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 const TZ = 'America/Argentina/Cordoba';
 const CONTINUITY_WINDOW_MS = 30 * 60 * 1000;
 const normPos = (n) => String(n ?? '')
@@ -87,7 +88,7 @@ function hmToMsOnDay(anchor, hm) {
         return utcGuess;
     return anchor.getTime();
 }
-function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
+function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime, outgoingCode) {
     if (!slaDoc)
         return false;
     const dateStr = ymdInTz(shiftEndTime);
@@ -103,6 +104,10 @@ function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
             continue;
         if (reliefEligibility_1.NON_RELIEF_EXTRA_CODES.has(String(need.banda || '').toUpperCase()))
             continue;
+        if (outgoingCode != null
+            && String(outgoingCode).trim()
+            && (0, shiftSeries_1.seriesHandoffKind)(outgoingCode, need.banda) === 'REJECT')
+            continue;
         if (need.excludedDates?.includes(dateStr))
             continue;
         if (!need.diasSemana.includes(dayLetter))
@@ -116,7 +121,7 @@ function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime) {
     }
     return false;
 }
-async function loadPositionHasContinuity(db, objectiveId, positionName, shiftEndTime) {
+async function loadPositionHasContinuity(db, objectiveId, positionName, shiftEndTime, outgoingCode) {
     const oid = String(objectiveId || '').trim();
     if (!oid)
         return false;
@@ -126,7 +131,7 @@ async function loadPositionHasContinuity(db, objectiveId, positionName, shiftEnd
         .where('status', '==', 'active')
         .get();
     for (const d of slaSnap.docs) {
-        if (positionHasContinuityFromSlaDoc(d.data(), positionName, shiftEndTime)) {
+        if (positionHasContinuityFromSlaDoc(d.data(), positionName, shiftEndTime, outgoingCode)) {
             return true;
         }
     }

@@ -304,6 +304,7 @@ export async function registrarPresencia(
             gapStartMs: incomingStartMs,
             excludeShiftIds: [shiftId],
             excludeEmployeeId: empId || undefined,
+            incoming: shiftData as Record<string, unknown>,
           });
           if (pick) {
             const pickSnap = await db.collection('turnos').doc(pick.id).get();

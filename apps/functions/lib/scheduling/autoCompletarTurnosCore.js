@@ -12,6 +12,7 @@ const coverageRetention_1 = require("../coverage/coverageRetention");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const simulableShift_1 = require("../common/simulableShift");
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 const escalarVacanteSinCobertura_1 = require("../coverage/escalarVacanteSinCobertura");
 const pushGreeting_1 = require("../common/pushGreeting");
 const relevoNotifications_1 = require("../fichajes/relevoNotifications");
@@ -24,7 +25,7 @@ function shiftEndMs(data) {
 function shiftStartMs(data) {
     return data.startTime?.toMillis?.() ?? 0;
 }
-function isValidReliefForOutgoing(incoming, outgoingEndMs) {
+function isValidReliefForOutgoing(incoming, outgoingEndMs, outgoing) {
     if (!(0, reliefEligibility_1.isReliefEligibleShift)(incoming))
         return false;
     const st = shiftStartMs(incoming);
@@ -34,7 +35,31 @@ function isValidReliefForOutgoing(incoming, outgoingEndMs) {
         return false;
     if (st > outgoingEndMs + RELEVO_WINDOW_AFTER_MS)
         return false;
+    if (outgoing && (0, shiftSeries_1.seriesHandoffKind)((0, shiftSeries_1.seriesCodeOf)(outgoing), (0, shiftSeries_1.seriesCodeOf)(incoming)) === 'REJECT')
+        return false;
     return true;
+}
+function pickSeriesRelief(outgoingId, outgoing, endTimeMs, docs, pred) {
+    const hits = docs.filter((d) => pred(d) && isValidReliefForOutgoing(d.data(), endTimeMs, outgoing));
+    if (!hits.length)
+        return undefined;
+    const winner = (0, shiftSeries_1.relieverFor)({
+        id: outgoingId,
+        ...outgoing,
+        startMs: shiftStartMs(outgoing),
+        endMs: endTimeMs,
+    }, hits.map((d) => ({
+        id: d.id,
+        ...d.data(),
+        startMs: shiftStartMs(d.data()),
+        endMs: shiftEndMs(d.data()),
+    })), {
+        earliestIncomingMs: endTimeMs - RELEVO_ALIGN_MS,
+        latestIncomingMs: endTimeMs + RELEVO_WINDOW_AFTER_MS,
+    });
+    if (!winner?.id)
+        return undefined;
+    return hits.find((d) => d.id === String(winner.id));
 }
 function isReliefPresent(incoming) {
     if (incoming.isCompleted === true)
@@ -133,7 +158,7 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
                 .get();
             slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
         }
-        return (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', end));
+        return (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', end, (0, shiftSeries_1.seriesCodeOf)(shift)));
     }
     const outgoingDocs = [...snap.docs].sort((a, b) => (0, shiftClose_1.shiftWorkStartMs)(a.data()) - (0, shiftClose_1.shiftWorkStartMs)(b.data()));
     const reservedReliefKey = (objectiveId, employeeId) => `${String(objectiveId || '')}|${String(employeeId || '')}`;
@@ -236,25 +261,18 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id
             && ctx.sameTenantShift(shift, d.data())
             && !(0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(d.data()));
-        const relievePresent = relieveDocs.find((d) => {
+        const relievePresent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => {
             if (reliefIncomingClaimed.has(d.id))
                 return false;
             if (reliefBusyForOther(d.data(), docSnap.id))
                 return false;
-            const data = d.data();
-            return isReliefPresent(data) && isValidReliefForOutgoing(data, endTimeMs);
+            return isReliefPresent(d.data());
         });
-        const relievePending = relieveDocs.find((d) => {
-            const data = d.data();
-            return !reliefPendingClaimed.has(d.id) && isReliefPending(data) && isValidReliefForOutgoing(data, endTimeMs);
-        })
-            ?? relieveDocs.find((d) => isReliefPending(d.data()) && isValidReliefForOutgoing(d.data(), endTimeMs));
+        const relievePending = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()))
+            ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()));
         if (relievePending)
             reliefPendingClaimed.add(relievePending.id);
-        const relieveAbsent = relieveDocs.find((d) => {
-            const data = d.data();
-            return isReliefAbsent(data) && isValidReliefForOutgoing(data, endTimeMs);
-        });
+        const relieveAbsent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefAbsent(d.data()));
         if (relievePresent) {
             reliefIncomingClaimed.add(relievePresent.id);
             update(relievePresent.ref, { relievedOutgoingShiftId: docSnap.id });

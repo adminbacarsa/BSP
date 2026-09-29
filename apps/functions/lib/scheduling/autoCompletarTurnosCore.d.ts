@@ -30,7 +30,7 @@ export type AutoCompletePassResult = {
     alertedNoRelief: number;
     actions: AutoCompleteAction[];
 };
-export declare function isValidReliefForOutgoing(incoming: FirebaseFirestore.DocumentData, outgoingEndMs: number): boolean;
+export declare function isValidReliefForOutgoing(incoming: FirebaseFirestore.DocumentData, outgoingEndMs: number, outgoing?: FirebaseFirestore.DocumentData): boolean;
 export declare function isReliefPresent(incoming: FirebaseFirestore.DocumentData): boolean;
 export type AutoCompletarTurnosPassOpts = {
     onlyOutgoingShiftId?: string | null;

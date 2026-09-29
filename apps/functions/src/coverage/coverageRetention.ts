@@ -5,6 +5,7 @@ import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
 import { guardFirstName } from '../common/pushGreeting';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { seriesCodeOf } from '../common/shiftSeries';
 import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
@@ -119,6 +120,7 @@ export async function retainOutgoingForGap(
     excludeShiftIds: [absenceShiftId],
     excludeEmployeeId: absentEmpId,
     absenceShiftId,
+    incoming: titularShift,
   });
 
   if (!pick) {
@@ -298,7 +300,7 @@ export async function releaseInvalidRetentionsRun(
       slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
     }
     const continuous = (slaCache.get(oid) || []).some((sla) =>
-      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', new Date(endMs)),
+      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', new Date(endMs), seriesCodeOf(shift)),
     );
     if (continuous) continue;
     const reason = String(shift.retentionReason || '');

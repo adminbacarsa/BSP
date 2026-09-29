@@ -34,6 +34,20 @@ export {
   isExtraNonReliefShift,
 } from './reliefEligibility';
 export type { ReliefIneligibleReason } from './reliefEligibility';
+export {
+  SHIFT_SERIES_ALIGN_MS,
+  parseShiftSeries,
+  isRecognizedSeriesCode,
+  nextSeriesCode,
+  prevSeriesCode,
+  seriesCodeOf,
+  seriesHandoffKind,
+  seriesBoundMs,
+  reliefPositionsMatch,
+  relieverFor,
+  outgoingFor,
+} from './shiftSeries';
+export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts } from './shiftSeries';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';
 export type { ShiftCodeBadge, ShiftCodeBadgeTone } from './shiftCodeBadge';
 export { classifyOpsShift } from './classifyOpsShift';

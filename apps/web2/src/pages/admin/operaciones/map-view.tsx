@@ -134,7 +134,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
                 ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
                 : effectiveMode === 'override'
                     ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
-                    : (status === 'LATE' ? 'Ingreso tarde — relevo automático FIFO.' : 'Ingreso — relevo automático FIFO.'),
+                    : (status === 'LATE' ? 'Ingreso tarde — relevo de la serie.' : 'Ingreso — relevo de la serie.'),
         );
 
         void registrarPresenciaOps({
@@ -146,7 +146,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, recentlyRelieved
             if (res.alreadyPresent) {
                 toast.message('El turno ya estaba marcado presente.');
             } else if (effectiveMode === 'auto' && res.relieved) {
-                toast.success(`Relevó a ${res.relieved.employeeName} (FIFO).`);
+                toast.success(`Relevó a ${res.relieved.employeeName}.`);
                 onRelieved?.(res.relieved.shiftId);
             } else if (effectiveMode === 'auto' && !res.relieved) {
                 toast.message('Presente OK — no había saliente para relevar.');

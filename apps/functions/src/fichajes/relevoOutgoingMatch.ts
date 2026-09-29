@@ -1,5 +1,6 @@
 import type { Firestore } from 'firebase-admin/firestore';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { outgoingFor } from '../common/shiftSeries';
 
 export const RELEVO_GAP_ALIGN_MS = 30 * 60 * 1000;
 
@@ -57,6 +58,8 @@ export async function findPresentOutgoingAlignedToGapStart(
     excludeEmployeeId?: string;
     /** Si el candidato está retenido por otra ausencia, probar el siguiente. */
     absenceShiftId?: string;
+    /** Entrante (código de serie + horario). Sin código reconocible, queda el criterio de horario. */
+    incoming?: Record<string, unknown>;
   },
 ): Promise<OutgoingReliefPick | null> {
   const objectiveId = String(params.objectiveId || '').trim();
@@ -96,7 +99,26 @@ export async function findPresentOutgoingAlignedToGapStart(
     .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
 
   const absenceShiftId = String(params.absenceShiftId || '').trim();
-  for (const cand of outgoing) {
+  const incoming: Record<string, unknown> = {
+    ...(params.incoming || {}),
+    positionName: params.positionName,
+    startMs: gapStartMs,
+  };
+  const excluded = new Set<string>();
+  while (excluded.size < outgoing.length) {
+    const visible = outgoing.filter((cand) => !excluded.has(cand.id));
+    const winner = outgoingFor(
+      incoming,
+      visible.map((cand) => ({
+        id: cand.id,
+        ...cand.data,
+        startMs: startMs(cand.data),
+        endMs: endMs(cand.data),
+      })),
+    );
+    if (!winner?.id) return null;
+    const cand = visible.find((row) => row.id === winner.id);
+    if (!cand) return null;
     const linked = String(cand.data.retentionAbsenceShiftId || '').trim();
     if (
       cand.data.isRetention === true
@@ -104,6 +126,7 @@ export async function findPresentOutgoingAlignedToGapStart(
       && absenceShiftId
       && linked !== absenceShiftId
     ) {
+      excluded.add(cand.id);
       continue;
     }
     return cand;

@@ -20,6 +20,8 @@ import {
   isVacancyDescubierto,
   isActionableOpsVacancy,
   isReliefEligibleShift,
+  seriesCodeOf,
+  seriesHandoffKind,
   isGapSiblingVacancyDoc,
   isCanonicalGapTitular,
   buildSlaUnplannedGapDocId,
@@ -1272,6 +1274,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     if (normPosName(other.positionName) !== normPosName(s.positionName)) return false;
                     // ESC/REF/RET tarde no es el relevo del saliente.
                     if (!isReliefEligibleShift(other)) return false;
+                    if (seriesHandoffKind(seriesCodeOf(s), seriesCodeOf(other)) === 'REJECT') return false;
                     if (!other.lateETA && !other.lateArrivalAt && !other.lateArrivalConfirmed) return false;
                     const otherStart = other.shiftDateObj?.getTime?.() ?? 0;
                     return otherStart >= endMs - 30 * 60000 && otherStart <= endMs + 4 * 60 * 60000;

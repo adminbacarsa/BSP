@@ -13,6 +13,7 @@ const coverageTraceShift_1 = require("./coverageTraceShift");
 const relevoOutgoingMatch_1 = require("../fichajes/relevoOutgoingMatch");
 const pushGreeting_1 = require("../common/pushGreeting");
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 const shiftClose_1 = require("../scheduling/shiftClose");
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = shiftClose_1.SHIFT_HARD_CAP_MS;
@@ -103,6 +104,7 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
         excludeShiftIds: [absenceShiftId],
         excludeEmployeeId: absentEmpId,
         absenceShiftId,
+        incoming: titularShift,
     });
     if (!pick) {
         return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'NO_OUTGOING' };
@@ -258,7 +260,7 @@ async function releaseInvalidRetentionsRun(db, opts) {
                 .get();
             slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
         }
-        const continuous = (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', new Date(endMs)));
+        const continuous = (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', new Date(endMs), (0, shiftSeries_1.seriesCodeOf)(shift)));
         if (continuous)
             continue;
         const reason = String(shift.retentionReason || '');

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.posMatchRelief = exports.RELEVO_GAP_ALIGN_MS = void 0;
 exports.findPresentOutgoingAlignedToGapStart = findPresentOutgoingAlignedToGapStart;
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 exports.RELEVO_GAP_ALIGN_MS = 30 * 60 * 1000;
 const normPos = (n) => String(n ?? '')
     .trim()
@@ -86,12 +87,31 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
     })
         .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
     const absenceShiftId = String(params.absenceShiftId || '').trim();
-    for (const cand of outgoing) {
+    const incoming = {
+        ...(params.incoming || {}),
+        positionName: params.positionName,
+        startMs: gapStartMs,
+    };
+    const excluded = new Set();
+    while (excluded.size < outgoing.length) {
+        const visible = outgoing.filter((cand) => !excluded.has(cand.id));
+        const winner = (0, shiftSeries_1.outgoingFor)(incoming, visible.map((cand) => ({
+            id: cand.id,
+            ...cand.data,
+            startMs: startMs(cand.data),
+            endMs: endMs(cand.data),
+        })));
+        if (!winner?.id)
+            return null;
+        const cand = visible.find((row) => row.id === winner.id);
+        if (!cand)
+            return null;
         const linked = String(cand.data.retentionAbsenceShiftId || '').trim();
         if (cand.data.isRetention === true
             && linked
             && absenceShiftId
             && linked !== absenceShiftId) {
+            excluded.add(cand.id);
             continue;
         }
         return cand;

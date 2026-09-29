@@ -10,7 +10,7 @@ import {
   writeBatch,
   type Firestore,
 } from 'firebase/firestore';
-import { opsPositionMatches } from '@/lib/operaciones/opsDualCoverageApply';
+import { outgoingFor } from '@cosp/ops-core';
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 const toDate = (d: unknown): Date => {
@@ -39,8 +39,6 @@ export type RetentionPickResult = {
   checkInMs: number;
 } | null;
 
-const RETENTION_ALIGN_MS = 30 * 60 * 1000;
-
 function shiftBoundMs(shift: Record<string, unknown>, kind: 'start' | 'end'): number {
   const objKey = kind === 'start' ? 'shiftDateObj' : 'endDateObj';
   const rawKey = kind === 'start' ? 'startTime' : 'endTime';
@@ -53,46 +51,47 @@ function shiftBoundMs(shift: Record<string, unknown>, kind: 'start' | 'end'): nu
 }
 
 /**
- * Retenido = presente que TERMINA cuando empieza el hueco (fin ±30 min),
- * mismo puesto. Quien arranca a esa hora o está a mitad de turno no entra.
+ * Retenido = presente de la serie que TERMINA cuando empieza el hueco
+ * (fin ±30 min, mismo puesto). Si el código no es serie, queda el horario.
+ * Quien arranca a esa hora o está a mitad de turno no entra.
  */
 export function pickRetentionShiftForGap(
   processedData: unknown[],
   absenceShift: Record<string, unknown>,
 ): RetentionPickResult {
   const objectiveId = String(absenceShift.objectiveId || '').trim();
-  const positionName = absenceShift.positionName;
   const gapStart = shiftBoundMs(absenceShift, 'start');
   if (!objectiveId || !gapStart) return null;
+  const absentEmp = String(absenceShift.employeeId || '').trim();
 
-  const rows = (processedData || []).filter((raw) => {
-    const sh = raw as Record<string, unknown>;
+  const rows = ((processedData || []) as Record<string, unknown>[]).filter((sh) => {
     if (!sh.isPresent || sh.isCompleted || sh.isAbsent) return false;
     if (String(sh.objectiveId || '').trim() !== objectiveId) return false;
-    if (!opsPositionMatches(sh.positionName, positionName)) return false;
     if (sh.isVirtual === true) return false;
     const eid = String(sh.employeeId || '').trim();
-    if (!eid || eid === 'VACANTE') return false;
-    if (eid === String(absenceShift.employeeId || '').trim()) return false;
-    const st = shiftBoundMs(sh, 'start');
-    const en = shiftBoundMs(sh, 'end');
-    if (st <= 0 || st >= gapStart - 60_000) return false;
-    if (!en || Math.abs(en - gapStart) > RETENTION_ALIGN_MS) return false;
+    if (!eid || eid === 'VACANTE' || (absentEmp && eid === absentEmp)) return false;
     return true;
-  }) as Record<string, unknown>[];
-
+  });
   if (!rows.length) return null;
 
-  rows.sort((a, b) => checkInMsFromShift(b) - checkInMsFromShift(a));
-  const top = rows[0];
-  const shiftId = String(top.id || '').trim();
-  if (!shiftId) return null;
+  const winner = outgoingFor(
+    { ...absenceShift, startMs: gapStart },
+    rows.map((sh) => ({
+      ...sh,
+      id: String(sh.id || ''),
+      startMs: shiftBoundMs(sh, 'start'),
+      endMs: shiftBoundMs(sh, 'end'),
+      checkInMs: checkInMsFromShift(sh),
+    })),
+  );
+  const shiftId = String(winner?.id || '').trim();
+  if (!winner || !shiftId) return null;
 
   return {
     shiftId,
-    employeeId: String(top.employeeId || '').trim(),
-    employeeName: String(top.employeeName || 'Guardia').trim(),
-    checkInMs: checkInMsFromShift(top),
+    employeeId: String(winner.employeeId || '').trim(),
+    employeeName: String(winner.employeeName || 'Guardia').trim(),
+    checkInMs: checkInMsFromShift(winner),
   };
 }
 
