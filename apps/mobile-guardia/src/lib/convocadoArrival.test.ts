@@ -14,6 +14,7 @@ import {
   formatEnCaminoLine,
   isRecordatorioPendiente,
   parseConvocadoRecordatorioPush,
+  resolveExpectedArrivalAt,
 } from '../../../../packages/portal-core/src/checkIn/convocadoArrival.ts';
 import { raceWithTimeout } from './raceWithTimeout.ts';
 
@@ -67,20 +68,55 @@ describe('getCheckInTiming convocado', () => {
 });
 
 describe('recordatorio convocado', () => {
-  it('pendiente solo si aceptó, no fichó y el recordatorio sigue abierto', () => {
+  const sent = new Date('2026-09-14T20:20:00-03:00');
+
+  it('pendiente = ACCEPTED + reminderSentAt + sin respuesta posterior + sin fichar', () => {
+    assert.equal(isRecordatorioPendiente({ status: 'ACCEPTED', type: 'RET', reminderSentAt: sent }), true);
+    assert.equal(isRecordatorioPendiente({ status: 'ACCEPTED', type: 'RET', reminderSentAt: sent }, true), false);
+    assert.equal(isRecordatorioPendiente({ status: 'ACCEPTED', type: 'RET', reminderAt: sent }), false);
+    assert.equal(isRecordatorioPendiente({ status: 'PENDING', reminderSentAt: sent }), false);
+    assert.equal(isRecordatorioPendiente({ status: 'ACCEPTED', type: 'EXTEND', reminderSentAt: sent }), false);
+  });
+
+  it('convocadoReplyAt >= reminderSentAt ya respondió; una respuesta vieja no cuenta', () => {
+    const later = new Date(sent.getTime() + 60_000);
+    const earlier = new Date(sent.getTime() - 60_000);
     assert.equal(
-      isRecordatorioPendiente({ status: 'ACCEPTED', recordatorioPendiente: true, type: 'RET' }),
+      isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        reminderSentAt: sent,
+        convocadoReply: 'ON_WAY',
+        convocadoReplyAt: later,
+      }),
+      false,
+    );
+    assert.equal(
+      isRecordatorioPendiente({
+        status: 'ACCEPTED',
+        reminderSentAt: sent,
+        convocadoReply: 'PROBLEM',
+        convocadoReplyAt: sent,
+      }),
+      false,
+    );
+    assert.equal(
+      isRecordatorioPendiente({ status: 'ACCEPTED', reminderSentAt: sent, convocadoReplyAt: earlier }),
       true,
     );
+  });
+
+  it('expectedArrivalAt manda; sin él, etaMinutes desde la aceptación', () => {
+    const expected = new Date('2026-09-14T20:45:00-03:00');
+    const accepted = new Date('2026-09-14T20:00:00-03:00');
     assert.equal(
-      isRecordatorioPendiente({ status: 'ACCEPTED', recordatorioPendiente: true }, true),
-      false,
+      resolveExpectedArrivalAt({ expectedArrivalAt: expected, etaMinutes: 10, nowMs: Date.now() })?.getTime(),
+      expected.getTime(),
     );
     assert.equal(
-      isRecordatorioPendiente({ status: 'ACCEPTED', recordatorioStatus: 'ON_WAY', recordatorioPendiente: true }),
-      false,
+      resolveExpectedArrivalAt({ etaMinutes: 15, anchorMs: accepted.getTime(), nowMs: Date.now() })?.getTime(),
+      accepted.getTime() + 15 * 60_000,
     );
-    assert.equal(isRecordatorioPendiente({ status: 'PENDING', recordatorioPendiente: true }), false);
+    assert.equal(resolveExpectedArrivalAt({ nowMs: Date.now() }), null);
   });
 
   it('el push abre la ruta del banner con la convocatoria', () => {

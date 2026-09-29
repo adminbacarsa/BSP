@@ -4,44 +4,57 @@ import { isCoverageHoursOnSourceDoc, timestampLikeToMillis } from './evaluateChe
 export const CONVOCADO_ETA_OPTIONS = [10, 15, 30] as const;
 export type ConvocadoEtaMinutes = (typeof CONVOCADO_ETA_OPTIONS)[number];
 
+/**
+ * Campos que escribe el servidor (convocadoAcceptEta / convocadoFollowUp) en
+ * convocatorias_cobertura. El turno ops_cov replica expectedArrivalAt,
+ * convocadoReminderSentAt, convocadoReply y convocadoDemorado.
+ */
 export type RecordatorioConvocadoLike = {
   id?: string;
   status?: string;
   type?: string;
-  recordatorioPendiente?: boolean;
-  recordatorioStatus?: string;
-  reminderStatus?: string;
-  checkedIn?: boolean;
-  fichado?: boolean;
-  etaMinutes?: number;
-  llegadaEstimadaAt?: unknown;
-  respondedAt?: unknown;
-  objectiveName?: string;
-  objectiveLat?: number;
-  objectiveLng?: number;
   shiftId?: string;
+  objectiveName?: string;
+  /** ETA en minutos calculado al aceptar (o el elegido en ON_WAY). */
+  etaMinutes?: number;
+  /** Hora estimada de llegada. */
+  expectedArrivalAt?: unknown;
+  /** Cuándo toca el recordatorio y cuándo se envió. */
+  reminderAt?: unknown;
+  reminderSentAt?: unknown;
+  /** Respuesta del convocado al recordatorio. */
+  convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
+  convocadoReplyAt?: unknown;
+  convocadoReplyNote?: string | null;
+  convocadoReplyEtaMinutes?: number;
+  convocadoDemorado?: boolean;
+  originCoords?: { lat: number; lng: number; accuracy?: number } | null;
+  originSource?: 'DEVICE' | 'DOMICILIO' | 'SIN_COORD' | string;
+  acceptedAt?: unknown;
+  respondedAt?: unknown;
 };
-
-const RESPONDED_REMINDER = new Set(['ON_WAY', 'PROBLEM', 'DONE', 'RESPONDED']);
 
 export function isConvocadoEta(value: number): value is ConvocadoEtaMinutes {
   return value === 10 || value === 15 || value === 30;
 }
 
-/** Aceptada, sin fichar, y el servidor marcó el recordatorio como pendiente. */
+/**
+ * Pendiente = ACCEPTED + reminderSentAt presente + sin respuesta posterior + sin fichar.
+ * Respondió si convocadoReplyAt >= reminderSentAt.
+ */
 export function isRecordatorioPendiente(
   c: RecordatorioConvocadoLike | null | undefined,
   shiftCheckedIn = false,
 ): boolean {
-  if (!c || shiftCheckedIn || c.checkedIn === true || c.fichado === true) return false;
-  if (String(c.type || '').trim().toUpperCase() === 'LLEGADA_TARDE') return false;
+  if (!c || shiftCheckedIn) return false;
+  const type = String(c.type || '').trim().toUpperCase();
+  if (type === 'LLEGADA_TARDE' || type === 'EXTEND') return false;
   if (String(c.status || '').trim().toUpperCase() !== 'ACCEPTED') return false;
-  const rec = String(c.recordatorioStatus || c.reminderStatus || '')
-    .trim()
-    .toUpperCase();
-  if (RESPONDED_REMINDER.has(rec)) return false;
-  if (c.recordatorioPendiente === false) return false;
-  return c.recordatorioPendiente === true || rec === 'PENDING' || rec === 'SENT';
+  const sentMs = timestampLikeToMillis(c.reminderSentAt);
+  if (sentMs <= 0) return false;
+  const replyMs = timestampLikeToMillis(c.convocadoReplyAt);
+  if (replyMs > 0 && replyMs >= sentMs) return false;
+  return true;
 }
 
 export function parseConvocadoRecordatorioPush(
@@ -72,13 +85,14 @@ export function convocadoRecordatorioRoute(parsed: {
   return `/(tabs)?${q.toString()}`;
 }
 
-export function resolveLlegadaEstimadaAt(input: {
-  llegadaEstimadaAt?: unknown;
+/** `expectedArrivalAt` del servidor; si falta, `etaMinutes` desde el ancla (aceptación o ahora). */
+export function resolveExpectedArrivalAt(input: {
+  expectedArrivalAt?: unknown;
   etaMinutes?: number | null;
   anchorMs?: number;
   nowMs: number;
 }): Date | null {
-  const explicit = timestampLikeToMillis(input.llegadaEstimadaAt);
+  const explicit = timestampLikeToMillis(input.expectedArrivalAt);
   if (explicit > 0) return new Date(explicit);
   const eta = input.etaMinutes;
   if (eta != null && Number.isFinite(eta) && eta > 0) {

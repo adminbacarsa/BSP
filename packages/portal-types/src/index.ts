@@ -39,6 +39,14 @@ export type Shift = {
   checkInRequestedAt?: FirestoreTimestampLike;
   checkInRequestStatus?: string;
   lateArrivalAt?: FirestoreTimestampLike;
+  /** Cobertura del convocado (ops_cov): espejo de convocatorias_cobertura. */
+  expectedArrivalAt?: FirestoreTimestampLike;
+  etaMinutes?: number;
+  convocadoReminderAt?: FirestoreTimestampLike;
+  convocadoReminderSentAt?: FirestoreTimestampLike;
+  convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
+  convocadoDemorado?: boolean;
+  originSource?: 'DEVICE' | 'DOMICILIO' | 'SIN_COORD' | string;
 };
 
 export type PortalFeatures = {

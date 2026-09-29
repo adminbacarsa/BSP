@@ -47,16 +47,20 @@ export type ConvocatoriaCobertura = {
   timeoutAt?: FirestoreTimestampLike;
   createdAt?: FirestoreTimestampLike;
   rejectionReason?: string;
-  recordatorioPendiente?: boolean;
-  recordatorioStatus?: string;
-  reminderStatus?: string;
-  checkedIn?: boolean;
-  fichado?: boolean;
-  etaMinutes?: number;
-  llegadaEstimadaAt?: FirestoreTimestampLike;
   respondedAt?: FirestoreTimestampLike;
-  objectiveLat?: number;
-  objectiveLng?: number;
+  acceptedAt?: FirestoreTimestampLike;
+  /** Servidor (convocadoAcceptEta / convocadoFollowUp). */
+  etaMinutes?: number;
+  expectedArrivalAt?: FirestoreTimestampLike;
+  reminderAt?: FirestoreTimestampLike;
+  reminderSentAt?: FirestoreTimestampLike;
+  convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
+  convocadoReplyAt?: FirestoreTimestampLike;
+  convocadoReplyNote?: string | null;
+  convocadoReplyEtaMinutes?: number;
+  convocadoDemorado?: boolean;
+  originCoords?: { lat: number; lng: number; accuracy?: number } | null;
+  originSource?: 'DEVICE' | 'DOMICILIO' | 'SIN_COORD' | string;
 };
 
 export function isLlegadaTardeConvocatoria(c: Pick<ConvocatoriaCobertura, 'type'>): boolean {

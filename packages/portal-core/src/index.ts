@@ -52,7 +52,7 @@ export {
   isConvocadoEta,
   mapsSearchUrl,
   parseConvocadoRecordatorioPush,
-  resolveLlegadaEstimadaAt,
+  resolveExpectedArrivalAt,
 } from './checkIn/convocadoArrival';
 export type { ConvocadoEtaMinutes, RecordatorioConvocadoLike } from './checkIn/convocadoArrival';
 export {

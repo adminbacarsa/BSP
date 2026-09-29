@@ -9,10 +9,11 @@ import {
   isRecordatorioPendiente,
   isShiftPresent,
   mapsSearchUrl,
+  timestampLikeToMillis,
   toDate,
   resolveCheckInUiStatus,
   resolveEvShiftDisplay,
-  resolveLlegadaEstimadaAt,
+  resolveExpectedArrivalAt,
 } from '@cosp/portal-core';
 import type { ConvocadoEtaMinutes } from '@cosp/portal-core';
 import { isEmulatorMode } from '../../src/lib/portal';
@@ -161,10 +162,12 @@ function HoyScreenContent() {
     if (pending.some((c) => c.id === highlightConvocatoriaId)) return pending;
     const known = aceptadas.find((c) => c.id === highlightConvocatoriaId);
     if (known && checked(known.shiftId)) return pending;
+    // Push recibido antes de que el snapshot traiga reminderSentAt / si ya respondió: no lo repite.
+    if (known && timestampLikeToMillis(known.convocadoReplyAt) > 0) return pending;
     return [
       {
         ...(known ?? { id: highlightConvocatoriaId, type: 'RET', status: 'ACCEPTED' }),
-        recordatorioPendiente: true,
+        reminderSentAt: known?.reminderSentAt ?? new Date(),
         etaMinutes:
           known?.etaMinutes ?? (Number.isFinite(etaFromPush) && etaFromPush > 0 ? etaFromPush : undefined),
       },
@@ -327,21 +330,20 @@ function HoyScreenContent() {
     ? aceptadas.find((c) => c.shiftId === mainShift.id)
     : undefined;
   const enCaminoEta = convocadoHero
-    ? resolveLlegadaEstimadaAt({
-        llegadaEstimadaAt: acceptedForHero?.llegadaEstimadaAt,
-        etaMinutes: acceptedForHero?.etaMinutes ?? null,
-        anchorMs: now.getTime(),
+    ? resolveExpectedArrivalAt({
+        expectedArrivalAt: mainShift?.expectedArrivalAt ?? acceptedForHero?.expectedArrivalAt,
+        etaMinutes: mainShift?.etaMinutes ?? acceptedForHero?.etaMinutes ?? null,
+        anchorMs:
+          timestampLikeToMillis(acceptedForHero?.acceptedAt) ||
+          timestampLikeToMillis(acceptedForHero?.respondedAt) ||
+          now.getTime(),
         nowMs: now.getTime(),
       }) ?? toDate(mainShift?.startTime)
     : null;
   const enCaminoLine = convocadoHero
     ? formatEnCaminoLine(placement.objective, enCaminoEta && !Number.isNaN(enCaminoEta.getTime()) ? enCaminoEta : null)
     : null;
-  const mapsUrl = mapsSearchUrl(
-    objective?.lat ?? acceptedForHero?.objectiveLat,
-    objective?.lng ?? acceptedForHero?.objectiveLng,
-    objective?.address,
-  );
+  const mapsUrl = mapsSearchUrl(objective?.lat, objective?.lng, objective?.address);
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
