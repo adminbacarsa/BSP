@@ -32,6 +32,8 @@ import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEli
 import { arPlanificacionEstadoKey } from './common/arClock';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
+import { isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
+import { openLateAbsenceVacancy } from './attendance/openLateAbsenceVacancy';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
 import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
@@ -913,6 +915,13 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       return;
     }
 
+    if (isProvisionalLateAbsence(after as Record<string, unknown>, Date.now())) {
+      console.log(
+        `[onTurnoAbsenciaDetectada] AA provisoria: retención sin vacante shift=${event.params.shiftId}`,
+      );
+      return;
+    }
+
     await iniciarCascadaCobertura(db, {
       id: event.params.shiftId,
       objectiveId:    String(after.objectiveId   || ''),
@@ -925,6 +934,11 @@ export const onTurnoAbsenciaDetectada = onDocumentUpdatedV2(
       endTime:   after.endTime,
       empresaId,
     }, cascadeCreatedBy);
+    await event.data.after.ref.update({
+      absenceVacancyOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch((e) => {
+      console.warn('[onTurnoAbsenciaDetectada] absenceVacancyOpenedAt:', (e as Error)?.message);
+    });
   }
 );
 
@@ -1365,11 +1379,23 @@ export const marcarAusenciaOperaciones = functions.https.onCall(async (data, con
   const shiftId = String(data?.shiftId || '').trim();
   if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
   const db = admin.firestore();
+  const ref = db.collection('turnos').doc(shiftId);
+  const before = await ref.get();
+  const cur = before.data() as Record<string, unknown> | undefined;
+  if (cur?.isAbsent === true) {
+    await ref.update({
+      absenceDetectedBy: 'MANUAL_OPS',
+      absenceType: 'MANUAL_OPS',
+      absenceConfirmedBy: context.auth.uid,
+      absenceConfirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+  }
   const r = await markShiftAbsent(db, shiftId, {
     reason: 'MANUAL_OPS',
     by: context.auth.uid,
   });
-  return { success: r.applied || r.alreadyAbsent === true, ...r };
+  const vacancyOpened = await openLateAbsenceVacancy(db, shiftId);
+  return { success: r.applied || r.alreadyAbsent === true || cur?.isAbsent === true, vacancyOpened, ...r };
 });
 
 export const revertirAusencia = functions.https.onCall(async (data, context) => {
@@ -2645,8 +2671,7 @@ export const detectarAusencias = functions
 
       if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
         const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
-        const capMs = startMs + 60 * 60 * 1000;
-        const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;
+        const deadlineMs = lateAbsenceDeadlineMs(startMs, etaMs);
         if (nowMs >= deadlineMs && !shift.absenceDetectedAt) {
           if (shift.notifiedAbsent === true) continue;
           if (shift.isReten === true || shift.origin === 'RETEN') continue;
@@ -2683,6 +2708,11 @@ export const detectarAusencias = functions
             }
           } catch (fixErr) {
             console.warn('[detectarAusencias] Error corrección fecha retro:', fixErr);
+          }
+          try {
+            await openLateAbsenceVacancy(db, docSnap.id);
+          } catch (vacErr) {
+            console.warn('[detectarAusencias] vacante T+60:', (vacErr as Error)?.message);
           }
           continue;
         }

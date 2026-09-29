@@ -108,6 +108,22 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assert.equal(evaluateCheckInWindow(shift, t31).rejectCode, 'TOO_LATE');
   });
 
+  it('ETA menor a 30 no cierra antes de T+30', () => {
+    const startIso = `${day}T11:00:00-03:00`;
+    const shift = {
+      startTime: ts(startIso),
+      endTime: ts(`${day}T15:00:00-03:00`),
+      lateArrivalConfirmed: true,
+      lateArrivalEtaAt: ts(`${day}T11:15:00-03:00`),
+    };
+    const t20 = new Date(`${day}T11:20:00-03:00`).getTime();
+    assertParity('eta15 t+20', shift, t20);
+    assert.equal(evaluateCheckInWindow(shift, t20).allowed, true);
+    const t31 = new Date(`${day}T11:31:00-03:00`).getTime();
+    assertParity('eta15 t+31', shift, t31);
+    assert.equal(evaluateCheckInWindow(shift, t31).rejectCode, 'TOO_LATE');
+  });
+
   it('lateArrivalEtaAt prioriza sobre minutos; cap T+60', () => {
     const startIso = `${day}T17:00:00-03:00`;
     const shift = {

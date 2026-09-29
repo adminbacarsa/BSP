@@ -1,0 +1,54 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PROVISIONAL_LATE_REASONS = exports.LATE_ABSENCE_CAP_MS = exports.LATE_ABSENCE_FLOOR_MS = void 0;
+exports.shiftStartMs = shiftStartMs;
+exports.lateAbsenceDeadlineMs = lateAbsenceDeadlineMs;
+exports.isProvisionalLateAbsence = isProvisionalLateAbsence;
+exports.lateVacancyDue = lateVacancyDue;
+exports.LATE_ABSENCE_FLOOR_MS = 30 * 60 * 1000;
+exports.LATE_ABSENCE_CAP_MS = 60 * 60 * 1000;
+exports.PROVISIONAL_LATE_REASONS = new Set(['AUTO_T30', 'ETA_VENCIDA']);
+function shiftStartMs(shift) {
+    const st = shift.startTime;
+    return st?.toMillis?.() ?? 0;
+}
+function lateAbsenceDeadlineMs(plannedStartMs, etaAtMs) {
+    if (plannedStartMs <= 0)
+        return 0;
+    const floor = plannedStartMs + exports.LATE_ABSENCE_FLOOR_MS;
+    const cap = plannedStartMs + exports.LATE_ABSENCE_CAP_MS;
+    if (etaAtMs > 0)
+        return Math.max(floor, Math.min(etaAtMs, cap));
+    return floor;
+}
+function isProvisionalLateAbsence(shift, nowMs) {
+    const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
+    if (!absent)
+        return false;
+    const by = String(shift.absenceDetectedBy || '').toUpperCase();
+    if (!exports.PROVISIONAL_LATE_REASONS.has(by))
+        return false;
+    const start = shiftStartMs(shift);
+    if (start <= 0)
+        return false;
+    return nowMs < start + exports.LATE_ABSENCE_CAP_MS;
+}
+function lateVacancyDue(shift, nowMs) {
+    const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
+    if (!absent)
+        return false;
+    if (shift.absenceVacancyOpenedAt)
+        return false;
+    const by = String(shift.absenceDetectedBy || '').toUpperCase();
+    const start = shiftStartMs(shift);
+    const operatorDeclared = by === 'MANUAL_OPS'
+        || String(shift.absenceType || '').toUpperCase() === 'MANUAL_OPS'
+        || !!shift.absenceConfirmedBy;
+    if (operatorDeclared)
+        return true;
+    if (exports.PROVISIONAL_LATE_REASONS.has(by)) {
+        return start > 0 && nowMs >= start + exports.LATE_ABSENCE_CAP_MS;
+    }
+    return false;
+}
+//# sourceMappingURL=lateAbsenceWindow.js.map

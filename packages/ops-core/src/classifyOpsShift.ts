@@ -53,6 +53,10 @@ export type ClassifyOpsShiftResult = {
   rrhhAnticipacionMinutes: number | null;
   isLateNotified: boolean;
   isLateUnnotified: boolean;
+  /** AA automática (o ventana vencida) antes de T+60: no abre VAC. */
+  isProvisionalLateAbsence: boolean;
+  /** Hueco que sí cuenta como vacante (operador o T+60). */
+  opensCoverageVacancy: boolean;
   minutesRemainingLate: number | null;
   lateArrivalEtaMinutes: number | null;
   lateArrivalEtaLabel: string | null;
@@ -232,6 +236,24 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     lateArrivalEtaMinutes,
     lateArrivalEtaLabel,
   } = lateMonitor;
+  const vacancyAtMs = startMs > 0 ? startMs + 60 * 60_000 : 0;
+  const absenceBy = String(shift.absenceDetectedBy || '').toUpperCase();
+  const provisionalReason = absenceBy === 'AUTO_T30' || absenceBy === 'ETA_VENCIDA';
+  const operatorDeclared =
+    absenceBy === 'MANUAL_OPS'
+    || String(shift.absenceType || '').toUpperCase() === 'MANUAL_OPS'
+    || !!shift.absenceConfirmedBy;
+  const beforeVacancyCap = vacancyAtMs > 0 && nowMs < vacancyAtMs;
+  const isProvisionalLateAbsence =
+    beforeVacancyCap
+    && !operatorDeclared
+    && (
+      (isPotentialAbsence && !isAbsent)
+      || (isAbsent && provisionalReason)
+    );
+  const opensCoverageVacancy =
+    (isAbsent && !isProvisionalLateAbsence)
+    || (isPotentialAbsence && !beforeVacancyCap);
   const isImminent =
     lateEligible && !isLateNotified && minutesUntilStart <= 15 && minutesUntilStart > -5;
   const isFuture =
@@ -251,9 +273,9 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     !isCoverageSourceUsed
     && !isPassiveRetStandby
     && !isAutoNotification
-    && ((isValidEmployee && !isAbsent && !isPotentialAbsence && !hasRRHHNovedad)
+    && ((isValidEmployee && !opensCoverageVacancy && !hasRRHHNovedad)
       || (isReportedToPlanning && !isValidEmployee)
-      || (isPlannedSplitSegment && !isAbsent && !isPotentialAbsence));
+      || (isPlannedSplitSegment && !opensCoverageVacancy));
 
   return {
     isUnassigned,
@@ -288,6 +310,8 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     rrhhAnticipacionMinutes,
     isLateNotified,
     isLateUnnotified,
+    isProvisionalLateAbsence,
+    opensCoverageVacancy,
     minutesRemainingLate,
     lateArrivalEtaMinutes,
     lateArrivalEtaLabel,

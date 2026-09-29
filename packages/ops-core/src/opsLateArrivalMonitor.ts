@@ -1,6 +1,7 @@
 /**
  * Estados CC de llegada tarde (espejo detectarAusencias / notificarLlegadaTarde).
- * Aviso T−60…T+5; ventana hasta min(lateArrivalEtaAt, T+60); sin eta → T+30.
+ * Aviso T−60…T+5. AA provisoria en max(T+30, min(ETA, T+60)).
+ * Vacante recién a T+60 o si el operador declara la ausencia.
  */
 
 export type OpsLateArrivalMonitorInput = {
@@ -68,13 +69,11 @@ export function resolveLateArrivalEtaAtMs(shift: Record<string, unknown>, startM
 
 export function resolveLateAbsenceDeadlineMs(shift: Record<string, unknown>, startMs: number): number {
   if (startMs <= 0) return 0;
-  if (hasLateArrivalNotice(shift)) {
-    const etaMs = resolveLateArrivalEtaAtMs(shift, startMs);
-    const capMs = startMs + 60 * 60_000;
-    if (etaMs > 0) return Math.min(etaMs, capMs);
-    return startMs + 30 * 60_000;
-  }
-  return startMs + 30 * 60_000;
+  const floor = startMs + 30 * 60_000;
+  const cap = startMs + 60 * 60_000;
+  const etaMs = resolveLateArrivalEtaAtMs(shift, startMs);
+  if (etaMs > 0) return Math.max(floor, Math.min(etaMs, cap));
+  return floor;
 }
 
 export function formatLateEtaLabelAR(etaMs: number): string | null {
@@ -118,8 +117,7 @@ export function computeOpsLateArrivalMonitorState(
 
   let minutesRemainingLate: number | null = null;
   if (isLateNotified) {
-    const targetMs = etaAtMs > 0 ? etaAtMs : absenceDeadlineMs;
-    minutesRemainingLate = Math.max(0, Math.round((targetMs - nowMs) / 60_000));
+    minutesRemainingLate = Math.max(0, Math.round((absenceDeadlineMs - nowMs) / 60_000));
   }
 
   const lateArrivalEtaLabel =

@@ -3,6 +3,8 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registrarPresencia = registrarPresencia;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
+const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
+const revertirAusencia_1 = require("../attendance/revertirAusencia");
 const checkInWindow_1 = require("./checkInWindow");
 const checkInPay_1 = require("./checkInPay");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
@@ -82,7 +84,16 @@ async function registrarPresencia(db, input) {
         throw new Error('TURNO_NOT_FOUND');
     const shiftData = shiftDoc.data();
     if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-        throw new Error('SHIFT_ABSENT');
+        if (!(0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shiftData, Date.now())) {
+            throw new Error('SHIFT_ABSENT');
+        }
+        const rev = await (0, revertirAusencia_1.revertirAusenciaShift)(db, {
+            shiftId,
+            operatorUid: operatorUid || 'FICHADA',
+        });
+        if (!rev.success)
+            throw new Error('SHIFT_ABSENT');
+        return { success: true, alreadyPresent: false, relieved: null };
     }
     if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {
         throw new Error('TRACE_REGISTRATION_SHIFT');

@@ -236,6 +236,34 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(at31.rejectCode).toBe('TOO_LATE');
   });
 
+  it('ETA 15: puede fichar a T+20; AA provisoria hasta T+60', () => {
+    const start = new Date('2026-09-29T11:00:00-03:00');
+    const noticed = shift({
+      id: 'eta15',
+      origin: 'PLANIFICADOR',
+      startTime: start,
+      endTime: new Date('2026-09-29T15:00:00-03:00'),
+      lateArrivalConfirmed: true,
+      lateArrivalEtaAt: new Date(start.getTime() + 15 * 60_000),
+    });
+    const at20 = getCheckInTiming(noticed, new Date('2026-09-29T11:20:00-03:00'));
+    expect(at20.canCheckIn).toBe(true);
+    expect(at20.checkInDeadline?.getTime()).toBe(start.getTime() + 30 * 60_000);
+    const provisional = shift({
+      id: 'eta15-aa',
+      origin: 'PLANIFICADOR',
+      startTime: start,
+      endTime: new Date('2026-09-29T15:00:00-03:00'),
+      isAbsent: true,
+      status: 'ABSENT',
+      absenceType: 'AA',
+      absenceDetectedBy: 'ETA_VENCIDA',
+    });
+    const at40 = getCheckInTiming(provisional, new Date('2026-09-29T11:40:00-03:00'));
+    expect(at40.canCheckIn).toBe(true);
+    expect(at40.checkInDeadline?.getTime()).toBe(start.getTime() + 60 * 60_000);
+  });
+
   it('ausente: no puede fichar', () => {
     const s = shift({
       id: 'abs1',

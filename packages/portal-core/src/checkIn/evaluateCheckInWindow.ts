@@ -100,12 +100,27 @@ function hasPriorLateNotice(shift: Record<string, unknown>): boolean {
   return shift.lateArrivalConfirmed === true || !!shift.lateArrivalAt;
 }
 
-/** Fin ventana propia: min(eta, T+60) si hay ETA; con aviso sin ETA o sin aviso → T+30. */
+const LATE_FLOOR_MS = 30 * 60 * 1000;
+const LATE_CAP_MS = 60 * 60 * 1000;
+
+/** Espejo de functions `lateAbsenceDeadlineMs`: max(T+30, min(ETA, T+60)). */
 function lateEtaDeadlineMs(shift: Record<string, unknown>, plannedStartMs: number): number {
   const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
-  const cap60 = plannedStartMs + 60 * 60 * 1000;
-  if (etaAt > 0) return Math.min(etaAt, cap60);
-  return plannedStartMs + 30 * 60 * 1000;
+  if (plannedStartMs <= 0) return 0;
+  const floor = plannedStartMs + LATE_FLOOR_MS;
+  const cap = plannedStartMs + LATE_CAP_MS;
+  if (etaAt > 0) return Math.max(floor, Math.min(etaAt, cap));
+  return floor;
+}
+
+function isProvisionalLatePunch(shift: Record<string, unknown>, nowMs: number): boolean {
+  const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
+  if (!absent) return false;
+  const by = String(shift.absenceDetectedBy || '').toUpperCase();
+  if (by !== 'AUTO_T30' && by !== 'ETA_VENCIDA') return false;
+  const start = startMs(shift);
+  if (start <= 0) return false;
+  return nowMs < start + LATE_CAP_MS;
 }
 
 function finishAllowed(
@@ -141,6 +156,12 @@ export function evaluateCheckInWindow(
   nowMs: number,
   opts?: { source?: string },
 ): CheckInWindowResult {
+  if (isProvisionalLatePunch(shift, nowMs)) {
+    const planned = startMs(shift);
+    const endEarly = endMs(shift);
+    if (endEarly > 0 && nowMs > endEarly) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+    return finishAllowed(planned, nowMs, false, !hasPriorLateNotice(shift));
+  }
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
     return { allowed: false, rejectCode: 'ABSENT' };
   }

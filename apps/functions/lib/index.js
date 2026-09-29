@@ -25,6 +25,8 @@ const reliefEligibility_1 = require("./common/reliefEligibility");
 const arClock_1 = require("./common/arClock");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
+const lateAbsenceWindow_1 = require("./attendance/lateAbsenceWindow");
+const openLateAbsenceVacancy_1 = require("./attendance/openLateAbsenceVacancy");
 const cancelLlegadaTardeConvocatorias_1 = require("./attendance/cancelLlegadaTardeConvocatorias");
 const relevoNotifications_1 = require("./fichajes/relevoNotifications");
 const convocadoAbsentPass_1 = require("./attendance/convocadoAbsentPass");
@@ -733,6 +735,10 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         console.log(`[onTurnoAbsenciaDetectada] Manual: solo retención, sin cascada empresa=${empresaId} shift=${event.params.shiftId}`);
         return;
     }
+    if ((0, lateAbsenceWindow_1.isProvisionalLateAbsence)(after, Date.now())) {
+        console.log(`[onTurnoAbsenciaDetectada] AA provisoria: retención sin vacante shift=${event.params.shiftId}`);
+        return;
+    }
     await (0, convocatoriasCobertura_1.iniciarCascadaCobertura)(db, {
         id: event.params.shiftId,
         objectiveId: String(after.objectiveId || ''),
@@ -745,6 +751,11 @@ exports.onTurnoAbsenciaDetectada = (0, firestore_1.onDocumentUpdated)({ document
         endTime: after.endTime,
         empresaId,
     }, cascadeCreatedBy);
+    await event.data.after.ref.update({
+        absenceVacancyOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch((e) => {
+        console.warn('[onTurnoAbsenciaDetectada] absenceVacancyOpenedAt:', e?.message);
+    });
 });
 const SUPER_ADMIN_ROLES_AP = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 exports.autoPresenciaYCierre = functions
@@ -1109,11 +1120,23 @@ exports.marcarAusenciaOperaciones = functions.https.onCall(async (data, context)
     if (!shiftId)
         throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
     const db = admin.firestore();
+    const ref = db.collection('turnos').doc(shiftId);
+    const before = await ref.get();
+    const cur = before.data();
+    if (cur?.isAbsent === true) {
+        await ref.update({
+            absenceDetectedBy: 'MANUAL_OPS',
+            absenceType: 'MANUAL_OPS',
+            absenceConfirmedBy: context.auth.uid,
+            absenceConfirmedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+    }
     const r = await (0, markShiftAbsent_1.markShiftAbsent)(db, shiftId, {
         reason: 'MANUAL_OPS',
         by: context.auth.uid,
     });
-    return { success: r.applied || r.alreadyAbsent === true, ...r };
+    const vacancyOpened = await (0, openLateAbsenceVacancy_1.openLateAbsenceVacancy)(db, shiftId);
+    return { success: r.applied || r.alreadyAbsent === true || cur?.isAbsent === true, vacancyOpened, ...r };
 });
 exports.revertirAusencia = functions.https.onCall(async (data, context) => {
     if (!context.auth?.uid) {
@@ -2195,8 +2218,7 @@ exports.detectarAusencias = functions
         };
         if (shift.lateArrivalAt || shift.lateArrivalConfirmed || shift.lateETA || String(shift.checkInStatus || '').toUpperCase() === 'LATE_PENDING') {
             const etaMs = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
-            const capMs = startMs + 60 * 60 * 1000;
-            const deadlineMs = etaMs > 0 ? Math.min(etaMs, capMs) : startMs + 30 * 60 * 1000;
+            const deadlineMs = (0, lateAbsenceWindow_1.lateAbsenceDeadlineMs)(startMs, etaMs);
             if (nowMs >= deadlineMs && !shift.absenceDetectedAt) {
                 if (shift.notifiedAbsent === true)
                     continue;
@@ -2233,6 +2255,12 @@ exports.detectarAusencias = functions
                 }
                 catch (fixErr) {
                     console.warn('[detectarAusencias] Error corrección fecha retro:', fixErr);
+                }
+                try {
+                    await (0, openLateAbsenceVacancy_1.openLateAbsenceVacancy)(db, docSnap.id);
+                }
+                catch (vacErr) {
+                    console.warn('[detectarAusencias] vacante T+60:', vacErr?.message);
                 }
                 continue;
             }

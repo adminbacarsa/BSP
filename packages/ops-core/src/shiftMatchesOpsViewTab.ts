@@ -17,6 +17,8 @@ export type OpsViewTabShift = Record<string, unknown> & {
   isLateNotified?: boolean;
   isLateUnnotified?: boolean;
   isPotentialAbsence?: boolean;
+  isProvisionalLateAbsence?: boolean;
+  opensCoverageVacancy?: boolean;
   isAbsent?: boolean;
   isFuture?: boolean;
   isRRHHPlanned?: boolean;
@@ -52,9 +54,10 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
       );
     case 'NO_LLEGO':
       return (
-        (s.isLateNotified || s.isLateUnnotified || s.isPotentialAbsence)
+        (s.isLateNotified || s.isLateUnnotified || s.isProvisionalLateAbsence || s.isPotentialAbsence)
         && !s.isFranco
-        && !s.isAbsent
+        && (!s.isAbsent || !!s.isProvisionalLateAbsence)
+        && !s.opensCoverageVacancy
         && !s.isEarlyStart
         && !s.isAwaitingCoverageCheckIn
         && !s.hasRRHHNovedad
@@ -80,7 +83,8 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
       if (s.isRetention || s.origin === 'RETEN' || s.isReten || String(s.code || '').toUpperCase() === 'RET') {
         return false;
       }
-      return !!(s.isAbsent || s.isPotentialAbsence);
+      if (s.isProvisionalLateAbsence) return false;
+      return !!(s.isAbsent || (s.isPotentialAbsence && s.opensCoverageVacancy));
     case 'FRANCOS':
       return !!s.isFranco;
     default:

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.evaluateServerCheckInWindow = evaluateServerCheckInWindow;
+const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 function startMs(shift) {
     return shift.startTime?.toMillis?.() ?? 0;
@@ -27,10 +28,7 @@ function hasPriorLateNotice(shift) {
 }
 function lateEtaDeadlineMs(shift, plannedStartMs) {
     const etaAt = shift.lateArrivalEtaAt?.toMillis?.() ?? 0;
-    const cap60 = plannedStartMs + 60 * 60 * 1000;
-    if (etaAt > 0)
-        return Math.min(etaAt, cap60);
-    return plannedStartMs + 30 * 60 * 1000;
+    return (0, lateAbsenceWindow_1.lateAbsenceDeadlineMs)(plannedStartMs, etaAt);
 }
 function finishAllowed(anchorStartMs, nowMs, useAdjustedStart, lateNoNoticeEligible = false) {
     const onTimeEnd = anchorStartMs + 5 * 60 * 1000;
@@ -52,6 +50,15 @@ function finishAllowed(anchorStartMs, nowMs, useAdjustedStart, lateNoNoticeEligi
     };
 }
 function evaluateServerCheckInWindow(shift, nowMs, opts) {
+    const plannedStartEarly = startMs(shift);
+    if ((shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
+        && (0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shift, nowMs)
+        && plannedStartEarly > 0) {
+        const endEarly = endMs(shift);
+        if (endEarly > 0 && nowMs > endEarly)
+            return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+        return finishAllowed(plannedStartEarly, nowMs, false, !hasPriorLateNotice(shift));
+    }
     if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
         return { allowed: false, rejectCode: 'ABSENT' };
     }

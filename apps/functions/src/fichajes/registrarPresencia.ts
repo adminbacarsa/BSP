@@ -1,5 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { isProvisionalLateAbsence } from '../attendance/lateAbsenceWindow';
+import { revertirAusenciaShift } from '../attendance/revertirAusencia';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { resolveCheckInPayClock } from './checkInPay';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
@@ -143,7 +145,15 @@ export async function registrarPresencia(
   const shiftData = shiftDoc.data()!;
 
   if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-    throw new Error('SHIFT_ABSENT');
+    if (!isProvisionalLateAbsence(shiftData as Record<string, unknown>, Date.now())) {
+      throw new Error('SHIFT_ABSENT');
+    }
+    const rev = await revertirAusenciaShift(db, {
+      shiftId,
+      operatorUid: operatorUid || 'FICHADA',
+    });
+    if (!rev.success) throw new Error('SHIFT_ABSENT');
+    return { success: true, alreadyPresent: false, relieved: null };
   }
   if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {
     throw new Error('TRACE_REGISTRATION_SHIFT');

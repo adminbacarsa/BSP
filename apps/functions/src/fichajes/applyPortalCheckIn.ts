@@ -2,6 +2,7 @@ import { FieldValue } from 'firebase-admin/firestore';
 import type { PortalCheckInInput, PortalCheckInResult } from './fichajesTypes';
 import { fichajeDocIdFromKey } from './sanitizeId';
 import { registrarPresencia } from './registrarPresencia';
+import { isProvisionalLateAbsence } from '../attendance/lateAbsenceWindow';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
@@ -22,7 +23,10 @@ export async function processPortalCheckIn(
   }
   const shiftData = shiftDoc.data()!;
 
-  if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
+  if (
+    (shiftData.isAbsent === true || shiftData.status === 'ABSENT')
+    && !isProvisionalLateAbsence(shiftData as Record<string, unknown>, Date.now())
+  ) {
     throw new Error('SHIFT_ABSENT');
   }
   if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {

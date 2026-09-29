@@ -1,4 +1,5 @@
 import { Timestamp } from 'firebase-admin/firestore';
+import { isProvisionalLateAbsence, lateAbsenceDeadlineMs } from '../attendance/lateAbsenceWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 export type CheckInWindowResult = {
@@ -40,12 +41,10 @@ function hasPriorLateNotice(shift: Record<string, unknown>): boolean {
   return shift.lateArrivalConfirmed === true || !!shift.lateArrivalAt;
 }
 
-/** Fin ventana propia: min(eta, T+60) si hay ETA; con aviso sin ETA o sin aviso → T+30. */
+/** Fin de fichada en hora: max(T+30, min(ETA, T+60)). Sin ETA → T+30. */
 function lateEtaDeadlineMs(shift: Record<string, unknown>, plannedStartMs: number): number {
   const etaAt = (shift.lateArrivalEtaAt as Timestamp | undefined)?.toMillis?.() ?? 0;
-  const cap60 = plannedStartMs + 60 * 60 * 1000;
-  if (etaAt > 0) return Math.min(etaAt, cap60);
-  return plannedStartMs + 30 * 60 * 1000;
+  return lateAbsenceDeadlineMs(plannedStartMs, etaAt);
 }
 
 function finishAllowed(
@@ -75,7 +74,8 @@ function finishAllowed(
 
 /**
  * Ventanas servidor (espejo portal-core): normal T−15…T+30 (T+5…T+30 sin aviso = llegada tarde);
- * con aviso hasta min(ETA, T+60); OPERATIONS_COVERAGE convocado max(created, start)+60;
+ * con aviso hasta max(T+30, min(ETA, T+60)); AA provisoria fichable hasta T+60;
+ * OPERATIONS_COVERAGE convocado max(created, start)+60;
  * isEarlyStart = adelanto OR turno propio.
  */
 export function evaluateServerCheckInWindow(
@@ -83,6 +83,16 @@ export function evaluateServerCheckInWindow(
   nowMs: number,
   opts?: { source?: string },
 ): CheckInWindowResult {
+  const plannedStartEarly = startMs(shift);
+  if (
+    (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
+    && isProvisionalLateAbsence(shift, nowMs)
+    && plannedStartEarly > 0
+  ) {
+    const endEarly = endMs(shift);
+    if (endEarly > 0 && nowMs > endEarly) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+    return finishAllowed(plannedStartEarly, nowMs, false, !hasPriorLateNotice(shift));
+  }
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
     return { allowed: false, rejectCode: 'ABSENT' };
   }

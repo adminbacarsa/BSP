@@ -6,6 +6,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const sanitizeId_1 = require("./sanitizeId");
 const registrarPresencia_1 = require("./registrarPresencia");
 Object.defineProperty(exports, "registrarPresencia", { enumerable: true, get: function () { return registrarPresencia_1.registrarPresencia; } });
+const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const checkInWindow_1 = require("./checkInWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 async function processPortalCheckIn(db, input) {
@@ -16,7 +17,8 @@ async function processPortalCheckIn(db, input) {
         throw new Error('TURNO_NOT_FOUND');
     }
     const shiftData = shiftDoc.data();
-    if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
+    if ((shiftData.isAbsent === true || shiftData.status === 'ABSENT')
+        && !(0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shiftData, Date.now())) {
         throw new Error('SHIFT_ABSENT');
     }
     if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {

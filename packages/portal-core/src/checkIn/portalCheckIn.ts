@@ -165,21 +165,29 @@ function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date
     return new Date(Math.max(created, plannedStart) + 60 * 60 * 1000);
   }
 
+  const by = String(shift.absenceDetectedBy || '').toUpperCase();
+  const provisional =
+    (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
+    && (by === 'AUTO_T30' || by === 'ETA_VENCIDA')
+    && nowMs < plannedStart + 60 * 60 * 1000;
+  if (provisional) return new Date(plannedStart + 60 * 60 * 1000);
+
   if (shift.isEarlyStart === true) {
     const adj = timestampLikeToMillis(shift.adjustedStartTime) || plannedStart;
     const advClose = adj + 60 * 60 * 1000;
     const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
     const cap60 = plannedStart + 60 * 60 * 1000;
-    let ownClose = plannedStart + 30 * 60 * 1000;
-    if (etaAt > 0) ownClose = Math.min(etaAt, cap60);
+    const floor30 = plannedStart + 30 * 60 * 1000;
+    const ownClose = etaAt > 0 ? Math.max(floor30, Math.min(etaAt, cap60)) : floor30;
     if (nowMs >= adj - 15 * 60_000 && nowMs <= advClose) return new Date(advClose);
     return new Date(ownClose);
   }
 
   const etaAt = timestampLikeToMillis(shift.lateArrivalEtaAt);
   const cap60 = plannedStart + 60 * 60 * 1000;
-  if (etaAt > 0) return new Date(Math.min(etaAt, cap60));
-  return new Date(plannedStart + 30 * 60 * 1000);
+  const floor30 = plannedStart + 30 * 60 * 1000;
+  if (etaAt > 0) return new Date(Math.max(floor30, Math.min(etaAt, cap60)));
+  return new Date(floor30);
 }
 
 /**
@@ -204,7 +212,14 @@ export function getCheckInTiming(
     checkInDeadline: null,
   };
 
-  if (isAbsentLikeShift(s as unknown as Record<string, unknown>)) {
+  const absenceBy = String((s as { absenceDetectedBy?: unknown }).absenceDetectedBy || '').toUpperCase();
+  const provisionalPunch =
+    (absenceBy === 'AUTO_T30' || absenceBy === 'ETA_VENCIDA')
+    && (s.isAbsent === true || String(s.status || '').toUpperCase() === 'ABSENT')
+    && !!start
+    && nowMs < start.getTime() + 60 * 60 * 1000;
+
+  if (!provisionalPunch && isAbsentLikeShift(s as unknown as Record<string, unknown>)) {
     return {
       ...empty,
       rejectCode: 'ABSENT',
