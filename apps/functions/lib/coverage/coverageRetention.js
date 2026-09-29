@@ -14,6 +14,7 @@ const relevoOutgoingMatch_1 = require("../fichajes/relevoOutgoingMatch");
 const pushGreeting_1 = require("../common/pushGreeting");
 const reliefEligibility_1 = require("../common/reliefEligibility");
 const shiftSeries_1 = require("../common/shiftSeries");
+const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const shiftClose_1 = require("../scheduling/shiftClose");
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = shiftClose_1.SHIFT_HARD_CAP_MS;
@@ -73,6 +74,9 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
     }
     if (!(0, reliefEligibility_1.isReliefEligibleShift)(titularShift)) {
         return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EXTRA_SHIFT_NO_GAP' };
+    }
+    if ((0, eventoCoverage_1.isEventoShift)(titularShift) && !(0, eventoCoverage_1.eventoTieneFranjasEncadenadas)(titularShift)) {
+        return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EVENTO_SIN_CONTINUIDAD' };
     }
     const absenceShiftId = String(titularShift.id || '').trim();
     const objectiveId = String(titularShift.objectiveId || '').trim();

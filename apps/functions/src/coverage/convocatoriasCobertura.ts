@@ -17,6 +17,12 @@ import {
 import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from '../common/simulableShift';
 import { canalOrigenConvocatoria, logConvocatoriaEvento } from './convocatoriaEventos';
+import {
+  EVENT_COVERAGE_CASCADE_ORDER,
+  eventoTieneFranjasEncadenadas,
+  eventualesParaHueco,
+  isEventoShift,
+} from '../eventos/eventoCoverage';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -313,7 +319,7 @@ export async function findBestCandidate(
   conv: ConvocatoriaCoberturaDoc,
   type: CandidateType,
 ): Promise<CandidateResult | null> {
-  if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP') return null;
+  if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP' || type === 'EVENTUAL') return null;
   const { findBestCoverageCandidate } = await import('./coverageCandidatesServer');
   const found = await findBestCoverageCandidate(db, conv, type);
   if (!found) return null;
@@ -1230,8 +1236,26 @@ export async function iniciarCascadaCobertura(
     createdBy,
   };
 
+  const eventGap = isEventoShift(titularData);
+  const order: readonly CandidateType[] = eventGap ? EVENT_COVERAGE_CASCADE_ORDER : CASCADE_ORDER;
+  if (eventGap) {
+    const pool = eventualesParaHueco();
+    const first = pool[0];
+    if (first?.employeeId) {
+      await crearConvocatoriaDoc(db, {
+        ...baseConvData,
+        type: 'EVENTUAL',
+        cascadeStep: 0,
+        candidateEmployeeId: first.employeeId,
+        candidateEmployeeName: first.employeeName,
+        createdBy,
+      });
+      return;
+    }
+  }
+
   // Iterar la cascada desde el primer paso hasta encontrar candidato
-  for (const type of CASCADE_ORDER) {
+  for (const type of order) {
     if (type === 'FT') {
       await dispararBroadcastFT(db, baseConvData);
       return;
@@ -1242,7 +1266,7 @@ export async function iniciarCascadaCobertura(
     await crearConvocatoriaDoc(db, {
       ...baseConvData,
       type,
-      cascadeStep: CASCADE_ORDER.indexOf(type),
+      cascadeStep: order.indexOf(type),
       candidateEmployeeId: candidate.id,
       candidateEmployeeName: candidate.name,
       ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
@@ -1260,8 +1284,10 @@ export async function iniciarCascadaCobertura(
     objectiveId: shift.objectiveId,
     objectiveName: shift.objectiveName || '',
     positionName: shift.positionName || '',
-    message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
-    attemptRetention: true,
+    message: eventGap
+      ? `Hueco de evento sin candidatos (${shift.code || 'EV'}) en ${shift.objectiveName || 'objetivo'} (${createdBy}).`
+      : `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
+    attemptRetention: !(eventGap && !eventoTieneFranjasEncadenadas(titularData)),
     source: 'INICIAR_CASCADA',
   });
 }

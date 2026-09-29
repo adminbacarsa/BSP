@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.markShiftAbsent = markShiftAbsent;
 const firestore_1 = require("firebase-admin/firestore");
+const eventoCoverage_1 = require("../eventos/eventoCoverage");
 function shiftEmpresaId(shift) {
     return String(shift.empresaId || '').trim() || 'bacarsa';
 }
@@ -46,6 +47,16 @@ async function markShiftAbsent(db, shiftId, opts) {
         absenceDetectedAt: shift.absenceDetectedAt || now,
         absenceDetectedBy: reason,
     });
+    const eventGap = (0, eventoCoverage_1.isEventoShift)(shift);
+    const eventFields = eventGap
+        ? {
+            eventoId: shift.eventoId || null,
+            eventoNombre: shift.eventoNombre || null,
+            servicioId: shift.servicioId || null,
+            servicioNombre: shift.servicioNombre || null,
+            eventGap: true,
+        }
+        : {};
     const ausSnap = await db.collection('ausencias').where('shiftId', '==', sid).limit(1).get();
     if (ausSnap.empty) {
         await db.collection('ausencias').add({
@@ -68,6 +79,7 @@ async function markShiftAbsent(db, shiftId, opts) {
             hasCertificate: false,
             createdAt: now,
             source: actorBy,
+            ...eventFields,
         });
     }
     const novSnap = await db
@@ -94,6 +106,7 @@ async function markShiftAbsent(db, shiftId, opts) {
             createdAt: now,
             source: actorBy,
             absenceReason: reason,
+            ...eventFields,
         });
     }
     return { applied: true };

@@ -21,6 +21,7 @@ const eligibilityFilter_1 = require("./eligibilityFilter");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
 const simulableShift_1 = require("../common/simulableShift");
 const convocatoriaEventos_1 = require("./convocatoriaEventos");
+const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const tz = 'America/Argentina/Buenos_Aires';
@@ -196,7 +197,7 @@ async function crearConvocatoriaDoc(db, data) {
     return ref.id;
 }
 async function findBestCandidate(db, conv, type) {
-    if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP')
+    if (type === 'VOLANTE' || type === 'SIN_TURNO' || type === 'SIN_TURNO_CON_EXP' || type === 'EVENTUAL')
         return null;
     const { findBestCoverageCandidate } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
     const found = await findBestCoverageCandidate(db, conv, type);
@@ -934,7 +935,24 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         createdAt: firestore_1.Timestamp.now(),
         createdBy,
     };
-    for (const type of eligibilityFilter_1.CASCADE_ORDER) {
+    const eventGap = (0, eventoCoverage_1.isEventoShift)(titularData);
+    const order = eventGap ? eventoCoverage_1.EVENT_COVERAGE_CASCADE_ORDER : eligibilityFilter_1.CASCADE_ORDER;
+    if (eventGap) {
+        const pool = (0, eventoCoverage_1.eventualesParaHueco)();
+        const first = pool[0];
+        if (first?.employeeId) {
+            await crearConvocatoriaDoc(db, {
+                ...baseConvData,
+                type: 'EVENTUAL',
+                cascadeStep: 0,
+                candidateEmployeeId: first.employeeId,
+                candidateEmployeeName: first.employeeName,
+                createdBy,
+            });
+            return;
+        }
+    }
+    for (const type of order) {
         if (type === 'FT') {
             await dispararBroadcastFT(db, baseConvData);
             return;
@@ -945,7 +963,7 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         await crearConvocatoriaDoc(db, {
             ...baseConvData,
             type,
-            cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(type),
+            cascadeStep: order.indexOf(type),
             candidateEmployeeId: candidate.id,
             candidateEmployeeName: candidate.name,
             ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
@@ -962,8 +980,10 @@ async function iniciarCascadaCobertura(db, shift, createdBy = 'AUTO') {
         objectiveId: shift.objectiveId,
         objectiveName: shift.objectiveName || '',
         positionName: shift.positionName || '',
-        message: `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
-        attemptRetention: true,
+        message: eventGap
+            ? `Hueco de evento sin candidatos (${shift.code || 'EV'}) en ${shift.objectiveName || 'objetivo'} (${createdBy}).`
+            : `Sin candidatos para turno ${shift.code || ''} en ${shift.objectiveName || 'objetivo'} (${createdBy}).`,
+        attemptRetention: !(eventGap && !(0, eventoCoverage_1.eventoTieneFranjasEncadenadas)(titularData)),
         source: 'INICIAR_CASCADA',
     });
 }

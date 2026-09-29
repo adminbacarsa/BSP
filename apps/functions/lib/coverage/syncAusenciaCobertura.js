@@ -22,6 +22,7 @@ exports.anularOpsCoverageLeg = anularOpsCoverageLeg;
 const admin = require("firebase-admin");
 const simulableShift_1 = require("../common/simulableShift");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
+const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
 function coverageServerTime() {
     if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -315,6 +316,8 @@ async function applyCoverage(db, batch, params) {
     const posName = params.positionName || titular.positionName || null;
     const ct = ctEarly;
     const isRet = ct === 'RET';
+    const eventGap = (0, eventoCoverage_1.isEventoShift)(titular);
+    const writtenCode = eventGap ? 'EV' : (ct === 'FT' ? 'FT' : bandCode);
     const sourceId = String(params.sourceShiftId || '').trim();
     if (sourceId) {
         const srcSnap = await db.collection('turnos').doc(sourceId).get();
@@ -402,8 +405,17 @@ async function applyCoverage(db, batch, params) {
         objectiveName: params.objectiveName ?? titular.objectiveName ?? '',
         positionName: posName,
         coversPositionName: posName,
-        code: ct === 'FT' ? 'FT' : bandCode,
-        type: ct === 'FT' ? 'FT' : bandCode,
+        code: writtenCode,
+        type: writtenCode,
+        ...(eventGap
+            ? {
+                eventoId: titular.eventoId ?? null,
+                eventoNombre: titular.eventoNombre ?? null,
+                servicioId: titular.servicioId ?? null,
+                servicioNombre: titular.servicioNombre ?? null,
+                eventGap: true,
+            }
+            : {}),
         startTime: startTs,
         endTime: endTs,
         origin: 'OPERATIONS_COVERAGE',

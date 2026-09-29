@@ -5,6 +5,7 @@ import { skipAbsencePipelineForShift } from '../coverage/coverageTraceShift';
 import { crearConvocatoriaLlegadaTarde } from '../coverage/convocatoriasCobertura';
 import type { loadCentroControlState } from '../ops/centroControlGuard';
 import { guardFirstName } from '../common/pushGreeting';
+import { isEventoShift, eventoTieneFranjasEncadenadas } from '../eventos/eventoCoverage';
 import {
   classifyArrivalNotice,
   headsUpBody,
@@ -103,6 +104,7 @@ async function alertOutgoing(
   incoming: Record<string, unknown>,
 ): Promise<void> {
   if (isExtraNonReliefShift(incoming)) return;
+  if (isEventoShift(incoming) && !eventoTieneFranjasEncadenadas(incoming)) return;
   const empresaId = String(incoming.empresaId || '').trim();
   const objectiveId = String(incoming.objectiveId || '').trim();
   const posName = String(incoming.positionName || '').trim().toLowerCase();
@@ -180,7 +182,7 @@ export async function runShiftArrivalNotices(
       if (classifyArrivalNotice(startMs, nowMs) !== kind) continue;
       const flag = kind === 'HEADS_UP' ? 'preStartArrivalNoticeAt' : 'earlyRetentionAlertAt';
       if (shift[flag]) continue;
-      if (!(await cache.isShiftInOperation(db, shift))) continue;
+      if (!isEventoShift(shift) && !(await cache.isShiftInOperation(db, shift))) continue;
 
       const claimed = await claimFlag(db, docSnap.ref, flag, now);
       if (!claimed) continue;

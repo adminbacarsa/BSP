@@ -1,4 +1,5 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { isEventoShift } from '../eventos/eventoCoverage';
 
 export type ShiftAbsentReason =
   | 'AUTO_T30'
@@ -75,6 +76,17 @@ export async function markShiftAbsent(
     absenceDetectedBy: reason,
   });
 
+  const eventGap = isEventoShift(shift);
+  const eventFields = eventGap
+    ? {
+      eventoId: shift.eventoId || null,
+      eventoNombre: shift.eventoNombre || null,
+      servicioId: shift.servicioId || null,
+      servicioNombre: shift.servicioNombre || null,
+      eventGap: true,
+    }
+    : {};
+
   const ausSnap = await db.collection('ausencias').where('shiftId', '==', sid).limit(1).get();
   if (ausSnap.empty) {
     await db.collection('ausencias').add({
@@ -97,6 +109,7 @@ export async function markShiftAbsent(
       hasCertificate: false,
       createdAt: now,
       source: actorBy,
+      ...eventFields,
     });
   }
 
@@ -125,6 +138,7 @@ export async function markShiftAbsent(
       createdAt: now,
       source: actorBy,
       absenceReason: reason,
+      ...eventFields,
     });
   }
 
