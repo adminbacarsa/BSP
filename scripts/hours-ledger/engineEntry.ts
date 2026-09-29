@@ -47,6 +47,7 @@ export type LedgerDay = {
   ext: number;
   adv: number;
   novedadPaga: number;
+  novedadPagaOutside: number;
   licV: number;
   licE: number;
   licL: number;
@@ -55,7 +56,9 @@ export type LedgerDay = {
   licSUS: number;
   licSGS: number;
   ausenciaHoras: number;
+  ausenciaHorasOutside: number;
   ausenciaTurnos: number;
+  ausenciaTurnosOutside: number;
   ausenciaLegajos: number;
   uncoveredAusencia: number;
   uncoveredRetiro: number;
@@ -84,6 +87,7 @@ export type LedgerMonth = {
   ext: number;
   adv: number;
   novedadPaga: number;
+  novedadPagaOutside: number;
   licV: number;
   licE: number;
   licL: number;
@@ -92,7 +96,9 @@ export type LedgerMonth = {
   licSUS: number;
   licSGS: number;
   ausenciaHoras: number;
+  ausenciaHorasOutside: number;
   ausenciaTurnos: number;
+  ausenciaTurnosOutside: number;
   ausenciaLegajos: number;
   uncoveredAusencia: number;
   uncoveredRetiro: number;
@@ -121,9 +127,9 @@ export type LedgerBuildInput = {
 
 const METRIC_KEYS = [
   'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
-  'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+  'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga', 'novedadPagaOutside',
   'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
-  'ausenciaHoras', 'ausenciaTurnos', 'ausenciaLegajos',
+  'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
   'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
 ] as const;
 
@@ -239,9 +245,9 @@ function blankMetrics() {
   return {
     slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0,
     planPublished: 0, planDraft: 0, worked: 0, workedOutside: 0,
-    covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
+    covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0, novedadPagaOutside: 0,
     licV: 0, licE: 0, licL: 0, licA: 0, licPG: 0, licSUS: 0, licSGS: 0,
-    ausenciaHoras: 0, ausenciaTurnos: 0, ausenciaLegajos: 0,
+    ausenciaHoras: 0, ausenciaHorasOutside: 0, ausenciaTurnos: 0, ausenciaTurnosOutside: 0, ausenciaLegajos: 0,
     uncoveredAusencia: 0, uncoveredRetiro: 0, uncoveredFaltaPlan: 0,
   };
 }
@@ -579,12 +585,21 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
+  /** Mismo universo que trabajadas: solo objetivos con contrato activo o cerrado del mes. */
+  const inOperationEarly = new Set<string>();
+  for (const item of chosen.values()) {
+    if (item.bucket === 'active' || item.bucket === 'closed') {
+      inOperationEarly.add(String(item.srv.objectiveId || ''));
+    }
+  }
+
   const jornadaLookup = buildJornadaLookup(turnos);
   const bumpLicencia = (row: LedgerDay, code: string, hs: number) => {
     const field = LIC_CODE_FIELD[code];
     if (!field) return;
     row[field] = r1(row[field] + hs);
     row.novedadPaga = r1(row.novedadPaga + hs);
+    if (!inOperationEarly.has(row.objectiveId)) row.novedadPagaOutside = r1(row.novedadPagaOutside + hs);
   };
 
   const paidDay = new Set<string>();
@@ -649,8 +664,13 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     const when = dateStr(t.startTime);
     const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
     const row = touch(oid, 'ausencia', 'Ausencia AA', day, null);
-    row.ausenciaHoras = r1(row.ausenciaHoras + jornadaPagada(t));
+    const hs = jornadaPagada(t);
+    row.ausenciaHoras = r1(row.ausenciaHoras + hs);
     row.ausenciaTurnos += 1;
+    if (!inOperationEarly.has(oid)) {
+      row.ausenciaHorasOutside = r1(row.ausenciaHorasOutside + hs);
+      row.ausenciaTurnosOutside += 1;
+    }
     const emp = String(t.employeeId || '').trim();
     if (emp && emp !== 'VACANTE') {
       const set = ausenciaLegajosByObj.get(oid) || new Set<string>();
@@ -688,12 +708,6 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     row.objectiveName = b.objectiveName || row.objectiveName;
   }
 
-  const inOperationEarly = new Set<string>();
-  for (const item of chosen.values()) {
-    if (item.bucket === 'active' || item.bucket === 'closed') {
-      inOperationEarly.add(String(item.srv.objectiveId || ''));
-    }
-  }
   for (const p of persona.parts || []) {
     if (!p.date?.startsWith(periodKey)) continue;
     const oid = String(p.objectiveId || '').trim() || '_sin_objetivo';
@@ -787,6 +801,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     m.covered = r1(m.covered + d.covered);
     m.uncovered = r1(m.uncovered + d.uncovered);
     m.novedadPaga = r1(m.novedadPaga + d.novedadPaga);
+    m.novedadPagaOutside = r1(m.novedadPagaOutside + d.novedadPagaOutside);
     m.licV = r1(m.licV + d.licV);
     m.licE = r1(m.licE + d.licE);
     m.licL = r1(m.licL + d.licL);
@@ -795,7 +810,9 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     m.licSUS = r1(m.licSUS + d.licSUS);
     m.licSGS = r1(m.licSGS + d.licSGS);
     m.ausenciaHoras = r1(m.ausenciaHoras + d.ausenciaHoras);
+    m.ausenciaHorasOutside = r1(m.ausenciaHorasOutside + d.ausenciaHorasOutside);
     m.ausenciaTurnos += d.ausenciaTurnos;
+    m.ausenciaTurnosOutside += d.ausenciaTurnosOutside;
     m.worked = r1(m.worked + d.worked);
     m.workedOutside = r1(m.workedOutside + d.workedOutside);
     m.ft = r1(m.ft + d.ft);

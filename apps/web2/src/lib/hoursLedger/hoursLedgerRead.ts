@@ -31,6 +31,7 @@ export type HoursLedgerMonthRow = {
   ext?: number;
   adv?: number;
   novedadPaga?: number;
+  novedadPagaOutside?: number;
   licV?: number;
   licE?: number;
   licL?: number;
@@ -39,7 +40,9 @@ export type HoursLedgerMonthRow = {
   licSUS?: number;
   licSGS?: number;
   ausenciaHoras?: number;
+  ausenciaHorasOutside?: number;
   ausenciaTurnos?: number;
+  ausenciaTurnosOutside?: number;
   ausenciaLegajos?: number;
   uncoveredAusencia?: number;
   uncoveredRetiro?: number;
@@ -118,6 +121,7 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     ext: Number(raw.ext) || 0,
     adv: Number(raw.adv) || 0,
     novedadPaga: Number(raw.novedadPaga) || 0,
+    novedadPagaOutside: Number(raw.novedadPagaOutside) || 0,
     licV: Number(raw.licV) || 0,
     licE: Number(raw.licE) || 0,
     licL: Number(raw.licL) || 0,
@@ -126,7 +130,9 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     licSUS: Number(raw.licSUS) || 0,
     licSGS: Number(raw.licSGS) || 0,
     ausenciaHoras: Number(raw.ausenciaHoras) || 0,
+    ausenciaHorasOutside: Number(raw.ausenciaHorasOutside) || 0,
     ausenciaTurnos: Number(raw.ausenciaTurnos) || 0,
+    ausenciaTurnosOutside: Number(raw.ausenciaTurnosOutside) || 0,
     ausenciaLegajos: Number(raw.ausenciaLegajos) || 0,
     uncoveredAusencia: Number(raw.uncoveredAusencia) || 0,
     uncoveredRetiro: Number(raw.uncoveredRetiro) || 0,

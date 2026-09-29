@@ -40,9 +40,9 @@ function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number })
 
 const SUM_KEYS = [
   'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
-  'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+  'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga', 'novedadPagaOutside',
   'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
-  'ausenciaHoras', 'ausenciaTurnos', 'ausenciaLegajos',
+  'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
   'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
 ] as const;
 
@@ -402,6 +402,9 @@ export default function BancoHorasPage() {
           <div className="rounded-3xl bg-indigo-50 shadow-sm border border-indigo-100 p-4">
             <div className="text-[10px] font-black uppercase tracking-wide text-indigo-500">Licencias</div>
             <div className="text-2xl font-black text-indigo-700 tabular-nums mt-1">{nf(Number(empresa?.novedadPaga) || 0)}</div>
+            {!!empresa?.novedadPagaOutside && (
+              <div className="text-[10px] font-bold text-indigo-400 mt-1">{nf(empresa.novedadPagaOutside)} fuera de operación</div>
+            )}
           </div>
           {licenciaCards.map(([label, value]) => (
             <div key={label} className="rounded-3xl bg-white shadow-sm border border-slate-100 p-4">
@@ -414,6 +417,7 @@ export default function BancoHorasPage() {
             <div className="text-2xl font-black text-rose-700 tabular-nums mt-1">{nf(Number(empresa?.ausenciaHoras) || 0)}</div>
             <div className="text-[10px] font-bold text-rose-400 mt-1">
               {nf(Number(empresa?.ausenciaTurnos) || 0)} turnos · {nf(Number(empresa?.ausenciaLegajos) || 0)} legajos
+              {!!empresa?.ausenciaHorasOutside && ` · ${nf(empresa.ausenciaHorasOutside)} fuera de operación`}
             </div>
           </div>
         </div>

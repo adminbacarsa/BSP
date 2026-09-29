@@ -126,6 +126,11 @@ if (!(empresa.ausenciaTurnos > 0) || !(empresa.ausenciaHoras > 0)) {
   throw new Error('Ausencias (AA) sigue en 0: revisar isAbsent en turnos publicados');
 }
 
+// 6) fuera de operación es un subconjunto del total (mismo universo que worked/workedOutside).
+if (empresa.novedadPagaOutside > empresa.novedadPaga + 0.5) throw new Error('licencias fuera > total');
+if (empresa.ausenciaHorasOutside > empresa.ausenciaHoras + 0.5) throw new Error('ausencias AA fuera > total');
+if (empresa.ausenciaTurnosOutside > empresa.ausenciaTurnos) throw new Error('turnos AA fuera > total');
+
 console.log('INVARIANTS_OK', JSON.stringify({
   jornadaBad: badJornada,
   licSum: licSum(empresa),

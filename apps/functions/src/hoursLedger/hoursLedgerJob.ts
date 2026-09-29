@@ -340,9 +340,9 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
   }
   const keys = [
     'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
-    'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+    'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga', 'novedadPagaOutside',
     'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
-    'ausenciaHoras', 'ausenciaTurnos', 'ausenciaLegajos',
+    'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
     'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
   ];
   const blank = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
