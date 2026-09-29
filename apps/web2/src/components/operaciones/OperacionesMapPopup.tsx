@@ -3,6 +3,7 @@ import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
+import { formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -239,11 +240,11 @@ export function OperacionesMapPopup({
               statusColor = '#d97706';
             } else if (shift.isRetention) {
               const mins = Number(shift.retentionMinutes) || 0;
-              statusLabel = mins > 0 ? `RETENIDO +${mins}min` : 'RETENIDO';
+              statusLabel = mins > 0 ? `RETENIDO ${formatRetentionDuration(mins)}` : 'RETENIDO';
               statusColor = '#ea580c';
             } else if (shift.isPendingClose) {
               const mins = Number(shift.retentionMinutes) || 0;
-              statusLabel = mins > 0 ? `ESPERANDO RELEVO +${mins}min` : 'ESPERANDO RELEVO';
+              statusLabel = mins > 0 ? `ESPERA RELEVO ${formatRetentionDuration(mins)}` : 'ESPERA RELEVO';
               statusColor = '#ea580c';
             } else if (shift.isPresent) {
               statusLabel = 'ACTIVO';
@@ -284,6 +285,7 @@ export function OperacionesMapPopup({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
+                  flexWrap: shift.isPresent && shift.retentionWait ? 'wrap' : 'nowrap',
                   gap: '6px',
                   borderLeft: `3px solid ${s.borderColor}`,
                   background: idx % 2 === 0 ? s.background : '#ffffff',
@@ -483,6 +485,21 @@ export function OperacionesMapPopup({
                     </button>
                   )}
                 </div>
+                {shift.isPresent && shift.retentionWait && (
+                  <div
+                    style={{
+                      flex: '1 0 100%',
+                      fontSize: '10px',
+                      fontWeight: 700,
+                      color: '#c2410c',
+                      paddingLeft: '2px',
+                      whiteSpace: 'normal',
+                      lineHeight: 1.3,
+                    }}
+                  >
+                    {formatRetentionLine(shift.retentionWait)}
+                  </div>
+                )}
               </div>
             );
           })

@@ -61,6 +61,14 @@ export {
 } from './convocadoEta';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';
 export type { ShiftCodeBadge, ShiftCodeBadgeTone } from './shiftCodeBadge';
+export {
+  RETENTION_HARD_CAP_MS,
+  formatHmAR,
+  formatRetentionDuration,
+  buildRetentionWaitInfo,
+  formatRetentionLine,
+} from './retentionDisplay';
+export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';

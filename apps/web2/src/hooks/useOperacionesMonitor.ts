@@ -25,6 +25,7 @@ import {
   isGapSiblingVacancyDoc,
   isCanonicalGapTitular,
   buildSlaUnplannedGapDocId,
+  buildRetentionWaitInfo,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -858,6 +859,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             if (seenIds.has(s.id)) return false;
             seenIds.add(s.id);
             return true;
+        });
+
+        // ── P9b: a quién espera el retenido / saliente con fin vencido (relevo de la serie o vacante).
+        const shiftsByObjective = new Map<string, any[]>();
+        dedupByIdShifts.forEach((s: any) => {
+            const oid = String(s.objectiveId || '').trim();
+            if (!oid) return;
+            const arr = shiftsByObjective.get(oid);
+            if (arr) arr.push(s);
+            else shiftsByObjective.set(oid, [s]);
+        });
+        dedupByIdShifts.forEach((s: any) => {
+            if (!s.isPresent || s.isCompleted) return;
+            if (!s.isRetention && !s.isPendingClose) return;
+            const siblings = shiftsByObjective.get(String(s.objectiveId || '').trim()) || [];
+            s.retentionWait = buildRetentionWaitInfo(s, siblings, now);
         });
 
         // ── Deduplicar por (employeeId, objectiveId, startTime) para eliminar turnos
