@@ -43,6 +43,8 @@ function simulableShiftSkipReason(data, opts) {
         return 'VIRTUAL';
     if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(data))
         return 'OPS_COV_TRACE';
+    if ((0, coverageTraceShift_1.isFrancoCoverageOriginDoc)(data))
+        return 'FRANCO_ORIGEN';
     const code = shiftGridCode(data);
     if (isLicenseShiftCode(code))
         return 'LICENCIA';

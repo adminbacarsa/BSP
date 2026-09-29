@@ -1,5 +1,5 @@
 import type { Firestore } from 'firebase-admin/firestore';
-import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { isFrancoCoverageOriginDoc, isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { arYearMonth, arYmd } from './arClock';
 import { planificacionEstadoLookupDocIds } from '../assistant/planificacionEstadoKeys';
 
@@ -20,6 +20,7 @@ export type SimulableSkipReason =
   | 'DRAFT'
   | 'VIRTUAL'
   | 'OPS_COV_TRACE'
+  | 'FRANCO_ORIGEN'
   | 'FUERA_OPERACION';
 
 export type SimulableShiftOpts = {
@@ -67,6 +68,7 @@ export function simulableShiftSkipReason(
   if (data.draft === true) return 'DRAFT';
   if (data.isVirtual === true) return 'VIRTUAL';
   if (isOpsCoverageHoursOnSourceDoc(data)) return 'OPS_COV_TRACE';
+  if (isFrancoCoverageOriginDoc(data)) return 'FRANCO_ORIGEN';
   const code = shiftGridCode(data);
   if (isLicenseShiftCode(code)) return 'LICENCIA';
   if (data.isFranco === true || isFrancoShiftCode(code)) return 'FRANCO';

@@ -1,7 +1,7 @@
 import type { Firestore } from 'firebase-admin/firestore';
 export declare const LICENSE_SHIFT_CODES: ReadonlySet<string>;
 export declare const FRANCO_SHIFT_CODES: ReadonlySet<string>;
-export type SimulableSkipReason = 'LICENCIA' | 'FRANCO' | 'DRAFT' | 'VIRTUAL' | 'OPS_COV_TRACE' | 'FUERA_OPERACION';
+export type SimulableSkipReason = 'LICENCIA' | 'FRANCO' | 'DRAFT' | 'VIRTUAL' | 'OPS_COV_TRACE' | 'FRANCO_ORIGEN' | 'FUERA_OPERACION';
 export type SimulableShiftOpts = {
     inOperation?: boolean;
 };
