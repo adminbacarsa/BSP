@@ -329,11 +329,22 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
     }
     const relief = Number(m.reliefHours) || 0;
     if ((Number(m.slaActive) || 0) > 0 && Number(m.covered) > Number(m.worked) + relief + 0.05) {
+      const prevUncovered = Number(m.uncovered) || 0;
       m.covered = r1(Number(m.worked) + relief);
       m.uncovered = r1(Math.max(0, Number(m.slaActive) - Number(m.covered)));
+      // El ajuste de trabajadas es global (recién se conoce al cerrar el job): la diferencia
+      // no se puede atribuir a una causa puntual, así que engrosa falta de planificación.
+      const delta = r1(m.uncovered - prevUncovered);
+      if (delta) m.uncoveredFaltaPlan = r1((Number(m.uncoveredFaltaPlan) || 0) + delta);
     }
   }
-  const keys = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'];
+  const keys = [
+    'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
+    'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+    'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
+    'ausenciaHoras', 'ausenciaTurnos', 'ausenciaLegajos',
+    'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
+  ];
   const blank = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
   const add = (a: Record<string, number>, b: Record<string, any>) => {
     for (const k of keys) a[k] = Math.round(((a[k] || 0) + (Number(b[k]) || 0)) * 10) / 10;

@@ -47,6 +47,19 @@ export type LedgerDay = {
   ext: number;
   adv: number;
   novedadPaga: number;
+  licV: number;
+  licE: number;
+  licL: number;
+  licA: number;
+  licPG: number;
+  licSUS: number;
+  licSGS: number;
+  ausenciaHoras: number;
+  ausenciaTurnos: number;
+  ausenciaLegajos: number;
+  uncoveredAusencia: number;
+  uncoveredRetiro: number;
+  uncoveredFaltaPlan: number;
 };
 
 export type LedgerMonth = {
@@ -71,6 +84,19 @@ export type LedgerMonth = {
   ext: number;
   adv: number;
   novedadPaga: number;
+  licV: number;
+  licE: number;
+  licL: number;
+  licA: number;
+  licPG: number;
+  licSUS: number;
+  licSGS: number;
+  ausenciaHoras: number;
+  ausenciaTurnos: number;
+  ausenciaLegajos: number;
+  uncoveredAusencia: number;
+  uncoveredRetiro: number;
+  uncoveredFaltaPlan: number;
   hoursCoreEnabled: boolean;
 };
 
@@ -96,15 +122,26 @@ export type LedgerBuildInput = {
 const METRIC_KEYS = [
   'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
   'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga',
+  'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
+  'ausenciaHoras', 'ausenciaTurnos', 'ausenciaLegajos',
+  'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
 ] as const;
 
-const PAID_CODE: Record<string, 'V' | 'L' | 'E' | 'A' | 'PG'> = {
-  V: 'V', VACACIONES: 'V',
-  L: 'L', LICENCIA: 'L',
-  E: 'E', ENFERMEDAD: 'E',
-  A: 'A', AUTORIZADA: 'A',
-  PG: 'PG', 'PERMISO GREMIAL': 'PG', GREMIAL: 'PG',
+/** Códigos que van a la tarjeta Licencias (desglose). AA queda afuera: es Ausencias, no paga. */
+const LIC_CODE_FIELD: Record<string, 'licV' | 'licE' | 'licL' | 'licA' | 'licPG' | 'licSUS' | 'licSGS'> = {
+  V: 'licV', VACACIONES: 'licV',
+  L: 'licL', LICENCIA: 'licL',
+  E: 'licE', ENFERMEDAD: 'licE',
+  A: 'licA', AUTORIZADA: 'licA', ART: 'licA',
+  PG: 'licPG', 'PERMISO GREMIAL': 'licPG', GREMIAL: 'licPG',
+  SUS: 'licSUS', SUSPENSION: 'licSUS', 'SUSPENSIÓN': 'licSUS',
+  SGS: 'licSGS', 'SIN GOCE': 'licSGS', 'SIN GOCE DE SUELDO': 'licSGS',
 };
+
+function paidCode(raw: unknown): string {
+  const c = String(raw || '').trim().toUpperCase();
+  return LIC_CODE_FIELD[c] ? c : '';
+}
 
 const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
@@ -203,15 +240,14 @@ function blankMetrics() {
     slaActive: 0, slaInactive: 0, slaClosed: 0, slaWithoutPlan: 0,
     planPublished: 0, planDraft: 0, worked: 0, workedOutside: 0,
     covered: 0, uncovered: 0, ft: 0, ext: 0, adv: 0, novedadPaga: 0,
+    licV: 0, licE: 0, licL: 0, licA: 0, licPG: 0, licSUS: 0, licSGS: 0,
+    ausenciaHoras: 0, ausenciaTurnos: 0, ausenciaLegajos: 0,
+    uncoveredAusencia: 0, uncoveredRetiro: 0, uncoveredFaltaPlan: 0,
   };
 }
 
 function addMetrics(a: ReturnType<typeof blankMetrics>, b: Partial<ReturnType<typeof blankMetrics>>) {
   for (const k of METRIC_KEYS) a[k] = r1((Number(a[k]) || 0) + (Number(b[k]) || 0));
-}
-
-function paidCode(raw: unknown): string {
-  return PAID_CODE[String(raw || '').trim().toUpperCase()] || '';
 }
 
 type LiquidationPart = {
@@ -285,6 +321,35 @@ function daysInRange(start: string, end: string, periodKey: string): string[] {
     d = next.getUTCDate();
   }
   return out;
+}
+
+/** Jornada real por empleado/día (desde la malla) + jornada típica del empleado, para licencias sin turno ese día. */
+function buildJornadaLookup(turnos: any[]): {
+  byEmpDay: Map<string, number>;
+  typicalByEmp: Map<string, number>;
+} {
+  const byEmpDay = new Map<string, number>();
+  const counts = new Map<string, Map<number, number>>();
+  for (const t of turnos) {
+    const emp = String(t?.employeeId || '').trim();
+    if (!emp || emp === 'VACANTE') continue;
+    const day = (dateStr(t?.scheduleDate) || dateStr(t?.startTime) || '').slice(0, 10);
+    const hs = jornadaPagada(t);
+    if (day) byEmpDay.set(`${emp}|${day}`, hs);
+    const m = counts.get(emp) || new Map<number, number>();
+    m.set(hs, (m.get(hs) || 0) + 1);
+    counts.set(emp, m);
+  }
+  const typicalByEmp = new Map<string, number>();
+  for (const [emp, m] of counts) {
+    let best = 8;
+    let bestN = -1;
+    for (const [hs, n] of m) {
+      if (n > bestN) { best = hs; bestN = n; }
+    }
+    typicalByEmp.set(emp, best);
+  }
+  return { byEmpDay, typicalByEmp };
 }
 
 export function personaMonthWorked(input: {
@@ -514,6 +579,14 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
+  const jornadaLookup = buildJornadaLookup(turnos);
+  const bumpLicencia = (row: LedgerDay, code: string, hs: number) => {
+    const field = LIC_CODE_FIELD[code];
+    if (!field) return;
+    row[field] = r1(row[field] + hs);
+    row.novedadPaga = r1(row.novedadPaga + hs);
+  };
+
   const paidDay = new Set<string>();
   const planOn = (list: any[], field: 'planPublished' | 'planDraft') => {
     for (const t of list) {
@@ -528,7 +601,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
         if (emp && paidDay.has(key)) continue;
         if (emp) paidDay.add(key);
         const row = touch(oid, 'novedad', 'Novedad', day, null);
-        row.novedadPaga = r1(row.novedadPaga + jornadaPagada(t));
+        bumpLicencia(row, code, jornadaPagada(t));
         continue;
       }
       const hs = calcPlanificadorShiftHours(t);
@@ -544,23 +617,51 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   planOn(draftTurnos, 'planDraft');
 
   for (const a of ausencias) {
-    if (!paidCode(a.type || a.codigo || a.code)) continue;
+    const code = paidCode(a.type || a.codigo || a.code);
+    if (!code) continue;
     const st = String(a.status || '').toLowerCase();
     if (st.includes('rechaz') || st.includes('injust')) continue;
     const oid = String(a.objectiveId || '').trim() || '_sin_objetivo';
     const start = dateStr(a.startDate) || dateStr(a.fecha);
     const end = dateStr(a.endDate) || start;
+    const emp = String(a.employeeId || '').trim();
     for (const day of daysInRange(start, end, periodKey)) {
-      const emp = String(a.employeeId || '');
       const key = `${emp}|${day}`;
       if (emp && paidDay.has(key)) continue;
       if (emp) paidDay.add(key);
       const row = touch(oid, 'novedad', 'Novedad', day, null);
-      row.novedadPaga = r1(row.novedadPaga + 8);
+      const hs = emp
+        ? (jornadaLookup.byEmpDay.get(key) ?? jornadaLookup.typicalByEmp.get(emp) ?? 8)
+        : 8;
+      bumpLicencia(row, code, hs);
       if (a.objectiveName) row.objectiveName = String(a.objectiveName);
     }
   }
 
+  /** Ausencias (AA): turnos publicados con falta sin justificar. No pagas. */
+  const ausenciaLegajosByObj = new Map<string, Set<string>>();
+  for (const t of publishedTurnos) {
+    if (t.isAbsent !== true) continue;
+    const code = String(t.code || t.type || '').toUpperCase();
+    if (paidCode(code)) continue;
+    const oid = String(t.objectiveId || '').trim();
+    if (!oid) continue;
+    const when = dateStr(t.startTime);
+    const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
+    const row = touch(oid, 'ausencia', 'Ausencia AA', day, null);
+    row.ausenciaHoras = r1(row.ausenciaHoras + jornadaPagada(t));
+    row.ausenciaTurnos += 1;
+    const emp = String(t.employeeId || '').trim();
+    if (emp && emp !== 'VACANTE') {
+      const set = ausenciaLegajosByObj.get(oid) || new Set<string>();
+      set.add(emp);
+      ausenciaLegajosByObj.set(oid, set);
+    }
+  }
+
+  const turnoById = new Map<string, any>(turnos.map((t: any) => [String(t.id || ''), t]));
+  const ausenciaGapByObj = new Map<string, number>();
+  const retiroGapByObj = new Map<string, number>();
   const reliefByObj = new Map<string, number>();
   for (const b of franja.buckets) {
     const oid = String(b.objectiveId || '').trim();
@@ -570,7 +671,19 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     const row = touch(oid, pid, b.positionName || pid, b.date, null);
     row.covered = r1(row.covered + b.covered);
     let relief = 0;
-    for (const tit of b.titulares || []) relief += Number(tit.fromFillers) || 0;
+    for (const tit of b.titulares || []) {
+      relief += Number(tit.fromFillers) || 0;
+      const gap = r1(Math.max(0, (Number(tit.requested) || 0) - (Number(tit.covered) || 0)));
+      if (gap <= 0) continue;
+      const shift = turnoById.get(String(tit.shiftId || ''));
+      if (shift?.isAbsent === true) {
+        row.uncoveredAusencia = r1(row.uncoveredAusencia + gap);
+        ausenciaGapByObj.set(oid, r1((ausenciaGapByObj.get(oid) || 0) + gap));
+      } else {
+        row.uncoveredRetiro = r1(row.uncoveredRetiro + gap);
+        retiroGapByObj.set(oid, r1((retiroGapByObj.get(oid) || 0) + gap));
+      }
+    }
     reliefByObj.set(oid, r1((reliefByObj.get(oid) || 0) + relief));
     row.objectiveName = b.objectiveName || row.objectiveName;
   }
@@ -600,7 +713,8 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     if (only && !only.has(d.objectiveId) && d.objectiveId !== '_sin_objetivo') return false;
     return d.slaActive || d.slaInactive || d.slaClosed || d.slaWithoutPlan || d.planPublished || d.planDraft
       || d.worked || d.workedOutside
-      || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga;
+      || d.covered || d.uncovered || d.ft || d.ext || d.adv || d.novedadPaga
+      || d.ausenciaHoras || d.ausenciaTurnos;
   });
 
   const byObj = new Map<string, LedgerMonth>();
@@ -673,11 +787,24 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     m.covered = r1(m.covered + d.covered);
     m.uncovered = r1(m.uncovered + d.uncovered);
     m.novedadPaga = r1(m.novedadPaga + d.novedadPaga);
+    m.licV = r1(m.licV + d.licV);
+    m.licE = r1(m.licE + d.licE);
+    m.licL = r1(m.licL + d.licL);
+    m.licA = r1(m.licA + d.licA);
+    m.licPG = r1(m.licPG + d.licPG);
+    m.licSUS = r1(m.licSUS + d.licSUS);
+    m.licSGS = r1(m.licSGS + d.licSGS);
+    m.ausenciaHoras = r1(m.ausenciaHoras + d.ausenciaHoras);
+    m.ausenciaTurnos += d.ausenciaTurnos;
     m.worked = r1(m.worked + d.worked);
     m.workedOutside = r1(m.workedOutside + d.workedOutside);
     m.ft = r1(m.ft + d.ft);
     m.ext = r1(m.ext + d.ext);
     m.adv = r1(m.adv + d.adv);
+  }
+  for (const [oid, set] of ausenciaLegajosByObj) {
+    const m = byObj.get(oid);
+    if (m) m.ausenciaLegajos = set.size;
   }
 
   for (const m of byObj.values()) m.slaActive = r1(m.slaActive + m.slaClosed);
@@ -695,6 +822,18 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       if (m.covered > allowance) m.covered = allowance;
       m.uncovered = r1(Math.max(0, m.slaActive - m.covered));
     }
+    let ausenciaGap = ausenciaGapByObj.get(m.objectiveId) || 0;
+    let retiroGap = retiroGapByObj.get(m.objectiveId) || 0;
+    const knownGap = r1(ausenciaGap + retiroGap);
+    if (knownGap > m.uncovered && knownGap > 0) {
+      const scale = m.uncovered / knownGap;
+      ausenciaGap = r1(ausenciaGap * scale);
+      retiroGap = r1(retiroGap * scale);
+    }
+    m.uncoveredAusencia = ausenciaGap;
+    m.uncoveredRetiro = retiroGap;
+    /** Residual: SLA sin ningún titular planificado (gap_* de la grilla). Garantiza la invariante por construcción. */
+    m.uncoveredFaltaPlan = r1(Math.max(0, m.uncovered - ausenciaGap - retiroGap));
   }
   const daysByObj = new Map<string, LedgerDay[]>();
   for (const d of days) {
@@ -705,7 +844,13 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
   for (const [oid, objDays] of daysByObj) {
     const m = byObj.get(oid);
     if (!m || !(m.slaActive > 0)) {
-      for (const d of objDays) { d.covered = 0; d.uncovered = 0; }
+      for (const d of objDays) {
+        d.covered = 0;
+        d.uncovered = 0;
+        d.uncoveredAusencia = 0;
+        d.uncoveredRetiro = 0;
+        d.uncoveredFaltaPlan = 0;
+      }
       continue;
     }
     const slaSum = objDays.reduce((s, d) => s + (d.slaActive || 0), 0);
@@ -734,6 +879,21 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       last.slaActive = r1(last.slaActive + driftPair);
       last.uncovered = r1(last.uncovered + driftPair);
     }
+    /**
+     * Reparte las causas del mes entre los días proporcional al descubierto final de cada día.
+     * Clampeado al descubierto propio del día: la invariante por día importa más que la
+     * proporción exacta (el residuo de redondeo cae en falta de planificación).
+     */
+    const uncoveredBase = objDays.reduce((s, d) => s + (d.uncovered || 0), 0);
+    objDays.forEach((d) => {
+      const dayUncovered = d.uncovered || 0;
+      const share = uncoveredBase > 0 ? dayUncovered / uncoveredBase : 0;
+      const a = Math.min(Math.max(0, r1(m.uncoveredAusencia * share)), dayUncovered);
+      const r = Math.min(Math.max(0, r1(m.uncoveredRetiro * share)), r1(dayUncovered - a));
+      d.uncoveredAusencia = a;
+      d.uncoveredRetiro = r;
+      d.uncoveredFaltaPlan = r1(Math.max(0, dayUncovered - a - r));
+    });
   }
   if (only) {
     for (const id of [...byObj.keys()]) {
@@ -743,7 +903,8 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
 
   const monthlyObjs = [...byObj.values()].filter((m) =>
     m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft
-    || m.worked || m.workedOutside || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga,
+    || m.worked || m.workedOutside || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
+    || m.ausenciaHoras || m.ausenciaTurnos,
   );
 
   const empresa = blankMetrics();

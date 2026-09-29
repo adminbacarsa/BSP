@@ -29,6 +29,8 @@ export function personaMonthWorked(input: {
   parts: Array<{ employeeId: string; objectiveId: string; date: string; worked: number; ft: number; ext: number; adv: number }>;
 };
 
+export function jornadaPagada(t: any): number;
+
 export function buildLedgerMonth(input: {
   empresaId: string;
   year: number;
