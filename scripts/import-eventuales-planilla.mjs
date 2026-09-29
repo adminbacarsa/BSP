@@ -110,10 +110,8 @@ async function loadLegajosPorCuil() {
     } else {
       const sa = process.env.GOOGLE_APPLICATION_CREDENTIALS
         || path.join(ROOT, 'service-account.json');
-      if (!fs.existsSync(sa)) {
-        return { ok: false, motivo: 'sin credenciales de Firestore (no se leyó prod)', empleados: [] };
-      }
-      initializeApp({ credential: cert(sa), projectId: 'comtroldata' });
+      if (fs.existsSync(sa)) initializeApp({ credential: cert(sa), projectId: 'comtroldata' });
+      else initializeApp({ projectId: 'comtroldata' });
     }
   }
   const db = getFirestore();
