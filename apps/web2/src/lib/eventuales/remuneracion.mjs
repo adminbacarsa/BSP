@@ -22,7 +22,7 @@ export function escalaDocId(escala) {
 
 export function escalaVigente(escalas, categoria, fecha) {
   const lista = (escalas || []).filter((e) => {
-    if (e.status === 'INACTIVE') return false;
+    if (e.status !== 'ACTIVE') return false;
     if (e.categoria !== categoria) return false;
     if (String(e.vigenciaDesde) > fecha) return false;
     if (e.vigenciaHasta && String(e.vigenciaHasta) < fecha) return false;

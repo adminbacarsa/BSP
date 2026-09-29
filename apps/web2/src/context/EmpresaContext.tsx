@@ -34,6 +34,8 @@ export interface Empresa {
   arcaDomicilioExplotacion?: string;
   /** Código de modalidad eventual ARCA/SICOSS. Vacío hasta verificar 14 o 102. */
   arcaModalidadEventual?: string;
+  /** Parámetros del TXT de carga masiva. Default de código: modalidad 012. */
+  arcaEventuales?: import('@/lib/eventuales/types').ArcaEventualesConfig;
 }
 
 interface EmpresaContextType {

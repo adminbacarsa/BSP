@@ -42,8 +42,8 @@ Fuente pública: https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/M
 (3 modalidad de contratación, 4 modalidad de liquidación, 7 situación de revista, 8 rechazos, 24 tipos de servicio). Copias en esta carpeta (tabla-*.txt).
 
 Datos clave para eventuales:
-- Modalidad de contrato **012 = Trabajo eventual** (contratación directa de la prestadora). 102 = Empleado Servicio Eventual en Usuaria (Dto 762) solo aplica si contrata una Empresa de Servicios Eventuales. El 14 que mencionó el abogado es Nuevo período de prueba: NO corresponde.
-- Movimientos válidos (tabla de rechazos B61): AT = alta, MR = modificación, BT = baja.
-- Modalidad de liquidación: 5 = HORA, 4 = DÍA, 1 = MES.
-- Situación de revista: 1 = Activo. Para la baja, el motivo sale de esta tabla (candidatos: 30 Vencimiento de plazo Art.250 LCT, 2 Bajas otras causales) → confirmar con el contador.
-- Pendiente: código de CCT 422/05, categoría profesional y puesto (tablas 9/10/11 no se pudieron leer automáticamente), código de obra social de cada vigilador, sucursal/domicilio de desempeño de cada empresa.
+- Modalidad de contrato **012 = Trabajo eventual** (código 12 de la tabla, 3 posiciones). 102 = Empleado Servicio Eventual en Usuaria (Dto 762) solo si contrata una Empresa de Servicios Eventuales. El 14 que dijo el contador es Nuevo período de prueba: no se usa.
+- Movimientos: AT = alta, BT = baja. La baja lleva situación de revista **30** (Vencimiento de plazo / ART. 250 LCT). El alta lleva **01** (Activo).
+- Modalidad de liquidación: **5 = HORA**.
+- Actividad CIIU **801000**. Sucursal / domicilio de explotación = principal de la empresa, código **00000**. Puesto **5414** (verificar en la tabla de puestos). Categoría: Vigilador General; el código numérico de 6 posiciones sigue pendiente. CCT 422/05: el código de 10 posiciones de la tabla de convenios sigue pendiente. Obra social: RNOS del legajo.
+- Esos defaults viven en `empresas/{id}.arcaEventuales`. El generador es `lineasCargaMasiva`. Retribución pactada: 15 dígitos, centavos implícitos (bruto × 100). Una línea mide 130. Si faltan CCT, categoría u obra social, la línea se arma igual y `enviable` queda en false.

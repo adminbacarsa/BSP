@@ -57,7 +57,7 @@ No hay URL de homologación ni de producción. Si ARCA publica un WSN, aparecer�
 
 ### 1.2 Archivo de carga masiva (RG 5508)
 
-COSP genera el TXT; una persona lo sube con Clave Fiscal del **CUIT de la empresa que da el alta**. El diseño de registro (posiciones) **sigue pendiente**: Mauro lo baja del servicio y se versiona en `docs/arca/`. Sin eso no se escribe el generador.
+COSP genera el TXT; una persona lo sube con Clave Fiscal del **CUIT de la empresa que da el alta**. El registro de posiciones fijas está en `docs/arca/CARGA-MASIVA-FORMATO.md`. Lo arma `lineasCargaMasiva` (`apps/web2/src/lib/eventuales/arcaTxt.mjs`) con los parámetros de `empresas/{id}.arcaEventuales`.
 
 Alta inicial, 7 campos. El resto (puesto, CCT, categoría, remuneración de escala, ART, jornada) se informa en el servicio **antes de la primera liquidación** de esa empresa.
 
@@ -65,11 +65,11 @@ Alta inicial, 7 campos. El resto (puesto, CCT, categoría, remuneración de esca
 |---------------|-------------|-----|-------------------|
 | CUIL | Ficha de bolsa / `empleados.cuil` | Existe | Ya está |
 | Domicilio de explotación de la actividad | `empresas.arcaDomicilioExplotacion` (el declarado en ARCA, no el del objetivo) | Falta | Una vez por empresa |
-| Fecha de inicio | `contratos_eventuales.fechaInicio` de **esa** empresa | Colección nueva | RRHH al crear el contrato |
-| Modalidad de contratación | `empresas.arcaModalidadEventual` | **A confirmar: 14 o 102** (§0.5.5) | No se carga hasta verificar la tabla |
+| Fecha de inicio | `contratos_eventuales.fechaAlta` de **esa** empresa | Colección nueva | RRHH al crear el contrato |
+| Modalidad de contratación | `empresas.arcaEventuales.modalidadContrato` | **012** Trabajo eventual (tabla oficial). El 14 es período de prueba: no se usa. | Default del generador |
 | Trabajador agropecuario | constante `false` | No aplica | El generador lo manda en no |
 | Obra social (RNOS) | `empleados.obraSocialRnos` o default de empresa (SUVICO) | Falta | RRHH en el legajo de esa empresa |
-| Fecha de finalización | `contratos_eventuales.fechaFin` | Solo si `modalidad === PLAZO_FIJO` | En EVENTUAL el alta inicial no la envía |
+| Fecha de finalización | `contratos_eventuales.fechaBaja` | El mismo TXT informa desde y hasta | Alta AT y baja BT |
 
 El alta del TXT sale de contratos `DOCUMENTADO` (papel o firma certificada adjunta). Pasa a `ALTA_ARCA` solo cuando el operador confirma que ARCA aceptó el archivo (nro. de transacción). La baja (CUIL + fecha + motivo) sale al `FINALIZADO`.
 
@@ -130,7 +130,9 @@ Presentismo y adicionales (no remunerativos / viáticos) son conceptos de la esc
 
 Al cierre: SAC = remunerativo del período / 12. Vacaciones no gozadas = (días con jornada / 20) × (básico / 30), la regla de 1 día cada 20 de `SUVICO_POLICY.VACATION` para quien no llega a medio año. 20, 12 y 30 quedan en la escala por si la paritaria dice otra cosa.
 
-Colección `escalas_salariales/{convenio}_{categoria}_{vigenciaDesde}`: convenio, categoría, vigencia, básico, divisor, jornada ordinaria, recargos, presentismo, adicionales[], SAC, vacaciones, `status`. Historial = un doc por vigencia. La lee un admin; la escribe SuperAdmin en Configuración (pantalla chica, todavía no). Reglas e índice en el repo, sin publicar.
+Colección `escalas_salariales/{convenio}_{categoria}_{vigenciaDesde}`: convenio, categoría, vigencia, básico, divisor, jornada ordinaria, recargos, presentismo, adicionales[], SAC, vacaciones, `status` (`ACTIVE` | `PENDIENTE_APROBACION` | `INACTIVE`). Solo `ACTIVE` entra al cálculo. Historial = un doc por vigencia. La lee un admin; la escribe SuperAdmin. Reglas e índice en el repo, sin publicar.
+
+El job de escala (`planJobEscalaSuvico`) no está exportado en Functions: no se publica. Recorre fuentes (suvico.org.ar, Boletín Oficial de Córdoba, InfoLEG, prensa). Si el texto no trae una tabla `ESCALA_SUVICO_TABLA` con básico por categoría, no inventa importes: deja un aviso para carga asistida. Si parsea, crea una propuesta `PENDIENTE_APROBACION` con URL de fuente. `aprobarEscala` la pasa a `ACTIVE` (un clic de SuperAdmin). Nunca se aplica sola. El 29/09/2026 la home de SUVICO nombra «Escala Salarial Vigente» pero `/escala` y `/escala-salarial` responden 404. La prensa cita un conformado inicial de $1.644.650 del 1er semestre 2026: no es el básico de Vigilador General y no se cargó.
 
 Cláusula que se imprime: bruto, categoría, valor hora, desglose por concepto y la frase de que no es un monto fijo. Al cierre se agregan SAC y vacaciones.
 
@@ -256,7 +258,7 @@ No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empre
 ## 5. Pendiente de verificar (el dictamen ya cerró el resto)
 
 1. **Qué significa ACTIVO / BAJA en la planilla** (hipótesis en §4: convocable vs. fuera de la bolsa). No es el alta ARCA.
-2. Código de modalidad **14 o 102** contra la tabla ARCA/SICOSS vigente, y bajar el diseño de registro del TXT. El TXT de cada contrato tiene que informar desde (`fechaAlta`) y hasta (`fechaBaja`); la RG 5508 dice que la fecha de fin del alta inicial es solo de plazo fijo: hay que confirmarlo con el diseño de registro.
+2. Código de CCT 422/05 (10 caracteres de la tabla de convenios), código numérico de categoría profesional Vigilador General, y confirmar puesto 5414. Modalidad ya cerrada: **012**. Baja: movimiento BT, situación de revista **30** (vencimiento de plazo, art. 250 LCT).
 3. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
 4. El abogado revisa la cláusula de §2.8. El monto ya sale de la escala; falta la tabla paritaria (básicos, % nocturno, presentismo, adicionales, 25 o 30 días para vacaciones).
 5. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.

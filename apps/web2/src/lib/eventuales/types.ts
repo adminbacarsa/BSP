@@ -50,7 +50,25 @@ export interface EscalaSalarial {
   }>;
   sac?: { divisor: number };
   vacaciones?: { unDiaCada: number; divisorDiasMes: number };
-  status: 'ACTIVE' | 'INACTIVE';
+  status: 'ACTIVE' | 'PENDIENTE_APROBACION' | 'INACTIVE';
+  fuenteUrl?: string;
+  fuenteNota?: string;
+}
+
+/** Defaults de carga masiva ARCA por empresa. Doc: empresas/{id}.arcaEventuales. */
+export interface ArcaEventualesConfig {
+  modalidadContrato: string;
+  movimientoAlta: string;
+  movimientoBaja: string;
+  situacionRevistaAlta: string;
+  situacionRevistaBaja: string;
+  modalidadLiquidacion: string;
+  sucursal: string;
+  actividad: string;
+  puesto: string;
+  cctCodigo: string;
+  categoriaProfesional: string;
+  obraSocialDefault?: string;
 }
 
 export interface ContratoEventual {
