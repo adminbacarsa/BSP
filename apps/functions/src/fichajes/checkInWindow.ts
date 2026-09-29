@@ -4,7 +4,7 @@ import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 export type CheckInWindowResult = {
   allowed: boolean;
-  rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED';
+  rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED' | 'EXT_NO_CHECKIN';
   usePlannedStart?: boolean;
   /** Fichada en ventana de adelanto (isEarlyStart) → realStartTime = adjustedStartTime si a tiempo */
   useAdjustedStart?: boolean;
@@ -27,6 +27,19 @@ function createdMs(shift: Record<string, unknown>): number {
     ?? (shift.coverageCreatedAt as Timestamp | undefined)?.toMillis?.()
     ?? startMs(shift)
   );
+}
+
+/** Aceptación de la convocatoria. Sin `acceptedAt`, cae a createdAt del ops_cov. */
+export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
+  const acc = (shift.acceptedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
+  if (acc > 0) return acc;
+  return createdMs(shift);
+}
+
+/** Tope de fichada del convocado: el fin del hueco. Sin fin, no hay tope corto. */
+export function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+  const end = endMs(shift);
+  return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
 }
 
 function adjustedStartMs(shift: Record<string, unknown>): number {
@@ -75,7 +88,7 @@ function finishAllowed(
 /**
  * Ventanas servidor (espejo portal-core): normal T−15…T+30 (T+5…T+30 sin aviso = llegada tarde);
  * con aviso hasta max(T+30, min(ETA, T+60)); AA provisoria fichable hasta T+60;
- * OPERATIONS_COVERAGE convocado max(created, start)+60;
+ * convocado (no EXT): desde la aceptación hasta el fin del hueco, sin tarde;
  * isEarlyStart = adelanto OR turno propio.
  */
 export function evaluateServerCheckInWindow(
@@ -96,7 +109,12 @@ export function evaluateServerCheckInWindow(
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
     return { allowed: false, rejectCode: 'ABSENT' };
   }
-  if (isOpsCoverageHoursOnSourceDoc(shift)) {
+  const originEarly = String(shift.origin || '').toUpperCase();
+  const ctEarly = String(shift.coverageType || '').toUpperCase();
+  if (originEarly === 'OPERATIONS_COVERAGE' && ctEarly === 'EXTEND') {
+    return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+  }
+  if (isOpsCoverageHoursOnSourceDoc(shift) && ctEarly !== 'ADVANCE') {
     return { allowed: false, rejectCode: 'TRACE_REGISTRATION' };
   }
 
@@ -118,13 +136,15 @@ export function evaluateServerCheckInWindow(
   if (end > 0 && nowMs > end) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
   if (!plannedStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
 
-  if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const gapStart = plannedStart;
-    const windowStart = gapStart - 15 * 60 * 1000;
-    const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-    if (nowMs < windowStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
-    if (nowMs > windowEnd) return { allowed: false, rejectCode: 'TOO_LATE' };
-    return finishAllowed(gapStart, nowMs, false);
+  if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') {
+    return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+  }
+  if (origin === 'OPERATIONS_COVERAGE') {
+    const anchor = convocadoPunchAnchorMs(shift);
+    const cap = convocadoPunchCapMs(shift);
+    if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
+    if (cap > 0 && nowMs > cap) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+    return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
   }
 
   if (shift.isEarlyStart === true) {

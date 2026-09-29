@@ -206,7 +206,7 @@ onTurnoAbsenciaDetectada
 - **Sin aviso (P5a):** entre **T+5 y T+30** el guardia igual puede fichar. Ventana `evaluateServerCheckInWindow` / `evaluateCheckInWindow`: `lateNoNotice=true` y `lateMinutes`. El botón del portal dice **Llegada tarde** («Llegás N min tarde; queda registrado.»). `registrarPresencia` crea novedad `LLEGADA_TARDE` (no duplica si ya hay una de ese tipo en el turno). Liquidación descuenta desde `realStartTime` (H1, sin cambio).
 - **Con aviso:** igual que antes — hasta `min(lateArrivalEtaAt, T+60)`; sin ETA → T+30. No setea `lateNoNotice` ni crea `LLEGADA_TARDE` al fichar.
 - **Después de T+30** sin fichar: `TOO_LATE` y BLOQUE 2 `AUTO_T30`. Quien ya fichó (`isPresent`, aunque sea llegada tarde) no entra a `AUTO_T30`.
-- **ops_cov convocado:** ventana propia sin cambio, `max(createdAt|coverageCreatedAt, start)+60`.
+- **ops_cov convocado:** ancla `acceptedAt` (= `respondedAt`). A tiempo hasta +30. Llegada tarde hasta `min(acceptedAt+60, fin)`. Después `TOO_LATE` + el mismo tope en `runConvocadoAbsentPass`. Auditoría en `convocatorias_cobertura/{id}/eventos`.
 - **Scheduler:** BLOQUE 1 T+0…T+10 → conv `LLEGADA_TARDE` 3 min. Acepta confirma ETA; rechaza → AA; timeout → TIMEOUT (± AA si T+30).
 - **BLOQUE 2:** ETA vencida → `ETA_VENCIDA` → Flujo 1. Sin aviso y sin fichada: T+30 → `AUTO_T30`.
 - Demo skip en BLOQUE 1.

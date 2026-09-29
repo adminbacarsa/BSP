@@ -502,6 +502,24 @@
         { "fieldPath": "status",    "order": "ASCENDING" },
         { "fieldPath": "empresaId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "convocatorias_cobertura",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",          "order": "ASCENDING" },
+        { "fieldPath": "reminderPending", "order": "ASCENDING" },
+        { "fieldPath": "reminderAt",      "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "convocatorias_cobertura",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "status",            "order": "ASCENDING" },
+        { "fieldPath": "delayAlertPending", "order": "ASCENDING" },
+        { "fieldPath": "expectedArrivalAt", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

@@ -21,7 +21,12 @@ async function processPortalCheckIn(db, input) {
         && !(0, lateAbsenceWindow_1.isReversibleLateAbsence)(shiftData, Date.now())) {
         throw new Error('SHIFT_ABSENT');
     }
-    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {
+    const covTypeGate = String(shiftData.coverageType || '').toUpperCase();
+    const originGate = String(shiftData.origin || '').toUpperCase();
+    if (originGate === 'OPERATIONS_COVERAGE' && covTypeGate === 'EXTEND') {
+        throw new Error('EXT_NO_CHECKIN');
+    }
+    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData) && covTypeGate !== 'ADVANCE') {
         throw new Error('TRACE_REGISTRATION_SHIFT');
     }
     const recordedMs = recordedAt ? new Date(recordedAt).getTime() : Date.now();

@@ -101,7 +101,12 @@ export async function registrarPresencia(
     if (!rev.success) throw new Error('SHIFT_ABSENT');
     return { success: true, alreadyPresent: false, relieved: null };
   }
-  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {
+  const covTypeGate = String(shiftData.coverageType || '').toUpperCase();
+  const originGate = String(shiftData.origin || '').toUpperCase();
+  if (originGate === 'OPERATIONS_COVERAGE' && covTypeGate === 'EXTEND') {
+    throw new Error('EXT_NO_CHECKIN');
+  }
+  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>) && covTypeGate !== 'ADVANCE') {
     throw new Error('TRACE_REGISTRATION_SHIFT');
   }
 
@@ -124,6 +129,9 @@ export async function registrarPresencia(
 
   const scheduledStartTs = shiftData.startTime ?? null;
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
+  const originUp = String(shiftData.origin || '').toUpperCase();
+  const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
+  const convocadoPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND';
   const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
   const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
     ? adjustedStartMs
@@ -133,9 +141,12 @@ export async function registrarPresencia(
     plannedStartMs: payAnchorMs,
     windowLateMinutes: windowEval.lateMinutes ?? 0,
   });
-  const isLate = pay.isLate;
+  let isLate = convocadoPunch ? false : pay.isLate;
+  let lateMinutes = convocadoPunch ? 0 : pay.lateMinutes;
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
-  if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+  if (convocadoPunch) {
+    realStartTime = Timestamp.fromMillis(nowMs);
+  } else if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
     realStartTime = shiftData.adjustedStartTime;
   } else if (!pay.isLate && scheduledStartTs) {
     realStartTime = scheduledStartTs;
@@ -153,7 +164,7 @@ export async function registrarPresencia(
     checkInCoords: coords || null,
     checkInRecordedAt: recordedAt || null,
     isLate,
-    lateMinutes: pay.lateMinutes,
+    lateMinutes,
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,
@@ -174,6 +185,45 @@ export async function registrarPresencia(
   }
 
   await shiftRef.update(incomingPatch);
+
+  if (convocadoPunch) {
+    const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
+    if (convId) {
+      const { logConvocatoriaEvento } = await import('../coverage/convocatoriaEventos');
+      const { convocadoFollowUpClosePatch } = await import('../attendance/convocadoFollowUp');
+      const punchTs = Timestamp.fromMillis(nowMs);
+      await db.collection('convocatorias_cobertura').doc(convId)
+        .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
+        .catch(() => undefined);
+      await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
+    }
+    if (covTypeUp === 'ADVANCE') {
+      const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();
+      if (titularId) {
+        const extConvs = await db.collection('convocatorias_cobertura')
+          .where('shiftId', '==', titularId)
+          .limit(8)
+          .get();
+        for (const c of extConvs.docs) {
+          if (String(c.data().type || '') !== 'EXTEND') continue;
+          const extId = String(c.data().extendShiftId || '').trim();
+          if (!extId) continue;
+          const ext = await db.collection('turnos').doc(extId).get();
+          const ed = ext.data();
+          if (!ed || ed.isCompleted === true || ed.isExtended !== true) continue;
+          await ext.ref.update({
+            isExtended: false,
+            isCompleted: true,
+            isPresent: false,
+            isRetention: false,
+            status: 'COMPLETED',
+            completionReason: 'RELEVO_ADVANCE',
+            realEndTime: Timestamp.fromMillis(nowMs),
+          });
+        }
+      }
+    }
+  }
   await cancelLlegadaTardeConvocatorias(db, shiftId, 'CHECKED_IN').catch((e) =>
     console.warn('[registrarPresencia] cancelar ¿Venís?:', (e as Error).message),
   );
@@ -343,6 +393,7 @@ export async function registrarPresencia(
             });
             await outDoc.ref.update({
               ...outClose,
+              ...(outData.isRetention === true ? { isRetention: false } : {}),
               relievedBy: empId || null,
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),

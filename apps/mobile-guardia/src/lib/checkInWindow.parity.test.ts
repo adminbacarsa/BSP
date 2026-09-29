@@ -157,6 +157,25 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assertParity('t+30 late', shift, new Date(`${day}T17:35:00-03:00`).getTime());
   });
 
+  it('convocado: desde la aceptación hasta el fin, sin tarde', () => {
+    const shift = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'RET',
+      startTime: ts(`${day}T15:00:00-03:00`),
+      endTime: ts(`${day}T23:00:00-03:00`),
+      acceptedAt: ts(`${day}T16:00:00-03:00`),
+    };
+    const on = evaluateCheckInWindow(shift, new Date(`${day}T16:40:00-03:00`).getTime());
+    assert.equal(on.allowed, true);
+    assert.equal(on.lateMinutes, 0);
+    assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T15:50:00-03:00`).getTime()).rejectCode, 'TOO_EARLY');
+    assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T23:01:00-03:00`).getTime()).rejectCode, 'SHIFT_ENDED');
+    const ext = evaluateCheckInWindow({ ...shift, coverageType: 'EXTEND' }, new Date(`${day}T16:40:00-03:00`).getTime());
+    assert.equal(ext.rejectCode, 'EXT_NO_CHECKIN');
+    assertParity('conv 16:40', shift, new Date(`${day}T16:40:00-03:00`).getTime());
+    assertParity('conv 17:01', shift, new Date(`${day}T17:01:00-03:00`).getTime());
+  });
+
   it('OPERATIONS_COVERAGE: createdAt / coverageCreatedAt', () => {
     const shift = {
       origin: 'OPERATIONS_COVERAGE',
@@ -229,14 +248,15 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
       endTime: ts(`${day}T12:00:00-03:00`),
     };
     assertParity('by type ADVANCE', byType, new Date(`${day}T08:30:00-03:00`).getTime());
-    assert.equal(evaluateCheckInWindow(byType, new Date(`${day}T08:30:00-03:00`).getTime()).rejectCode, 'TRACE_REGISTRATION');
+    const adv = evaluateCheckInWindow(byType, new Date(`${day}T08:30:00-03:00`).getTime());
+    assert.equal(adv.allowed, true);
+    assert.equal(adv.lateMinutes, 0);
   });
 });
 
 describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
   it('Barrionuevo FT ops_cov (CAPS Angelelli 26/09): ventana ops + no es TRACE', () => {
-    // Hero FT ops_cov 15–23; cobertura real (no EXT/ADV de registro).
-    // Ventana server: start−15 … max(createdAt, start)+60 → cierre 16:00 con created 14:45.
+    // Hero FT ops_cov 15–23; sin acceptedAt el ancla es createdAt 14:45 → tope 15:45.
     const opsCov = {
       id: 'ops_cov_lXLFk2F33HRiAsQpmoqS_hzHO3PUA0Bo5DwZwHlG2',
       origin: 'OPERATIONS_COVERAGE',
@@ -256,19 +276,17 @@ describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
     assertParity('barrionuevo early', opsCov, beforeOpen);
     assert.equal(evaluateCheckInWindow(opsCov, beforeOpen).rejectCode, 'TOO_EARLY');
 
-    // Pasado max(created,start)+60 aunque el turno siga — paridad server (TOO_LATE).
-    const afterOpsWindow = new Date('2026-09-26T16:30:00-03:00').getTime();
-    assertParity('barrionuevo after ops window', opsCov, afterOpsWindow);
-    assert.equal(evaluateCheckInWindow(opsCov, afterOpsWindow).rejectCode, 'TOO_LATE');
+    const afterOldCap = new Date('2026-09-26T16:30:00-03:00').getTime();
+    assertParity('barrionuevo after old cap', opsCov, afterOldCap);
+    assert.equal(evaluateCheckInWindow(opsCov, afterOldCap).allowed, true);
+    assert.equal(evaluateCheckInWindow(opsCov, afterOldCap).lateMinutes, 0);
 
     const afterEnd = new Date('2026-09-26T23:05:00-03:00').getTime();
     assertParity('barrionuevo ended', opsCov, afterEnd);
     assert.equal(evaluateCheckInWindow(opsCov, afterEnd).rejectCode, 'SHIFT_ENDED');
   });
 
-  it('Nuevo Edificio 28/09 — ADVANCE Ceballos ops_cov con ventanas absurdas Demo: TRACE, sin romper', () => {
-    // Datos erróneos del Demo: franjas 08–12 y 16–20 en docs de registro ADVANCE.
-    // El portal no debe ofrecer fichar ni lanzar excepción.
+  it('ADVANCE ficha hasta el fin; EXT no ficha', () => {
     const bogusMorning = {
       origin: 'OPERATIONS_COVERAGE',
       coverageType: 'ADVANCE',
@@ -286,19 +304,20 @@ describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
       coverageCreatedAt: ts('2026-09-28T15:55:00-03:00'),
     };
 
-    for (const [label, shift, nowIso] of [
-      ['am mid', bogusMorning, '2026-09-28T09:00:00-03:00'],
-      ['am early', bogusMorning, '2026-09-28T07:00:00-03:00'],
-      ['pm mid', bogusAfternoon, '2026-09-28T17:00:00-03:00'],
-      ['pm after end', bogusAfternoon, '2026-09-28T21:00:00-03:00'],
-    ] as const) {
-      const nowMs = new Date(nowIso).getTime();
-      assertParity(`ceballos ${label}`, shift, nowMs);
+    const expectCode = (shift: Record<string, unknown>, iso: string, code: string | undefined, allowed: boolean) => {
+      const nowMs = new Date(iso).getTime();
+      assertParity(iso, shift, nowMs);
       const r = evaluateCheckInWindow(shift, nowMs);
-      assert.equal(r.allowed, false);
-      assert.equal(r.rejectCode, 'TRACE_REGISTRATION');
-      assert.match(checkInRejectMessage(r.rejectCode), /extensión|adelanto/i);
-    }
+      assert.equal(r.allowed, allowed);
+      assert.equal(r.rejectCode, code);
+    };
+    expectCode(bogusMorning, '2026-09-28T09:00:00-03:00', undefined, true);
+    expectCode(bogusMorning, '2026-09-28T07:00:00-03:00', 'TOO_EARLY', false);
+    expectCode(bogusAfternoon, '2026-09-28T17:00:00-03:00', undefined, true);
+    expectCode(bogusAfternoon, '2026-09-28T21:00:00-03:00', 'SHIFT_ENDED', false);
+    const ext = { ...bogusMorning, coverageType: 'EXTEND' };
+    expectCode(ext, '2026-09-28T09:00:00-03:00', 'EXT_NO_CHECKIN', false);
+    assert.match(checkInRejectMessage('EXT_NO_CHECKIN'), /extensión/i);
   });
 });
 

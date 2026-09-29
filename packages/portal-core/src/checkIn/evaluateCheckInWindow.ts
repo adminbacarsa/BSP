@@ -9,7 +9,8 @@ export type CheckInWindowRejectCode =
   | 'TRACE_REGISTRATION'
   | 'TOO_EARLY'
   | 'TOO_LATE'
-  | 'SHIFT_ENDED';
+  | 'SHIFT_ENDED'
+  | 'EXT_NO_CHECKIN';
 
 export type CheckInWindowResult = {
   allowed: boolean;
@@ -86,6 +87,17 @@ function createdMs(shift: Record<string, unknown>): number {
   const cc = timestampLikeToMillis(shift.coverageCreatedAt);
   if (cc > 0) return cc;
   return startMs(shift);
+}
+
+function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
+  const acc = timestampLikeToMillis(shift.acceptedAt);
+  if (acc > 0) return acc;
+  return createdMs(shift);
+}
+
+function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+  const end = endMs(shift);
+  return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
 }
 
 function adjustedStartMs(shift: Record<string, unknown>): number {
@@ -165,7 +177,12 @@ export function evaluateCheckInWindow(
   if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
     return { allowed: false, rejectCode: 'ABSENT' };
   }
-  if (isCoverageHoursOnSourceDoc(shift)) {
+  const originEarly = String(shift.origin || '').toUpperCase();
+  const ctEarly = String(shift.coverageType || '').toUpperCase();
+  if (originEarly === 'OPERATIONS_COVERAGE' && ctEarly === 'EXTEND') {
+    return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+  }
+  if (isCoverageHoursOnSourceDoc(shift) && ctEarly !== 'ADVANCE') {
     return { allowed: false, rejectCode: 'TRACE_REGISTRATION' };
   }
 
@@ -187,13 +204,15 @@ export function evaluateCheckInWindow(
   if (end > 0 && nowMs > end) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
   if (!plannedStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
 
-  if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const gapStart = plannedStart;
-    const windowStart = gapStart - 15 * 60 * 1000;
-    const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-    if (nowMs < windowStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
-    if (nowMs > windowEnd) return { allowed: false, rejectCode: 'TOO_LATE' };
-    return finishAllowed(gapStart, nowMs, false);
+  if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') {
+    return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+  }
+  if (origin === 'OPERATIONS_COVERAGE') {
+    const anchor = convocadoPunchAnchorMs(shift);
+    const cap = convocadoPunchCapMs(shift);
+    if (anchor > 0 && nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
+    if (cap > 0 && nowMs > cap) return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+    return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
   }
 
   if (shift.isEarlyStart === true) {
@@ -247,6 +266,8 @@ export function checkInRejectMessage(code: CheckInWindowRejectCode | undefined):
       return 'Es un registro de extensión/adelanto: no se ficha este turno (ficha el propio).';
     case 'ABSENT':
       return 'Este turno figura como ausente; no se puede fichar.';
+    case 'EXT_NO_CHECKIN':
+      return 'La extensión ya está en curso: no se ficha de nuevo.';
     default:
       return 'No se puede fichar en este momento.';
   }

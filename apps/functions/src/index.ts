@@ -38,6 +38,7 @@ import { openLateAbsenceVacancy } from './attendance/openLateAbsenceVacancy';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
 import { runConvocadoAbsentPass } from './attendance/convocadoAbsentPass';
+import { runConvocadoFollowUp } from './attendance/convocadoFollowUp';
 import { revertConvocadoFalseAbsencesRun } from './attendance/revertConvocadoFalseAbsences';
 import { revertirAusenciaShift } from './attendance/revertirAusencia';
 import { loadPositionHasContinuity, positionHasContinuityFromSlaDoc } from './coverage/positionHasContinuity';
@@ -1650,6 +1651,7 @@ export {
 export {
   crearConvocatoriaCobertura,
   responderConvocatoriaCobertura,
+  responderRecordatorioConvocado,
   cancelarConvocatoriaCobertura,
   checkConvocatoriaTimeouts,
 } from './coverage/convocatoriasCobertura';
@@ -2731,8 +2733,16 @@ export const detectarAusencias = functions
         console.log(`[detectarAusencias] Convocados sin llegada: ${convocados}`);
       }
     } catch (e) {
-      // Un índice faltante o un error acá no debe cortar la detección de ausencias.
       console.error('[detectarAusencias] runConvocadoAbsentPass:', (e as Error)?.message);
+    }
+
+    try {
+      const follow = await runConvocadoFollowUp(db, now);
+      if (follow > 0) {
+        console.log(`[detectarAusencias] Convocado seguimiento: ${follow}`);
+      }
+    } catch (e) {
+      console.error('[detectarAusencias] runConvocadoFollowUp:', (e as Error)?.message);
     }
 
     console.log(`[detectarAusencias] Alertas: ${alerts} | Marcados ausentes: ${absents}`);

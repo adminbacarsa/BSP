@@ -157,12 +157,10 @@ function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date
   const plannedStart = timestampLikeToMillis(shift.startTime);
   if (!plannedStart) return null;
 
-  if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const created =
-      timestampLikeToMillis(shift.createdAt) ||
-      timestampLikeToMillis(shift.coverageCreatedAt) ||
-      plannedStart;
-    return new Date(Math.max(created, plannedStart) + 60 * 60 * 1000);
+  if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') return null;
+  if (origin === 'OPERATIONS_COVERAGE') {
+    const end = timestampLikeToMillis(shift.endTime);
+    return end > 0 ? new Date(end) : null;
   }
 
   const by = String(shift.absenceDetectedBy || '').toUpperCase();
@@ -274,8 +272,7 @@ export function getCheckInTiming(
   // Aviso "llegué tarde" (UX portal): T−60…T+5 en turnos normales / early, no ops_cov puro.
   const origin = String(s.origin || '').toUpperCase();
   const ct = String(s.coverageType || '').toUpperCase();
-  const isOpsCov =
-    origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE';
+  const isOpsCov = origin === 'OPERATIONS_COVERAGE';
   let canNotifyLate = false;
   if (
     !isOpsCov &&

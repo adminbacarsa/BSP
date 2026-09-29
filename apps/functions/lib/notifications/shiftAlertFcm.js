@@ -11,6 +11,7 @@ exports.SHIFT_ALERT_FCM_TYPES = new Set([
     'RETENCION_AVISO',
     'SOLICITUD_ESTADO_LLEGADA',
     'SOLICITUD_ESTADO_RELEVO',
+    'CONVOCADO_RECORDATORIO',
 ]);
 function isShiftAlertFcmType(type) {
     return exports.SHIFT_ALERT_FCM_TYPES.has(String(type || '').trim().toUpperCase());
