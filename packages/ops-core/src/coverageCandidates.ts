@@ -32,7 +32,7 @@ export const COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 export const COVERAGE_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
 
 /** Interjornada mínima (SUVICO `REST.DAILY_MIN_HOURS`). */
-const COVERAGE_MIN_REST_MS = 10 * 60 * 60 * 1000;
+const COVERAGE_MIN_REST_MS = 12 * 60 * 60 * 1000;
 
 const AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -82,7 +82,7 @@ export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   FALTA_APTITUD: 'Le falta una aptitud del puesto',
   RESTRICCION: 'Tiene restricción de objetivo o cliente',
   EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
-  DESCANSO: 'No cumple el descanso entre turnos (10 h)',
+  DESCANSO: 'No cumple el descanso entre turnos (12 h)',
 };
 
 export function coverageRejectMessage(reason: CoverageRejectReason): string {
@@ -99,7 +99,7 @@ export function coverageRejectMessage(reason: CoverageRejectReason): string {
     case 'TOPE_12_59':
       return 'No se puede tomar esta cobertura: superarías el tope de 12:59 h.';
     case 'DESCANSO':
-      return 'No se puede tomar esta cobertura: no cumplís las 10 h de descanso entre turnos.';
+      return 'No se puede tomar esta cobertura: no cumplís las 12 h de descanso entre turnos.';
     case 'ZOMBI':
       return 'No se puede tomar esta cobertura: el turno está vencido.';
     case 'HUECO_CUBIERTO':
@@ -532,7 +532,7 @@ function isRealCoverageWork(sh: CoverageShiftView): boolean {
   return !!sh.startMs && !!sh.endMs && sh.endMs > sh.startMs;
 }
 
-/** Franco ya pasado a FT: otra cobertura el mismo día solo si no solapa, cabe en 12:59 y deja 10 h. */
+/** Franco ya pasado a FT: otra cobertura el mismo día solo si no solapa, cabe en 12:59 y deja 12 h (art. 197 LCT). */
 function ftAlreadyWorked(
   shift: CoverageShiftView,
   input: BuildCoverageCandidatesInput,
