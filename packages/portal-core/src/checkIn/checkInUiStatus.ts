@@ -1,7 +1,7 @@
 import type { Shift } from '@cosp/portal-types';
 import type { CheckInTiming } from './portalCheckIn';
-import { lateNoNoticeCheckInCopy } from './evaluateCheckInWindow';
-import { toDate, formatTimeAr } from '../utils/dates';
+import { lateNoNoticeCheckInCopy } from './evaluateCheckInWindow.ts';
+import { toDate, formatTimeAr } from '../utils/dates.ts';
 
 export type CheckInUiStatus =
   | 'none'
@@ -39,8 +39,35 @@ export function isShiftPresent(shift: Shift): boolean {
     shift.isPresent === true ||
     rawStatus === 'PRESENT' ||
     rawStatus === 'INPROGRESS' ||
-    !!shift.checkInTime
+    !!shift.checkInTime ||
+    !!shift.checkInAt ||
+    !!shift.realStartTime ||
+    !!shift.presentAt
   );
+}
+
+function actualCheckInDate(shift: Shift): Date | null {
+  return (
+    toDate(shift.checkInAt) ??
+    toDate(shift.realStartTime) ??
+    toDate(shift.presentAt) ??
+    toDate(shift.checkInTime)
+  );
+}
+
+/** Hero ya fichado: hora real de ingreso y, si corresponde, minutos de atraso. */
+export function presentArrivalCopy(shift: Shift): { title: string; subtitle?: string } {
+  const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
+  const actual = actualCheckInDate(shift);
+  const coverage = isOpsCoverage ? 'Cobertura' : undefined;
+  if (!actual) {
+    return { title: 'Presente confirmado', subtitle: coverage };
+  }
+  const planned = toDate(shift.startTime);
+  const lateMin = planned ? Math.round((actual.getTime() - planned.getTime()) / 60000) : 0;
+  const hhmm = formatTimeAr(actual);
+  const title = lateMin >= 1 ? `Ingresaste ${hhmm} (${lateMin} min tarde)` : `Ingresaste ${hhmm}`;
+  return { title, subtitle: coverage };
 }
 
 export function isCheckInRequestRejected(shift: Shift): boolean {
@@ -58,35 +85,11 @@ export function resolveCheckInUiStatus(
   }
 
   if (isShiftPresent(shift)) {
-    const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
-    const checkInAt = toDate(shift.checkInTime);
-    const turnoStart = toDate(shift.startTime) ?? checkInAt;
-    if (isOpsCoverage && checkInAt) {
-      return {
-        status: 'present',
-        title: `Presente desde las ${formatTimeAr(checkInAt)}`,
-        subtitle: turnoStart
-          ? `Turno asignado ${formatTimeAr(turnoStart)} · Cobertura`
-          : 'Cobertura confirmada',
-        tone: 'success',
-      };
-    }
-    const plannedStart = toDate(shift.startTime);
-    const realStart = toDate((shift as { realStartTime?: Parameters<typeof toDate>[0] }).realStartTime) ?? checkInAt;
-    const lateMin =
-      plannedStart && realStart ? Math.round((realStart.getTime() - plannedStart.getTime()) / 60000) : 0;
-    if (plannedStart && realStart && lateMin > 5) {
-      return {
-        status: 'present',
-        title: `Presente desde las ${formatTimeAr(realStart)}`,
-        subtitle: `Turno ${formatTimeAr(plannedStart)} · llegada tarde ${lateMin} min`,
-        tone: 'success',
-      };
-    }
+    const arrival = presentArrivalCopy(shift);
     return {
       status: 'present',
-      title: turnoStart ? `Tu turno comenzó a las ${formatTimeAr(turnoStart)}` : 'Presente confirmado',
-      subtitle: turnoStart ? 'Presente confirmado' : undefined,
+      title: arrival.title,
+      subtitle: arrival.subtitle,
       tone: 'success',
     };
   }

@@ -410,6 +410,8 @@ function HoyScreenContent() {
           {llegadaTardePendientes.length > 0 ? (
             <LlegadaTardeVenisBanner
               convocatorias={llegadaTardePendientes}
+              shifts={allShifts ?? shifts}
+              objectivesMap={objectivesMap}
               busyId={coberturaBusyId}
               onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
               onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
