@@ -71,7 +71,6 @@ import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPa
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
-import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
