@@ -2,8 +2,20 @@ import { toDateSafe } from './crmDateUtils';
 import { isPlanificadorPlannedHoursShift } from '@/lib/planificacion/planningScheduledHours';
 import { isProformaVacancyShift, isSinCoberturaShift } from './proformaVacancy';
 
-/** Modo de detalle de la pre-factura (grilla por objetivo/legajo). */
-export type ProformaDetailMode = 'auto' | 'planned' | 'executed' | 'sin_cobertura';
+/**
+ * Modo de detalle de la pre-factura (grilla por objetivo/legajo).
+ * `fijo` y `orden_compra` fuerzan el modo de facturación de los contratos (slaBilling);
+ * en la grilla, `fijo` muestra la malla planificada y `orden_compra` lo ejecutado por franja.
+ */
+export type ProformaDetailMode = 'auto' | 'planned' | 'executed' | 'fijo' | 'orden_compra' | 'sin_cobertura';
+
+/** Grilla que corresponde a un modo explícito (null = Auto, decide el contrato). */
+export function proformaDetailGridMode(mode: ProformaDetailMode): 'planned' | 'executed' | 'sin_cobertura' | null {
+  if (mode === 'sin_cobertura') return 'sin_cobertura';
+  if (mode === 'planned' || mode === 'fijo') return 'planned';
+  if (mode === 'executed' || mode === 'orden_compra') return 'executed';
+  return null;
+}
 
 /**
  * Qué usa el modo Auto: un valor para todo el cliente o una decisión por turno
@@ -16,9 +28,8 @@ export function resolveProformaDetailMode(
   useExecutedForAuto: AutoExecutedResolver,
   t?: any,
 ): 'planned' | 'executed' | 'sin_cobertura' {
-  if (mode === 'sin_cobertura') return 'sin_cobertura';
-  if (mode === 'planned') return 'planned';
-  if (mode === 'executed') return 'executed';
+  const fixed = proformaDetailGridMode(mode);
+  if (fixed) return fixed;
   const executed = typeof useExecutedForAuto === 'function'
     ? (t != null && useExecutedForAuto(t))
     : useExecutedForAuto;
@@ -66,6 +77,10 @@ export function proformaDetailModeLabel(mode: ProformaDetailMode): string {
       return 'Planificado';
     case 'executed':
       return 'Ejecutado (fichaje)';
+    case 'fijo':
+      return 'Fijo (contrato)';
+    case 'orden_compra':
+      return 'Orden de compra (tope OC)';
     case 'sin_cobertura':
       return 'Sin cobertura (ops)';
     default:

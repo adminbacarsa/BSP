@@ -32,6 +32,7 @@
     "eval:coverage-policy-balance": "npx tsx scripts/eval-coverage-policy-balance.ts",
     "eval:surplus-absence-modo8": "npx tsx scripts/eval-surplus-absence-modo8.ts",
     "eval:sla-active-days": "npx tsx scripts/eval-sla-active-days.ts",
+    "eval:oc-allocation": "npx tsx scripts/eval-oc-allocation.ts",
     "eval:franco-streak": "npx tsx scripts/eval-franco-streak-guard.ts",
     "eval:coverage-wisdom": "npx tsx scripts/eval-coverage-wisdom.ts",
     "eval:coverage-idempotency": "npx tsx scripts/eval-coverage-idempotency.ts",
