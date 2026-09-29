@@ -1,4 +1,5 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry, appendSlaChangeLog } from '@/services/slaService';
@@ -175,7 +176,7 @@ export default function ServiciosSLAPage() {
     }
     let cancelled = false;
     void purchaseOrderService
-      .getByClient(form.clientId, { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) })
+      .getByClient(form.clientId, { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), selectableOnly: true })
       .then((rows) => {
         if (!cancelled) setSlaFormPurchaseOrders(rows);
       })
@@ -2993,7 +2994,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                    )}
                    {normalizeSlaBillingMode(form.billingMode) === 'ORDEN_COMPRA' && (
                      <div>
-                       <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Orden de compra</label>
+                       <div className="flex items-center justify-between gap-2">
+                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Orden de compra</label>
+                         {form.clientId ? (
+                           <Link
+                             href={`/admin/crm/?clientId=${encodeURIComponent(form.clientId)}&tab=PREFACTURA`}
+                             className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800"
+                           >
+                             + Cargar OC
+                           </Link>
+                         ) : (
+                           <span className="text-[10px] font-bold text-slate-400">Elegí un cliente para cargar una OC</span>
+                         )}
+                       </div>
                        <select
                          disabled={isClosedContract}
                          className="w-full p-3 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold disabled:opacity-60"
@@ -3007,7 +3020,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                            </option>
                          ))}
                        </select>
-                       <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente.</p>
+                       <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente. Las anuladas no se listan.</p>
                      </div>
                    )}
                  </div>
