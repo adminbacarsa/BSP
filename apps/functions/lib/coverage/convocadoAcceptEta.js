@@ -82,6 +82,7 @@ async function recordConvocadoAcceptEta(db, convocatoriaId, opts = {}) {
     const etaMinutes = travel.etaMinutes;
     const expectedMs = nowMs + etaMinutes * 60 * 1000;
     const reminderMs = (0, convocadoEta_1.convocadoReminderAtMs)(nowMs, etaMinutes);
+    const gapEndMs = num(tit?.endTime?.toMillis?.()) ?? 0;
     const patch = {
         originCoords: origin ? { lat: origin.lat, lng: origin.lng, ...(num(opts.originCoords?.accuracy) != null ? { accuracy: num(opts.originCoords?.accuracy) } : {}) } : null,
         originSource,
@@ -89,6 +90,9 @@ async function recordConvocadoAcceptEta(db, convocatoriaId, opts = {}) {
         etaTraveled: travel.traveled,
         expectedArrivalAt: firestore_1.Timestamp.fromMillis(expectedMs),
         reminderAt: firestore_1.Timestamp.fromMillis(reminderMs),
+        reminderPending: true,
+        delayAlertPending: true,
+        ...(gapEndMs > 0 ? { gapEndAt: firestore_1.Timestamp.fromMillis(gapEndMs) } : {}),
         acceptedAt: conv.respondedAt || now,
     };
     await ref.update(patch);
@@ -152,6 +156,7 @@ async function responderRecordatorioConvocadoShift(db, input) {
         convocadoReplyAt: now,
         convocadoReplyEtaMinutes: eta,
         expectedArrivalAt: expected,
+        delayAlertPending: true,
         delayAlertedForArrivalAt: firestore_1.FieldValue.delete(),
     });
     const covId = (0, syncAusenciaCobertura_1.buildOpsCoverageDocId)(String(conv.shiftId || ''), String(conv.candidateEmployeeId || ''));

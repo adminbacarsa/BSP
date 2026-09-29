@@ -93,6 +93,7 @@ export async function recordConvocadoAcceptEta(
   const expectedMs = nowMs + etaMinutes * 60 * 1000;
   const reminderMs = convocadoReminderAtMs(nowMs, etaMinutes);
 
+  const gapEndMs = num((tit?.endTime as Timestamp | undefined)?.toMillis?.()) ?? 0;
   const patch = {
     originCoords: origin ? { lat: origin.lat, lng: origin.lng, ...(num(opts.originCoords?.accuracy) != null ? { accuracy: num(opts.originCoords?.accuracy) } : {}) } : null,
     originSource,
@@ -100,6 +101,9 @@ export async function recordConvocadoAcceptEta(
     etaTraveled: travel.traveled,
     expectedArrivalAt: Timestamp.fromMillis(expectedMs),
     reminderAt: Timestamp.fromMillis(reminderMs),
+    reminderPending: true,
+    delayAlertPending: true,
+    ...(gapEndMs > 0 ? { gapEndAt: Timestamp.fromMillis(gapEndMs) } : {}),
     acceptedAt: conv.respondedAt || now,
   };
   await ref.update(patch);
@@ -174,6 +178,7 @@ export async function responderRecordatorioConvocadoShift(
     convocadoReplyAt: now,
     convocadoReplyEtaMinutes: eta,
     expectedArrivalAt: expected,
+    delayAlertPending: true,
     delayAlertedForArrivalAt: FieldValue.delete(),
   });
   const covId = buildOpsCoverageDocId(String(conv.shiftId || ''), String(conv.candidateEmployeeId || ''));

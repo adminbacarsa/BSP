@@ -130,7 +130,12 @@ async function registrarPresencia(db, input) {
         const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
         if (convId) {
             const { logConvocatoriaEvento } = await Promise.resolve().then(() => require('../coverage/convocatoriaEventos'));
-            await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: firestore_1.Timestamp.fromMillis(nowMs) }).catch(() => undefined);
+            const { convocadoFollowUpClosePatch } = await Promise.resolve().then(() => require('../attendance/convocadoFollowUp'));
+            const punchTs = firestore_1.Timestamp.fromMillis(nowMs);
+            await db.collection('convocatorias_cobertura').doc(convId)
+                .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
+                .catch(() => undefined);
+            await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
         }
         if (covTypeUp === 'ADVANCE') {
             const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();

@@ -190,7 +190,12 @@ export async function registrarPresencia(
     const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
     if (convId) {
       const { logConvocatoriaEvento } = await import('../coverage/convocatoriaEventos');
-      await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: Timestamp.fromMillis(nowMs) }).catch(() => undefined);
+      const { convocadoFollowUpClosePatch } = await import('../attendance/convocadoFollowUp');
+      const punchTs = Timestamp.fromMillis(nowMs);
+      await db.collection('convocatorias_cobertura').doc(convId)
+        .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
+        .catch(() => undefined);
+      await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
     }
     if (covTypeUp === 'ADVANCE') {
       const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();

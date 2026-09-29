@@ -176,6 +176,18 @@ async function main() {
     `late=${punched.lateMinutes} ret=${outgoing.isRetention} done=${outgoing.isCompleted} ${typesPunch.join(',')}`,
   );
 
+  const convPunched = (await db.collection('convocatorias_cobertura').doc(convId).get()).data();
+  await runConvocadoFollowUp(db, Timestamp.fromMillis(convPunched.expectedArrivalAt.toMillis() + 30 * 60 * 1000));
+  const typesAfter = await eventsOf(convId);
+  report(
+    'fichó: seguimiento cerrado',
+    convPunched.reminderPending === false
+      && convPunched.delayAlertPending === false
+      && convPunched.followUpClosedReason === 'FICHO'
+      && !typesAfter.includes('DEMORADO'),
+    `rem=${convPunched.reminderPending} delay=${convPunched.delayAlertPending} ${typesAfter.join(',')}`,
+  );
+
   const escEmp = 'p5_esc_e';
   const escObj = 'p5_esc_obj';
   const escTit = 'p5_esc_tit';
@@ -216,6 +228,9 @@ async function main() {
     candidateEmployeeName: 'Franco',
     expectedArrivalAt: expected,
     reminderAt: Timestamp.fromMillis(nowMs + 60 * 60 * 1000),
+    reminderPending: true,
+    delayAlertPending: true,
+    gapEndAt: gapEnd,
   });
   await db.collection('turnos').doc(ftCov).set({
     origin: 'OPERATIONS_COVERAGE',
@@ -241,6 +256,20 @@ async function main() {
       && demora.includes('CONVOCADO_DEMORADO')
       && ftTypes.includes('DEMORADO'),
     `pass=${absentPass} abs=${ftShift.isAbsent} ${demora.join(',')} ${ftTypes.join(',')}`,
+  );
+
+  const again = await runConvocadoFollowUp(db, Timestamp.fromMillis(nowMs + 60 * 1000));
+  const ftTypes2 = await eventsOf(ftConv);
+  report('demorado una sola vez', again === 0 && ftTypes2.filter((t) => t === 'DEMORADO').length === 1, `n=${again}`);
+
+  const onWay = await responderRecordatorioConvocadoShift(db, { convocatoriaId: ftConv, action: 'ON_WAY', etaMinutes: 10 });
+  const ftReprog = (await db.collection('convocatorias_cobertura').doc(ftConv).get()).data();
+  await runConvocadoFollowUp(db, Timestamp.fromMillis(ftReprog.expectedArrivalAt.toMillis() + 16 * 60 * 1000));
+  const ftTypes3 = await eventsOf(ftConv);
+  report(
+    'reprogramado: vuelve a avisar',
+    onWay.success === true && ftReprog.delayAlertPending === true && ftTypes3.filter((t) => t === 'DEMORADO').length === 2,
+    `pending=${ftReprog.delayAlertPending} demorados=${ftTypes3.filter((t) => t === 'DEMORADO').length}`,
   );
 
   const reply = await responderRecordatorioConvocadoShift(db, {
@@ -311,6 +340,71 @@ async function main() {
       && ext.isCompleted === true
       && ext.completionReason === 'RELEVO_ADVANCE',
     `ext=${ext.isExtended} done=${ext.isCompleted} reason=${ext.completionReason}`,
+  );
+
+  // 60 viejas aceptadas (hueco terminado, algunas con recordatorio vencido) + 1 nueva que debe recibir el recordatorio.
+  const oldBase = nowMs - 3 * 24 * 3600000;
+  let batch = db.batch();
+  for (let i = 0; i < 60; i += 1) {
+    const ref = db.collection('convocatorias_cobertura').doc(`p5_old_${i}`);
+    batch.set(ref, {
+      empresaId: `emp_${i % 4}`,
+      shiftId: `old_tit_${i}`,
+      type: i % 2 ? 'RET' : 'FT',
+      status: 'ACCEPTED',
+      candidateEmployeeId: `old_e_${i}`,
+      candidateEmployeeName: `Viejo ${i}`,
+      respondedAt: Timestamp.fromMillis(oldBase + i * 60000),
+      expectedArrivalAt: Timestamp.fromMillis(oldBase + (i + 40) * 60000),
+      reminderAt: Timestamp.fromMillis(oldBase + (i + 25) * 60000),
+      reminderPending: i % 3 === 0,
+      delayAlertPending: i % 3 === 0,
+      gapEndAt: Timestamp.fromMillis(oldBase + 8 * 3600000),
+    });
+    if (i % 25 === 24) {
+      await batch.commit();
+      batch = db.batch();
+    }
+  }
+  await batch.commit();
+  const freshConv = 'p5_fresh_conv';
+  const freshEmp = 'p5_fresh_e';
+  const freshTit = 'p5_fresh_tit';
+  await db.collection('turnos').doc(freshTit).set({ endTime: gapEnd, objectiveId: 'p5_fresh_obj' });
+  await db.collection('convocatorias_cobertura').doc(freshConv).set({
+    empresaId: 'p5_emp',
+    shiftId: freshTit,
+    type: 'RET',
+    status: 'ACCEPTED',
+    candidateEmployeeId: freshEmp,
+    candidateEmployeeName: 'Nuevo',
+    respondedAt: Timestamp.fromMillis(nowMs - 40 * 60000),
+    expectedArrivalAt: Timestamp.fromMillis(nowMs + 20 * 60000),
+    reminderAt: Timestamp.fromMillis(nowMs - 60000),
+    reminderPending: true,
+    delayAlertPending: true,
+    gapEndAt: gapEnd,
+  });
+  const processed = await runConvocadoFollowUp(db, Timestamp.fromMillis(nowMs));
+  const fresh = (await db.collection('convocatorias_cobertura').doc(freshConv).get()).data();
+  const oldPendingSnap = await db.collection('convocatorias_cobertura')
+    .where('status', '==', 'ACCEPTED')
+    .where('reminderPending', '==', true)
+    .get();
+  const oldPending = { size: oldPendingSnap.docs.filter((d) => d.id.startsWith('p5_old_')).length };
+  const oldClosed = await db.collection('convocatorias_cobertura')
+    .where('followUpClosedReason', '==', 'HUECO_TERMINADO')
+    .get();
+  const freshTypes = await eventsOf(freshConv);
+  report(
+    '60 viejas + 1 nueva recibe recordatorio',
+    processed === 1
+      && !!fresh.reminderSentAt
+      && fresh.reminderPending === false
+      && freshTypes.includes('RECORDATORIO')
+      && oldPending.size === 0
+      && oldClosed.size === 20,
+    `n=${processed} sent=${!!fresh.reminderSentAt} pendientes=${oldPending.size} cerradas=${oldClosed.size}`,
   );
 
   const failed = results.filter((r) => !r.ok);
