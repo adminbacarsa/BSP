@@ -48,6 +48,8 @@ const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletar
 const { positionHasContinuityFromSlaDoc } = requireFn('./lib/coverage/positionHasContinuity.js');
 const { skipAbsencePipelineForShift } = requireFn('./lib/coverage/coverageTraceShift.js');
 const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
+const { lateAbsenceDeadlineMs, lateVacancyDue } = requireFn('./lib/attendance/lateAbsenceWindow.js');
+const { openLateAbsenceVacancy } = requireFn('./lib/attendance/openLateAbsenceVacancy.js');
 const { evaluateServerCheckInWindow } = requireFn('./lib/fichajes/checkInWindow.js');
 const { revertirAusenciaShift } = requireFn('./lib/attendance/revertirAusencia.js');
 const { runConvocadoAbsentPass } = requireFn('./lib/attendance/convocadoAbsentPass.js');
@@ -2391,6 +2393,118 @@ async function run() {
       report(57, ok, ok
         ? 'Demo simula SLA abierto y cerrado vigente (24/09 sí, 26/09 no); borrador y vencido 31/07 no'
         : `in=${reasonIn}/${touched(inn)} closed=${reasonClosed}/${touched(closedAfter)} draft=${reasonDraft} peaje=${peaje24}/${peaje26} ended=${endedReason} convD=${convDraft?.status}`);
+    }
+
+    // Caso 58 — ETA 15: a T+20 sigue en ventana (piso T+30), sin AA ni vacante
+    {
+      const prefix = `${runId}_c58`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 20 * 60 * 1000;
+      const etaAt = startMs + 15 * 60 * 1000;
+      const deadline = lateAbsenceDeadlineMs(startMs, etaAt);
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Fantini',
+        objectiveId: `${prefix}_obj`, positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+        lateArrivalConfirmed: true,
+        lateArrivalEtaMinutes: 15,
+        lateArrivalEtaAt: Timestamp.fromMillis(etaAt),
+      });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const win = evaluateServerCheckInWindow(sh, Date.now());
+      const due = lateVacancyDue(sh, Date.now());
+      const ok = deadline === startMs + 30 * 60 * 1000 && win.allowed === true && sh?.isAbsent !== true && due === false;
+      report(58, ok, ok ? 'ETA 15 → T+20 sigue tarde, sin AA ni vacante' : `dl=${deadline - startMs} allowed=${win.allowed} due=${due}`);
+    }
+
+    // Caso 59 — ETA 15: AA a T+30 sin vacante
+    {
+      const prefix = `${runId}_c59`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 30 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Fantini',
+        objectiveId: `${prefix}_obj`, objectiveName: 'Peaje', positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+        lateArrivalConfirmed: true,
+        lateArrivalEtaMinutes: 15,
+        lateArrivalEtaAt: Timestamp.fromMillis(startMs + 15 * 60 * 1000),
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'ETA_VENCIDA', by: 'E2E' });
+      const opened = await openLateAbsenceVacancy(db, shiftId);
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'VACANTE_SIN_COBERTURA').get();
+      const conv = await db.collection('convocatorias_cobertura').where('shiftId', '==', shiftId).get();
+      const ok = sh?.isAbsent === true && opened === false && lateVacancyDue(sh, Date.now()) === false && nov.empty && conv.empty;
+      report(59, ok, ok ? 'T+30 AA provisoria sin vacante' : `opened=${opened} nov=${nov.size} conv=${conv.size} by=${sh?.absenceDetectedBy}`);
+    }
+
+    // Caso 60 — ficha a T+40 revierte la AA provisoria
+    {
+      const prefix = `${runId}_c60`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 40 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Fantini',
+        objectiveId: `${prefix}_obj`, positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'ETA_VENCIDA', by: 'E2E' });
+      await registrarPresencia(db, { shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e` });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = sh?.isAbsent !== true && sh?.isPresent === true;
+      report(60, ok, ok ? 'T+40 fichada revierte AA' : `absent=${sh?.isAbsent} present=${sh?.isPresent}`);
+    }
+
+    // Caso 61 — T+60 sin fichar abre vacante
+    {
+      const prefix = `${runId}_c61`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 61 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Fantini',
+        objectiveId: `${prefix}_obj`, objectiveName: 'Peaje', positionName: 'M2', code: 'M',
+        clientId: `${prefix}_cli`,
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+        lateArrivalEtaMinutes: 15,
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'AUTO_T30', by: 'E2E' });
+      const opened = await openLateAbsenceVacancy(db, shiftId);
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'VACANTE_SIN_COBERTURA').get();
+      const ok = opened === true && (nov.size >= 1 || sh?.vacanteEscalada === true || !!sh?.absenceVacancyOpenedAt);
+      report(61, ok, ok ? 'T+60 sin fichar abre vacante' : `opened=${opened} nov=${nov.size} esc=${sh?.vacanteEscalada}`);
+    }
+
+    // Caso 62 — operador declara a T+35 → vacante
+    {
+      const prefix = `${runId}_c62`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 35 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Fantini',
+        objectiveId: `${prefix}_obj`, objectiveName: 'Peaje', positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+        lateArrivalConfirmed: true,
+        lateArrivalEtaMinutes: 15,
+        lateArrivalEtaAt: Timestamp.fromMillis(startMs + 15 * 60 * 1000),
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'MANUAL_OPS', by: 'OPERADOR' });
+      const opened = await openLateAbsenceVacancy(db, shiftId);
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const nov = await db.collection('novedades').where('shiftId', '==', shiftId).where('type', '==', 'VACANTE_SIN_COBERTURA').get();
+      const ok = opened === true && (nov.size >= 1 || !!sh?.absenceVacancyOpenedAt);
+      report(62, ok, ok ? 'operador a T+35 abre vacante' : `opened=${opened} nov=${nov.size}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

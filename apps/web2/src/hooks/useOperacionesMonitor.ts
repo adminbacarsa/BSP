@@ -191,10 +191,17 @@ const shiftMatchesVacancyPosition = (s: any, vacancyPos: string) => {
     return false;
 };
 
+/** Hueco real de cobertura. La AA provisoria (antes de T+60) no abre VAC. */
+const shiftOpensCoverageVacancy = (s: any): boolean => {
+    if (s?.opensCoverageVacancy === true) return true;
+    if (s?.opensCoverageVacancy === false || s?.isProvisionalLateAbsence === true) return false;
+    return !!(s?.isAbsent || s?.isPotentialAbsence);
+};
+
 /** Cobertura de slot considerando ext/adel planificados en otro puesto/tramo. */
 const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string) => {
     if (!shiftMatchesVacancyPosition(s, vacancyPos)) return false;
-    if (s.isAbsent || s.isPotentialAbsence || s.isFranco || s.isUnassigned) return false;
+    if (shiftOpensCoverageVacancy(s) || s.isFranco || s.isUnassigned) return false;
     const seg = getSegmentCoverageWindow(s, slotStart);
     const proxy = seg ? { shiftDateObj: seg.start, endDateObj: seg.end } : s;
     return checkSlotCoverage(slotStart, slotEnd, [proxy]);
@@ -669,7 +676,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                     // Gap 5: origen de la vacante por slot
                     const slotVacancyOrigin = allPosShifts.some((s: any) => s.hasRRHHNovedad)
                         ? 'RRHH_NOVEDAD'
-                        : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence)
+                        : allPosShifts.some((s: any) => shiftOpensCoverageVacancy(s))
                             ? 'ABSENCE'
                             : 'NO_PLANNING';
                     const dayYmd = now.toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Cordoba' });
@@ -754,7 +761,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                                 if (h>=6 && h<14) bestName = "MAÑANA"; else if (h>=14 && h<22) bestName = "TARDE"; else bestName = "NOCHE";
 
                                 const gap24Origin = allPosShifts.some((s: any) => s.hasRRHHNovedad) ? 'RRHH_NOVEDAD'
-                                    : allPosShifts.some((s: any) => s.isAbsent || s.isPotentialAbsence) ? 'ABSENCE' : 'NO_PLANNING';
+                                    : allPosShifts.some((s: any) => shiftOpensCoverageVacancy(s)) ? 'ABSENCE' : 'NO_PLANNING';
                                 virtualVacancies.push({
                                     id: `V124_GAP_${sla.objectiveId}_${pos.name}_${gap.start.getTime()}`,
                                     isUnassigned: true, isVirtual: true, isOperationalVacancy: true,
@@ -783,7 +790,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                         // Franco = el puesto opera pero la persona descansa → necesita reemplazo
                         const absentSlotMap = new Map<string, any>();
                         [...allPosShifts, ...posFrancoShifts]
-                            .filter((s: any) => (s.isAbsent || s.isPotentialAbsence || s.isFranco) && !s.isCompleted)
+                            .filter((s: any) => (shiftOpensCoverageVacancy(s) || s.isFranco) && !s.isCompleted)
                             .forEach((s: any) => {
                                 const key = `${s.shiftDateObj?.getTime?.() ?? 0}_${s.endDateObj?.getTime?.() ?? 0}`;
                                 if (!absentSlotMap.has(key)) absentSlotMap.set(key, s);
@@ -888,7 +895,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const cap = getPositionCapacity(filteredSLA, s.objectiveId, s.positionName);
             if (cap <= 0) return;
             const coveringCount = dedupedRealShifts.filter(cover =>
-                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isUnassigned && !shiftOpensCoverageVacancy(cover) && !cover.isCompleted &&
                 !cover.isFranco &&
                 cover.objectiveId === s.objectiveId &&
                 shiftCoversVacancySlot(cover, s.shiftDateObj, s.endDateObj, s.positionName)
@@ -924,7 +931,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             // Suprimir si hay guardias plan O presentes suficientes para el slot
             const cap = getPositionCapacity(filteredSLA, v.objectiveId, v.positionName);
             const coveringCount = dedupedRealShifts.filter((cover: any) =>
-                !cover.isUnassigned && !cover.isAbsent && !cover.isPotentialAbsence && !cover.isCompleted &&
+                !cover.isUnassigned && !shiftOpensCoverageVacancy(cover) && !cover.isCompleted &&
                 !cover.isFranco &&
                 cover.objectiveId === v.objectiveId &&
                 shiftCoversVacancySlot(cover, v.shiftDateObj, v.endDateObj, v.positionName)

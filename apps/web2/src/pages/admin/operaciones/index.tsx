@@ -1110,6 +1110,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isUnassigned)       { accentColor = 'bg-rose-500';    rowBg = 'bg-rose-50/40'; }
     else if (shift.isRetention)        { accentColor = 'bg-orange-500';  rowBg = 'bg-orange-50/40'; }
     else if (shift.isPresent)          { accentColor = 'bg-emerald-500'; rowBg = 'bg-emerald-50/20'; }
+    else if (shift.isProvisionalLateAbsence) { accentColor = 'bg-amber-600'; rowBg = 'bg-amber-50/50'; }
     else if (shift.isAbsent)           { accentColor = 'bg-slate-700';   rowBg = 'bg-slate-100'; }
     else if (shift.isCoverageSourceUsed) { accentColor = 'bg-violet-500'; rowBg = 'bg-violet-50/50'; }
     else if (shift.isPotentialAbsence) { accentColor = 'bg-red-600';     rowBg = 'bg-red-50/40'; }
@@ -1174,6 +1175,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0 max-w-[min(100%,260px)] truncate" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
     }
+    else if (shift.isProvisionalLateAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0">NO LLEGÓ / posible ausencia</span>;
     else if (shift.isPotentialAbsence) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-red-600 text-white animate-pulse shrink-0">AUSENCIA</span>;
     else if (shift.isLateNotified) {
         const lateTxt = opsLateArrivalBadgeLabel(shift) || 'TARDE AVISADA';
@@ -1244,7 +1246,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isUnassigned && shift.isReportedToPlanning && viewTab === 'VACANTES' && (<span className="text-[9px] font-bold text-slate-500 uppercase px-1 shrink-0">Devuelto</span>)}
                 {viewTab === 'PLAN' && (<><button onClick={() => onOpenHandover(shift)} disabled={!canCheckIn} className={`p-1.5 rounded-lg transition-colors ${canCheckIn ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`} title="Dar presente"><PlayCircle size={12}/></button><button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Marcar ausente"><AlertTriangle size={12}/></button></>)}
                 {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
-                    <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title="Dar presente"><PlayCircle size={12}/></button>
+                    <button onClick={() => onOpenHandover(shift)} className="p-1.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors" title={shift.isProvisionalLateAbsence ? 'Llegó?' : 'Dar presente'}><PlayCircle size={12}/></button>
+                )}
+                {viewTab === 'NO_LLEGO' && shift.isProvisionalLateAbsence && (
+                    <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Declarar ausencia"><AlertTriangle size={12}/></button>
                 )}
                 {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenManualRetention?.(shift)} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors" title="Retención manual"><Timer size={12}/></button><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
@@ -1355,7 +1360,10 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <button onClick={() => onOpenRRHH(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-orange-500 text-white rounded-lg text-[10px] font-bold hover:bg-orange-600 transition-colors"><Siren size={11}/>NOVEDAD RRHH</button>
                     )}
                     {(viewTab === 'PRIORIDAD' || viewTab === 'NO_LLEGO') && canCheckIn && !shift.isPresent && (
-                        <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors"><PlayCircle size={11}/>DAR PRESENTE</button>
+                        <button onClick={() => onOpenHandover(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-indigo-600 text-white rounded-lg text-[10px] font-bold hover:bg-indigo-700 transition-colors"><PlayCircle size={11}/>{shift.isProvisionalLateAbsence ? 'LLEGÓ?' : 'DAR PRESENTE'}</button>
+                    )}
+                    {viewTab === 'NO_LLEGO' && shift.isProvisionalLateAbsence && (
+                        <button onClick={() => onOpenAttendance(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg text-[10px] font-bold hover:bg-amber-100 transition-colors"><AlertTriangle size={11}/>DECLARAR AUSENCIA</button>
                     )}
                     {viewTab === 'NO_LLEGO' && shift.isLateUnnotified && (
                         <button onClick={() => onOpenAbsenceDecision(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-amber-500 text-white rounded-lg text-[10px] font-bold hover:bg-amber-600 transition-colors"><AlertTriangle size={11}/>DECIDIR</button>
@@ -3161,10 +3169,17 @@ export default function OperacionesPage() {
             const alreadyAutoAbsent = shift.isAbsent === true && shift.absenceType === 'AA';
 
             // 1. Marcar el turno como ausente (confirma la ausencia con origen operador)
+            try {
+                const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
+                await fn({ shiftId: shift.id });
+            } catch (callErr) {
+                console.warn('[handleMarkAbsent] callable', callErr);
+            }
             await updateDocForEmpresa('turnos', shift.id, {
                 status:       'ABSENT',
                 isAbsent:     true,
-                absenceType:  alreadyAutoAbsent ? 'AA' : 'MANUAL_OPS',
+                absenceType:  'MANUAL_OPS',
+                absenceDetectedBy: 'MANUAL_OPS',
                 absenceConfirmedBy: 'OPERACIONES',
                 absenceConfirmedAt: serverTimestamp(),
             }, empresaId, migracionCompleta);

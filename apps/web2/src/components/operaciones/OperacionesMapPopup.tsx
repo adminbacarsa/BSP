@@ -250,6 +250,9 @@ export function OperacionesMapPopup({
             } else if (shift.isUnassigned) {
               statusLabel = 'VACANTE';
               statusColor = '#e11d48';
+            } else if (shift.isProvisionalLateAbsence) {
+              statusLabel = 'NO LLEGÓ / posible ausencia';
+              statusColor = '#d97706';
             } else if (shift.isPotentialAbsence) {
               statusLabel = 'AUSENCIA';
               statusColor = '#dc2626';
@@ -399,8 +402,8 @@ export function OperacionesMapPopup({
                       {shift.vacancyOrigin === 'ABSENCE' ? 'ausencia' : 'sin plan'}
                     </span>
                   )}
-                  {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && !shift.isAbsent && !shift.isFranco &&
-                    (diffMin > 30 ? (
+                  {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && (!shift.isAbsent || shift.isProvisionalLateAbsence) && !shift.isFranco &&
+                    (diffMin > 30 && !shift.isProvisionalLateAbsence ? (
                       <button
                         onClick={() => onOpenAttendance(shift)}
                         style={{

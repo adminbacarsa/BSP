@@ -7,7 +7,8 @@ import { useOperacionesMonitor } from '@/hooks/useOperacionesMonitor';
 import { POPUP_STYLES } from '@/components/operaciones/mapStyles';
 import { toast } from 'sonner';
 import { doc, updateDoc, serverTimestamp, addDoc, collection, query, where, orderBy, limit, Timestamp, setDoc, writeBatch, getDocs } from 'firebase/firestore';
-import { db, onSnapshotFresh } from '@/lib/firebase';
+import { app, db, onSnapshotFresh } from '@/lib/firebase';
+import { getFunctions, httpsCallable } from 'firebase/functions';
 import { getAuth } from 'firebase/auth';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { stampEmpresaId, updateDocForEmpresa, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
@@ -982,7 +983,13 @@ export default function TacticalMapView() {
         const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
         const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
         const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
-        await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true, absenceType: 'MANUAL_OPS', absenceConfirmedBy: 'OPERACIONES', absenceConfirmedAt: serverTimestamp() }, empresaId, migracionCompleta);
+        try {
+            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
+            await fn({ shiftId: shift.id });
+        } catch (callErr) {
+            console.warn('[handleDeclareAbsentT5] callable', callErr);
+        }
+        await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true, absenceType: 'MANUAL_OPS', absenceDetectedBy: 'MANUAL_OPS', absenceConfirmedBy: 'OPERACIONES', absenceConfirmedAt: serverTimestamp() }, empresaId, migracionCompleta);
         await addDoc(collection(db, 'ausencias'), stampEmpresaId({ employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, type: 'NO_PRESENTACION', startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd), status: 'Pendiente', reason: `No presentación — ${shift.objectiveName} (${shift.positionName})`, hasCertificate: false, createdAt: serverTimestamp(), origin: 'OPERACIONES', shiftId: shift.id }, shiftEmpresaId));
         if (shift.employeeId) await addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: shift.employeeId, type: 'AUSENCIA_DECLARADA', title: 'Ausencia registrada', read: false, body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`, objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
         await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5', status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, shiftId: shift.id, objectiveName: shift.objectiveName || '', positionName: shift.positionName || '', description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
