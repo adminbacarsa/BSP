@@ -83,7 +83,7 @@
 | 4 | **Voy a llegar tarde** | En ventana T−60…T+5, botón en Hoy. | Pedir demora 15/30/60 → `notificarLlegadaTarde({ shiftId, etaMinutes })`. Estado «Llegada tarde avisada · te esperan hasta HH:MM». | ⬜ |
 | 5a | **Fichada normal** | T−15…T+5 en puesto (GPS). | Presente OK. Fuera de radio → bloqueo (salvo sin coords / `allowRemoteCheckIn`). | ⬜ |
 | 5b | **Fichada con aviso tarde** | Tras avisar con eta. | Puede fichar hasta `min(inicio+eta, T+60)`; sin eta hasta T+30. | ⬜ |
-| 5c | **Fichada cobertura** | Tras aceptar convocatoria (no registro). | Ventana: inicio−15 … max(createdAt, inicio)+60. | ⬜ |
+| 5c | **Fichada cobertura** | Tras aceptar convocatoria (no registro). | Ventana: `acceptedAt` … +30 a tiempo, tarde hasta `min(+60, fin)`. | ⬜ |
 | 5d | **Fichada adelanto (ADV)** | Turno propio con `isEarlyStart`. | Puede fichar en ventana del adelanto **o** en la propia (T−15…T+5 / tarde). | ⬜ |
 | 6 | **Sin turnos registro EXT/ADV** | Tras EXT/ADV del CC. | No aparecen ops_cov con `coverageHoursOnSource` como hero ni en Agenda. Presente se marca en el turno propio (`isExtended` / `isEarlyStart`). Intento de fichar registro → error `TRACE_REGISTRATION` (si aplica). | ⬜ |
 

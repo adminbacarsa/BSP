@@ -89,7 +89,7 @@ flowchart TB
 | Sin aviso, llegada tarde | **T+5 … T+30** botón **Llegada tarde** («Llegás N min tarde; queda registrado.»). Flag `lateNoNotice` | Igual; `registrarPresencia` crea novedad `LLEGADA_TARDE` (minutos). **T+31** → `TOO_LATE` |
 | Aviso tarde | Hasta **min(inicio+eta, T+60)**; sin eta → **T+30**. El botón sigue **Presente** | Prioriza `lateArrivalEtaAt`; si no, confirmed → T+30. Sin `lateNoNotice` |
 | Aviso «Voy tarde» | `canNotifyLate`: **T−60 … T+5** | Callable `notificarLlegadaTarde` |
-| `OPERATIONS_COVERAGE` (no registro) | inicio−15 … max(createdAt, inicio)+60 | Igual espíritu |
+| `OPERATIONS_COVERAGE` (no registro) | desde `acceptedAt` hasta +30 a tiempo; tarde hasta `min(acceptedAt+60, fin)` | Igual. Minutos = fichada − (acceptedAt+30). `realStartTime` = fichada |
 | ADV (`isEarlyStart`) | Ventana adelanto **OR** propia | Igual |
 | `coverageHoursOnSource` | No fichable | `TRACE_REGISTRATION` |
 | Ausente / franco (no FT) | No | `ABSENT` / vacío |
