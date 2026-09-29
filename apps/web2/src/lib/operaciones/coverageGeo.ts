@@ -9,6 +9,8 @@ export type CoverageGeoFields = {
   distanceKm: number | null;
   etaMinutes: number | null;
   hasGeo: boolean;
+  /** Por qué no hay distancia: el objetivo no tiene coords, o el legajo no tiene domicilio geocodificado. */
+  geoMiss?: 'objetivo' | 'legajo';
 };
 
 export function haversineKm(
@@ -39,16 +41,18 @@ export function estimateAutoTravelMinutes(distanceKm: number): number {
   return Math.max(1, Math.round((distanceKm / COVERAGE_AUTO_SPEED_KMH) * 60));
 }
 
+function finiteCoord(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function resolveObjectiveCoords(absenceShift: Record<string, unknown>): {
   lat: number | null;
   lng: number | null;
 } {
-  const lat = Number(absenceShift.lat ?? absenceShift.objectiveLat);
-  const lng = Number(absenceShift.lng ?? absenceShift.objectiveLng);
-  return {
-    lat: Number.isFinite(lat) ? lat : null,
-    lng: Number.isFinite(lng) ? lng : null,
-  };
+  const lat = finiteCoord(absenceShift.lat ?? absenceShift.objectiveLat ?? absenceShift.latitude);
+  const lng = finiteCoord(absenceShift.lng ?? absenceShift.objectiveLng ?? absenceShift.longitude);
+  return { lat, lng };
 }
 
 export function coverageGeoForEmployee(
@@ -58,7 +62,7 @@ export function coverageGeoForEmployee(
 ): CoverageGeoFields {
   const { lat: oLat, lng: oLng } = resolveObjectiveCoords(absenceShift);
   if (oLat == null || oLng == null) {
-    return { distanceKm: null, etaMinutes: null, hasGeo: false };
+    return { distanceKm: null, etaMinutes: null, hasGeo: false, geoMiss: 'objetivo' };
   }
 
   const sameObjective =
@@ -71,10 +75,10 @@ export function coverageGeoForEmployee(
     return { distanceKm: 0, etaMinutes: 0, hasGeo: true };
   }
 
-  const lat = Number(employee?.lat);
-  const lng = Number(employee?.lng);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-    return { distanceKm: null, etaMinutes: null, hasGeo: false };
+  const lat = finiteCoord(employee?.lat ?? employee?.latitude);
+  const lng = finiteCoord(employee?.lng ?? employee?.longitude);
+  if (lat == null || lng == null) {
+    return { distanceKm: null, etaMinutes: null, hasGeo: false, geoMiss: 'legajo' };
   }
 
   const km = haversineKm(lat, lng, oLat, oLng);
@@ -123,7 +127,11 @@ export function countBeyondPrimaryWithinExtended<T extends CoverageGeoFields>(
 }
 
 export function formatCoverageDistanceLine(geo: CoverageGeoFields): string {
-  if (!geo.hasGeo || geo.distanceKm == null) return 'Sin ubicación GPS en legajo';
+  if (!geo.hasGeo || geo.distanceKm == null) {
+    return geo.geoMiss === 'objetivo'
+      ? 'El objetivo no tiene coordenadas'
+      : 'Sin ubicación GPS en legajo';
+  }
   if (geo.distanceKm < 0.05) return 'En objetivo (presente)';
   const km = geo.distanceKm.toFixed(1);
   const min = geo.etaMinutes ?? estimateAutoTravelMinutes(geo.distanceKm);
