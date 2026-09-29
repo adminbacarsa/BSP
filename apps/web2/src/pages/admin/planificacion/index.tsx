@@ -321,7 +321,7 @@ import {
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
-import { sumPublishedPlanHours } from '@cosp/hours-core';
+import { buildPlannerColumnHours } from '@/lib/planificacion/plannerColumnHours';
 import {
     billableHoursForPlanningCell,
     resolveTurnosForPlanningCellKey,
@@ -2406,44 +2406,24 @@ export default function PlanificacionPage() {
         setSortDir('asc');
     }, [selectedObjective, positionStructure]);
 
-    const publishedPlanShifts = useMemo(() => {
-        const seen = new Set<string>();
-        const list: any[] = [];
-        const take = (t: any) => {
-            if (!t || typeof t !== 'object') return;
-            const id = String(t.id || '');
-            if (id && seen.has(id)) return;
-            if (id) seen.add(id);
-            const ao = String(t.objectiveId || '');
-            if (selectedObjective && ao && ao !== String(selectedObjective)) return;
-            list.push(t);
-        };
-        Object.values(cellTurnosMap).forEach((arr) => { if (Array.isArray(arr)) arr.forEach(take); });
-        Object.values(shiftsMap).forEach(take);
-        return list;
-    }, [cellTurnosMap, shiftsMap, selectedObjective]);
-
-    const publishedPlanMesh = useMemo(
-        () => sumPublishedPlanHours(publishedPlanShifts),
-        [publishedPlanShifts],
-    );
-
-    /** Columna de la grilla: la misma regla que el plan publicado, partida por legajo. */
-    const empMonthlyHours = useMemo(() => {
-        const byEmp = new Map<string, any[]>();
-        for (const t of publishedPlanShifts) {
-            const emp = String(t?.employeeId || '').trim();
-            if (!emp) continue;
-            const list = byEmp.get(emp) || [];
-            list.push(t);
-            byEmp.set(emp, list);
-        }
-        const result: Record<string, number> = {};
-        displayedEmployees.forEach((emp: any) => {
-            result[emp.id] = sumPublishedPlanHours(byEmp.get(String(emp.id)) || []).hours;
+    const plannerColumn = useMemo(() => {
+        const groupMode = !!(selectedGrupo && grupoUnifiedMode && selectedGrupo.objectiveIds?.length);
+        const objectiveIds = groupMode
+            ? selectedGrupo.objectiveIds.map((id: string) => String(id))
+            : (selectedObjective ? [String(selectedObjective)] : []);
+        return buildPlannerColumnHours({
+            cellTurnosMap,
+            shiftsMap,
+            pendingChanges,
+            objectiveIds,
+            groupMode,
+            employeeIds: displayedEmployees.map((emp: any) => String(emp.id)),
         });
-        return result;
-    }, [displayedEmployees, publishedPlanShifts]);
+    }, [cellTurnosMap, shiftsMap, pendingChanges, displayedEmployees, selectedObjective, selectedGrupo, grupoUnifiedMode]);
+
+    const empMonthlyHours = plannerColumn.byEmployee;
+    const publishedPlanMesh = plannerColumn.published;
+    const plannerWorkingHours = plannerColumn.working.hours;
 
     /** Tramos ext/adel del mes (no cierran contra horas vendidas SLA). */
     const objectiveMonthCoverageExtraHours = useMemo(() => {
@@ -12649,7 +12629,9 @@ export default function PlanificacionPage() {
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const slaCloseHours = hoursMode === 'mes' ? objectiveMonthSlaBaseHours : totalHrs;
                     const facturableTotalHrs = hoursMode === 'cct' ? totalHrs : publishedPlanMesh.hours;
-                    const fueraFilasHrs = hoursMode === 'cct' ? 0 : Math.round((publishedPlanMesh.hours - totalHrs) * 10) / 10;
+                    const showConBorrador = hoursMode !== 'cct' && Math.abs(plannerWorkingHours - publishedPlanMesh.hours) > 0.05;
+                    const columnaRef = showConBorrador ? plannerWorkingHours : publishedPlanMesh.hours;
+                    const fueraFilasHrs = hoursMode === 'cct' ? 0 : Math.round((columnaRef - totalHrs) * 10) / 10;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
@@ -12661,7 +12643,7 @@ export default function PlanificacionPage() {
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
                         : effectiveSlaVendidas > 0
-                            ? `Plan publicado de la malla. Suma de filas ${Math.round(totalHrs)}h${fueraFilasHrs ? ` + fuera de filas ${fueraFilasHrs}h (sin código, no tienen legajo)` : ''} = ${Math.round(facturableTotalHrs)}h. El cierre contra vendidas es otro número (Desglose).`
+                            ? `Plan publicado ${Math.round(facturableTotalHrs)}h.${showConBorrador ? ` Con borrador ${Math.round(plannerWorkingHours)}h (publicado + borrador + sin guardar).` : ''}${fueraFilasHrs ? ` Filas ${Math.round(totalHrs)} + fuera ${fueraFilasHrs}.` : ''} El ciclo CCT no usa esta columna.`
                             : 'Plan publicado de la malla. La columna de cada legajo usa la misma regla.';
                     const displayPlanHrs = facturableTotalHrs;
                     // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
@@ -12724,13 +12706,13 @@ export default function PlanificacionPage() {
                             {statsHoursView === 'total' || !showHoursToggle ? (
                                 <p className={`${metricValue} whitespace-nowrap shrink-0 ${slaMismatch ? 'text-rose-700 dark:text-rose-400' : 'text-indigo-700 dark:text-indigo-300'}`}>
                                     {displayPlanHrs.toFixed(0)}<span className="text-[9px] font-medium text-slate-500">h</span>
-                                    {fueraFilasHrs ? <span className="block text-[7px] font-medium text-slate-500">filas {Math.round(totalHrs)} + fuera {fueraFilasHrs}</span> : null}
+                                    {showConBorrador ? <span className="block text-[7px] font-medium text-amber-700">con borrador: {Math.round(plannerWorkingHours)}h</span> : fueraFilasHrs ? <span className="block text-[7px] font-medium text-slate-500">filas {Math.round(totalHrs)} + fuera {fueraFilasHrs}</span> : null}
                                 </p>
                             ) : (
                                 <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Suma de filas + lo que no tiene legajo = plan publicado. El cierre contra vendidas no es el plan.">
                                     Filas {Math.round(totalHrs)}h
                                     {fueraFilasHrs ? ` + fuera ${fueraFilasHrs}h` : ''}
-                                    {` = plan ${Math.round(facturableTotalHrs)}h`}
+                                    {showConBorrador ? ` = con borrador ${Math.round(plannerWorkingHours)}h · plan ${Math.round(facturableTotalHrs)}h` : ` = plan ${Math.round(facturableTotalHrs)}h`}
                                     {` · cierre ${slaCloseHours.toFixed(0)}h`}
                                     {effectiveSlaVendidas > 0 ? ` · vend ${effectiveSlaVendidas}h` : ''}
                                 </p>
@@ -15642,7 +15624,8 @@ export default function PlanificacionPage() {
                                 {(() => {
                                     const b = planningMonthHoursBreakdown;
                                     const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
-                                    const fueraFilas = Math.round((publishedPlanMesh.hours - legajoSum) * 10) / 10;
+                                    const showConBorrador = Math.abs(plannerWorkingHours - publishedPlanMesh.hours) > 0.05;
+                                    const fueraFilas = Math.round(((showConBorrador ? plannerWorkingHours : publishedPlanMesh.hours) - legajoSum) * 10) / 10;
                                     const cierreResto = Math.round((publishedPlanMesh.hours - b.baseSla - publishedPlanMesh.ftHours - publishedPlanMesh.uncodedHours) * 10) / 10;
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                                     const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
@@ -15681,7 +15664,8 @@ export default function PlanificacionPage() {
                                                     <p className="text-xl font-black text-slate-800 dark:text-slate-100">{legajoSum}h</p>
                                                     <p className="text-[10px] text-slate-500">
                                                         Columna de la grilla
-                                                        {fueraFilas ? ` + fuera de filas ${fueraFilas}h = plan ${publishedPlanMesh.hours}h` : ' = plan publicado'}
+                                                        {fueraFilas ? ` + fuera ${fueraFilas}h` : ''}
+                                                        {showConBorrador ? ` · con borrador ${Math.round(plannerWorkingHours)}h` : ` = plan ${publishedPlanMesh.hours}h`}
                                                     </p>
                                                 </div>
                                                 <div className="rounded-xl border border-indigo-200 p-3 bg-indigo-50/50">
@@ -15774,8 +15758,11 @@ export default function PlanificacionPage() {
                                                 </p>
                                             )}
                                             <p className="text-[11px] text-slate-600">
-                                                <b>Plan publicado</b> = suma de filas + fuera de filas ({legajoSum} + {fueraFilas} = {publishedPlanMesh.hours}h).
-                                                El cierre contra vendidas ({b.baseSla}h) no suma FT ni turnos sin código.
+                                                <b>Plan publicado</b> {publishedPlanMesh.hours}h.
+                                                {showConBorrador
+                                                    ? <> La columna muestra lo que estás armando: filas {legajoSum} + fuera {fueraFilas} = con borrador {Math.round(plannerWorkingHours)}h.</>
+                                                    : <> Filas {legajoSum} + fuera {fueraFilas} = plan publicado.</>}
+                                                {' '}El cierre contra vendidas ({b.baseSla}h) no suma FT ni turnos sin código.
                                             </p>
                                             {codes.length > 0 && (
                                                 <div>
