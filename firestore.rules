@@ -782,6 +782,7 @@ service cloud.firestore {
       allow read: if tenantAdminRead();
       allow write: if false;
     }
+    // H2f. Escritura solo Admin SDK. La lectura permite «Actualizando…» en Banco de Horas.
     match /hours_ledger_dirty/{docId} {
       allow read: if tenantAdminRead();
       allow write: if false;

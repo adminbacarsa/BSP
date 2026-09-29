@@ -72,6 +72,8 @@ export type HoursLedgerMonthRow = {
   workedNotBilled?: number;
   billedNotWorked?: number;
   billingMode?: string;
+  updatedAt?: string;
+  engineVersion?: number;
 };
 
 /** Códigos de la tarjeta Licencias, en el orden que se muestran. */
@@ -96,6 +98,7 @@ export type HoursLedgerMonth = {
   monthly: HoursLedgerMonthRow[];
   /** Detalle diario si vino con el libro (preview sincrónico). Si no, `fetchHoursLedgerDays`. */
   days?: HoursLedgerDayRow[];
+  updatedAt?: string;
 };
 
 export const HOURS_LEDGER_PLAN_OPTIONS: { value: HoursLedgerPlanMode; label: string }[] = [
@@ -168,6 +171,8 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     workedNotBilled: Number(raw.workedNotBilled) || 0,
     billedNotWorked: Number(raw.billedNotWorked) || 0,
     billingMode: raw.billingMode ? String(raw.billingMode) : undefined,
+    updatedAt: raw.updatedAt ? String(raw.updatedAt) : '',
+    engineVersion: Number(raw.engineVersion) || 0,
   };
 }
 
@@ -194,9 +199,11 @@ function fromMonthlyList(
   source: HoursLedgerSource,
   days?: HoursLedgerDayRow[],
 ): HoursLedgerMonth {
+  const updatedAt = monthly.map((r) => r.updatedAt || '').filter(Boolean).sort().at(-1) || '';
   return {
     periodKey,
     source,
+    updatedAt,
     empresa: monthly.find((r) => r.level === 'empresa') || null,
     clients: monthly.filter((r) => r.level === 'cliente'),
     objectives: monthly.filter((r) => r.level === 'objetivo'),
@@ -385,21 +392,12 @@ export async function previewHoursLedgerMonth(empresaId: string, periodKey: stri
 }
 
 /**
- * Si hay libro, lo usa. Si no, dispara rebuildHoursLedger en dryRun y espera.
- * Si el callable falla, el llamador puede mostrar el extracto viejo rotulado «anterior».
+ * Lee el libro guardado. No dispara un recálculo: lo hace el scheduler.
  */
 export async function loadHoursLedgerOrPreview(empresaId: string, periodKey: string): Promise<HoursLedgerMonth> {
   const stored = await fetchHoursLedgerMonthly(empresaId, periodKey);
-  if (stored.source === 'libro' && stored.empresa) {
-    emitProgress(periodKey, undefined);
-    return stored;
-  }
-  const finished = await readFinishedHoursLedgerPreview(empresaId, periodKey);
-  if (finished) {
-    emitProgress(periodKey, undefined);
-    return finished;
-  }
-  return previewHoursLedgerMonth(empresaId, periodKey);
+  emitProgress(periodKey, undefined);
+  return stored;
 }
 
 /**

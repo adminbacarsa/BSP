@@ -22,6 +22,8 @@ export async function enqueueHoursLedgerJob(opts: {
   createdBy?: string;
   uid?: string;
   force?: boolean;
+  /** Si viene, el job no lista toda la empresa: solo estas tandas. */
+  objectiveIds?: string[];
 }) {
   const empresaId = String(opts.empresaId || '').trim();
   if (!empresaId) throw new Error('empresaId requerido');
@@ -31,8 +33,39 @@ export async function enqueueHoursLedgerJob(opts: {
   const ref = admin.firestore().collection(JOBS).doc(id);
   const snap = await ref.get();
   const cur = snap.data();
+  const asked = opts.objectiveIds
+    ? [...new Set(opts.objectiveIds.map((x) => String(x || '').trim()).filter(Boolean))]
+    : null;
   const busy = cur && (cur.status === 'QUEUED' || cur.status === 'RUNNING');
-  if (busy) return { jobId: id, queued: true, reused: true, period: periodKey, dryRun };
+  if (busy && !opts.force) {
+    const curIds = cur.objectiveIds;
+    if (!Array.isArray(curIds)) return { jobId: id, queued: true, reused: true, covered: true, period: periodKey, dryRun };
+    if (!asked) {
+      if (cur.status === 'QUEUED') {
+        await ref.update({
+          objectiveIds: null,
+          chunks: [],
+          total: 0,
+          updatedAt: new Date().toISOString(),
+        });
+        return { jobId: id, queued: true, reused: true, covered: true, period: periodKey, dryRun };
+      }
+      return { jobId: id, queued: true, reused: true, covered: false, period: periodKey, dryRun };
+    }
+    const missing = asked.filter((oid) => !curIds.includes(oid));
+    if (!missing.length) return { jobId: id, queued: true, reused: true, covered: true, period: periodKey, dryRun };
+    if (cur.status === 'QUEUED') {
+      const next = [...curIds, ...missing];
+      await ref.update({
+        objectiveIds: next,
+        chunks: buildChunks(next.length),
+        total: next.length,
+        updatedAt: new Date().toISOString(),
+      });
+      return { jobId: id, queued: true, reused: true, covered: true, period: periodKey, dryRun };
+    }
+    return { jobId: id, queued: true, reused: true, covered: false, period: periodKey, dryRun };
+  }
   const oldSlices = await ref.collection('slices').get();
   if (!oldSlices.empty) {
     const batch = admin.firestore().batch();
@@ -44,7 +77,7 @@ export async function enqueueHoursLedgerJob(opts: {
     period: periodKey,
     dryRun,
     status: 'QUEUED',
-    total: 0,
+    total: asked ? asked.length : 0,
     processed: 0,
     currentObjectiveName: '',
     startedAt: null,
@@ -52,15 +85,15 @@ export async function enqueueHoursLedgerJob(opts: {
     error: null,
     createdBy: opts.createdBy || '',
     createdByUid: opts.uid || '',
-    objectiveIds: null,
+    objectiveIds: asked,
     objectiveNames: {},
-    chunks: [],
+    chunks: asked ? buildChunks(asked.length) : [],
     failed: [],
     result: null,
     lockUntil: null,
     updatedAt: new Date().toISOString(),
   });
-  return { jobId: id, queued: true, reused: false, period: periodKey, dryRun };
+  return { jobId: id, queued: true, reused: false, covered: true, period: periodKey, dryRun };
 }
 
 export async function retryHoursLedgerJob(jobId: string) {
@@ -89,10 +122,12 @@ export async function enqueueOpenMonthAllEmpresas() {
   const year = parts.find((p) => p.type === 'year')?.value;
   const month = parts.find((p) => p.type === 'month')?.value;
   const period = `${year}-${month}`;
-  const empresas = await admin.firestore().collection('empresas').get();
+  const { hoursCoreOn } = await import('./rebuildHoursLedger');
+  const empresas = await admin.firestore().collection('empresas').where('hoursCoreEnabled', '==', true).get();
   const jobs: string[] = [];
   for (const e of empresas.docs) {
-    const r = await enqueueHoursLedgerJob({ empresaId: e.id, period, dryRun: false, createdBy: 'nocturno' });
+    if (!(await hoursCoreOn(e.id))) continue;
+    const r = await enqueueHoursLedgerJob({ empresaId: e.id, period, dryRun: false, createdBy: 'nocturno', force: true });
     jobs.push(r.jobId);
   }
   return { period, jobs };
