@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { cuilCheckDigit, normalizeCuil } from './cuil.mjs';
 import { planEfectivizacion, causaContratoValida } from './efectivizacion.mjs';
-import { classifyEstadoActual, planImportRow, repetidosEnPlanilla } from './planilla.mjs';
+import { buildBolsaDoc, bolsaDocId, classifyEstadoActual, planImportRow, repetidosEnPlanilla } from './planilla.mjs';
 
 function cuilValidoDesde(first10) {
   return first10 + cuilCheckDigit(first10);
@@ -31,7 +31,6 @@ describe('clasificación de planilla', () => {
       matches: [{ employeeId: 'e1', empresaId: 'bacarsa', modalidad: 'INDETERMINADO', fechaEfectivizacion: '2024-03-01' }],
     });
     assert.equal(fuera.entraBolsa, false);
-    assert.equal(fuera.creaLegajo, false);
     assert.equal(fuera.legajoExiste, true);
     assert.equal(fuera.indeterminadoConFecha, true);
 
@@ -45,8 +44,12 @@ describe('clasificación de planilla', () => {
     assert.equal(activoNuevo.disponibilidad, 'DISPONIBLE');
     assert.equal(activoNuevo.estadoArca, 'ALTA');
     assert.equal(activoNuevo.fechaArca, '2026-02-15');
-    assert.equal(activoNuevo.creaLegajo, true);
-    assert.equal(activoNuevo.empresaAlta, 'bacarsa');
+    assert.equal(bolsaDocId(cuil), cuil);
+    const ficha = buildBolsaDoc({ nombre: 'Persona', legajo: '100', ingreso: '2026-02-15' }, activoNuevo);
+    assert.equal(ficha.cuil, cuil);
+    assert.equal(ficha.legajoPlanilla, '100');
+    assert.equal(ficha.createdBy, 'import-planilla-2026-09-29');
+    assert.equal('employeeId' in ficha, false);
 
     const baja = planImportRow({
       estadoRaw: '3. BAJA',
@@ -60,7 +63,7 @@ describe('clasificación de planilla', () => {
     assert.equal(baja.fechaArca, '2025-06-01');
     assert.equal(baja.requiereAltaNueva, true);
     assert.equal(baja.arcaHistorial.length, 2);
-    assert.equal(baja.creaLegajo, true);
+    assert.equal(baja.entraBolsa, true);
 
     const gol = planImportRow({
       estadoRaw: '4. GOLONDRINA',
@@ -83,14 +86,14 @@ describe('clasificación de planilla', () => {
     assert.equal(permanente.porEmpresa.bacarsa, 'PLANTA_PERMANENTE');
     assert.equal(permanente.porEmpresa.pruebas_sa, 'NO_EXISTE');
 
-    const enPruebas = planImportRow({
+    const enGrupo = planImportRow({
       estadoRaw: '1. ACTIVO',
       cuilRaw: cuil,
-      matches: [{ employeeId: 'e3', empresaId: 'pruebas_sa', modalidad: 'EVENTUAL', status: 'activo' }],
+      matches: [{ employeeId: 'e3', empresaId: 'grupos_bacar_sa', modalidad: 'INDETERMINADO', status: 'activo' }],
     });
-    assert.equal(enPruebas.bucket, 'YA_EN_PRUEBAS_SA');
-    assert.equal(enPruebas.entraBolsa, false);
-    assert.equal(enPruebas.porEmpresa.pruebas_sa, 'EVENTUAL');
+    assert.equal(enGrupo.bucket, 'DUPLICADO_PLANTA');
+    assert.equal(enGrupo.entraBolsa, false);
+    assert.equal(enGrupo.porEmpresa.grupos_bacar_sa, 'PLANTA_PERMANENTE');
 
     const flags = repetidosEnPlanilla([
       { legajo: '100', cuilRaw: cuil },

@@ -1,5 +1,5 @@
 import { normalizeCuil } from './cuil.mjs';
-import { COTEJO_EMPRESA_IDS, PLANILLA_EMPRESA_ALTA } from './grupo.mjs';
+import { COTEJO_EMPRESA_IDS, GRUPO_EVENTUALES_ID, IMPORT_CREATED_BY } from './grupo.mjs';
 
 const ABIERTOS = new Set(['BORRADOR', 'DOCUMENTADO', 'ACUSE_RECIBIDO', 'ALTA_ARCA', 'VIGENTE']);
 
@@ -97,9 +97,32 @@ function dedupeEmpleados(list) {
   return [...byId.values()];
 }
 
+/** Id de `eventuales_bolsa`: el CUIL normalizado. Re-correr el import pisa el mismo doc. */
+export function bolsaDocId(cuil) {
+  return cuil || null;
+}
+
+/** Ficha de la bolsa. No trae legajo de empresa: eso nace con el alta (contrato + ARCA). */
+export function buildBolsaDoc({ nombre, legajo, ingreso }, plan) {
+  return {
+    grupoId: GRUPO_EVENTUALES_ID,
+    cuil: plan.cuil,
+    nombre: nombre || '',
+    legajoPlanilla: String(legajo || '').trim(),
+    primerIngreso: ingreso || '',
+    disponibilidad: 'DISPONIBLE',
+    estadoArca: plan.estadoArca,
+    fechaArca: plan.fechaArca || '',
+    requiereAltaNueva: Boolean(plan.requiereAltaNueva),
+    riesgoEncadenamiento: Boolean(plan.riesgoEncadenamiento),
+    arcaHistorial: plan.arcaHistorial || [],
+    createdBy: IMPORT_CREATED_BY,
+  };
+}
+
 /**
- * Qué haría el import con una fila. No escribe.
- * EFECTIVIZADOS, planta permanente y quien ya está en pruebas_sa no se suben.
+ * Qué haría el import con una fila. Solo bolsa, nunca legajos.
+ * No entra quien ya es planta permanente en el cotejo, ni efectivizados, ni repetidos.
  */
 export function planImportRow({
   estadoRaw,
@@ -118,8 +141,6 @@ export function planImportRow({
     porEmpresa[empresaId] = claseEnEmpresa(legajos.filter((m) => m.empresaId === empresaId));
   }
   const duplicadoPlanta = legajos.some(esPlantaPermanente);
-  const yaEnPruebasSa = legajos.some((m) => m.empresaId === 'pruebas_sa');
-  const yaEventual = legajos.some(esEventualCargado);
   const indeterminadoConFecha = legajos.some(
     (m) => m.modalidad === 'INDETERMINADO' && String(m.fechaEfectivizacion || '').trim() !== '',
   );
@@ -130,19 +151,15 @@ export function planImportRow({
     legajoExiste,
     porEmpresa,
     duplicadoPlanta,
-    yaEnPruebasSa,
-    yaEventual,
     repetidoEnPlanilla: Boolean(repetidoEnPlanilla),
     indeterminadoConFecha,
     entraBolsa: false,
-    creaLegajo: false,
     disponibilidad: 'NO_DISPONIBLE',
     estadoArca: null,
     fechaArca: '',
     requiereAltaNueva: false,
     riesgoEncadenamiento: false,
     arcaHistorial: [],
-    empresaAlta: null,
   };
 
   if (!cuil) return { ...base, bucket: 'CUIL_INVALIDO' };
@@ -154,16 +171,12 @@ export function planImportRow({
   const conArca = { ...base, ...arca };
 
   if (duplicadoPlanta) return { ...conArca, bucket: 'DUPLICADO_PLANTA' };
-  if (yaEnPruebasSa) return { ...conArca, bucket: 'YA_EN_PRUEBAS_SA' };
-  if (yaEventual) return { ...conArca, bucket: 'YA_EVENTUAL' };
 
   return {
     ...conArca,
     bucket: estado,
     entraBolsa: true,
-    creaLegajo: true,
     disponibilidad: 'DISPONIBLE',
-    empresaAlta: PLANILLA_EMPRESA_ALTA,
   };
 }
 

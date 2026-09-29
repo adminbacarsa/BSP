@@ -3,7 +3,7 @@
 > **Módulo:** RRHH-EVENTUALES · Vigiladores eventuales de seguridad (Córdoba, CCT 422/05 SUVICO, LCT arts. 99/100, Ley 24.013, Ley provincial 9236).
 > **Rama:** `cursor/eventuales-fase-a` (desde `origin/main`). Solo diseño — sin código, sin escrituras en prod.
 > **Coordina:** Claude Code · **Autor:** agente RRHH-EVENTUALES · **Fecha:** 29/09/2026.
-> **Decisiones vigentes:** bolsa única del grupo (§0); el eventual es un vigilador más dentro de cada empresa (misma malla, CC, Banco de Horas, Análisis y motor `hours-core`); dictamen del abogado aplicado en §0.5. No hay motor de liquidación paralelo.
+> **Decisiones vigentes:** Eventuales es un módulo con bolsa propia, aparte de la nómina. La persona existe una vez por CUIL en `eventuales_bolsa`. El legajo de una empresa nace al darla de alta (contrato + ARCA). Una vez con legajo, se planifica, controla y liquida con el motor único. Dictamen del abogado en §0.5.
 
 ---
 
@@ -11,11 +11,11 @@
 
 ### 0.1 Bolsa única del grupo
 
-Hay una **bolsa de eventuales compartida** por un grupo de empresas del panel. Hoy el grupo es **Bacar S.A. y Grupo Bacar**; la lista es configurable (`grupos_eventuales`). La persona existe **una vez**, identificada por CUIL, en esa bolsa. No se duplica la identidad entre empresas del grupo.
+Hay una **bolsa de eventuales**, módulo aparte de la nómina. Hoy el grupo es **Bacar S.A. y Grupo Bacar**; la lista es configurable (`grupos_eventuales`). La persona existe **una vez**, por CUIL, en `eventuales_bolsa/{cuil}`. Puede no trabajar para nadie, o para una o varias empresas del grupo.
 
 ### 0.2 Alta en la empresa que lo usa
 
-Según qué empresa lo pide o le asigna turnos, se le da el **alta en esa empresa**: legajo de esa empresa (`empleados` con su `empresaId`) y alta ARCA con el **CUIT de esa empresa**. Puede estar de alta en las dos a la vez (dos legajos, un CUIL, una ficha de bolsa).
+El legajo (`empleados`) **no se crea al importar**. Se crea cuando esa empresa lo da de alta: contrato eventual + alta ARCA con el CUIT de esa empresa. Puede tener legajo en más de una a la vez. Al terminar el contrato vuelve a la bolsa `DISPONIBLE`. Si se efectiviza, sale de la bolsa y queda en la planta de esa empresa.
 
 ### 0.3 Turnos y liquidación en paralelo
 
@@ -134,13 +134,15 @@ grupos_eventuales/{grupoId}: {
 
 eventuales_bolsa/{cuil}: {
   grupoId, cuil, dni, nombre,
+  nombre, legajoPlanilla,                 // el número de la planilla es referencia, no un empleados.id
   primerIngreso?: string;
-  disponibilidad: 'DISPONIBLE' | 'NO_DISPONIBLE';  // en la bolsa, no es el alta ARCA
+  disponibilidad: 'DISPONIBLE' | 'NO_DISPONIBLE';
   estadoArca: 'ALTA' | 'BAJA';
   arcaHistorial: Array<{ estado: 'ALTA' | 'BAJA', fecha, origen }>;
-  requiereAltaNueva?: boolean;           // BAJA en ARCA: asignable, pero no trabaja sin alta nueva
+  requiereAltaNueva?: boolean;
   riesgoEncadenamiento?: boolean;
-  legajos: Array<{ empresaId, employeeId, modalidad }>;
+  legajos: Array<{ empresaId, employeeId }>;  // vacío hasta el alta de una empresa
+  createdBy?: string;
 }
 ```
 
@@ -223,9 +225,9 @@ Se extiende `credenciales_publicas/{empDocId}` (un doc por legajo / empresa pres
 
 ---
 
-## 4. Migración de la planilla (Fase B, solo dry-run)
+## 4. Migración de la planilla
 
-Script `scripts/import-eventuales-planilla.mjs`. **No escribe.** `--apply` termina sin tocar Firestore hasta un OK de Mauro. El cotejo es por CUIL y por número de legajo contra `empleados` de **bacarsa** y **pruebas_sa** (la segunda es otra empresa del panel, no un período de prueba). El detalle con datos personales va a `scripts/out/` (gitignored).
+Script `scripts/import-eventuales-planilla.mjs`. Escribe **solo** `eventuales_bolsa` (id = CUIL, re-correr no duplica, no borra). No crea ni modifica `empleados`. `--apply` exige también `--allow-prod`. `createdBy` = `import-planilla-2026-09-29` y deja un `audit_logs`. El cotejo de planta permanente es por CUIL y por legajo contra `bacarsa`, `grupos_bacar_sa` y `pruebas_sa`. El detalle con datos personales va a `scripts/out/` (gitignored).
 
 En la planilla, ACTIVO y BAJA son el **estado en ARCA**, no si la persona está en la bolsa. Los dos entran `DISPONIBLE`.
 
@@ -236,7 +238,7 @@ En la planilla, ACTIVO y BAJA son el **estado en ARCA**, no si la persona está 
 | 4. GOLONDRINA | `DISPONIBLE` + `riesgoEncadenamiento` | Igual que el resto: `BAJA` si hay fecha de baja; si no, `ALTA` |
 | 2. EFECTIVIZADOS | No entran | Planta permanente |
 
-No se sube como eventual si el CUIL o el legajo ya es planta permanente (`modalidad` `INDETERMINADO`, o sin modalidad y activo), si ya está cargado en `pruebas_sa`, o si el legajo/CUIL está repetido en la planilla (se informa el repetido; queda la primera fila). El reporte separa, por empresa, planta permanente / eventual / no existe.
+No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empresas (`modalidad` `INDETERMINADO`, o sin modalidad y activo), ni si el legajo o el CUIL está repetido en la planilla (se informa; queda la primera fila).
 
 ---
 

@@ -892,11 +892,12 @@ service cloud.firestore {
       return data.get('causa', '') is string && data.get('causa', '').size() > 0;
     }
 
-    // Bolsa de eventuales del grupo (una persona por CUIL). Lectura de admins del panel;
-    // escritura solo Admin SDK (import / efectivización). No publicar estas reglas: lo hace Claude.
+    // Bolsa del grupo (una persona por CUIL). Lectura: admin del panel.
+    // Escritura: SuperAdmin o Admin SDK. No se borra desde el cliente. Las publica Claude.
     match /eventuales_bolsa/{cuil} {
       allow read: if isSuperAdmin() || isAdmin();
-      allow write: if false;
+      allow create, update: if isSuperAdmin();
+      allow delete: if false;
     }
 
     match /grupos_eventuales/{grupoId} {

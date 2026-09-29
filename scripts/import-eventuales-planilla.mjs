@@ -11,9 +11,9 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { COTEJO_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from '../apps/web2/src/lib/eventuales/grupo.mjs';
+import { COTEJO_EMPRESA_IDS, GRUPO_EVENTUALES_ID, IMPORT_CREATED_BY } from '../apps/web2/src/lib/eventuales/grupo.mjs';
 import { normalizeCuil } from '../apps/web2/src/lib/eventuales/cuil.mjs';
-import { planImportRow, repetidosEnPlanilla } from '../apps/web2/src/lib/eventuales/planilla.mjs';
+import { buildBolsaDoc, planImportRow, repetidosEnPlanilla } from '../apps/web2/src/lib/eventuales/planilla.mjs';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -22,11 +22,13 @@ const ROOT = path.resolve(__dirname, '..');
 function parseArgs(argv) {
   let file = '';
   let apply = false;
+  let allowProd = false;
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === '--file' && argv[i + 1]) file = argv[++i];
     else if (argv[i] === '--apply') apply = true;
+    else if (argv[i] === '--allow-prod') allowProd = true;
   }
-  return { file, apply };
+  return { file, apply, allowProd };
 }
 
 function loadXlsx() {
@@ -157,17 +159,14 @@ function emptyCounts() {
     efectivizadosConLegajo: 0,
     efectivizadosSinLegajo: 0,
     efectivizadosYaIndeterminadoConFecha: 0,
-    porEmpresa: {
-      bacarsa: emptyEmpresa(),
-      pruebas_sa: emptyEmpresa(),
-    },
+    porEmpresa: Object.fromEntries(COTEJO_EMPRESA_IDS.map((id) => [id, emptyEmpresa()])),
   };
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  if (args.apply) {
-    console.error('Escritura deshabilitada. --apply queda para un OK explícito de Mauro. No se escribió nada.');
+  if (args.apply && !args.allowProd) {
+    console.error('--apply requiere --allow-prod. No se escribió nada.');
     process.exit(2);
   }
   if (!args.file) {
@@ -180,6 +179,7 @@ async function main() {
   const counts = emptyCounts();
   counts.filas = rows.length;
   const detalle = [];
+  const aEscribir = [];
 
   rows.forEach((row, i) => {
     const cuil = normalizeCuil(row.cuilRaw);
@@ -196,10 +196,10 @@ async function main() {
     if (plan.bucket === 'CUIL_INVALIDO') counts.cuilInvalidos += 1;
     if (plan.repetidoEnPlanilla) counts.repetidosEnPlanilla += 1;
     if (lookup.ok && plan.duplicadoPlanta) counts.duplicadosPlantaPermanente += 1;
-    if (lookup.ok && plan.bucket === 'YA_EN_PRUEBAS_SA') counts.yaEnPruebasSaNoSeSuben += 1;
-    if (lookup.ok && plan.bucket === 'YA_EVENTUAL') counts.yaEventualNoSeDuplica += 1;
-    if (lookup.ok && plan.creaLegajo) counts.legajosSeCrearian += 1;
-    if (plan.entraBolsa) counts.entranBolsa += 1;
+    if (plan.entraBolsa) {
+      counts.entranBolsa += 1;
+      aEscribir.push(buildBolsaDoc(row, plan));
+    }
     if (lookup.ok) {
       for (const empresaId of COTEJO_EMPRESA_IDS) {
         const clase = plan.porEmpresa[empresaId];
@@ -228,7 +228,7 @@ async function main() {
       fechaArca: plan.fechaArca,
       requiereAltaNueva: plan.requiereAltaNueva,
       arcaHistorial: plan.arcaHistorial,
-      creaLegajo: Boolean(plan.creaLegajo),
+      docId: plan.cuil,
       duplicadoPlanta: Boolean(plan.duplicadoPlanta),
       repetidoEnPlanilla: Boolean(plan.repetidoEnPlanilla),
       riesgoEncadenamiento: Boolean(plan.riesgoEncadenamiento),
@@ -249,23 +249,64 @@ async function main() {
     detalle,
   }, null, 2));
 
+  if (args.apply) {
+    if (!lookup.ok) {
+      console.error('Sin cotejo de empleados no se escribe: no se puede excluir la planta permanente.');
+      process.exit(2);
+    }
+    const escritos = await escribirBolsa(aEscribir);
+    console.log(JSON.stringify({ apply: true, ...escritos, filas: counts.filas }));
+    return;
+  }
+
   console.log(JSON.stringify({
     dryRun: true,
     lookupOk: lookup.ok,
     filas: counts.filas,
     porEstado: counts.porEstado,
     cuilInvalidos: counts.cuilInvalidos,
-    entranBolsa: counts.entranBolsa,
-    legajosSeCrearian: lookup.ok ? counts.legajosSeCrearian : null,
     duplicadosPlantaPermanente: lookup.ok ? counts.duplicadosPlantaPermanente : null,
     repetidosEnPlanilla: counts.repetidosEnPlanilla,
-    yaEnPruebasSaNoSeSuben: lookup.ok ? counts.yaEnPruebasSaNoSeSuben : null,
-    yaEventualNoSeDuplica: lookup.ok ? counts.yaEventualNoSeDuplica : null,
+    seEscribirian: counts.entranBolsa,
     porEmpresa: lookup.ok ? counts.porEmpresa : null,
-    efectivizadosConLegajo: lookup.ok ? counts.efectivizadosConLegajo : null,
-    efectivizadosSinLegajo: lookup.ok ? counts.efectivizadosSinLegajo : null,
-    efectivizadosYaIndeterminadoConFecha: lookup.ok ? counts.efectivizadosYaIndeterminadoConFecha : null,
   }));
+}
+
+async function escribirBolsa(docs) {
+  const { getFirestore, FieldValue } = require('firebase-admin/firestore');
+  const db = getFirestore();
+  let nuevos = 0;
+  let actualizados = 0;
+  for (let i = 0; i < docs.length; i += 400) {
+    const slice = docs.slice(i, i + 400);
+    const refs = slice.map((d) => db.collection('eventuales_bolsa').doc(d.cuil));
+    const snaps = await db.getAll(...refs);
+    const batch = db.batch();
+    snaps.forEach((snap, idx) => {
+      const data = { ...slice[idx], updatedAt: FieldValue.serverTimestamp() };
+      if (!snap.exists) {
+        data.createdAt = FieldValue.serverTimestamp();
+        data.legajos = [];
+        nuevos += 1;
+      } else {
+        actualizados += 1;
+      }
+      batch.set(snap.ref, data, { merge: true });
+    });
+    batch.set(db.collection('audit_logs').doc(), {
+      action: 'IMPORT_EVENTUALES_BOLSA',
+      actorUid: 'SYSTEM',
+      actorName: IMPORT_CREATED_BY,
+      module: 'RRHH',
+      empresaId: 'bacarsa',
+      grupoId: GRUPO_EVENTUALES_ID,
+      createdBy: IMPORT_CREATED_BY,
+      details: `Import bolsa eventuales: ${slice.length} fichas. No crea ni modifica legajos.`,
+      timestamp: FieldValue.serverTimestamp(),
+    });
+    await batch.commit();
+  }
+  return { escritos: docs.length, nuevos, actualizados };
 }
 
 main().catch((err) => {
