@@ -90,6 +90,7 @@ import {
 } from '@/lib/crm/slaBilling';
 import type { PurchaseOrder, SlaBillingMode } from '@/lib/crm/slaBilling.types';
 import { purchaseOrderService } from '@/services/purchaseOrderService';
+import { purchaseOrderKindLabel, purchaseOrderTotalHours, resolvePurchaseOrderKind } from '@/lib/crm/purchaseOrderAllocation';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -3014,11 +3015,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                          onChange={(e) => setForm({ ...form, billingPurchaseOrderId: e.target.value || undefined })}
                        >
                          <option value="">— Seleccionar OC del cliente —</option>
-                         {slaFormPurchaseOrders.map((o) => (
-                           <option key={o.id} value={o.id}>
-                             {o.ocNumber} ({o.startDate} → {o.endDate}{o.authorizedHours != null ? ` · ${o.authorizedHours} hs` : ''})
-                           </option>
-                         ))}
+                         {slaFormPurchaseOrders.map((o) => {
+                           const total = purchaseOrderTotalHours(o);
+                           return (
+                             <option key={o.id} value={o.id}>
+                               {o.ocNumber} ({o.startDate} → {o.endDate}{total != null ? ` · ${total} hs` : ''} · {purchaseOrderKindLabel(resolvePurchaseOrderKind(o))})
+                             </option>
+                           );
+                         })}
                        </select>
                        <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente. Las anuladas no se listan.</p>
                      </div>
