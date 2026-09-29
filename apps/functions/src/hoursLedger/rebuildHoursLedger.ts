@@ -55,13 +55,15 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
   const start = new Date(`${year}-${pad(month)}-01T00:00:00.000-03:00`);
   const endDay = new Date(year, month, 0).getDate();
   const end = new Date(`${year}-${pad(month)}-${pad(endDay)}T23:59:59.999-03:00`);
-  const [empresaSnap, clientsSnap, slaSnap, planifSnap, empSnap, ausSnap, turnosSnap] = await Promise.all([
+  const [empresaSnap, clientsSnap, slaSnap, planifSnap, empSnap, ausSnap, contractsSnap, ordersSnap, turnosSnap] = await Promise.all([
     db.collection('empresas').doc(empresaId).get(),
     db.collection('clients').where('empresaId', '==', empresaId).get(),
     db.collection('servicios_sla').where('empresaId', '==', empresaId).get(),
     db.collection('planificacion_estados').where('empresaId', '==', empresaId).get(),
     db.collection('empleados').where('empresaId', '==', empresaId).get(),
     db.collection('ausencias').where('empresaId', '==', empresaId).get(),
+    db.collection('contracts').get(),
+    db.collection('ordenes_compra').where('empresaId', '==', empresaId).get(),
     db.collection('turnos')
       .where('empresaId', '==', empresaId)
       .where('startTime', '>=', Timestamp.fromDate(start))
@@ -75,6 +77,7 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
     if (st === 'inactive' || st === 'inactivo') return;
     empNameById[d.id] = String(e.nombre || e.name || e.displayName || d.id);
   });
+  const clientIds = new Set(clientsSnap.docs.map((d) => d.id));
   const built = buildLedgerMonth({
     empresaId,
     year,
@@ -89,6 +92,10 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
     onlyObjectiveIds: opts?.objectiveIds,
     skipPersona: opts?.skipPersona === true,
     includeUnscopedPaidAbsences: opts?.includeUnscopedPaidAbsences,
+    contracts: contractsSnap.docs
+      .map((d) => ({ id: d.id, ...d.data() }))
+      .filter((c) => clientIds.has(String((c as { clientId?: string }).clientId || ''))),
+    purchaseOrders: ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
   });
   return built;
 }
@@ -303,6 +310,7 @@ export async function rollupStoredMonth(empresaId: string, periodKey: string) {
     licV: 0, licE: 0, licL: 0, licA: 0, licPG: 0, licSUS: 0, licSGS: 0,
     ausenciaHoras: 0, ausenciaHorasOutside: 0, ausenciaTurnos: 0, ausenciaTurnosOutside: 0, ausenciaLegajos: 0,
     uncoveredAusencia: 0, uncoveredRetiro: 0, uncoveredFaltaPlan: 0,
+    billable: 0, workedNotBilled: 0, billedNotWorked: 0,
   });
   const keys = Object.keys(blank());
   const add = (a: Record<string, number>, b: Record<string, unknown>) => {

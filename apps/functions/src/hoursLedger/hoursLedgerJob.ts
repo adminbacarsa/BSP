@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { buildChunks, claimChunks, markChunk, processedOf, type LedgerChunk } from './jobPlan';
-import { assignWorkedShares } from './bundledEngine';
+import { applyBillableOnRow, assignWorkedShares } from './bundledEngine';
 import { parsePeriod, personaOfMonth, rebuildObjectives, rollupStoredMonth } from './rebuildHoursLedger';
 
 const JOBS = 'hours_ledger_jobs';
@@ -337,6 +337,7 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
       const delta = r1(m.uncovered - prevUncovered);
       if (delta) m.uncoveredFaltaPlan = r1((Number(m.uncoveredFaltaPlan) || 0) + delta);
     }
+    applyBillableOnRow(m);
   }
   const keys = [
     'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
@@ -344,6 +345,7 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
     'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
     'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
     'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
+    'billable', 'workedNotBilled', 'billedNotWorked',
   ];
   const blank = () => Object.fromEntries(keys.map((k) => [k, 0])) as Record<string, number>;
   const add = (a: Record<string, number>, b: Record<string, any>) => {
@@ -392,6 +394,7 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
           worked: m.worked, workedOutside: m.workedOutside || 0,
           ft: m.ft || 0, ext: m.ext || 0, adv: m.adv || 0,
           covered: m.covered || 0, uncovered: m.uncovered || 0,
+          billable: m.billable || 0, workedNotBilled: m.workedNotBilled || 0, billedNotWorked: m.billedNotWorked || 0,
           updatedAt: new Date().toISOString(),
         }, { merge: true });
       });

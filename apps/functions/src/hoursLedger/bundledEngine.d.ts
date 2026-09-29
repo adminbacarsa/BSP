@@ -31,6 +31,19 @@ export function personaMonthWorked(input: {
 
 export function jornadaPagada(t: any): number;
 
+export function applyBillableOnRow(m: {
+  billingMode?: string;
+  planPublished?: number;
+  covered?: number;
+  worked?: number;
+  billingFixedHours?: number;
+  billingHasCap?: boolean;
+  billingAuthorizedHours?: number | null;
+  billable?: number;
+  workedNotBilled?: number;
+  billedNotWorked?: number;
+}): void;
+
 export function buildLedgerMonth(input: {
   empresaId: string;
   year: number;
@@ -45,6 +58,8 @@ export function buildLedgerMonth(input: {
   onlyObjectiveIds?: string[];
   skipPersona?: boolean;
   includeUnscopedPaidAbsences?: boolean;
+  contracts?: any[];
+  purchaseOrders?: any[];
 }): {
   days: any[];
   monthly: any[];

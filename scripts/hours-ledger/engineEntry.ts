@@ -18,6 +18,15 @@ import {
   calculateLiquidationHoursStatsF0,
 } from '../../packages/hours-core/src/index';
 import { assignWorkedShares, classifySlaBucket } from './slaPolicy';
+import {
+  billableGaps,
+  billableHoursForContract,
+  normalizeSlaBillingMode,
+  prorateFixedMonthlyHours,
+  purchaseOrderAuthorizedHours,
+  resolveSlaBillingMode,
+} from '@/lib/crm/slaBilling';
+import type { PurchaseOrder } from '@/lib/crm/slaBilling.types';
 
 export { assignWorkedShares };
 
@@ -63,6 +72,9 @@ export type LedgerDay = {
   uncoveredAusencia: number;
   uncoveredRetiro: number;
   uncoveredFaltaPlan: number;
+  billable: number;
+  workedNotBilled: number;
+  billedNotWorked: number;
 };
 
 export type LedgerMonth = {
@@ -103,6 +115,15 @@ export type LedgerMonth = {
   uncoveredAusencia: number;
   uncoveredRetiro: number;
   uncoveredFaltaPlan: number;
+  billable: number;
+  workedNotBilled: number;
+  billedNotWorked: number;
+  /** Modo del contrato vigente. No se suma entre niveles. */
+  billingMode?: string;
+  /** Horas fijas ya prorrateadas al mes. */
+  billingFixedHours?: number;
+  billingHasCap?: boolean;
+  billingAuthorizedHours?: number;
   hoursCoreEnabled: boolean;
 };
 
@@ -123,6 +144,10 @@ export type LedgerBuildInput = {
   skipPersona?: boolean;
   /** Ausencias pagas sin objectiveId. Solo el build completo o la primera tanda. */
   includeUnscopedPaidAbsences?: boolean;
+  /** Contratos comerciales (`contracts`) para el modo Auto. */
+  contracts?: any[];
+  /** Órdenes de compra del período. */
+  purchaseOrders?: any[];
 };
 
 const METRIC_KEYS = [
@@ -131,6 +156,7 @@ const METRIC_KEYS = [
   'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
   'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
   'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
+  'billable', 'workedNotBilled', 'billedNotWorked',
 ] as const;
 
 /** Códigos que van a la tarjeta Licencias (desglose). AA queda afuera: es Ausencias, no paga. */
@@ -249,7 +275,47 @@ function blankMetrics() {
     licV: 0, licE: 0, licL: 0, licA: 0, licPG: 0, licSUS: 0, licSGS: 0,
     ausenciaHoras: 0, ausenciaHorasOutside: 0, ausenciaTurnos: 0, ausenciaTurnosOutside: 0, ausenciaLegajos: 0,
     uncoveredAusencia: 0, uncoveredRetiro: 0, uncoveredFaltaPlan: 0,
+    billable: 0, workedNotBilled: 0, billedNotWorked: 0,
   };
+}
+
+/**
+ * Facturable según el modo guardado en la fila (horas fijas ya prorrateadas, tope de OC ya resuelto).
+ * El cierre del job lo vuelve a correr después de reclamar trabajadas y cubiertas.
+ */
+export function applyBillableOnRow(m: {
+  billingMode?: string;
+  planPublished?: number;
+  covered?: number;
+  worked?: number;
+  billingFixedHours?: number;
+  billingHasCap?: boolean;
+  billingAuthorizedHours?: number | null;
+  billable?: number;
+  workedNotBilled?: number;
+  billedNotWorked?: number;
+}) {
+  if (!m.billingMode) {
+    m.billable = 0;
+    m.workedNotBilled = 0;
+    m.billedNotWorked = 0;
+    return;
+  }
+  const priced = billableHoursForContract({
+    mode: normalizeSlaBillingMode(m.billingMode),
+    planHours: Number(m.planPublished) || 0,
+    coveredHours: Number(m.covered) || 0,
+    fixedMonthlyHours: Number(m.billingFixedHours) || 0,
+    contractStart: '2000-01-01',
+    contractEnd: '2000-01-01',
+    periodStartYmd: '2000-01-01',
+    periodEndYmd: '2000-01-01',
+    authorizedHours: m.billingHasCap ? Number(m.billingAuthorizedHours) || 0 : null,
+  });
+  const gaps = billableGaps(Number(m.worked) || 0, priced.billableHours);
+  m.billable = priced.billableHours;
+  m.workedNotBilled = gaps.workedNotBilled;
+  m.billedNotWorked = gaps.billedNotWorked;
 }
 
 function addMetrics(a: ReturnType<typeof blankMetrics>, b: Partial<ReturnType<typeof blankMetrics>>) {
@@ -918,10 +984,54 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     }
   }
 
+  const openClients = new Set<string>();
+  for (const c of input.contracts || []) {
+    if (String(c?.type ?? '') === 'abierto' && String(c?.status ?? '').toUpperCase() !== 'INACTIVE') {
+      const cid = String(c.clientId || '').trim();
+      if (cid) openClients.add(cid);
+    }
+  }
+  const ocById = new Map((input.purchaseOrders || []).map((o) => [String(o.id), o as PurchaseOrder]));
+  const billingSrv = new Map<string, any>();
+  for (const item of chosen.values()) {
+    if (item.bucket !== 'active' && item.bucket !== 'closed') continue;
+    const oid = String(item.srv.objectiveId || '');
+    const prev = billingSrv.get(oid);
+    if (!prev || item.bucket === 'active') billingSrv.set(oid, item.srv);
+  }
+  const periodStart = ymd(year, month, 1);
+  const periodEnd = ymd(year, month, lastDay(year, month));
+  for (const m of byObj.values()) {
+    const srv = billingSrv.get(m.objectiveId);
+    if (!srv) continue;
+    const mode = resolveSlaBillingMode(srv, { clientHasOpenContract: openClients.has(m.clientId) });
+    m.billingMode = mode;
+    const cap = mode === 'ORDEN_COMPRA'
+      ? purchaseOrderAuthorizedHours(
+        ocById.get(String(srv.billingPurchaseOrderId || '').trim()),
+        m.objectiveId,
+        periodStart,
+        periodEnd,
+      )
+      : null;
+    m.billingHasCap = cap != null;
+    if (cap != null) m.billingAuthorizedHours = cap;
+    m.billingFixedHours = mode === 'FIJO'
+      ? prorateFixedMonthlyHours(
+        Number(srv.billingFixedMonthlyHours) || 0,
+        dateStr(srv.startDate),
+        dateStr(srv.endDate) || '2099-12-31',
+        periodStart,
+        periodEnd,
+      )
+      : 0;
+    applyBillableOnRow(m);
+  }
+
   const monthlyObjs = [...byObj.values()].filter((m) =>
     m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft
     || m.worked || m.workedOutside || m.covered || m.uncovered || m.ft || m.ext || m.adv || m.novedadPaga
-    || m.ausenciaHoras || m.ausenciaTurnos,
+    || m.ausenciaHoras || m.ausenciaTurnos || m.billable || m.workedNotBilled || m.billedNotWorked,
   );
 
   const empresa = blankMetrics();

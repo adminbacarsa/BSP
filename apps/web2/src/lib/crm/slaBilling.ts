@@ -93,6 +93,125 @@ function ocCoversPeriod(oc: PurchaseOrder, startYmd: string, endYmd: string): bo
   return oc.startDate <= endYmd && oc.endDate >= startYmd;
 }
 
+function ymdOf(value: unknown): string {
+  if (value == null) return '';
+  if (typeof value === 'string') return value.trim().slice(0, 10);
+  const o = value as { toDate?: () => Date; seconds?: number; _seconds?: number };
+  const d = typeof o.toDate === 'function'
+    ? o.toDate()
+    : (typeof (o.seconds ?? o._seconds) === 'number' ? new Date(((o.seconds ?? o._seconds) as number) * 1000) : null);
+  if (!d || Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 10);
+}
+
+function dayCount(fromYmd: string, toYmd: string): number {
+  if (!fromYmd || !toYmd || fromYmd > toYmd) return 0;
+  const a = Date.parse(`${fromYmd}T00:00:00Z`);
+  const b = Date.parse(`${toYmd}T00:00:00Z`);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return 0;
+  return Math.round((b - a) / 86400000) + 1;
+}
+
+const r1Bill = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
+
+/** Horas fijas del mes, prorrateadas si la vigencia no cubre el período entero. */
+export function prorateFixedMonthlyHours(
+  fixedMonthlyHours: number,
+  contractStart: string,
+  contractEnd: string,
+  periodStart: string,
+  periodEnd: string,
+): number {
+  const fixed = Number(fixedMonthlyHours) || 0;
+  if (!(fixed > 0)) return 0;
+  const periodDays = dayCount(periodStart, periodEnd);
+  if (!(periodDays > 0)) return 0;
+  const start = contractStart && contractStart > periodStart ? contractStart : periodStart;
+  const end = contractEnd && contractEnd < periodEnd ? contractEnd : periodEnd;
+  const valid = dayCount(start, end);
+  if (!(valid > 0)) return 0;
+  if (valid >= periodDays) return r1Bill(fixed);
+  return r1Bill((fixed * valid) / periodDays);
+}
+
+/**
+ * Techo de la OC para un objetivo en el período.
+ * null = la OC no aplica (no hay tope). El reparto por línea vive en authorizedHoursForObjective.
+ */
+export function purchaseOrderAuthorizedHours(
+  oc: PurchaseOrder | null | undefined,
+  objectiveId: string,
+  periodStartYmd: string,
+  periodEndYmd: string,
+): number | null {
+  if (!oc || !ocCoversPeriod(oc, periodStartYmd, periodEndYmd)) return null;
+  const hours = authorizedHoursForObjective(oc, objectiveId);
+  return hours == null ? null : hours;
+}
+
+export type BillableContractInput = {
+  mode: SlaBillingMode;
+  /** PLANIFICADO: plan publicado. */
+  planHours: number;
+  /** EJECUTADO y base de ORDEN_COMPRA: cubiertas por franja. */
+  coveredHours: number;
+  fixedMonthlyHours?: number | null;
+  contractStart?: string;
+  contractEnd?: string;
+  periodStartYmd: string;
+  periodEndYmd: string;
+  /** null = sin tope de OC. */
+  authorizedHours?: number | null;
+};
+
+/** Única fórmula de horas facturables. La usan la prefactura y el libro. */
+export function billableHoursForContract(input: BillableContractInput): {
+  billableHours: number;
+  basisHours: number;
+  authorizedHours?: number;
+  balanceHours?: number;
+} {
+  const plan = Math.max(0, Number(input.planHours) || 0);
+  const covered = Math.max(0, Number(input.coveredHours) || 0);
+  if (input.mode === 'EJECUTADO') {
+    return { billableHours: r1Bill(covered), basisHours: r1Bill(covered) };
+  }
+  if (input.mode === 'FIJO') {
+    const fixed = prorateFixedMonthlyHours(
+      Number(input.fixedMonthlyHours) || 0,
+      String(input.contractStart || ''),
+      String(input.contractEnd || ''),
+      input.periodStartYmd,
+      input.periodEndYmd,
+    );
+    const billable = fixed > 0 ? fixed : r1Bill(plan);
+    return { billableHours: billable, basisHours: billable };
+  }
+  if (input.mode === 'ORDEN_COMPRA') {
+    const auth = input.authorizedHours;
+    if (auth != null && Number.isFinite(Number(auth)) && Number(auth) >= 0) {
+      const cap = r1Bill(Number(auth));
+      return {
+        billableHours: r1Bill(Math.min(covered, cap)),
+        basisHours: r1Bill(covered),
+        authorizedHours: cap,
+        balanceHours: r1Bill(Math.max(0, cap - covered)),
+      };
+    }
+    return { billableHours: r1Bill(covered), basisHours: r1Bill(covered) };
+  }
+  return { billableHours: r1Bill(plan), basisHours: r1Bill(plan) };
+}
+
+export function billableGaps(worked: number, billable: number) {
+  const w = Number(worked) || 0;
+  const b = Number(billable) || 0;
+  return {
+    workedNotBilled: r1Bill(Math.max(0, w - b)),
+    billedNotWorked: r1Bill(Math.max(0, b - w)),
+  };
+}
+
 function authorizedHoursForObjective(
   oc: PurchaseOrder,
   objectiveId: string,
@@ -132,6 +251,10 @@ export type BuildProformaBillingInput = {
    */
   franjaByObjectiveId: Record<string, number>;
   franjaByObjectiveName: Record<string, number>;
+  /** Horas de servicio por objetivo. */
+  slaByObjectiveId?: Record<string, number>;
+  /** Horas trabajadas para el cliente. Si falta, Prestado queda en la base del modo. */
+  workedByObjectiveId?: Record<string, number>;
   clientHasOpenContract?: boolean;
 };
 
@@ -144,48 +267,55 @@ export function buildProformaBillingRows(input: BuildProformaBillingInput): Prof
     const oid = String(srv.objectiveId ?? '').trim();
     const oName = String(srv.objectiveName ?? '').trim();
     const oKey = oName.toUpperCase();
+    const planH = (oid && input.plannedByObjectiveId[oid]) ?? input.plannedByObjectiveName[oKey] ?? 0;
+    const coveredH = (oid && input.franjaByObjectiveId[oid]) ?? input.franjaByObjectiveName[oKey] ?? 0;
     const useFranja = billing.billingMode === 'EJECUTADO' || billing.billingMode === 'ORDEN_COMPRA';
-    const byId = useFranja ? input.franjaByObjectiveId : input.plannedByObjectiveId;
-    const byName = useFranja ? input.franjaByObjectiveName : input.plannedByObjectiveName;
-    const prestado = (oid && byId[oid]) ?? byName[oKey] ?? 0;
+    const workedKnown = input.workedByObjectiveId;
+    const prestado = workedKnown
+      ? ((oid && workedKnown[oid]) || 0)
+      : (useFranja ? coveredH : planH);
 
-    let billable = prestado;
-    let authorized: number | undefined;
     let ocNumber: string | undefined;
     let ocId: string | undefined;
     let fixedAmount: number | undefined;
+    let cap: number | null = null;
 
     if (billing.billingMode === 'FIJO') {
-      const fixedH = Number(billing.billingFixedMonthlyHours);
-      if (Number.isFinite(fixedH) && fixedH > 0) {
-        billable = Math.round(fixedH);
-      } else {
-        billable = prestado;
-      }
       fixedAmount = billing.billingFixedMonthlyAmount;
     } else if (billing.billingMode === 'ORDEN_COMPRA') {
       const ocRef = String(billing.billingPurchaseOrderId ?? '').trim();
       const oc = ocRef ? ocById.get(ocRef) : undefined;
-      if (oc && ocCoversPeriod(oc, input.periodStartYmd, input.periodEndYmd)) {
-        authorized = authorizedHoursForObjective(oc, oid);
+      cap = purchaseOrderAuthorizedHours(oc, oid, input.periodStartYmd, input.periodEndYmd);
+      if (oc && (cap != null || ocCoversPeriod(oc, input.periodStartYmd, input.periodEndYmd))) {
         ocNumber = oc.ocNumber;
         ocId = oc.id;
-        if (authorized != null && authorized >= 0) {
-          billable = Math.min(Math.round(prestado), Math.round(authorized));
-        }
       }
     }
 
+    const priced = billableHoursForContract({
+      mode: billing.billingMode,
+      planHours: planH,
+      coveredHours: coveredH,
+      fixedMonthlyHours: billing.billingFixedMonthlyHours,
+      contractStart: ymdOf((srv as { startDate?: unknown }).startDate),
+      contractEnd: ymdOf((srv as { endDate?: unknown }).endDate),
+      periodStartYmd: input.periodStartYmd,
+      periodEndYmd: input.periodEndYmd,
+      authorizedHours: cap,
+    });
+
+    const prestadoR = r1Bill(prestado);
     rows.push({
       objectiveId: oid,
       objectiveName: oName || oid || 'Objetivo',
       slaId: srv.id,
       billingMode: billing.billingMode,
-      prestadoHours: Math.round(prestado),
-      billableHours: Math.round(billable),
-      authorizedHours: authorized != null ? Math.round(authorized) : undefined,
-      balanceHours:
-        authorized != null ? Math.max(0, Math.round(authorized) - Math.round(prestado)) : undefined,
+      slaHours: r1Bill((oid && input.slaByObjectiveId?.[oid]) || 0),
+      prestadoHours: prestadoR,
+      billableHours: priced.billableHours,
+      diferenciaHours: r1Bill(prestadoR - priced.billableHours),
+      authorizedHours: priced.authorizedHours,
+      balanceHours: priced.balanceHours,
       fixedMonthlyAmount: fixedAmount,
       ocNumber,
       ocId,

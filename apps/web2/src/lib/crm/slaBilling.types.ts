@@ -66,10 +66,14 @@ export type ProformaBillingRow = {
   objectiveName: string;
   slaId?: string;
   billingMode: SlaBillingMode;
-  /** Horas prestadas (plan/ejec/fijo teórico) antes de tope OC. */
+  /** Horas de servicio (SLA) del período. */
+  slaHours?: number;
+  /** Horas trabajadas para el cliente. Sin mapa de trabajadas, queda la base del modo (plan o franja). */
   prestadoHours: number;
-  /** Horas (o equivalente) a facturar en el período. */
+  /** Horas a facturar en el período, según el modo del contrato. */
   billableHours: number;
+  /** prestado − facturado. Positivo: se trabajó más de lo que se cobra. */
+  diferenciaHours?: number;
   authorizedHours?: number;
   balanceHours?: number;
   fixedMonthlyAmount?: number;
