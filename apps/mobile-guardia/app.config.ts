@@ -24,6 +24,9 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.cosp.guardia',
+    entitlements: {
+      'com.apple.developer.usernotifications.time-sensitive': true,
+    },
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
         'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',
@@ -112,6 +115,9 @@ const config: ExpoConfig = {
         icon: './assets/android-icon-monochrome.png',
         color: '#D32F2F',
         defaultChannel: 'default',
+        // Sonido propio: './assets/sounds/alertas_turno.wav' acá y sound del canal.
+        // El plugin lo copia al binario nativo: requiere build EAS, no OTA.
+        // Hoy el canal usa el stream de alarma del sistema (USAGE_ALARM).
         sounds: [],
       },
     ],

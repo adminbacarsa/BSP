@@ -4,7 +4,14 @@
  */
 import { createRequire } from 'node:module';
 import path from 'node:path';
-import { billableGaps, billableHoursForContract, prorateFixedMonthlyHours } from '../../apps/web2/src/lib/crm/slaBilling.ts';
+import {
+  billableGaps,
+  billableHoursForContract,
+  buildProformaBillingRows,
+  prorateFixedMonthlyHours,
+} from '../../apps/web2/src/lib/crm/slaBilling.ts';
+import { allocatePurchaseOrder } from '../../apps/web2/src/lib/crm/purchaseOrderAllocation.ts';
+import type { PurchaseOrder } from '../../apps/web2/src/lib/crm/slaBilling.types.ts';
 
 process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||= 'h2-readonly';
 process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'comtroldata';
@@ -22,20 +29,55 @@ WriteBatch.prototype.commit = deny('batch');
 Firestore.prototype.runTransaction = deny('tx');
 Firestore.prototype.recursiveDelete = deny('recursiveDelete');
 
-const { buildLedgerMonth } = await import('./engineEntry.ts');
+const { buildLedgerMonth, applyBillableOnRows } = await import('./engineEntry.ts');
 
 const fijo = prorateFixedMonthlyHours(300, '2026-09-16', '2026-09-30', '2026-09-01', '2026-09-30');
 if (fijo !== 150) throw new Error(`FIJO prorrateado ${fijo} != 150`);
 const ej = billableHoursForContract({
   mode: 'EJECUTADO', planHours: 80, coveredHours: 40,
-  periodStartYmd: '2026-09-01', periodEndYmd: '2026-09-30', authorizedHours: null,
+  periodStartYmd: '2026-09-01', periodEndYmd: '2026-09-30',
 });
 if (ej.billableHours !== 40) throw new Error('EJECUTADO debe facturar cubiertas');
-const oc = billableHoursForContract({
-  mode: 'ORDEN_COMPRA', planHours: 80, coveredHours: 40,
-  periodStartYmd: '2026-09-01', periodEndYmd: '2026-09-30', authorizedHours: 25,
-});
-if (oc.billableHours !== 25 || oc.balanceHours !== 0) throw new Error(`OC tope ${oc.billableHours}`);
+
+const ocBase = { empresaId: 'x', clientId: 'c', ocNumber: 'OC', startDate: '2026-09-01', endDate: '2026-09-30', status: 'ACTIVE' as const };
+const ocCases: Array<{ oc: PurchaseOrder; expect: Record<string, number> }> = [
+  { oc: { ...ocBase, id: 'g', kind: 'GENERAL', authorizedHours: 1000 }, expect: { a: 600, b: 400 } },
+  { oc: { ...ocBase, id: 'p', kind: 'POR_OBJETIVO', lines: [{ objectiveId: 'a', authorizedHours: 100 }, { objectiveId: 'b', authorizedHours: 900 }] }, expect: { a: 100, b: 700 } },
+  { oc: { ...ocBase, id: 'b', kind: 'BOLSA', authorizedHours: 900, lines: [{ objectiveId: 'a', authorizedHours: 300 }, { objectiveId: 'b', authorizedHours: 300 }] }, expect: { a: 600, b: 300 } },
+];
+const demands = [{ objectiveId: 'a', prestadoHours: 600 }, { objectiveId: 'b', prestadoHours: 700 }];
+for (const { oc, expect } of ocCases) {
+  const alloc = allocatePurchaseOrder(oc, demands);
+  const ledgerRows = demands.map((d) => ({
+    objectiveId: d.objectiveId, periodKey: '2026-09', billingMode: 'ORDEN_COMPRA',
+    covered: d.prestadoHours, worked: d.prestadoHours, billingPurchaseOrderId: oc.id,
+  }));
+  applyBillableOnRows(ledgerRows, [oc]);
+  const proforma = buildProformaBillingRows({
+    vigenteSlas: demands.map((d) => ({ id: `s_${d.objectiveId}`, objectiveId: d.objectiveId, objectiveName: d.objectiveId, billingMode: 'ORDEN_COMPRA', billingPurchaseOrderId: oc.id })) as any[],
+    purchaseOrders: [oc],
+    periodStartYmd: '2026-09-01',
+    periodEndYmd: '2026-09-30',
+    plannedByObjectiveId: {},
+    plannedByObjectiveName: {},
+    franjaByObjectiveId: Object.fromEntries(demands.map((d) => [d.objectiveId, d.prestadoHours])),
+    franjaByObjectiveName: {},
+  });
+  for (const d of demands) {
+    const direct = billableHoursForContract({
+      mode: 'ORDEN_COMPRA', planHours: 0, coveredHours: d.prestadoHours,
+      periodStartYmd: '2026-09-01', periodEndYmd: '2026-09-30',
+      purchaseOrder: oc, objectiveId: d.objectiveId, ocDemands: demands,
+    }).billableHours;
+    const fromAlloc = alloc.byObjective.find((r) => r.objectiveId === d.objectiveId)!.billableHours;
+    const fromLedger = ledgerRows.find((r) => r.objectiveId === d.objectiveId)!.billable;
+    const fromProforma = proforma.find((r) => r.objectiveId === d.objectiveId)!.billableHours;
+    const want = expect[d.objectiveId];
+    if (![direct, fromAlloc, fromLedger, fromProforma].every((v) => v === want)) {
+      throw new Error(`OC ${oc.kind} ${d.objectiveId}: contrato ${direct} reparto ${fromAlloc} libro ${fromLedger} prefactura ${fromProforma} != ${want}`);
+    }
+  }
+}
 const gaps = billableGaps(50, 25);
 if (gaps.workedNotBilled !== 25 || gaps.billedNotWorked !== 0) throw new Error('gaps');
 
@@ -101,6 +143,12 @@ const built = buildLedgerMonth({
 
 const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 const empresa = built.monthly.find((m) => m.level === 'empresa')!;
+const nk = built.monthly.find((m) => m.level === 'objetivo' && m.objectiveId === 'NK1i1DUwlaDxC4Hn8QwJ');
+if (!nk || nk.planPublished !== 2792) throw new Error(`plan publicado Nuevo Edificio en el libro ${nk?.planPublished} != 2792`);
+const nkDays = built.days.filter((d: any) => d.objectiveId === 'NK1i1DUwlaDxC4Hn8QwJ');
+const nkDaysPlan = r1(nkDays.reduce((a: number, d: any) => a + (Number(d.planPublished) || 0), 0));
+if (nkDaysPlan !== 2792) throw new Error(`plan publicado Nuevo Edificio por día ${nkDaysPlan} != 2792`);
+console.log('NK_LIBRO_PLAN', nk.planPublished, 'dias', nkDaysPlan);
 const objs = built.monthly.filter((m) => m.level === 'objetivo' && m.billingMode);
 const clients = built.monthly.filter((m) => m.level === 'cliente');
 

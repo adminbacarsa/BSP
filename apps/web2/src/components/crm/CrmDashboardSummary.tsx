@@ -186,7 +186,6 @@ export default function CrmDashboardSummary({
             </select>
           )}
           {extraControls}
-          )}
           {rangeMode === 'quarter' && (
             <select aria-label="Trimestre del período" className={selectCls} value={crmCalendarQuarter(rangeMonth)} onChange={(e) => onRangeMonthChange(Number(e.target.value) * 3)}>
               <option value={0}>T1 Ene–Mar</option>

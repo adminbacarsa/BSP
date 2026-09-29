@@ -78,7 +78,9 @@ export declare function crearConvocatoriaLlegadaTarde(db: admin.firestore.Firest
     empresaId: string;
     objectiveId: string;
     objectiveName: string;
+    positionName?: string;
     clientId: string;
+    clientName?: string;
     shiftCode: string;
     startTime: Timestamp;
     endTime?: Timestamp;

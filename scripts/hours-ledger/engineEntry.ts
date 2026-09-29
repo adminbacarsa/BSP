@@ -9,6 +9,7 @@ import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { executedBillableHoursByFranja } from '@/lib/crm/executedBillableHoursByFranja';
+import { buildObjectiveOwnerIndex, resolveObjectiveOwner } from '@/lib/crm/objectiveClientOwner';
 import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
@@ -20,7 +21,6 @@ import {
   billableHoursForContract,
   normalizeSlaBillingMode,
   prorateFixedMonthlyHours,
-  purchaseOrderAuthorizedHours,
   resolveSlaBillingMode,
 } from '@/lib/crm/slaBilling';
 import type { PurchaseOrder } from '@/lib/crm/slaBilling.types';
@@ -119,8 +119,10 @@ export type LedgerMonth = {
   billingMode?: string;
   /** Horas fijas ya prorrateadas al mes. */
   billingFixedHours?: number;
-  billingHasCap?: boolean;
+  billingPurchaseOrderId?: string;
   billingAuthorizedHours?: number;
+  billingBalanceHours?: number;
+  billingOcKind?: string;
   hoursCoreEnabled: boolean;
 };
 
@@ -276,43 +278,78 @@ function blankMetrics() {
   };
 }
 
-/**
- * Facturable según el modo guardado en la fila (horas fijas ya prorrateadas, tope de OC ya resuelto).
- * El cierre del job lo vuelve a correr después de reclamar trabajadas y cubiertas.
- */
-export function applyBillableOnRow(m: {
+export type BillableRow = {
+  objectiveId?: string;
+  periodKey?: string;
   billingMode?: string;
   planPublished?: number;
   covered?: number;
   worked?: number;
   billingFixedHours?: number;
-  billingHasCap?: boolean;
-  billingAuthorizedHours?: number | null;
+  billingPurchaseOrderId?: string;
+  billingAuthorizedHours?: number;
+  billingBalanceHours?: number;
+  billingOcKind?: string;
   billable?: number;
   workedNotBilled?: number;
   billedNotWorked?: number;
-}) {
-  if (!m.billingMode) {
-    m.billable = 0;
-    m.workedNotBilled = 0;
-    m.billedNotWorked = 0;
-    return;
+};
+
+function periodBounds(periodKey: string): { start: string; end: string } {
+  const [y, mo] = String(periodKey || '').split('-').map(Number);
+  if (!y || !mo) return { start: '2000-01-01', end: '2000-01-31' };
+  return { start: ymd(y, mo, 1), end: ymd(y, mo, lastDay(y, mo)) };
+}
+
+/**
+ * Facturable según el modo guardado en cada fila (horas fijas ya prorrateadas).
+ * ORDEN_COMPRA reparte el tope entre todas las filas que usan la misma OC (allocatePurchaseOrder).
+ * El cierre del job lo vuelve a correr después de reclamar trabajadas y cubiertas.
+ */
+export function applyBillableOnRows(rows: BillableRow[], purchaseOrders: any[] = []) {
+  const ocById = new Map((purchaseOrders || []).map((o) => [String(o.id), o as PurchaseOrder]));
+  const demandsByOc = new Map<string, Array<{ objectiveId: string; prestadoHours: number }>>();
+  for (const m of rows) {
+    if (normalizeSlaBillingMode(m.billingMode) !== 'ORDEN_COMPRA' || !m.billingMode) continue;
+    const ocId = String(m.billingPurchaseOrderId || '').trim();
+    if (!ocId || !ocById.has(ocId)) continue;
+    const list = demandsByOc.get(ocId) || [];
+    list.push({ objectiveId: String(m.objectiveId || '').trim(), prestadoHours: Number(m.covered) || 0 });
+    demandsByOc.set(ocId, list);
   }
-  const priced = billableHoursForContract({
-    mode: normalizeSlaBillingMode(m.billingMode),
-    planHours: Number(m.planPublished) || 0,
-    coveredHours: Number(m.covered) || 0,
-    fixedMonthlyHours: Number(m.billingFixedHours) || 0,
-    contractStart: '2000-01-01',
-    contractEnd: '2000-01-01',
-    periodStartYmd: '2000-01-01',
-    periodEndYmd: '2000-01-01',
-    authorizedHours: m.billingHasCap ? Number(m.billingAuthorizedHours) || 0 : null,
-  });
-  const gaps = billableGaps(Number(m.worked) || 0, priced.billableHours);
-  m.billable = priced.billableHours;
-  m.workedNotBilled = gaps.workedNotBilled;
-  m.billedNotWorked = gaps.billedNotWorked;
+  for (const m of rows) {
+    if (!m.billingMode) {
+      m.billable = 0;
+      m.workedNotBilled = 0;
+      m.billedNotWorked = 0;
+      continue;
+    }
+    const { start, end } = periodBounds(String(m.periodKey || ''));
+    const ocId = String(m.billingPurchaseOrderId || '').trim();
+    const priced = billableHoursForContract({
+      mode: normalizeSlaBillingMode(m.billingMode),
+      planHours: Number(m.planPublished) || 0,
+      coveredHours: Number(m.covered) || 0,
+      fixedMonthlyHours: Number(m.billingFixedHours) || 0,
+      contractStart: start,
+      contractEnd: end,
+      periodStartYmd: start,
+      periodEndYmd: end,
+      purchaseOrder: ocId ? ocById.get(ocId) ?? null : null,
+      objectiveId: String(m.objectiveId || '').trim(),
+      ocDemands: ocId ? demandsByOc.get(ocId) : undefined,
+    });
+    const gaps = billableGaps(Number(m.worked) || 0, priced.billableHours);
+    m.billable = priced.billableHours;
+    m.workedNotBilled = gaps.workedNotBilled;
+    m.billedNotWorked = gaps.billedNotWorked;
+    if (priced.authorizedHours != null) m.billingAuthorizedHours = priced.authorizedHours;
+    else delete m.billingAuthorizedHours;
+    if (priced.balanceHours != null) m.billingBalanceHours = priced.balanceHours;
+    else delete m.billingBalanceHours;
+    if (priced.ocKind) m.billingOcKind = priced.ocKind;
+    else delete m.billingOcKind;
+  }
 }
 
 function addMetrics(a: ReturnType<typeof blankMetrics>, b: Partial<ReturnType<typeof blankMetrics>>) {
@@ -512,43 +549,18 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
   }
   const { start, end } = arRange(year, month);
-  const clientById = new Map(clients.map((c) => [String(c.id), c]));
-
-  const normName = (v: unknown) => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
-  const ownerByObjective = new Map<string, { clientId: string; clientName: string }>();
-  const ownerByObjName = new Map<string, { clientId: string; clientName: string }>();
-  for (const c of clients) {
-    const objs = c.objetivos || c.objectives || [];
-    const meta = { clientId: String(c.id), clientName: String(c.name || c.razonSocial || '') };
-    for (const o of objs) {
-      const id = String(o?.id || o?.objectiveId || '').trim();
-      const name = normName(o?.name || o?.nombre);
-      if (id && !ownerByObjective.has(id)) ownerByObjective.set(id, meta);
-      if (name && !ownerByObjName.has(name)) ownerByObjName.set(name, meta);
-    }
-  }
-
-  const clientByName = new Map<string, any>();
-  for (const c of clients) {
-    const n = normName(c.name || c.razonSocial);
-    if (n && !clientByName.has(n)) clientByName.set(n, c);
-  }
-
+  // Dueño actual del objetivo dentro de la empresa (objetivos[].id), como el trigger I1.
+  // El clientId del SLA/turno puede apuntar a un cliente borrado: no se usa para agrupar.
+  const ownerIndex = buildObjectiveOwnerIndex(clients);
   const resolveClient = (objectiveId: string, sla?: any) => {
-    const fromSla = String(sla?.clientId || '').trim();
-    const direct = fromSla ? clientById.get(fromSla) : undefined;
-    if (direct) {
-      return { clientId: fromSla, clientName: String(direct.name || direct.razonSocial || sla?.clientName || ''), client: direct };
-    }
-    const owner = ownerByObjective.get(objectiveId) || ownerByObjName.get(normName(sla?.objectiveName));
+    const owner = resolveObjectiveOwner(ownerIndex, objectiveId, {
+      objectiveName: sla?.objectiveName,
+      clientName: sla?.clientName,
+    });
     if (owner) {
-      return { ...owner, client: clientById.get(owner.clientId) };
+      return { ...owner, client: ownerIndex.clientById.get(owner.clientId) };
     }
-    const byName = clientByName.get(normName(sla?.clientName));
-    if (byName) {
-      return { clientId: String(byName.id), clientName: String(byName.name || byName.razonSocial || ''), client: byName };
-    }
-    return { clientId: fromSla, clientName: String(sla?.clientName || ''), client: undefined as any };
+    return { clientId: '', clientName: String(sla?.clientName || ''), client: undefined as any };
   };
 
   type Bucket = 'active' | 'inactive' | 'closed' | 'withoutPlan';
@@ -1023,7 +1035,6 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       if (cid) openClients.add(cid);
     }
   }
-  const ocById = new Map((input.purchaseOrders || []).map((o) => [String(o.id), o as PurchaseOrder]));
   const billingSrv = new Map<string, any>();
   for (const item of chosen.values()) {
     if (item.bucket !== 'active' && item.bucket !== 'closed') continue;
@@ -1038,16 +1049,8 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     if (!srv) continue;
     const mode = resolveSlaBillingMode(srv, { clientHasOpenContract: openClients.has(m.clientId) });
     m.billingMode = mode;
-    const cap = mode === 'ORDEN_COMPRA'
-      ? purchaseOrderAuthorizedHours(
-        ocById.get(String(srv.billingPurchaseOrderId || '').trim()),
-        m.objectiveId,
-        periodStart,
-        periodEnd,
-      )
-      : null;
-    m.billingHasCap = cap != null;
-    if (cap != null) m.billingAuthorizedHours = cap;
+    const ocRef = String(srv.billingPurchaseOrderId || '').trim();
+    if (mode === 'ORDEN_COMPRA' && ocRef) m.billingPurchaseOrderId = ocRef;
     m.billingFixedHours = mode === 'FIJO'
       ? prorateFixedMonthlyHours(
         Number(srv.billingFixedMonthlyHours) || 0,
@@ -1057,8 +1060,8 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
         periodEnd,
       )
       : 0;
-    applyBillableOnRow(m);
   }
+  applyBillableOnRows([...byObj.values()], input.purchaseOrders || []);
 
   const monthlyObjs = [...byObj.values()].filter((m) =>
     m.slaActive || m.slaInactive || m.slaClosed || m.slaWithoutPlan || m.planPublished || m.planDraft

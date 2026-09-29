@@ -1,4 +1,5 @@
 ﻿import React, { useMemo, useState, useEffect, useRef, useCallback } from 'react';
+import Link from 'next/link';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry, appendSlaChangeLog } from '@/services/slaService';
@@ -17,6 +18,7 @@ import {
 import { ServiceCapacityViabilityModal } from '@/components/servicios/ServiceCapacityViabilityModal';
 import { ServiceCapacityViabilityIcon } from '@/components/servicios/ServiceCapacityViabilityIcon';
 import { EventosPanel } from '@/components/servicios/EventosPanel';
+import { BillingModeHelp } from '@/components/servicios/BillingModeHelp';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
@@ -89,6 +91,7 @@ import {
 } from '@/lib/crm/slaBilling';
 import type { PurchaseOrder, SlaBillingMode } from '@/lib/crm/slaBilling.types';
 import { purchaseOrderService } from '@/services/purchaseOrderService';
+import { purchaseOrderKindLabel, purchaseOrderTotalHours, resolvePurchaseOrderKind } from '@/lib/crm/purchaseOrderAllocation';
 
 function serviceSlaRowKey(srv: ServiceSLA): string {
   return srv.id || `${srv.clientId}-${srv.objectiveId}-${srv.startDate}`;
@@ -175,7 +178,7 @@ export default function ServiciosSLAPage() {
     }
     let cancelled = false;
     void purchaseOrderService
-      .getByClient(form.clientId, { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta) })
+      .getByClient(form.clientId, { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), selectableOnly: true })
       .then((rows) => {
         if (!cancelled) setSlaFormPurchaseOrders(rows);
       })
@@ -2965,6 +2968,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                        ))}
                      </select>
                    </div>
+                   <BillingModeHelp
+                     mode={hasExplicitSlaBillingMode(form) ? normalizeSlaBillingMode(form.billingMode) : null}
+                     autoLabel={autoBillingModeLabel({ clientHasOpenContract: slaFormClientHasOpenContract })}
+                   />
                    {normalizeSlaBillingMode(form.billingMode) === 'FIJO' && (
                      <div className="grid grid-cols-2 gap-3">
                        <div>
@@ -2993,7 +3000,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                    )}
                    {normalizeSlaBillingMode(form.billingMode) === 'ORDEN_COMPRA' && (
                      <div>
-                       <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Orden de compra</label>
+                       <div className="flex items-center justify-between gap-2">
+                         <label className="text-[10px] font-black uppercase text-slate-400 ml-1">Orden de compra</label>
+                         {form.clientId ? (
+                           <Link
+                             href={`/admin/crm/?clientId=${encodeURIComponent(form.clientId)}&tab=PREFACTURA`}
+                             className="text-[10px] font-black uppercase text-indigo-600 hover:text-indigo-800"
+                           >
+                             + Cargar OC
+                           </Link>
+                         ) : (
+                           <span className="text-[10px] font-bold text-slate-400">Elegí un cliente para cargar una OC</span>
+                         )}
+                       </div>
                        <select
                          disabled={isClosedContract}
                          className="w-full p-3 bg-white dark:bg-slate-900 border rounded-xl text-xs font-bold disabled:opacity-60"
@@ -3001,13 +3020,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                          onChange={(e) => setForm({ ...form, billingPurchaseOrderId: e.target.value || undefined })}
                        >
                          <option value="">— Seleccionar OC del cliente —</option>
-                         {slaFormPurchaseOrders.map((o) => (
-                           <option key={o.id} value={o.id}>
-                             {o.ocNumber} ({o.startDate} → {o.endDate}{o.authorizedHours != null ? ` · ${o.authorizedHours} hs` : ''})
-                           </option>
-                         ))}
+                         {slaFormPurchaseOrders.map((o) => {
+                           const total = purchaseOrderTotalHours(o);
+                           return (
+                             <option key={o.id} value={o.id}>
+                               {o.ocNumber} ({o.startDate} → {o.endDate}{total != null ? ` · ${total} hs` : ''} · {purchaseOrderKindLabel(resolvePurchaseOrderKind(o))})
+                             </option>
+                           );
+                         })}
                        </select>
-                       <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente.</p>
+                       <p className="text-[9px] font-bold text-slate-500 mt-1">Las OC se cargan en CRM → Prefactura del cliente. Las anuladas no se listan.</p>
                      </div>
                    )}
                  </div>

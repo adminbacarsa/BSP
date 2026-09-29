@@ -31,18 +31,22 @@ export function personaMonthWorked(input: {
 
 export function jornadaPagada(t: any): number;
 
-export function applyBillableOnRow(m: {
+export function applyBillableOnRows(rows: Array<{
+  objectiveId?: string;
+  periodKey?: string;
   billingMode?: string;
   planPublished?: number;
   covered?: number;
   worked?: number;
   billingFixedHours?: number;
-  billingHasCap?: boolean;
-  billingAuthorizedHours?: number | null;
+  billingPurchaseOrderId?: string;
+  billingAuthorizedHours?: number;
+  billingBalanceHours?: number;
+  billingOcKind?: string;
   billable?: number;
   workedNotBilled?: number;
   billedNotWorked?: number;
-}): void;
+}>, purchaseOrders?: any[]): void;
 
 export function buildLedgerMonth(input: {
   empresaId: string;

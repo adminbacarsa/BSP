@@ -3,10 +3,14 @@ import type { ProformaDetailMode } from './proformaMode';
 import type {
   ProformaBillingRow,
   PurchaseOrder,
+  PurchaseOrderKind,
   SlaBillingFields,
   SlaBillingMode,
 } from './slaBilling.types';
 import { DEFAULT_SLA_BILLING_MODE } from './slaBilling.types';
+import { allocatePurchaseOrder, authorizedHoursForObjective, type OcDemand } from './purchaseOrderAllocation';
+
+export { authorizedHoursForObjective };
 
 export function normalizeSlaBillingMode(raw: unknown): SlaBillingMode {
   const v = String(raw ?? '').trim().toUpperCase();
@@ -62,9 +66,12 @@ export function billingModeToProformaDetailMode(mode: SlaBillingMode): 'planned'
   return mode === 'EJECUTADO' || mode === 'ORDEN_COMPRA' ? 'executed' : 'planned';
 }
 
+/** Modo de contrato forzado por el selector Detalle horas; null = Auto (cada contrato con el suyo). */
 export function proformaDetailModeToBillingHint(mode: ProformaDetailMode): SlaBillingMode | null {
   if (mode === 'planned') return 'PLANIFICADO';
   if (mode === 'executed') return 'EJECUTADO';
+  if (mode === 'fijo') return 'FIJO';
+  if (mode === 'orden_compra') return 'ORDEN_COMPRA';
   return null;
 }
 
@@ -88,8 +95,8 @@ export function billingModeLabel(mode: SlaBillingMode): string {
   }
 }
 
-function ocCoversPeriod(oc: PurchaseOrder, startYmd: string, endYmd: string): boolean {
-  if (oc.status === 'INACTIVE') return false;
+export function ocCoversPeriod(oc: PurchaseOrder, startYmd: string, endYmd: string): boolean {
+  if (oc.status === 'INACTIVE' || oc.status === 'CANCELLED') return false;
   return oc.startDate <= endYmd && oc.endDate >= startYmd;
 }
 
@@ -134,21 +141,6 @@ export function prorateFixedMonthlyHours(
   return r1Bill((fixed * valid) / periodDays);
 }
 
-/**
- * Techo de la OC para un objetivo en el período.
- * null = la OC no aplica (no hay tope). El reparto por línea vive en authorizedHoursForObjective.
- */
-export function purchaseOrderAuthorizedHours(
-  oc: PurchaseOrder | null | undefined,
-  objectiveId: string,
-  periodStartYmd: string,
-  periodEndYmd: string,
-): number | null {
-  if (!oc || !ocCoversPeriod(oc, periodStartYmd, periodEndYmd)) return null;
-  const hours = authorizedHoursForObjective(oc, objectiveId);
-  return hours == null ? null : hours;
-}
-
 export type BillableContractInput = {
   mode: SlaBillingMode;
   /** PLANIFICADO: plan publicado. */
@@ -160,17 +152,28 @@ export type BillableContractInput = {
   contractEnd?: string;
   periodStartYmd: string;
   periodEndYmd: string;
-  /** null = sin tope de OC. */
-  authorizedHours?: number | null;
+  /** ORDEN_COMPRA: la OC del contrato. Sin OC vigente se factura lo cubierto sin tope. */
+  purchaseOrder?: PurchaseOrder | null;
+  /** ORDEN_COMPRA: objetivo de esta fila dentro del reparto. */
+  objectiveId?: string;
+  /**
+   * ORDEN_COMPRA: consumo de TODOS los objetivos que usan la misma OC en el período
+   * (incluido este). El tope se reparte con allocatePurchaseOrder.
+   */
+  ocDemands?: OcDemand[];
 };
 
-/** Única fórmula de horas facturables. La usan la prefactura y el libro. */
-export function billableHoursForContract(input: BillableContractInput): {
+export type BillableContractResult = {
   billableHours: number;
   basisHours: number;
   authorizedHours?: number;
   balanceHours?: number;
-} {
+  ocKind?: PurchaseOrderKind;
+  ocFromUnassignedHours?: number;
+};
+
+/** Única fórmula de horas facturables. La usan la prefactura y el libro. */
+export function billableHoursForContract(input: BillableContractInput): BillableContractResult {
   const plan = Math.max(0, Number(input.planHours) || 0);
   const covered = Math.max(0, Number(input.coveredHours) || 0);
   if (input.mode === 'EJECUTADO') {
@@ -188,17 +191,25 @@ export function billableHoursForContract(input: BillableContractInput): {
     return { billableHours: billable, basisHours: billable };
   }
   if (input.mode === 'ORDEN_COMPRA') {
-    const auth = input.authorizedHours;
-    if (auth != null && Number.isFinite(Number(auth)) && Number(auth) >= 0) {
-      const cap = r1Bill(Number(auth));
-      return {
-        billableHours: r1Bill(Math.min(covered, cap)),
-        basisHours: r1Bill(covered),
-        authorizedHours: cap,
-        balanceHours: r1Bill(Math.max(0, cap - covered)),
-      };
+    const oc = input.purchaseOrder;
+    if (!oc || !ocCoversPeriod(oc, input.periodStartYmd, input.periodEndYmd)) {
+      return { billableHours: r1Bill(covered), basisHours: r1Bill(covered) };
     }
-    return { billableHours: r1Bill(covered), basisHours: r1Bill(covered) };
+    const oid = String(input.objectiveId || '').trim();
+    const demands = input.ocDemands?.length
+      ? input.ocDemands
+      : [{ objectiveId: oid, prestadoHours: covered }];
+    const summary = allocatePurchaseOrder(oc, demands);
+    const alloc = summary.byObjective.find((a) => a.objectiveId === oid);
+    if (!alloc) return { billableHours: r1Bill(covered), basisHours: r1Bill(covered), ocKind: summary.kind };
+    return {
+      billableHours: r1Bill(alloc.billableHours),
+      basisHours: r1Bill(covered),
+      authorizedHours: alloc.authorizedHours != null ? r1Bill(alloc.authorizedHours) : undefined,
+      balanceHours: alloc.balanceHours != null ? r1Bill(alloc.balanceHours) : undefined,
+      ocKind: summary.kind,
+      ocFromUnassignedHours: alloc.fromUnassignedHours > 0 ? r1Bill(alloc.fromUnassignedHours) : undefined,
+    };
   }
   return { billableHours: r1Bill(plan), basisHours: r1Bill(plan) };
 }
@@ -210,31 +221,6 @@ export function billableGaps(worked: number, billable: number) {
     workedNotBilled: r1Bill(Math.max(0, w - b)),
     billedNotWorked: r1Bill(Math.max(0, b - w)),
   };
-}
-
-function authorizedHoursForObjective(
-  oc: PurchaseOrder,
-  objectiveId: string,
-  positionNames?: string[],
-): number | undefined {
-  const lines = oc.lines || [];
-  if (lines.length === 0) return oc.authorizedHours;
-  const oid = String(objectiveId || '').trim();
-  const matching = lines.filter((l) => {
-    if (l.objectiveId && String(l.objectiveId).trim() !== oid) return false;
-    if (l.positionName && positionNames?.length) {
-      return positionNames.some((p) => p === l.positionName);
-    }
-    return !l.positionName || !positionNames?.length;
-  });
-  if (matching.length === 0) {
-    const objOnly = lines.filter((l) => String(l.objectiveId || '').trim() === oid);
-    if (objOnly.length === 0) return oc.authorizedHours;
-    const sum = objOnly.reduce((a, l) => a + (Number(l.authorizedHours) || 0), 0);
-    return sum > 0 ? sum : oc.authorizedHours;
-  }
-  const sum = matching.reduce((a, l) => a + (Number(l.authorizedHours) || 0), 0);
-  return sum > 0 ? sum : oc.authorizedHours;
 }
 
 export type BuildProformaBillingInput = {
@@ -256,41 +242,50 @@ export type BuildProformaBillingInput = {
   /** Horas trabajadas para el cliente. Si falta, Prestado queda en la base del modo. */
   workedByObjectiveId?: Record<string, number>;
   clientHasOpenContract?: boolean;
+  /**
+   * Modo forzado desde el selector Detalle horas de la prefactura. null/ausente = Auto:
+   * cada contrato factura con su propio modo. FIJO sin horas fijas en el contrato factura lo
+   * planificado; ORDEN_COMPRA sin OC (o con OC que no cubre el período) factura lo ejecutado sin tope.
+   */
+  modeOverride?: SlaBillingMode | null;
 };
 
 export function buildProformaBillingRows(input: BuildProformaBillingInput): ProformaBillingRow[] {
   const rows: ProformaBillingRow[] = [];
   const ocById = new Map(input.purchaseOrders.map((o) => [o.id, o]));
 
-  for (const srv of input.vigenteSlas) {
-    const billing = slaBillingFields(srv, { clientHasOpenContract: input.clientHasOpenContract });
+  const prepared = input.vigenteSlas.map((srv) => {
+    const contractBilling = slaBillingFields(srv, { clientHasOpenContract: input.clientHasOpenContract });
+    const billing = input.modeOverride ? { ...contractBilling, billingMode: input.modeOverride } : contractBilling;
     const oid = String(srv.objectiveId ?? '').trim();
     const oName = String(srv.objectiveName ?? '').trim();
     const oKey = oName.toUpperCase();
     const planH = (oid && input.plannedByObjectiveId[oid]) ?? input.plannedByObjectiveName[oKey] ?? 0;
     const coveredH = (oid && input.franjaByObjectiveId[oid]) ?? input.franjaByObjectiveName[oKey] ?? 0;
+    let oc: PurchaseOrder | undefined;
+    if (billing.billingMode === 'ORDEN_COMPRA') {
+      const ocRef = String(billing.billingPurchaseOrderId ?? '').trim();
+      const found = ocRef ? ocById.get(ocRef) : undefined;
+      if (found && ocCoversPeriod(found, input.periodStartYmd, input.periodEndYmd)) oc = found;
+    }
+    return { srv, billing, oid, oName, planH, coveredH, oc };
+  });
+
+  const ocDemands = new Map<string, OcDemand[]>();
+  for (const p of prepared) {
+    if (!p.oc) continue;
+    const list = ocDemands.get(p.oc.id) || [];
+    list.push({ objectiveId: p.oid, prestadoHours: p.coveredH });
+    ocDemands.set(p.oc.id, list);
+  }
+
+  for (const p of prepared) {
+    const { srv, billing, oid, oName, planH, coveredH, oc } = p;
     const useFranja = billing.billingMode === 'EJECUTADO' || billing.billingMode === 'ORDEN_COMPRA';
     const workedKnown = input.workedByObjectiveId;
     const prestado = workedKnown
       ? ((oid && workedKnown[oid]) || 0)
       : (useFranja ? coveredH : planH);
-
-    let ocNumber: string | undefined;
-    let ocId: string | undefined;
-    let fixedAmount: number | undefined;
-    let cap: number | null = null;
-
-    if (billing.billingMode === 'FIJO') {
-      fixedAmount = billing.billingFixedMonthlyAmount;
-    } else if (billing.billingMode === 'ORDEN_COMPRA') {
-      const ocRef = String(billing.billingPurchaseOrderId ?? '').trim();
-      const oc = ocRef ? ocById.get(ocRef) : undefined;
-      cap = purchaseOrderAuthorizedHours(oc, oid, input.periodStartYmd, input.periodEndYmd);
-      if (oc && (cap != null || ocCoversPeriod(oc, input.periodStartYmd, input.periodEndYmd))) {
-        ocNumber = oc.ocNumber;
-        ocId = oc.id;
-      }
-    }
 
     const priced = billableHoursForContract({
       mode: billing.billingMode,
@@ -301,7 +296,9 @@ export function buildProformaBillingRows(input: BuildProformaBillingInput): Prof
       contractEnd: ymdOf((srv as { endDate?: unknown }).endDate),
       periodStartYmd: input.periodStartYmd,
       periodEndYmd: input.periodEndYmd,
-      authorizedHours: cap,
+      purchaseOrder: oc ?? null,
+      objectiveId: oid,
+      ocDemands: oc ? ocDemands.get(oc.id) : undefined,
     });
 
     const prestadoR = r1Bill(prestado);
@@ -316,9 +313,11 @@ export function buildProformaBillingRows(input: BuildProformaBillingInput): Prof
       diferenciaHours: r1Bill(prestadoR - priced.billableHours),
       authorizedHours: priced.authorizedHours,
       balanceHours: priced.balanceHours,
-      fixedMonthlyAmount: fixedAmount,
-      ocNumber,
-      ocId,
+      fixedMonthlyAmount: billing.billingMode === 'FIJO' ? billing.billingFixedMonthlyAmount : undefined,
+      ocNumber: oc?.ocNumber,
+      ocId: oc?.id,
+      ocKind: priced.ocKind,
+      ocFromUnassignedHours: priced.ocFromUnassignedHours,
     });
   }
 

@@ -104,6 +104,7 @@ export declare const processEmpresaMigrateJob: import("firebase-functions/core")
     jobId: string;
 }>>;
 export declare const onAusenciaCreatedFromPortal: functions.CloudFunction<functions.firestore.QueryDocumentSnapshot>;
+export declare const scheduledArrivalNotices: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const scheduledTagTurnosArchiveTier: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const processEarlyWithdrawalCallable: functions.HttpsFunction & functions.Runnable<any>;
 export declare const revertConvocadoFalseAbsences: functions.HttpsFunction & functions.Runnable<any>;
@@ -143,3 +144,6 @@ export declare const onClientWriteHoursLedger: import("firebase-functions/core")
 export declare const scheduledHoursLedgerDirty: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const scheduledHoursLedgerNightly: import("firebase-functions/v2/scheduler").ScheduleFunction;
 export declare const rebuildHoursLedger: functions.HttpsFunction & functions.Runnable<any>;
+export declare const processHoursLedgerJob: import("firebase-functions/core").CloudFunction<import("firebase-functions/v2/firestore").FirestoreEvent<functions.Change<import("firebase-functions/v2/firestore").DocumentSnapshot>, {
+    jobId: string;
+}>>;

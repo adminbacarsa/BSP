@@ -24,7 +24,7 @@ import {
   isAdminBackupRole,
 } from './backup/backup-auth.util';
 import { createNestApp } from './main';
-import { iniciarCascadaCobertura, simularRespuestasConvocatorias, crearConvocatoriaLlegadaTarde } from './coverage/convocatoriasCobertura';
+import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
@@ -2551,98 +2551,7 @@ export const detectarAusencias = functions
     const now = admin.firestore.Timestamp.now();
     const nowMs = now.toMillis();
 
-    // â"€â"€ BLOQUE 1: alerta temprana de retenciÃ³n a T+0 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-    // Turnos que acaban de iniciar (0-10 min) sin check-in → avisar al guardia saliente
-    // Los guardias marcan a T-15, asÃ­ que T+0 sin check-in = ya estÃ¡ retrasado
-    const earlyFrom = admin.firestore.Timestamp.fromMillis(nowMs - 10 * 60 * 1000);
-    const earlyTo   = admin.firestore.Timestamp.fromMillis(nowMs);
-
-    const earlySnap = await db.collection('turnos')
-      .where('startTime', '>=', earlyFrom)
-      .where('startTime', '<=', earlyTo)
-      .get();
-
-    for (const earlyDoc of earlySnap.docs) {
-      const s = earlyDoc.data();
-      if (!cc.isEnabled(s.empresaId)) continue;
-      if (cc.isDemo(s.empresaId)) continue; // Demo genera sus propios eventos
-      if (s.draft === true || s.isPresent || s.isCompleted || s.isAbsent) continue;
-      if (skipAbsencePipelineForShift(s as Record<string, unknown>)) continue;
-      if (s.isUnassigned || !s.employeeId || s.employeeId === 'VACANTE') continue;
-      if (SKIP_CODES.has((s.code || '').toUpperCase())) continue;
-      if (SKIP_STATUSES.has(s.status || '')) continue;
-      if (s.earlyRetentionAlertAt) continue;  // ya se procesÃ³
-      if (s.lateArrivalAt || s.lateArrivalConfirmed || s.lateETA || s.notifiedAbsent) continue; // tiene aviso previo
-
-      const empId = shiftEmpresaId(s);
-      const posName = (s.positionName || '').trim().toLowerCase();
-
-      if (!s.objectiveId || !posName || !empId) continue;
-
-      // Marcar que ya se procesó la alerta temprana
-      await earlyDoc.ref.update({ earlyRetentionAlertAt: now });
-
-      // Preguntar al guardia tardío si viene antes de marcarlo ausente
-      try {
-        const empUidSnap = await db.collection('empleados').doc(s.employeeId).get();
-        const empUid: string | undefined = empUidSnap.data()?.uid;
-        await crearConvocatoriaLlegadaTarde(db, {
-          id: earlyDoc.id,
-          empresaId: empId,
-          objectiveId: s.objectiveId,
-          objectiveName: s.objectiveName || '',
-          clientId: s.clientId || '',
-          shiftCode: (s.code || '').toUpperCase(),
-          startTime: s.startTime,
-          endTime: s.endTime,
-          employeeId: s.employeeId,
-          employeeName: s.employeeName || '',
-          employeeUid: empUid,
-        });
-      } catch (e) {
-        console.warn('[detectarAusencias] Error creando LLEGADA_TARDE:', e);
-      }
-
-      // Buscar guardia saliente presente en el mismo puesto.
-      // Un ESC/REF/RET que no llegó no deja a nadie esperando relevo: es sobreturno.
-      if (isExtraNonReliefShift(s as Record<string, unknown>)) continue;
-      try {
-        const presentSnap = await db.collection('turnos')
-          .where('empresaId', '==', empId)
-          .where('objectiveId', '==', s.objectiveId)
-          .where('isPresent', '==', true)
-          .get();
-
-        const toAlert = presentSnap.docs.filter(d => {
-          const dat = d.data();
-          if (dat.isCompleted === true) return false;
-          if (isExtraNonReliefShift(dat as Record<string, unknown>)) return false;
-          return (dat.positionName || '').trim().toLowerCase() === posName
-            && dat.employeeId !== s.employeeId;
-        });
-
-        for (const retDoc of toAlert) {
-          const retData = retDoc.data();
-          const retTokens = await getEmployeeTokens(db, retData.employeeId);
-          if (retTokens.length > 0) {
-            await admin.messaging().sendEachForMulticast({
-              tokens: retTokens,
-              notification: {
-                title: 'â³ El entrante aÃºn no llegÃ³',
-                body: `${s.employeeName || 'El guardia siguiente'} no marcÃ³ presencia en ${s.objectiveName || 'el puesto'}. Espera aviso de Operaciones antes de retirarte.`,
-              },
-              webpush: {
-                notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },
-                fcmOptions: { link: '/app/' },
-              },
-            }).catch(e => console.warn('[detectarAusencias] Push alerta temprana error:', e));
-          }
-          console.log(`[detectarAusencias] Alerta temprana enviada a ${retData.employeeName} (saliente en ${s.objectiveName})`);
-        }
-      } catch (e) {
-        console.warn('[detectarAusencias] Error en alerta temprana retenciÃ³n:', e);
-      }
-    }
+    // Aviso T−5 y ¿Venís? a T: scheduledArrivalNotices (cada 1 min). Este cron queda en T+30.
 
     // â"€â"€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
     // Ventana: turnos que empezaron entre hace 8h y hace 30min
@@ -3541,6 +3450,25 @@ export const onAusenciaCreatedFromPortal = functions
  * Retención: etiqueta archiveTier en turnos fuera de hot (diario 04:15 AR).
  * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
  */
+/** T−5 «¿estás llegando?» y ¿Venís? en el minuto de T. Idempotente. CC ON + objetivo en operación. */
+export const scheduledArrivalNotices = onScheduleV2(
+  {
+    schedule: 'every 1 minutes',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 120,
+    memory: '512MiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const db = admin.firestore();
+    const cc = await loadCentroControlState(db);
+    if (!cc.anyEnabled) return;
+    const { runShiftArrivalNotices } = await import('./attendance/arrivalNotices');
+    const sent = await runShiftArrivalNotices(db, admin.firestore.Timestamp.now(), cc);
+    if (sent > 0) console.log(`[scheduledArrivalNotices] avisos=${sent}`);
+  },
+);
+
 export const scheduledTagTurnosArchiveTier = onScheduleV2(
   {
     schedule: '15 4 * * *',

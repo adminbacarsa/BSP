@@ -6,8 +6,59 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getPortalFirebase } from './portal';
 import { buildDeviceTokenDoc } from './deviceTokenDoc';
+import { ALERTAS_TURNO_CHANNEL, ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
 
 export { buildDeviceTokenDoc } from './deviceTokenDoc';
+export { ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
+
+let alertasTurnoChannelReady: Promise<void> | null = null;
+
+/**
+ * Crea el canal Android `alertas_turno` al abrir la app (también en iOS deja
+ * el handler con sonido). Idempotente. No pide permiso.
+ */
+export function ensureAlertasTurnoChannel(): Promise<void> {
+  if (Platform.OS === 'web') return Promise.resolve();
+  if (!alertasTurnoChannelReady) {
+    alertasTurnoChannelReady = (async () => {
+      const Notifications = await import('expo-notifications');
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
+      if (Platform.OS !== 'android') return;
+      await Notifications.setNotificationChannelAsync(ALERTAS_TURNO_CHANNEL_ID, {
+        name: ALERTAS_TURNO_CHANNEL.name,
+        description: ALERTAS_TURNO_CHANNEL.description,
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [...ALERTAS_TURNO_CHANNEL.vibrationPattern],
+        lightColor: '#D32F2F',
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        sound: ALERTAS_TURNO_CHANNEL.sound,
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+        audioAttributes: {
+          usage: Notifications.AndroidAudioUsage.ALARM,
+          contentType: Notifications.AndroidAudioContentType.SONIFICATION,
+          flags: {
+            enforceAudibility: true,
+            requestHardwareAudioVideoSynchronization: false,
+          },
+        },
+      });
+    })().catch((err) => {
+      alertasTurnoChannelReady = null;
+      throw err;
+    });
+  }
+  return alertasTurnoChannelReady;
+}
 
 /** Misma clave que el portal web viejo `/empleado` (localStorage). */
 export const WEB_FCM_STORAGE_KEY = 'fcm_token';
@@ -216,11 +267,21 @@ async function registerNativePush(params: {
   }
 
   if (Platform.OS === 'android') {
+    await ensureAlertasTurnoChannel();
     await Notifications.setNotificationChannelAsync('default', {
       name: 'COSP Guardia',
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#312e81',
+    });
+    await Notifications.setNotificationChannelAsync('alertas_turno', {
+      name: 'Avisos de turno',
+      description: 'Llegada, ¿Venís? y convocatorias de cobertura',
+      importance: Notifications.AndroidImportance.HIGH,
+      sound: 'default',
+      vibrationPattern: [0, 250, 250, 250],
+      lightColor: '#D32F2F',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
 

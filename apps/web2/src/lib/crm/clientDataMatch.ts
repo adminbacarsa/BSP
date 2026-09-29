@@ -118,7 +118,7 @@ export function resolveCanonicalClientIdFromList(
   if (!cid) return null;
   for (const c of clients) {
     if (c.id === cid) return c.id;
-    if (getClientIdAliases(c.id).includes(cid)) return c.id;
+    if (getClientIdAliases(c.id, c.empresaId).includes(cid)) return c.id;
   }
   return null;
 }
@@ -128,7 +128,7 @@ export function resolveCanonicalClientIdFromList(
  * si hay al menos uno, solo esos. Si no, match por objetivo/nombre del cliente.
  */
 export function selectSlaRowsForClient(slaRows: any[], client: ClientRef): any[] {
-  const aliases = new Set(getClientIdAliases(client.id));
+  const aliases = new Set(getClientIdAliases(client.id, client.empresaId));
   const byId = new Map<string, any>();
 
   for (const s of slaRows) {
@@ -165,7 +165,7 @@ export function indexSlaRowsByClients(
 export function collectClientIdAliases(clients: ClientRef[]): string[] {
   const aliasSet = new Set<string>();
   for (const c of clients) {
-    for (const a of getClientIdAliases(c.id)) aliasSet.add(a);
+    for (const a of getClientIdAliases(c.id, c.empresaId)) aliasSet.add(a);
   }
   return [...aliasSet];
 }
@@ -269,7 +269,7 @@ async function queryByClientIdAliases<T extends Record<string, unknown>>(
   mapDoc: (id: string, data: Record<string, unknown>) => T,
 ): Promise<T[]> {
   const byId = new Map<string, T>();
-  const aliases = getClientIdAliases(client.id);
+  const aliases = getClientIdAliases(client.id, client.empresaId);
   for (const cid of aliases) {
     const snap = await getDocs(query(collection(db, collectionName), where('clientId', '==', cid)));
     snap.docs.forEach((d) => {

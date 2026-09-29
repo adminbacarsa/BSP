@@ -34,6 +34,7 @@ export type {
 } from './checkIn/portalCheckIn';
 export {
   resolveCheckInUiStatus,
+  presentArrivalCopy,
   isShiftPresent,
   isCheckInRequestRejected,
 } from './checkIn/checkInUiStatus';

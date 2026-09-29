@@ -5,7 +5,8 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { sumPublishedPlanHours } from '../../packages/hours-core/src/motors/planning/publishedPlanHours.ts';
-import { sumPlannedHoursForObjective } from '../../apps/web2/src/lib/crm/plannedHours.ts';
+import { sumPlannedHoursForClient, sumPlannedHoursForObjective } from '../../apps/web2/src/lib/crm/plannedHours.ts';
+import { aggregateCrmHoursByClient } from '../../apps/web2/src/lib/crm/crmDashboardAggregate.ts';
 
 process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||= 'h2-readonly';
 process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||= 'comtroldata';
@@ -40,6 +41,18 @@ const snap = await db.collection('turnos')
 const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 const mesh = sumPublishedPlanHours(rows);
 const crm = sumPlannedHoursForObjective(rows, oid, { start, end });
+const clientRef = { id: 'nk_only', name: 'Nuevo Edificio', legalName: '', objetivos: [{ id: oid, name: 'Nuevo Edificio Corporativo' }] };
+const crmClient = sumPlannedHoursForClient(rows, clientRef as any, { start, end });
+const crmDashboard = aggregateCrmHoursByClient([clientRef as any], new Map(), rows.map((t: any) => ({ ...t, clientId: 'nk_only' })), {}, start, end, new Set(['nk_only']))['nk_only'].planned;
+const byObjective = new Map<string, any[]>();
+for (const t of rows as any[]) {
+  const id = String(t.objectiveId || '').trim();
+  byObjective.set(id, [...(byObjective.get(id) || []), t]);
+}
+const cronogramaYAnalisis = sumPublishedPlanHours(byObjective.get(oid)).hours;
+const pantallas = { planificacion: mesh.hours, cronograma: cronogramaYAnalisis, analisis: cronogramaYAnalisis, crmObjetivo: crm, crmCliente: crmClient, crmDashboard };
+console.log('PANTALLAS', JSON.stringify(pantallas));
+if (new Set(Object.values(pantallas)).size !== 1) throw new Error(`pantallas distintas ${JSON.stringify(pantallas)}`);
 const expect: Record<string, number> = {
   M: 808, M1: 440, T: 656, N: 640, D12: 96, N12: 96, SIN_CODIGO: 24, FT: 32,
 };

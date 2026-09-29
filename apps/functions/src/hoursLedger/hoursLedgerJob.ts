@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { buildChunks, claimChunks, markChunk, processedOf, type LedgerChunk } from './jobPlan';
-import { applyBillableOnRow, assignWorkedShares } from './bundledEngine';
+import { applyBillableOnRows, assignWorkedShares } from './bundledEngine';
 import { parsePeriod, personaOfMonth, rebuildObjectives, rollupStoredMonth } from './rebuildHoursLedger';
 
 const JOBS = 'hours_ledger_jobs';
@@ -337,8 +337,10 @@ async function finalizeJob(ref: FirebaseFirestore.DocumentReference) {
       const delta = r1(m.uncovered - prevUncovered);
       if (delta) m.uncoveredFaltaPlan = r1((Number(m.uncoveredFaltaPlan) || 0) + delta);
     }
-    applyBillableOnRow(m);
   }
+  const ordersSnap = await admin.firestore().collection('ordenes_compra').where('empresaId', '==', empresaId).get();
+  for (const m of objectives) if (!m.periodKey) m.periodKey = period;
+  applyBillableOnRows(objectives, ordersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
   const keys = [
     'slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside',
     'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga', 'novedadPagaOutside',
