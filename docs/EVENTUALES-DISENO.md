@@ -102,8 +102,7 @@ El alta del TXT sale de contratos `DOCUMENTADO` (papel o firma certificada adjun
 
 - `calculateLiquidationHoursStats`: `packages/hours-core/src/motors/liquidation/reportesLiquidation.ts:831-837`; bolsa 200 `:1067-1071`. API: `apps/functions/src/payroll-api/calc.ts:1-18`.
 - Los turnos M/T/N/D12/N12 y TURA/RFZ (`desgloseTura` `:1027`) ya liquidan en la empresa del turno. El hueco es el código `EV`, excluido en `:891` y en `reportesLiquidationF0.ts:792`. Para pagarlo en el mismo motor: sacar `'EV'` de esos dos returns y sumar la duración real a `desgloseTura`. `EV` sigue en `OBJECTIVE_NON_BILLABLE_CODES` (`:29`) para no vender SLA.
-- **No hay remuneración fija.** Se elimina el concepto del contrato. Presentismo, nocturnidad, extras, sábado/domingo/feriado y adicionales salen de este motor en la empresa del turno. SAC y vacaciones proporcionales **no los arma hoy el motor de horas**: al pasar el contrato a `FINALIZADO` se agregan como líneas del snapshot de liquidación de **esa** empresa (mismo `payroll` / `ajustes_liquidacion`), no como otro motor.
-- El modelo Bacar de «remuneración bruta fija a mes vencido» queda **obsleto** para el abogado: la plantilla debe remitir a la escala CCT 422/05.
+- **No hay remuneración fija.** El bruto lo calcula `calcularRemuneracionContrato` (§2.8) con la escala vigente a cada jornada. La clasificación diurna / nocturna / feriado es `getNightDuration` y `dateKeyAR` de hours-core, no una segunda regla. Esas líneas se reimprimen en la liquidación de esa empresa al `FINALIZADO`.
 
 ### 2.5 AFIP por empresa
 
@@ -118,6 +117,22 @@ El alta del TXT sale de contratos `DOCUMENTADO` (papel o firma certificada adjun
 ### 2.7 Firma
 
 - No hay firma electrónica. El bloque «FIRMAS» de RRHH es un placeholder impreso: `rrhh/index.tsx:3435-3444`. El acuse de la app se apoya en el patrón de callable con uid y timestamp de servidor (`respondEventoConvocatoria`), y **no** cambia el estado legal del contrato.
+
+### 2.8 Remuneración
+
+No hay sueldo fijo. `calcularRemuneracionContrato` (`apps/web2/src/lib/eventuales/remuneracion.mjs`) arma el bruto para la cláusula del contrato y las mismas líneas se reusan al cerrar la liquidación.
+
+Valor hora = básico mensual de la categoría / divisor. El divisor default es **200**, el techo que ya usa la liquidación (`reportesLiquidation.ts`, `SUVICO_POLICY.REST.MAX_MONTHLY_HARD`). Cada jornada usa la escala con `vigenciaDesde` ≤ esa fecha.
+
+Horas: `getNightDuration` y `dateKeyAR` de `@cosp/hours-core` (21:00–06:00 AR). El feriado es el calendario `feriados` de COSP, minuto a minuto por el día AR (una jornada que cruza medianoche puede entrar a un feriado). Sábado desde las 13, domingo y feriado suman el recargo de `SUVICO_POLICY.COST` (100 %). Si la jornada pasa las 8 h, el excedente es extra al 50 %, o al 100 % si cae en sábado >13, domingo o feriado: ese 100 % reemplaza al recargo del día, no se apila. El nocturno sí se suma aparte. El % nocturno **no está en el repo**; si la escala lo trae vacío, las horas se cuentan y el importe queda en 0 con aviso.
+
+Presentismo y adicionales (no remunerativos / viáticos) son conceptos de la escala. No entran a SAC ni a vacaciones si son viático o no remunerativos.
+
+Al cierre: SAC = remunerativo del período / 12. Vacaciones no gozadas = (días con jornada / 20) × (básico / 30), la regla de 1 día cada 20 de `SUVICO_POLICY.VACATION` para quien no llega a medio año. 20, 12 y 30 quedan en la escala por si la paritaria dice otra cosa.
+
+Colección `escalas_salariales/{convenio}_{categoria}_{vigenciaDesde}`: convenio, categoría, vigencia, básico, divisor, jornada ordinaria, recargos, presentismo, adicionales[], SAC, vacaciones, `status`. Historial = un doc por vigencia. La lee un admin; la escribe SuperAdmin en Configuración (pantalla chica, todavía no). Reglas e índice en el repo, sin publicar.
+
+Cláusula que se imprime: bruto, categoría, valor hora, desglose por concepto y la frase de que no es un monto fijo. Al cierre se agregan SAC y vacaciones.
 
 ---
 
@@ -186,7 +201,7 @@ contratos_eventuales: {
 }
 ```
 
-No hay campo de remuneración fija. La plantilla (`contratos_templates/{empresaId}_{version}`) usa el texto Bacar **sin** la cláusula de bruto fijo, remitiendo a la escala CCT, hasta que el abogado entregue el texto nuevo.
+No hay campo de monto fijo. Al armar el PDF se imprime `clausula` de §2.8: bruto calculado, desglose y la escala vigente. El abogado revisa ese texto; no vuelve el bruto pactado a mano.
 
 **Firma y acuse.** `BORRADOR` → `DOCUMENTADO` solo con el archivo de papel o la constancia de firma certificada. La app muestra ese PDF y el callable `acusarReciboContrato` escribe el acuse (`ACUSE_RECIBIDO`). No existe transición por clic a «firmado».
 
@@ -243,7 +258,7 @@ No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empre
 1. **Qué significa ACTIVO / BAJA en la planilla** (hipótesis en §4: convocable vs. fuera de la bolsa). No es el alta ARCA.
 2. Código de modalidad **14 o 102** contra la tabla ARCA/SICOSS vigente, y bajar el diseño de registro del TXT. El TXT de cada contrato tiene que informar desde (`fechaAlta`) y hasta (`fechaBaja`); la RG 5508 dice que la fecha de fin del alta inicial es solo de plazo fijo: hay que confirmarlo con el diseño de registro.
 3. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
-4. Texto nuevo del contrato sin remuneración fija (abogado).
+4. El abogado revisa la cláusula de §2.8. El monto ya sale de la escala; falta la tabla paritaria (básicos, % nocturno, presentismo, adicionales, 25 o 30 días para vacaciones).
 5. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.
 
 ---

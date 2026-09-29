@@ -19,6 +19,40 @@ export interface JornadaContrato {
   horas: number;
 }
 
+export type AdicionalEscalaTipo = 'REMUNERATIVO' | 'NO_REMUNERATIVO' | 'VIATICO';
+export type AdicionalEscalaModo = 'POR_JORNADA' | 'POR_DIA' | 'POR_HORA' | 'FIJO_PERIODO';
+
+/** Una vigencia de la paritaria. Doc id = `{convenio}_{categoria}_{vigenciaDesde}`. */
+export interface EscalaSalarial {
+  convenio: 'CCT_422_05';
+  categoria: string;
+  categoriaLabel: string;
+  vigenciaDesde: string;
+  vigenciaHasta?: string | null;
+  basicoMensual: number;
+  divisorHoras: number;
+  jornadaOrdinariaHoras: number;
+  recargos: {
+    nocturnoPct: number | null;
+    extra50Pct: number;
+    extra100Pct: number;
+    sabado13Pct: number;
+    domingoPct: number;
+    feriadoPct: number;
+  };
+  presentismo?: { pct: number; divisorDias?: number; tipo?: AdicionalEscalaTipo } | null;
+  adicionales: Array<{
+    codigo: string;
+    nombre: string;
+    tipo: AdicionalEscalaTipo;
+    modo: AdicionalEscalaModo;
+    monto: number;
+  }>;
+  sac?: { divisor: number };
+  vacaciones?: { unDiaCada: number; divisorDiasMes: number };
+  status: 'ACTIVE' | 'INACTIVE';
+}
+
 export interface ContratoEventual {
   empresaId: string;
   employeeId: string;

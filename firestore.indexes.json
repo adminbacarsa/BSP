@@ -496,6 +496,15 @@
       ]
     },
     {
+      "collectionGroup": "escalas_salariales",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "convenio", "order": "ASCENDING" },
+        { "fieldPath": "categoria", "order": "ASCENDING" },
+        { "fieldPath": "vigenciaDesde", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "eventuales_bolsa",
       "queryScope": "COLLECTION",
       "fields": [
@@ -509,7 +518,7 @@
       "fields": [
         { "fieldPath": "empresaId", "order": "ASCENDING" },
         { "fieldPath": "employeeId", "order": "ASCENDING" },
-        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+        { "fieldPath": "fechaAlta", "order": "DESCENDING" }
       ]
     },
     {
@@ -518,7 +527,7 @@
       "fields": [
         { "fieldPath": "empresaId", "order": "ASCENDING" },
         { "fieldPath": "estado", "order": "ASCENDING" },
-        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+        { "fieldPath": "fechaAlta", "order": "DESCENDING" }
       ]
     },
     {
@@ -526,7 +535,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "bolsaCuil", "order": "ASCENDING" },
-        { "fieldPath": "fechaInicio", "order": "DESCENDING" }
+        { "fieldPath": "fechaAlta", "order": "DESCENDING" }
       ]
     },
     {
