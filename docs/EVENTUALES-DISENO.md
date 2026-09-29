@@ -132,11 +132,13 @@ grupos_eventuales/{grupoId}: {
   status: 'ACTIVE' | 'INACTIVE';
 }
 
-bolsa_eventuales/{cuil}: {
+eventuales_bolsa/{cuil}: {
   grupoId, cuil, dni, nombre,
   primerIngreso?: string;
-  legajos: Array<{ empresaId, employeeId, status }>;   // uno por empresa donde tuvo alta
-  status: 'ACTIVE' | 'INACTIVE';
+  estado: 'ACTIVA' | 'BAJA' | 'EFECTIVIZADO';   // BAJA = histórico, no asignable
+  asignable: boolean;
+  riesgoEncadenamiento?: boolean;
+  legajos: Array<{ empresaId, employeeId, modalidad }>;
 }
 ```
 
@@ -158,7 +160,7 @@ credencialVencimiento?: string;
 aptoPsicofisico?: 'APTO' | 'NO_APTO';      // solo eso sale al QR
 ```
 
-Efectivizar = el legajo de **esa** empresa pasa a `INDETERMINADO` con fecha. La ficha de bolsa permanece.
+El domicilio de explotación ARCA vive en la empresa (`empresas.arcaDomicilioExplotacion`), no en el legajo. El código RNOS va en `empleados.obraSocialRnos`. El grupo default es `bacarsa` + `grupos_bacar_sa` (`grupos_eventuales/bacar`).
 
 ### 3.3 Contrato (uno por período y por empresa)
 
@@ -190,6 +192,18 @@ No hay campo de remuneración fija. La plantilla (`contratos_templates/{empresaI
 3. **Encadenamiento:** al guardar un contrato, si en la ventana configurada se supera la cantidad de contratos, de días, o hay patrón semanal fijo con el mismo CUIL en el grupo, el contrato queda marcado `riesgoEncadenamiento` y la UI sugiere efectivizar. No impide guardar (la decisión es de RRHH), pero entra al reporte de riesgo.
 4. **Cierre:** `FINALIZADO` dispara la liquidación final de esa empresa (SAC y vacaciones proporcionales, §2.4) y habilita el TXT de baja ARCA.
 
+### 3.7 Efectivización (art. 90)
+
+Pasar a planta permanente es en la **misma empresa** y el **mismo legajo**. Función pura `planEfectivizacion` (`apps/web2/src/lib/eventuales/efectivizacion.mjs`):
+
+- `modalidad: INDETERMINADO` y `fechaEfectivizacion`.
+- `startDate` queda en el **1º ingreso** (la antigüedad no se reinicia).
+- Los contratos eventuales abiertos de esa empresa pasan a `FINALIZADO`. Si estaban en `ALTA_ARCA` o `VIGENTE`, queda pendiente la baja ARCA de ese contrato.
+- Sale de la bolsa de esa empresa. Si no le queda un legajo eventual en otra empresa del grupo, la ficha pasa a `EFECTIVIZADO` y deja de ser asignable. Si sigue eventual en la otra, solo se quita este vínculo.
+- ARCA: modificación de modalidad **pendiente** (no hay web service, §1.1). No se inventa el código 14/102.
+
+Quien ya es `INDETERMINADO` no se efectiviza de nuevo.
+
 Reglas Firestore: lectura del contrato = admin de esa empresa o el guardia dueño del legajo. Escritura de `estado`, `documento`, `acuse` y `arca` solo por callable. La bolsa: lectura admin de cualquier empresa del grupo; escritura solo callable.
 
 Índices: `contratos_eventuales` (empresaId, employeeId, fechaInicio) · (empresaId, estado, fechaInicio) · (bolsaCuil, fechaInicio). El cruce de turnos del grupo lo hace el callable, no una query cruzada desde el cliente.
@@ -207,14 +221,16 @@ Se extiende `credenciales_publicas/{empDocId}` (un doc por legajo / empresa pres
 
 ---
 
-## 4. Migración de la planilla (76 personas)
+## 4. Migración de la planilla (Fase B, solo dry-run)
 
-Script `scripts/import-eventuales-planilla.mjs`, dryRun por defecto, `--apply` solo con OK de Mauro.
+Script `scripts/import-eventuales-planilla.mjs`. **No escribe.** `--apply` termina sin tocar Firestore hasta un OK de Mauro. Match por CUIL con dígito verificador contra `empleados` de `bacarsa` y `grupos_bacar_sa`. El detalle con datos personales va a `scripts/out/` (gitignored).
 
-1. Match por CUIL normalizado (`apps/functions/src/afip/normalizeCuit.ts`) contra la bolsa y contra `empleados` de las empresas del grupo. No se duplica la ficha ni el legajo.
-2. Sin match: se crea la ficha de bolsa y el legajo en la empresa dueña de la planilla (Bacar), `importSource: 'PLANILLA_SP'`.
-3. ACTIVO → `modalidad: EVENTUAL`. EFECTIVIZADOS → `INDETERMINADO` + fecha. BAJA → `EVENTUAL` inactivo + `eventualUltimaBaja`. GOLONDRINA → igual que ACTIVO **más** `riesgoEncadenamiento` (no es una modalidad).
-4. Un contrato sintético `FINALIZADO` por el período que la planilla conoce (1º ingreso → efectivización o baja), sin documento y sin inventar eventos. El dryRun lista matcheados, nuevos y CUIL ambiguos.
+| Estado en la planilla | Qué hace |
+|------------------------|----------|
+| 1. ACTIVO | Entra a `eventuales_bolsa` (ACTIVA) y el legajo queda `EVENTUAL`. Si el CUIL no existe, el legajo nuevo sería de `bacarsa`. Si existe, no se duplica. |
+| 2. EFECTIVIZADOS | **No entran a la bolsa.** Solo se informa si el legajo existe y si ya tiene `modalidad: INDETERMINADO` con fecha de efectivización. |
+| 3. BAJA | Bolsa en estado `BAJA`, histórico, no asignable. No crea legajo. |
+| 4. GOLONDRINA | Bolsa asignable con `riesgoEncadenamiento`. No crea legajo. |
 
 ---
 
@@ -231,7 +247,7 @@ Script `scripts/import-eventuales-planilla.mjs`, dryRun por defecto, `--apply` s
 
 | Fase | Alcance | Tamaño | Riesgo |
 |------|---------|--------|--------|
-| **B — Bolsa, legajo, contrato, migración** | `grupos_eventuales`, `bolsa_eventuales`, `modalidad` y campos 9236/RNOS en el legajo, `contratos_eventuales` con causa obligatoria y sin monto fijo, reglas e índices, import dryRun. Campos ARCA de empresa (`arcaDomicilioExplotacion`; `arcaModalidadEventual` vacío hasta verificar 14/102). | **M** (~1 semana) | CUIL sucio en la planilla. No inventar el código de modalidad. |
+| **B — Bolsa, legajo, contrato, migración** | Hecho en datos, sin UI: `eventuales_bolsa`, `grupos_eventuales`, `modalidad` + historial + RNOS en el legajo, `arcaDomicilioExplotacion` en la empresa, `contratos_eventuales` (causa obligatoria; estado/firma/ARCA solo servidor), reglas e índices **sin publicar**, import dry-run, `planEfectivizacion`. | **M** | CUIL sucio. Código 14/102 sin verificar. `--apply` sigue apagado. |
 | **C — UI RRHH** | Tab de la bolsa del grupo, wizard con causa, alerta de encadenamiento y sugerencia de efectivizar, reporte de riesgo, PDF de contrato remitiendo al CCT (plantilla provisoria hasta el texto del abogado). | **M** (~1 semana) | El texto provisorio no se usa como contrato real hasta el ok del abogado. |
 | **D — Acuse, QR, puertas** | Adjunto papel o firma certificada. Acuse en la app (no firma). QR del §0.5.4. Bloqueo al asignar (§0.4 + contrato de esa empresa) en Planificación, CC, eventos y `applyCoverage`. Bloqueo de fichada sin `ALTA_ARCA` de esa empresa. | **L** (~2 semanas) | Tocar Planificación, CC y fichada exige E2E de emulador. OTP/biometría depende de lo que el dispositivo ya sepa hacer. |
 | **E — ARCA y cierre en el motor único** | TXT de alta (7 campos) y de baja, por CUIT de empresa, confirmación manual. `TRABAJO_F931` solo con certificado propio. Sacar `EV` del early-return del motor único (§2.4). Al `FINALIZADO`, líneas de SAC y vacaciones proporcionales en la liquidación de esa empresa. | **M** (~1 semana) | Sin el diseño de registro no hay generador. Incluir `EV` paga ese código a cualquier guardia, no solo a eventuales. El cert de Bacar no sale de `bacarsa` / `pruebas_sa`. |

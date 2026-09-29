@@ -30,6 +30,10 @@ export interface Empresa {
   isTrainingEmpresa?: boolean;
   /** Maps JavaScript API — restringir por HTTP referrer en Google Cloud. */
   googleMapsApiKey?: string;
+  /** Domicilio de explotación declarado en ARCA (alta RG 5508). No es el del objetivo. */
+  arcaDomicilioExplotacion?: string;
+  /** Código de modalidad eventual ARCA/SICOSS. Vacío hasta verificar 14 o 102. */
+  arcaModalidadEventual?: string;
 }
 
 interface EmpresaContextType {
