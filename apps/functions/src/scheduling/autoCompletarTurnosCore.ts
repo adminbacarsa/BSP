@@ -180,7 +180,7 @@ export async function runAutoCompletarTurnosPass(
   passOpts?: AutoCompletarTurnosPassOpts,
 ): Promise<AutoCompletePassResult> {
   const nowMs = now.toMillis();
-  const cutoff = Timestamp.fromMillis(nowMs - 5 * 60 * 1000);
+  const cutoff = Timestamp.fromMillis(nowMs);
   const onlyOutId = String(passOpts?.onlyOutgoingShiftId || '').trim();
   const dryRun = passOpts?.dryRun === true;
 
@@ -383,22 +383,6 @@ export async function runAutoCompletarTurnosPass(
       (shift.relieveScheduledAt as { toMillis?: () => number } | undefined)?.toMillis?.()
       ?? (relievedBy ? endTimeMs : 0);
 
-    if (relievedBy && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
-      const incomingName = String(shift.relievedByName || 'relevo').trim();
-      close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO');
-      const outEmpId = String(shift.employeeId || '').trim();
-      if (outEmpId && !ccOff) {
-        relevoFinishNotifs.push({
-          outEmpId,
-          outDocId: docSnap.id,
-          incomingName,
-          objectiveName: String(shift.objectiveName || ''),
-          empresaId: ctx.shiftEmpresaId(shift) || null,
-        });
-      }
-      continue;
-    }
-
     // Turnos que pasaron el tope hace rato (cron caído / abiertos de días anteriores).
     if (capAtMs > 0 && nowMs >= capAtMs + STALE_CAP_GRACE_MS) {
       const retained = shift.isRetention === true;
@@ -454,6 +438,29 @@ export async function runAutoCompletarTurnosPass(
         && ctx.sameTenantShift(shift, d.data())
         && !isOpsCoverageHoursOnSourceDoc(d.data() as Record<string, unknown>),
     );
+
+    // El relevo programado solo cierra si el entrante sigue siendo de la serie y
+    // arranca en la ventana del fin. Un compañero del mismo horario (M junto a M2)
+    // no puede cerrar al saliente a las 15:00.
+    const programmedIncoming = relievedBy
+      ? relieveDocs.find((d) => String(d.data().employeeId || '').trim() === relievedBy
+        && isValidReliefForOutgoing(d.data(), endTimeMs, shift))
+      : undefined;
+    if (programmedIncoming && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
+      const incomingName = String(shift.relievedByName || programmedIncoming.data().employeeName || 'relevo').trim();
+      close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO');
+      const outEmpId = String(shift.employeeId || '').trim();
+      if (outEmpId && !ccOff) {
+        relevoFinishNotifs.push({
+          outEmpId,
+          outDocId: docSnap.id,
+          incomingName,
+          objectiveName: String(shift.objectiveName || ''),
+          empresaId: ctx.shiftEmpresaId(shift) || null,
+        });
+      }
+      continue;
+    }
 
     // Franja siguiente con menos lugares: se quedan los de menos tiempo en el puesto;
     // el resto se va a su horario, sin retención y sin tomar el relevo de otro.
@@ -589,7 +596,8 @@ export async function runAutoCompletarTurnosPass(
             retentionReason: 'ESPERA_CUBRIDOR',
             retentionKind: 'AUSENCIA_RELEVO',
             retentionAbsenceShiftId: relieveAbsent.id,
-            autoRetentionAt: Timestamp.fromMillis(Math.max(nowMs, endTimeMs)),
+            retentionStartedAt: Timestamp.fromMillis(endTimeMs),
+            autoRetentionAt: Timestamp.fromMillis(endTimeMs),
           });
           actions.push(describe(docSnap.id, shift, 'RETAIN_QUIET', 'ESPERA_CUBRIDOR', { gapShiftId: relieveAbsent.id }));
         } else {
@@ -608,7 +616,8 @@ export async function runAutoCompletarTurnosPass(
           isRetention: true,
           retentionReason: `RELEVO_NO_PRESENTADO: ${pendingData.employeeName || 'relevo'} no se presentó`,
           retentionAbsenceShiftId: relievePending.id,
-          autoRetentionAt: Timestamp.fromMillis(Math.max(nowMs, endTimeMs)),
+          retentionStartedAt: Timestamp.fromMillis(endTimeMs),
+          autoRetentionAt: Timestamp.fromMillis(endTimeMs),
         });
         actions.push(describe(docSnap.id, shift, 'RETAIN', 'RELEVO_NO_PRESENTADO', { gapShiftId: relievePending.id }));
       }
@@ -627,7 +636,8 @@ export async function runAutoCompletarTurnosPass(
       update(docSnap.ref, {
         isRetention: true,
         retentionReason: 'SIN_RELEVO_CONTINUIDAD',
-        autoRetentionAt: Timestamp.fromMillis(Math.max(nowMs, endTimeMs)),
+        retentionStartedAt: Timestamp.fromMillis(endTimeMs),
+        autoRetentionAt: Timestamp.fromMillis(endTimeMs),
       });
       actions.push(describe(docSnap.id, shift, 'RETAIN', 'SIN_RELEVO_CONTINUIDAD'));
       alertedNoRelief++;

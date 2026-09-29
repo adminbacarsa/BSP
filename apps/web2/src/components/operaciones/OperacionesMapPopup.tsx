@@ -238,7 +238,12 @@ export function OperacionesMapPopup({
               statusLabel = 'MAN INDEF';
               statusColor = '#d97706';
             } else if (shift.isRetention) {
-              statusLabel = 'RECARGO';
+              const mins = Number(shift.retentionMinutes) || 0;
+              statusLabel = mins > 0 ? `RETENIDO +${mins}min` : 'RETENIDO';
+              statusColor = '#ea580c';
+            } else if (shift.isPendingClose) {
+              const mins = Number(shift.retentionMinutes) || 0;
+              statusLabel = mins > 0 ? `ESPERANDO RELEVO +${mins}min` : 'ESPERANDO RELEVO';
               statusColor = '#ea580c';
             } else if (shift.isPresent) {
               statusLabel = 'ACTIVO';
