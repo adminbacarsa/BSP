@@ -1976,8 +1976,8 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   );
 
   const catalogClientGroups = useMemo(
-    () => buildServiciosCatalogClientGroups(objectiveCatalog, getServiceHoursForKpiMonth),
-    [objectiveCatalog, getServiceHoursForKpiMonth],
+    () => buildServiciosCatalogClientGroups(objectiveCatalog, getServiceHoursForKpiMonth, 'alpha', srvCatalogFilter),
+    [objectiveCatalog, getServiceHoursForKpiMonth, srvCatalogFilter],
   );
 
   const clientGroups = catalogClientGroups;
@@ -2307,6 +2307,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] font-mono font-bold text-slate-400">
                                       {currentSrv.startDate} → {currentSrv.endDate}
                                     </span>
+                                    {isClosedRow && row.hasSlaInMonth && (
+                                      <span className="text-[9px] font-bold text-slate-400">Cerrado del mes · el objetivo sigue en operación</span>
+                                    )}
                                     {row.hasServiceWithoutOperation && (
                                       <span className="text-[9px] font-black text-amber-600 uppercase">Sin cronograma publicado</span>
                                     )}
