@@ -20,6 +20,9 @@ export type PortalInboxNormalized = {
   startTime?: unknown;
   endTime?: unknown;
   convocatoriaId?: string;
+  response?: string;
+  respondedAt?: unknown;
+  timeoutAt?: unknown;
   protocoloStep?: string;
   solicitudId?: string;
   eventoId?: string;
@@ -58,6 +61,9 @@ export function normalizePortalInboxItem(
     startTime: raw.startTime ?? raw.shiftStartTime ?? undefined,
     endTime: raw.endTime ?? raw.shiftEndTime ?? undefined,
     convocatoriaId: asOptionalString(raw.convocatoriaId),
+    response: asOptionalString(raw.response),
+    respondedAt: raw.respondedAt,
+    timeoutAt: raw.timeoutAt,
     protocoloStep: asOptionalString(raw.protocolStep ?? raw.protocoloStep),
     solicitudId: asOptionalString(raw.solicitudId),
     eventoId: asOptionalString(raw.eventoId),

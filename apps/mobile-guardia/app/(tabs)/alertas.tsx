@@ -10,6 +10,13 @@ import { radius, spacing } from '../../src/theme/tokens';
 import { useTheme } from '../../src/theme/ThemeContext';
 import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { usePortalInbox, type PortalInboxItem } from '../../src/hooks/usePortalInbox';
+import { useClockNow } from '../../src/hooks/useClockNow';
+import {
+  alertaCuentaPorConfirmar,
+  alertaCuentaSinLeer,
+  resolveAlertaCard,
+  type AlertaLocalKind,
+} from '../../src/lib/alertaCardState';
 import {
   alertNeedsAck,
   notificationActionLabel,
@@ -59,6 +66,37 @@ function formatShiftWindow(n: PortalInboxItem): string | null {
   return parts.join(' · ');
 }
 
+type LocalReply = { kind: AlertaLocalKind; atMs: number };
+
+function cardInput(
+  n: PortalInboxItem,
+  coberturaById: Record<string, { status?: string; timeoutAt?: unknown; endTime?: unknown; cancelReason?: string; respondedAt?: unknown; cancelledAt?: unknown }>,
+  local: LocalReply | undefined,
+  nowMs: number,
+) {
+  return {
+    type: n.type,
+    read: n.read,
+    needsAck: alertNeedsAck(n),
+    ackedAt: n.ackedAt,
+    response: n.response,
+    respondedAt: n.respondedAt,
+    endTime: n.endTime,
+    timeoutAt: n.timeoutAt,
+    conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] ?? null : null,
+    local: local ?? null,
+    nowMs,
+  };
+}
+
+function staleLocalKind(message: string): AlertaLocalKind {
+  const m = message.toLowerCase();
+  if (m.includes('cubiert')) return 'cubierta';
+  if (m.includes('rechaz')) return 'REJECTED';
+  if (m.includes('cancel')) return 'cancelada';
+  return 'vencida';
+}
+
 function hrefFromRoute(route: string): Href {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
   if (route === '/(tabs)/agenda') return appRoutes.agenda;
@@ -84,8 +122,10 @@ function AlertasScreenContent() {
   const { user, previewEmpDocId, isPreviewMode, isSuperAdmin } = usePortalAuth();
   const { palette } = useTheme();
   const { contentMaxWidth, horizontalPadding, isCompact } = useResponsiveLayout();
-  const { items, loading, unreadCount, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
+  const { items, loading, coberturaById, markRead, acknowledge, respond, dismiss, markAllUnreadRead, dismissAll } =
     usePortalInbox(user, previewEmpDocId);
+  const now = useClockNow(15_000);
+  const [localReply, setLocalReply] = useState<Record<string, LocalReply>>({});
   const showTestPush = isEmulatorMode() || isPreviewMode || isSuperAdmin;
   const [testBusy, setTestBusy] = useState(false);
   const [markAllBusy, setMarkAllBusy] = useState(false);
@@ -115,7 +155,32 @@ function AlertasScreenContent() {
     if (page > totalPages - 1) setPage(Math.max(0, totalPages - 1));
   }, [page, totalPages]);
 
-  const pendingAck = useMemo(() => items.filter((n) => alertNeedsAck(n)).length, [items]);
+  const attention = useMemo(() => {
+    const nowMs = now.getTime();
+    let unread = 0;
+    let confirm = 0;
+    for (const n of items) {
+      const input = cardInput(n, coberturaById, localReply[n.id], nowMs);
+      if (alertaCuentaSinLeer(input)) unread += 1;
+      if (alertaCuentaPorConfirmar(input)) confirm += 1;
+    }
+    return { unread, confirm };
+  }, [items, coberturaById, localReply, now]);
+  const unreadCount = attention.unread;
+  const pendingAck = attention.confirm;
+
+  const pinLocal = useCallback((id: string, kind: AlertaLocalKind) => {
+    setLocalReply((prev) => ({ ...prev, [id]: { kind, atMs: Date.now() } }));
+  }, []);
+
+  const clearLocal = useCallback((id: string) => {
+    setLocalReply((prev) => {
+      if (!prev[id]) return prev;
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  }, []);
 
   const sendTestPush = useCallback(async () => {
     if (!user) return;
@@ -214,16 +279,18 @@ function AlertasScreenContent() {
 
   const onAck = useCallback(
     async (n: PortalInboxItem) => {
+      pinLocal(n.id, 'ACK');
       setBusyId(n.id);
       try {
         await acknowledge(n.id);
       } catch {
+        clearLocal(n.id);
         appAlert('Error', 'No se pudo registrar el acuse. Reintentá.');
       } finally {
         setBusyId(null);
       }
     },
-    [acknowledge],
+    [acknowledge, pinLocal, clearLocal],
   );
 
   const onRespond = useCallback(
@@ -243,10 +310,12 @@ function AlertasScreenContent() {
             onPress: () => {
               void (async () => {
                 if (busyId) return;
+                pinLocal(n.id, response === 'ACCEPTED' ? 'ACCEPTED' : 'REJECTED');
                 setBusyId(n.id);
                 try {
                   const convId = String(n.convocatoriaId || '').trim();
                   if (!convId) {
+                    clearLocal(n.id);
                     appAlert(
                       'Cobertura',
                       'No encontramos el id de la convocatoria. Abrí Hoy y respondé desde el banner.',
@@ -262,7 +331,7 @@ function AlertasScreenContent() {
                     try {
                       await respond(n.id, response);
                     } catch {
-                      await dismiss(n.id).catch(() => {});
+                      /* la tarjeta ya muestra el resultado */
                     }
                     const feedback = buildCoberturaRespondFeedback(response, {
                       clientName: n.clientName,
@@ -288,9 +357,12 @@ function AlertasScreenContent() {
                   }
                   appAlert('Cobertura', result.message);
                   if (result.dismissInbox) {
-                    await dismiss(n.id).catch(() => {});
+                    pinLocal(n.id, staleLocalKind(result.message));
+                  } else {
+                    clearLocal(n.id);
                   }
                 } catch {
+                  clearLocal(n.id);
                   appAlert('Error', 'No se pudo enviar la respuesta. Reintentá.');
                 } finally {
                   setBusyId(null);
@@ -301,7 +373,7 @@ function AlertasScreenContent() {
         ],
       );
     },
-    [respond, dismiss, busyId, router],
+    [respond, busyId, router, pinLocal, clearLocal],
   );
 
   const onDismiss = useCallback(
@@ -482,8 +554,14 @@ function AlertasScreenContent() {
           const isCoverage = COVERAGE_RESPONSE_TYPES.has(String(n.type ?? '').toUpperCase());
           const busy = busyId === n.id;
           const route = routeFromNotificationData({ type: n.type });
-          const settled = !needsAck && !isCoverage && (n.read || !!n.ackedAt);
+          const card = resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
+          const settled = card.closed || (!needsAck && !isCoverage && (n.read || !!n.ackedAt));
           const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
+          const resultLine = card.closed
+            ? card.atMs
+              ? `${card.label} · ${formatDateTimeAr(new Date(card.atMs))}`
+              : card.label
+            : null;
           const detailLines = portalInboxDetailLines(n);
           const shiftWindow = formatShiftWindow(n);
 
@@ -501,7 +579,7 @@ function AlertasScreenContent() {
                 <View style={styles.compactTextCol}>
                   <Text style={[styles.domain, { color: palette.onSurfaceMuted }]}>
                     {notificationDomainLabel(n.type)}
-                    {n.ackedAt ? ' · Enterado' : ' · Leída'}
+                    {resultLine ? ` · ${resultLine}` : n.ackedAt ? ' · Enterado' : ' · Leída'}
                   </Text>
                   <Text
                     style={[styles.inboxTitleCompact, { color: palette.onSurface }]}
@@ -545,7 +623,7 @@ function AlertasScreenContent() {
                 <Text style={[styles.domain, { color: isCoverage ? palette.error : palette.primary }]}>
                   {notificationDomainLabel(n.type)}
                 </Text>
-                {isCoverage ? (
+                {card.showCoverageButtons ? (
                   <Text style={[styles.nueva, { color: palette.error }]}>Responder</Text>
                 ) : needsAck ? (
                   <Text style={[styles.nueva, { color: palette.warning }]}>Confirmar</Text>
@@ -579,7 +657,7 @@ function AlertasScreenContent() {
                 </View>
               ) : null}
               <View style={styles.rowBtns}>
-                {isCoverage ? (
+                {card.showCoverageButtons ? (
                   <>
                     <CommandButton
                       label={busy ? 'Enviando…' : 'Aceptar'}
@@ -598,7 +676,7 @@ function AlertasScreenContent() {
                       style={styles.btnFlex}
                     />
                   </>
-                ) : needsAck ? (
+                ) : card.showAckButton ? (
                   <CommandButton
                     label={busy ? '…' : 'Me enteré'}
                     variant="success"

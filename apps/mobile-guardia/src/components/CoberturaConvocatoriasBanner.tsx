@@ -8,6 +8,7 @@ import {
   convocatoriaCoberturaTypeLabel,
   type ConvocatoriaCobertura,
 } from '../lib/convocatoriasCobertura';
+import { resolveAlertaCard } from '../lib/alertaCardState';
 
 type Props = {
   convocatorias: ConvocatoriaCobertura[];
@@ -72,6 +73,13 @@ export function CoberturaConvocatoriasBanner({
         const horario = start && end ? `${start} – ${end}` : start || 'Horario a confirmar';
         const remain = remainingLabel(c.timeoutAt, now);
         const highlight = highlightedId === c.id;
+        const card = resolveAlertaCard({
+          type: 'CONVOCATORIA_COBERTURA',
+          conv: c,
+          endTime: c.endTime,
+          timeoutAt: c.timeoutAt,
+          nowMs: now.getTime(),
+        });
 
         return (
           <View
@@ -100,24 +108,30 @@ export function CoberturaConvocatoriasBanner({
               {horario}
               {c.shiftCode ? ` · ${String(c.shiftCode).toUpperCase()}` : ''}
             </Text>
-            <View style={styles.rowBtns}>
-              <CommandButton
-                label={busy ? 'Enviando…' : 'Acepto'}
-                variant="success"
-                onPress={() => onAccept(c)}
-                disabled={!!busyId}
-                loading={busy}
-                style={styles.btnFlex}
-              />
-              <CommandButton
-                label={busy ? 'Enviando…' : 'No puedo'}
-                variant="secondary"
-                onPress={() => onReject(c)}
-                disabled={!!busyId}
-                loading={busy}
-                style={styles.btnFlex}
-              />
-            </View>
+            {card.showCoverageButtons ? (
+              <View style={styles.rowBtns}>
+                <CommandButton
+                  label={busy ? 'Enviando…' : 'Acepto'}
+                  variant="success"
+                  onPress={() => onAccept(c)}
+                  disabled={!!busyId}
+                  loading={busy}
+                  style={styles.btnFlex}
+                />
+                <CommandButton
+                  label={busy ? 'Enviando…' : 'No puedo'}
+                  variant="secondary"
+                  onPress={() => onReject(c)}
+                  disabled={!!busyId}
+                  loading={busy}
+                  style={styles.btnFlex}
+                />
+              </View>
+            ) : (
+              <Text style={[styles.sub, { color: palette.onSurface, fontWeight: '800' }]}>
+                {card.label || 'Vencida'}
+              </Text>
+            )}
           </View>
         );
       })}

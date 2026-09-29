@@ -17,6 +17,7 @@ import type { User } from 'firebase/auth';
 import { normalizePortalInboxItem, type PortalInboxNormalized } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { isEmployeeFacingAlert, alertNeedsAck } from '../lib/notificationNavigation';
+import { alertaCuentaSinLeer, type AlertaConvocatoriaVista } from '../lib/alertaCardState';
 import { usePortalAuth } from '../context/PortalAuthContext';
 
 export type PortalInboxItem = PortalInboxNormalized;
@@ -61,20 +62,25 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
   const { db } = getPortalFirebase();
   const { deviceVerified } = usePortalAuth();
   const [items, setItems] = useState<PortalInboxItem[]>([]);
+  const [coberturaById, setCoberturaById] = useState<Record<string, AlertaConvocatoriaVista>>({});
   const [loading, setLoading] = useState(true);
   const bucketsRef = useRef<Record<string, PortalInboxItem[]>>({});
+  const convBucketsRef = useRef<Record<string, Array<AlertaConvocatoriaVista & { id: string }>>>({});
   const fallbackRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user || deviceVerified !== true) {
       bucketsRef.current = {};
+      convBucketsRef.current = {};
       setItems([]);
+      setCoberturaById({});
       setLoading(deviceVerified === null && !!user);
       return;
     }
 
     setLoading(true);
     bucketsRef.current = {};
+    convBucketsRef.current = {};
     fallbackRef.current = new Set();
     const unsubs: Array<() => void> = [];
     const previewId = previewEmpDocId?.trim() || null;
@@ -110,7 +116,43 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
       unsubs.push(unsub);
     };
 
+    const publishConv = () => {
+      const map: Record<string, AlertaConvocatoriaVista> = {};
+      for (const list of Object.values(convBucketsRef.current)) {
+        for (const row of list) map[row.id] = row;
+      }
+      setCoberturaById(map);
+    };
+
+    const listenConv = (key: string, field: 'candidateEmployeeId' | 'candidateUid', value: string) => {
+      const unsub = onSnapshot(
+        query(collection(db, 'convocatorias_cobertura'), where(field, '==', value)),
+        (snap) => {
+          convBucketsRef.current[key] = snap.docs.map((d) => {
+            const data = d.data() as Record<string, unknown>;
+            return {
+              id: d.id,
+              status: typeof data.status === 'string' ? data.status : undefined,
+              timeoutAt: data.timeoutAt,
+              endTime: data.endTime,
+              cancelReason: typeof data.cancelReason === 'string' ? data.cancelReason : undefined,
+              respondedAt: data.respondedAt,
+              cancelledAt: data.cancelledAt,
+            };
+          });
+          publishConv();
+        },
+        (err) => {
+          console.warn('[usePortalInbox] convocatorias', err);
+          convBucketsRef.current[key] = [];
+          publishConv();
+        },
+      );
+      unsubs.push(unsub);
+    };
+
     const registerEmp = (empId: string) => {
+      listenConv(`conv-emp:${empId}`, 'candidateEmployeeId', empId);
       register(
         `emp:${empId}`,
         query(
@@ -127,6 +169,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     // Preview: solo legajo (evita vacantes/ops del SuperAdmin).
     if (previewId) {
       registerEmp(previewId);
+      listenConv(`conv-uid:${user.uid}`, 'candidateUid', user.uid);
       return () => {
         unsubs.forEach((u) => u());
       };
@@ -142,6 +185,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
       ),
       () => query(collection(db, 'user_notifications'), where('uid', '==', user.uid), limit(40)),
     );
+    listenConv(`conv-uid:${user.uid}`, 'candidateUid', user.uid);
 
     (async () => {
       try {
@@ -169,8 +213,22 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
   }, [user?.uid, previewEmpDocId, db, deviceVerified]);
 
   const unreadCount = useMemo(
-    () => items.filter((n) => !n.read || alertNeedsAck(n)).length,
-    [items],
+    () =>
+      items.filter((n) =>
+        alertaCuentaSinLeer({
+          type: n.type,
+          read: n.read,
+          needsAck: alertNeedsAck(n),
+          ackedAt: n.ackedAt,
+          response: n.response,
+          respondedAt: n.respondedAt,
+          endTime: n.endTime,
+          timeoutAt: n.timeoutAt,
+          conv: n.convocatoriaId ? coberturaById[n.convocatoriaId] : null,
+          nowMs: Date.now(),
+        }),
+      ).length,
+    [items, coberturaById],
   );
 
   const markRead = async (id: string) => {
@@ -207,8 +265,6 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
         respondedAt: serverTimestamp(),
         read: true,
         readAt: serverTimestamp(),
-        dismissed: true,
-        status: 'INACTIVE',
       });
     } catch (e) {
       console.warn('[usePortalInbox] respond', e);
@@ -285,6 +341,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     items,
     loading,
     unreadCount,
+    coberturaById,
     markRead,
     acknowledge,
     respond,
