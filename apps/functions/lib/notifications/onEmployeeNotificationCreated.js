@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onEmployeeNotificationCreated = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const shiftAlertFcm_1 = require("./shiftAlertFcm");
 const INBOX_NEEDS_FCM = new Set([
     'CONVOCATORIA_EVENTO',
     'EVENTO_CONFIRMADO',
@@ -15,6 +16,8 @@ const INBOX_NEEDS_FCM = new Set([
     'VACANTE_PLANIFICACION',
     'VACANTE_OPERACIONES',
     'CONVOCATORIA_COBERTURA',
+    'AVISO_TURNO_PROXIMO',
+    'AVISO_ENTRANTE_SIN_FICHAR',
     'DEVICE_REGISTRATION_REJECTED',
     'DEVICE_REGISTRATION_APPROVED',
 ]);
@@ -82,6 +85,8 @@ exports.onEmployeeNotificationCreated = functions
                         : type === 'DEVICE_REGISTRATION_REJECTED' || type === 'DEVICE_REGISTRATION_APPROVED'
                             ? '/app/device-blocked'
                             : '/app/';
+    const shiftAlert = (0, shiftAlertFcm_1.isShiftAlertFcmType)(type);
+    const platform = shiftAlert ? (0, shiftAlertFcm_1.shiftAlertPlatformConfig)() : null;
     try {
         const result = await admin.messaging().sendEachForMulticast({
             notification: { title, body },
@@ -95,11 +100,13 @@ exports.onEmployeeNotificationCreated = functions
                 solicitudId: data.solicitudId ? String(data.solicitudId) : '',
                 servicioId: data.servicioId ? String(data.servicioId) : '',
             },
-            android: {
+            android: platform?.android ?? {
                 priority: 'high',
                 notification: { channelId: 'default' },
             },
+            ...(platform ? { apns: platform.apns } : {}),
             webpush: {
+                headers: shiftAlert ? { Urgency: 'high' } : undefined,
                 notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: true },
                 fcmOptions: { link },
             },

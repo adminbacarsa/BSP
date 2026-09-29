@@ -24,6 +24,9 @@ const config: ExpoConfig = {
   ios: {
     supportsTablet: true,
     bundleIdentifier: 'com.cosp.guardia',
+    entitlements: {
+      'com.apple.developer.usernotifications.time-sensitive': true,
+    },
     infoPlist: {
       NSLocationWhenInUseUsageDescription:
         'COSP Guardia usa tu ubicación para validar la fichada en el puesto de trabajo.',

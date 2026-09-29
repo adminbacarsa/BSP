@@ -40,7 +40,7 @@ async function crearNotifConvocatoria(db, conv) {
         ? conv.endTime.toDate()
         : null;
     const horaInicio = startDate
-        ? startDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
+        ? startDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: tz })
         : '--:--';
     const horaFin = endDate
         ? endDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
@@ -61,10 +61,11 @@ async function crearNotifConvocatoria(db, conv) {
     const horarioTxt = horaFin ? `${horaInicio}–${horaFin}` : horaInicio;
     const codigo = String(conv.shiftCode || '').trim();
     const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
-    const title = isLlegadaTarde ? '⏰ ¿Estás en camino?' : `[${urgencyLabel}] Cobertura requerida`;
+    const title = isLlegadaTarde ? '¿Venís?' : `[${urgencyLabel}] Cobertura requerida`;
+    const donde = lugar ? ` en ${lugar}` : '';
     const body = isLlegadaTarde
-        ? `Tu turno ${codigo} en ${lugarTxt} (${fechaTurno} ${horarioTxt}) ya comenzó. Confirmá si estás en camino en los próximos ${TIMEOUT_MINUTES} min.`
-        : `${typeLabel[conv.type]} en ${lugarTxt}. Turno ${codigo || '—'} · ${fechaTurno} ${horarioTxt}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
+        ? `¿Venís? Tu turno ${codigo || '—'} (${horaInicio})${donde} ya comenzó. Confirmá si estás en camino.`
+        : `${typeLabel[conv.type]} en ${lugar || lugarTxt}. Turno ${codigo || '—'} · ${fechaTurno} ${horarioTxt}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
     await db.collection('user_notifications').add({
         uid: conv.candidateUid || null,
         employeeId: conv.candidateEmployeeId,
@@ -996,7 +997,9 @@ async function crearConvocatoriaLlegadaTarde(db, shift) {
         shiftId: shift.id,
         objectiveId: shift.objectiveId,
         objectiveName: shift.objectiveName,
+        positionName: shift.positionName || '',
         clientId: shift.clientId,
+        clientName: shift.clientName || '',
         shiftCode: shift.shiftCode,
         startTime: shift.startTime,
         endTime: shift.endTime,

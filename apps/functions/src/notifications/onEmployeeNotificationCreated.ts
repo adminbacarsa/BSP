@@ -4,6 +4,7 @@
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { isShiftAlertFcmType, shiftAlertPlatformConfig } from './shiftAlertFcm';
 
 /** Tipos que NO envían FCM en el mismo flujo que crean la notificación. */
 const INBOX_NEEDS_FCM = new Set([
@@ -21,6 +22,8 @@ const INBOX_NEEDS_FCM = new Set([
   'VACANTE_OPERACIONES',        // vacante — requiere cobertura operativa urgente
   // Convocatoria de cobertura operativa (cascada RET → FT)
   'CONVOCATORIA_COBERTURA',     // llamado a cubrir turno vacante — requiere respuesta en 10 min
+  'AVISO_TURNO_PROXIMO',        // T−5: tu turno empieza, ¿estás llegando?
+  'AVISO_ENTRANTE_SIN_FICHAR',  // T: el entrante no fichó — saliente espera
   'DEVICE_REGISTRATION_REJECTED',
   'DEVICE_REGISTRATION_APPROVED',
 ]);
@@ -105,6 +108,8 @@ export const onEmployeeNotificationCreated = functions
                   ? '/app/device-blocked'
                   : '/app/'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
+    const shiftAlert = isShiftAlertFcmType(type);
+    const platform = shiftAlert ? shiftAlertPlatformConfig() : null;
     try {
       const result = await admin.messaging().sendEachForMulticast({
         notification: { title, body },
@@ -118,11 +123,13 @@ export const onEmployeeNotificationCreated = functions
           solicitudId: data.solicitudId ? String(data.solicitudId) : '',
           servicioId: data.servicioId ? String(data.servicioId) : '',
         },
-        android: {
+        android: platform?.android ?? {
           priority: 'high',
           notification: { channelId: 'default' },
         },
+        ...(platform ? { apns: platform.apns } : {}),
         webpush: {
+          headers: shiftAlert ? { Urgency: 'high' } : undefined,
           notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: true },
           fcmOptions: { link },
         },
