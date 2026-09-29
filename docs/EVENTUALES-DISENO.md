@@ -3,6 +3,7 @@
 > **Módulo:** RRHH-EVENTUALES · Gestión de empleados eventuales de seguridad (Córdoba, CCT 422/05 SUVICO, LCT arts. 99/100, Ley 24.013, Ley provincial 9236).
 > **Rama:** `cursor/eventuales-fase-a` (desde `origin/main`). Solo diseño — sin código, sin escrituras en prod.
 > **Coordina:** Claude Code · **Autor:** agente RRHH-EVENTUALES · **Fecha:** 29/09/2026.
+> **Ajuste Mauro (29/09):** el eventual es un vigilador más. Misma malla, mismo Centro de Control, mismo Banco de Horas, mismo Análisis, mismo motor de liquidación (`hours-core` / Reportes / `payrollApi`), y sirve tanto en servicios normales como en eventos (`coverageType: eventos` / TURA). **Única diferencia operativa:** solo puede tener turnos dentro de un contrato eventual vigente, más el alta/baja ARCA de ese contrato. No hay motor, bolsa ni rama de liquidación paralela.
 
 ---
 
@@ -54,10 +55,13 @@ La vía oficial semi-automatizable es generar desde COSP el **archivo de importa
 - Turno EV (`code: 'EV'`, `origin: 'EVENTO'`): asignación `apps/web2/src/services/eventoAssignService.ts:128-212`; espejo portal `packages/portal-core/src/eventos/eventoPortal.ts:189-259`; aceptación del guardia `respondEventoConvocatoria`: `apps/functions/src/eventos/eventoPortalCallables.ts:87-165` (export `index.ts:1634`).
 - Facturación TURA/EV: `apps/web2/src/lib/crm/executedBillableHoursByFranja.ts:22-33`; prefactura eventos `apps/web2/src/pages/admin/crm/index.tsx:2569-2631`; imputación a puesto Eventos `apps/web2/src/lib/refuerzo/refuerzoProforma.ts:9-14`.
 
-### 2.4 Liquidación de un eventual por horas
+### 2.4 Liquidación — mismo motor (el código `EV` no es la modalidad)
 
-- Motor canónico `calculateLiquidationHoursStats`: `packages/hours-core/src/motors/liquidation/reportesLiquidation.ts:831-837` (impl. desde `:840`); bolsa 200 `:1067-1071`. Espejo API: `apps/functions/src/payroll-api/calc.ts:1-18`, persona `calcPersona.ts:1-32`.
-- **Gap clave:** los turnos `EV` están **excluidos** del cómputo persona (`reportesLiquidation.ts:891`) y no existe rama de remuneración bruta fija por contrato. Un eventual con contrato «remuneración fija por evento» hoy no liquida por el motor CCT → el módulo necesita un **anexo de liquidación eventual** (por contrato: monto fijo o hs×valor), sin tocar la bolsa 200 de los permanentes.
+- Motor único `calculateLiquidationHoursStats`: `packages/hours-core/src/motors/liquidation/reportesLiquidation.ts:831-837` (impl. desde `:840`); bolsa 200 `:1067-1071`. Espejo API: `apps/functions/src/payroll-api/calc.ts:1-18`, persona `calcPersona.ts:1-32`. Banco de Horas y Análisis leen ese mismo resultado (`sumPlantelLiquidationHours` / libro persona).
+- Un eventual con turnos de servicio (M/T/N/D12/N12, y también TURA/RFZ, que ya suman en `desgloseTura` `:1027`) **ya liquida hoy** como cualquier legajo. La modalidad no tiene rama propia.
+- **El único hueco** es el código de turno `EV` (evento), excluido del cómputo **persona** para todos los guardias, no solo eventuales: early-return `reportesLiquidation.ts:891` y el espejo legacy `packages/hours-core/src/motors/legacy/reportesLiquidationF0.ts:792`. Esas horas hoy se facturan al cliente (prefactura eventos, §2.3) y no se le pagan al vigilador por este motor.
+- **Cambio para que el evento liquide en el motor único** (sin segundo motor): sacar `'EV'` de esos dos early-return y acumular la duración real del turno (el evento tiene horario concreto, p.ej. 6 h) en el desglose que ya existe (`desgloseTura`, `:1027`), de modo que entre a bolsa 200, Banco de Horas, Análisis y `payrollApi` igual que un TURA. **No** sacar `EV` de `OBJECTIVE_NON_BILLABLE_CODES` (`:29`), ni de `publishedPlanHours.ts:12`, `positionCoverageUnits.ts:6` ni `deploymentRoles.ts:172,199`: ahí `EV` significa «no cubre ni vende SLA», y eso se mantiene. La prefactura de eventos al cliente no se toca.
+- **Remuneración bruta fija del contrato:** es un dato del contrato (§3.2), no una fórmula. El pago sale del motor. Si el fijo pactado difiere de las horas liquidadas, la diferencia se carga como ajuste del snapshot que ya existe (`ajustes_liquidacion`), sobre el mismo `cycleId` 26→25. No hay bolsa ni tope distintos.
 
 ### 2.5 AFIP/WSAA por empresa
 
@@ -123,7 +127,7 @@ Plantilla: colección `contratos_templates/{empresaId}_{version}` con el texto B
 
 **Índices:** `contratos_eventuales` (empresaId, employeeId, fechaInicio DESC) · (empresaId, estado, fechaInicio DESC) · (cuil, fechaInicio DESC) — este último **sin empresaId** para el cruce entre empresas (consulta collection-wide vía callable Admin SDK, no desde cliente).
 
-**Validación «turno solo dentro de contrato vigente»:** helper compartido `hasVigentContratoEventual(employeeId, date, hhmm)` (lib en `packages/` + espejo functions, patrón `simulableShift.ts`). Se invoca en: alta de turno en Planificación, `eventoAssignService.ts:128-212`, `applyCoverage` y convocatorias EV. Si `empleados.modalidad === 'EVENTUAL'` y no hay contrato FIRMADO/ALTA_ARCA/VIGENTE que contenga el turno → bloqueo con CTA «Crear contrato».
+**Única regla operativa — turno solo dentro de contrato vigente:** helper compartido `hasVigentContratoEventual(employeeId, date, hhmm)` (lib en `packages/` + espejo functions, patrón `simulableShift.ts`). Misma validación en los cuatro escritores: alta/edición de turno en Planificación, asignación desde el Centro de Control (cobertura y convocatorias), `eventoAssignService.ts:128-212` (eventos/TURA) y `applyCoverage`. Si `empleados.modalidad === 'EVENTUAL'` y no hay contrato FIRMADO/ALTA_ARCA/VIGENTE que contenga fecha y horario del turno → bloqueo con CTA «Crear contrato». Fuera de esa puerta, fichada, ausencias, cobertura, Banco de Horas, Análisis y liquidación no distinguen al eventual.
 
 **Cruce entre empresas por CUIL:** callable `checkCuilConflicts({ cuil, fecha })` (Admin SDK): turnos de la misma persona en 2+ empresas del panel con superposición horaria o descanso < 12 h → warning en Planificación/CC y novedad `PLURIEMPLEO_DETECTADO`.
 
@@ -168,8 +172,12 @@ Script `scripts/import-eventuales-planilla.mjs` — **dryRun por default**, `--a
 |------|---------|--------|---------|
 | **B — Datos + migración** | `modalidad`+history en legajo (form y payload §2.1), colección `contratos_eventuales` + `contratos_templates`, reglas e índices, campos ARCA en `empresas`, script import planilla (dryRun). Descargar diseño de registro de Carga Masiva (Mauro, Clave Fiscal) y versionarlo en `docs/arca/`. | **M** (~1 semana) | Match CUIL con datos sucios de planilla; publicar reglas (recordar backlog de reglas pendientes). |
 | **C — UI RRHH + contrato PDF** | Tab Eventuales, wizard de contrato desde plantilla Bacar, PDF (reutilizar pipeline `liquidacionReportPdf`), efectivización, estados. | **M/L** (~1–2 semanas) | Plantilla legal debe cerrarla el abogado antes (dudas §5.3/5.6). |
-| **D — Firma en app + QR + validación turnos** | Pantalla contrato en `mobile-guardia`, callable `signContratoEventual`, bloque eventual en `credenciales_publicas` + página `/credencial/`, helper `hasVigentContratoEventual` en Planificación / eventos / `applyCoverage`, cruce CUIL entre empresas. | **L** (~2 semanas) | Tocar Planificación/CC exige tests E2E emulador; validez legal de la firma condiciona el diseño; OTA app. |
-| **E — ARCA + liquidación eventual** | Generador de archivo Carga Masiva (altas/bajas) según diseño descargado, confirmación manual con nro. de transacción, control opcional vía WS `TRABAJO_F931` (WSAA existente), anexo de liquidación eventual (fijo por contrato u hs×valor, fuera de bolsa 200). | **M** (~1 semana) | Formato del archivo puede cambiar sin aviso (spec solo dentro del servicio); definición legal del código de modalidad; EV excluido del motor persona (§2.4) obliga a rama nueva bien aislada. |
+| **D — Firma en app + QR + la única puerta** | Pantalla contrato en `mobile-guardia`, callable `signContratoEventual`, bloque eventual en `credenciales_publicas` + página `/credencial/`, `hasVigentContratoEventual` en Planificación, Centro de Control, eventos/TURA y `applyCoverage`, cruce CUIL entre empresas. | **L** (~2 semanas) | Tocar Planificación/CC exige tests E2E emulador; validez legal de la firma condiciona el diseño; OTA app. |
+| **E — ARCA + EV dentro del motor único** | Generador de archivo Carga Masiva (altas/bajas) + confirmación manual con nro. de transacción; control opcional vía WS `TRABAJO_F931`. Incluir el código `EV` en el cómputo persona del motor que ya existe (§2.4: quitar el early-return en `reportesLiquidation.ts:891` y el espejo F0 `:792`, sumar al `desgloseTura`). La remuneración fija queda como campo del contrato y, si hay diferencia, como `ajustes_liquidacion` del mismo ciclo. | **S/M** (~3–5 días) | Formato del archivo ARCA puede cambiar sin aviso. Incluir `EV` paga esas horas a **todos** los guardias que tengan un turno EV, no solo a eventuales: hay que confirmar con Mauro que eso es lo buscado y no inflar cobertura SLA (EV sigue en `OBJECTIVE_NON_BILLABLE_CODES`). |
+
+**Qué se simplifica** respecto del diseño anterior: no hay anexo de liquidación, ni colección de horas, ni rama en `payrollApi`/Banco/Análisis. Esos módulos no se modifican salvo el early-return de `EV`.
+
+**Qué se agrega:** la puerta de contrato vigente en los cuatro escritores (Fase D) y el alta/baja ARCA por contrato (Fase E).
 
 **Riesgo transversal:** no existe API de ARCA → el paso alta/baja siempre tendrá un click humano con Clave Fiscal; el diseño lo asume (estados `ALTA_ARCA`/`BAJA_ARCA` se confirman manualmente). Re-chequear el catálogo WSN de ARCA por si publican un servicio de registración.
 
