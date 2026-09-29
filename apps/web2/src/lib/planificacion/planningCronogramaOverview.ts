@@ -40,9 +40,7 @@ export interface CronogramaOverviewRow {
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {
   const o = String(data?.origin || '').toUpperCase();
-  if (o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL') return true;
-  if (data?.resolvedBy === 'OPERACIONES') return true;
-  return false;
+  return o === 'RETEN' || o === 'OPERATIONS_COVERAGE' || o === 'SLA_VIRTUAL';
 }
 
 function turnoCuentaParaCrono(data: Record<string, unknown>, objectiveId: string): boolean {

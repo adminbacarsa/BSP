@@ -67,6 +67,15 @@ for (const [code, hours] of Object.entries(expect)) {
 }
 if (mesh.uncodedCount !== 2 || mesh.ftCount !== 4) fail.push(`sin código ${mesh.uncodedCount} FT ${mesh.ftCount}`);
 if (got.RET) fail.push('RET no entra en el plan');
+const opsOrigin = (t: any) => ['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL'].includes(String(t.origin || '').toUpperCase());
+const cronoViejo = sumPublishedPlanHours((rows as any[]).filter((t) => !opsOrigin(t) && String(t.resolvedBy || '').toUpperCase() !== 'OPERACIONES')).hours;
+if (cronoViejo !== 2784) fail.push(`cronograma viejo ${cronoViejo} != 2784`);
+const marcadoOps = (rows as any[]).filter((t) => sumPublishedPlanHours([t]).hours > 0 && String(t.resolvedBy || '').toUpperCase() === 'OPERACIONES');
+if (marcadoOps.length !== 1 || marcadoOps[0].id !== 'rMkxHxOlHahC9Gtx2xbk') fail.push(`turno que el cronograma tiraba: ${marcadoOps.map((t) => t.id).join(',')}`);
+const enFila = sumPublishedPlanHours((rows as any[]).filter((t) => String(t.employeeId || '') !== 'SIN_COBERTURA')).hours;
+const fueraFila = sumPublishedPlanHours((rows as any[]).filter((t) => String(t.employeeId || '') === 'SIN_COBERTURA')).hours;
+if (enFila + fueraFila !== 2792 || fueraFila !== 24) fail.push(`filas ${enFila} + fuera ${fueraFila} != 2792`);
+if (enFila !== 2768) fail.push(`suma de filas ${enFila} != 2768`);
 if (fail.length) {
   console.error(JSON.stringify({ mesh, got }, null, 2));
   throw new Error(fail.join('; '));

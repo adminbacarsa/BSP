@@ -2406,39 +2406,7 @@ export default function PlanificacionPage() {
         setSortDir('asc');
     }, [selectedObjective, positionStructure]);
 
-    const empMonthlyHours = useMemo(() => {
-        const result: Record<string, number> = {};
-        const _grupoObjIds = selectedGrupo && grupoUnifiedMode ? selectedGrupo.objectiveIds : null;
-        displayedEmployees.forEach((emp: any) => {
-            let total = 0;
-            const assignedPos = String(emp.assignedPosition || '').trim();
-            const ctx: PlanningCellHoursContext = {
-                selectedObjective,
-                grupoObjectiveIds: _grupoObjIds,
-                slaCodeHoursHint,
-                isExcludedFromBillable: isShiftExcludedFromSlaBillable,
-                assignedPositionForEmp: () => assignedPos,
-            };
-            daysInMonth.forEach(day => {
-                const dateStr = getDateKey(day);
-                const key = `${emp.id}_${dateStr}`;
-                const turnos = resolveTurnosForPlanningCellKey({
-                    empId: emp.id,
-                    dateStr,
-                    pending: pendingChanges[key],
-                    cellTurnos: cellTurnosMap[key],
-                    resolveSingleAtObjective: () =>
-                        resolveCellShiftAtObjective(emp.id, dateStr, selectedObjective, pendingChanges, shiftsMap),
-                    ctx,
-                });
-                total += billableHoursForPlanningCell(turnos, dateStr, emp.id, ctx);
-            });
-            result[emp.id] = total;
-        });
-        return result;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
-
-    const publishedPlanMesh = useMemo(() => {
+    const publishedPlanShifts = useMemo(() => {
         const seen = new Set<string>();
         const list: any[] = [];
         const take = (t: any) => {
@@ -2452,8 +2420,30 @@ export default function PlanificacionPage() {
         };
         Object.values(cellTurnosMap).forEach((arr) => { if (Array.isArray(arr)) arr.forEach(take); });
         Object.values(shiftsMap).forEach(take);
-        return sumPublishedPlanHours(list);
+        return list;
     }, [cellTurnosMap, shiftsMap, selectedObjective]);
+
+    const publishedPlanMesh = useMemo(
+        () => sumPublishedPlanHours(publishedPlanShifts),
+        [publishedPlanShifts],
+    );
+
+    /** Columna de la grilla: la misma regla que el plan publicado, partida por legajo. */
+    const empMonthlyHours = useMemo(() => {
+        const byEmp = new Map<string, any[]>();
+        for (const t of publishedPlanShifts) {
+            const emp = String(t?.employeeId || '').trim();
+            if (!emp) continue;
+            const list = byEmp.get(emp) || [];
+            list.push(t);
+            byEmp.set(emp, list);
+        }
+        const result: Record<string, number> = {};
+        displayedEmployees.forEach((emp: any) => {
+            result[emp.id] = sumPublishedPlanHours(byEmp.get(String(emp.id)) || []).hours;
+        });
+        return result;
+    }, [displayedEmployees, publishedPlanShifts]);
 
     /** Tramos ext/adel del mes (no cierran contra horas vendidas SLA). */
     const objectiveMonthCoverageExtraHours = useMemo(() => {
@@ -10390,7 +10380,7 @@ export default function PlanificacionPage() {
                                                         <span
                                                             title={hoursMode === 'cct'
                                                                 ? `${formatLegajoHours(cctHours)}h en el ciclo CCT actual (26 mes anterior → 25 de este mes). Tope 200h.\n${formatLegajoHours(monthHours)}h en el mes calendario.${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`
-                                                                : `${formatLegajoHours(monthHours)}h facturables en el mes (= Pre-factura). Días 🚫 sin servicio SLA no suman aunque veas el código en la celda.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
+                                                                : `${formatLegajoHours(monthHours)}h de plan publicado de este legajo (jornada del puesto, incluye FT). Los turnos sin código no tienen fila.\n${formatLegajoHours(cctHours)}h en el ciclo CCT actual (tope 200h).${retDays > 0 ? `\n${retDays} días RET (0 h planificadas; sobrante disponible en otro objetivo).` : ''}`}
                                                             className={`shrink-0 text-[8px] ${hoursColor}`}
                                                         >
                                                             {formatLegajoHours(displayHours)}h
@@ -12659,6 +12649,7 @@ export default function PlanificacionPage() {
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const slaCloseHours = hoursMode === 'mes' ? objectiveMonthSlaBaseHours : totalHrs;
                     const facturableTotalHrs = hoursMode === 'cct' ? totalHrs : publishedPlanMesh.hours;
+                    const fueraFilasHrs = hoursMode === 'cct' ? 0 : Math.round((publishedPlanMesh.hours - totalHrs) * 10) / 10;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
@@ -12670,8 +12661,8 @@ export default function PlanificacionPage() {
                     const hsTitle = hoursMode === 'cct'
                         ? 'Suma del ciclo CCT actual (cola del mes anterior 26..fin + días 1..25 del mes activo). Solo turnos publicados de este objetivo, sin RET/REF/ESC/francos/licencias.'
                         : effectiveSlaVendidas > 0
-                            ? 'Horas facturables del mes (= suma columnas legajo): base del cronograma + extensiones/adelantos de cobertura. El cierre «base SLA» sin ext/adel se ve en Desglose o Análisis por guardia.'
-                            : 'Suma facturable por legajo (= Pre-factura CRM). Días 🚫 sin servicio no suman.';
+                            ? `Plan publicado de la malla. Suma de filas ${Math.round(totalHrs)}h${fueraFilasHrs ? ` + fuera de filas ${fueraFilasHrs}h (sin código, no tienen legajo)` : ''} = ${Math.round(facturableTotalHrs)}h. El cierre contra vendidas es otro número (Desglose).`
+                            : 'Plan publicado de la malla. La columna de cada legajo usa la misma regla.';
                     const displayPlanHrs = facturableTotalHrs;
                     // Extras del mes (RFZ + TURA) de este objetivo — se facturan en CRM aparte del SLA base.
                     const monthPrefixExtras = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
@@ -12682,7 +12673,7 @@ export default function PlanificacionPage() {
                     const extrasHrs = extrasList.reduce((a: number, t: any) => a + (Number(t.hours) || 0), 0);
                     const extrasCount = extrasList.length;
                     const slaDelta = effectiveSlaVendidas > 0 ? Math.round(effectiveSlaVendidas - facturableTotalHrs) : 0;
-                    const extAdelBarHrs = hoursMode === 'mes' ? Math.max(0, Math.round((facturableTotalHrs - slaCloseHours) * 10) / 10) : 0;
+                    const extAdelBarHrs = hoursMode === 'mes' ? Math.max(0, Math.round(objectiveMonthCoverageExtraHours * 10) / 10) : 0;
                     const showHoursToggle = hoursMode === 'mes' && effectiveSlaVendidas > 0;
                     const persistStatsHoursView = (v: 'total' | 'detalle') => {
                         setStatsHoursView(v);
@@ -12733,14 +12724,15 @@ export default function PlanificacionPage() {
                             {statsHoursView === 'total' || !showHoursToggle ? (
                                 <p className={`${metricValue} whitespace-nowrap shrink-0 ${slaMismatch ? 'text-rose-700 dark:text-rose-400' : 'text-indigo-700 dark:text-indigo-300'}`}>
                                     {displayPlanHrs.toFixed(0)}<span className="text-[9px] font-medium text-slate-500">h</span>
+                                    {fueraFilasHrs ? <span className="block text-[7px] font-medium text-slate-500">filas {Math.round(totalHrs)} + fuera {fueraFilasHrs}</span> : null}
                                 </p>
                             ) : (
-                                <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Base SLA (sin ext/adel) + extensiones = total facturable vs vendidas">
-                                    Base {slaCloseHours.toFixed(0)}h
-                                    {extAdelBarHrs > 0 ? ` · +${extAdelBarHrs} ext` : ''}
-                                    {` · Tot ${facturableTotalHrs.toFixed(0)}h`}
-                                    {effectiveSlaVendidas > 0 ? ` · Vend ${effectiveSlaVendidas}h` : ''}
-                                    {slaMismatch ? (slaDelta > 0 ? ` · Δ −${slaDelta}h` : ` · Δ +${Math.abs(slaDelta)}h`) : ''}
+                                <p className="text-[7px] font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap truncate tabular-nums leading-tight" title="Suma de filas + lo que no tiene legajo = plan publicado. El cierre contra vendidas no es el plan.">
+                                    Filas {Math.round(totalHrs)}h
+                                    {fueraFilasHrs ? ` + fuera ${fueraFilasHrs}h` : ''}
+                                    {` = plan ${Math.round(facturableTotalHrs)}h`}
+                                    {` · cierre ${slaCloseHours.toFixed(0)}h`}
+                                    {effectiveSlaVendidas > 0 ? ` · vend ${effectiveSlaVendidas}h` : ''}
                                 </p>
                             )}
                         </div>
@@ -15650,6 +15642,8 @@ export default function PlanificacionPage() {
                                 {(() => {
                                     const b = planningMonthHoursBreakdown;
                                     const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
+                                    const fueraFilas = Math.round((publishedPlanMesh.hours - legajoSum) * 10) / 10;
+                                    const cierreResto = Math.round((publishedPlanMesh.hours - b.baseSla - publishedPlanMesh.ftHours - publishedPlanMesh.uncodedHours) * 10) / 10;
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                                     const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
                                     const deltaFactVsVend = vend > 0 ? Math.round(publishedPlanMesh.hours - vend) : 0;
@@ -15677,15 +15671,18 @@ export default function PlanificacionPage() {
                                                     <div className="rounded-xl border border-slate-200 p-3 bg-slate-50/80">
                                                         <p className="text-[9px] font-black uppercase text-slate-500">SLA cobertura</p>
                                                         <p className="text-lg font-black text-teal-800">{vend || '—'}h vend.</p>
-                                                        <p className="text-[10px] text-slate-600">Base plan {b.baseSla}h · facturable {b.gross}h</p>
+                                                        <p className="text-[10px] text-slate-600">Cierre contra vendidas {b.baseSla}h · no es el plan publicado</p>
                                                     </div>
                                                 </div>
                                             )}
                                             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
                                                 <div className="rounded-xl border border-slate-200 p-3 bg-white dark:bg-slate-800">
-                                                    <p className="text-[9px] font-black uppercase text-slate-400">Col. legajo (CRM)</p>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400">Suma de filas</p>
                                                     <p className="text-xl font-black text-slate-800 dark:text-slate-100">{legajoSum}h</p>
-                                                    <p className="text-[10px] text-slate-500">Suma filas de la grilla</p>
+                                                    <p className="text-[10px] text-slate-500">
+                                                        Columna de la grilla
+                                                        {fueraFilas ? ` + fuera de filas ${fueraFilas}h = plan ${publishedPlanMesh.hours}h` : ' = plan publicado'}
+                                                    </p>
                                                 </div>
                                                 <div className="rounded-xl border border-indigo-200 p-3 bg-indigo-50/50">
                                                     <p className="text-[9px] font-black uppercase text-indigo-600">Plan publicado</p>
@@ -15697,9 +15694,14 @@ export default function PlanificacionPage() {
                                                     </p>
                                                 </div>
                                                 <div className="rounded-xl border border-teal-200 p-3 bg-teal-50/50">
-                                                    <p className="text-[9px] font-black uppercase text-teal-700">Base cierre SLA</p>
+                                                    <p className="text-[9px] font-black uppercase text-teal-700">Cierre contra vendidas</p>
                                                     <p className="text-xl font-black text-teal-800">{b.baseSla}h</p>
-                                                    <p className="text-[10px] text-slate-500">Sin ext/adel ({b.coverageExtra}h aparte)</p>
+                                                    <p className="text-[10px] text-slate-500">
+                                                        No es el plan. Fuera: FT {publishedPlanMesh.ftHours}h
+                                                        {publishedPlanMesh.uncodedHours ? `, sin código ${publishedPlanMesh.uncodedHours}h` : ''}
+                                                        {cierreResto ? `, ${cierreResto}h que el cierre descarta` : ''}
+                                                        {` · ${b.baseSla} + eso = ${publishedPlanMesh.hours}h`}
+                                                    </p>
                                                 </div>
                                                 <div className={`rounded-xl border p-3 ${vend > 0 && deltaFactVsVend !== 0 ? 'border-rose-200 bg-rose-50/50' : 'border-slate-200 bg-white'}`}>
                                                     <p className="text-[9px] font-black uppercase text-slate-400">Vendidas SLA</p>
@@ -15772,14 +15774,12 @@ export default function PlanificacionPage() {
                                                 </p>
                                             )}
                                             <p className="text-[11px] text-slate-600">
-                                                <b>Identidad:</b> facturable = base SLA + ext/adel ({b.baseSla} + {b.coverageExtra} = {Math.round((b.baseSla + b.coverageExtra) * 10) / 10}h).
-                                                {legajoSum !== Math.round(b.gross) && (
-                                                    <span className="text-amber-700"> Diferencia col. legajo vs facturable: {legajoSum - Math.round(b.gross)}h (revisar coalesce o turnos cross-objetivo).</span>
-                                                )}
+                                                <b>Plan publicado</b> = suma de filas + fuera de filas ({legajoSum} + {fueraFilas} = {publishedPlanMesh.hours}h).
+                                                El cierre contra vendidas ({b.baseSla}h) no suma FT ni turnos sin código.
                                             </p>
                                             {codes.length > 0 && (
                                                 <div>
-                                                    <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Por código (facturable)</p>
+                                                    <p className="text-[10px] font-black uppercase text-slate-400 mb-2">Por código del plan publicado ({publishedPlanMesh.hours}h)</p>
                                                     <div className="flex flex-wrap gap-2">
                                                         {codes.map(([code, hrs]) => (
                                                             <span key={code} className="px-2 py-1 rounded-lg bg-slate-100 text-[11px] font-bold text-slate-700">{code}: {Math.round(hrs)}h</span>
@@ -15792,7 +15792,7 @@ export default function PlanificacionPage() {
                                                     <thead className="bg-slate-100 dark:bg-slate-800">
                                                         <tr>
                                                             <th className="text-left p-2 font-black">Guardia</th>
-                                                            <th className="text-right p-2 font-black">Col. legajo</th>
+                                                            <th className="text-right p-2 font-black">Fila (plan)</th>
                                                             <th className="text-right p-2 font-black">Facturable</th>
                                                             <th className="text-right p-2 font-black">Base SLA</th>
                                                             <th className="text-right p-2 font-black">Ext/adel</th>
