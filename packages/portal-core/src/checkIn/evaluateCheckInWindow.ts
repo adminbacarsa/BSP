@@ -37,6 +37,18 @@ export function isCoverageHoursOnSourceDoc(
   return false;
 }
 
+/**
+ * Cobertura aceptada (convocado): no es el registro EXT/ADV.
+ * La fichada va desde que aceptó hasta el fin del hueco, sin ventana T−15/T+30.
+ */
+export function isConvocadoCoverageShift(
+  data: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!data) return false;
+  if (String(data.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE') return false;
+  return !isCoverageHoursOnSourceDoc(data);
+}
+
 /** Convierte Timestamp Firestore / Date / ms / ISO a epoch ms (0 si inválido). */
 export function timestampLikeToMillis(val: unknown): number {
   if (val == null || val === '') return 0;

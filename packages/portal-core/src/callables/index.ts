@@ -27,9 +27,20 @@ export function createPortalCallables(functions: Functions) {
         responseChannel?: 'ALERTAS' | 'BANNER_HOY' | 'PUSH_ACTION';
         deviceId?: string;
         platform?: 'android' | 'ios' | 'web';
+        /** GPS al aceptar. Si falta, el servidor usa el domicilio. */
+        originCoords?: { lat: number; lng: number; accuracy?: number };
       },
       { success?: boolean }
     >(functions, PORTAL_CALLABLES.responderConvocatoriaCobertura),
+    responderRecordatorioConvocado: httpsCallable<
+      {
+        convocatoriaId: string;
+        action: 'ON_WAY' | 'PROBLEM';
+        etaMinutes?: 10 | 15 | 30;
+        note?: string;
+      },
+      { success?: boolean }
+    >(functions, PORTAL_CALLABLES.responderRecordatorioConvocado),
     deleteMyTokens: httpsCallable<void, unknown>(functions, PORTAL_CALLABLES.deleteMyTokens),
     sendTestNotification: httpsCallable<{ title?: string; body?: string; type?: string }, unknown>(
       functions,

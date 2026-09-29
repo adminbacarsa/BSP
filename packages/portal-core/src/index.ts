@@ -15,6 +15,7 @@ export {
   flushPendingCheckins,
   getCheckInTiming,
   isOperationsCoverageShift,
+  isConvocadoCoverageShift,
   isCoverageHoursOnSourceShift,
   parsePendingCheckins,
   validateCheckInDistance,
@@ -39,6 +40,21 @@ export {
   isCheckInRequestRejected,
 } from './checkIn/checkInUiStatus';
 export type { CheckInUiStatus, CheckInUiStatusView } from './checkIn/checkInUiStatus';
+export {
+  CONVOCADO_ETA_OPTIONS,
+  advanceStartLine,
+  convocadoRecordatorioRoute,
+  extendUntilLine,
+  formatEnCaminoLine,
+  isAdvanceDutyShift,
+  isExtendedDutyShift,
+  isRecordatorioPendiente,
+  isConvocadoEta,
+  mapsSearchUrl,
+  parseConvocadoRecordatorioPush,
+  resolveLlegadaEstimadaAt,
+} from './checkIn/convocadoArrival';
+export type { ConvocadoEtaMinutes, RecordatorioConvocadoLike } from './checkIn/convocadoArrival';
 export {
   ABSENCE_TYPE_OPTIONS,
   absenceSubmitToastMessage,

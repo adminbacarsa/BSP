@@ -5,6 +5,7 @@ import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
 import {
   checkInRejectMessage,
   evaluateCheckInWindow,
+  isConvocadoCoverageShift,
   isCoverageHoursOnSourceDoc,
   timestampLikeToMillis,
   type CheckInWindowRejectCode,
@@ -12,6 +13,7 @@ import {
 
 export {
   evaluateCheckInWindow,
+  isConvocadoCoverageShift,
   isCoverageHoursOnSourceDoc,
   checkInRejectMessage,
   timestampLikeToMillis,
@@ -48,6 +50,8 @@ export type CheckInTiming = {
   /** T+5…T+30 sin aviso previo: el botón es «Llegada tarde». */
   lateNoNotice?: boolean;
   lateMinutes?: number;
+  /** Convocado: sin ventana y sin marca de tarde. */
+  convocado?: boolean;
 };
 
 export type CheckInTimingOptions = {
@@ -72,6 +76,9 @@ type ShiftTimingFields = Shift & {
   coverageCreatedAt?: unknown;
   coverageHoursOnSource?: boolean;
   coverageType?: string;
+  respondedAt?: unknown;
+  acceptedAt?: unknown;
+  coverageAcceptedAt?: unknown;
 };
 
 /** Cobertura urgente creada desde Operaciones (hueco por ausencia). */
@@ -149,6 +156,17 @@ function shiftToRecord(
     }
   }
   return rec;
+}
+
+function acceptanceMs(shift: ShiftTimingFields): number {
+  return (
+    timestampLikeToMillis(shift.respondedAt) ||
+    timestampLikeToMillis(shift.acceptedAt) ||
+    timestampLikeToMillis(shift.coverageAcceptedAt) ||
+    timestampLikeToMillis(shift.createdAt) ||
+    timestampLikeToMillis(shift.coverageCreatedAt) ||
+    0
+  );
 }
 
 function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date | null {
@@ -232,6 +250,32 @@ export function getCheckInTiming(
       ...empty,
       rejectCode: 'TRACE_REGISTRATION',
       rejectMessage: checkInRejectMessage('TRACE_REGISTRATION'),
+    };
+  }
+
+  if (isConvocadoCoverageShift(s as unknown as Record<string, unknown>)) {
+    const end = toDate(s.endTime);
+    const accepted = acceptanceMs(s);
+    const ended = !!end && nowMs > end.getTime();
+    const beforeAccept = accepted > 0 && nowMs < accepted;
+    const canCheckIn = !ended && !beforeAccept;
+    const rejectCode = ended ? ('SHIFT_ENDED' as const) : beforeAccept ? ('TOO_EARLY' as const) : undefined;
+    return {
+      diffMinutes,
+      canCheckIn,
+      canNotifyLate: false,
+      lateWindow: false,
+      tooEarly: beforeAccept,
+      checkInDeadline: end,
+      rejectCode,
+      rejectMessage: rejectCode
+        ? beforeAccept
+          ? 'Podés fichar desde que aceptaste la convocatoria, hasta que termine el hueco.'
+          : checkInRejectMessage(rejectCode)
+        : undefined,
+      lateNoNotice: false,
+      lateMinutes: 0,
+      convocado: true,
     };
   }
 
