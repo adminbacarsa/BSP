@@ -17,6 +17,7 @@ import {
 import { ServiceCapacityViabilityModal } from '@/components/servicios/ServiceCapacityViabilityModal';
 import { ServiceCapacityViabilityIcon } from '@/components/servicios/ServiceCapacityViabilityIcon';
 import { EventosPanel } from '@/components/servicios/EventosPanel';
+import { BillingModeHelp } from '@/components/servicios/BillingModeHelp';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAuth } from '@/context/AuthContext';
@@ -2965,6 +2966,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                        ))}
                      </select>
                    </div>
+                   <BillingModeHelp
+                     mode={hasExplicitSlaBillingMode(form) ? normalizeSlaBillingMode(form.billingMode) : null}
+                     autoLabel={autoBillingModeLabel({ clientHasOpenContract: slaFormClientHasOpenContract })}
+                   />
                    {normalizeSlaBillingMode(form.billingMode) === 'FIJO' && (
                      <div className="grid grid-cols-2 gap-3">
                        <div>
