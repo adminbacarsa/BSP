@@ -97,7 +97,7 @@ const config: ExpoConfig = {
       'expo-location',
       {
         locationWhenInUsePermission:
-          'COSP Guardia necesita tu ubicación para validar que estás en el puesto al marcar presente.',
+          'COSP Guardia usa tu ubicación al aceptar una convocatoria para estimar la llegada. Si la negás, usamos el domicilio del legajo. También valida que estés en el puesto al fichar.',
       },
     ],
     [

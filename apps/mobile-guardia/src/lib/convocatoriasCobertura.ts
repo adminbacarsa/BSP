@@ -47,6 +47,16 @@ export type ConvocatoriaCobertura = {
   timeoutAt?: FirestoreTimestampLike;
   createdAt?: FirestoreTimestampLike;
   rejectionReason?: string;
+  recordatorioPendiente?: boolean;
+  recordatorioStatus?: string;
+  reminderStatus?: string;
+  checkedIn?: boolean;
+  fichado?: boolean;
+  etaMinutes?: number;
+  llegadaEstimadaAt?: FirestoreTimestampLike;
+  respondedAt?: FirestoreTimestampLike;
+  objectiveLat?: number;
+  objectiveLng?: number;
 };
 
 export function isLlegadaTardeConvocatoria(c: Pick<ConvocatoriaCobertura, 'type'>): boolean {
