@@ -12,12 +12,16 @@ const allowed = path.join('src', 'lib', 'appAlert.ts');
 
 let out = '';
 try {
-  out = execSync(
-    `rg -n "Alert\\.alert" app src --glob '*.{ts,tsx}' || true`,
-    { cwd: root, encoding: 'utf8', shell: true },
-  );
+  out = execSync(`rg -n "Alert\\.alert" app src --glob "*.{ts,tsx}"`, {
+    cwd: root,
+    encoding: 'utf8',
+    shell: true,
+  });
 } catch (e) {
-  out = (e.stdout || '') + (e.stderr || '');
+  const status = e && e.status;
+  const stdout = String((e && e.stdout) || '');
+  if (status === 1) out = stdout;
+  else out = stdout;
 }
 
 const lines = out

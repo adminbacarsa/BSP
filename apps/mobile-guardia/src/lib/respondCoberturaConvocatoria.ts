@@ -3,6 +3,7 @@ import { getPortalCallables } from './portal';
 import { getMobilePlatform, getOrCreateDeviceId } from './deviceId';
 import { mapPortalCallableError } from './mapPortalCallableError';
 import { classifyCoberturaRespondError } from './coberturaRespondError';
+import { captureAcceptOriginCoords, type OriginCoords } from './captureAcceptOriginCoords';
 
 export type CoberturaResponseChannel = 'ALERTAS' | 'BANNER_HOY' | 'PUSH_ACTION';
 
@@ -31,6 +32,11 @@ export async function respondCoberturaConvocatoria(params: {
 
   const deviceId = await getOrCreateDeviceId().catch(() => undefined);
   const platform = getMobilePlatform();
+  let originCoords: OriginCoords | undefined;
+  if (params.response === 'ACCEPTED') {
+    const coords = await captureAcceptOriginCoords().catch(() => null);
+    if (coords) originCoords = coords;
+  }
 
   try {
     const { responderConvocatoriaCobertura } = getPortalCallables();
@@ -43,6 +49,7 @@ export async function respondCoberturaConvocatoria(params: {
       deviceId: deviceId || undefined,
       platform,
       appVersion: Constants.expoConfig?.version || undefined,
+      ...(originCoords ? { originCoords } : {}),
     });
     return {
       ok: true,

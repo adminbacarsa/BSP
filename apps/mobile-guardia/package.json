@@ -19,7 +19,8 @@
     "test:cobertura-feedback": "node --experimental-strip-types --test src/lib/coberturaRespondFeedback.test.ts",
     "test:hero-shifts": "node --experimental-strip-types --test src/lib/shifts.hero.test.ts",
     "test:checkin-parity": "node --experimental-strip-types --test src/lib/checkInWindow.parity.test.ts",
-    "test:all": "node --experimental-strip-types --test src/lib/deviceVerification.test.ts src/lib/pushNotifications.preview.test.ts src/lib/alertasPagination.test.ts src/lib/coberturaRespondError.test.ts src/lib/coberturaRespondFeedback.test.ts src/lib/shifts.hero.test.ts src/lib/checkInWindow.parity.test.ts src/lib/checkInPresentCopy.test.ts src/lib/llegadaTardePlace.test.ts src/lib/alertasTurnoChannel.test.ts",
+    "test:convocado": "node --import ./src/lib/ts-ext-register.mjs --experimental-strip-types --test src/lib/convocadoArrival.test.ts",
+    "test:all": "node --import ./src/lib/ts-ext-register.mjs --experimental-strip-types --test src/lib/deviceVerification.test.ts src/lib/pushNotifications.preview.test.ts src/lib/alertasPagination.test.ts src/lib/coberturaRespondError.test.ts src/lib/coberturaRespondFeedback.test.ts src/lib/shifts.hero.test.ts src/lib/checkInWindow.parity.test.ts src/lib/checkInPresentCopy.test.ts src/lib/llegadaTardePlace.test.ts src/lib/alertasTurnoChannel.test.ts src/lib/convocadoArrival.test.ts",
     "update:preview": "npx --yes eas-cli update --channel preview --environment preview",
     "update:production": "npx --yes eas-cli update --channel production --environment production --auto"
   },

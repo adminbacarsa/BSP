@@ -1,4 +1,8 @@
 import type { Notification } from 'expo-notifications';
+import {
+  convocadoRecordatorioRoute,
+  parseConvocadoRecordatorioPush,
+} from '@cosp/portal-core';
 
 /** Tipos que un vigilador debe ver en la app (whitelist). */
 export const EMPLOYEE_ALERT_TYPES = new Set([
@@ -23,6 +27,7 @@ export const EMPLOYEE_ALERT_TYPES = new Set([
   'CONVOCATORIA_COBERTURA',
   'RETENCION',
   'ADELANTO',
+  'CONVOCADO_RECORDATORIO',
 ]);
 
 /** Tipos de cobertura que requieren respuesta Aceptar / Rechazar. */
@@ -116,6 +121,9 @@ export function routeFromNotificationData(data: Record<string, unknown> | undefi
     .trim()
     .toUpperCase();
 
+  const recordatorio = parseConvocadoRecordatorioPush(data);
+  if (recordatorio) return convocadoRecordatorioRoute(recordatorio);
+
   if (COBERTURA_TYPES.has(type)) {
     const convId = String(data.convocatoriaId ?? data.convId ?? data.id ?? '').trim();
     if (convId) return `/(tabs)?focus=cobertura&convocatoriaId=${encodeURIComponent(convId)}`;
@@ -174,6 +182,7 @@ export function notificationActionLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
+  if (t === 'CONVOCADO_RECORDATORIO') return 'Responder llegada';
   if (COBERTURA_TYPES.has(t)) return 'Ver convocatoria';
   if (EVENTOS_TYPES.has(t)) return 'Ver convocatoria';
   if (t === 'SWAP_REQUEST') return 'Ver permutas';
@@ -186,7 +195,7 @@ export function notificationDomainLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
-  if (COBERTURA_TYPES.has(t)) return 'Cobertura';
+  if (t === 'CONVOCADO_RECORDATORIO' || COBERTURA_TYPES.has(t)) return 'Cobertura';
   if (EVENTOS_TYPES.has(t)) return 'Eventos';
   if (t === 'SWAP_REQUEST') return 'Permutas';
   if (AGENDA_TYPES.has(t)) return 'Planificación';
