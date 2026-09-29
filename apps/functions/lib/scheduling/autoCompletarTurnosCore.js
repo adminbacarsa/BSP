@@ -145,11 +145,7 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         }));
         completed++;
     };
-    async function hasContinuity(shift) {
-        const oid = String(shift.objectiveId || '');
-        const end = shiftEndDate(shift);
-        if (!oid || !end)
-            return false;
+    async function slasFor(oid) {
         if (!slaCache.has(oid)) {
             const slaSnap = await db
                 .collection('servicios_sla')
@@ -158,7 +154,68 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
                 .get();
             slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
         }
-        return (slaCache.get(oid) || []).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', end, (0, shiftSeries_1.seriesCodeOf)(shift)));
+        return slaCache.get(oid) || [];
+    }
+    async function hasContinuity(shift) {
+        const oid = String(shift.objectiveId || '');
+        const end = shiftEndDate(shift);
+        if (!oid || !end)
+            return false;
+        return (await slasFor(oid)).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', end, (0, shiftSeries_1.seriesCodeOf)(shift)));
+    }
+    async function nextBandSlots(shift) {
+        const oid = String(shift.objectiveId || '');
+        const end = shiftEndDate(shift);
+        if (!oid || !end)
+            return null;
+        for (const sla of await slasFor(oid)) {
+            const slots = (0, positionHasContinuity_1.nextBandSlotsFromSlaDoc)(sla, shift.positionName || '', end, (0, shiftSeries_1.seriesCodeOf)(shift));
+            if (slots != null)
+                return slots;
+        }
+        return null;
+    }
+    async function handoffSiblings(outId, shift, endTimeMs) {
+        const snap = await db
+            .collection('turnos')
+            .where('objectiveId', '==', shift.objectiveId)
+            .where('positionName', '==', shift.positionName)
+            .where('startTime', '>=', firestore_1.Timestamp.fromMillis(endTimeMs - 13 * 60 * 60 * 1000))
+            .where('startTime', '<=', firestore_1.Timestamp.fromMillis(endTimeMs))
+            .get();
+        const outCode = (0, shiftSeries_1.seriesCodeOf)(shift);
+        return snap.docs
+            .filter((d) => {
+            if (d.id === outId)
+                return true;
+            const data = d.data();
+            if (!ctx.sameTenantShift(shift, data))
+                return false;
+            if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(data) || !(0, reliefEligibility_1.isReliefEligibleShift)(data))
+                return false;
+            if (data.isAbsent === true || String(data.status || '').toUpperCase() === 'ABSENT')
+                return false;
+            const eid = String(data.employeeId || '').trim();
+            if (!eid || eid === 'VACANTE')
+                return false;
+            const worked = data.isPresent === true
+                || !!(data.realStartTime || data.checkInAt || data.checkInTime);
+            if (!worked)
+                return false;
+            const en = shiftEndMs(data);
+            if (!en || Math.abs(en - endTimeMs) > RELEVO_ALIGN_MS)
+                return false;
+            const code = (0, shiftSeries_1.seriesCodeOf)(data);
+            if ((0, shiftSeries_1.isRecognizedSeriesCode)(outCode) && (0, shiftSeries_1.isRecognizedSeriesCode)(code) && code !== outCode)
+                return false;
+            return true;
+        })
+            .map((d) => ({
+            id: d.id,
+            ...d.data(),
+            startMs: shiftStartMs(d.data()),
+            endMs: shiftEndMs(d.data()),
+        }));
     }
     const outgoingDocs = [...snap.docs].sort((a, b) => (0, shiftClose_1.shiftWorkStartMs)(a.data()) - (0, shiftClose_1.shiftWorkStartMs)(b.data()));
     const reservedReliefKey = (objectiveId, employeeId) => `${String(objectiveId || '')}|${String(employeeId || '')}`;
@@ -261,6 +318,22 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
         const relieveDocs = relieveSnap.docs.filter((d) => d.id !== docSnap.id
             && ctx.sameTenantShift(shift, d.data())
             && !(0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(d.data()));
+        if (!shift.manualRetentionType && shift.objectiveId && shift.positionName) {
+            const slots = await nextBandSlots(shift);
+            if (slots != null) {
+                const siblings = await handoffSiblings(docSnap.id, shift, endTimeMs);
+                const self = {
+                    id: docSnap.id,
+                    ...shift,
+                    startMs: shiftStartMs(shift),
+                    endMs: endTimeMs,
+                };
+                if (!(0, shiftSeries_1.keepsNextBandSlot)(self, siblings, slots)) {
+                    close(docSnap, shift, endTimeMs, 'SIN_LUGAR_FRANJA');
+                    continue;
+                }
+            }
+        }
         const relievePresent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => {
             if (reliefIncomingClaimed.has(d.id))
                 return false;

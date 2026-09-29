@@ -2861,6 +2861,147 @@ async function run() {
       const ok = res.relieved?.employeeName === 'Saliente' && String(out?.relievedBy || '') === `${prefix}_inE`;
       report(74, ok, ok ? 'sin serie, releva por horario' : `relieved=${res.relieved?.employeeName} by=${out?.relievedBy}`);
     }
+
+    // SLA M×2 → T×1 → N×1 (cantidad por turno)
+    const seedSlaCuts = async (objectiveId) => {
+      await db.collection('servicios_sla').doc(`${objectiveId}_sla`).set({
+        objectiveId, clientId: `${objectiveId}_cli`, status: 'active',
+        startDate: '2026-01-01', endDate: '2027-12-31',
+        positions: [{
+          name: 'Puesto 1', quantity: 1, coverageType: 'custom',
+          activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+          allowedShiftTypes: [
+            { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8, quantity: 2 },
+            { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8, quantity: 1 },
+            { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8, quantity: 1 },
+          ],
+        }],
+      });
+    };
+    const seedTwoM = async (prefix, objectiveId, tDoc) => {
+      const empresaId = `${prefix}_emp`;
+      const base = { empresaId, objectiveId, positionName: 'Puesto 1' };
+      await db.batch()
+        .set(db.collection('turnos').doc(`${prefix}_viejo`), {
+          ...base, employeeId: `${prefix}_eV`, employeeName: 'Viejo', code: 'M',
+          status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 6, 50), realStartTime: tsAt(2026, 9, 23, 7, 0),
+        })
+        .set(db.collection('turnos').doc(`${prefix}_nuevo`), {
+          ...base, employeeId: `${prefix}_eN`, employeeName: 'Nuevo', code: 'M',
+          status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0),
+          checkInTime: tsAt(2026, 9, 23, 7, 20), realStartTime: tsAt(2026, 9, 23, 7, 20),
+        })
+        .set(db.collection('turnos').doc(`${prefix}_t`), {
+          ...base, employeeId: `${prefix}_eT`, employeeName: 'Tarde', code: 'T',
+          startTime: tsAt(2026, 9, 23, 15, 0), endTime: tsAt(2026, 9, 23, 23, 0),
+          ...tDoc,
+        })
+        .commit();
+    };
+
+    // Caso 75 — M×2 → T×1, T puntual: releva al M más nuevo; el viejo cierra 15:00 sin retención
+    {
+      const prefix = `${runId}_c75`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSlaCuts(objectiveId);
+      await seedTwoM(prefix, objectiveId, {
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        checkInTime: tsAt(2026, 9, 23, 14, 58), realStartTime: tsAt(2026, 9, 23, 15, 0),
+      });
+      const now = tsAt(2026, 9, 23, 15, 10);
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, now, { onlyOutgoingShiftId: `${prefix}_viejo` });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, now, { onlyOutgoingShiftId: `${prefix}_nuevo` });
+      const nuevo = (await db.collection('turnos').doc(`${prefix}_nuevo`).get()).data();
+      const viejo = (await db.collection('turnos').doc(`${prefix}_viejo`).get()).data();
+      const ok = nuevo?.completionReason === 'RELEVO_PRESENTE'
+        && viejo?.completionReason === 'SIN_LUGAR_FRANJA'
+        && viejo?.realEndTime?.toMillis?.() === tsAt(2026, 9, 23, 15, 0).toMillis()
+        && viejo?.isRetention !== true;
+      report(75, ok, ok ? 'T releva al M nuevo; el viejo cierra 15:00'
+        : `nuevo=${nuevo?.completionReason} viejo=${viejo?.completionReason}/${viejo?.isRetention}`);
+    }
+
+    // Caso 76 — M×2 → T×1, T ausente: retenido el M nuevo, el viejo cierra a su hora
+    {
+      const prefix = `${runId}_c76`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSlaCuts(objectiveId);
+      await seedTwoM(prefix, objectiveId, { status: 'ABSENT', isAbsent: true });
+      const now = tsAt(2026, 9, 23, 15, 10);
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, now, { onlyOutgoingShiftId: `${prefix}_viejo` });
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, now, { onlyOutgoingShiftId: `${prefix}_nuevo` });
+      const nuevo = (await db.collection('turnos').doc(`${prefix}_nuevo`).get()).data();
+      const viejo = (await db.collection('turnos').doc(`${prefix}_viejo`).get()).data();
+      const ok = nuevo?.isRetention === true && nuevo?.isCompleted !== true
+        && viejo?.completionReason === 'SIN_LUGAR_FRANJA' && viejo?.isRetention !== true;
+      report(76, ok, ok ? 'T ausente: retenido el M nuevo, el viejo se va'
+        : `nuevoRet=${nuevo?.isRetention} viejo=${viejo?.completionReason}/${viejo?.isRetention}`);
+    }
+
+    const seedNtoTwoM = async (prefix, objectiveId, m1, m2) => {
+      const base = { empresaId: `${prefix}_emp`, objectiveId, positionName: 'Puesto 1' };
+      await db.batch()
+        .set(db.collection('turnos').doc(`${prefix}_n`), {
+          ...base, employeeId: `${prefix}_eNoche`, employeeName: 'Noche', code: 'N',
+          status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 22, 23, 0), endTime: tsAt(2026, 9, 23, 7, 0),
+          checkInTime: tsAt(2026, 9, 22, 22, 55),
+        })
+        .set(db.collection('turnos').doc(`${prefix}_m1`), {
+          ...base, employeeId: `${prefix}_eM1`, employeeName: 'M uno', code: 'M',
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0), ...m1,
+        })
+        .set(db.collection('turnos').doc(`${prefix}_m2`), {
+          ...base, employeeId: `${prefix}_eM2`, employeeName: 'M dos', code: 'M',
+          startTime: tsAt(2026, 9, 23, 7, 0), endTime: tsAt(2026, 9, 23, 15, 0), ...m2,
+        })
+        .commit();
+    };
+
+    // Caso 77 — N×1 → M×2, falta uno: N se va con el que llegó; el lugar faltante sin retención
+    {
+      const prefix = `${runId}_c77`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSlaCuts(objectiveId);
+      await seedNtoTwoM(prefix, objectiveId,
+        { status: 'PENDING' },
+        { status: 'ABSENT', isAbsent: true });
+      const fichada = await registrarPresencia(db, {
+        shiftId: `${prefix}_m1`, source: 'OPERATIONS', empId: `${prefix}_eM1`,
+      });
+      const ret = await retainOutgoingForGap(db, {
+        id: `${prefix}_m2`, ...(await db.collection('turnos').doc(`${prefix}_m2`).get()).data(),
+      }, { sendPush: false });
+      const n = (await db.collection('turnos').doc(`${prefix}_n`).get()).data();
+      const ok = fichada.relieved?.employeeName === 'Noche'
+        && ret.applied === false && n?.isRetention !== true;
+      report(77, ok, ok ? 'falta un M: N relevado por el que llegó, vacante sin retención'
+        : `relieved=${fichada.relieved?.employeeName} ret=${ret.applied}/${ret.skippedReason} nRet=${n?.isRetention}`);
+    }
+
+    // Caso 78 — N×1 → M×2, faltan los dos: N retenido una sola vez, el segundo lugar queda vacante
+    {
+      const prefix = `${runId}_c78`;
+      const objectiveId = `${prefix}_obj`;
+      await seedSlaCuts(objectiveId);
+      await seedNtoTwoM(prefix, objectiveId,
+        { status: 'ABSENT', isAbsent: true },
+        { status: 'ABSENT', isAbsent: true });
+      const r1 = await retainOutgoingForGap(db, {
+        id: `${prefix}_m1`, ...(await db.collection('turnos').doc(`${prefix}_m1`).get()).data(),
+      }, { sendPush: false });
+      const r2 = await retainOutgoingForGap(db, {
+        id: `${prefix}_m2`, ...(await db.collection('turnos').doc(`${prefix}_m2`).get()).data(),
+      }, { sendPush: false });
+      const n = (await db.collection('turnos').doc(`${prefix}_n`).get()).data();
+      const ok = r1.applied === true && r2.applied === false && n?.isRetention === true
+        && n?.retentionAbsenceShiftId === `${prefix}_m1`;
+      report(78, ok, ok ? 'faltan los dos M: N retenido + 1 vacante'
+        : `r1=${r1.applied} r2=${r2.applied}/${r2.skippedReason} nRet=${n?.isRetention}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;

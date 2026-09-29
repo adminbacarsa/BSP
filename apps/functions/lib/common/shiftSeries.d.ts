@@ -29,5 +29,6 @@ export declare function seriesHandoffKind(outgoingCode: unknown, incomingCode: u
 export declare function seriesBoundMs(shift: SeriesShift | null | undefined, kind: 'start' | 'end'): number;
 export declare function reliefPositionsMatch(a: unknown, b: unknown): boolean;
 export declare function relieverFor<T extends SeriesShift>(outgoing: T, candidates: readonly T[], opts?: SeriesPickOpts): T | null;
+export declare function keepsNextBandSlot<T extends SeriesShift>(outgoing: T, siblings: readonly T[], slots: number): boolean;
 export declare function outgoingFor<T extends SeriesShift>(incoming: T, candidates: readonly T[], opts?: SeriesPickOpts): T | null;
 export {};

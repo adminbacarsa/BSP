@@ -76,5 +76,13 @@ report('fallback', fb?.id === 'in' && inherited && inheritedRel?.id === 'ft', `c
 const esc = { id: 'esc', code: 'ESC', positionName: puesto, startMs: gap, endMs: gap + 8 * 3600 * 1000 };
 report('esc', core.relieverFor(baez, [esc]) == null && fn.relieverFor(baez, [esc, guerrero])?.id === 'guerrero', 'ESC no releva');
 
+const t7 = Date.parse('2026-09-29T07:00:00-03:00');
+const viejo = { id: 'viejo', code: 'M', positionName: puesto, startMs: t7, endMs: t15, checkInMs: t7 - 10 * 60 * 1000 };
+const nuevo = { id: 'nuevo', code: 'M', positionName: puesto, startMs: t7, endMs: t15, checkInMs: t7 + 20 * 60 * 1000 };
+const cupo = core.keepsNextBandSlot(nuevo, [viejo, nuevo], 1) && !core.keepsNextBandSlot(viejo, [viejo, nuevo], 1)
+  && fn.keepsNextBandSlot(nuevo, [viejo, nuevo], 1) && !fn.keepsNextBandSlot(viejo, [viejo, nuevo], 1)
+  && core.keepsNextBandSlot(viejo, [viejo, nuevo], 2);
+report('cupo', cupo, 'M×2 → T×1: se queda el de menos tiempo; con 2 lugares quedan los dos');
+
 const failed = results.filter((r) => !r.ok).length;
 if (failed) process.exitCode = 1;

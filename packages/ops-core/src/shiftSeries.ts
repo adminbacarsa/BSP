@@ -212,6 +212,25 @@ export function relieverFor<T extends SeriesShift>(
   return rankRows(pool, outgoing, true, outgoingEnd);
 }
 
+/**
+ * Cambio de franja con menos lugares: se quedan los `slots` salientes con menos
+ * tiempo en el puesto (fichada más reciente). El resto cierra a su horario.
+ */
+export function keepsNextBandSlot<T extends SeriesShift>(
+  outgoing: T,
+  siblings: readonly T[],
+  slots: number,
+): boolean {
+  if (!Number.isFinite(slots)) return true;
+  if (slots <= 0) return false;
+  const pool = siblings.some((s) => s.id === outgoing.id) ? [...siblings] : [outgoing, ...siblings];
+  if (pool.length <= slots) return true;
+  const ranked = pool
+    .map((s) => ({ id: String(s.id || ''), fichaje: fichajeMs(s) || seriesBoundMs(s, 'start') }))
+    .sort((a, b) => (b.fichaje - a.fichaje) || a.id.localeCompare(b.id));
+  return ranked.slice(0, slots).some((r) => r.id === String(outgoing.id || ''));
+}
+
 /** A quién releva este entrante. Quien arranca con el hueco no es saliente. */
 export function outgoingFor<T extends SeriesShift>(
   incoming: T,

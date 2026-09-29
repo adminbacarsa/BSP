@@ -2,13 +2,20 @@ import * as admin from 'firebase-admin';
 import { Timestamp, type Firestore, type QueryDocumentSnapshot } from 'firebase-admin/firestore';
 import {
   loadPositionHasContinuity,
+  nextBandSlotsFromSlaDoc,
   positionHasContinuityFromSlaDoc,
 } from '../coverage/positionHasContinuity';
 import { retainOutgoingForGap } from '../coverage/coverageRetention';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
-import { relieverFor, seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
+import {
+  isRecognizedSeriesCode,
+  keepsNextBandSlot,
+  relieverFor,
+  seriesCodeOf,
+  seriesHandoffKind,
+} from '../common/shiftSeries';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { guardFirstName } from '../common/pushGreeting';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
@@ -255,10 +262,7 @@ export async function runAutoCompletarTurnosPass(
     completed++;
   };
 
-  async function hasContinuity(shift: FirebaseFirestore.DocumentData): Promise<boolean> {
-    const oid = String(shift.objectiveId || '');
-    const end = shiftEndDate(shift);
-    if (!oid || !end) return false;
+  async function slasFor(oid: string): Promise<FirebaseFirestore.DocumentData[]> {
     if (!slaCache.has(oid)) {
       // Un objetivo puede tener varios contratos "active" (uno por mes): vale el vigente en la fecha.
       const slaSnap = await db
@@ -268,9 +272,67 @@ export async function runAutoCompletarTurnosPass(
         .get();
       slaCache.set(oid, slaSnap.docs.map((d) => ({ ...d.data(), id: d.id })));
     }
-    return (slaCache.get(oid) || []).some((sla) =>
+    return slaCache.get(oid) || [];
+  }
+
+  async function hasContinuity(shift: FirebaseFirestore.DocumentData): Promise<boolean> {
+    const oid = String(shift.objectiveId || '');
+    const end = shiftEndDate(shift);
+    if (!oid || !end) return false;
+    return (await slasFor(oid)).some((sla) =>
       positionHasContinuityFromSlaDoc(sla, shift.positionName || '', end, seriesCodeOf(shift)),
     );
+  }
+
+  async function nextBandSlots(shift: FirebaseFirestore.DocumentData): Promise<number | null> {
+    const oid = String(shift.objectiveId || '');
+    const end = shiftEndDate(shift);
+    if (!oid || !end) return null;
+    for (const sla of await slasFor(oid)) {
+      const slots = nextBandSlotsFromSlaDoc(sla, shift.positionName || '', end, seriesCodeOf(shift));
+      if (slots != null) return slots;
+    }
+    return null;
+  }
+
+  /** Salientes de la misma franja (mismo puesto, mismo fin ±30 y misma serie) que trabajaron. */
+  async function handoffSiblings(
+    outId: string,
+    shift: FirebaseFirestore.DocumentData,
+    endTimeMs: number,
+  ): Promise<Record<string, unknown>[]> {
+    const snap = await db
+      .collection('turnos')
+      .where('objectiveId', '==', shift.objectiveId)
+      .where('positionName', '==', shift.positionName)
+      .where('startTime', '>=', Timestamp.fromMillis(endTimeMs - 13 * 60 * 60 * 1000))
+      .where('startTime', '<=', Timestamp.fromMillis(endTimeMs))
+      .get();
+    const outCode = seriesCodeOf(shift as Record<string, unknown>);
+    return snap.docs
+      .filter((d) => {
+        if (d.id === outId) return true;
+        const data = d.data() as Record<string, unknown>;
+        if (!ctx.sameTenantShift(shift, data)) return false;
+        if (isOpsCoverageHoursOnSourceDoc(data) || !isReliefEligibleShift(data)) return false;
+        if (data.isAbsent === true || String(data.status || '').toUpperCase() === 'ABSENT') return false;
+        const eid = String(data.employeeId || '').trim();
+        if (!eid || eid === 'VACANTE') return false;
+        const worked = data.isPresent === true
+          || !!(data.realStartTime || data.checkInAt || data.checkInTime);
+        if (!worked) return false;
+        const en = shiftEndMs(data);
+        if (!en || Math.abs(en - endTimeMs) > RELEVO_ALIGN_MS) return false;
+        const code = seriesCodeOf(data);
+        if (isRecognizedSeriesCode(outCode) && isRecognizedSeriesCode(code) && code !== outCode) return false;
+        return true;
+      })
+      .map((d) => ({
+        id: d.id,
+        ...(d.data() as Record<string, unknown>),
+        startMs: shiftStartMs(d.data()),
+        endMs: shiftEndMs(d.data()),
+      }));
   }
 
   const outgoingDocs = [...snap.docs].sort(
@@ -392,6 +454,25 @@ export async function runAutoCompletarTurnosPass(
         && ctx.sameTenantShift(shift, d.data())
         && !isOpsCoverageHoursOnSourceDoc(d.data() as Record<string, unknown>),
     );
+
+    // Franja siguiente con menos lugares: se quedan los de menos tiempo en el puesto;
+    // el resto se va a su horario, sin retención y sin tomar el relevo de otro.
+    if (!shift.manualRetentionType && shift.objectiveId && shift.positionName) {
+      const slots = await nextBandSlots(shift);
+      if (slots != null) {
+        const siblings = await handoffSiblings(docSnap.id, shift, endTimeMs);
+        const self = {
+          id: docSnap.id,
+          ...(shift as Record<string, unknown>),
+          startMs: shiftStartMs(shift),
+          endMs: endTimeMs,
+        };
+        if (!keepsNextBandSlot(self, siblings, slots)) {
+          close(docSnap, shift, endTimeMs, 'SIN_LUGAR_FRANJA');
+          continue;
+        }
+      }
+    }
 
     const relievePresent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => {
       if (reliefIncomingClaimed.has(d.id)) return false;

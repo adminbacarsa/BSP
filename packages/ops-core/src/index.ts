@@ -46,6 +46,7 @@ export {
   reliefPositionsMatch,
   relieverFor,
   outgoingFor,
+  keepsNextBandSlot,
 } from './shiftSeries';
 export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts } from './shiftSeries';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';

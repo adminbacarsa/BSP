@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.positionHasContinuityFromSlaDoc = positionHasContinuityFromSlaDoc;
+exports.nextBandSlotsFromSlaDoc = nextBandSlotsFromSlaDoc;
 exports.loadPositionHasContinuity = loadPositionHasContinuity;
 const types_1 = require("../cerebro/types");
 const s1_leer_sla_1 = require("../cerebro/inteligencia-servicio/s1-leer-sla");
@@ -89,16 +90,26 @@ function hmToMsOnDay(anchor, hm) {
     return anchor.getTime();
 }
 function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime, outgoingCode) {
+    return nextBandSlotsFromSlaDoc(slaDoc, positionName, shiftEndTime, outgoingCode) != null;
+}
+function bandQuantity(rawPos, banda, fallback) {
+    const types = (rawPos?.allowedShiftTypes ?? rawPos?.shifts);
+    const hit = (types || []).find((t) => String(t.code || '').toUpperCase() === String(banda || '').toUpperCase());
+    const q = Number(hit?.quantity);
+    return Number.isFinite(q) && q >= 0 ? q : fallback;
+}
+function nextBandSlotsFromSlaDoc(slaDoc, positionName, shiftEndTime, outgoingCode) {
     if (!slaDoc)
-        return false;
+        return null;
     const dateStr = ymdInTz(shiftEndTime);
     if (!slaVigenteEnFecha(slaDoc, dateStr))
-        return false;
+        return null;
     const rawPos = findRawPosition(slaDoc, positionName);
     const sla = (0, types_1.normalizarSlaDeFirestore)({ ...slaDoc, id: slaDoc.id || 'sla' });
     const needs = (0, s1_leer_sla_1.leerSlaYDerivarCobertura)(sla);
     const endMs = shiftEndTime.getTime();
     const dayLetter = weekdayLetter(shiftEndTime);
+    let slots = null;
     for (const need of needs) {
         if (!posMatch(need.puestoName, positionName))
             continue;
@@ -116,10 +127,11 @@ function positionHasContinuityFromSlaDoc(slaDoc, positionName, shiftEndTime, out
             continue;
         const startMs = hmToMsOnDay(shiftEndTime, need.horaInicio);
         const diff = Math.abs(startMs - endMs);
-        if (diff <= CONTINUITY_WINDOW_MS)
-            return true;
+        if (diff <= CONTINUITY_WINDOW_MS) {
+            slots = (slots ?? 0) + bandQuantity(rawPos, need.banda, need.cantSimultaneos);
+        }
     }
-    return false;
+    return slots;
 }
 async function loadPositionHasContinuity(db, objectiveId, positionName, shiftEndTime, outgoingCode) {
     const oid = String(objectiveId || '').trim();

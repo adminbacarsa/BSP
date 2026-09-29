@@ -10,6 +10,7 @@ exports.seriesHandoffKind = seriesHandoffKind;
 exports.seriesBoundMs = seriesBoundMs;
 exports.reliefPositionsMatch = reliefPositionsMatch;
 exports.relieverFor = relieverFor;
+exports.keepsNextBandSlot = keepsNextBandSlot;
 exports.outgoingFor = outgoingFor;
 const reliefEligibility_1 = require("./reliefEligibility");
 exports.SHIFT_SERIES_ALIGN_MS = 30 * 60 * 1000;
@@ -189,6 +190,19 @@ function relieverFor(outgoing, candidates, opts) {
         return incomingStartsInWindow(start, outgoingEnd, opts);
     });
     return rankRows(pool, outgoing, true, outgoingEnd);
+}
+function keepsNextBandSlot(outgoing, siblings, slots) {
+    if (!Number.isFinite(slots))
+        return true;
+    if (slots <= 0)
+        return false;
+    const pool = siblings.some((s) => s.id === outgoing.id) ? [...siblings] : [outgoing, ...siblings];
+    if (pool.length <= slots)
+        return true;
+    const ranked = pool
+        .map((s) => ({ id: String(s.id || ''), fichaje: fichajeMs(s) || seriesBoundMs(s, 'start') }))
+        .sort((a, b) => (b.fichaje - a.fichaje) || a.id.localeCompare(b.id));
+    return ranked.slice(0, slots).some((r) => r.id === String(outgoing.id || ''));
 }
 function outgoingFor(incoming, candidates, opts) {
     const gapStart = seriesBoundMs(incoming, 'start');

@@ -101,15 +101,36 @@ export function positionHasContinuityFromSlaDoc(
   shiftEndTime: Date,
   outgoingCode?: unknown,
 ): boolean {
-  if (!slaDoc) return false;
+  return nextBandSlotsFromSlaDoc(slaDoc, positionName, shiftEndTime, outgoingCode) != null;
+}
+
+function bandQuantity(rawPos: Record<string, unknown> | null, banda: string, fallback: number): number {
+  const types = (rawPos?.allowedShiftTypes ?? rawPos?.shifts) as Record<string, unknown>[] | undefined;
+  const hit = (types || []).find((t) => String(t.code || '').toUpperCase() === String(banda || '').toUpperCase());
+  const q = Number(hit?.quantity);
+  return Number.isFinite(q) && q >= 0 ? q : fallback;
+}
+
+/**
+ * Lugares de la franja que empieza al terminar el turno (misma serie si el código es serie).
+ * `null` = sin continuidad. Cantidad por turno (`allowedShiftTypes[].quantity`) o la del puesto.
+ */
+export function nextBandSlotsFromSlaDoc(
+  slaDoc: Record<string, unknown> | null | undefined,
+  positionName: string,
+  shiftEndTime: Date,
+  outgoingCode?: unknown,
+): number | null {
+  if (!slaDoc) return null;
   const dateStr = ymdInTz(shiftEndTime);
-  if (!slaVigenteEnFecha(slaDoc, dateStr)) return false;
+  if (!slaVigenteEnFecha(slaDoc, dateStr)) return null;
 
   const rawPos = findRawPosition(slaDoc, positionName);
   const sla = normalizarSlaDeFirestore({ ...slaDoc, id: slaDoc.id || 'sla' });
   const needs = leerSlaYDerivarCobertura(sla);
   const endMs = shiftEndTime.getTime();
   const dayLetter = weekdayLetter(shiftEndTime);
+  let slots: number | null = null;
 
   for (const need of needs) {
     if (!posMatch(need.puestoName, positionName)) continue;
@@ -125,9 +146,11 @@ export function positionHasContinuityFromSlaDoc(
     if (isBandExcludedOnDate(rawPos, dateStr, need.banda)) continue;
     const startMs = hmToMsOnDay(shiftEndTime, need.horaInicio);
     const diff = Math.abs(startMs - endMs);
-    if (diff <= CONTINUITY_WINDOW_MS) return true;
+    if (diff <= CONTINUITY_WINDOW_MS) {
+      slots = (slots ?? 0) + bandQuantity(rawPos, need.banda, need.cantSimultaneos);
+    }
   }
-  return false;
+  return slots;
 }
 
 export async function loadPositionHasContinuity(
