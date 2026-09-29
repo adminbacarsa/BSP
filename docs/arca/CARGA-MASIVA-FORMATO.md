@@ -35,3 +35,15 @@ Registro de posiciones fijas (una línea por movimiento):
 | Marca trabajo licenciado COVID / tipo contrato CCG | 130 | 130 | NUM | 1 | 0-9 |
 
 Pendiente de confirmar en las tablas de códigos del servicio: significado exacto de AT/BT/MR/NA/NB (hipótesis: AT = alta, BT = baja, MR = modificación), código de modalidad de contrato del eventual, códigos de obra social, situación de revista, CCT 422/05, categoría, puesto y sucursal/domicilio de desempeño.
+
+## Tablas informativas (descargadas 29/09/2026)
+
+Fuente pública: https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/MiSimplificacion/app/contribuyente/RelacionLaboral/CargaMasiva_tablasInformativas.aspx?tab=N
+(3 modalidad de contratación, 4 modalidad de liquidación, 7 situación de revista, 8 rechazos, 24 tipos de servicio). Copias en esta carpeta (tabla-*.txt).
+
+Datos clave para eventuales:
+- Modalidad de contrato **012 = Trabajo eventual** (contratación directa de la prestadora). 102 = Empleado Servicio Eventual en Usuaria (Dto 762) solo aplica si contrata una Empresa de Servicios Eventuales. El 14 que mencionó el abogado es Nuevo período de prueba: NO corresponde.
+- Movimientos válidos (tabla de rechazos B61): AT = alta, MR = modificación, BT = baja.
+- Modalidad de liquidación: 5 = HORA, 4 = DÍA, 1 = MES.
+- Situación de revista: 1 = Activo. Para la baja, el motivo sale de esta tabla (candidatos: 30 Vencimiento de plazo Art.250 LCT, 2 Bajas otras causales) → confirmar con el contador.
+- Pendiente: código de CCT 422/05, categoría profesional y puesto (tablas 9/10/11 no se pudieron leer automáticamente), código de obra social de cada vigilador, sucursal/domicilio de desempeño de cada empresa.

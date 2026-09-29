@@ -1,0 +1,157 @@
+Código | Período Desde | Período Hasta | Descripción
+0 | 199407 | 199909 | Contrato Modalidad Promovida.Reducción 0%
+1 | 199910 | 999999 | A tiempo parcial: Indeterminado/permanente
+2 | 199606 | 999999 | Becarios-Residencias médicas Ley 22127
+3 | 199810 | 999999 | De aprendizaje Ley 25013
+4 | 199910 | 200010 | Especial de Fomento del Empleo: L.24465
+5 | 199910 | 200005 | Fomento del empleo. L.24013 y 24465
+6 | 199910 | 200010 | Lanzamiento nueva actividad. Idem 005
+7 | 199504 | 200007 | Período de prueba. Leyes 24465 y 25013
+8 | 199904 | 999999 | A tiempo completo indeterminado/Trabajo permanente
+9 | 199910 | 200005 | Práctica laboral para jovenes
+10 | 199606 | 999999 | Práctica profesionalizante - Dcto. 1374/11 - Pasantía sin obra social
+11 | 199910 | 999999 | Trabajo de temporada
+12 | 199910 | 999999 | Trabajo eventual
+13 | 199910 | 200105 | Trabajo formación
+14 | 200006 | 999999 | Nuevo período de prueba
+15 | 200006 | 200409 | Puesto nuevo varones y mujeres de 25 a 44 años
+16 | 200006 | 200402 | Nuevo período de prueba trabajador discapacitado Art.34 Ley 24147
+17 | 200006 | 200409 | Puesto nuevo menor de 25 años, varones y mujeres de 45 o más años y mujer jefe de flia.s/limite/edad
+18 | 199910 | 999999 | Trabajador discapacitado Art.34.Ley 24147
+19 | 200006 | 200409 | Puesto nuevo.Varones y mujeres 25 a 44 años Art.34.Ley 24147
+20 | 200006 | 200409 | Pto.nuevo menor 25 años,varones y mujeres 45 o más y mujer jefe flia.s/limite/edad.Art.34 L.24147
+21 | 199910 | 999999 | A tiempo parcial determinado (contrato a plazo fijo)
+22 | 199910 | 999999 | A tiempo completo determinado (contrato a plazo fijo)
+23 | 199910 | 999999 | Personal no permanente Ley N°22248
+24 | 199407 | 999999 | Personal de la construcción Ley N°22250
+25 | 199407 | 999999 | Empleo público provincial
+26 | 199606 | 999999 | Beneficiario de programa de empleo,capacitación y de recueración productiva
+27 | 200110 | 999999 | Pasantías Ley 26427 - con obra social -
+28 | 195001 | 999999 | Programas  jefes y jefas de hogar
+29 | 200306 | 999999 | AFA Regimen especial. Aportante autonomo
+30 | 200403 | 999999 | Nuevo período de prueba trabajador discapacitado Art.87 Ley N°24013
+31 | 200403 | 999999 | Trabajador discapacitado Art.87 Ley N°24013
+32 | 200403 | 200812 | Período de prueba Art.6 Ley 25877
+33 | 200403 | 200812 | Período de prueba Art.6 Ley 25877.Beneficiarios de planes jefes y jefas de hogar
+34 | 200403 | 200812 | Período de prueba Art.6 Ley 25877.Art.34 Ley 24147
+35 | 200403 | 200812 | Período de prueba Art.6 Ley 25877.Art.34 Ley 24147.Beneficiarios planes jefes y jefas de hogar
+36 | 200403 | 200812 | Período de prueba Art.6 Ley 25877.Trabajador discapacitado Art.87 Ley 24013
+37 | 200403 | 200812 | Período de prueba Art.6 Ley 25877.Trab.discapacitado Art.87 Ley 24013 Benef.jefes-jefas hogar
+38 | 200403 | 200812 | Puesto nuevo Art. 6 Ley 25877
+39 | 200403 | 200812 | Puesto nuevo Art.6 Ley 25877.beneficiario de planes jefes y jefas de hogar
+40 | 200403 | 200812 | Puesto nuevo Art.6 Ley 25877.Art.34 Ley 24147
+41 | 200403 | 200812 | Puesto nuevo Art.6 Ley 25877. Art.34 Ley 24147.Beneficiarios de planes jefes y jefas de hogar
+42 | 200403 | 200812 | Puesto nuevo Art.6 Ley 25877.Trabajador discapacitado Art.87 Ley 24013
+43 | 200403 | 200812 | Puesto nvo. Art.6 ley 25877.Trab.discapacitado Art.87 ley 24013.Benef.planes jefes y jefas de hogar
+44 | 199407 | 999999 | Changa solidaria.CCT 62/75
+45 | 199407 | 999999 | Personal no permanente hoteles CCT 362/03 Art.68 Inc.B)
+46 | 199407 | 999999 | Planta transitoria Adm.Pública Nacional, Provincial y/o Municipal
+47 | 199407 | 999999 | Representante Gremial
+48 | 199407 | 999999 | Art.4°Ley 24241.Traslado temporario desdes el exterior ó Conv.bilateral de Seg.Social
+49 | 199407 | 999999 | Director - Empleado SA con Obra Social y LRT
+50 | 199407 | 199909 | Contrato modalidad promovida .Reducción 50%
+51 | 200812 | 999999 | Pasantias Ley 26.427 - con obra social - beneficiario pensión de discapacidad
+60 | 201509 | 999999 | Taller Protegido Especial para el Empleo (TPEE) Ley 26816, art. 2º punto 1
+61 | 201601 | 999999 | Actor - Intérprete en Empleador Contratante Ley 27.203- C/OBRA SOCIAL
+62 | 201601 | 999999 | Actor - Intérprete en Empleador Contratante Ley 27.203- S/OBRA SOCIAL
+63 | 202210 | 999999 | Acciones de Entrenamiento para el Trabajo  - Res 1107/2022
+65 | 202310 | 999999 | A Tiempo indeterminado /Trabajo permanente discontinuo
+95 | 201001 | 999999 | Planes Ministerio de Trabajo
+96 | 200311 | 999999 | Plan Trabajadores por San Luis Ley 5411
+97 | 200702 | 999999 | Programa Trabajo para Jovenes Tucumanos
+98 | 200601 | 999999 | BONUS- SEGUNDA OPORTUNIDAD
+99 | 199407 | 999999 | LRT(Direc.SA, Municip.Org.cent.y descent.Emp.Mixta,docent.priv.opúbl.de jurisd.incorp. o no al SIJP
+100 | 199407 | 199909 | Contrato modalidad promovida.Reducción 100%
+101 | 194001 | 199406 | Pre-SIJP (Anterior a 07/1994)
+102 | 201503 | 999999 | Empleado Servicio Eventual en Usuaria DTO 762
+103 | 201805 | 999999 | Retiro Voluntario - Decreto 263/2018 y otros
+110 | 201201 | 999999 | Trabajo permanente prestación continua Ley 26727
+111 | 201201 | 999999 | Trabajo temporario Ley 26727
+112 | 201201 | 999999 | Trabajo permanente discontinuo ley 26727
+114 | 201303 | 201502 | Trabajo temporario con Reducción Ley 26727
+115 | 201303 | 201502 | Trabajo permanente discontinuo con Reducción ley 26727
+201 | 200812 | 201312 | Puesto Nuevo ART.16 LEY 26476
+202 | 200812 | 201312 | Puesto Nuevo ART.16 LEY 26476 Trabajador  Discapacitado ART.34 LEY 24147
+203 | 200812 | 201312 | Puesto Nuevo ART.16 LEY 26476 Trabajador Discapacitado ART. 87 LEY 24013
+211 | 195001 | 200812 | Art 11 Inc b L26476 Reg Pers n/Registrado
+212 | 195001 | 200812 | Art 11 Inc b L26476 Reg Pers n/Registrado Disc Art 34 L24147
+213 | 195001 | 200812 | Art 11 Inc b L 26476 Reg Pers n/Registrado Disc Art 87 L24013
+221 | 195001 | 200812 | Art 12 L26476 Reg Pers n/Registrado
+222 | 195001 | 200812 | Art 12 L26476 Reg Pers n/Registrado Disc Art 34 L24147
+223 | 195001 | 200812 | Art 12 L26476 Reg Pers n/Registrado Disc Art 87 L24013
+301 | 201408 | 201712 | Art. 19 Ley 26940. Tiempo indeterminado
+302 | 201408 | 201712 | Art. 19 Ley 26940. Trabajador discapacitado art. 34 L 24147. Tiempo indeterminado
+303 | 201408 | 201712 | Art. 19 Ley 26940. Trabajador discapacitado art. 87 L 24013. Tiempo indeterminado
+304 | 201408 | 201712 | Art. 19 Ley 26940. Tiempo parcial. Art. 92 ter LCT
+305 | 201408 | 201712 | Art. 19 Ley 26940. Trabajador discapacitado art. 34 L 24147. Tiempo parcial. Art. 92 ter LCT
+306 | 201408 | 201712 | Art. 19 Ley 26940. Trabajador discapacitado art. 87 L 24013. Tiempo parcial. Art. 92 ter LCT
+307 | 201408 | 201712 | Art. 24 Ley 26940. Hasta 15 empleados. Primeros 12 meses. Tiempo indeterminado
+308 | 201408 | 201712 | Art. 24 Ley 26940. H/ 15 emp. 1ros 12 meses. Tiempo indet. Trabajador discap. art. 34 L 24147
+309 | 201408 | 201712 | Art. 24 Ley 26940. H/ 15 emp. 1ros 12 meses. Tiempo indet. Trabajador discap. art. 87 L 24013
+313 | 201408 | 201712 | Art. 24 Ley 26940. 16 a 80 empleados. Tiempo indeterminado
+314 | 201408 | 201712 | Art. 24 Ley 26940. 16 a 80 empl. Tiempo indet. Trabajador discapacitado art. 34 L 24147
+315 | 201408 | 201712 | Art. 24 Ley 26940. 16 a 80 empl. Tiempo indet. Trabajador discapacitado art. 87 L 24013
+401 | 202104 | 202305 | Puesto nuevo Art 2 inc. a Decreto 191/ 2021. Primeros 12 meses
+402 | 202204 | 202405 | Puesto nuevo Art 2 inc. b Decreto 191/ 2021. Segundos 12 meses
+403 | 202304 | 202505 | Puesto nuevo Art 2 inc. c Decreto 191/ 2021. Terceros 12 meses
+404 | 202104 | 202305 | Puesto nuevo Art 2 inc. d Decreto 191/ 2021. Primeros 12 meses
+405 | 202204 | 202405 | Puesto nuevo Art 2 inc. e Decreto 191/ 2021 segundos 12 meses
+406 | 202304 | 202505 | Puesto nuevo Art 2 inc. f Decreto 191/ 2021 terceros 12 meses
+407 | 202104 | 202305 | Tiempo parcial. Puesto nuevo Art 2 inc. a Decreto 191/ 2021. Primeros 12 meses
+408 | 202204 | 202405 | Tiempo parcial. Puesto nuevo Art 2 inc. b Decreto 191/ 2021. Segundos 12 meses
+409 | 202304 | 202505 | Tiempo parcial. Puesto nuevo Art 2 inc. c Decreto 191/ 2021. Terceros 12 meses
+410 | 202104 | 202305 | Tiempo parcial. Puesto nuevo Art 2 inc. d Decreto 191/ 2021. Primeros 12 meses
+411 | 202204 | 202405 | Tiempo parcial. Puesto nuevo Art 2 inc. e Decreto 191/ 2021. Segundos 12 meses
+412 | 202304 | 202505 | Tiempo parcial. Puesto nuevo Art 2 inc. f Decreto 191/ 2021. Terceros 12 meses
+413 | 202104 | 202305 | Discapacitado Ley 24.013 y Puesto nuevo Art 2 inc. a Decreto 191/ 2021
+414 | 202104 | 202305 | Discapacitado Ley 24.013 y Puesto nuevo Art 2 inc. d Decreto 191/ 2021
+415 | 202104 | 202305 | Discapacitado Ley 24.013 y Tiempo parcial Puesto nuevo Art 2 inc. a Decreto 191/ 2021
+416 | 202104 | 202305 | Discapacitado Ley 24.013 y Tiempo parcial Puesto nuevo Art 2 inc. d Decreto 191/ 2021
+501 | 202109 | 202209 | Puesto Nuevo Art 2 inc. a. Dec. 493/2021
+502 | 202109 | 202209 | Puesto Nuevo Art 2 inc. b.Dec. 493/2021
+503 | 202109 | 202209 | Tiempo parcial. Puesto Nuevo Art 2 inc. a.Dec. 493/2021
+504 | 202109 | 202209 | Tiempo parcial. Puesto Nuevo Art 2 inc. b.Dec. 493/2021
+505 | 202109 | 202209 | Discapacitado Ley 24.013 y Puesto nuevo Art 2 inc. a. Dec. 493/2021
+506 | 202109 | 202209 | Discapacitado Ley 24.013 y Tiempo parcial Puesto Nuevo Art 2 inc. a.Dec. 493/2021
+507 | 202109 | 202209 | Trabajo permanente prestación continua Ley 26727. Puesto Nuevo Art 2 inc. a. Dec. 493/2021
+508 | 202109 | 202209 | Trabajo permanente prestación continua Ley 26727. Puesto Nuevo Art 2 inc. b. Dec. 493/2021
+509 | 202109 | 202209 | Trabajo permanente discontinuo ley 26727. Puesto Nuevo Art 2 inc. a.  Dec. 493/2021
+510 | 202109 | 202209 | Trabajo permanente discontinuo ley 26727. Puesto Nuevo Art 2 inc. b. Dec. 493/2021
+511 | 202109 | 202209 | Personal de la Construcción L 22250 Puesto Nuevo Art 2 inc. a. Dec. 493/2021
+512 | 202109 | 202209 | Personal de la Construcción L 22250 Puesto Nuevo Art 2 inc. b. Dec. 493/2021
+601 | 202210 | 202711 | Plazo indeterminado a tiempo completo (art 90 Ley 20744) Art 2 Dec 551/22 y 1085/24. Red. 100%.
+602 | 202210 | 202711 | Plazo indeterminado a tpo parcial (art 90 y art 92 Ley 20744) Art 2 Dec 551/22 y 1085/24. Red. 50%
+603 | 202210 | 202711 | Plazo fijo a tiempo completo ( art 93 Ley 20744) Art 2 Dec. 551/22 y 1085/24. Red. 100%.
+604 | 202210 | 202711 | Plazo fijo a tiempo parcial ( art 92 y art 93 Ley 20744) Art 2 Dec 551/22 y 1085/24. Red. 50%.
+605 | 202210 | 202711 | Trabajo de temporada a tiempo completo (art 96 Ley 20744) Art 2 Dec. 551/22 y 1085/24. Red. 100%.
+606 | 202210 | 202711 | Trabajo de temporada a tpo parcial (art 92 y art 96 Ley 20744) Art 2 Dec. 551/22 y 1085/24. Red. 50%
+607 | 202210 | 202711 | Trab agrario perm prest cont a tpo compl (Ley 26727). Pto Nvo Art 2 Dec 551/22 y 1085/24. Red. 100%
+608 | 202210 | 202711 | Trab agrario perm pres continua a tpo pcial (Ley 26727) Pto Nvo Art 2 Dec.551/22 y 1085/24. Red.50 %
+609 | 202210 | 202711 | Trab agrario perm discont a tpo completo (Ley 26727) Pto Nvo Art 2 Dec. 551/22 y 1085/24. Red.100%
+610 | 202210 | 202711 | Trabajo agrario perm discont a tpo parcial (Ley 26727) Pto Nvo Art 2 Dec. 551/22 y 1085/24. Red. 50%
+611 | 202210 | 202711 | Trabajo agrario de temp a tpo completo (Ley 26727) Pto Nvo Art 2 Dec. 551/22 y 1085/24. Red.100%
+612 | 202210 | 202711 | Trabajo agrario de temp a tpo parcial (Ley 26727). Pto Nuevo Art 2 Dec. 551/22 y 1085/24. Red. 50%
+613 | 202210 | 202711 | Personal de la Construcción a tpo completo (Ley 22250) Pto Nvo Art 2. Dec. 551/22 y 1085/24 Red.100%
+614 | 202210 | 202711 | Pers.de la Constr a tpo pcial (L22250 y art 92 L20744) Pto Nvo Art 2. Dec.551/22 y 1085/24. Red. 50%
+701 | 199407 | 202407 | Regularización personal no registrado. Art 77 Ley 27.742.
+702 | 199407 | 202407 | Regularización personal no registrado. Art 77 Ley 27.742 Micro y Peq. Emp. y ent. sin fines de lucro
+703 | 199407 | 202407 | Regularización personal no registrado. Art 77 Ley 27.742. Medianas Empresas Tramo 1 y 2.
+704 | 199407 | 202610 | Regularización personal no registrado. Art. 169 - Ley 27.802. Micro y Peq. Emp. Ent. s/ fin de lucro
+705 | 199407 | 202610 | Regularización personal no registrado. Art. 169 - Ley 27.802. Medianas Empresas Tramo 1 y 2.
+706 | 199407 | 202610 | Regularización personal no registrado. Art. 169 - Ley 27.802. Demás empleadores.
+710 | 202605 | 203103 | Régimen de Incentivo para la Formalización Laboral - Ley 27.802
+982 | 201602 | 999999 | CCG vitivinícola de Catamarca
+983 | 201602 | 999999 | CCG vitivinícola de Salta
+984 | 201512 | 999999 | CCG foresto industrial de Chaco
+985 | 201503 | 999999 | CCG Vitivinícola de Neuquén
+987 | 201601 | 999999 | CCG Vitivinícola de La Rioja
+988 | 201904 | 999999 | CCG  Limones de Tucuman Salta y Jujuy
+989 | 201212 | 999999 | CCG Tabaco Salta
+990 | 201212 | 999999 | CCG Tabaco Jujuy
+991 | 201212 | 999999 | CCG vitivinícola de Río Negro
+992 | 201206 | 999999 | CCG multiproducto del Chaco
+994 | 201503 | 999999 | CCG Yerba mate Misiones y Corrientes
+995 | 201203 | 999999 | CCG Vitivinícola de San Juan
+996 | 201203 | 999999 | CCG Vitivinícola de Mendoza
+997 | 201012 | 999999 | CCG FORESTAL CHACO
+998 | 201010 | 999999 | CCG TABACO VIRGINIA CHACO

@@ -1,0 +1,55 @@
+Descripción | Código
+Abandono del trabajo/ Art.244 LCT | 25
+Activo | 1
+Baja de oficio por denuncia | 53
+Baja por despido | 7
+Baja por fallecimiento | 0
+Baja por retiro anticipado o voluntario | 54
+Bajas otras causales | 2
+Cesantía laboral | 40
+Cesión del personal / ART.229 - LCT | 20
+Concurso del Empleador Art.251 LCT | 32
+Conservación del empleo P/accidente o enfermedad inculpable | 44
+Denuncia de contrato de trabajo por el empleador/ Art.242 LCT | 23
+Denuncia de contrato de trabajo por el trabajador/ Art.242 LCT | 24
+Denuncia del contrato de trabajo por transferencia de establecimiento -ART.226 - LCT | 19
+Despido / ART. 245 - LCT | 26
+Despido Art.5° Ley 25371 | 39
+Despido con o sin justa causa / ART.64 Inc.c) Ley 22248 | 36
+Despido por fuerza mayor-Trabajo Agrario/Art.64 Inc.d) L.22248 | 37
+E.S.E.Cese transitorio de servicios | 15
+Empleado eventual en EU (para uso de la ESE) mes completo | 42
+Empleado eventual en EU (para uso de la ESE) mes incompleto | 43
+Exoneración | 41
+Extinción por mutuo acuerdo de las partes (Art. 241 Ley N° 20.744) | 52
+Fallecimiento del empleador/ Art.249 LCT | 29
+Falta o disminución del trabajo/ Art.247 LCT | 27
+Fin Pago Retiro Voluntario - Dec.263/2018 y otros | 47
+Fin contrato de aprendizaje y pasantias / ART.1 y 2 Ley 25877; ART.2 y 19 Ley 25013 | 38
+Fuerza mayor / ART.247 - LCT | 28
+Incapacidad o inhabilidad del trabajador / ART.254 - LCT | 34
+Inicio Pago Retiro Voluntario - Dec.263/2018 y otros | 46
+Jubilación/ Art.252 LCT / Art.64 Inc.e) L.22248 y otras | 33
+Licencia Ley 27.674 Art. 13 - Régimen De Protección Integral Del Niño, Niña y Adolescente Con Cáncer | 51
+Licencia por excedencia | 10
+Licencia por maternidad | 5
+Licencia por maternidad Down | 11
+Licencia por vacaciones | 12
+Licencia sin goce de haberes | 13
+Personal siniestrado de terceros | 16
+Quiebra del empleador/Art.251 LCT | 31
+Reingreso por disposición judicial | 17
+Renuncia del trabajador / ART.240 - LCT / ART.64 Inc.a) L22248 y otras | 21
+Reserva de puesto | 14
+SIN INFORMAR | 97
+Susp. período parcial L 20744 art.223bis / Res. 397 MTEySS | 49
+Suspendido. Res. 397/2020 MTEySS c/Aportes OS | 48
+Suspendido.Ley 20744 Art. 223 Bis | 9
+Suspensiones otras causales | 6
+Suspensiones por causas disciplinarias | 45
+Transferencia del contrato de trabajo ART.225 LCT | 18
+Traspaso de personal / RIGI Ley 27.742 | 55
+Vencimiento de contrato a plazo fijo o determinado, a tiempo completo o parcial | 99
+Vencimiento de plazo / ART. 250 - LCT | 30
+Voluntad concurrente de las partes - ART.241 - LCT acuerdo homologado o no homologado | 22
+Voluntad concurrente de las partes-Trabajo Agrario/Art.64 Inc.b) L.22248 | 35

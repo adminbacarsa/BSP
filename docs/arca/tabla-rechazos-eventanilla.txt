@@ -1,0 +1,225 @@
+Codigo | Descripcion
+0 | OK, sin error
+1 | La persona no existe
+2 | El código ingresado no es válido.
+3 | CUIT inválido
+4 | La persona esta fallecida. No se puede actualizar sus datos.
+6 | El vínculo no existe
+7 | Dígito verificador erróneo
+16 | CUIT inexistente
+19 | CUIT dado de Baja en Universo
+24 | La fecha es inválida.
+25 | La hora es inválida
+28 | El campo debe ser numérico.
+48 | Campo obligatorio no informado.
+58 | El vínculo ya esta dado de alta.
+60 | El evento informado está en conflicto con una relación cónyuge existente
+72 | El CUIL titular y el relacionado ya estan relacionados
+73 | El CUIL titular y el relacionado son iguales.
+86 | La persona posee fecha de estado civil mayor a la ingresada.
+92 | Fecha inválida. La fecha se superpone a rangos anteriores o posteriores
+95 | No se han informado los datos de la documentación respaldatoria
+114 | La fecha de nacimiento difiere de la de inicio de la relación
+115 | El tipo de documentación no corresponde al evento
+119 | La persona posee el límite de adoptantes o padres activos.
+120 | Se informaron datos de más de una documentación
+121 | La persona posee mas de un cónyuge activo.
+122 | No informó texto de declaración jurada
+126 | El relacionado esta fallecido
+127 | El campo no debe estar informado
+163 | No se informo el código de documentación respaldatoria
+169 | La fecha debe ser menor o igual a la fecha actual
+182 | Código de evento inválido para esta función
+194 | La fecha no puede ser anterior a la fecha de nacimiento
+199 | La fecha del evento de finalización es anterior a la de inicio
+200 | Evento de finalización no previsto para el vínculo
+214 | Obra Social inválida para la Fecha de inicio de la RL
+251 | Evento no permitido para personas del mismo sexo
+252 | El hombre debe tener mas de 16 años y la mujer mas de 12 años
+253 | Este evento es incompatible para estos CUILes
+254 | La persona ya tiene ambos padres
+255 | La persona ya tiene un padre del mismo sexo
+256 | El padre o madre tiene menos de 10 años
+257 | Evento no permitido para titulares menores de 18 años
+258 | Evento no permitido para relacionados mayores de 21 años
+276 | CUIT igual al CUIL
+277 | Modalidad de contrato errónea
+360 | CUIL dado de baja
+367 | Marca de baja errónea
+369 | Existen relaciones incompatibles
+370 | Existe una adopción vigente de distinto tipo en la misma fecha
+372 | Falta (o esta fuera de fecha) relación conyuge o conviviente
+373 | Existen relaciones incompatibles para el mismo par de CUILes
+374 | Existe una relación de hijo posterior
+375 | Evento no permitido para menores de 21 años y relacionados no discapacitados
+376 | Una persona a cargo no puede tener personas a cargo
+378 | Existen relaciones posteriores que son incompatibles
+379 | El tenedor debe ser el padre o madre
+380 | Solo se permite una relación en la misma fecha
+381 | Evento no permitido para relacionados menores de 21 años y sin discapacidad
+382 | Existe una relación cónyuge o conviviente vigente con el otro padre
+393 | No existe relación hijo con el otro progenitor
+396 | Evento no permitido para relacionados sin discapacidad
+421 | Es mayor de 25 años y no es discapacitado
+422 | Es mayor de 21 años y no estudia ni es discapacitado
+423 | No existe una relacion cónyuge o conviviente vigente
+424 | El CUIL relacionado no esta registrado como hijo de otro titular
+426 | Fecha evento de finalización no puede superar fecha fin relación cónyuge/cónyuge
+430 | Existe una relación hijo con persona a cargo de obra social vigente
+520 | Datos incongruentes para el CUIL solicitado
+601 | Fecha de nacimiento menor a 31/12/1901
+602 | Existe documentación con legajo, no se permite actualizarla
+700 | Código de evento inválido (es válido dentro de ADP pero no se acordó que se informara)
+800 | Tipo de escolaridad inválida
+801 | Nivel de estudio inválido
+802 | Grado o año escolar inválido
+999 | Incongruencias en header y/o trailer
+ABM | Inconsistencias en las novedades ingresadas,  reformatee y reingrese el archivo
+AT1 | Código de transacción erróneo
+AT2 | Fecha de transacción errónea
+AT3 | Hora de transacción errónea
+AT4 | Relación CUIT - CUIL existente
+AT5 | Fecha de inicio de relación laboral inválida
+AT6 | Fecha de fin de relación laboral inválida
+AT7 | Modalidad de contrato no vigente para la fecha de inicio de relación laboral
+AT8 | Si es trabajador agropecuario, la fecha de inicio de relación laboral debe ser mayor o igual a 1999-12-01
+AT9 | Obra Social inválida para la fecha de ingreso de la novedad
+ATA | Fecha de inicio de relación laboral supera los tres meses de la fecha de ingreso de la novedad
+ATB | La fecha de fin de relación laboral es obligatoria para modalidad de contrato plazo fijo
+ATC | Para la modalidad de contrato ingresada no corresponde fecha de fin de relación laboral
+ATD | El CUIL ha sido cambiado, por favor ingrese el CUIL nuevo
+ATE | Ya posee una clave da alta temprana vigente
+ATF | No posee una clave da alta temprana activa
+ATG | No posee una clave da alta temprana vigente
+ATH | Posee más de una clave da alta temprana vigente
+ATI | ART inválida
+ATJ | Retribución pactada inválida
+ATK | Marca de trabajador agropecuario inválida
+ATL | La modalidad de contrato y la fecha de inicio de relación laboral son obligatorias
+ATM | Modalidad de liquidación errónea
+ATN | Puesto desempeñado es obligatorio
+ATO | Debe informar sucursal (Domicilio de desempeño/explotación)
+ATP | Debe informar actividad en domicilio de desempeño/explotación
+ATQ | La cantidad de empleados debe ser mayor a cero
+ATR | La fecha de recepción de telegrama de renuncia no puede ser mayor  a la fecha de la novedad
+ATS | Posee más de una clave da alta temprana activa
+ATT | No corresponde informar Fecha de recepción de telegrama de renuncia
+ATU | Debe informar situación de baja
+ATV | No corresponde informar situación de baja
+ATW | Fecha de vigencia de ART inválida
+ATZ | Fin del periodo de adhesion para la modalidad de contrato informada
+B01 | Convenio colectivo de trabajo inválido
+B02 | Código de incapacidad inválido
+B03 | Código de nivel de formación inválido
+B04 | Código de provincia inválido
+B05 | Tipo de mail inválido
+B06 | Tipo de teléfono inválido
+B11 | CUIL inválido
+B12 | CBU inválida
+B13 | Código de Obra Social inválido
+B16 | Sólo se permiten altas de domicilios
+B17 | Ya existe esa actividad para el domicilio de explotación
+B18 | Se requiere actividad en domicilio de explotación
+B19 | Código de actividad  en domicilio de explotación inválida
+B20 | Cantidad de empleados inválida
+B21 | Código de tipo de domicilio inválido
+B22 | Domicilio incompleto
+B23 | Datos Telefónicos incompletos(Prefijo tel. Pais o Área o, número de tel.)
+B26 | Fecha de vigencia ART requerida
+B27 | Código de movimiento inválido
+B29 | Código de tipo de documentación inválido
+B30 | Código de país inválido
+B31 | Tipo de escolaridad inválida
+B32 | Nivel de estudio inválido
+B33 | Grado/Año Inválido
+B34 | Año de la partida debe ser igual al Año Evento o al Año anterior
+B35 | La fecha del evento debe ser anterior a la fecha actual
+B36 | La fecha de emisón del documento debe ser anterior a la fecha actual
+B37 | Código de evento inválido
+B38 | El empleador debe tener al menos una OS
+B39 | Se requiere código de sucursal - domicilio de desempeño/explotación
+B40 | Informó un campo de domicilio y no informó la calle
+B41 | Informó un campo de domicilio y no informó la puerta
+B42 | El vinculado se encuentra fallecido en el PUC
+B43 | Existen otros vínculos incompatibles con los que intenta registrar
+B44 | El domicilio ya se encuentra registrado
+B45 | El código de sucursal -domicilio de desempeño/explotación,  ya se encuentra registrado
+B46 | Informó un campo de domicilio y no informó el código postal
+B47 | Informó un campo de domicilio y no informó la localidad
+B48 | Sucursal - domicilio de desempeño/explotación debe ser numérica
+B49 | Actividad en domicilio de desempeño/explotación debe ser numérica
+B50 | No informó alguno de los campos obligatorios de domicilio
+B51 | El tipo de domicilio debe ser E / P / N / T / S
+B52 | No informó provincia o es inválida
+B53 | No informó sucursal-domicilio de desempeño/explotación, o es inválida
+B54 | No informó actividad en domicilio de desempeño/explotación o es inválida
+B56 | Solo se permite código de movimiento 'AT'
+B60 | No existe la relación laboral CUIT - CUIL
+B61 | Código de movimiento distinto de AT/MR/BT.
+B62 | Cuil no informado
+B63 | Fecha de nacimiento del trabajador inválida.
+B64 | Número de Teléfono inválido.
+B65 | E-mail inválido.
+B66 | Prefijo telefónico de Area invalido o no informado, siendo informado el número telefono.
+B67 | Prefijo telefónico de Pais invalido o no informado, siendo informado el número de telefono.
+B68 | Número de puerta invalido.
+B69 | Tipo de domicilio inválido
+B70 | Código de evento invalido.
+B71 | Código de documentacion externa no informado.
+B72 | Número de acta no informado o invalido
+B73 | Tomo no informado
+B74 | Folio no informado
+B75 | Localidad no informada
+B76 | País no informado
+B77 | Comuna no informado
+B78 | Tribunal no informado
+B79 | Juzgado no informado o invalido
+B80 | Secretaria no informada o invalida
+B81 | Escolaridad-año invalida
+B82 | Escolaridad-tipo invalido
+B83 | Escolaridad-nivel invalido
+B84 | Escolaridad-grado no informado
+B85 | Tipo de Domicilio Inválido
+B86 | E-mail incompleto
+B87 | Texto de la declaracion jurada incompleto
+B89 | Codigo de provincia no informado
+B91 | Juzgado o Secretaria invalidos
+B92 | Localidad Inválida
+B93 | Estado civil no numérico o no encontrado en supa
+B94 | Fecha de antigüedad formato inválido
+B95 | No posee relación laboral vigente
+B96 | La fecha de antigüedad es posterior a la fecha de Inicio de la relación laboral
+BT1 | Para anular Altas Automáticas, primero complete los datos mediante una modificación
+BT2 | No corresponde informar esa situación de Baja para esa modalidad de contratación
+BT3 | Fecha de Fin de Relacion Laboral debe ser menor a la Fecha de la Novedad
+BT4 | Debe informar Código de Obra Social
+BT5 | La Fecha de fin de Relación Laboral no puede ser menor a la Fecha de inicio de RL
+BT6 | La Fecha de Inicio de Relación Laboral informada es posterior a la vigente
+BT7 | No corresponde informar Fecha de Fìn de la RL para esa modalidad de contratación
+BT8 | La relacion SUCURSAL /ACTIVIDAD en domicilio de desempeño/explotación no existe
+BT9 | Convenio Colectivo de Trabajo inválido
+BTA | Cantidad de empleados para el convenio colectivo de trabajo debe ser mayor a 1
+BTC | Fecha de Inicio de Actividad del empleador en el impuesto es inválida
+BTD | Fecha de Novedad Inválida
+BTE | Debe ingresar modificación informando sucursal-actividad y puesto desempeñado
+BTF | No debe informar fecha de recepción de telegrama de renuncia
+BTG | No posee Baja vigente
+BTH | Código de Movimiento Inválido
+BTI | Debe informar Categoría Profesional
+BTJ | Debe informar Convenio Colectivo
+BTK | Debe informar Servicio Diferenciado
+BTL | La Fecha de Fin de la Relación Laboral  informada no puede ser anterior a la Fecha de Fin ya ingresada
+BTR | El CUIL no fue informado con modalidad de contratación '102' por ningún empleador
+BTS | Tiene menos de 15 empleados
+BTW | No corresponde situación de baja 46 si la modalidad de contrato es 103
+BTU | No se pueden anular altas pasadas las 24 hs de la fecha de Inicio
+BTV | La modalidad de contrato 103 no puede modificarse
+BTX | No puede modificarse la modalidad de contrato por una modalidad 103
+BTY | La fecha de inicio no puede cambiarse si la modalidad de contrato es 103
+BTZ | No se pueden ingresar altas con modalidad de contrato 103
+BAA | No corresponde situación de baja 47 si la modalidad de contrato no es 103
+BAB | No corresponde anular altas si la modalidad de contrato es 103
+BBB | No está habilitado para utilizar la situación de baja 46
+BBC | No se pueden modificar registros con situación de Baja  46
+BBM | La marca COVID/CCG es inválida
+BBN | La  marca COVID/CCG  ingresada  no corresponde para esa Fecha de Inicio de la Relación Laboral
