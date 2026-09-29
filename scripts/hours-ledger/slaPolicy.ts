@@ -35,6 +35,39 @@ export function objectiveInOperation(buckets: readonly SlaBucket[]): boolean {
   return buckets.some((b) => b === 'active' || b === 'closed');
 }
 
+/** Objetivos con al menos un contrato en operación o cerrado del mes. */
+export function inOperationObjectiveIds(
+  bucketsByObjective: ReadonlyMap<string, readonly SlaBucket[]> | Record<string, readonly SlaBucket[]>,
+): Set<string> {
+  const ids = new Set<string>();
+  const entries = bucketsByObjective instanceof Map
+    ? bucketsByObjective.entries()
+    : Object.entries(bucketsByObjective);
+  for (const [id, buckets] of entries) {
+    const oid = String(id || '').trim();
+    if (oid && objectiveInOperation(buckets)) ids.add(oid);
+  }
+  return ids;
+}
+
+/**
+ * Horas a facturar vs horas de objetivos fuera de ese universo.
+ * Sin objectiveId no se puede probar el contrato: quedan fuera.
+ */
+export function splitHoursByOperation(
+  hoursByObjectiveId: Record<string, number>,
+  inOperation: ReadonlySet<string>,
+): { billed: number; outside: number } {
+  let billed = 0;
+  let outside = 0;
+  for (const [id, raw] of Object.entries(hoursByObjectiveId)) {
+    const h = Number(raw) || 0;
+    if (String(id || '').trim() && inOperation.has(String(id).trim())) billed += h;
+    else outside += h;
+  }
+  return { billed: r1(billed), outside: r1(outside) };
+}
+
 const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 
 /**

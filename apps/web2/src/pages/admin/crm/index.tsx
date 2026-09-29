@@ -124,6 +124,8 @@ import {
   resolveClientDefaultProformaDetailMode,
   sumBillableContractHours,
 } from '@/lib/crm/slaBilling';
+import { buildInOperationObjectiveIds, splitHoursByOperation, type ProformaSlaRow } from '@/lib/crm/proformaOperation';
+import { fetchPlanificacionEstadoDoc } from '@/lib/multiempresa';
 import type { ProformaBillingRow, PurchaseOrder } from '@/lib/crm/slaBilling.types';
 import { purchaseOrderService } from '@/services/purchaseOrderService';
 import { isSolicitudRefuerzoExtraVendible } from '@/lib/refuerzo/refuerzoDisplay';
@@ -473,12 +475,18 @@ export default function CRMPage() {
     planned: number | null;
     executed: number | null;
     sinCobertura: number | null;
+    fueraContratoPlan: number | null;
+    fueraContratoEjec: number | null;
+    fueraContratoTurnos: number | null;
     loading: boolean;
     estructurales: number;
   }>({
     planned: null,
     executed: null,
     sinCobertura: null,
+    fueraContratoPlan: null,
+    fueraContratoEjec: null,
+    fueraContratoTurnos: null,
     loading: false,
     estructurales: 0,
   });
@@ -2260,6 +2268,32 @@ export default function CRMPage() {
         objetivos: selectedClient.objetivos || [],
         slas: servicesForProforma,
       });
+      const proformaYearNum = start.getFullYear();
+      const proformaMonthIndex0 = start.getMonth();
+      const publishIds = new Set<string>();
+      for (const srv of servicesForProforma) {
+        const id = String((srv as { objectiveId?: unknown }).objectiveId ?? '').trim();
+        if (id) publishIds.add(id);
+      }
+      for (const o of selectedClient.objetivos || []) {
+        const id = normalizeClientObjetivo(o).id;
+        if (id) publishIds.add(id);
+      }
+      const publishedObjectiveIds = new Set<string>();
+      await Promise.all([...publishIds].map(async (oid) => {
+        const estado = await fetchPlanificacionEstadoDoc(empresaId, oid, proformaYearNum, proformaMonthIndex0 + 1);
+        if (!estado) return;
+        if (estado.data.publishedAt == null || estado.data.publishedAt === '') return;
+        publishedObjectiveIds.add(oid);
+      }));
+      const inOperation = buildInOperationObjectiveIds({
+        slas: servicesForProforma as ProformaSlaRow[],
+        year: proformaYearNum,
+        monthIndex0: proformaMonthIndex0,
+        publishedObjectiveIds,
+        clientStatusById: new Map([[String(selectedClient.id), selectedClient.status]]),
+      });
+      const objectiveInContract = (objectiveId: unknown) => inOperation.has(String(objectiveId ?? '').trim());
       const solicitudesRefuerzo = await solicitudRefuerzoService.getByClient(selectedClient.id);
       if (stale()) return;
       const billedSolicitudIds = solicitudIdsBilledInRange(solicitudesRefuerzo, { start, end });
@@ -2403,8 +2437,9 @@ export default function CRMPage() {
           : proformaDetailMode === 'planned'
             ? planned
             : autoBreakdownByContract();
-      const breakdown = Object.values(breakdownSource.byObjective)
-        .map((o: any) => ({
+      const breakdown = Object.entries(breakdownSource.byObjective)
+        .filter(([key]) => objectiveInContract(breakdownObjectiveIdByKey.get(key)))
+        .map(([, o]: [string, any]) => ({
           ...o,
           totalHours: Math.round(o.totalHours),
           positions: Object.values(o.positions)
@@ -2443,7 +2478,12 @@ export default function CRMPage() {
       if (stale()) return;
       setEmpMetaMap(empMeta);
 
+      const franjaInContract = {
+        ...franja,
+        buckets: franja.buckets.filter((b) => objectiveInContract(b.objectiveId)),
+      };
       const turnosRaw = turnosEnriched.filter((t) => {
+        if (!objectiveInContract(t.objectiveId)) return false;
         if (t.solicitudRefuerzoId && billedSolicitudIds.has(String(t.solicitudRefuerzoId))) return false;
         if (!turnoEligibleForProformaGrid(t, proformaDetailMode, useExecutedForAuto)) return false;
         if (proformaDetailMode === 'sin_cobertura') return turnoPassesSlaExclusion(t);
@@ -2463,7 +2503,7 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
-        executedFranja: franja,
+        executedFranja: franjaInContract,
       });
       const grids = applyRefuerzoHorasVendidasToGrids(baseGrids, solicitudesRefuerzo, { start, end });
       const positionGrids = applyRefuerzoHorasVendidasToPositionGrids(
@@ -2480,12 +2520,12 @@ export default function CRMPage() {
         useExecutedForAuto,
         slaCodeHoursHint,
         slaCodeHoursHintByObjective,
-        executedFranja: franja,
+        executedFranja: franjaInContract,
       }),
         solicitudesRefuerzo,
         { start, end },
       );
-      const vigenteSlas = vigenteSlasForBilling;
+      const vigenteSlas = vigenteSlasForBilling.filter((srv) => objectiveInContract((srv as { objectiveId?: unknown }).objectiveId));
       const periodStartYmd = getDateKeyInTimezone(start);
       const periodEndYmd = getDateKeyInTimezone(end);
       const plannedByObjectiveId: Record<string, number> = {};
@@ -2632,10 +2672,25 @@ export default function CRMPage() {
         slaCodeHoursHintByObjective,
       ));
       if (stale()) return;
+      const plannedById: Record<string, number> = {};
+      Object.entries(planned.byObjective).forEach(([key, row]: [string, any]) => {
+        const oid = breakdownObjectiveIdByKey.get(key) || '';
+        plannedById[oid] = (plannedById[oid] || 0) + (Number(row?.totalHours) || 0);
+      });
+      const plannedSplit = splitHoursByOperation(plannedById, inOperation);
+      const executedById: Record<string, number> = { ...franja.byObjectiveId };
+      const keyedExecuted = Object.values(franja.byObjectiveId).reduce((a, h) => a + (Number(h) || 0), 0);
+      const unkeyedExecuted = Math.round((franja.totalBillable - keyedExecuted) * 10) / 10;
+      if (unkeyedExecuted > 0) executedById[''] = (executedById[''] || 0) + unkeyedExecuted;
+      const executedSplit = splitHoursByOperation(executedById, inOperation);
+      const plannedAll = plannedBase + Math.round(refuerzoHorasVendidas);
       setProformaTotals({
-        planned: plannedBase + Math.round(refuerzoHorasVendidas),
-        executed: Math.round(franja.totalBillable),
+        planned: plannedSplit.outside === 0 ? plannedAll : Math.round(plannedSplit.billed),
+        executed: executedSplit.outside === 0 ? Math.round(franja.totalBillable) : Math.round(executedSplit.billed),
         sinCobertura: modeIsSinCobertura ? gridTotal : Math.round(sinCobertura.total),
+        fueraContratoPlan: Math.round(plannedSplit.outside),
+        fueraContratoEjec: Math.round(executedSplit.outside),
+        fueraContratoTurnos: turnosEnriched.filter((t) => !objectiveInContract(t.objectiveId) && t.isDeleted !== true).length,
         loading: false,
         estructurales: countEstructuralesEnRango(solicitudesRefuerzo, { start, end }),
       });

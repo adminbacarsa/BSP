@@ -28,7 +28,16 @@ export type ProformaPanelProps = {
   proformaLayoutMode: ProformaLayoutMode;
   proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
-  proformaTotals: { planned: number | null; executed: number | null; sinCobertura: number | null; loading: boolean; estructurales?: number };
+  proformaTotals: {
+    planned: number | null;
+    executed: number | null;
+    sinCobertura: number | null;
+    fueraContratoPlan?: number | null;
+    fueraContratoEjec?: number | null;
+    fueraContratoTurnos?: number | null;
+    loading: boolean;
+    estructurales?: number;
+  };
   proformaBreakdown: any[];
   proformaBundle: ProformaExportBundle | null;
   baseHours: number;
@@ -337,6 +346,11 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 )}
                 {(proformaTotals.estructurales ?? 0) > 0 && (
                   <> · {proformaTotals.estructurales} refuerzo{proformaTotals.estructurales === 1 ? '' : 's'} estructural{proformaTotals.estructurales === 1 ? '' : 'es'} ya incluido{proformaTotals.estructurales === 1 ? '' : 's'} en el SLA</>
+                )}
+                {(proformaTotals.fueraContratoTurnos ?? 0) > 0 && (
+                  <span className="text-amber-700">
+                    {' '}· Fuera de contrato (no se factura) {proformaTotals.fueraContratoTurnos} turnos, plan {formatProformaHours(proformaTotals.fueraContratoPlan ?? 0, proformaTotals.loading)} · ejec {formatProformaHours(proformaTotals.fueraContratoEjec ?? 0, proformaTotals.loading)}
+                  </span>
                 )}
               </span>
             </div>
