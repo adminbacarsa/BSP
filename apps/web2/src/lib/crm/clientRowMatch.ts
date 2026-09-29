@@ -9,6 +9,8 @@ export type ClientRef = {
   name?: string;
   legalName?: string;
   objetivos?: Array<{ id?: string; name?: string }>;
+  /** Empresa del cliente: los alias de huérfanos legacy solo aplican en bacarsa. */
+  empresaId?: string;
 };
 
 export function normalizeClientName(value: unknown): string {
@@ -31,7 +33,7 @@ export function objectiveIdsForClient(client: ClientRef): Set<string> {
 }
 
 export function clientRowMatchesClient(row: Record<string, unknown>, client: ClientRef): boolean {
-  const aliases = new Set(getClientIdAliases(client.id));
+  const aliases = new Set(getClientIdAliases(client.id, client.empresaId));
   const rowCid = String(row.clientId ?? '').trim();
   if (rowCid && aliases.has(rowCid)) return true;
 

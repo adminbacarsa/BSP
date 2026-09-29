@@ -16,6 +16,7 @@ import {
   belongsToEmpresaView,
   KNOWN_ORPHAN_CLIENT_IDS,
   getClientIdAliases,
+  orphanClientAliasesApply,
 } from './tenantScope';
 
 // Helpers puros (sin Firebase) viven en tenantScope.ts; se re-exportan para los imports existentes.
@@ -608,7 +609,7 @@ export async function retagClientRelatedDocsToEmpresa(
   const id = String(empresaId ?? '').trim();
   if (!cid || !id) throw new Error('Cliente y empresa son obligatorios.');
 
-  const resolved = await resolveClientDocument(cid);
+  const resolved = await resolveClientDocument(cid, id);
   if (!resolved) throw new Error(`Cliente no encontrado (ID: ${cid})`);
   if (!isTenantWriteOwner(resolved.data, id, migracionCompleta)) {
     throw new TenantIsolationError(
@@ -670,9 +671,15 @@ async function loadClientDocById(clientId: string): Promise<ResolvedClientDocume
   return null;
 }
 
-/** Si el doc clients/{id} fue borrado en migración pero turnos siguen con clientId antiguo. */
-async function resolveClientFromOrphanClientId(orphanId: string): Promise<ResolvedClientDocument | null> {
-  const knownTarget = KNOWN_ORPHAN_CLIENT_IDS[orphanId];
+/**
+ * Si el doc clients/{id} fue borrado en migración pero turnos siguen con clientId antiguo.
+ * El mapa fijo de huérfanos es de bacarsa: con `empresaId` de otra empresa no se cruza.
+ */
+async function resolveClientFromOrphanClientId(
+  orphanId: string,
+  empresaId?: string,
+): Promise<ResolvedClientDocument | null> {
+  const knownTarget = orphanClientAliasesApply(empresaId) ? KNOWN_ORPHAN_CLIENT_IDS[orphanId] : undefined;
   if (knownTarget) {
     const known = await loadClientDocById(knownTarget);
     if (known) return known;
@@ -686,7 +693,12 @@ async function resolveClientFromOrphanClientId(orphanId: string): Promise<Resolv
   const objectiveId = String(turnoSnap.docs[0].data()?.objectiveId ?? '').trim();
   if (!objectiveId) return null;
 
-  const clientsSnap = await getDocs(collection(db, 'clients'));
+  const emp = String(empresaId ?? '').trim();
+  const clientsSnap = await getDocs(
+    emp
+      ? query(collection(db, 'clients'), where('empresaId', '==', emp))
+      : collection(db, 'clients'),
+  );
   for (const c of clientsSnap.docs) {
     const objetivos = (c.data().objetivos || []) as Array<{ id?: string }>;
     if (objetivos.some(o => String(o?.id ?? '') === objectiveId)) {
@@ -697,7 +709,10 @@ async function resolveClientFromOrphanClientId(orphanId: string): Promise<Resolv
 }
 
 /** Busca el cliente en `clients` y, si no existe, en `clientes` (legacy NestJS). */
-export async function resolveClientDocument(clientId: string): Promise<ResolvedClientDocument | null> {
+export async function resolveClientDocument(
+  clientId: string,
+  empresaId?: string,
+): Promise<ResolvedClientDocument | null> {
   const id = String(clientId ?? '').trim();
   if (!id) return null;
   for (const col of CLIENT_DOC_COLLECTIONS) {
@@ -706,7 +721,7 @@ export async function resolveClientDocument(clientId: string): Promise<ResolvedC
       return { collection: col, id: snap.id, data: snap.data() as Record<string, unknown> };
     }
   }
-  return resolveClientFromOrphanClientId(id);
+  return resolveClientFromOrphanClientId(id, empresaId);
 }
 
 export function dedupeClientsById<T extends { id?: unknown }>(rows: T[]): T[] {
@@ -726,7 +741,7 @@ export async function assertClientWritableForEmpresa(
   action: 'guardar' | 'eliminar' = 'guardar',
   access?: TenantAccessOpts,
 ): Promise<{ id: string; collection: ClientDocCollection; [key: string]: unknown }> {
-  const resolved = await resolveClientDocument(clientId);
+  const resolved = await resolveClientDocument(clientId, empresaId);
   if (!resolved) {
     throw new Error(
       `Cliente no encontrado (ID: ${clientId}). El registro pudo haberse eliminado en una migración. ` +
@@ -822,7 +837,7 @@ export async function deleteClientForEmpresa(
   empresaId: string,
   migracionCompleta: boolean,
 ): Promise<void> {
-  const resolved = await resolveClientDocument(clientId);
+  const resolved = await resolveClientDocument(clientId, empresaId);
   if (!resolved) {
     throw new Error(
       `Cliente no encontrado (ID: ${clientId}). Refrescá el listado o verificá que el registro exista en Firestore.`,

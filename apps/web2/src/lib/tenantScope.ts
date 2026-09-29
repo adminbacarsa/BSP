@@ -94,7 +94,10 @@ export function filterSlaRowsByEmpresa<T extends { empresaId?: unknown; clientId
   return rows.filter(r => slaBelongsToEmpresa(r, empresaId, true, clientIds));
 }
 
-/** IDs de clients borrados en migración Bacarsa → doc actual en Firestore. */
+/**
+ * IDs de clients borrados en migración Bacarsa → doc actual en Firestore.
+ * Solo vale para la empresa `bacarsa`: en otras empresas (pruebas_sa) esos ids viejos no son alias.
+ */
 export const KNOWN_ORPHAN_CLIENT_IDS: Record<string, string> = {
   '99yqpqc4ppY9rVXymWhx': 'DB8UZxFC4DpqGSQ3o69w',
   p9atJYpcu9oUspQMFta3: 'ujOVMbL9gK8YK6DsiLvs',
@@ -102,10 +105,23 @@ export const KNOWN_ORPHAN_CLIENT_IDS: Record<string, string> = {
   FzAowOV93fHQcxZhHfjN: 'NS0UBtf6zkHsm2iRRo9W',
 };
 
-/** IDs de documento clients + huérfanos legacy que apuntan al mismo cliente. */
-export function getClientIdAliases(canonicalId: string): string[] {
+export const KNOWN_ORPHAN_CLIENT_IDS_EMPRESA = 'bacarsa';
+
+/** El mapa de huérfanos aplica sin empresa (legacy) o en bacarsa; nunca cruza a otra empresa. */
+export function orphanClientAliasesApply(empresaId?: string | null): boolean {
+  const id = String(empresaId ?? '').trim();
+  if (!id) return true;
+  return tenantEmpresaIdsMatch(id, KNOWN_ORPHAN_CLIENT_IDS_EMPRESA);
+}
+
+/**
+ * IDs de documento clients + huérfanos legacy que apuntan al mismo cliente.
+ * Con `empresaId` de otra empresa que bacarsa devuelve solo el id canónico.
+ */
+export function getClientIdAliases(canonicalId: string, empresaId?: string | null): string[] {
   const id = String(canonicalId ?? '').trim();
   if (!id) return [];
+  if (!orphanClientAliasesApply(empresaId)) return [id];
   const ids = new Set<string>([id]);
   for (const [orphan, target] of Object.entries(KNOWN_ORPHAN_CLIENT_IDS)) {
     if (target === id) ids.add(orphan);

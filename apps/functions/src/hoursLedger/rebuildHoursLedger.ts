@@ -46,6 +46,14 @@ function docId(parts: string[]) {
   return parts.join('_').replace(/[/\s#?[\]]+/g, '_').slice(0, 700);
 }
 
+/**
+ * Doc id siempre gana sobre un campo `id` del data. Los clients clonados entre empresas
+ * (pruebas_sa) traen el `id` viejo de bacarsa y el libro terminaba agrupando por un cliente borrado.
+ */
+function withDocId(d: FirebaseFirestore.QueryDocumentSnapshot) {
+  return { ...d.data(), id: d.id };
+}
+
 async function loadMonth(empresaId: string, year: number, month: number, opts?: {
   objectiveIds?: string[];
   skipPersona?: boolean;
@@ -80,10 +88,10 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
     year,
     month,
     hoursCoreEnabled: empresaSnap.data()?.hoursCoreEnabled === true,
-    clients: clientsSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    slas: slaSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    turnos: turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    clients: clientsSnap.docs.map(withDocId),
+    slas: slaSnap.docs.map(withDocId),
+    turnos: turnosSnap.docs.map(withDocId),
+    ausencias: ausSnap.docs.map(withDocId),
     publishStatusMap: publishMap(planifSnap.docs),
     empNameById,
     onlyObjectiveIds: opts?.objectiveIds,
@@ -364,8 +372,8 @@ export async function personaOfMonth(empresaId: string, period: string) {
     empNameById[d.id] = String(e.nombre || e.name || e.displayName || d.id);
   });
   return personaMonthWorked({
-    turnos: turnosSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
-    ausencias: ausSnap.docs.map((d) => ({ id: d.id, ...d.data() })),
+    turnos: turnosSnap.docs.map(withDocId),
+    ausencias: ausSnap.docs.map(withDocId),
     publishStatusMap: publishMap(planifSnap.docs),
     year,
     month,
