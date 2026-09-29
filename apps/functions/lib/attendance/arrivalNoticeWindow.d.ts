@@ -7,5 +7,5 @@ export declare function lugarAviso(parts: {
     objectiveName?: unknown;
     positionName?: unknown;
 }): string;
-export declare function headsUpBody(hora: string, lugar: string): string;
-export declare function venisBody(codigo: string, lugar: string, hora: string): string;
+export declare function headsUpBody(hora: string, lugar: string, name?: string): string;
+export declare function venisBody(_codigo: string, lugar: string, hora: string, name?: string): string;

@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.registrarPresencia = registrarPresencia;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
+const pushGreeting_1 = require("../common/pushGreeting");
 const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const revertirAusencia_1 = require("../attendance/revertirAusencia");
 const checkInWindow_1 = require("./checkInWindow");
@@ -117,10 +118,14 @@ async function registrarPresencia(db, input) {
     void (async () => {
         try {
             const isPortal = source === 'PORTAL_GPS';
-            const title = isPortal ? 'Presente registrado' : 'Operador registró tu ingreso';
+            const inName = (0, pushGreeting_1.guardFirstName)({ employeeName: shiftData.employeeName });
+            const whereIn = shiftData.objectiveName || 'el puesto';
+            const title = isPortal ? 'Ingreso registrado' : 'Operaciones registró tu ingreso';
             const body = isPortal
-                ? `Tu ingreso en ${shiftData.objectiveName || 'el puesto'} fue confirmado.`
-                : `${actorName || 'El operador'} registró tu ingreso en ${shiftData.objectiveName || 'el puesto'}.`;
+                ? (inName ? `Listo, ${inName}. Quedó tu ingreso en ${whereIn}.` : `Quedó tu ingreso en ${whereIn}.`)
+                : (inName
+                    ? `${inName}, ${actorName || 'Operaciones'} registró tu ingreso en ${whereIn}.`
+                    : `${actorName || 'Operaciones'} registró tu ingreso en ${whereIn}.`);
             const notifType = 'CHECKIN_CONFIRMADO';
             const notifRef = await db.collection('user_notifications').add({
                 type: notifType,

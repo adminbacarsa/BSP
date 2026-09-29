@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.onCronogramaPublished = void 0;
+const pushGreeting_1 = require("../common/pushGreeting");
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
 const MONTH_NAMES_ES = [
@@ -102,10 +103,15 @@ exports.onCronogramaPublished = functions
     const monthName = monthLabelEs(year, month);
     console.log(`[onCronogramaPublished] Notificando ${empMap.size} empleado(s) — ${objectiveId} ${month}/${year}`);
     for (const [employeeId, info] of empMap.entries()) {
-        const title = `📅 Cronograma de ${monthName} disponible`;
-        const body = `${info.objectiveName} — ${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` · ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
         const empDoc = await db.collection('empleados').doc(employeeId).get();
-        const empUid = empDoc.exists ? empDoc.data()?.uid : undefined;
+        const emp = empDoc.exists ? empDoc.data() || {} : {};
+        const empUid = emp.uid;
+        const cronoName = (0, pushGreeting_1.guardFirstName)({ firstName: emp.firstName, employeeName: info.name || emp.nombre });
+        const counts = `${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` y ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
+        const title = 'Cronograma publicado';
+        const body = cronoName
+            ? `${cronoName}, ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`
+            : `Ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`;
         const [byEmpId, byUid] = await Promise.all([
             db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
             empUid

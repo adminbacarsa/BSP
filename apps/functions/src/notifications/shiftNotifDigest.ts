@@ -4,6 +4,7 @@
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { guardFirstName } from '../common/pushGreeting';
 
 const DIGEST_COLLECTION = 'shift_notif_digests';
 /** Segundos sin nuevas escrituras antes de enviar el digest. */
@@ -48,7 +49,7 @@ export function buildDigestMessage(d: {
   eliminado: number;
   franco: number;
   samples: string[];
-}): { title: string; body: string; type: string } {
+}, name = ''): { title: string; body: string; type: string } {
   const parts: string[] = [];
   if (d.nuevo > 0) {
     parts.push(d.nuevo === 1 ? '1 turno nuevo' : `${d.nuevo} turnos nuevos`);
@@ -68,35 +69,38 @@ export function buildDigestMessage(d: {
   const samples = (d.samples || []).filter(Boolean).slice(0, 3);
 
   let type = 'CAMBIO_CRONOGRAMA';
-  let title = '📅 Cambios en tu cronograma';
+  let title = 'Cambió tu cronograma';
   if (total === 1 && d.nuevo === 1) {
     type = 'TURNO_NUEVO';
-    title = '📅 Nuevo turno asignado';
+    title = 'Tenés un turno nuevo';
   } else if (total === 1 && d.modificado === 1) {
     type = 'TURNO_MODIFICADO';
-    title = '🔄 Cambio en tu cronograma';
+    title = 'Cambió tu cronograma';
   } else if (total === 1 && d.eliminado === 1) {
     type = 'TURNO_ELIMINADO';
-    title = '❌ Turno eliminado';
+    title = 'Te sacaron un turno';
   } else if (total === 1 && d.franco === 1) {
     type = 'FRANCO_ASIGNADO';
-    title = '🟢 Franco asignado';
+    title = 'Tenés franco';
   } else if (parts.length === 1 && d.nuevo > 1) {
-    title = `📅 ${d.nuevo} turnos nuevos`;
+    title = `${d.nuevo} turnos nuevos`;
     type = 'TURNO_NUEVO';
   } else if (parts.length === 1 && d.modificado > 1) {
-    title = `🔄 ${d.modificado} turnos modificados`;
+    title = `${d.modificado} turnos modificados`;
     type = 'TURNO_MODIFICADO';
   }
 
   const summary = parts.join(' · ');
   const detail = samples.length ? samples.join(' · ') : '';
-  const body =
+  let body =
     total === 1 && detail
       ? detail
       : detail
         ? `${summary}: ${detail}`
         : summary || 'Actualizaron tu cronograma';
+  if (name && total === 1 && d.nuevo === 1) body = `${name}, tenés un turno nuevo: ${body}`;
+  else if (name && total === 1 && d.franco === 1) body = `${name}, tenés franco: ${body}`;
+  else if (name) body = `${name}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
 
   return { title, body, type };
 }
@@ -157,19 +161,17 @@ async function sendDigestPushAndInbox(
   employeeId: string,
   data: DigestDoc & { updatedAt?: admin.firestore.Timestamp },
 ): Promise<void> {
+  const empDoc = await db.collection('empleados').doc(employeeId).get();
+  const emp = empDoc.exists ? empDoc.data() || {} : {};
+  let empUid = data.uid || (emp.uid as string) || null;
+  const name = guardFirstName({ firstName: emp.firstName, employeeName: emp.nombre || emp.employeeName });
   const msg = buildDigestMessage({
     nuevo: data.nuevo || 0,
     modificado: data.modificado || 0,
     eliminado: data.eliminado || 0,
     franco: data.franco || 0,
     samples: data.samples || [],
-  });
-
-  let empUid = data.uid || null;
-  if (!empUid) {
-    const empDoc = await db.collection('empleados').doc(employeeId).get();
-    empUid = empDoc.exists ? (empDoc.data()?.uid as string) || null : null;
-  }
+  }, name);
 
   const [byEmpId, byUid] = await Promise.all([
     db.collection('device_tokens').where('employeeId', '==', employeeId).get(),

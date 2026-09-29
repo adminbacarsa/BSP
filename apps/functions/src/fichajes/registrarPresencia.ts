@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { guardFirstName } from '../common/pushGreeting';
 import { isReversibleLateAbsence } from '../attendance/lateAbsenceWindow';
 import { revertirAusenciaShift } from '../attendance/revertirAusencia';
 import { evaluateServerCheckInWindow } from './checkInWindow';
@@ -181,10 +182,14 @@ export async function registrarPresencia(
   void (async () => {
     try {
       const isPortal = source === 'PORTAL_GPS';
-      const title = isPortal ? 'Presente registrado' : 'Operador registró tu ingreso';
+      const inName = guardFirstName({ employeeName: shiftData.employeeName });
+      const whereIn = shiftData.objectiveName || 'el puesto';
+      const title = isPortal ? 'Ingreso registrado' : 'Operaciones registró tu ingreso';
       const body = isPortal
-        ? `Tu ingreso en ${shiftData.objectiveName || 'el puesto'} fue confirmado.`
-        : `${actorName || 'El operador'} registró tu ingreso en ${shiftData.objectiveName || 'el puesto'}.`;
+        ? (inName ? `Listo, ${inName}. Quedó tu ingreso en ${whereIn}.` : `Quedó tu ingreso en ${whereIn}.`)
+        : (inName
+          ? `${inName}, ${actorName || 'Operaciones'} registró tu ingreso en ${whereIn}.`
+          : `${actorName || 'Operaciones'} registró tu ingreso en ${whereIn}.`);
       const notifType = 'CHECKIN_CONFIRMADO';
 
       const notifRef = await db.collection('user_notifications').add({

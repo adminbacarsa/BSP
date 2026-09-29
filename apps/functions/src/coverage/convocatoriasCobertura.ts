@@ -1,6 +1,8 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { venisBody } from '../attendance/arrivalNoticeWindow';
 import { clampLateEtaMinutes } from '../attendance/lateAbsenceWindow';
+import { guardFirstName } from '../common/pushGreeting';
 import { markShiftAbsent } from '../attendance/markShiftAbsent';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -74,22 +76,6 @@ async function crearNotifConvocatoria(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc & { id: string },
 ) {
-  const urgencyLabel =
-    conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
-
-  const typeLabel: Record<ConvocatoriaType, string> = {
-    RET: 'Retención (RET)',
-    REF: 'Refuerzo (REF)',
-    ESC: 'Escuela (ESC)',
-    VOLANTE: 'Cobertura volante',
-    SIN_TURNO_CON_EXP: 'Cobertura disponible',
-    EXTEND: 'Extensión de jornada',
-    ADVANCE: 'Adelanto de turno',
-    SIN_TURNO: 'Cobertura disponible',
-    FT: 'Franco Trabajado (FT)',
-    LLEGADA_TARDE: '¿Estás en camino?',
-  };
-
   const tz = 'America/Argentina/Buenos_Aires';
   const startDate =
     conv.startTime instanceof Timestamp
@@ -105,29 +91,22 @@ async function crearNotifConvocatoria(
   const horaFin = endDate
     ? endDate.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: tz })
     : '';
-  const fechaTurno = startDate
-    ? startDate.toLocaleDateString('es-AR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-        timeZone: tz,
-      })
-    : '';
-
   const lugar = [conv.clientName, conv.objectiveName, conv.positionName]
     .map((s) => String(s || '').trim())
     .filter(Boolean)
     .join(' · ');
-  const lugarTxt = lugar || 'objetivo / puesto';
-  const horarioTxt = horaFin ? `${horaInicio}–${horaFin}` : horaInicio;
+  const lugarTxt = lugar || 'el puesto';
   const codigo = String(conv.shiftCode || '').trim();
 
   const isLlegadaTarde = conv.type === 'LLEGADA_TARDE';
-  const title = isLlegadaTarde ? '¿Venís?' : `[${urgencyLabel}] Cobertura requerida`;
-  const donde = lugar ? ` en ${lugar}` : '';
+  const name = guardFirstName({ employeeName: conv.candidateEmployeeName });
+  const title = isLlegadaTarde ? '¿Venís?' : '¿Nos das una mano?';
+  const rango = horaFin ? `${horaInicio} a ${horaFin}` : horaInicio;
   const body = isLlegadaTarde
-    ? `¿Venís? Tu turno ${codigo || '—'} (${horaInicio})${donde} ya comenzó. Confirmá si estás en camino.`
-    : `${typeLabel[conv.type]} en ${lugar || lugarTxt}. Turno ${codigo || '—'} · ${fechaTurno} ${horarioTxt}. Respondé en los próximos ${TIMEOUT_MINUTES} min.`;
+    ? venisBody(codigo, lugar, horaInicio, name)
+    : name
+      ? `${name}, ¿nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`
+      : `¿Nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`;
 
   await db.collection('user_notifications').add({
     uid: conv.candidateUid || null,

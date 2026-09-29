@@ -9,6 +9,7 @@ import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
+import { guardFirstName } from '../common/pushGreeting';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 import {
   buildAutoClosePatch,
@@ -596,13 +597,14 @@ async function escalateCapClose(
   if (outEmpId && outEmpId !== 'VACANTE') {
     const tokens = await ctx.getEmployeeTokens(db, outEmpId).catch(() => [] as string[]);
     if (tokens.length) {
+      const capName = guardFirstName({ employeeName: shift.employeeName });
       await admin
         .messaging()
         .sendEachForMulticast({
           tokens,
           notification: {
-            title: 'Fin de jornada por tope',
-            body: `Llegaste al máximo de 12:59 h en ${shift.objectiveName || 'el puesto'}. Tu turno quedó cerrado.`,
+            title: 'Tope de jornada',
+            body: `${capName ? `${capName}, ` : ''}llegaste al máximo de horas de hoy. Podés retirarte, gracias por quedarte.`,
           },
           webpush: { fcmOptions: { link: '/app/' } },
         })

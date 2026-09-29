@@ -23,6 +23,7 @@ const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
 const simulableShift_1 = require("./common/simulableShift");
 const reliefEligibility_1 = require("./common/reliefEligibility");
 const arClock_1 = require("./common/arClock");
+const pushGreeting_1 = require("./common/pushGreeting");
 const releaseTraceAbsences_1 = require("./coverage/releaseTraceAbsences");
 const markShiftAbsent_1 = require("./attendance/markShiftAbsent");
 const lateAbsenceWindow_1 = require("./attendance/lateAbsenceWindow");
@@ -2179,17 +2180,20 @@ exports.detectarAusencias = functions
                 const startStr = shift.startTime?.toDate
                     ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
                     : '';
+                const absName = (0, pushGreeting_1.guardFirstName)({ employeeName: shift.employeeName });
+                const absWhere = shift.objectiveName ? ` en ${shift.objectiveName}` : '';
+                const absBody = `${absName ? `${absName}, ` : ''}no registramos tu ingreso de las ${startStr}${absWhere}. Si fue un error, avisale a Operaciones.`;
                 try {
                     await admin.messaging().sendEachForMulticast({
                         tokens,
                         notification: {
-                            title: '⚠️ Ausencia registrada',
-                            body: `No se registró tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
+                            title: 'Ausencia registrada',
+                            body: absBody,
                         },
                         webpush: {
                             notification: {
-                                title: '⚠️ Ausencia registrada',
-                                body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). Ingresá al portal si estás presente.`,
+                                title: 'Ausencia registrada',
+                                body: absBody,
                                 icon: '/icons/icon-192x192.png',
                                 requireInteraction: true,
                             },

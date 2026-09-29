@@ -3,6 +3,7 @@ import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore'
 import { positionHasContinuityFromSlaDoc } from './positionHasContinuity';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
+import { guardFirstName } from '../common/pushGreeting';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
 
@@ -166,8 +167,16 @@ export async function retainOutgoingForGap(
           .sendEachForMulticast({
             tokens,
             notification: {
-              title: 'Quedaste retenido',
-              body: `Permanecé en ${titularShift.objectiveName || 'el puesto'} hasta que llegue el relevo.`,
+              title: '⛔ Quedás retenido',
+              body: (() => {
+                const name = guardFirstName({ employeeName: pick.data.employeeName });
+                const where = [titularShift.objectiveName, titularShift.positionName]
+                  .map((s) => String(s || '').trim())
+                  .filter(Boolean)
+                  .join(' · ') || 'el puesto';
+                const lead = name ? `${name}, quedás retenido` : 'Quedás retenido';
+                return `${lead} en ${where}. No abandones el puesto hasta que llegue tu relevo o Operaciones te libere.`;
+              })(),
             },
             webpush: {
               notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },

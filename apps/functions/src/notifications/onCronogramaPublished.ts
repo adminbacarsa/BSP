@@ -6,6 +6,7 @@
  * Importante: asignar puestos también crea/actualiza este doc (sin publishedAt).
  * Por eso NO usamos onCreate — solo notificamos cuando hay publicación real.
  */
+import { guardFirstName } from '../common/pushGreeting';
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
 
@@ -132,12 +133,15 @@ export const onCronogramaPublished = functions
 
     // Enviar una notificación por empleado
     for (const [employeeId, info] of empMap.entries()) {
-      const title = `📅 Cronograma de ${monthName} disponible`;
-      const body = `${info.objectiveName} — ${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` · ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
-
-      // Buscar uid y tokens
       const empDoc = await db.collection('empleados').doc(employeeId).get();
-      const empUid = empDoc.exists ? (empDoc.data()?.uid as string | undefined) : undefined;
+      const emp = empDoc.exists ? empDoc.data() || {} : {};
+      const empUid = emp.uid as string | undefined;
+      const cronoName = guardFirstName({ firstName: emp.firstName, employeeName: info.name || emp.nombre });
+      const counts = `${info.work} turno${info.work !== 1 ? 's' : ''}${info.franco > 0 ? ` y ${info.franco} franco${info.franco !== 1 ? 's' : ''}` : ''}`;
+      const title = 'Cronograma publicado';
+      const body = cronoName
+        ? `${cronoName}, ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`
+        : `Ya está tu cronograma de ${monthName} en ${info.objectiveName || 'tu objetivo'}: ${counts}.`;
 
       const [byEmpId, byUid] = await Promise.all([
         db.collection('device_tokens').where('employeeId', '==', employeeId).get(),

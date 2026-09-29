@@ -250,15 +250,21 @@ async function notifyGuardDeviceDecision(db, params) {
     if (!targetUid && !employeeId)
         return;
     let empresaId = null;
+    let namedBody = body;
     if (employeeId) {
         const emp = await db.collection('empleados').doc(employeeId).get();
-        empresaId = emp.data()?.empresaId || null;
+        const data = emp.data() || {};
+        empresaId = data.empresaId || null;
+        const { guardFirstName } = await Promise.resolve().then(() => require('../common/pushGreeting'));
+        const name = guardFirstName({ firstName: data.firstName, employeeName: data.nombre });
+        if (name)
+            namedBody = `${name}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
     }
     await db.collection('user_notifications').add({
         uid: targetUid || null,
         employeeId: employeeId || null,
         title,
-        body,
+        body: namedBody,
         type,
         target: 'employee',
         empresaId,

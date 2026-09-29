@@ -4,6 +4,7 @@ import { isExtraNonReliefShift } from '../common/reliefEligibility';
 import { skipAbsencePipelineForShift } from '../coverage/coverageTraceShift';
 import { crearConvocatoriaLlegadaTarde } from '../coverage/convocatoriasCobertura';
 import type { loadCentroControlState } from '../ops/centroControlGuard';
+import { guardFirstName } from '../common/pushGreeting';
 import {
   classifyArrivalNotice,
   headsUpBody,
@@ -75,13 +76,15 @@ async function writeHeadsUp(
   const lugar = lugarAviso(shift);
   const hora = horaAr(startMs);
   const empSnap = await db.collection('empleados').doc(String(shift.employeeId)).get();
-  const uid = empSnap.exists ? String(empSnap.data()?.uid || '') : '';
+  const emp = empSnap.exists ? empSnap.data() || {} : {};
+  const uid = String(emp.uid || '');
+  const name = guardFirstName({ firstName: emp.firstName, employeeName: shift.employeeName || emp.nombre });
   await db.collection('user_notifications').add({
     uid: uid || null,
     employeeId: shift.employeeId,
     type: 'AVISO_TURNO_PROXIMO',
-    title: '¿Estás llegando?',
-    body: headsUpBody(hora, lugar),
+    title: '¿Ya estás llegando?',
+    body: headsUpBody(hora, lugar, name),
     empresaId: shift.empresaId || null,
     shiftId,
     objectiveId: shift.objectiveId || null,
@@ -120,13 +123,16 @@ async function alertOutgoing(
     if (dat.employeeId === incoming.employeeId) continue;
     if (dat.incomingLateAlertShiftId === incoming.id) continue;
     const empSnap = await db.collection('empleados').doc(String(dat.employeeId || '')).get();
-    const uid = empSnap.exists ? String(empSnap.data()?.uid || '') : '';
+    const emp = empSnap.exists ? empSnap.data() || {} : {};
+    const uid = String(emp.uid || '');
+    const name = guardFirstName({ firstName: emp.firstName, employeeName: dat.employeeName || emp.nombre });
+    const who = name ? `${name}, ` : '';
     await db.collection('user_notifications').add({
       uid: uid || null,
       employeeId: dat.employeeId || null,
       type: 'AVISO_ENTRANTE_SIN_FICHAR',
-      title: 'El entrante aún no llegó',
-      body: `${incoming.employeeName || 'El guardia siguiente'} no marcó presencia en ${lugar}. Esperá aviso de Operaciones antes de retirarte.`,
+      title: 'Tu relevo todavía no llegó',
+      body: `${who}el que entra todavía no fichó en ${lugar}. No te retires hasta que Operaciones te avise.`,
       empresaId,
       shiftId: retDoc.id,
       relatedShiftId: incoming.id || null,

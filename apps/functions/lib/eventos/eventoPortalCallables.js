@@ -4,6 +4,7 @@ exports.respondEventoConvocatoria = void 0;
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
 const firestore_1 = require("firebase-admin/firestore");
+const pushGreeting_1 = require("../common/pushGreeting");
 const eventoAssignAdmin_1 = require("./eventoAssignAdmin");
 async function resolveEmployeeIdForUid(db, uid) {
     const byUid = await db.collection('empleados').where('uid', '==', uid).limit(1).get();
@@ -131,7 +132,10 @@ exports.respondEventoConvocatoria = functions.https.onCall(async (data, context)
         type: 'EVENTO_CONFIRMADO',
         target: 'employee',
         title: 'Evento confirmado',
-        body: `Quedaste asignado a ${sol.servicioNombre || sol.eventoNombre}.`,
+        body: `${(() => {
+            const n = (0, pushGreeting_1.guardFirstName)({ firstName: empData.firstName, employeeName: empNombre });
+            return n ? `${n}, quedaste` : 'Quedaste';
+        })()} en ${sol.servicioNombre || sol.eventoNombre}.`,
         eventoId: sol.eventoId,
         servicioId: sol.servicioId,
         solicitudId,

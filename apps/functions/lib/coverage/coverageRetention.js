@@ -11,6 +11,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const positionHasContinuity_1 = require("./positionHasContinuity");
 const coverageTraceShift_1 = require("./coverageTraceShift");
 const relevoOutgoingMatch_1 = require("../fichajes/relevoOutgoingMatch");
+const pushGreeting_1 = require("../common/pushGreeting");
 const reliefEligibility_1 = require("../common/reliefEligibility");
 const shiftClose_1 = require("../scheduling/shiftClose");
 const GAP_ALIGN_MS = 30 * 60 * 1000;
@@ -145,8 +146,16 @@ async function retainOutgoingForGap(db, titularShift, opts = {}) {
                     .sendEachForMulticast({
                     tokens,
                     notification: {
-                        title: 'Quedaste retenido',
-                        body: `Permanecé en ${titularShift.objectiveName || 'el puesto'} hasta que llegue el relevo.`,
+                        title: '⛔ Quedás retenido',
+                        body: (() => {
+                            const name = (0, pushGreeting_1.guardFirstName)({ employeeName: pick.data.employeeName });
+                            const where = [titularShift.objectiveName, titularShift.positionName]
+                                .map((s) => String(s || '').trim())
+                                .filter(Boolean)
+                                .join(' · ') || 'el puesto';
+                            const lead = name ? `${name}, quedás retenido` : 'Quedás retenido';
+                            return `${lead} en ${where}. No abandones el puesto hasta que llegue tu relevo o Operaciones te libere.`;
+                        })(),
                     },
                     webpush: {
                         notification: { icon: '/icons/icon-192x192.png', requireInteraction: true },

@@ -5,6 +5,7 @@ exports.buildDigestMessage = buildDigestMessage;
 exports.enqueueShiftNotifDigest = enqueueShiftNotifDigest;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const pushGreeting_1 = require("../common/pushGreeting");
 const DIGEST_COLLECTION = 'shift_notif_digests';
 const QUIET_MS = 45_000;
 function counterField(type) {
@@ -19,7 +20,7 @@ function counterField(type) {
             return 'franco';
     }
 }
-function buildDigestMessage(d) {
+function buildDigestMessage(d, name = '') {
     const parts = [];
     if (d.nuevo > 0) {
         parts.push(d.nuevo === 1 ? '1 turno nuevo' : `${d.nuevo} turnos nuevos`);
@@ -36,38 +37,44 @@ function buildDigestMessage(d) {
     const total = (d.nuevo || 0) + (d.modificado || 0) + (d.eliminado || 0) + (d.franco || 0);
     const samples = (d.samples || []).filter(Boolean).slice(0, 3);
     let type = 'CAMBIO_CRONOGRAMA';
-    let title = '📅 Cambios en tu cronograma';
+    let title = 'Cambió tu cronograma';
     if (total === 1 && d.nuevo === 1) {
         type = 'TURNO_NUEVO';
-        title = '📅 Nuevo turno asignado';
+        title = 'Tenés un turno nuevo';
     }
     else if (total === 1 && d.modificado === 1) {
         type = 'TURNO_MODIFICADO';
-        title = '🔄 Cambio en tu cronograma';
+        title = 'Cambió tu cronograma';
     }
     else if (total === 1 && d.eliminado === 1) {
         type = 'TURNO_ELIMINADO';
-        title = '❌ Turno eliminado';
+        title = 'Te sacaron un turno';
     }
     else if (total === 1 && d.franco === 1) {
         type = 'FRANCO_ASIGNADO';
-        title = '🟢 Franco asignado';
+        title = 'Tenés franco';
     }
     else if (parts.length === 1 && d.nuevo > 1) {
-        title = `📅 ${d.nuevo} turnos nuevos`;
+        title = `${d.nuevo} turnos nuevos`;
         type = 'TURNO_NUEVO';
     }
     else if (parts.length === 1 && d.modificado > 1) {
-        title = `🔄 ${d.modificado} turnos modificados`;
+        title = `${d.modificado} turnos modificados`;
         type = 'TURNO_MODIFICADO';
     }
     const summary = parts.join(' · ');
     const detail = samples.length ? samples.join(' · ') : '';
-    const body = total === 1 && detail
+    let body = total === 1 && detail
         ? detail
         : detail
             ? `${summary}: ${detail}`
             : summary || 'Actualizaron tu cronograma';
+    if (name && total === 1 && d.nuevo === 1)
+        body = `${name}, tenés un turno nuevo: ${body}`;
+    else if (name && total === 1 && d.franco === 1)
+        body = `${name}, tenés franco: ${body}`;
+    else if (name)
+        body = `${name}, ${body.charAt(0).toLowerCase()}${body.slice(1)}`;
     return { title, body, type };
 }
 async function enqueueShiftNotifDigest(db, params) {
@@ -108,18 +115,17 @@ async function enqueueShiftNotifDigest(db, params) {
     });
 }
 async function sendDigestPushAndInbox(db, employeeId, data) {
+    const empDoc = await db.collection('empleados').doc(employeeId).get();
+    const emp = empDoc.exists ? empDoc.data() || {} : {};
+    let empUid = data.uid || emp.uid || null;
+    const name = (0, pushGreeting_1.guardFirstName)({ firstName: emp.firstName, employeeName: emp.nombre || emp.employeeName });
     const msg = buildDigestMessage({
         nuevo: data.nuevo || 0,
         modificado: data.modificado || 0,
         eliminado: data.eliminado || 0,
         franco: data.franco || 0,
         samples: data.samples || [],
-    });
-    let empUid = data.uid || null;
-    if (!empUid) {
-        const empDoc = await db.collection('empleados').doc(employeeId).get();
-        empUid = empDoc.exists ? empDoc.data()?.uid || null : null;
-    }
+    }, name);
     const [byEmpId, byUid] = await Promise.all([
         db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
         empUid

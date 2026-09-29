@@ -6,6 +6,7 @@ const simulableShift_1 = require("../common/simulableShift");
 const reliefEligibility_1 = require("../common/reliefEligibility");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const convocatoriasCobertura_1 = require("../coverage/convocatoriasCobertura");
+const pushGreeting_1 = require("../common/pushGreeting");
 const arrivalNoticeWindow_1 = require("./arrivalNoticeWindow");
 const SKIP_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'A', 'E', 'AA', 'ART', 'PG', 'SGS', 'SUS']);
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
@@ -60,13 +61,15 @@ async function writeHeadsUp(db, shiftId, shift, startMs) {
     const lugar = (0, arrivalNoticeWindow_1.lugarAviso)(shift);
     const hora = horaAr(startMs);
     const empSnap = await db.collection('empleados').doc(String(shift.employeeId)).get();
-    const uid = empSnap.exists ? String(empSnap.data()?.uid || '') : '';
+    const emp = empSnap.exists ? empSnap.data() || {} : {};
+    const uid = String(emp.uid || '');
+    const name = (0, pushGreeting_1.guardFirstName)({ firstName: emp.firstName, employeeName: shift.employeeName || emp.nombre });
     await db.collection('user_notifications').add({
         uid: uid || null,
         employeeId: shift.employeeId,
         type: 'AVISO_TURNO_PROXIMO',
-        title: '¿Estás llegando?',
-        body: (0, arrivalNoticeWindow_1.headsUpBody)(hora, lugar),
+        title: '¿Ya estás llegando?',
+        body: (0, arrivalNoticeWindow_1.headsUpBody)(hora, lugar, name),
         empresaId: shift.empresaId || null,
         shiftId,
         objectiveId: shift.objectiveId || null,
@@ -106,13 +109,16 @@ async function alertOutgoing(db, incoming) {
         if (dat.incomingLateAlertShiftId === incoming.id)
             continue;
         const empSnap = await db.collection('empleados').doc(String(dat.employeeId || '')).get();
-        const uid = empSnap.exists ? String(empSnap.data()?.uid || '') : '';
+        const emp = empSnap.exists ? empSnap.data() || {} : {};
+        const uid = String(emp.uid || '');
+        const name = (0, pushGreeting_1.guardFirstName)({ firstName: emp.firstName, employeeName: dat.employeeName || emp.nombre });
+        const who = name ? `${name}, ` : '';
         await db.collection('user_notifications').add({
             uid: uid || null,
             employeeId: dat.employeeId || null,
             type: 'AVISO_ENTRANTE_SIN_FICHAR',
-            title: 'El entrante aún no llegó',
-            body: `${incoming.employeeName || 'El guardia siguiente'} no marcó presencia en ${lugar}. Esperá aviso de Operaciones antes de retirarte.`,
+            title: 'Tu relevo todavía no llegó',
+            body: `${who}el que entra todavía no fichó en ${lugar}. No te retires hasta que Operaciones te avise.`,
             empresaId,
             shiftId: retDoc.id,
             relatedShiftId: incoming.id || null,

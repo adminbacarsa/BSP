@@ -38,7 +38,7 @@ const lugar = lugarAviso({
   positionName: 'Puesto 1',
 });
 const heads = headsUpBody('08:00', lugar);
-report('texto T-5', heads.includes('08:00') && heads.includes('Obrador Malagueño') && heads.includes('Puesto 1') && heads.includes('¿estás llegando?'), heads);
+report('texto T-5', heads.includes('08:00') && heads.includes('Obrador Malagueño') && heads.includes('Puesto 1') && heads.includes('¿Ya estás llegando?'), heads);
 const venis = venisBody('M', lugar, '08:00');
 report('texto venis', venis.includes('Obrador Malagueño') && venis.includes('Puesto 1') && !venis.includes('objetivo / puesto'), venis);
 

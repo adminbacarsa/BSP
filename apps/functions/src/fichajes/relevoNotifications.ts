@@ -1,4 +1,5 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { guardFirstName } from '../common/pushGreeting';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 
@@ -11,13 +12,18 @@ export function formatHmArgentina(ms: number): string {
   }).format(new Date(ms));
 }
 
-async function employeeUid(
+async function employeePushIdentity(
   db: FirebaseFirestore.Firestore,
   employeeId: string,
-): Promise<string | undefined> {
-  if (!employeeId) return undefined;
+  employeeName?: string,
+): Promise<{ uid?: string; name: string }> {
+  if (!employeeId) return { name: guardFirstName({ employeeName }) };
   const empDoc = await db.collection('empleados').doc(employeeId).get();
-  return empDoc.exists ? (empDoc.data()?.uid as string | undefined) : undefined;
+  const emp = empDoc.exists ? empDoc.data() || {} : {};
+  return {
+    uid: emp.uid as string | undefined,
+    name: guardFirstName({ firstName: emp.firstName, employeeName: employeeName || emp.nombre }),
+  };
 }
 
 /** Push + bandeja: turno saliente cerrado con relevo ya en puesto (TURNO_FINALIZADO). */
@@ -31,12 +37,15 @@ export async function notifyTurnoFinalizadoRelevo(
     empresaId: string | null;
   },
 ): Promise<void> {
-  const { outEmpId, outDocId, incomingName, objectiveName, empresaId } = params;
+  const { outEmpId, outDocId, objectiveName, empresaId } = params;
+  const who = await employeePushIdentity(db, outEmpId);
   const title = 'Turno finalizado';
-  const body = `Turno finalizado — tu relevo ${incomingName} ya está en el puesto${objectiveName ? ` (${objectiveName})` : ''}.`;
+  const body = who.name
+    ? `¡Gracias, ${who.name}! Terminaste tu turno en ${objectiveName || 'el puesto'}. Buen descanso.`
+    : `¡Gracias! Terminaste tu turno en ${objectiveName || 'el puesto'}. Buen descanso.`;
 
   try {
-    const outEmpUid = await employeeUid(db, outEmpId);
+    const outEmpUid = who.uid;
     await db.collection('user_notifications').add({
       uid: outEmpUid || null,
       employeeId: outEmpId,
@@ -71,11 +80,13 @@ export async function notifyRetencionAvisoRelevoTarde(
   const { outEmpId, outDocId, incomingName, objectiveName, etaAtMs, empresaId } = params;
   const etaLabel = formatHmArgentina(etaAtMs);
   const objLabel = objectiveName || 'el puesto';
-  const title = 'Retención — relevo en camino';
-  const body = `Tu relevo ${incomingName} llega aprox. a las ${etaLabel}. Quedás retenido en ${objLabel} hasta que llegue.`;
+  const who = await employeePushIdentity(db, outEmpId);
+  const title = '⛔ Quedás retenido';
+  const lead = who.name ? `${who.name}, quedás retenido` : 'Quedás retenido';
+  const body = `${lead} en ${objLabel}. ${incomingName} llega cerca de las ${etaLabel}. No abandones el puesto hasta que llegue tu relevo o Operaciones te libere.`;
 
   try {
-    const outEmpUid = await employeeUid(db, outEmpId);
+    const outEmpUid = who.uid;
     await db.collection('user_notifications').add({
       uid: outEmpUid || null,
       employeeId: outEmpId,

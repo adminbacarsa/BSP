@@ -29,13 +29,14 @@ export function lugarAviso(parts: {
     .join(' · ');
 }
 
-export function headsUpBody(hora: string, lugar: string): string {
-  if (lugar) return `Tu turno empieza a las ${hora} en ${lugar}, ¿estás llegando?`;
-  return `Tu turno empieza a las ${hora}, ¿estás llegando?`;
+export function headsUpBody(hora: string, lugar: string, name?: string): string {
+  const donde = lugar ? ` en ${lugar}` : '';
+  const hello = name ? `Hola ${name} 👋 ` : '';
+  return `${hello}Tu turno arranca a las ${hora}${donde}. ¿Ya estás llegando?`;
 }
 
-export function venisBody(codigo: string, lugar: string, hora: string): string {
-  const code = codigo ? `${codigo} ` : '';
+export function venisBody(_codigo: string, lugar: string, hora: string, name?: string): string {
   const donde = lugar ? ` en ${lugar}` : '';
-  return `¿Venís? Tu turno ${code}(${hora})${donde} ya comenzó.`;
+  const who = name ? `${name}, ¿venís?` : '¿Venís?';
+  return `${who} Tu turno empezó a las ${hora}${donde}. Contanos si llegás en 10, 15 o 30 min.`;
 }

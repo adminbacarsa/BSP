@@ -23,14 +23,14 @@ function lugarAviso(parts) {
         .filter(Boolean)
         .join(' · ');
 }
-function headsUpBody(hora, lugar) {
-    if (lugar)
-        return `Tu turno empieza a las ${hora} en ${lugar}, ¿estás llegando?`;
-    return `Tu turno empieza a las ${hora}, ¿estás llegando?`;
-}
-function venisBody(codigo, lugar, hora) {
-    const code = codigo ? `${codigo} ` : '';
+function headsUpBody(hora, lugar, name) {
     const donde = lugar ? ` en ${lugar}` : '';
-    return `¿Venís? Tu turno ${code}(${hora})${donde} ya comenzó.`;
+    const hello = name ? `Hola ${name} 👋 ` : '';
+    return `${hello}Tu turno arranca a las ${hora}${donde}. ¿Ya estás llegando?`;
+}
+function venisBody(_codigo, lugar, hora, name) {
+    const donde = lugar ? ` en ${lugar}` : '';
+    const who = name ? `${name}, ¿venís?` : '¿Venís?';
+    return `${who} Tu turno empezó a las ${hora}${donde}. Contanos si llegás en 10, 15 o 30 min.`;
 }
 //# sourceMappingURL=arrivalNoticeWindow.js.map

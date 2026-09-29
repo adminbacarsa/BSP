@@ -30,6 +30,7 @@ import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEligibility';
 import { arPlanificacionEstadoKey } from './common/arClock';
+import { guardFirstName } from './common/pushGreeting';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { clampLateEtaMinutes, isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
@@ -2632,17 +2633,20 @@ export const detectarAusencias = functions
           const startStr = shift.startTime?.toDate
             ? shift.startTime.toDate().toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' })
             : '';
+          const absName = guardFirstName({ employeeName: shift.employeeName });
+          const absWhere = shift.objectiveName ? ` en ${shift.objectiveName}` : '';
+          const absBody = `${absName ? `${absName}, ` : ''}no registramos tu ingreso de las ${startStr}${absWhere}. Si fue un error, avisale a Operaciones.`;
           try {
             await admin.messaging().sendEachForMulticast({
               tokens,
               notification: {
-                title: '⚠️ Ausencia registrada',
-                body: `No se registró tu presencia en el turno de las ${startStr} en ${shift.objectiveName || ''}. Reportate a Operaciones.`,
+                title: 'Ausencia registrada',
+                body: absBody,
               },
               webpush: {
                 notification: {
-                  title: '⚠️ Ausencia registrada',
-                  body: `No registraste presencia en ${shift.objectiveName || ''} (${startStr}). Ingresá al portal si estás presente.`,
+                  title: 'Ausencia registrada',
+                  body: absBody,
                   icon: '/icons/icon-192x192.png',
                   requireInteraction: true,
                 },

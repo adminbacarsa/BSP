@@ -7,7 +7,7 @@ export declare function buildDigestMessage(d: {
     eliminado: number;
     franco: number;
     samples: string[];
-}): {
+}, name?: string): {
     title: string;
     body: string;
     type: string;

@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 import { FieldValue } from 'firebase-admin/firestore';
+import { guardFirstName } from '../common/pushGreeting';
 import { assignGuardToEventAdmin } from './eventoAssignAdmin';
 
 async function resolveEmployeeIdForUid(
@@ -153,7 +154,10 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
     type: 'EVENTO_CONFIRMADO',
     target: 'employee',
     title: 'Evento confirmado',
-    body: `Quedaste asignado a ${sol.servicioNombre || sol.eventoNombre}.`,
+    body: `${(() => {
+      const n = guardFirstName({ firstName: empData.firstName, employeeName: empNombre });
+      return n ? `${n}, quedaste` : 'Quedaste';
+    })()} en ${sol.servicioNombre || sol.eventoNombre}.`,
     eventoId: sol.eventoId,
     servicioId: sol.servicioId,
     solicitudId,

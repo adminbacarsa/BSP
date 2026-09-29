@@ -7,6 +7,7 @@ const planificacionEstadoKeys_1 = require("../assistant/planificacionEstadoKeys"
 const llegadaTardeUtils_1 = require("../ausencias/llegadaTardeUtils");
 const updateLiquidacionOnTurnoComplete_1 = require("../liquidacion/updateLiquidacionOnTurnoComplete");
 const shiftNotifDigest_1 = require("./shiftNotifDigest");
+const pushGreeting_1 = require("../common/pushGreeting");
 const shiftModificationWithin12h_1 = require("../coverage/shiftModificationWithin12h");
 function formatDate(ts) {
     if (!ts)
@@ -14,26 +15,38 @@ function formatDate(ts) {
     const d = ts.toDate ? ts.toDate() : new Date(ts);
     return d.toLocaleDateString('es-AR', { weekday: 'short', day: 'numeric', month: 'short' });
 }
+function hmAr(ts) {
+    const d = ts?.toDate ? ts.toDate() : ts ? new Date(ts) : null;
+    if (!d || Number.isNaN(d.getTime()))
+        return '';
+    return d.toLocaleTimeString('es-AR', {
+        hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/Argentina/Buenos_Aires',
+    });
+}
 function buildMessage(type, after, before, turnoId) {
-    const dateStr = formatDate(after?.startTime || before?.startTime);
-    const objective = (after || before)?.objectiveName || (after || before)?.clientName || '';
-    const code = (after || before)?.code || '';
-    const isFranco = code === 'F' || (after || before)?.isFranco;
+    const src = after || before;
+    const dateStr = formatDate(src?.startTime);
+    const objective = src?.objectiveName || src?.clientName || '';
+    const code = src?.code || '';
+    const from = hmAr(src?.startTime);
+    const to = hmAr(src?.endTime);
+    const rango = from && to ? `${from}–${to}` : from;
+    const cuando = [dateStr, rango].filter(Boolean).join(' ');
     switch (type) {
         case 'TURNO_ELIMINADO':
             return {
-                title: '❌ Turno eliminado',
-                body: dateStr ? `${dateStr}${code && code !== 'F' ? ` · ${code}` : ''} — ${objective || 'tu cronograma'}` : 'Un turno fue eliminado de tu cronograma',
+                title: 'Te sacaron un turno',
+                body: cuando ? `${cuando}${objective ? ` en ${objective}` : ''}` : 'Un turno salió de tu cronograma',
             };
         case 'FRANCO_ASIGNADO':
             return {
-                title: '🟢 Franco asignado',
-                body: dateStr ? `${dateStr} — día libre confirmado` : 'Se te asignó un día franco',
+                title: 'Tenés franco',
+                body: dateStr ? `${dateStr} es franco` : 'Tenés un día franco',
             };
         case 'TURNO_NUEVO':
             return {
-                title: '📅 Nuevo turno asignado',
-                body: dateStr ? `${dateStr}${code ? ` · ${code}` : ''} — ${objective}` : objective || 'Nuevo turno en tu cronograma',
+                title: 'Tenés un turno nuevo',
+                body: cuando ? `${cuando}${code && code !== 'F' ? ` · ${code}` : ''}${objective ? ` en ${objective}` : ''}` : (objective || 'Nuevo turno en tu cronograma'),
             };
         case 'TURNO_MODIFICADO': {
             const changes = [];
@@ -51,7 +64,7 @@ function buildMessage(type, after, before, turnoId) {
             }
             const detail = changes.length ? changes.join(', ') : (dateStr ? `${dateStr}${code ? ` · ${code}` : ''}` : '');
             return {
-                title: '🔄 Cambio en tu cronograma',
+                title: 'Cambió tu cronograma',
                 body: detail || objective || 'Tu cronograma fue modificado',
             };
         }
@@ -227,9 +240,15 @@ exports.onTurnoWrite = functions
             return;
         const objective = after.objectiveName || after.clientName || 'el puesto';
         const position = after.positionName || '';
-        const retMsg = { title: '⏰ Quedaste retenido', body: `Permanecé en ${objective}${position ? ' · ' + position : ''} hasta nuevo aviso de Operaciones.` };
         const empDoc = await db.collection('empleados').doc(employeeId).get();
-        const empUid = empDoc.exists ? empDoc.data()?.uid : undefined;
+        const emp = empDoc.exists ? empDoc.data() || {} : {};
+        const empUid = emp.uid;
+        const retName = (0, pushGreeting_1.guardFirstName)({ firstName: emp.firstName, employeeName: after.employeeName || emp.nombre });
+        const where = `${objective}${position ? ' · ' + position : ''}`;
+        const retMsg = {
+            title: '⛔ Quedás retenido',
+            body: `${retName ? `${retName}, quedás` : 'Quedás'} retenido en ${where}. No abandones el puesto hasta que llegue tu relevo o Operaciones te libere.`,
+        };
         const [byEmpId, byUid] = await Promise.all([
             db.collection('device_tokens').where('employeeId', '==', employeeId).get(),
             empUid ? db.collection('device_tokens').where('uid', '==', empUid).get() : Promise.resolve({ docs: [] }),
@@ -275,17 +294,16 @@ exports.onTurnoWrite = functions
         if (!completedEmployeeId)
             return;
         const objective = after.objectiveName || after.clientName || 'tu puesto';
-        const fmtT = (d) => d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Argentina/Cordoba' });
-        const endDate = after.endTime?.toDate ? after.endTime.toDate() : null;
-        const endStr = endDate ? fmtT(endDate) : '';
-        const completedMsg = {
-            title: '✅ Turno finalizado',
-            body: endStr
-                ? `Tu turno en ${objective} finalizó a las ${endStr}. ¡Hasta luego!`
-                : `Tu turno en ${objective} ha concluido. ¡Hasta luego!`,
-        };
         const empDocC = await db.collection('empleados').doc(completedEmployeeId).get();
-        const empUidC = empDocC.exists ? empDocC.data()?.uid : undefined;
+        const empC = empDocC.exists ? empDocC.data() || {} : {};
+        const empUidC = empC.uid;
+        const doneName = (0, pushGreeting_1.guardFirstName)({ firstName: empC.firstName, employeeName: after.employeeName || empC.nombre });
+        const completedMsg = {
+            title: 'Turno finalizado',
+            body: doneName
+                ? `¡Gracias, ${doneName}! Terminaste tu turno en ${objective}. Buen descanso.`
+                : `¡Gracias! Terminaste tu turno en ${objective}. Buen descanso.`,
+        };
         const [byEmpIdC, byUidC] = await Promise.all([
             db.collection('device_tokens').where('employeeId', '==', completedEmployeeId).get(),
             empUidC ? db.collection('device_tokens').where('uid', '==', empUidC).get() : Promise.resolve({ docs: [] }),
