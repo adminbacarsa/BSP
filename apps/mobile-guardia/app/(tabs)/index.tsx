@@ -289,6 +289,14 @@ function HoyScreenContent() {
     appAlert('Voy a llegar tarde', '¿Cuántos minutos de demora estimás?', [
       { text: 'Cancelar', style: 'cancel' },
       {
+        text: '10 min',
+        onPress: () => {
+          void notifyLateArrival(mainShift.id, 10).then((result) =>
+            appAlert('Llegada tarde', result.message),
+          );
+        },
+      },
+      {
         text: '15 min',
         onPress: () => {
           void notifyLateArrival(mainShift.id, 15).then((result) =>
@@ -300,14 +308,6 @@ function HoyScreenContent() {
         text: '30 min',
         onPress: () => {
           void notifyLateArrival(mainShift.id, 30).then((result) =>
-            appAlert('Llegada tarde', result.message),
-          );
-        },
-      },
-      {
-        text: '60 min',
-        onPress: () => {
-          void notifyLateArrival(mainShift.id, 60).then((result) =>
             appAlert('Llegada tarde', result.message),
           );
         },

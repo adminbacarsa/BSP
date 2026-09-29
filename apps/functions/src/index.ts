@@ -32,7 +32,7 @@ import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEli
 import { arPlanificacionEstadoKey } from './common/arClock';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
-import { isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
+import { clampLateEtaMinutes, isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
 import { openLateAbsenceVacancy } from './attendance/openLateAbsenceVacancy';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
@@ -1585,11 +1585,7 @@ export const notificarLlegadaTarde = functions.https.onCall(async (data, context
             );
         }
 
-        const etaMinutes = Number.isFinite(Number(etaRaw)) ? Math.max(1, Math.floor(Number(etaRaw))) : 30;
-        if (etaMinutes > 60) {
-            await markShiftAbsent(db, shiftId, { reason: 'AVISO_MAYOR_60', by: context.auth.uid });
-            return { success: true, markedAbsent: true, reason: 'AVISO_MAYOR_60' };
-        }
+        const etaMinutes = clampLateEtaMinutes(etaRaw);
 
         const etaAt = startMs > 0
           ? admin.firestore.Timestamp.fromMillis(startMs + etaMinutes * 60 * 1000)

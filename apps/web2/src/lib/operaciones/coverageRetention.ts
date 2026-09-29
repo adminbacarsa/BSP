@@ -39,14 +39,31 @@ export type RetentionPickResult = {
   checkInMs: number;
 } | null;
 
-/** Presentes en el mismo objetivo y puesto del hueco; retiene al último en fichar. */
+const RETENTION_ALIGN_MS = 30 * 60 * 1000;
+
+function shiftBoundMs(shift: Record<string, unknown>, kind: 'start' | 'end'): number {
+  const objKey = kind === 'start' ? 'shiftDateObj' : 'endDateObj';
+  const rawKey = kind === 'start' ? 'startTime' : 'endTime';
+  const obj = shift[objKey];
+  if (obj instanceof Date && !Number.isNaN(obj.getTime())) return obj.getTime();
+  const raw = shift[rawKey];
+  if (!raw) return 0;
+  const d = toDate(raw);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
+/**
+ * Retenido = presente que TERMINA cuando empieza el hueco (fin ±30 min),
+ * mismo puesto. Quien arranca a esa hora o está a mitad de turno no entra.
+ */
 export function pickRetentionShiftForGap(
   processedData: unknown[],
   absenceShift: Record<string, unknown>,
 ): RetentionPickResult {
   const objectiveId = String(absenceShift.objectiveId || '').trim();
   const positionName = absenceShift.positionName;
-  if (!objectiveId) return null;
+  const gapStart = shiftBoundMs(absenceShift, 'start');
+  if (!objectiveId || !gapStart) return null;
 
   const rows = (processedData || []).filter((raw) => {
     const sh = raw as Record<string, unknown>;
@@ -57,6 +74,10 @@ export function pickRetentionShiftForGap(
     const eid = String(sh.employeeId || '').trim();
     if (!eid || eid === 'VACANTE') return false;
     if (eid === String(absenceShift.employeeId || '').trim()) return false;
+    const st = shiftBoundMs(sh, 'start');
+    const en = shiftBoundMs(sh, 'end');
+    if (st <= 0 || st >= gapStart - 60_000) return false;
+    if (!en || Math.abs(en - gapStart) > RETENTION_ALIGN_MS) return false;
     return true;
   }) as Record<string, unknown>[];
 
@@ -82,7 +103,7 @@ export type ApplyAutoRetentionResult = {
 };
 
 /**
- * Marca retención obligatoria en el guardia presente (último fichaje en el puesto).
+ * Marca retención en el saliente que termina cuando empieza el hueco.
  * Idempotente por par shiftId + absenceShiftId.
  */
 export async function applyAutoRetentionForGap(
@@ -149,7 +170,7 @@ export async function applyAutoRetentionForGap(
             objectiveId: absenceShift.objectiveId || null,
             objectiveName: absenceShift.objectiveName || '',
             positionName: absenceShift.positionName || '',
-            description: `${pick.employeeName} retenido (último en puesto) por ausencia de ${absenceShift.employeeName || 'relevo'} hasta cobertura del hueco.`,
+            description: `${pick.employeeName} retenido (saliente) por ausencia de ${absenceShift.employeeName || 'relevo'} hasta cobertura del hueco.`,
             createdAt: serverTimestamp(),
             reportedBy: 'OPERACIONES',
           },

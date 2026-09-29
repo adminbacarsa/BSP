@@ -1,12 +1,20 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.REVERSIBLE_LATE_REASONS = exports.PROVISIONAL_LATE_REASONS = exports.LATE_ABSENCE_CAP_MS = exports.LATE_ABSENCE_FLOOR_MS = void 0;
+exports.REVERSIBLE_LATE_REASONS = exports.PROVISIONAL_LATE_REASONS = exports.LATE_ABSENCE_CAP_MS = exports.LATE_ETA_MAX_MINUTES = exports.LATE_ABSENCE_FLOOR_MS = void 0;
+exports.clampLateEtaMinutes = clampLateEtaMinutes;
 exports.shiftStartMs = shiftStartMs;
 exports.lateAbsenceDeadlineMs = lateAbsenceDeadlineMs;
 exports.isProvisionalLateAbsence = isProvisionalLateAbsence;
 exports.isReversibleLateAbsence = isReversibleLateAbsence;
 exports.lateVacancyDue = lateVacancyDue;
 exports.LATE_ABSENCE_FLOOR_MS = 30 * 60 * 1000;
+exports.LATE_ETA_MAX_MINUTES = 30;
+function clampLateEtaMinutes(raw, fallback = exports.LATE_ETA_MAX_MINUTES) {
+    const n = Number(raw);
+    if (!Number.isFinite(n))
+        return fallback;
+    return Math.min(exports.LATE_ETA_MAX_MINUTES, Math.max(1, Math.floor(n)));
+}
 exports.LATE_ABSENCE_CAP_MS = 60 * 60 * 1000;
 exports.PROVISIONAL_LATE_REASONS = new Set(['ETA_VENCIDA']);
 exports.REVERSIBLE_LATE_REASONS = new Set(['AUTO_T30', 'ETA_VENCIDA']);

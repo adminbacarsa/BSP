@@ -15,6 +15,8 @@ import {
   isCoverageHoursOnSourceDoc,
   lateNoNoticeCheckInCopy,
 } from '../../../../packages/portal-core/src/checkIn/evaluateCheckInWindow.ts';
+import { presentArrivalCopy } from '../../../../packages/portal-core/src/checkIn/checkInUiStatus.ts';
+import { formatIngresoLine } from '../../../../apps/web2/src/lib/operaciones/ingresoLabel.ts';
 
 const require = createRequire(import.meta.url);
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -337,5 +339,25 @@ describe('mensajes de rechazo UX', () => {
     assert.match(checkInRejectMessage('SHIFT_ENDED'), /terminó/i);
     assert.match(checkInRejectMessage('TRACE_REGISTRATION'), /extensión|adelanto/i);
     assert.match(checkInRejectMessage('TOO_LATE'), /ventana/i);
+  });
+});
+
+describe('P5d reloj de pago', () => {
+  it('Bosio fichó 11:21 y se muestra el inicio 11:30', () => {
+    const shift = {
+      startTime: '2026-09-29T11:30:00-03:00',
+      checkInAt: '2026-09-29T11:21:00-03:00',
+      realStartTime: '2026-09-29T11:30:00-03:00',
+    };
+    const copy = presentArrivalCopy(shift as never);
+    assert.equal(copy.title, 'Ingresaste 11:30');
+    assert.match(copy.subtitle || '', /Marcaste 11:21/);
+    const line = formatIngresoLine({
+      startTime: shift.startTime,
+      checkInAt: shift.checkInAt,
+      realStartTime: shift.realStartTime,
+    });
+    assert.match(line || '', /^Ingresó 11:30/);
+    assert.match(line || '', /marcó 11:21/);
   });
 });

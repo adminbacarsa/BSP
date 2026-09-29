@@ -1,4 +1,6 @@
 export declare const LATE_ABSENCE_FLOOR_MS: number;
+export declare const LATE_ETA_MAX_MINUTES = 30;
+export declare function clampLateEtaMinutes(raw: unknown, fallback?: number): number;
 export declare const LATE_ABSENCE_CAP_MS: number;
 export declare const PROVISIONAL_LATE_REASONS: Set<string>;
 export declare const REVERSIBLE_LATE_REASONS: Set<string>;

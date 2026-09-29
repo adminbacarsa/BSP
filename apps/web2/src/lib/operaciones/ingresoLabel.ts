@@ -15,24 +15,33 @@ function toDate(v: TsLike): Date | null {
   return null;
 }
 
-/** Reloj de auditoría (`checkInAt`). Tarde solo si pasó la tolerancia T+5. */
-export function formatIngresoLine(shift: {
-  checkInAt?: TsLike;
-  checkInTime?: TsLike;
-  startTime?: TsLike;
-  shiftDateObj?: Date | null;
-}): string | null {
-  const punch = toDate(shift.checkInAt) || toDate(shift.checkInTime);
-  if (!punch) return null;
-  const planned = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : toDate(shift.startTime);
-  const hh = punch.toLocaleTimeString('es-AR', {
+function hhmm(d: Date): string {
+  return d.toLocaleTimeString('es-AR', {
     hour: '2-digit',
     minute: '2-digit',
     hourCycle: 'h23',
     timeZone: 'America/Argentina/Buenos_Aires',
   });
-  if (!planned) return `Ingresó ${hh}`;
-  const lateMin = Math.round((punch.getTime() - planned.getTime()) / 60000);
-  if (lateMin > 5) return `Ingresó ${hh} (${lateMin} min tarde)`;
-  return `Ingresó ${hh}`;
+}
+
+/** Reloj de pago (`realStartTime`). `checkInAt` queda como «marcó» si fichó antes. */
+export function formatIngresoLine(shift: {
+  checkInAt?: TsLike;
+  checkInTime?: TsLike;
+  realStartTime?: TsLike;
+  startTime?: TsLike;
+  shiftDateObj?: Date | null;
+}): string | null {
+  const punch = toDate(shift.checkInAt) || toDate(shift.checkInTime);
+  const planned = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : toDate(shift.startTime);
+  const pay =
+    toDate(shift.realStartTime) ||
+    (planned && punch && punch.getTime() < planned.getTime() ? planned : punch);
+  if (!pay) return null;
+  const lateMin = planned ? Math.round((pay.getTime() - planned.getTime()) / 60000) : 0;
+  const main = lateMin > 5 ? `Ingresó ${hhmm(pay)} (${lateMin} min tarde)` : `Ingresó ${hhmm(pay)}`;
+  if (punch && Math.abs(punch.getTime() - pay.getTime()) >= 60_000) {
+    return `${main} · marcó ${hhmm(punch)}`;
+  }
+  return main;
 }

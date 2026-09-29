@@ -7,7 +7,7 @@ import { useTheme } from '../theme/ThemeContext';
 import type { ConvocatoriaCobertura } from '../lib/convocatoriasCobertura';
 import { llegadaTardePlaceLabel } from '../lib/llegadaTardePlace';
 
-export const LLEGADA_TARDE_ETA_OPTIONS = [15, 30, 60] as const;
+export const LLEGADA_TARDE_ETA_OPTIONS = [10, 15, 30] as const;
 export type LlegadaTardeEtaMinutes = (typeof LLEGADA_TARDE_ETA_OPTIONS)[number];
 
 type Props = {

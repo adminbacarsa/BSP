@@ -46,28 +46,31 @@ export function isShiftPresent(shift: Shift): boolean {
   );
 }
 
-function actualCheckInDate(shift: Shift): Date | null {
-  return (
-    toDate(shift.checkInAt) ??
-    toDate(shift.realStartTime) ??
-    toDate(shift.presentAt) ??
-    toDate(shift.checkInTime)
-  );
+function punchDate(shift: Shift): Date | null {
+  return toDate(shift.checkInAt) ?? toDate(shift.checkInTime) ?? toDate(shift.presentAt);
 }
 
-/** Hero ya fichado: hora real de ingreso y, si corresponde, minutos de atraso. */
+/** Hora que se muestra: la de pago (`realStartTime`). Si fichó antes, el inicio planificado. */
 export function presentArrivalCopy(shift: Shift): { title: string; subtitle?: string } {
   const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
-  const actual = actualCheckInDate(shift);
   const coverage = isOpsCoverage ? 'Cobertura' : undefined;
-  if (!actual) {
+  const planned = toDate(shift.startTime);
+  const punch = punchDate(shift);
+  const pay =
+    toDate(shift.realStartTime) ??
+    (planned && punch && punch.getTime() < planned.getTime() ? planned : punch);
+  if (!pay) {
     return { title: 'Presente confirmado', subtitle: coverage };
   }
-  const planned = toDate(shift.startTime);
-  const lateMin = planned ? Math.round((actual.getTime() - planned.getTime()) / 60000) : 0;
-  const hhmm = formatTimeAr(actual);
-  const title = lateMin >= 1 ? `Ingresaste ${hhmm} (${lateMin} min tarde)` : `Ingresaste ${hhmm}`;
-  return { title, subtitle: coverage };
+  const lateMin = planned ? Math.round((pay.getTime() - planned.getTime()) / 60000) : 0;
+  const title =
+    lateMin > 5 ? `Ingresaste ${formatTimeAr(pay)} (${lateMin} min tarde)` : `Ingresaste ${formatTimeAr(pay)}`;
+  const marked =
+    punch && Math.abs(punch.getTime() - pay.getTime()) >= 60_000
+      ? `Marcaste ${formatTimeAr(punch)}`
+      : undefined;
+  const subtitle = [marked, coverage].filter(Boolean).join(' · ') || undefined;
+  return { title, subtitle };
 }
 
 export function isCheckInRequestRejected(shift: Shift): boolean {
@@ -181,7 +184,7 @@ export function resolveCheckInUiStatus(
       status: 'late_window',
       title: timing.canNotifyLate ? 'Podés avisar llegada tarde' : 'Fuera de ventana de fichada',
       subtitle: timing.canNotifyLate
-        ? 'Indicá demora de 15, 30 o 60 min'
+        ? 'Indicá demora de 10, 15 o 30 min'
         : timing.rejectMessage ?? 'Contactá a operaciones si hace falta',
       tone: 'warning',
     };

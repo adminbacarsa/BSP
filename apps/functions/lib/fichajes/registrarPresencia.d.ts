@@ -20,6 +20,7 @@ export type RegistrarPresenciaResult = {
         shiftId: string;
         employeeId: string;
         employeeName: string;
+        scheduled?: boolean;
     } | null;
 };
 export declare function registrarPresencia(db: FirebaseFirestore.Firestore, input: RegistrarPresenciaInput): Promise<RegistrarPresenciaResult>;

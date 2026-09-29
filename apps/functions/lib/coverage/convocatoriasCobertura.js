@@ -10,6 +10,7 @@ exports.simularRespuestasConvocatorias = simularRespuestasConvocatorias;
 exports.crearConvocatoriaLlegadaTarde = crearConvocatoriaLlegadaTarde;
 const admin = require("firebase-admin");
 const functions = require("firebase-functions/v1");
+const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const markShiftAbsent_1 = require("../attendance/markShiftAbsent");
 const coverageTraceShift_1 = require("./coverageTraceShift");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
@@ -735,9 +736,7 @@ exports.responderConvocatoriaCobertura = functions
         const startMs = shiftData.startTime?.toMillis?.() ?? 0;
         if (response === 'ACCEPTED') {
             await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
-            const eta = Number.isFinite(Number(etaMinutes))
-                ? Math.min(60, Math.max(1, Math.floor(Number(etaMinutes))))
-                : 30;
+            const eta = (0, lateAbsenceWindow_1.clampLateEtaMinutes)(etaMinutes);
             const etaAt = startMs > 0 ? firestore_1.Timestamp.fromMillis(startMs + eta * 60 * 1000) : now;
             await db.collection('turnos').doc(conv.shiftId).update({
                 lateArrivalConfirmed: true,

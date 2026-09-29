@@ -18,63 +18,13 @@ function normPos(n) {
         .trim()
         .toLowerCase();
 }
-function arrivalMs(dat) {
-    return (dat.checkInTime?.toMillis?.() ??
-        dat.realStartTime?.toMillis?.() ??
-        dat.presentAt?.toMillis?.() ??
-        dat.startTime?.toMillis?.() ??
-        0);
-}
-function isCambioCandidate(dat, nowMs, incomingStartMs) {
-    if (String(dat.relievedBy || '').trim())
-        return false;
-    if (dat.isRetention === true) {
-        const scheduledEnd = dat.endTime?.toMillis?.() ?? 0;
-        return scheduledEnd >= incomingStartMs - 45 * 60 * 1000;
-    }
-    const outEndMs = dat.endTime?.toMillis?.() ?? 0;
-    if (outEndMs <= 0)
-        return false;
-    if (nowMs >= outEndMs)
-        return false;
-    const handoffAligned = incomingStartMs > 0 && Math.abs(outEndMs - incomingStartMs) <= 30 * 60 * 1000;
-    if (handoffAligned)
-        return true;
-    return outEndMs - nowMs <= 15 * 60 * 1000;
-}
-async function resolvePositionCapacity(db, objectiveId, positionName, empresaId) {
-    try {
-        let q = db
-            .collection('servicios_sla')
-            .where('objectiveId', '==', objectiveId)
-            .limit(15);
-        if (empresaId) {
-            q = db
-                .collection('servicios_sla')
-                .where('empresaId', '==', empresaId)
-                .where('objectiveId', '==', objectiveId)
-                .limit(15);
-        }
-        const snap = await q.get();
-        const posNorm = normPos(positionName);
-        for (const d of snap.docs) {
-            const data = d.data();
-            const status = String(data.status || data.estado || 'ACTIVE').toUpperCase();
-            if (status === 'INACTIVE' || status === 'DELETED')
-                continue;
-            const positions = Array.isArray(data.positions) ? data.positions : [];
-            const pos = positions.find((p) => normPos(p?.name) === posNorm);
-            if (pos) {
-                const qty = Number(pos.quantity);
-                if (Number.isFinite(qty) && qty >= 1)
-                    return Math.floor(qty);
-            }
-        }
-    }
-    catch (e) {
-        console.warn('[registrarPresencia] capacity lookup:', e?.message);
-    }
-    return 1;
+function formatHmAr(ms) {
+    return new Date(ms).toLocaleTimeString('es-AR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+        timeZone: 'America/Argentina/Buenos_Aires',
+    });
 }
 async function registrarPresencia(db, input) {
     const { shiftId, source, coords, recordedAt, operatorUid, actorName, overrideRelieveShiftId, skipAutoRelevo, } = input;
@@ -238,6 +188,7 @@ async function registrarPresencia(db, input) {
     })
         .catch((e) => console.warn('[registrarPresencia] novedad ingreso:', e?.message));
     let relieved = null;
+    let relievedScheduleMs = 0;
     const wantSkip = skipAutoRelevo === true ||
         overrideRelieveShiftId === null ||
         !(0, reliefEligibility_1.isReliefEligibleShift)(shiftData);
@@ -266,72 +217,18 @@ async function registrarPresencia(db, input) {
                         }
                     }
                 }
-                else {
-                    let activeSnap;
-                    if (empresaId) {
-                        activeSnap = await db
-                            .collection('turnos')
-                            .where('empresaId', '==', empresaId)
-                            .where('objectiveId', '==', objectiveId)
-                            .where('isPresent', '==', true)
-                            .get();
-                    }
-                    else {
-                        activeSnap = await db
-                            .collection('turnos')
-                            .where('objectiveId', '==', objectiveId)
-                            .where('isPresent', '==', true)
-                            .get();
-                    }
-                    const samePost = activeSnap.docs.filter((d) => {
-                        const dat = d.data();
-                        if (dat.isCompleted === true)
-                            return false;
-                        if (normPos(dat.positionName) !== normPos(positionName))
-                            return false;
-                        if (d.id === shiftId)
-                            return false;
-                        if (empId && dat.employeeId === empId)
-                            return false;
-                        if (String(dat.relievedBy || '').trim())
-                            return false;
-                        if (!(0, reliefEligibility_1.isReliefEligibleShift)(dat))
-                            return false;
-                        return true;
+                else if (incomingStartMs > 0) {
+                    const pick = await (0, relevoOutgoingMatch_1.findPresentOutgoingAlignedToGapStart)(db, {
+                        objectiveId,
+                        positionName,
+                        gapStartMs: incomingStartMs,
+                        excludeShiftIds: [shiftId],
+                        excludeEmployeeId: empId || undefined,
                     });
-                    const fifo = (a, b) => {
-                        const da = a.data();
-                        const db2 = b.data();
-                        if (da.isRetention && !db2.isRetention)
-                            return -1;
-                        if (!da.isRetention && db2.isRetention)
-                            return 1;
-                        return arrivalMs(da) - arrivalMs(db2);
-                    };
-                    const cambio = samePost
-                        .filter((d) => isCambioCandidate(d.data(), nowMs, incomingStartMs))
-                        .sort(fifo);
-                    let pool = cambio;
-                    if (pool.length === 0) {
-                        const capacity = await resolvePositionCapacity(db, objectiveId, positionName, empresaId);
-                        if (samePost.length >= capacity) {
-                            pool = [...samePost].sort(fifo);
-                        }
-                    }
-                    outDoc = pool[0] ?? null;
-                    if (!outDoc && !wantOverride && incomingStartMs > 0) {
-                        const pick = await (0, relevoOutgoingMatch_1.findPresentOutgoingAlignedToGapStart)(db, {
-                            objectiveId,
-                            positionName,
-                            gapStartMs: incomingStartMs,
-                            excludeShiftIds: [shiftId],
-                            excludeEmployeeId: empId || undefined,
-                        });
-                        if (pick) {
-                            const pickSnap = await db.collection('turnos').doc(pick.id).get();
-                            if (pickSnap.exists)
-                                outDoc = pickSnap;
-                        }
+                    if (pick) {
+                        const pickSnap = await db.collection('turnos').doc(pick.id).get();
+                        if (pickSnap.exists)
+                            outDoc = pickSnap;
                     }
                 }
                 if (outDoc) {
@@ -339,42 +236,39 @@ async function registrarPresencia(db, input) {
                     const outEmpId = String(outData.employeeId || '');
                     const outName = outData.employeeName || 'Guardia';
                     const outPosName = outData.positionName || '';
-                    const outScheduledEndMs = outData.endTime?.toMillis?.() ?? 0;
-                    const isEarlyRelevo = outScheduledEndMs > 0 && nowMs < outScheduledEndMs;
+                    const outEndMs = outData.endTime?.toMillis?.() ?? 0;
+                    const handoffMs = Math.max(incomingStartMs, outEndMs || incomingStartMs);
+                    const scheduleHandoff = !wantOverride && nowMs < handoffMs;
                     await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
-                    if (isEarlyRelevo && !wantOverride) {
+                    if (scheduleHandoff) {
+                        relievedScheduleMs = handoffMs;
                         await outDoc.ref.update({
                             relievedBy: empId || null,
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),
-                            relieveScheduledAt: outData.endTime ?? null,
+                            relieveScheduledAt: firestore_1.Timestamp.fromMillis(handoffMs),
                             autoRelevo: true,
                             relievedEarly: true,
                             relievedSource: source,
                         });
                     }
                     else {
+                        const realEndMs = wantOverride ? nowMs : Math.max(handoffMs, nowMs);
                         const outClose = (0, shiftClose_1.buildAutoClosePatch)(outData, {
-                            realEndMs: nowMs,
+                            realEndMs,
                             reason: 'RELEVO_PRESENTE',
                             now: firestore_1.Timestamp.fromMillis(nowMs),
                             by: 'RELEVO',
                         });
                         await outDoc.ref.update({
-                            isCompleted: true,
-                            isPresent: false,
-                            status: 'COMPLETED',
-                            realEndTime: outClose.realEndTime,
-                            ...(outClose.retentionMinutes != null ? { retentionMinutes: outClose.retentionMinutes } : {}),
-                            ...(outClose.retentionEndedAt ? { retentionEndedAt: outClose.retentionEndedAt } : {}),
+                            ...outClose,
                             relievedBy: empId || null,
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),
-                            relieveScheduledAt: outData.endTime ?? null,
+                            relieveScheduledAt: firestore_1.Timestamp.fromMillis(handoffMs),
                             autoRelevo: !wantOverride,
                             relievedEarly: false,
                             relievedSource: source,
-                            completionReason: 'RELEVO_PRESENTE',
                         });
                         if (outEmpId) {
                             void (0, relevoNotifications_1.notifyTurnoFinalizadoRelevo)(db, {
@@ -390,11 +284,13 @@ async function registrarPresencia(db, input) {
                         shiftId: outDoc.id,
                         employeeId: outEmpId,
                         employeeName: outName,
+                        scheduled: scheduleHandoff,
                     };
+                    const when = formatHmAr(handoffMs);
                     void db
                         .collection('novedades')
                         .add({
-                        type: isEarlyRelevo ? 'RELEVO_PROGRAMADO' : 'RELEVO_AUTOMATICO',
+                        type: scheduleHandoff ? 'RELEVO_PROGRAMADO' : 'RELEVO_AUTOMATICO',
                         status: 'ATENDIDA',
                         empresaId,
                         objectiveId,
@@ -404,8 +300,8 @@ async function registrarPresencia(db, input) {
                         employeeName: incomingName,
                         relievedEmployeeId: outEmpId,
                         relievedEmployeeName: outName,
-                        description: isEarlyRelevo
-                            ? `${incomingName} fichó antes del fin de ${outName}; retiro programado a hora de fin (${source})`
+                        description: scheduleHandoff
+                            ? `Relevo de ${outName} programado a las ${when} (${source})`
                             : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
                         createdAt: firestore_1.FieldValue.serverTimestamp(),
                         autoProcessed: !wantOverride,
@@ -434,7 +330,9 @@ async function registrarPresencia(db, input) {
         shiftId,
         empresaId: shiftData.empresaId || null,
         details: relieved
-            ? `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}). Relevó a ${relieved.employeeName}.`
+            ? relievedScheduleMs > 0
+                ? `${shiftData.employeeName || empId} ingresó (${source}). Relevo de ${relieved.employeeName} programado a las ${formatHmAr(relievedScheduleMs)}.`
+                : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}). Relevó a ${relieved.employeeName}.`
             : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`,
     })
         .catch(() => { });

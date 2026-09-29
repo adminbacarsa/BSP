@@ -1297,11 +1297,7 @@ exports.notificarLlegadaTarde = functions.https.onCall(async (data, context) => 
         if (diffMin < -60 || diffMin > 5) {
             throw new functions.https.HttpsError('failed-precondition', 'Aviso de llegada tarde solo entre T−60 y T+5 minutos.');
         }
-        const etaMinutes = Number.isFinite(Number(etaRaw)) ? Math.max(1, Math.floor(Number(etaRaw))) : 30;
-        if (etaMinutes > 60) {
-            await (0, markShiftAbsent_1.markShiftAbsent)(db, shiftId, { reason: 'AVISO_MAYOR_60', by: context.auth.uid });
-            return { success: true, markedAbsent: true, reason: 'AVISO_MAYOR_60' };
-        }
+        const etaMinutes = (0, lateAbsenceWindow_1.clampLateEtaMinutes)(etaRaw);
         const etaAt = startMs > 0
             ? admin.firestore.Timestamp.fromMillis(startMs + etaMinutes * 60 * 1000)
             : nowTs;

@@ -48,7 +48,7 @@ const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletar
 const { positionHasContinuityFromSlaDoc } = requireFn('./lib/coverage/positionHasContinuity.js');
 const { skipAbsencePipelineForShift } = requireFn('./lib/coverage/coverageTraceShift.js');
 const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
-const { lateAbsenceDeadlineMs, lateVacancyDue } = requireFn('./lib/attendance/lateAbsenceWindow.js');
+const { clampLateEtaMinutes, lateAbsenceDeadlineMs, lateVacancyDue } = requireFn('./lib/attendance/lateAbsenceWindow.js');
 const { openLateAbsenceVacancy } = requireFn('./lib/attendance/openLateAbsenceVacancy.js');
 const { evaluateServerCheckInWindow } = requireFn('./lib/fichajes/checkInWindow.js');
 const { revertirAusenciaShift } = requireFn('./lib/attendance/revertirAusencia.js');
@@ -2524,9 +2524,8 @@ async function run() {
       const due = lateVacancyDue(sh0, Date.now());
       const opened = await openLateAbsenceVacancy(db, shiftId);
       const sh = (await db.collection('turnos').doc(shiftId).get()).data();
-      const conv = await db.collection('convocatorias_cobertura').where('shiftId', '==', shiftId).get();
-      const ok = due === true && opened === true && !!sh?.absenceVacancyOpenedAt && conv.size >= 1;
-      report(63, ok, ok ? 'sin aviso T+30 abre vacante y cascada' : `due=${due} opened=${opened} conv=${conv.size}`);
+      const ok = due === true && opened === true && !!sh?.absenceVacancyOpenedAt;
+      report(63, ok, ok ? 'sin aviso T+30 abre la vacante' : `due=${due} opened=${opened} flag=${!!sh?.absenceVacancyOpenedAt}`);
     }
 
     // Caso 64 — sin aviso: la fichada a T+40 igual revierte
@@ -2546,6 +2545,117 @@ async function run() {
       const sh = (await db.collection('turnos').doc(shiftId).get()).data();
       const ok = sh?.isAbsent !== true && sh?.isPresent === true;
       report(64, ok, ok ? 'sin aviso T+40 fichada revierte' : `absent=${sh?.isAbsent} present=${sh?.isPresent}`);
+    }
+
+    // Caso 65 — fichada antes del inicio: el saliente se releva a la hora planificada
+    {
+      const prefix = `${runId}_c65`;
+      const now = Date.now();
+      const inStart = now + 9 * 60 * 1000;
+      const inId = `${prefix}_in`;
+      const outId = `${prefix}_out`;
+      await db.collection('turnos').doc(outId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 2',
+        employeeId: `${prefix}_outE`, employeeName: 'Saliente', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(inStart - 4 * 60 * 60 * 1000),
+        endTime: Timestamp.fromMillis(inStart),
+      });
+      await db.collection('turnos').doc(inId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 2',
+        employeeId: `${prefix}_inE`, employeeName: 'Bosio', code: 'M', status: 'PENDING',
+        startTime: Timestamp.fromMillis(inStart),
+        endTime: Timestamp.fromMillis(inStart + 4 * 60 * 60 * 1000),
+      });
+      const res = await registrarPresencia(db, {
+        shiftId: inId, source: 'PORTAL_GPS', empId: `${prefix}_inE`,
+        recordedAt: new Date(now).toISOString(),
+      });
+      const out = (await db.collection('turnos').doc(outId).get()).data();
+      const ok = res.relieved?.scheduled === true
+        && out?.isCompleted !== true
+        && out?.relieveScheduledAt?.toMillis?.() === inStart;
+      report(65, ok, ok ? 'fichada anticipada programa el relevo al inicio' : `sched=${res.relieved?.scheduled} done=${out?.isCompleted} at=${out?.relieveScheduledAt?.toMillis?.()}`);
+    }
+
+    // Caso 66 — mismo fin no es relevo (GARCIA 11:45 no releva a FERRERO 11:30)
+    {
+      const prefix = `${runId}_c66`;
+      const inStart = Date.now() - 60 * 1000;
+      const sharedEnd = inStart + 3 * 60 * 60 * 1000;
+      const inId = `${prefix}_in`;
+      const outId = `${prefix}_out`;
+      await db.collection('turnos').doc(outId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'M2',
+        employeeId: `${prefix}_outE`, employeeName: 'Ferrero', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(inStart - 15 * 60 * 1000),
+        endTime: Timestamp.fromMillis(sharedEnd),
+      });
+      await db.collection('turnos').doc(inId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'M2',
+        employeeId: `${prefix}_inE`, employeeName: 'Garcia', code: 'M', status: 'PENDING',
+        startTime: Timestamp.fromMillis(inStart),
+        endTime: Timestamp.fromMillis(sharedEnd),
+      });
+      const res = await registrarPresencia(db, { shiftId: inId, source: 'PORTAL_GPS', empId: `${prefix}_inE` });
+      const out = (await db.collection('turnos').doc(outId).get()).data();
+      const ok = !res.relieved && out?.isPresent === true && !out?.relievedBy;
+      report(66, ok, ok ? 'mismo fin no releva' : `relieved=${res.relieved?.employeeName} present=${out?.isPresent}`);
+    }
+
+    // Caso 67 — retención solo del que termina; el que empieza a la misma hora no
+    {
+      const prefix = `${runId}_c67`;
+      const gap = Date.now();
+      const gapId = `${prefix}_gap`;
+      const endId = `${prefix}_end`;
+      const startId = `${prefix}_start`;
+      await db.collection('turnos').doc(gapId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+        employeeId: `${prefix}_gapE`, employeeName: 'Fantini', code: 'M',
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
+        isAbsent: true, status: 'ABSENT',
+      });
+      await db.collection('turnos').doc(endId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+        employeeId: `${prefix}_endE`, employeeName: 'Saliente', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(gap - 4 * 60 * 60 * 1000),
+        endTime: Timestamp.fromMillis(gap),
+      });
+      await db.collection('turnos').doc(startId).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+        employeeId: `${prefix}_startE`, employeeName: 'Entra', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
+      });
+      const r = await retainOutgoingForGap(db, { id: gapId, ...(await db.collection('turnos').doc(gapId).get()).data() }, { sendPush: false });
+      const onlyStart = `${prefix}_only`;
+      await db.collection('turnos').doc(`${onlyStart}_gap`).set({
+        empresaId: `${onlyStart}_emp`, objectiveId: `${onlyStart}_obj`, positionName: 'Puesto 1',
+        employeeId: `${onlyStart}_g`, code: 'M', isAbsent: true, status: 'ABSENT',
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
+      });
+      await db.collection('turnos').doc(`${onlyStart}_in`).set({
+        empresaId: `${onlyStart}_emp`, objectiveId: `${onlyStart}_obj`, positionName: 'Puesto 1',
+        employeeId: `${onlyStart}_e`, employeeName: 'Entra', code: 'M',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: Timestamp.fromMillis(gap),
+        endTime: Timestamp.fromMillis(gap + 4 * 60 * 60 * 1000),
+      });
+      const r2 = await retainOutgoingForGap(db, { id: `${onlyStart}_gap`, ...(await db.collection('turnos').doc(`${onlyStart}_gap`).get()).data() }, { sendPush: false });
+      const ok = r.applied === true && r.shiftIds.includes(endId) && !r.shiftIds.includes(startId) && r2.applied === false;
+      report(67, ok, ok ? 'retiene al saliente, no al que empieza' : `ids=${r.shiftIds.join(',')} only=${r2.skippedReason}`);
+    }
+
+    // Caso 68 — ETA pedida en 60 queda en 30
+    {
+      const ok = clampLateEtaMinutes(60) === 30 && clampLateEtaMinutes(10) === 10 && clampLateEtaMinutes(15) === 15;
+      report(68, ok, ok ? 'ETA máxima 30 min' : `60→${clampLateEtaMinutes(60)}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

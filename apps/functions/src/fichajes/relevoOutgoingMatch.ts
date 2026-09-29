@@ -86,7 +86,8 @@ export async function findPresentOutgoingAlignedToGapStart(
       const eid = String(data.employeeId || '').trim();
       if (!eid || eid === 'VACANTE' || (absentEmpId && eid === absentEmpId)) return false;
       const st = startMs(data);
-      if (st >= gapStartMs + 60_000) return false;
+      // Quien arranca con el hueco (o después) no es el saliente: está empezando.
+      if (st <= 0 || st >= gapStartMs - 60_000) return false;
       const en = endMs(data);
       if (!en) return false;
       if (Math.abs(en - gapStartMs) > RELEVO_GAP_ALIGN_MS) return false;

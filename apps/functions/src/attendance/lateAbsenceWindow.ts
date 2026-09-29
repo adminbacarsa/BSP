@@ -2,7 +2,16 @@ import type { Timestamp } from 'firebase-admin/firestore';
 
 /** Piso de llegada: aunque la ETA sea menor, se espera hasta T+30. */
 export const LATE_ABSENCE_FLOOR_MS = 30 * 60 * 1000;
-/** Tope de aviso y de reversión. Pasado esto, la ausencia abre vacante. */
+/** Tope para revertir y, si avisó, para abrir la vacante. La ETA que se acepta es 30 min. */
+export const LATE_ETA_MAX_MINUTES = 30;
+
+export function clampLateEtaMinutes(raw: unknown, fallback = LATE_ETA_MAX_MINUTES): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(LATE_ETA_MAX_MINUTES, Math.max(1, Math.floor(n)));
+}
+
+/** Tope de reversión (y de vacante si avisó). */
 export const LATE_ABSENCE_CAP_MS = 60 * 60 * 1000;
 
 /** Quien avisó: AA sin vacante hasta T+60. Sin aviso (AUTO_T30) abre vacante al momento. */

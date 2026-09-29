@@ -167,7 +167,9 @@ export async function ejecutarConfirmarPresencia(
     return { ok: true, message: `✓ **${nombre}** ya estaba presente${dia}${sitio}.` };
   }
   const relevo = result.relieved
-    ? ` Relevó a **${result.relieved.employeeName}** (FIFO).`
+    ? result.relieved.scheduled
+      ? ` Relevo de **${result.relieved.employeeName}** programado a la hora de inicio.`
+      : ` Relevó a **${result.relieved.employeeName}**.`
     : '';
   return {
     ok: true,

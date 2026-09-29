@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { clampLateEtaMinutes } from '../attendance/lateAbsenceWindow';
 import { markShiftAbsent } from '../attendance/markShiftAbsent';
 import { skipAbsencePipelineForShift } from './coverageTraceShift';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
@@ -990,9 +991,7 @@ export const responderConvocatoriaCobertura = functions
       const startMs = (shiftData.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (response === 'ACCEPTED') {
         await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
-        const eta = Number.isFinite(Number(etaMinutes))
-          ? Math.min(60, Math.max(1, Math.floor(Number(etaMinutes))))
-          : 30;
+        const eta = clampLateEtaMinutes(etaMinutes);
         const etaAt = startMs > 0 ? Timestamp.fromMillis(startMs + eta * 60 * 1000) : now;
         await db.collection('turnos').doc(conv.shiftId).update({
           lateArrivalConfirmed: true,

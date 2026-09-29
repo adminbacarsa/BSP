@@ -75,7 +75,7 @@ async function findPresentOutgoingAlignedToGapStart(db, params) {
         if (!eid || eid === 'VACANTE' || (absentEmpId && eid === absentEmpId))
             return false;
         const st = startMs(data);
-        if (st >= gapStartMs + 60_000)
+        if (st <= 0 || st >= gapStartMs - 60_000)
             return false;
         const en = endMs(data);
         if (!en)

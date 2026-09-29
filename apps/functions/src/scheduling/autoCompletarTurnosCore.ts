@@ -380,11 +380,25 @@ export async function runAutoCompletarTurnosPass(
       reliefIncomingClaimed.add(relievePresent.id);
       update(relievePresent.ref, { relievedOutgoingShiftId: docSnap.id });
       const relData = relievePresent.data();
-      const relCheckMs =
-        relData.realStartTime?.toMillis?.() ??
+      const plannedIn = shiftStartMs(relData) || endTimeMs;
+      const handoffMs = Math.max(plannedIn, endTimeMs);
+      if (nowMs < handoffMs) {
+        update(docSnap.ref, {
+          relievedBy: String(relData.employeeId || '').trim() || null,
+          relievedByName: String(relData.employeeName || 'relevo').trim(),
+          relieveScheduledAt: Timestamp.fromMillis(handoffMs),
+          relievedEarly: true,
+          autoRelevo: true,
+        });
+        actions.push(describe(docSnap.id, shift, 'WAIT', 'RELEVO_PROGRAMADO'));
+        continue;
+      }
+      const punchMs =
+        relData.checkInAt?.toMillis?.() ??
         relData.checkInTime?.toMillis?.() ??
         nowMs;
-      const closeMs = relCheckMs <= endTimeMs ? endTimeMs : relCheckMs;
+      const relCheckMs = Math.max(handoffMs, Math.min(punchMs, nowMs));
+      const closeMs = relCheckMs;
       const overCap = capAtMs > 0 && closeMs > capAtMs;
       close(docSnap, shift, closeMs, overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE');
       const outEmpId = String(shift.employeeId || '').trim();
