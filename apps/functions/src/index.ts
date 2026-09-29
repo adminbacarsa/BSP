@@ -4128,34 +4128,33 @@ export const geocodeAddressProxy = functions.https.onCall(async (data, _context)
 });
 
 /**
- * Libro de horas (H2a). No escribe hours_balances.
- * Debounce: cada cambio deja hours_ledger_dirty (objetivo + período, dueAt +2 min).
- * El cron de 10 min recalcula solo esos objetivos. El nocturno encola el mes por tandas.
+ * Libro de horas (H2f). No escribe hours_balances.
+ * Cada cambio marca hours_ledger_dirty/{empresa}_{objetivo}_{yyyy-mm} (dueAt +2 min).
+ * El cron de 5 min encola solo esos objetivos en el job H2c. El nocturno 03:40 sigue.
+ * Con hoursCoreEnabled en false no se marca ni se recalcula.
  */
-function ledgerSourceData(event: { data?: { after?: { exists: boolean; data: () => Record<string, unknown> }; before?: { exists: boolean; data: () => Record<string, unknown> } } }) {
-  const after = event.data?.after?.exists ? event.data.after.data() : undefined;
+async function touchLedger(
+  kind: 'turno' | 'planif' | 'ausencia' | 'objetivos',
+  event: { data?: { after?: { exists: boolean; data: () => Record<string, unknown> }; before?: { exists: boolean; data: () => Record<string, unknown> } }; params: { id: string } },
+) {
   const before = event.data?.before?.exists ? event.data.before.data() : undefined;
-  return after || before;
-}
-
-async function touchLedger(data: Record<string, unknown> | undefined, docId?: string) {
-  if (!data) return;
+  const after = event.data?.after?.exists ? event.data.after.data() : undefined;
   const { markLedgerDirty } = await import('./hoursLedger/rebuildHoursLedger');
-  const empresaId = String(data.empresaId || '').trim();
-  if (!empresaId) return;
-  let objectiveId = String(data.objectiveId || data.objetivoId || '').trim();
-  let periodKey: string | undefined;
-  const y = Number(data.year ?? data.año);
-  const m = Number(data.month ?? data.mes);
-  if (Number.isFinite(y) && Number.isFinite(m) && m >= 1 && m <= 12) {
-    periodKey = `${y}-${String(m).padStart(2, '0')}`;
+  const plan = await import('./hoursLedger/ledgerDirtyPlan');
+  const marks = kind === 'turno'
+    ? plan.dirtyMarksForTurno(before, after)
+    : kind === 'planif'
+      ? [...plan.dirtyMarksForPlanif(event.params.id, before), ...plan.dirtyMarksForPlanif(event.params.id, after)]
+      : kind === 'ausencia'
+        ? [...plan.dirtyMarksForAbsence(before), ...plan.dirtyMarksForAbsence(after)]
+        : plan.dirtyMarksForObjectives(before, after, plan.hotPeriodKeys());
+  const seen = new Set<string>();
+  for (const m of marks) {
+    const key = `${m.empresaId}|${m.objectiveId}|${m.periodKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    await markLedgerDirty({ ...m, reason: kind });
   }
-  const parsed = String(docId || '').match(/^(.*)_(\d{4})_(\d{1,2})$/);
-  if (parsed) {
-    if (!objectiveId) objectiveId = parsed[1];
-    if (!periodKey) periodKey = `${parsed[2]}-${String(Number(parsed[3])).padStart(2, '0')}`;
-  }
-  await markLedgerDirty({ empresaId, objectiveId, periodKey });
 }
 
 const ledgerTriggerOpts = {
@@ -4166,36 +4165,37 @@ const ledgerTriggerOpts = {
 
 export const onTurnoWriteHoursLedger = onDocumentWrittenV2(
   { document: 'turnos/{id}', ...ledgerTriggerOpts },
-  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+  async (event) => { await touchLedger('turno', event); },
 );
 export const onSlaWriteHoursLedger = onDocumentWrittenV2(
   { document: 'servicios_sla/{id}', ...ledgerTriggerOpts },
-  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+  async (event) => { await touchLedger('objetivos', event); },
 );
 export const onPlanifWriteHoursLedger = onDocumentWrittenV2(
   { document: 'planificacion_estados/{id}', ...ledgerTriggerOpts },
-  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+  async (event) => { await touchLedger('planif', event); },
 );
 export const onAusenciaWriteHoursLedger = onDocumentWrittenV2(
   { document: 'ausencias/{id}', ...ledgerTriggerOpts },
-  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+  async (event) => { await touchLedger('ausencia', event); },
 );
 export const onClientWriteHoursLedger = onDocumentWrittenV2(
   { document: 'clients/{id}', ...ledgerTriggerOpts },
-  async (event) => { await touchLedger(ledgerSourceData(event), event.params.id); },
+  async (event) => { await touchLedger('objetivos', event); },
 );
 
 export const scheduledHoursLedgerDirty = onScheduleV2(
   {
-    schedule: '*/10 * * * *',
+    schedule: '*/5 * * * *',
     timeZone: 'America/Argentina/Buenos_Aires',
     timeoutSeconds: 540,
     memory: '1GiB',
     region: 'us-central1',
   },
   async () => {
-    const { runDueLedgerDirty } = await import('./hoursLedger/rebuildHoursLedger');
+    const { runDueLedgerDirty, enqueueStaleEngineMonths } = await import('./hoursLedger/rebuildHoursLedger');
     await runDueLedgerDirty(12);
+    await enqueueStaleEngineMonths(6);
   },
 );
 
@@ -4229,7 +4229,7 @@ export const rebuildHoursLedger = functions
   const hoursBank = panel.permissions.HOURS_BANK || [];
   const canRead = panel.isSuperAdmin || hoursBank.includes('read');
   if (!canRead) throw new functions.https.HttpsError('permission-denied', 'Se requiere el módulo Banco de Horas (ver).');
-  // Guardar el libro sigue siendo solo SuperAdmin; `rebuild` del rol habilita el botón en la UI, no la escritura.
+  // Guardar el libro es solo SuperAdmin. El botón Recalcular de la pantalla también.
   if (!dryRun && !panel.isSuperAdmin) {
     throw new functions.https.HttpsError('permission-denied', 'Solo SuperAdmin puede guardar el libro.');
   }

@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { ChevronRight, Database, Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import * as XLSX from 'xlsx';
@@ -12,7 +12,6 @@ import {
   HOURS_LEDGER_LIC_CODES,
   HOURS_LEDGER_PLAN_OPTIONS,
   planHoursOf,
-  previewHoursLedgerMonth,
   hoursLedgerJobDocId,
   watchHoursLedgerJob,
   type HoursLedgerJobView,
@@ -76,12 +75,17 @@ function when(iso: string) {
   return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function clock(iso: string) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
 export default function BancoHorasPage() {
-  const { canReadModule, rolePermissions, isSuperAdmin, loading } = useAuth();
+  const { canReadModule, isSuperAdmin, loading } = useAuth();
   const { empresaId } = useEmpresa();
   const allowed = canReadModule('HOURS_BANK');
-  // `rebuild` habilita el botón; el callable solo guarda si el usuario es SuperAdmin.
-  const canRebuild = isSuperAdmin || (rolePermissions.HOURS_BANK || []).includes('rebuild');
+  const canRebuild = isSuperAdmin;
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
@@ -92,14 +96,14 @@ export default function BancoHorasPage() {
   const [source, setSource] = useState<'vacio' | 'libro' | 'preview'>('vacio');
   const [stack, setStack] = useState<Array<{ level: Level; id: string; label: string }>>([]);
   const [job, setJob] = useState<HoursLedgerJobView | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  const kicked = useRef('');
+  const [updatedAt, setUpdatedAt] = useState('');
+  const [pendingDirty, setPendingDirty] = useState(false);
+  const seenFinish = useRef('');
 
   const periodKey = `${year}-${String(month).padStart(2, '0')}`;
 
   const loadStored = useCallback(async () => {
     if (!empresaId) return;
-    setLoaded(false);
     setBusy(true);
     try {
       const book = await fetchHoursLedgerMonthly(empresaId, periodKey);
@@ -107,12 +111,12 @@ export default function BancoHorasPage() {
       setDays([]);
       setStack([]);
       setSource(book.source === 'libro' ? 'libro' : 'vacio');
+      setUpdatedAt(book.updatedAt || '');
     } catch (e) {
       console.error(e);
       toast.error('No se pudo leer el libro');
     } finally {
       setBusy(false);
-      setLoaded(true);
     }
   }, [empresaId, periodKey]);
 
@@ -120,7 +124,7 @@ export default function BancoHorasPage() {
 
   useEffect(() => {
     if (!empresaId) return;
-    return watchHoursLedgerJob(empresaId, periodKey, true, (raw) => {
+    return watchHoursLedgerJob(empresaId, periodKey, false, (raw) => {
       if (!raw) { setJob(null); return; }
       const total = Number(raw.total) || 0;
       const processed = Number(raw.processed) || 0;
@@ -139,47 +143,49 @@ export default function BancoHorasPage() {
   }, [empresaId, periodKey]);
 
   useEffect(() => {
-    if (!loaded || !empresaId || source !== 'vacio') return;
-    const key = `${empresaId}|${periodKey}`;
-    if (kicked.current === key) return;
-    kicked.current = key;
-    void preview();
-  }, [loaded, empresaId, periodKey, source]);
-
-  const preview = async () => {
     if (!empresaId) return;
+    const q = query(collection(db, 'hours_ledger_dirty'), where('empresaId', '==', empresaId));
+    return onSnapshot(q, (snap) => {
+      setPendingDirty(snap.docs.some((d) => String(d.data().periodKey || '') === periodKey));
+    }, () => setPendingDirty(false));
+  }, [empresaId, periodKey]);
+
+  useEffect(() => {
+    if (!job || job.dryRun || job.status !== 'DONE') return;
+    const mark = job.finishedAt || `${job.processed}`;
+    if (seenFinish.current === mark) return;
+    seenFinish.current = mark;
+    void loadStored();
+  }, [job, loadStored]);
+
+  const forceRebuild = async () => {
+    if (!empresaId || !isSuperAdmin) return;
     setBusy(true);
     try {
-      const book = await previewHoursLedgerMonth(empresaId, periodKey);
-      setMonthly(book.monthly);
-      setDays([]);
-      setStack([]);
-      setSource(book.source === 'preview' ? 'preview' : 'vacio');
-      toast.success('Vista previa (no se escribió en la base)');
+      const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 60000 });
+      await call({ empresaId, period: periodKey, dryRun: false, force: true });
+      toast.success('Recálculo encolado');
     } catch (e: any) {
       console.error(e);
-      toast.error(e?.message || 'La vista previa falló');
+      toast.error(e?.message || 'No se pudo encolar el recálculo');
     } finally {
       setBusy(false);
     }
   };
 
   const retryFailed = async () => {
-    if (!empresaId) return;
+    if (!empresaId || !isSuperAdmin) return;
     setBusy(true);
     try {
       const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 60000 });
       await call({
         empresaId,
         period: periodKey,
-        dryRun: true,
+        dryRun: false,
         retry: true,
-        jobId: hoursLedgerJobDocId(empresaId, periodKey, true),
+        jobId: hoursLedgerJobDocId(empresaId, periodKey, false),
       });
-      const book = await previewHoursLedgerMonth(empresaId, periodKey);
-      setMonthly(book.monthly);
-      setSource(book.source === 'preview' ? 'preview' : 'vacio');
-      toast.success('Se reintentaron las tandas fallidas');
+      toast.success('Reintento encolado');
     } catch (e: any) {
       toast.error(e?.message || 'No se pudo reintentar');
     } finally {
@@ -342,7 +348,11 @@ export default function BancoHorasPage() {
               Banco de Horas
             </h1>
             <p className="text-xs font-bold text-slate-500 mt-1">
-              {source === 'preview' ? 'Vista previa, sin escribir' : source === 'libro' ? 'Libro guardado' : 'Todavía no hay libro de este mes'}
+              {(pendingDirty || job?.status === 'QUEUED' || job?.status === 'RUNNING')
+                ? 'Actualizando…'
+                : updatedAt
+                  ? `Actualizado ${clock(updatedAt)}`
+                  : 'Todavía no hay libro de este mes'}
               {' · '}el plan oficial es el publicado
             </p>
           </div>
@@ -355,8 +365,8 @@ export default function BancoHorasPage() {
               {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {canRebuild && (
-              <button type="button" onClick={() => void preview()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
-                <RefreshCw size={14} className="inline mr-1" /> Recalcular (vista previa)
+              <button type="button" onClick={() => void forceRebuild()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
+                <RefreshCw size={14} className="inline mr-1" /> Recalcular
               </button>
             )}
             {!!job?.failed?.length && (
@@ -481,9 +491,7 @@ export default function BancoHorasPage() {
                   <tr><td colSpan={30} className="px-4 py-8 text-center text-slate-400 font-bold">
                     {empresa
                       ? 'El libro tiene totales de empresa, pero no hay detalle para este nivel.'
-                      : canRebuild
-                        ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.'
-                        : 'Sin filas. El libro de este mes todavía no fue calculado.'}
+                      : 'Sin filas. El libro se actualiza solo cuando cambian los datos.'}
                   </td></tr>
                 )}
               </tbody>
