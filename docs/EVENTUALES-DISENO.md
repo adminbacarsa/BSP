@@ -1,197 +1,245 @@
 # EVENTUALES — Diseño Fase A (análisis, sin código)
 
-> **Módulo:** RRHH-EVENTUALES · Gestión de empleados eventuales de seguridad (Córdoba, CCT 422/05 SUVICO, LCT arts. 99/100, Ley 24.013, Ley provincial 9236).
+> **Módulo:** RRHH-EVENTUALES · Vigiladores eventuales de seguridad (Córdoba, CCT 422/05 SUVICO, LCT arts. 99/100, Ley 24.013, Ley provincial 9236).
 > **Rama:** `cursor/eventuales-fase-a` (desde `origin/main`). Solo diseño — sin código, sin escrituras en prod.
 > **Coordina:** Claude Code · **Autor:** agente RRHH-EVENTUALES · **Fecha:** 29/09/2026.
-> **Ajuste Mauro (29/09):** el eventual es un vigilador más. Misma malla, mismo Centro de Control, mismo Banco de Horas, mismo Análisis, mismo motor de liquidación (`hours-core` / Reportes / `payrollApi`), y sirve tanto en servicios normales como en eventos (`coverageType: eventos` / TURA). **Única diferencia operativa:** solo puede tener turnos dentro de un contrato eventual vigente, más el alta/baja ARCA de ese contrato. No hay motor, bolsa ni rama de liquidación paralela.
+> **Decisiones vigentes:** bolsa única del grupo (§0); el eventual es un vigilador más dentro de cada empresa (misma malla, CC, Banco de Horas, Análisis y motor `hours-core`); dictamen del abogado aplicado en §0.5. No hay motor de liquidación paralelo.
 
 ---
 
-## 1. ARCA — PRIORIDAD 1: ¿existe web service de Simplificación Registral?
+## 0. Alcance (Mauro + dictamen del abogado)
 
-### 1.1 Conclusión (verificada contra fuentes oficiales)
+### 0.1 Bolsa única del grupo
 
-**NO existe hoy un web service público de ARCA para altas/bajas de Simplificación Registral** (registración de relaciones laborales). El certificado WSAA por empresa que ya tenemos **no sirve** para este trámite porque no hay ningún ID de servicio de negocio (WSN) que autorizar.
+Hay una **bolsa de eventuales compartida** por un grupo de empresas del panel. Hoy el grupo es **Bacar S.A. y Grupo Bacar**; la lista es configurable (`grupos_eventuales`). La persona existe **una vez**, identificada por CUIL, en esa bolsa. No se duplica la identidad entre empresas del grupo.
 
-Evidencia:
+### 0.2 Alta en la empresa que lo usa
 
-- **Catálogo oficial de Web Services SOAP de ARCA** ([afip.gob.ar/ws/documentacion/catalogo.asp](https://www.afip.gob.ar/ws/documentacion/catalogo.asp), consultado 29/09/2026): lista todos los WSN disponibles (padrón `ws_sr_constancia_inscripcion`, `ws_sr_padron_a4/a10/a13/a100`, WSBFE, WSCPE, WSCDC, `TRABAJO_F931`, agro, aduana, etc.). **No figura ningún servicio de Simplificación Registral / registración laboral.** El único WS del área Seguridad Social es `TRABAJO_F931`, que es **solo consulta** de DDJJ F.931 presentadas (remuneraciones declaradas), no alta/baja de relaciones.
-- **Página oficial del servicio** ([afip.gob.ar/simplificacionregistral/](https://www.afip.gob.ar/simplificacionregistral/) y [arca.gob.ar/simplificacionregistral/caracterisiticas-y-utilizacion/procedimiento.asp](https://www.arca.gob.ar/simplificacionregistral/caracterisiticas-y-utilizacion/procedimiento.asp)): las únicas vías son (a) el servicio interactivo **«Simplificación Registral - Empleadores»** con Clave Fiscal nivel 2+, (b) la app móvil **«Alta Ya»** (RG 5448/2023, solo altas), (c) F.885/A en dependencia. No se menciona ningún WS ni API.
-- **Guías paso a paso oficiales**: [carga masiva id=143](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=143), [alta masiva id=361](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=361), [modificación masiva id=498](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=498). Todas describen **carga de archivo dentro del servicio interactivo**, nunca un endpoint.
+Según qué empresa lo pide o le asigna turnos, se le da el **alta en esa empresa**: legajo de esa empresa (`empleados` con su `empresaId`) y alta ARCA con el **CUIT de esa empresa**. Puede estar de alta en las dos a la vez (dos legajos, un CUIL, una ficha de bolsa).
 
-Por lo tanto: no hay URL de homologación/producción, ni métodos, ni trámite de adhesión que investigar — **el servicio no existe** como WS. (Si ARCA lo publica a futuro, aparecerá en el catálogo de WSN; conviene re-chequear cada tanto.)
+### 0.3 Turnos y liquidación en paralelo
 
-### 1.2 Mejor alternativa automatizable: archivo de **Carga Masiva**
+Lleva turnos **en paralelo** en cada empresa. Cada empresa lo planifica, lo controla en el Centro de Control (fichada, ausencias, cobertura) y lo **liquida por separado** con el motor único: lo trabajado en una empresa se liquida en esa empresa (ciclo 26→25, bolsa 200, Banco de Horas y Análisis de esa empresa). Sirve en servicios normales y en eventos (`coverageType: eventos` / TURA).
 
-La vía oficial semi-automatizable es generar desde COSP el **archivo de importación** y subirlo en «Simplificación Registral - Empleadores» → menú **Relaciones Laborales → Carga masiva** (Clave Fiscal del empleador, no certificado). Dos modos (guía id=361): *alta masiva hasta 10 registros* (formulario) y *alta masiva sin límite* (archivo).
+### 0.4 Cruce obligatorio dentro del grupo
 
-- **Formato:** archivo de texto plano. El **diseño de registro exacto (posiciones del TXT) sigue pendiente**: no está publicado; Mauro lo baja del servicio con Clave Fiscal y se versiona en `docs/arca/` (Fase B). Hasta entonces el generador no se escribe.
-- **Alta inicial RG 5508 — solo 7 campos.** El resto (puesto, CCT 422/05, categoría, remuneración, ART, jornada) se completa en Simplificación Registral **antes de la primera liquidación**, con datos que COSP ya tendrá en el legajo y el contrato. Mapeo del alta:
+Al asignar un turno, el sistema mira los turnos de la misma persona en **todas** las empresas del grupo:
+
+- no superponer horarios → **bloqueo**;
+- descanso mínimo **12 h** entre el fin de una jornada y el inicio de la siguiente (art. 197 LCT), aunque cambie la empresa → **bloqueo**;
+- tope diario de jornada (el de COSP, 12:59 desde el inicio real) sumando las horas del día en el grupo → **bloqueo**.
+
+Además, alerta. El deber de fidelidad (art. 88 LCT) queda como obligación de la persona: el sistema solo ve empresas del grupo.
+
+### 0.5 Dictamen aplicado
+
+1. **Pluriempleo** entre prestadoras del grupo es legal (Ley 9236 no lo prohíbe). El cruce del §0.4 es obligatorio, no optativo.
+2. **Eventual solo con causa** de pico extraordinario o reemplazo (arts. 99-100 LCT, Ley 24.013). Encadenar contratos con la misma persona para cubrir lo recurrente (**golondrina**) no es defendible: pasa a indeterminado o a prestación discontinua con antigüedad acumulada (art. 90). El sistema exige causa por contrato, alerta encadenamiento y sugiere efectivizar. Golondrina es un **riesgo**, no un estado sano.
+3. **Firma.** El clic en la app es firma electrónica débil y **no** perfecciona el contrato. El contrato inicial es papel escaneado y adjunto, o firma digital certificada. La app muestra el contrato y registra **acuse de recibo**, con autenticación reforzada si se usa (OTP o biometría).
+4. **QR ante la autoridad.** Sí: nombre, CUIL/DNI, empresa prestadora, habilitación provincial (Ley 9236) con estado y vencimientos, apto psicofísico solo como Apto/No apto, categoría, vencimiento de credencial, contrato vigente. No: domicilio, contacto, remuneración, datos médicos, familiares (Ley 25.326).
+5. **Alta temprana siempre**, aunque el período sea de 2 h. Un turno de eventual solo puede **fichar** si el contrato de **esa** empresa está en `ALTA_ARCA` confirmada. Sin alta: bloqueo y alerta. Código de modalidad que indica el abogado: **14** (eventual, contratación directa) o **102** (empresas de servicios eventuales). **A confirmar** contra la tabla oficial ARCA/SICOSS vigente; no se hardcodea.
+6. **No hay sueldo fijo por evento.** Se liquida por escala CCT 422/05 en el motor único: valor hora de categoría, presentismo proporcional, nocturnidad 21–06, extras 50/100 %, sábado después de las 13, domingo, feriado, adicionales. Al **finalizar** el contrato, la liquidación de esa empresa suma SAC y vacaciones proporcionales. El modelo de contrato de Bacar que pacta remuneración bruta fija **hay que cambiarlo** (queda anotado para el abogado).
+
+---
+
+## 1. ARCA — no hay web service de altas/bajas
+
+### 1.1 Conclusión (fuentes oficiales, 29/09/2026)
+
+**No existe un web service público de ARCA para altas y bajas de Simplificación Registral.** El certificado WSAA por empresa no tiene un servicio de registración que autorizar.
+
+- Catálogo de WSN: [afip.gob.ar/ws/documentacion/catalogo.asp](https://www.afip.gob.ar/ws/documentacion/catalogo.asp). No figura Simplificación Registral. El único WS de Seguridad Social es `TRABAJO_F931`, y es **consulta** de DDJJ F.931 ya presentadas.
+- Vías oficiales: servicio interactivo «Simplificación Registral - Empleadores» ([afip.gob.ar/simplificacionregistral/](https://www.afip.gob.ar/simplificacionregistral/)), app «Alta Ya» (RG 5448/2023, solo altas), F.885/A. Guías de carga por archivo: [id=143](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=143), [id=361](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=361), [id=498](https://serviciosweb.afip.gob.ar/genericos/guiasPasoPaso/VerGuia.aspx?id=498).
+
+No hay URL de homologación ni de producción. Si ARCA publica un WSN, aparecerá en ese catálogo.
+
+### 1.2 Archivo de carga masiva (RG 5508)
+
+COSP genera el TXT; una persona lo sube con Clave Fiscal del **CUIT de la empresa que da el alta**. El diseño de registro (posiciones) **sigue pendiente**: Mauro lo baja del servicio y se versiona en `docs/arca/`. Sin eso no se escribe el generador.
+
+Alta inicial, 7 campos. El resto (puesto, CCT, categoría, remuneración de escala, ART, jornada) se informa en el servicio **antes de la primera liquidación** de esa empresa.
 
 | Campo RG 5508 | Origen COSP | Hoy | Quién lo completa |
 |---------------|-------------|-----|-------------------|
-| CUIL | `empleados.cuil` | Existe | Ya está en el legajo |
-| Domicilio de explotación de la actividad | `empresas.arcaDomicilioExplotacion` (el domicilio **declarado en ARCA**, no el del objetivo) | **Falta** | Una vez por empresa, Configuración → Empresas |
-| Fecha de inicio de la relación | `contratos_eventuales.fechaInicio` | Colección nueva | RRHH al crear el contrato |
-| Modalidad de contratación | código de la tabla ARCA, constante eventual (`empresas.arcaModalidadEventual`) | **Falta el código** (sale con el diseño de registro) | Una vez, cuando Mauro baje la tabla |
-| Marca trabajador agropecuario | constante `false` | No aplica a vigilancia | Nadie: el generador la manda en no |
-| Obra social / agente del seguro de salud | código RNOS en el legajo (`empleados.obraSocialRnos`); default de empresa si todos van a SUVICO | **Falta** (no hay campo RNOS) | RRHH en el legajo, o default de empresa |
-| Fecha de finalización | `contratos_eventuales.fechaFin` | Solo si `modalidad === PLAZO_FIJO` | RRHH en el contrato. En EVENTUAL el alta inicial **no** la envía |
+| CUIL | Ficha de bolsa / `empleados.cuil` | Existe | Ya está |
+| Domicilio de explotación de la actividad | `empresas.arcaDomicilioExplotacion` (el declarado en ARCA, no el del objetivo) | Falta | Una vez por empresa |
+| Fecha de inicio | `contratos_eventuales.fechaInicio` de **esa** empresa | Colección nueva | RRHH al crear el contrato |
+| Modalidad de contratación | `empresas.arcaModalidadEventual` | **A confirmar: 14 o 102** (§0.5.5) | No se carga hasta verificar la tabla |
+| Trabajador agropecuario | constante `false` | No aplica | El generador lo manda en no |
+| Obra social (RNOS) | `empleados.obraSocialRnos` o default de empresa (SUVICO) | Falta | RRHH en el legajo de esa empresa |
+| Fecha de finalización | `contratos_eventuales.fechaFin` | Solo si `modalidad === PLAZO_FIJO` | En EVENTUAL el alta inicial no la envía |
 
-- **Flujo propuesto:** botón «Generar archivo ARCA» agrupa contratos `FIRMADO` (altas, 7 campos) o `FINALIZADO` (bajas: CUIL + fecha + motivo). El TXT se marca `ALTA_ARCA` / `BAJA_ARCA` **recién cuando el operador confirma que ARCA aceptó el archivo** (nro. de transacción manual). Antes de la primera liquidación del ciclo, RRHH completa en el legajo/contrato los datos que la RG deja para después y los informa en el servicio (no van en este TXT inicial).
-- **Certificado AFIP — alcance (dato Mauro):** hoy existe **solo el certificado de BACAR S.A.** Sirve para la empresa `bacarsa` y para `pruebas_sa` (pruebas). **No** se usa en ninguna otra empresa del panel: cada una necesita su propio certificado en `empresa_afip_credentials/{empresaId}`, o delegar el web service a otro CUIT en ARCA. El fallback global de `loadAfipConfigForEmpresa` (`empresaAfipStore.ts:127`, secrets si no hay doc por empresa) **no** habilita `TRABAJO_F931` para el resto.
-- **Control `TRABAJO_F931`:** solo en empresas con certificado propio (hoy: `bacarsa` y `pruebas_sa` con el cert de Bacar, y el servicio autorizado en WSASS). Consulta, no alta. Sin certificado, el alta/baja se confirma a mano (el nro. de transacción del flujo de arriba) y no hay verificación automática.
+El alta del TXT sale de contratos `DOCUMENTADO` (papel o firma certificada adjunta). Pasa a `ALTA_ARCA` solo cuando el operador confirma que ARCA aceptó el archivo (nro. de transacción). La baja (CUIL + fecha + motivo) sale al `FINALIZADO`.
+
+**Certificado.** Mauro tiene solo el de BACAR S.A. Sirve para `bacarsa` y para `pruebas_sa`. No se usa en otra empresa: cada una carga el suyo en `empresa_afip_credentials/{empresaId}` o delega el WS a otro CUIT. El fallback global de `loadAfipConfigForEmpresa` (`apps/functions/src/afip/empresaAfipStore.ts:127`) no habilita `TRABAJO_F931` para el resto. Ese control (consulta, no alta) corre solo donde hay certificado propio; si no hay, la confirmación es manual.
 
 ---
 
 ## 2. Qué existe hoy reutilizable (archivo:línea)
 
-### 2.1 Legajos (`empleados`)
+### 2.1 Legajos
 
-- Interface front `Employee`: `apps/web2/src/services/employeeService.ts:4-23` (uid, dni, cuil, fileNumber, status, startDate, cycleStartDay, laborAgreement, portalInvite). CRUD + soft delete `INACTIVE`: `employeeService.ts:25-89`.
-- Defaults/payload legajo: `apps/web2/src/lib/employees/employeeLegajoDefaults.ts:1-28` (`initialLegajoForm` con `contractType`, `maxHours: 200`), `:37-63` (`mapFirestoreToLegajoForm`), `:65-97` (`buildEmployeeSavePayload`).
-- Backend Nest `IEmployee`: `apps/functions/src/common/interfaces/employee.interface.ts:11-47` — **ya existe `ContractType = 'FullTime' | 'PartTime' | 'Eventual'`**, pero el formulario vigente no lo expone (solo en `rrhh/index.tsx.bak:569`). Estados UI: `activo`/`inactivo` (`employeeLegajoDefaults.ts:30-34`); baja con `motivoBaja`/`fechaBaja`: `apps/web2/src/pages/admin/rrhh/index.tsx:1217-1222`.
-- Formularios: RRHH inline `rrhh/index.tsx:403`, guardado `:1064-1121`, pestaña LABORAL `:2848-2893`; componente reutilizable `EmployeeLegajoForm`: `apps/web2/src/components/admin/employees/EmployeeLegajoForm.tsx:34-45` y `:208-264`, montado en `apps/web2/src/pages/admin/empleados/index.tsx:589-601`.
+- `Employee`: `apps/web2/src/services/employeeService.ts:4-23`. Soft delete `INACTIVE`: `:25-89`. El legajo ya es por `empresaId`: la bolsa no reemplaza esta colección; la enlaza por CUIL.
+- Payload: `apps/web2/src/lib/employees/employeeLegajoDefaults.ts:1-28`, `:37-63`, `:65-97`.
+- `ContractType` incluye `'Eventual'` en `apps/functions/src/common/interfaces/employee.interface.ts:11-47`, pero el formulario vigente no lo expone. Estados UI `activo`/`inactivo`: `employeeLegajoDefaults.ts:30-34`. Baja: `apps/web2/src/pages/admin/rrhh/index.tsx:1217-1222`.
+- UI: RRHH `rrhh/index.tsx:1064-1121` y LABORAL `:2848-2893`; `EmployeeLegajoForm.tsx:34-45` y `:208-264`.
 
-### 2.2 Credencial QR + verificación pública
+### 2.2 Credencial QR
 
-- QR = URL `{origin}/credencial/?id={empDocId}`: `apps/mobile-guardia/src/lib/credencialVerification.ts:3-8`; render `apps/mobile-guardia/app/credencial.tsx:228-229`. Código rotativo anti-fraude 60 s (no viaja en el QR): `credencialVerification.ts:11-29`.
-- Doc público `credenciales_publicas/{empDocId}` (create/merge): `apps/web2/src/components/empleado/CredencialDigital.tsx:172-189`.
-- Página pública de verificación: `apps/web2/src/pages/credencial/index.tsx` (lee el doc en `:26-27`, UI «IDENTIDAD VERIFICADA» `:86-91`). Reglas: `firestore.rules:594-597` (`read: true`).
+- URL `{origin}/credencial/?id={empDocId}`: `apps/mobile-guardia/src/lib/credencialVerification.ts:3-8`; render `credencial.tsx:228-229`. El id es el legajo: con dos empresas hay dos credenciales, cada una con su prestadora.
+- Doc público `credenciales_publicas/{empDocId}`: `apps/web2/src/components/empleado/CredencialDigital.tsx:172-189`.
+- Página pública: `apps/web2/src/pages/credencial/index.tsx:26-27` y `:86-91`. Reglas `read: true`: `firestore.rules:594-597`. Hoy no muestra CUIL ni habilitación 9236: hay que ampliar el doc público con el recorte del §0.5.4.
 
-### 2.3 Eventos / coverageType `eventos` / TURA
+### 2.3 Eventos / TURA
 
-- Puesto Eventos (extras, fuera de SLA): `apps/web2/src/lib/servicios/eventosPosition.ts:3-39`; `includeInSlaTotals: false` en `apps/web2/src/services/slaService.ts:56-57`; UI alta `apps/web2/src/pages/admin/servicios/index.tsx:4905-4914`.
-- Colección `eventos` + estados: `apps/web2/src/services/eventoService.ts:19-74`, CRUD `:192-213`. Solicitudes/convocatorias: `apps/web2/src/services/solicitudEventoService.ts:15-101`; notif `apps/functions/src/notifications/onSolicitudEventoCreated.ts:15-74`.
-- Turno EV (`code: 'EV'`, `origin: 'EVENTO'`): asignación `apps/web2/src/services/eventoAssignService.ts:128-212`; espejo portal `packages/portal-core/src/eventos/eventoPortal.ts:189-259`; aceptación del guardia `respondEventoConvocatoria`: `apps/functions/src/eventos/eventoPortalCallables.ts:87-165` (export `index.ts:1634`).
-- Facturación TURA/EV: `apps/web2/src/lib/crm/executedBillableHoursByFranja.ts:22-33`; prefactura eventos `apps/web2/src/pages/admin/crm/index.tsx:2569-2631`; imputación a puesto Eventos `apps/web2/src/lib/refuerzo/refuerzoProforma.ts:9-14`.
+- Puesto eventos: `apps/web2/src/lib/servicios/eventosPosition.ts:3-39`; `slaService.ts:56-57`.
+- Turno `EV`: `apps/web2/src/services/eventoAssignService.ts:128-212`. Aceptación del guardia: `apps/functions/src/eventos/eventoPortalCallables.ts:87-165`.
+- Prefactura de eventos al cliente: `apps/web2/src/pages/admin/crm/index.tsx:2569-2631`. No se toca.
 
-### 2.4 Liquidación — mismo motor (el código `EV` no es la modalidad)
+### 2.4 Liquidación — mismo motor, por empresa
 
-- Motor único `calculateLiquidationHoursStats`: `packages/hours-core/src/motors/liquidation/reportesLiquidation.ts:831-837` (impl. desde `:840`); bolsa 200 `:1067-1071`. Espejo API: `apps/functions/src/payroll-api/calc.ts:1-18`, persona `calcPersona.ts:1-32`. Banco de Horas y Análisis leen ese mismo resultado (`sumPlantelLiquidationHours` / libro persona).
-- Un eventual con turnos de servicio (M/T/N/D12/N12, y también TURA/RFZ, que ya suman en `desgloseTura` `:1027`) **ya liquida hoy** como cualquier legajo. La modalidad no tiene rama propia.
-- **El único hueco** es el código de turno `EV` (evento), excluido del cómputo **persona** para todos los guardias, no solo eventuales: early-return `reportesLiquidation.ts:891` y el espejo legacy `packages/hours-core/src/motors/legacy/reportesLiquidationF0.ts:792`. Esas horas hoy se facturan al cliente (prefactura eventos, §2.3) y no se le pagan al vigilador por este motor.
-- **Cambio para que el evento liquide en el motor único** (sin segundo motor): sacar `'EV'` de esos dos early-return y acumular la duración real del turno (el evento tiene horario concreto, p.ej. 6 h) en el desglose que ya existe (`desgloseTura`, `:1027`), de modo que entre a bolsa 200, Banco de Horas, Análisis y `payrollApi` igual que un TURA. **No** sacar `EV` de `OBJECTIVE_NON_BILLABLE_CODES` (`:29`), ni de `publishedPlanHours.ts:12`, `positionCoverageUnits.ts:6` ni `deploymentRoles.ts:172,199`: ahí `EV` significa «no cubre ni vende SLA», y eso se mantiene. La prefactura de eventos al cliente no se toca.
-- **Remuneración bruta fija del contrato:** es un dato del contrato (§3.2), no una fórmula. El pago sale del motor. Si el fijo pactado difiere de las horas liquidadas, la diferencia se carga como ajuste del snapshot que ya existe (`ajustes_liquidacion`), sobre el mismo `cycleId` 26→25. No hay bolsa ni tope distintos.
+- `calculateLiquidationHoursStats`: `packages/hours-core/src/motors/liquidation/reportesLiquidation.ts:831-837`; bolsa 200 `:1067-1071`. API: `apps/functions/src/payroll-api/calc.ts:1-18`.
+- Los turnos M/T/N/D12/N12 y TURA/RFZ (`desgloseTura` `:1027`) ya liquidan en la empresa del turno. El hueco es el código `EV`, excluido en `:891` y en `reportesLiquidationF0.ts:792`. Para pagarlo en el mismo motor: sacar `'EV'` de esos dos returns y sumar la duración real a `desgloseTura`. `EV` sigue en `OBJECTIVE_NON_BILLABLE_CODES` (`:29`) para no vender SLA.
+- **No hay remuneración fija.** Se elimina el concepto del contrato. Presentismo, nocturnidad, extras, sábado/domingo/feriado y adicionales salen de este motor en la empresa del turno. SAC y vacaciones proporcionales **no los arma hoy el motor de horas**: al pasar el contrato a `FINALIZADO` se agregan como líneas del snapshot de liquidación de **esa** empresa (mismo `payroll` / `ajustes_liquidacion`), no como otro motor.
+- El modelo Bacar de «remuneración bruta fija a mes vencido» queda **obsleto** para el abogado: la plantilla debe remitir a la escala CCT 422/05.
 
-### 2.5 AFIP/WSAA por empresa
+### 2.5 AFIP por empresa
 
-- Login WSAA **genérico y parametrizable por service id**: `loginWsaaDirect(cert, key, service, production, empresaId?)` en `apps/functions/src/afip/wsaaDirect.ts:95-100` (TRA `<service>` `:27-40`). Uso actual con `ws_sr_constancia_inscripcion`: `lookupTaxpayer.ts:8-32`.
-- Credenciales por empresa `empresa_afip_credentials/{empresaId}`: `apps/functions/src/afip/empresaAfipStore.ts:6-18`; save `:41-87`; lectura runtime + fallback secrets `loadAfipConfigForEmpresa` `:108-128`; cache TA `:130-163`. Callables: `lookupClientByCuitHandler.ts:5-37`, `empresaAfipCredentialsHandler.ts:27-72` (exports `index.ts:3726-3731`). Reglas cerradas: `firestore.rules:424-427`.
-- → `TRABAJO_F931` reutiliza `loginWsaaDirect`, pero **solo** si la empresa tiene certificado propio. El de Bacar cubre `bacarsa` y `pruebas_sa`; el resto confirma el alta a mano (§1.2). No hay servicio de altas/bajas.
+- `loginWsaaDirect`: `apps/functions/src/afip/wsaaDirect.ts:95-100`. Credenciales: `empresaAfipStore.ts:6-18` y `:108-128`. Reglas cerradas: `firestore.rules:424-427`.
+- Alta/baja de relaciones: no hay WS (§1.1). `TRABAJO_F931` solo con certificado de esa empresa (§1.2).
 
 ### 2.6 Reglas e índices modelo
 
-- Helpers tenant: `tenantAdminRead()` `firestore.rules:160-162`; `tenantAdminCreate/Update/Delete` `:164-176`; `empleadoDocOwnedByAuth` `:220-226`. Colecciones modelo: `empleados` `:289-296`, `ausencias` `:298-303`, `solicitudes_evento` `:865-874` (patrón lectura propia del guardia).
-- Índices (`firestore.indexes.json`): turnos empresa+origin+startTime `:20-27`; ausencias employeeId+status+startDate `:71-78`; solicitudes_evento empresaId+empleadoId+servicioFecha `:490-496`.
+- `tenantAdminRead()` `firestore.rules:160-162`; create/update/delete `:164-176`. `empleados` `:289-296`.
+- La bolsa y el cruce por CUIL se leen por callable (Admin SDK), no desde el cliente de una sola empresa.
 
-### 2.7 Firma en app
+### 2.7 Firma
 
-- **No existe firma electrónica ni aceptación de términos persistida** (el bloque «FIRMAS» de RRHH es placeholder impreso: `rrhh/index.tsx:3435-3444`). Lo más cercano es el patrón callable de aceptación `respondEventoConvocatoria` (§2.3), que registra decisión + uid + timestamp server. La firma del contrato eventual se modela sobre ese patrón (§3.3).
+- No hay firma electrónica. El bloque «FIRMAS» de RRHH es un placeholder impreso: `rrhh/index.tsx:3435-3444`. El acuse de la app se apoya en el patrón de callable con uid y timestamp de servidor (`respondEventoConvocatoria`), y **no** cambia el estado legal del contrato.
 
 ---
 
-## 3. Diseño de datos y pantallas
+## 3. Datos, reglas y pantallas
 
-### 3.1 Legajo: campo `modalidad` + historial (misma nómina)
-
-En `empleados` (sin colección paralela de personas):
+### 3.1 Grupo y bolsa
 
 ```ts
-modalidad: 'INDETERMINADO' | 'EVENTUAL' | 'PLAZO_FIJO';          // default INDETERMINADO
-modalidadHistory: Array<{                                          // efectivización = nuevo item
-  modalidad: Modalidad; desde: string; hasta?: string;             // ISO date
-  motivo?: 'ALTA' | 'EFECTIVIZACION' | 'REINGRESO_EVENTUAL' | 'IMPORT_PLANILLA';
-  contratoId?: string; setByUid: string; setAt: Timestamp;
-}>;
-eventualPrimerIngreso?: string;     // planilla «1º INGRESO»
-eventualUltimaBaja?: string;        // planilla «BAJA EVENTUAL - última fecha»
-fechaEfectivizacion?: string;       // planilla «FECHA EFECTIVIZACIÓN»
-```
+grupos_eventuales/{grupoId}: {
+  nombre: string;                    // «Grupo Bacar»
+  empresaIds: string[];              // hoy las dos empresas Bacar; configurable
+  descansoMinHoras: 12;              // art. 197, no editable a la baja
+  alertaEncadenamiento: { maxContratos: number; ventanaMeses: number; patronSemanal: boolean };
+  status: 'ACTIVE' | 'INACTIVE';
+}
 
-El estado de la planilla se **deriva**, no se guarda: ACTIVO = modalidad EVENTUAL + contrato vigente; EFECTIVIZADO = modalidad INDETERMINADO con history eventual previo; BAJA = EVENTUAL + `status: inactivo`; GOLONDRINA = EVENTUAL + ≥2 contratos no contiguos. UI: exponer `modalidad` en `EmployeeLegajoForm` (LABORAL) y sincronizar `contractType: 'Eventual'` que ya existe en `IEmployee` (§2.1).
-
-### 3.2 Colección nueva `contratos_eventuales`
-
-Un doc por evento/período. Id sugerido `ce_{employeeId}_{yyyyMMdd}_{n}`.
-
-```ts
-{
-  empresaId, employeeId, cuil,                       // cuil desnormalizado p/ cruce entre empresas
-  clientId?, objectiveId?, eventoId?,                // vínculo al evento/objetivo
-  causa: string,                                     // texto art. 99 (exigencia extraordinaria)
-  fechaInicio: string, fechaFin: string,             // ISO; fin obligatorio (eventual)
-  horario: { inicio: 'HH:mm', fin: 'HH:mm' }, jornadaHoras: number,
-  remuneracion: { tipo: 'BRUTA_FIJA' | 'POR_HORA', monto: number, pagoMesVencido: true },
-  estado: 'BORRADOR' | 'FIRMADO' | 'ALTA_ARCA' | 'VIGENTE' | 'FINALIZADO' | 'BAJA_ARCA' | 'ANULADO',
-  estadoHistory: Array<{ estado, at, byUid }>,
-  documento: { storagePath, templateVersion, sha256 },          // PDF generado desde plantilla Bacar
-  firma?: { signedAt, uid, deviceId, appVersion, verificationCode },  // ver 3.3
-  arca?: { altaArchivoAt?, altaConfirmadaAt?, nroTransaccion?, bajaArchivoAt?, bajaConfirmadaAt? },
-  status: 'ACTIVE' | 'INACTIVE', createdAt, createdBy, updatedAt
+bolsa_eventuales/{cuil}: {
+  grupoId, cuil, dni, nombre,
+  primerIngreso?: string;
+  legajos: Array<{ empresaId, employeeId, status }>;   // uno por empresa donde tuvo alta
+  status: 'ACTIVE' | 'INACTIVE';
 }
 ```
 
-Plantilla: colección `contratos_templates/{empresaId}_{version}` con el texto Bacar (cláusulas: tareas seguridad y vigilancia, causa, jornada/horario, remuneración a mes vencido, puntualidad, fidelidad/reserva, obediencia, normas internas, domicilios, jurisdicción Córdoba) + placeholders `{{nombre}}, {{cuil}}, {{fechas}}, {{horario}}, {{remuneracion}}, {{causa}}, {{objetivo}}`.
+`alertaEncadenamiento` es parametrizable. Los umbrales iniciales los fija Mauro con el abogado antes de la Fase C (no se inventan acá).
 
-**Reglas Firestore** (patrón §2.6): `read` = `tenantAdminRead() || empleadoDocOwnedByAuth(resource.data.employeeId)`; `create/update/delete` = `tenantAdmin*`. La **firma y los cambios de estado van solo por callable** (Admin SDK), como `respondEventoConvocatoria`; regla que bloquea escribir `firma`/`estado` desde cliente. `contratos_templates`: solo tenant admin.
+### 3.2 Legajo de cada empresa
 
-**Índices:** `contratos_eventuales` (empresaId, employeeId, fechaInicio DESC) · (empresaId, estado, fechaInicio DESC) · (cuil, fechaInicio DESC) — este último **sin empresaId** para el cruce entre empresas (consulta collection-wide vía callable Admin SDK, no desde cliente).
+Sigue siendo `empleados` de esa empresa, más:
 
-**Única regla operativa — turno solo dentro de contrato vigente:** helper compartido `hasVigentContratoEventual(employeeId, date, hhmm)` (lib en `packages/` + espejo functions, patrón `simulableShift.ts`). Misma validación en los cuatro escritores: alta/edición de turno en Planificación, asignación desde el Centro de Control (cobertura y convocatorias), `eventoAssignService.ts:128-212` (eventos/TURA) y `applyCoverage`. Si `empleados.modalidad === 'EVENTUAL'` y no hay contrato FIRMADO/ALTA_ARCA/VIGENTE que contenga fecha y horario del turno → bloqueo con CTA «Crear contrato». Fuera de esa puerta, fichada, ausencias, cobertura, Banco de Horas, Análisis y liquidación no distinguen al eventual.
+```ts
+modalidad: 'INDETERMINADO' | 'EVENTUAL' | 'PLAZO_FIJO';
+bolsaCuil: string;                         // enlace a la bolsa
+obraSocialRnos?: string;
+modalidadHistory: Array<{ modalidad, desde, hasta?, motivo, contratoId?, setByUid, setAt }>;
+fechaEfectivizacion?: string;
+eventualUltimaBaja?: string;
+habilitacion9236?: { numero, estado, vencimiento };
+credencialVencimiento?: string;
+aptoPsicofisico?: 'APTO' | 'NO_APTO';      // solo eso sale al QR
+```
 
-**Cruce entre empresas por CUIL:** callable `checkCuilConflicts({ cuil, fecha })` (Admin SDK): turnos de la misma persona en 2+ empresas del panel con superposición horaria o descanso < 12 h → warning en Planificación/CC y novedad `PLURIEMPLEO_DETECTADO`.
+Efectivizar = el legajo de **esa** empresa pasa a `INDETERMINADO` con fecha. La ficha de bolsa permanece.
 
-### 3.3 Firma en la app y credencial QR
+### 3.3 Contrato (uno por período y por empresa)
 
-- **Firma:** pantalla `apps/mobile-guardia/app/contrato.tsx` (patrón `eventos.tsx`): muestra el PDF/texto → «Firmar y aceptar» → callable `signContratoEventual({ contratoId })` que valida uid↔employeeId + device registrado, escribe `firma` (timestamp server, deviceId, hash del documento) y pasa `BORRADOR→FIRMADO`. Banner en tab Hoy si hay contrato pendiente de firma (patrón `CoberturaConvocatoriasBanner`).
-- **Credencial QR:** extender `credenciales_publicas/{empDocId}` con bloque no sensible: `{ modalidad, contratoVigente?: { desde, hasta, estado }, habilitacion?: { ley9236Nro?, vencimiento? } }` (escrito por el server al cambiar estado del contrato). La página `/credencial/` (§2.2) muestra: empresa, vigilador (nombre/foto/legajo), **vigencia del contrato eventual**, habilitación provincial y estado — sin CUIL completo, ni remuneración, ni causa. Misma URL de QR existente: cero cambios en la app.
+```ts
+contratos_eventuales: {
+  empresaId, employeeId, bolsaCuil,
+  clientId?, objectiveId?, eventoId?,
+  causa: string,                         // obligatoria, art. 99; no se guarda vacía
+  fechaInicio, fechaFin,                 // fin obligatorio en COSP
+  horario: { inicio, fin }, jornadaHoras,
+  estado: 'BORRADOR' | 'DOCUMENTADO' | 'ACUSE_RECIBIDO' | 'ALTA_ARCA' | 'VIGENTE' | 'FINALIZADO' | 'BAJA_ARCA' | 'ANULADO',
+  documento: { storagePath, sha256, tipo: 'PAPEL_ESCANEADO' | 'FIRMA_DIGITAL_CERTIFICADA' },
+  acuse?: { at, uid, deviceId, metodo: 'SESION' | 'OTP' | 'BIOMETRIA', docSha256 },
+  arca?: { altaArchivoAt?, altaConfirmadaAt?, nroTransaccion?, bajaArchivoAt?, bajaConfirmadaAt?, modalidadCodigo? },
+  liquidacionFinal?: { cycleId, sac, vacacionesProporcionales, snapshotRef },
+  riesgoEncadenamiento?: boolean,
+  status: 'ACTIVE' | 'INACTIVE'
+}
+```
 
-### 3.4 Pantallas RRHH
+No hay campo de remuneración fija. La plantilla (`contratos_templates/{empresaId}_{version}`) usa el texto Bacar **sin** la cláusula de bruto fijo, remitiendo a la escala CCT, hasta que el abogado entregue el texto nuevo.
 
-1. **RRHH → tab «Eventuales»** (en `rrhh/index.tsx`, permiso RRHH): tabla con los 4 estados derivados (Activo 25 / Efectivizados 27 / Baja 22 / Golondrina 2), filtros, contratos por persona, botones «Nuevo contrato», «Efectivizar» (escribe `modalidadHistory` + modalidad INDETERMINADO), «Generar archivo ARCA» (altas/bajas pendientes).
-2. **Wizard alta de contrato:** empleado (o alta rápida de legajo) → evento/objetivo → fechas/horario/jornada → remuneración → causa art. 99 (texto editable con default) → previsualización PDF → guardar BORRADOR → enviar a firma (push al guardia).
-3. **Ficha contrato:** timeline de estados, PDF, datos de firma, sección ARCA (archivo generado, confirmación manual con nro. de transacción).
+**Firma y acuse.** `BORRADOR` → `DOCUMENTADO` solo con el archivo de papel o la constancia de firma certificada. La app muestra ese PDF y el callable `acusarReciboContrato` escribe el acuse (`ACUSE_RECIBIDO`). No existe transición por clic a «firmado».
+
+### 3.4 Reglas de turno
+
+1. **Asignar** (Planificación, Centro de Control, `eventoAssignService.ts:128-212`, `applyCoverage`): si el legajo es `EVENTUAL`, el turno tiene que caer dentro de un contrato de **esa** empresa en estado `DOCUMENTADO` o posterior, no anulado. Y tiene que pasar el cruce del §0.4 contra los turnos del mismo CUIL en el grupo. Si no hay legajo en esa empresa, la acción abre el alta de legajo desde la bolsa.
+2. **Fichar** (`requestCheckIn` / `registrarPresencia`): solo si el contrato que cubre el turno está en `ALTA_ARCA` o `VIGENTE` en esa empresa. Si no: bloqueo y alerta a RRHH (`ALTA_ARCA_PENDIENTE`). Vale también para un turno de 2 h.
+3. **Encadenamiento:** al guardar un contrato, si en la ventana configurada se supera la cantidad de contratos, de días, o hay patrón semanal fijo con el mismo CUIL en el grupo, el contrato queda marcado `riesgoEncadenamiento` y la UI sugiere efectivizar. No impide guardar (la decisión es de RRHH), pero entra al reporte de riesgo.
+4. **Cierre:** `FINALIZADO` dispara la liquidación final de esa empresa (SAC y vacaciones proporcionales, §2.4) y habilita el TXT de baja ARCA.
+
+Reglas Firestore: lectura del contrato = admin de esa empresa o el guardia dueño del legajo. Escritura de `estado`, `documento`, `acuse` y `arca` solo por callable. La bolsa: lectura admin de cualquier empresa del grupo; escritura solo callable.
+
+Índices: `contratos_eventuales` (empresaId, employeeId, fechaInicio) · (empresaId, estado, fechaInicio) · (bolsaCuil, fechaInicio). El cruce de turnos del grupo lo hace el callable, no una query cruzada desde el cliente.
+
+### 3.5 QR
+
+Se extiende `credenciales_publicas/{empDocId}` (un doc por legajo / empresa prestadora) con: nombre, CUIL, DNI, empresa, habilitación 9236 (número, estado, vencimiento), `aptoPsicofisico`, categoría, vencimiento de credencial, vigencia y estado del contrato. Nada más. La página `/credencial/` muestra ese recorte.
+
+### 3.6 Pantallas
+
+1. **RRHH → Eventuales**, con el grupo seleccionado: la bolsa (una fila por CUIL), columnas de alta por empresa, contratos, y el reporte de riesgo de encadenamiento. Acciones: dar de alta en una empresa del grupo, nuevo contrato (causa obligatoria), efectivizar, generar TXT ARCA de esa empresa.
+2. **Wizard de contrato:** causa → objetivo o evento → fechas y horario → previsualización sin monto fijo → adjuntar papel o constancia certificada.
+3. **App:** pantalla de contrato en solo lectura + «Acusé recibo» (OTP o biometría si está disponible). Banner en Hoy si hay acuse pendiente. La fichada responde el bloqueo del §3.4.2 con un texto claro.
+4. **Ficha:** timeline de estados, archivo adjunto, acuse, ARCA (transacción manual), liquidación final al cerrar.
 
 ---
 
-## 4. Migración de la planilla SP Eventuales (76 personas)
+## 4. Migración de la planilla (76 personas)
 
-Script `scripts/import-eventuales-planilla.mjs` — **dryRun por default**, `--apply` solo con OK de Mauro (patrón `fix-p1d-demo-fuera-operacion.mjs`):
+Script `scripts/import-eventuales-planilla.mjs`, dryRun por defecto, `--apply` solo con OK de Mauro.
 
-1. Input: XLSX/CSV con NOMBRE, LEGAJO, CUIL, 1º INGRESO, ESTADO ACTUAL, FECHA EFECTIVIZACIÓN, BAJA EVENTUAL.
-2. **Match por CUIL normalizado** (reutilizar `apps/functions/src/afip/normalizeCuit.ts`); fallback por `fileNumber`; sin match → crear legajo mínimo `status: inactivo` marcado `importSource: 'PLANILLA_SP'`. **Nunca duplicar**: si el CUIL existe, solo se agregan campos de modalidad.
-3. Mapeo: ACTIVO → `modalidad: EVENTUAL` + item history; EFECTIVIZADOS → `modalidad: INDETERMINADO` + history `EFECTIVIZACION` con fecha; BAJA → `EVENTUAL` + `status: inactivo` + `eventualUltimaBaja`; GOLONDRINA → `EVENTUAL` + flag en history.
-4. Contratos históricos: **un contrato sintético `FINALIZADO`** por período conocido (1º ingreso → efectivización/baja) con `documento: null` y `importSource` (la planilla no tiene el detalle por evento; no inventar). El reporte dryRun lista: matcheados, nuevos, ambiguos (CUIL inválido/duplicado) para revisión manual.
-
----
-
-## 5. Dudas legales para el abogado laboral / Dirección de Control (Ley 9236)
-
-1. **Pluriempleo:** ¿puede un vigilador habilitado prestar servicios simultáneos para dos prestadoras (empresas del panel) bajo Ley 9236 y CCT 422/05? ¿La habilitación provincial es por persona o por persona-empresa? ¿Qué descanso mínimo entre jornadas exige el CCT ante empleadores distintos?
-2. **Límites del CCT 422/05 al eventual:** ¿admite el CCT la modalidad eventual sin restricción? ¿Tope de renovaciones/duración antes de presumirse contrato indeterminado (arts. 90/99 LCT)? ¿El patrón «golondrina» (contratos repetidos con la misma persona) es defendible o exige plazo fijo/temporada?
-3. **Firma electrónica:** ¿es válida la firma «click-to-sign» en la app (registro de uid, dispositivo, timestamp, hash del PDF) como firma electrónica (art. 5 Ley 25.506) para un contrato laboral, o se exige firma ológrafa/digital certificada? ¿Conviene doble ejemplar impreso complementario (art. 100 LCT / requisitos Ley 24.013 art. 18)?
-4. **QR ante la autoridad:** ¿qué debe poder constatar la Dirección de Control / policía adicional al escanear la credencial (habilitación 9236, alta ARCA, cobertura ART, vigencia del contrato)? ¿Hay datos que **no** deban exponerse públicamente (CUIL completo, domicilio)?
-5. **Alta ARCA previa:** confirmación de que el eventual requiere alta en Simplificación Registral **antes** de iniciar cada período de prestación (alta temprana) aun para servicios de pocas horas, y qué código de modalidad de contratación corresponde (eventual vs. plazo fijo) según la tabla vigente.
-6. **Remuneración bruta fija por evento:** compatibilidad con los mínimos del CCT 422/05 por hora/categoría (que el fijo nunca quede debajo del mínimo proporcional).
+1. Match por CUIL normalizado (`apps/functions/src/afip/normalizeCuit.ts`) contra la bolsa y contra `empleados` de las empresas del grupo. No se duplica la ficha ni el legajo.
+2. Sin match: se crea la ficha de bolsa y el legajo en la empresa dueña de la planilla (Bacar), `importSource: 'PLANILLA_SP'`.
+3. ACTIVO → `modalidad: EVENTUAL`. EFECTIVIZADOS → `INDETERMINADO` + fecha. BAJA → `EVENTUAL` inactivo + `eventualUltimaBaja`. GOLONDRINA → igual que ACTIVO **más** `riesgoEncadenamiento` (no es una modalidad).
+4. Un contrato sintético `FINALIZADO` por el período que la planilla conoce (1º ingreso → efectivización o baja), sin documento y sin inventar eventos. El dryRun lista matcheados, nuevos y CUIL ambiguos.
 
 ---
 
-## 6. Plan por fases B–E
+## 5. Pendiente de verificar (el dictamen ya cerró el resto)
 
-| Fase | Alcance | Tamaño | Riesgos |
-|------|---------|--------|---------|
-| **B — Datos + migración** | `modalidad`+history en legajo, `contratos_eventuales` + plantilla, reglas e índices, script import planilla (dryRun). Campos que faltan para el alta RG 5508: `empresas.arcaDomicilioExplotacion`, `empresas.arcaModalidadEventual`, `empleados.obraSocialRnos` (o default de empresa). El TXT espera a que Mauro baje el diseño de registro. | **M** (~1 semana) | Match CUIL con datos sucios; el código de modalidad ARCA no se inventa. |
-| **C — UI RRHH + contrato PDF** | Tab Eventuales, wizard de contrato desde plantilla Bacar, PDF (reutilizar pipeline `liquidacionReportPdf`), efectivización, estados. | **M/L** (~1–2 semanas) | Plantilla legal debe cerrarla el abogado antes (dudas §5.3/5.6). |
-| **D — Firma en app + QR + la única puerta** | Pantalla contrato en `mobile-guardia`, callable `signContratoEventual`, bloque eventual en `credenciales_publicas` + página `/credencial/`, `hasVigentContratoEventual` en Planificación, Centro de Control, eventos/TURA y `applyCoverage`, cruce CUIL entre empresas. | **L** (~2 semanas) | Tocar Planificación/CC exige tests E2E emulador; validez legal de la firma condiciona el diseño; OTA app. |
-| **E — ARCA + EV dentro del motor único** | Generador del TXT de alta (7 campos RG 5508) y de bajas, con confirmación manual. `TRABAJO_F931` solo en empresas con certificado propio (`bacarsa`, `pruebas_sa`, o la que cargue el suyo); el resto, confirmación a mano. Incluir `EV` en el cómputo persona (§2.4: quitar el early-return en `reportesLiquidation.ts:891` y el espejo F0 `:792`, sumar al `desgloseTura`). Remuneración fija = campo del contrato; la diferencia, si la hay, va a `ajustes_liquidacion` del mismo ciclo. | **S/M** (~3–5 días) | Sin el diseño de registro no se escribe el generador. Incluir `EV` paga esas horas a **todos** los guardias con turno EV. El cert de Bacar no se reutiliza fuera de `bacarsa` / `pruebas_sa`. |
-
-**Qué se simplifica** respecto del diseño anterior: no hay anexo de liquidación, ni colección de horas, ni rama en `payrollApi`/Banco/Análisis. Esos módulos no se modifican salvo el early-return de `EV`.
-
-**Qué se agrega:** la puerta de contrato vigente en los cuatro escritores (Fase D) y el alta/baja ARCA por contrato (Fase E).
-
-**Riesgo transversal:** no existe API de ARCA → el paso alta/baja siempre tendrá un click humano con Clave Fiscal; el diseño lo asume (estados `ALTA_ARCA`/`BAJA_ARCA` se confirman manualmente). Re-chequear el catálogo WSN de ARCA por si publican un servicio de registración.
+1. Código de modalidad **14 o 102** contra la tabla ARCA/SICOSS vigente, y bajar el diseño de registro del TXT.
+2. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
+3. Texto nuevo del contrato sin remuneración fija (abogado).
+4. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.
 
 ---
 
-*Fase A cerrada: solo diseño. Fuentes ARCA consultadas el 29/09/2026 (catálogo WSN, guías 143/361/498, páginas simplificacionregistral). La búsqueda web asistida estuvo bloqueada en esta sesión; la verificación se hizo por fetch directo de páginas oficiales ARCA/AFIP + índice DuckDuckGo.*
+## 6. Fases B–E
+
+| Fase | Alcance | Tamaño | Riesgo |
+|------|---------|--------|--------|
+| **B — Bolsa, legajo, contrato, migración** | `grupos_eventuales`, `bolsa_eventuales`, `modalidad` y campos 9236/RNOS en el legajo, `contratos_eventuales` con causa obligatoria y sin monto fijo, reglas e índices, import dryRun. Campos ARCA de empresa (`arcaDomicilioExplotacion`; `arcaModalidadEventual` vacío hasta verificar 14/102). | **M** (~1 semana) | CUIL sucio en la planilla. No inventar el código de modalidad. |
+| **C — UI RRHH** | Tab de la bolsa del grupo, wizard con causa, alerta de encadenamiento y sugerencia de efectivizar, reporte de riesgo, PDF de contrato remitiendo al CCT (plantilla provisoria hasta el texto del abogado). | **M** (~1 semana) | El texto provisorio no se usa como contrato real hasta el ok del abogado. |
+| **D — Acuse, QR, puertas** | Adjunto papel o firma certificada. Acuse en la app (no firma). QR del §0.5.4. Bloqueo al asignar (§0.4 + contrato de esa empresa) en Planificación, CC, eventos y `applyCoverage`. Bloqueo de fichada sin `ALTA_ARCA` de esa empresa. | **L** (~2 semanas) | Tocar Planificación, CC y fichada exige E2E de emulador. OTP/biometría depende de lo que el dispositivo ya sepa hacer. |
+| **E — ARCA y cierre en el motor único** | TXT de alta (7 campos) y de baja, por CUIT de empresa, confirmación manual. `TRABAJO_F931` solo con certificado propio. Sacar `EV` del early-return del motor único (§2.4). Al `FINALIZADO`, líneas de SAC y vacaciones proporcionales en la liquidación de esa empresa. | **M** (~1 semana) | Sin el diseño de registro no hay generador. Incluir `EV` paga ese código a cualquier guardia, no solo a eventuales. El cert de Bacar no sale de `bacarsa` / `pruebas_sa`. |
+
+Se simplifica respecto del diseño anterior: no hay remuneración fija, no hay firma por clic y no hay liquidación paralela. Se agrega la bolsa del grupo, el cruce de 12 h / tope diario entre empresas, la causa con alerta de golondrina, el acuse separado del papel, y la fichada condicionada al alta ARCA de esa empresa.
+
+**Riesgo transversal:** el alta y la baja ARCA siguen teniendo un paso humano con Clave Fiscal. Re-chequear el catálogo de WSN por si aparece un servicio de registración.
+
+---
+
+*Fase A, solo diseño. Fuentes ARCA consultadas el 29/09/2026. Dictamen del abogado y alcance de bolsa aplicados en §0 el mismo día.*
