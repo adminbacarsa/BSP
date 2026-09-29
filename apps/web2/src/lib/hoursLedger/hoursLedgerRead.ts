@@ -2,7 +2,7 @@
  * Lectura del libro de horas (H2b). Fuente única para Servicios, CRM, Análisis,
  * Dashboard, Estado de cronogramas y prefactura. No escribe hours_balances.
  */
-import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
 import {
@@ -287,19 +287,40 @@ export function subscribeLedgerProgress(cb: (p: LedgerProgress | null) => void) 
   return () => progressListeners.delete(cb);
 }
 
+function jobStatusOf(raw: Record<string, unknown> | null | undefined): string {
+  return String(raw?.status || '').trim().toUpperCase();
+}
+
+function monthFromJobResult(periodKey: string, raw: Record<string, unknown> | null | undefined): HoursLedgerMonth | null {
+  const status = jobStatusOf(raw);
+  if (status !== 'DONE' && status !== 'ERROR') return null;
+  const monthlyRaw = (raw?.result as { monthly?: unknown[] } | null | undefined)?.monthly;
+  if (!Array.isArray(monthlyRaw) || monthlyRaw.length === 0) return null;
+  const monthly = monthlyRaw.map((row) => asMonthRow(row as Record<string, unknown>));
+  return fromMonthlyList(periodKey, monthly, monthly.length ? 'preview' : 'vacio');
+}
+
+/** Preview ya calculado (dry). No vuelve a encolar el job. */
+export async function readFinishedHoursLedgerPreview(empresaId: string, periodKey: string): Promise<HoursLedgerMonth | null> {
+  const snap = await getDoc(doc(db, 'hours_ledger_jobs', hoursLedgerJobDocId(empresaId, periodKey, true)));
+  if (!snap.exists()) return null;
+  return monthFromJobResult(periodKey, snap.data() as Record<string, unknown>);
+}
+
 function emitProgress(periodKey: string, raw: Record<string, unknown> | undefined) {
   if (!raw) {
     progressListeners.forEach((cb) => cb(null));
     return;
   }
+  const status = jobStatusOf(raw);
   const total = Number(raw.total) || 0;
   const processed = Number(raw.processed) || 0;
   const view: LedgerProgress = {
     periodKey,
-    status: String(raw.status || ''),
+    status,
     total,
     processed,
-    pct: total > 0 ? Math.round((100 * processed) / total) : (String(raw.status) === 'DONE' ? 100 : 0),
+    pct: status === 'DONE' ? 100 : (total > 0 ? Math.round((100 * processed) / total) : 0),
     currentObjectiveName: String(raw.currentObjectiveName || ''),
     error: String(raw.error || ''),
     createdBy: String(raw.createdBy || ''),
@@ -311,10 +332,17 @@ function emitProgress(periodKey: string, raw: Record<string, unknown> | undefine
 }
 
 export function watchHoursLedgerJob(empresaId: string, periodKey: string, dryRun: boolean, cb: (job: Record<string, unknown> | null) => void) {
-  return onSnapshot(doc(db, 'hours_ledger_jobs', hoursLedgerJobDocId(empresaId, periodKey, dryRun)), (snap) => {
-    const data = snap.exists() ? (snap.data() as Record<string, unknown>) : null;
+  const ref = doc(db, 'hours_ledger_jobs', hoursLedgerJobDocId(empresaId, periodKey, dryRun));
+  const deliver = (data: Record<string, unknown> | null) => {
     emitProgress(periodKey, data || undefined);
     cb(data);
+  };
+  return onSnapshot(ref, (snap) => {
+    deliver(snap.exists() ? (snap.data() as Record<string, unknown>) : null);
+  }, () => {
+    void getDoc(ref).then((snap) => {
+      deliver(snap.exists() ? (snap.data() as Record<string, unknown>) : null);
+    }).catch(() => { /* el llamador sigue con el último estado */ });
   });
 }
 
@@ -326,17 +354,17 @@ function waitHoursLedgerJob(empresaId: string, periodKey: string, dryRun: boolea
     }, 15 * 60 * 1000);
     const unsub = watchHoursLedgerJob(empresaId, periodKey, dryRun, (job) => {
       if (!job) return;
-      const status = String(job.status || '');
+      const status = jobStatusOf(job);
       if (status !== 'DONE' && status !== 'ERROR') return;
       clearTimeout(timer);
       unsub();
-      const result = job.result as { monthly?: HoursLedgerMonthRow[] } | null;
-      const monthly = (result?.monthly || []).map((r) => asMonthRow(r as unknown as Record<string, unknown>, r.id));
-      if (status === 'ERROR' && !monthly.length) {
+      const book = monthFromJobResult(periodKey, job);
+      if (status === 'ERROR' && !book) {
         reject(new Error(String(job.error || 'El recálculo falló')));
         return;
       }
-      resolve(fromMonthlyList(periodKey, monthly, monthly.length ? 'preview' : 'vacio'));
+      emitProgress(periodKey, undefined);
+      resolve(book || fromMonthlyList(periodKey, [], 'vacio'));
     });
   });
 }
@@ -362,7 +390,15 @@ export async function previewHoursLedgerMonth(empresaId: string, periodKey: stri
  */
 export async function loadHoursLedgerOrPreview(empresaId: string, periodKey: string): Promise<HoursLedgerMonth> {
   const stored = await fetchHoursLedgerMonthly(empresaId, periodKey);
-  if (stored.source === 'libro' && stored.empresa) return stored;
+  if (stored.source === 'libro' && stored.empresa) {
+    emitProgress(periodKey, undefined);
+    return stored;
+  }
+  const finished = await readFinishedHoursLedgerPreview(empresaId, periodKey);
+  if (finished) {
+    emitProgress(periodKey, undefined);
+    return finished;
+  }
   return previewHoursLedgerMonth(empresaId, periodKey);
 }
 
