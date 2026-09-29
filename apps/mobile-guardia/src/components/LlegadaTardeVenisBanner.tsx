@@ -1,15 +1,19 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { formatTimeAr } from '@cosp/portal-core';
+import type { ObjectiveLocation, Shift } from '@cosp/portal-types';
 import { CommandButton } from './ui/CommandButton';
 import { radius, spacing } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import type { ConvocatoriaCobertura } from '../lib/convocatoriasCobertura';
+import { llegadaTardePlaceLabel } from '../lib/llegadaTardePlace';
 
 export const LLEGADA_TARDE_ETA_OPTIONS = [15, 30, 60] as const;
 export type LlegadaTardeEtaMinutes = (typeof LLEGADA_TARDE_ETA_OPTIONS)[number];
 
 type Props = {
   convocatorias: ConvocatoriaCobertura[];
+  shifts?: Shift[];
+  objectivesMap?: Record<string, ObjectiveLocation>;
   busyId?: string | null;
   onSiVoy: (c: ConvocatoriaCobertura, etaMinutes: LlegadaTardeEtaMinutes) => void;
   onNoVoy: (c: ConvocatoriaCobertura) => void;
@@ -19,7 +23,14 @@ type Props = {
  * Tarjeta «¿Venís?» para convocatoria LLEGADA_TARDE.
  * Sí voy → elegir demora 15/30/60; No voy → ausente.
  */
-export function LlegadaTardeVenisBanner({ convocatorias, busyId, onSiVoy, onNoVoy }: Props) {
+export function LlegadaTardeVenisBanner({
+  convocatorias,
+  shifts = [],
+  objectivesMap = {},
+  busyId,
+  onSiVoy,
+  onNoVoy,
+}: Props) {
   const { palette } = useTheme();
   if (convocatorias.length === 0) return null;
 
@@ -42,7 +53,7 @@ export function LlegadaTardeVenisBanner({ convocatorias, busyId, onSiVoy, onNoVo
 
       {convocatorias.map((c) => {
         const busy = busyId === c.id;
-        const obj = (c.objectiveName || c.clientName || 'tu puesto').trim();
+        const obj = llegadaTardePlaceLabel(c, shifts, objectivesMap);
         const start = formatTimeAr(c.startTime);
 
         return (
