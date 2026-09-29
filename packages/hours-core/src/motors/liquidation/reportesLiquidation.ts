@@ -864,6 +864,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let desgloseTura = 0;
     const warnings: string[] = [];
     const exceeds12hDaysWarned = new Set<string>();
+    const parts: LiquidationShiftPart[] = [];
 
     sortedDocs.forEach(d => {
         try {
@@ -1020,18 +1021,31 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                 const isCobertura = origin === 'OPERATIONS_COVERAGE'
                     && d.coverageHoursOnSource !== true
                     && !['EXTEND', 'ADVANCE'].includes(String(d.coverageType || '').toUpperCase());
+                let partExt = 0;
+                let partAdv = 0;
                 if (isFT) desgloseFt += worked;
                 else if (codeUp === 'TURA' || codeUp === 'RFZ') desgloseTura += worked;
                 else if (isCobertura) desgloseCobertura += worked;
                 else if (d.isEarlyStart === true) {
                     desglosePlan += planPart;
                     desgloseAdv += extraPart;
+                    partAdv = extraPart;
                 } else if (d.isExtended === true || d.isRetention === true || String(d.coverageSegmentRole || '').toUpperCase() === 'EXTENSION') {
                     desglosePlan += planPart;
                     desgloseExt += extraPart;
+                    partExt = extraPart;
                 } else {
                     desglosePlan += worked;
                 }
+                parts.push({
+                    employeeId: String(d.employeeId || ''),
+                    objectiveId: String(d.objectiveId || '').trim(),
+                    date: dateKey || (start ? arYmd(start) : ''),
+                    worked,
+                    ft: isFT ? worked : 0,
+                    ext: partExt,
+                    adv: partAdv,
+                });
             }
             if (worked > 0) {
                 if (isDespliegue && !isFT) horasRealesDespliegue += worked;
@@ -1089,5 +1103,16 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         /** Decisión Mauro H1 #2: días con jornadas independientes que suman >12 h (revisar, no se recorta el pago). */
         warnings,
         requiresReview: warnings.length > 0,
+        parts,
     };
+};
+
+export type LiquidationShiftPart = {
+    employeeId: string;
+    objectiveId: string;
+    date: string;
+    worked: number;
+    ft: number;
+    ext: number;
+    adv: number;
 };

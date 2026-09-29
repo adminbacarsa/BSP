@@ -26,7 +26,7 @@ import {
   empresaCollectionQuery, buildPlanificacionPublishStatusMap,
 } from '@/lib/multiempresa';
 import { isSlaContractActive } from '@/lib/slaPlanningMatch';
-import { patchSlaHoursOnBalances } from '@/lib/hoursBalance';
+import { loadHoursLedgerOrPreview, officialHoursFromEmpresa, periodKeyOf, type HoursLedgerMonth } from '@/lib/hoursLedger/hoursLedgerRead';
 import {
   analyzeShiftComposition,
   calculateMonthlyBreakdown,
@@ -1453,12 +1453,6 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       }
       addToast('Guardado correctamente', 'success');
       setView('list');
-      if (empresaId && dataToSave.objectiveId) {
-        void patchSlaHoursOnBalances({
-          empresaId,
-          sla: { ...dataToSave, id: isEditing && form.id ? form.id : dataToSave.id } as any,
-        }).catch((err) => console.warn('[servicios] hours_balances', err));
-      }
       const nextEncargadoId = String(dataToSave.encargadoEmployeeId || '').trim();
       if (dataToSave.objectiveId && (prevEncargadoId || nextEncargadoId || encPosToSave)) {
         void syncEncargadoLegajoDotacion({
@@ -1692,6 +1686,22 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
   const [kpiMonth, setKpiMonth] = useState(new Date().getMonth());
   const [kpiYear, setKpiYear]   = useState(new Date().getFullYear());
+  const [ledgerMonth, setLedgerMonth] = useState<HoursLedgerMonth | null>(null);
+  const [ledgerBusy, setLedgerBusy] = useState(false);
+  const [ledgerFailed, setLedgerFailed] = useState(false);
+
+  useEffect(() => {
+    if (!empresaId) return;
+    let cancelled = false;
+    const periodKey = periodKeyOf(kpiYear, kpiMonth + 1);
+    setLedgerBusy(true);
+    setLedgerFailed(false);
+    void loadHoursLedgerOrPreview(empresaId, periodKey)
+      .then((book) => { if (!cancelled) setLedgerMonth(book); })
+      .catch(() => { if (!cancelled) { setLedgerFailed(true); setLedgerMonth(null); } })
+      .finally(() => { if (!cancelled) setLedgerBusy(false); });
+    return () => { cancelled = true; };
+  }, [empresaId, kpiYear, kpiMonth]);
 
   /** Mes visible en listado (kpi) ∩ vigencia del contrato — para resumen de días excluidos. */
   const excludedDisplayRange = useMemo(() => {
@@ -1871,7 +1881,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     || srvFeatureFilter !== 'all'
     || srvClientFilter !== 'all',
   );
-  const kpiDisplay = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
+  const kpiDisplayBase = kpiMetricsActive ? kpiCurrentFiltered : kpiCurrent;
+  const ledgerHours = officialHoursFromEmpresa(ledgerMonth?.empresa);
+  const kpiDisplay = {
+    ...kpiDisplayBase,
+    hours: ledgerBusy ? kpiDisplayBase.hours : (ledgerFailed ? kpiDisplayBase.hours : ledgerHours.sla),
+  };
+  const kpiHoursHint = ledgerBusy
+    ? 'Calculando…'
+    : ledgerFailed
+      ? 'Anterior (el libro no respondió; este número no es el oficial)'
+      : ledgerMonth?.source === 'preview'
+        ? 'Libro (vista previa, sin guardar)'
+        : 'Libro de horas';
 
   const kpiClosedCurrent = useMemo(
     () =>
@@ -2096,13 +2118,14 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               <div className="flex items-center gap-1.5">
                 <button onClick={kpiPrevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">‹</button>
                 <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiDisplay.label}</span>
+                <span className="text-[9px] font-bold text-slate-400 normal-case">{kpiHoursHint}</span>
                 <button onClick={kpiNextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">›</button>
               </div>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {([
                 { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiDisplay.active, unit: '' },
-                { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
+                { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: ledgerBusy ? '…' : kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
                 { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiDisplay.positions, unit: '' },
                 { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiDisplay.guards, unit: '' },
               ] as const).map(({ icon: Icon, color, label, value, unit }) => (
@@ -2611,6 +2634,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <div className="flex items-center gap-1.5">
                   <button onClick={kpiPrevMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">‹</button>
                   <span className="text-[11px] font-black text-slate-700 dark:text-white uppercase min-w-[100px] text-center tracking-wide">{kpiDisplay.label}</span>
+                <span className="text-[9px] font-bold text-slate-400 normal-case">{kpiHoursHint}</span>
                   <button onClick={kpiNextMonth} className="w-7 h-7 flex items-center justify-center rounded-lg border border-slate-200 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-400 font-black text-sm transition-colors">›</button>
                 </div>
               </div>
@@ -2619,7 +2643,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                 {([
                   { icon: Shield, color: '#4f46e5', label: 'Servicios activos', value: kpiDisplay.active, unit: '' },
-                  { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
+                  { icon: Clock,  color: '#059669', label: 'Horas del mes',      value: ledgerBusy ? '…' : kpiDisplay.hours.toLocaleString('es-AR'), unit: 'hs' },
                   { icon: Layers, color: '#d97706', label: 'Puestos',             value: kpiDisplay.positions, unit: '' },
                   { icon: Users,  color: '#dc2626', label: 'Guardias',            value: kpiDisplay.guards, unit: '' },
                 ] as const).map(({ icon: Icon, color, label, value, unit }) => (

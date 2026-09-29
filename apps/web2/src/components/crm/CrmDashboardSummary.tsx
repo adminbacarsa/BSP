@@ -52,6 +52,7 @@ type Props = {
   clientListSort: ClientListSort;
   onClientListFilterChange: (v: ClientListFilter) => void;
   onClientListSortChange: (v: ClientListSort) => void;
+  extraControls?: React.ReactNode;
 };
 
 function pct(num: number, den: number): number {
@@ -105,6 +106,7 @@ export default function CrmDashboardSummary({
   clientListSort,
   onClientListFilterChange,
   onClientListSortChange,
+  extraControls,
 }: Props) {
   const burn = pct(totalExecuted, totalSold);
   const planVsSla = pct(totalPlanned, totalSold);
@@ -182,6 +184,8 @@ export default function CrmDashboardSummary({
                 <option key={m} value={idx}>{m}</option>
               ))}
             </select>
+          )}
+          {extraControls}
           )}
           {rangeMode === 'quarter' && (
             <select aria-label="Trimestre del período" className={selectCls} value={crmCalendarQuarter(rangeMonth)} onChange={(e) => onRangeMonthChange(Number(e.target.value) * 3)}>

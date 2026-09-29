@@ -786,6 +786,14 @@ service cloud.firestore {
       allow read: if tenantAdminRead();
       allow write: if false;
     }
+    match /hours_ledger_jobs/{jobId} {
+      allow read: if tenantAdminRead();
+      allow write: if false;
+      match /slices/{sliceId} {
+        allow read: if tenantAdminRead();
+        allow write: if false;
+      }
+    }
 
     match /grupos_objetivos/{grupoId} {
       allow read:   if tenantAdminRead();

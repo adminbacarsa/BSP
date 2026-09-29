@@ -6,6 +6,13 @@ import {
   type CronogramaEstado,
   type CronogramaOverviewRow,
 } from '@/lib/planificacion/planningCronogramaOverview';
+import {
+  HOURS_LEDGER_PLAN_OPTIONS,
+  loadHoursLedgerOrPreview,
+  periodKeyOf,
+  planHoursOf,
+  type HoursLedgerPlanMode,
+} from '@/lib/hoursLedger/hoursLedgerRead';
 
 function formatActivityDate(d: Date | null): string {
   if (!d) return '—';
@@ -72,6 +79,7 @@ export default function PlanningCronogramasOverviewModal({
   const [filterEstado, setFilterEstado] = useState<CronogramaEstado | 'ALL'>('ALL');
   const [filterOpenVacancies, setFilterOpenVacancies] = useState(false);
   const [search, setSearch] = useState('');
+  const [planMode, setPlanMode] = useState<HoursLedgerPlanMode>('published');
 
   const monthLabel = useMemo(
     () => new Date(year, month - 1, 1).toLocaleDateString('es-AR', { month: 'long', year: 'numeric' }),
@@ -90,7 +98,21 @@ export default function PlanningCronogramasOverviewModal({
         month,
         clients,
       });
-      setRows(data);
+      try {
+        const book = await loadHoursLedgerOrPreview(empresaId, periodKeyOf(year, month));
+        const byOid = new Map(book.objectives.map((o) => [o.objectiveId, o]));
+        setRows(data.map((r) => {
+          const led = byOid.get(r.objectiveId);
+          if (!led) return r;
+          return {
+            ...r,
+            plannedHours: led.planPublished || 0,
+            planDraftHours: led.planDraft || 0,
+          };
+        }));
+      } catch {
+        setRows(data);
+      }
     } catch (e) {
       console.error('[plan] cronograma overview', e);
       setRows([]);
@@ -132,12 +154,12 @@ export default function PlanningCronogramasOverviewModal({
   }, [rows, filterEstado, filterOpenVacancies, search]);
 
   const totalPlannedHours = useMemo(
-    () => filtered.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
-    [filtered],
+    () => filtered.reduce((acc, r) => acc + planHoursOf(planMode, { planPublished: r.plannedHours, planDraft: r.planDraftHours }), 0),
+    [filtered, planMode],
   );
   const portfolioPlannedHours = useMemo(
-    () => rows.reduce((acc, r) => acc + (r.plannedHours || 0), 0),
-    [rows],
+    () => rows.reduce((acc, r) => acc + planHoursOf(planMode, { planPublished: r.plannedHours, planDraft: r.planDraftHours }), 0),
+    [rows, planMode],
   );
 
   const grouped = useMemo(() => groupByClient(filtered), [filtered]);
@@ -212,6 +234,13 @@ export default function PlanningCronogramasOverviewModal({
               >
                 Todos ({rows.length})
               </button>
+              <select
+                value={planMode}
+                onChange={(e) => setPlanMode(e.target.value as HoursLedgerPlanMode)}
+                className="text-[9px] font-black px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white"
+              >
+                {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
               {(Object.keys(CRONOGRAMA_ESTADO_LABEL) as CronogramaEstado[]).map((est) => (
                 <button
                   key={est}
@@ -354,7 +383,7 @@ export default function PlanningCronogramasOverviewModal({
                           </td>
                           <td className="px-4 py-2.5 border-r border-slate-100 text-right font-black tabular-nums text-indigo-700">
                             {r.plannedHours > 0 ? (
-                              <span>{r.plannedHours.toLocaleString('es-AR')} hs</span>
+                              <span>{planHoursOf(planMode, { planPublished: r.plannedHours, planDraft: r.planDraftHours }).toLocaleString('es-AR')} hs</span>
                             ) : (
                               <span className="text-slate-300">—</span>
                             )}

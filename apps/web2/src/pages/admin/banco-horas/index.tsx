@@ -1,5 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { httpsCallable } from 'firebase/functions';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { ChevronRight, Database, Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
@@ -8,30 +7,22 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
+import {
+  fetchHoursLedgerMonthly,
+  HOURS_LEDGER_PLAN_OPTIONS,
+  planHoursOf,
+  previewHoursLedgerMonth,
+  hoursLedgerJobDocId,
+  watchHoursLedgerJob,
+  type HoursLedgerJobView,
+  type HoursLedgerMonthRow,
+  type HoursLedgerPlanMode,
+} from '@/lib/hoursLedger/hoursLedgerRead';
+import { httpsCallable } from 'firebase/functions';
 
-type PlanMode = 'published' | 'draft' | 'both';
+type PlanMode = HoursLedgerPlanMode;
 type Level = 'cliente' | 'objetivo' | 'puesto' | 'dia';
-
-type MonthRow = {
-  id?: string;
-  level: 'empresa' | 'cliente' | 'objetivo';
-  clientId: string;
-  clientName: string;
-  objectiveId: string;
-  objectiveName: string;
-  slaActive: number;
-  slaInactive: number;
-  slaClosed: number;
-  planPublished: number;
-  planDraft: number;
-  worked: number;
-  covered: number;
-  uncovered: number;
-  ft: number;
-  ext: number;
-  adv: number;
-  novedadPaga: number;
-};
+type MonthRow = HoursLedgerMonthRow;
 
 type DayRow = MonthRow & {
   date: string;
@@ -43,9 +34,38 @@ type DayRow = MonthRow & {
 const nf = (n: number) => Math.round(Number(n) || 0).toLocaleString('es-AR');
 
 function planOf(mode: PlanMode, r: { planPublished: number; planDraft: number }) {
-  if (mode === 'draft') return r.planDraft || 0;
-  if (mode === 'both') return (r.planPublished || 0) + (r.planDraft || 0);
-  return r.planPublished || 0;
+  return planHoursOf(mode, r);
+}
+
+const SUM_KEYS = ['slaActive', 'slaInactive', 'slaClosed', 'slaWithoutPlan', 'planPublished', 'planDraft', 'worked', 'workedOutside', 'covered', 'uncovered', 'ft', 'ext', 'adv', 'novedadPaga'] as const;
+
+function groupClients(objectives: MonthRow[]): MonthRow[] {
+  const map = new Map<string, MonthRow>();
+  for (const o of objectives) {
+    const id = o.clientId || '_sin_cliente';
+    const prev = map.get(id);
+    if (!prev) {
+      map.set(id, {
+        ...o,
+        id,
+        level: 'cliente',
+        clientId: o.clientId,
+        clientName: o.clientName || 'Sin cliente',
+        objectiveId: '',
+        objectiveName: '',
+      });
+      continue;
+    }
+    for (const k of SUM_KEYS) prev[k] = (Number(prev[k]) || 0) + (Number(o[k]) || 0);
+  }
+  return [...map.values()];
+}
+
+function when(iso: string) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('es-AR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 export default function BancoHorasPage() {
@@ -63,64 +83,112 @@ export default function BancoHorasPage() {
   const [busy, setBusy] = useState(false);
   const [source, setSource] = useState<'vacio' | 'libro' | 'preview'>('vacio');
   const [stack, setStack] = useState<Array<{ level: Level; id: string; label: string }>>([]);
+  const [job, setJob] = useState<HoursLedgerJobView | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const kicked = useRef('');
 
   const periodKey = `${year}-${String(month).padStart(2, '0')}`;
 
   const loadStored = useCallback(async () => {
     if (!empresaId) return;
+    setLoaded(false);
     setBusy(true);
     try {
-      const snap = await getDocs(query(
-        collection(db, 'hours_ledger_monthly'),
-        where('empresaId', '==', empresaId),
-        where('periodKey', '==', periodKey),
-      ));
-      const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() } as MonthRow));
-      setMonthly(rows);
+      const book = await fetchHoursLedgerMonthly(empresaId, periodKey);
+      setMonthly(book.monthly);
       setDays([]);
       setStack([]);
-      setSource(rows.length ? 'libro' : 'vacio');
+      setSource(book.source === 'libro' ? 'libro' : 'vacio');
     } catch (e) {
       console.error(e);
       toast.error('No se pudo leer el libro');
     } finally {
       setBusy(false);
+      setLoaded(true);
     }
   }, [empresaId, periodKey]);
 
   useEffect(() => { void loadStored(); }, [loadStored]);
 
+  useEffect(() => {
+    if (!empresaId) return;
+    return watchHoursLedgerJob(empresaId, periodKey, true, (raw) => {
+      if (!raw) { setJob(null); return; }
+      const total = Number(raw.total) || 0;
+      const processed = Number(raw.processed) || 0;
+      setJob({
+        status: String(raw.status || ''),
+        total,
+        processed,
+        currentObjectiveName: String(raw.currentObjectiveName || ''),
+        error: String(raw.error || ''),
+        createdBy: String(raw.createdBy || ''),
+        finishedAt: String(raw.finishedAt || ''),
+        dryRun: raw.dryRun !== false,
+        failed: Array.isArray(raw.failed) ? raw.failed as HoursLedgerJobView['failed'] : [],
+      });
+    });
+  }, [empresaId, periodKey]);
+
+  useEffect(() => {
+    if (!loaded || !empresaId || source !== 'vacio') return;
+    const key = `${empresaId}|${periodKey}`;
+    if (kicked.current === key) return;
+    kicked.current = key;
+    void preview();
+  }, [loaded, empresaId, periodKey, source]);
+
   const preview = async () => {
     if (!empresaId) return;
     setBusy(true);
-    const toastId = toast.loading('Calculando el mes… puede tardar unos minutos.');
     try {
-      const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 560_000 });
-      const res = await call({ empresaId, period: periodKey, dryRun: true });
-      toast.dismiss(toastId);
-      const data = res.data as { monthly?: MonthRow[]; days?: DayRow[] };
-      setMonthly((data.monthly || []) as MonthRow[]);
-      setDays((data.days || []) as DayRow[]);
+      const book = await previewHoursLedgerMonth(empresaId, periodKey);
+      setMonthly(book.monthly);
+      setDays([]);
       setStack([]);
-      setSource('preview');
+      setSource(book.source === 'preview' ? 'preview' : 'vacio');
       toast.success('Vista previa (no se escribió en la base)');
     } catch (e: any) {
       console.error(e);
-      toast.dismiss(toastId);
       toast.error(e?.message || 'La vista previa falló');
     } finally {
       setBusy(false);
     }
   };
 
+  const retryFailed = async () => {
+    if (!empresaId) return;
+    setBusy(true);
+    try {
+      const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 60000 });
+      await call({
+        empresaId,
+        period: periodKey,
+        dryRun: true,
+        retry: true,
+        jobId: hoursLedgerJobDocId(empresaId, periodKey, true),
+      });
+      const book = await previewHoursLedgerMonth(empresaId, periodKey);
+      setMonthly(book.monthly);
+      setSource(book.source === 'preview' ? 'preview' : 'vacio');
+      toast.success('Se reintentaron las tandas fallidas');
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo reintentar');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const empresa = monthly.find((r) => r.level === 'empresa');
-  const clients = monthly.filter((r) => r.level === 'cliente');
+  const storedClients = monthly.filter((r) => r.level === 'cliente');
+  const objectives = monthly.filter((r) => r.level === 'objetivo');
+  const clients = storedClients.length ? storedClients : groupClients(objectives);
   const current = stack[stack.length - 1];
 
   const visible = useMemo(() => {
     if (!current) return clients;
     if (current.level === 'cliente') {
-      return monthly.filter((r) => r.level === 'objetivo' && r.clientId === current.id);
+      return monthly.filter((r) => r.level === 'objetivo' && (r.clientId || '_sin_cliente') === current.id);
     }
     if (current.level === 'objetivo') {
       const puestos = new Map<string, DayRow>();
@@ -132,9 +200,11 @@ export default function BancoHorasPage() {
           prev.slaActive += d.slaActive || 0;
           prev.slaInactive += d.slaInactive || 0;
           prev.slaClosed += d.slaClosed || 0;
+          prev.slaWithoutPlan = (prev.slaWithoutPlan || 0) + (d.slaWithoutPlan || 0);
           prev.planPublished += d.planPublished || 0;
           prev.planDraft += d.planDraft || 0;
           prev.worked += d.worked || 0;
+          prev.workedOutside = (prev.workedOutside || 0) + (d.workedOutside || 0);
           prev.covered += d.covered || 0;
           prev.uncovered += d.uncovered || 0;
           prev.ft += d.ft || 0;
@@ -179,9 +249,11 @@ export default function BancoHorasPage() {
       'SLA activo': Math.round(r.slaActive || 0),
       'SLA inactivo': Math.round(r.slaInactive || 0),
       'SLA cerrado': Math.round(r.slaClosed || 0),
+      'Sin plan': Math.round(r.slaWithoutPlan || 0),
       'Plan publicado': Math.round(r.planPublished || 0),
       'Plan borrador': Math.round(r.planDraft || 0),
       Trabajadas: Math.round(r.worked || 0),
+      'Trabajadas fuera': Math.round(r.workedOutside || 0),
       Cubiertas: Math.round(r.covered || 0),
       Descubiertas: Math.round(r.uncovered || 0),
       FT: Math.round(r.ft || 0),
@@ -206,11 +278,15 @@ export default function BancoHorasPage() {
     ['SLA activo', empresa?.slaActive],
     ['SLA inactivo', empresa?.slaInactive],
     ['SLA cerrado', empresa?.slaClosed],
+    ['Sin plan', empresa?.slaWithoutPlan],
     ['Plan', empresa ? planOf(planMode, empresa) : 0],
     ['Trabajadas', empresa?.worked],
+    ['Trab. fuera', empresa?.workedOutside],
     ['Cubiertas', empresa?.covered],
     ['Descubiertas', empresa?.uncovered],
-    ['FT / EXT / ADV', (empresa?.ft || 0) + (empresa?.ext || 0) + (empresa?.adv || 0)],
+    ['FT', empresa?.ft],
+    ['EXT', empresa?.ext],
+    ['ADV', empresa?.adv],
     ['Novedades pagas', empresa?.novedadPaga],
   ] as const;
 
@@ -234,13 +310,16 @@ export default function BancoHorasPage() {
               if (y && m) { setYear(y); setMonth(m); }
             }} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold shadow-sm" />
             <select value={planMode} onChange={(e) => setPlanMode(e.target.value as PlanMode)} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm font-bold shadow-sm">
-              <option value="published">Publicadas</option>
-              <option value="draft">Solo borradores</option>
-              <option value="both">Publicadas + borradores</option>
+              {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
             {canRebuild && (
               <button type="button" onClick={() => void preview()} disabled={busy} className="rounded-2xl bg-indigo-600 text-white px-4 py-2 text-sm font-black shadow-sm hover:bg-indigo-700 disabled:opacity-50">
                 <RefreshCw size={14} className="inline mr-1" /> Recalcular (vista previa)
+              </button>
+            )}
+            {!!job?.failed?.length && (
+              <button type="button" onClick={() => void retryFailed()} className="rounded-2xl border border-amber-300 bg-amber-50 text-amber-800 px-4 py-2 text-sm font-black shadow-sm">
+                Reintentar lo fallido
               </button>
             )}
             <button type="button" onClick={exportExcel} disabled={!monthly.length} className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-black shadow-sm hover:bg-slate-50 disabled:opacity-40">
@@ -248,6 +327,26 @@ export default function BancoHorasPage() {
             </button>
           </div>
         </div>
+
+        {job && (job.status === 'QUEUED' || job.status === 'RUNNING' || job.status === 'DONE' || job.status === 'ERROR') && (
+          <div className="rounded-3xl bg-white shadow-sm border border-slate-100 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-black text-slate-600">
+              <span>
+                {job.status === 'QUEUED' || job.status === 'RUNNING' ? 'Calculando…' : job.status === 'ERROR' ? 'Terminó con errores' : 'Último recálculo'}
+                {job.total ? ` · ${job.processed} de ${job.total} objetivos` : ''}
+              </span>
+              <span className="text-slate-400 font-bold">
+                {job.createdBy || ''}{job.finishedAt ? ` · ${when(job.finishedAt)}` : ''}
+              </span>
+            </div>
+            <div className="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+              <div className="h-full bg-indigo-500 transition-all" style={{ width: `${job.total ? Math.round((100 * job.processed) / job.total) : (job.status === 'DONE' ? 100 : 8)}%` }} />
+            </div>
+            {(job.currentObjectiveName || job.error) && (
+              <p className="mt-1 text-[11px] font-bold text-slate-400 truncate">{job.currentObjectiveName || job.error}</p>
+            )}
+          </div>
+        )}
 
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
           {cards.map(([label, value]) => (
@@ -272,7 +371,7 @@ export default function BancoHorasPage() {
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400">
                 <tr>
-                  {['Nombre', 'SLA', 'Inactivo', 'Cerrado', 'Plan', 'Trabajadas', 'Cubiertas', 'Descubiertas', 'FT', 'EXT', 'ADV', 'Nov. paga'].map((h) => (
+                  {['Nombre', 'SLA', 'Inactivo', 'Cerrado', 'Sin plan', 'Plan', 'Trabajadas', 'Trab. fuera', 'Cubiertas', 'Descubiertas', 'FT', 'EXT', 'ADV', 'Nov. paga'].map((h) => (
                     <th key={h} className="text-right first:text-left px-3 py-2 font-black">{h}</th>
                   ))}
                 </tr>
@@ -288,15 +387,19 @@ export default function BancoHorasPage() {
                           <button type="button" className="hover:text-indigo-600" onClick={() => void openRow(r)}>{name}</button>
                         ) : name}
                       </td>
-                      {[r.slaActive, r.slaInactive, r.slaClosed, planOf(planMode, r), r.worked, r.covered, r.uncovered, r.ft, r.ext, r.adv, r.novedadPaga].map((n, i) => (
+                      {[r.slaActive, r.slaInactive, r.slaClosed, r.slaWithoutPlan, planOf(planMode, r), r.worked, r.workedOutside, r.covered, r.uncovered, r.ft, r.ext, r.adv, r.novedadPaga].map((n, i) => (
                         <td key={i} className="px-3 py-2 text-right tabular-nums text-slate-600">{nf(n)}</td>
                       ))}
                     </tr>
                   );
                 })}
                 {!visible.length && (
-                  <tr><td colSpan={12} className="px-4 py-8 text-center text-slate-400 font-bold">
-                    {canRebuild ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.' : 'Sin filas. El libro de este mes todavía no fue calculado.'}
+                  <tr><td colSpan={14} className="px-4 py-8 text-center text-slate-400 font-bold">
+                    {empresa
+                      ? 'El libro tiene totales de empresa, pero no hay detalle para este nivel.'
+                      : canRebuild
+                        ? 'Sin filas. Usá Recalcular para calcular el mes sin guardar.'
+                        : 'Sin filas. El libro de este mes todavía no fue calculado.'}
                   </td></tr>
                 )}
               </tbody>

@@ -78,7 +78,14 @@ import { getDateKeyInTimezone, isProformaVacancyShift } from '@/lib/crm/proforma
 import { resolveCanonicalObjectiveId } from '@/lib/crm/objectiveIdentity';
 import { pickVigenteSlasForPeriod, slaHoursForServiceInRange } from '@/lib/crm/slaObjectiveHours';
 import { buildSlaExclusionContext, isTurnoOnSlaExcludedSlot } from '@/lib/crm/slaExclusionForPlanned';
-import { persistHoursBalancesFromTurnos } from '@/lib/hoursBalance';
+import {
+  HOURS_LEDGER_PLAN_OPTIONS,
+  loadHoursLedgerOrPreview,
+  officialHoursFromEmpresa,
+  periodKeyOf,
+  type HoursLedgerMonth,
+  type HoursLedgerPlanMode,
+} from '@/lib/hoursLedger/hoursLedgerRead';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, ReferenceLine, Cell, ComposedChart, Line,
@@ -441,6 +448,9 @@ export default function AnalisisPage() {
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const now = new Date();
   const [periodMode, setPeriodMode] = useState('month' as PeriodMode);
+  const [planMode, setPlanMode] = useState<HoursLedgerPlanMode>('published');
+  const [ledgerMonth, setLedgerMonth] = useState<HoursLedgerMonth | null>(null);
+  const [ledgerBusy, setLedgerBusy] = useState(false);
   const [periodYear, setPeriodYear] = useState(now.getFullYear());
   const [periodMonth, setPeriodMonth] = useState(now.getMonth());
   const [periodDay, setPeriodDay] = useState(now.getDate());
@@ -1085,14 +1095,21 @@ export default function AnalisisPage() {
         y += 1;
       }
     }
-    void persistHoursBalancesFromTurnos({
-      empresaId,
-      services: vigenteServices,
-      turnos: allTurnos,
-      months,
-      rebuiltFrom: 'crm-bootstrap',
-    }).catch((err) => console.warn('[analisis] hours_balances', err));
   }, [mallaReady, turnosLive.length, empresaId, vigenteServices, allTurnos, periodKey, periodRange.start, periodRange.end]);
+
+  useEffect(() => {
+    if (!empresaId || periodMode !== 'month') {
+      setLedgerMonth(null);
+      return;
+    }
+    let cancelled = false;
+    setLedgerBusy(true);
+    void loadHoursLedgerOrPreview(empresaId, periodKeyOf(periodYear, periodMonth + 1))
+      .then((book) => { if (!cancelled) setLedgerMonth(book); })
+      .catch(() => { if (!cancelled) setLedgerMonth(null); })
+      .finally(() => { if (!cancelled) setLedgerBusy(false); });
+    return () => { cancelled = true; };
+  }, [empresaId, periodMode, periodYear, periodMonth]);
   const finClientBars = useMemo(
     () =>
       topNPlusResto(
@@ -1177,6 +1194,17 @@ export default function AnalisisPage() {
         demandaTotals: demanda.totals,
         ausenciasStats,
         turnos,
+        ledgerHours: periodMode === 'month' && ledgerMonth?.empresa
+          ? {
+            sla: officialHoursFromEmpresa(ledgerMonth.empresa).sla,
+            planPublished: planMode === 'draft'
+              ? officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
+              : planMode === 'both'
+                ? officialHoursFromEmpresa(ledgerMonth.empresa).planPublished + officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
+                : officialHoursFromEmpresa(ledgerMonth.empresa).planPublished,
+            worked: officialHoursFromEmpresa(ledgerMonth.empresa).worked,
+          }
+          : undefined,
         bolsa: {
           inicial: bolsaRealista.bolsaInicial,
           techo: bolsaRealista.techoBruto,
@@ -1187,7 +1215,7 @@ export default function AnalisisPage() {
           modo: bolsaRealista.modo,
         },
       }),
-    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista],
+    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista, ledgerMonth, planMode, periodMode],
   );
 
   const vacacionesCapacidad = useMemo(() => {
@@ -2289,6 +2317,16 @@ export default function AnalisisPage() {
                     <ChevronRight size={16}/>
                   </button>
                 </div>
+                {periodMode === 'month' && (
+                  <select
+                    value={planMode}
+                    onChange={(e) => setPlanMode(e.target.value as HoursLedgerPlanMode)}
+                    className="h-8 rounded-lg border border-slate-200 dark:border-slate-600 px-2 text-[10px] font-black uppercase"
+                  >
+                    {HOURS_LEDGER_PLAN_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                )}
+                {ledgerBusy && <span className="text-[10px] font-black text-slate-400 uppercase">Calculando…</span>}
                 <button
                   type="button"
                   onClick={() => void reloadAll()}

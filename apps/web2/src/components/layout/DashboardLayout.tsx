@@ -17,6 +17,7 @@ import { applyCompanyTheme } from '@/lib/companyTheme';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { filterSolicitudesByObjectives } from '@/lib/supervision/supervisionUtils';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
+import HoursLedgerJobBar from '@/components/hours/HoursLedgerJobBar';
 import { readSessionString, writeSessionString } from '@/lib/persistSession';
 import { useTrainingSession } from '@/hooks/useTrainingSession';
 import {
@@ -900,6 +901,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
 
       {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
       {!isSupervisionApp && <BottomNav />}
+      <HoursLedgerJobBar />
     </>
   );
 }

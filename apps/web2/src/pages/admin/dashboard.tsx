@@ -20,6 +20,7 @@ import { buildDemandaByObjective, coveragePlannedBillableHours } from '@/lib/ana
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { fichadaHoursForShift, isShiftFichado } from '@/lib/crm/fichadaHours';
+import { loadHoursLedgerOrPreview, officialHoursFromEmpresa, periodKeyOf } from '@/lib/hoursLedger/hoursLedgerRead';
 import { db } from '@/lib/firebase';
 import { collection, getDocs, query, where, orderBy, limit, Timestamp } from 'firebase/firestore';
 import {
@@ -675,6 +676,13 @@ function AdminDashboard() {
           hrs: Math.round(hours),
         });
       });
+      try {
+        const book = await loadHoursLedgerOrPreview(empresaId, periodKeyOf(kpiYear, kpiMonth + 1));
+        const official = officialHoursFromEmpresa(book.empresa);
+        if (official.sla > 0 || book.empresa) totalSlaH = official.sla;
+      } catch {
+        /* el KPI de horas usa el cálculo vivo solo si el libro no responde */
+      }
 
       // 3. EMPLEADOS
       const empMap: Record<string, string> = {};

@@ -34,8 +34,9 @@ export interface CronogramaOverviewRow {
   totalShifts: number;
   /** Ausencias sin cobertura asignada (sin coveredBy). */
   openVacancies: number;
-  /** Horas planificadas base SLA (misma regla que pie del planificador / CRM / Análisis). */
+  /** Horas planificadas oficiales (solo publicado). El selector del modal puede mostrar el borrador. */
   plannedHours: number;
+  planDraftHours: number;
   publishedBy: string;
   publishedAt: Date | null;
   lastModifiedAt: Date | null;
@@ -278,7 +279,8 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedBy ?? '',
       );
       const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
-      const plannedHours = plannedByObjective.get(objectiveId) || 0;
+          const plannedHours = plannedByObjective.get(objectiveId) || 0;
+      const planDraftHours = 0;
 
       rows.push({
         clientId: client.id,
@@ -293,6 +295,7 @@ export async function loadCronogramaOverview(params: {
         totalShifts: counts.draft + counts.published,
         openVacancies: counts.openVacancies,
         plannedHours,
+        planDraftHours,
         publishedBy: pub?.publishedBy || '',
         publishedAt: pub?.publishedAt ?? null,
         lastModifiedAt: mergedActivity.lastModifiedAt,
