@@ -32,6 +32,10 @@ export type Shift = {
   isFranco?: boolean;
   isFrancoTrabajado?: boolean;
   checkInTime?: FirestoreTimestampLike;
+  /** Hora real de fichada (P5b). Prioridad sobre realStartTime / presentAt. */
+  checkInAt?: FirestoreTimestampLike;
+  realStartTime?: FirestoreTimestampLike;
+  presentAt?: FirestoreTimestampLike;
   checkInRequestedAt?: FirestoreTimestampLike;
   checkInRequestStatus?: string;
   lateArrivalAt?: FirestoreTimestampLike;
