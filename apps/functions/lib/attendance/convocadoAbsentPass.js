@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runConvocadoAbsentPass = runConvocadoAbsentPass;
 const firestore_1 = require("firebase-admin/firestore");
+const checkInWindow_1 = require("../fichajes/checkInWindow");
 const markShiftAbsent_1 = require("./markShiftAbsent");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const convocatoriasCobertura_1 = require("../coverage/convocatoriasCobertura");
@@ -89,7 +90,7 @@ async function runConvocadoAbsentPass(db, now, cc) {
             const gapStart = ms(shift.startTime);
             const deadline = ct === 'ADVANCE'
                 ? (ms(shift.adjustedStartTime) || gapStart) + 60 * 60 * 1000
-                : Math.max(ms(shift.createdAt) || gapStart, gapStart) + 60 * 60 * 1000;
+                : (0, checkInWindow_1.convocadoPunchCapMs)(shift);
             if (nowMs < deadline)
                 continue;
             const covTypes = new Set(['RET', 'REF', 'ESC', 'FT']);

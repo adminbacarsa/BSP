@@ -139,6 +139,26 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assertParity('t+30 late', shift, new Date(`${day}T17:35:00-03:00`).getTime());
   });
 
+  it('convocado: acceptedAt+30 a tiempo, +60 TOO_LATE', () => {
+    const shift = {
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'RET',
+      startTime: ts(`${day}T15:00:00-03:00`),
+      endTime: ts(`${day}T23:00:00-03:00`),
+      acceptedAt: ts(`${day}T16:00:00-03:00`),
+    };
+    const on = evaluateCheckInWindow(shift, new Date(`${day}T16:20:00-03:00`).getTime());
+    assert.equal(on.allowed, true);
+    assert.equal(on.lateMinutes, 0);
+    const late = evaluateCheckInWindow(shift, new Date(`${day}T16:40:00-03:00`).getTime());
+    assert.equal(late.lateNoNotice, true);
+    assert.equal(late.lateMinutes, 10);
+    assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T17:01:00-03:00`).getTime()).rejectCode, 'TOO_LATE');
+    assertParity('conv 16:20', shift, new Date(`${day}T16:20:00-03:00`).getTime());
+    assertParity('conv 16:40', shift, new Date(`${day}T16:40:00-03:00`).getTime());
+    assertParity('conv 17:01', shift, new Date(`${day}T17:01:00-03:00`).getTime());
+  });
+
   it('OPERATIONS_COVERAGE: createdAt / coverageCreatedAt', () => {
     const shift = {
       origin: 'OPERATIONS_COVERAGE',
@@ -217,8 +237,7 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
 
 describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
   it('Barrionuevo FT ops_cov (CAPS Angelelli 26/09): ventana ops + no es TRACE', () => {
-    // Hero FT ops_cov 15–23; cobertura real (no EXT/ADV de registro).
-    // Ventana server: start−15 … max(createdAt, start)+60 → cierre 16:00 con created 14:45.
+    // Hero FT ops_cov 15–23; sin acceptedAt el ancla es createdAt 14:45 → tope 15:45.
     const opsCov = {
       id: 'ops_cov_lXLFk2F33HRiAsQpmoqS_hzHO3PUA0Bo5DwZwHlG2',
       origin: 'OPERATIONS_COVERAGE',

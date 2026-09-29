@@ -1,4 +1,5 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
+import { convocadoPunchCapMs } from '../fichajes/checkInWindow';
 import { markShiftAbsent } from './markShiftAbsent';
 import { skipAbsencePipelineForShift } from '../coverage/coverageTraceShift';
 import { iniciarCascadaCobertura } from '../coverage/convocatoriasCobertura';
@@ -108,7 +109,7 @@ export async function runConvocadoAbsentPass(
     const deadline =
       ct === 'ADVANCE'
         ? (ms(shift.adjustedStartTime) || gapStart) + 60 * 60 * 1000
-        : Math.max(ms(shift.createdAt) || gapStart, gapStart) + 60 * 60 * 1000;
+        : convocadoPunchCapMs(shift);
 
     if (nowMs < deadline) continue;
 

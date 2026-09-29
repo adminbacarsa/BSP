@@ -28,6 +28,20 @@ function createdMs(shift: Record<string, unknown>): number {
   );
 }
 
+/** Aceptación de la convocatoria. Sin `acceptedAt`, cae a createdAt del ops_cov. */
+export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
+  const acc = (shift.acceptedAt as Timestamp | undefined)?.toMillis?.() ?? 0;
+  if (acc > 0) return acc;
+  return createdMs(shift);
+}
+
+/** Tope de fichada del convocado: min(aceptación+60, fin del hueco). */
+export function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+  const plus60 = convocadoPunchAnchorMs(shift) + 60 * 60 * 1000;
+  const end = endMs(shift);
+  return end > 0 ? Math.min(plus60, end) : plus60;
+}
+
 function adjustedStartMs(shift: Record<string, unknown>): number {
   const adj = (shift.adjustedStartTime as Timestamp | undefined)?.toMillis?.() ?? 0;
   if (adj > 0) return adj;
@@ -75,7 +89,7 @@ function finishAllowed(
 
 /**
  * Ventanas servidor (espejo portal-core): normal T−15…T+30 (T+5…T+30 sin aviso = llegada tarde);
- * con aviso hasta min(ETA, T+60); OPERATIONS_COVERAGE convocado max(created, start)+60;
+ * con aviso hasta min(ETA, T+60); convocado: a tiempo hasta acceptedAt+30, tarde hasta min(acceptedAt+60, fin);
  * isEarlyStart = adelanto OR turno propio.
  */
 export function evaluateServerCheckInWindow(
@@ -109,12 +123,21 @@ export function evaluateServerCheckInWindow(
   if (!plannedStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
 
   if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const gapStart = plannedStart;
-    const windowStart = gapStart - 15 * 60 * 1000;
-    const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-    if (nowMs < windowStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
-    if (nowMs > windowEnd) return { allowed: false, rejectCode: 'TOO_LATE' };
-    return finishAllowed(gapStart, nowMs, false);
+    const anchor = convocadoPunchAnchorMs(shift);
+    const cap = convocadoPunchCapMs(shift);
+    const onTimeEnd = anchor + 30 * 60 * 1000;
+    if (nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
+    if (nowMs > cap) return { allowed: false, rejectCode: 'TOO_LATE' };
+    if (nowMs <= onTimeEnd) {
+      return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
+    }
+    const lateMinutes = Math.max(0, Math.round((nowMs - onTimeEnd) / 60000));
+    return {
+      allowed: true,
+      usePlannedStart: false,
+      lateMinutes,
+      lateNoNotice: lateMinutes > 0,
+    };
   }
 
   if (shift.isEarlyStart === true) {

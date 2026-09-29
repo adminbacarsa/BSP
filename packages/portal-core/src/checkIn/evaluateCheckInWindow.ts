@@ -88,6 +88,18 @@ function createdMs(shift: Record<string, unknown>): number {
   return startMs(shift);
 }
 
+function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
+  const acc = timestampLikeToMillis(shift.acceptedAt);
+  if (acc > 0) return acc;
+  return createdMs(shift);
+}
+
+function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+  const plus60 = convocadoPunchAnchorMs(shift) + 60 * 60 * 1000;
+  const end = endMs(shift);
+  return end > 0 ? Math.min(plus60, end) : plus60;
+}
+
 function adjustedStartMs(shift: Record<string, unknown>): number {
   const adj = timestampLikeToMillis(shift.adjustedStartTime);
   if (adj > 0) return adj;
@@ -167,12 +179,21 @@ export function evaluateCheckInWindow(
   if (!plannedStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
 
   if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const gapStart = plannedStart;
-    const windowStart = gapStart - 15 * 60 * 1000;
-    const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-    if (nowMs < windowStart) return { allowed: false, rejectCode: 'TOO_EARLY' };
-    if (nowMs > windowEnd) return { allowed: false, rejectCode: 'TOO_LATE' };
-    return finishAllowed(gapStart, nowMs, false);
+    const anchor = convocadoPunchAnchorMs(shift);
+    const cap = convocadoPunchCapMs(shift);
+    const onTimeEnd = anchor + 30 * 60 * 1000;
+    if (nowMs < anchor) return { allowed: false, rejectCode: 'TOO_EARLY' };
+    if (nowMs > cap) return { allowed: false, rejectCode: 'TOO_LATE' };
+    if (nowMs <= onTimeEnd) {
+      return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
+    }
+    const lateMinutes = Math.max(0, Math.round((nowMs - onTimeEnd) / 60000));
+    return {
+      allowed: true,
+      usePlannedStart: false,
+      lateMinutes,
+      lateNoNotice: lateMinutes > 0,
+    };
   }
 
   if (shift.isEarlyStart === true) {

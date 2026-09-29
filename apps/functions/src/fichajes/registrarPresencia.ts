@@ -167,11 +167,18 @@ export async function registrarPresencia(
 
   const scheduledStartTs = shiftData.startTime ?? null;
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-  const isLate = (windowEval.lateMinutes ?? 0) > 0
-    || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
+  const originUp = String(shiftData.origin || '').toUpperCase();
+  const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
+  const opsCovPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND' && covTypeUp !== 'ADVANCE';
+  const isLate = opsCovPunch
+    ? (windowEval.lateMinutes ?? 0) > 0
+    : (windowEval.lateMinutes ?? 0) > 0
+      || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
 
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
-  if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
+  if (opsCovPunch) {
+    realStartTime = Timestamp.fromMillis(nowMs);
+  } else if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
     // Presente anticipado: el turno arranca a la hora planificada (igual que la fichada GPS), no al click.
     realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : Timestamp.fromMillis(nowMs);
   } else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
@@ -195,9 +202,11 @@ export async function registrarPresencia(
     checkInRecordedAt: recordedAt || null,
     isLate,
     // Ops/VIGI no traen lateMinutes de la ventana: la tardanza siempre se mide contra el inicio planificado.
-    lateMinutes: isLate && scheduledStartMs
-      ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
-      : (windowEval.lateMinutes ?? 0),
+    lateMinutes: opsCovPunch
+      ? (windowEval.lateMinutes ?? 0)
+      : isLate && scheduledStartMs
+        ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
+        : (windowEval.lateMinutes ?? 0),
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,

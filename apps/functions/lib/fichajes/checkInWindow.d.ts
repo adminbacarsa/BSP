@@ -6,6 +6,8 @@ export type CheckInWindowResult = {
     lateMinutes?: number;
     lateNoNotice?: boolean;
 };
+export declare function convocadoPunchAnchorMs(shift: Record<string, unknown>): number;
+export declare function convocadoPunchCapMs(shift: Record<string, unknown>): number;
 export declare function evaluateServerCheckInWindow(shift: Record<string, unknown>, nowMs: number, opts?: {
     source?: string;
 }): CheckInWindowResult;

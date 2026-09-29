@@ -422,6 +422,7 @@ async function applyCoverage(db, batch, params) {
                 isAwaitingCoverageCheckIn: ct !== 'EXTEND',
             }),
         ...(existingCov ? {} : { createdAt: coverageServerTime() }),
+        ...(existingCov?.acceptedAt ? {} : { acceptedAt: params.acceptedAt || coverageServerTime() }),
         ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     }, { merge: true });
     const closeMode = params.titularCloseMode ?? 'FULL';

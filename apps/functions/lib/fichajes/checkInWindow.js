@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.convocadoPunchAnchorMs = convocadoPunchAnchorMs;
+exports.convocadoPunchCapMs = convocadoPunchCapMs;
 exports.evaluateServerCheckInWindow = evaluateServerCheckInWindow;
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 function startMs(shift) {
@@ -12,6 +14,17 @@ function createdMs(shift) {
     return (shift.createdAt?.toMillis?.()
         ?? shift.coverageCreatedAt?.toMillis?.()
         ?? startMs(shift));
+}
+function convocadoPunchAnchorMs(shift) {
+    const acc = shift.acceptedAt?.toMillis?.() ?? 0;
+    if (acc > 0)
+        return acc;
+    return createdMs(shift);
+}
+function convocadoPunchCapMs(shift) {
+    const plus60 = convocadoPunchAnchorMs(shift) + 60 * 60 * 1000;
+    const end = endMs(shift);
+    return end > 0 ? Math.min(plus60, end) : plus60;
 }
 function adjustedStartMs(shift) {
     const adj = shift.adjustedStartTime?.toMillis?.() ?? 0;
@@ -75,14 +88,23 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
     if (!plannedStart)
         return { allowed: false, rejectCode: 'TOO_EARLY' };
     if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-        const gapStart = plannedStart;
-        const windowStart = gapStart - 15 * 60 * 1000;
-        const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-        if (nowMs < windowStart)
+        const anchor = convocadoPunchAnchorMs(shift);
+        const cap = convocadoPunchCapMs(shift);
+        const onTimeEnd = anchor + 30 * 60 * 1000;
+        if (nowMs < anchor)
             return { allowed: false, rejectCode: 'TOO_EARLY' };
-        if (nowMs > windowEnd)
+        if (nowMs > cap)
             return { allowed: false, rejectCode: 'TOO_LATE' };
-        return finishAllowed(gapStart, nowMs, false);
+        if (nowMs <= onTimeEnd) {
+            return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
+        }
+        const lateMinutes = Math.max(0, Math.round((nowMs - onTimeEnd) / 60000));
+        return {
+            allowed: true,
+            usePlannedStart: false,
+            lateMinutes,
+            lateNoNotice: lateMinutes > 0,
+        };
     }
     if (shift.isEarlyStart === true) {
         const advStart = adjustedStartMs(shift);

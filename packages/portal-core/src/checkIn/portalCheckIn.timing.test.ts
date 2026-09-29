@@ -92,26 +92,34 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(after.rejectCode).toBe('TOO_LATE');
   });
 
-  it('OPERATIONS_COVERAGE: desde inicio−15 hasta max(createdAt, inicio)+60', () => {
-    const start = new Date('2026-09-14T20:00:00-03:00');
-    const created = new Date('2026-09-14T17:30:00-03:00');
+  it('OPERATIONS_COVERAGE: a tiempo hasta acceptedAt+30, tarde hasta min(+60, fin)', () => {
+    const start = new Date('2026-09-14T15:00:00-03:00');
+    const accepted = new Date('2026-09-14T16:00:00-03:00');
     const s = shift({
       id: 'ops1',
       origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'RET',
       startTime: start,
-      endTime: new Date('2026-09-15T04:00:00-03:00'),
-      createdAt: created,
+      endTime: new Date('2026-09-14T23:00:00-03:00'),
+      acceptedAt: accepted,
     });
-    const early = getCheckInTiming(s, now);
-    expect(early.canCheckIn).toBe(false);
-    expect(early.tooEarly).toBe(true);
+    const before = getCheckInTiming(s, new Date('2026-09-14T15:50:00-03:00'));
+    expect(before.canCheckIn).toBe(false);
+    expect(before.rejectCode).toBe('TOO_EARLY');
 
-    const inWin = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
-    expect(inWin.canCheckIn).toBe(true);
-    expect(inWin.checkInDeadline?.getTime()).toBe(start.getTime() + 60 * 60_000);
+    const onTime = getCheckInTiming(s, new Date('2026-09-14T16:20:00-03:00'));
+    expect(onTime.canCheckIn).toBe(true);
+    expect(onTime.lateNoNotice).toBeFalsy();
+    expect(onTime.checkInDeadline?.getTime()).toBe(accepted.getTime() + 60 * 60_000);
 
-    const late = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
-    expect(late.canCheckIn).toBe(false);
+    const late = getCheckInTiming(s, new Date('2026-09-14T16:40:00-03:00'));
+    expect(late.canCheckIn).toBe(true);
+    expect(late.lateNoNotice).toBe(true);
+    expect(late.lateMinutes).toBe(10);
+
+    const tooLate = getCheckInTiming(s, new Date('2026-09-14T17:01:00-03:00'));
+    expect(tooLate.canCheckIn).toBe(false);
+    expect(tooLate.rejectCode).toBe('TOO_LATE');
   });
 
   it('OPERATIONS_COVERAGE: coverageCreatedAt si no hay createdAt', () => {

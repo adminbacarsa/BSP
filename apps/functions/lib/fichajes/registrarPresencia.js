@@ -102,10 +102,18 @@ async function registrarPresencia(db, input) {
     }
     const scheduledStartTs = shiftData.startTime ?? null;
     const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-    const isLate = (windowEval.lateMinutes ?? 0) > 0
-        || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
+    const originUp = String(shiftData.origin || '').toUpperCase();
+    const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
+    const opsCovPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND' && covTypeUp !== 'ADVANCE';
+    const isLate = opsCovPunch
+        ? (windowEval.lateMinutes ?? 0) > 0
+        : (windowEval.lateMinutes ?? 0) > 0
+            || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
     let realStartTime;
-    if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
+    if (opsCovPunch) {
+        realStartTime = firestore_1.Timestamp.fromMillis(nowMs);
+    }
+    else if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
         realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : firestore_1.Timestamp.fromMillis(nowMs);
     }
     else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
@@ -129,9 +137,11 @@ async function registrarPresencia(db, input) {
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
         isLate,
-        lateMinutes: isLate && scheduledStartMs
-            ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
-            : (windowEval.lateMinutes ?? 0),
+        lateMinutes: opsCovPunch
+            ? (windowEval.lateMinutes ?? 0)
+            : isLate && scheduledStartMs
+                ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
+                : (windowEval.lateMinutes ?? 0),
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,

@@ -343,6 +343,8 @@ export type ApplyCoverageParams = {
   clientName?: string;
   titularCloseMode?: 'FULL' | 'PARTIAL' | 'NONE';
   convocatoriaId?: string;
+  /** Hora en que el convocado aceptó. Ancla de la ventana de fichada. */
+  acceptedAt?: admin.firestore.Timestamp | null;
   allowReplace?: boolean;
   covSegmentStart?: admin.firestore.Timestamp | null;
   covSegmentEnd?: admin.firestore.Timestamp | null;
@@ -529,6 +531,7 @@ export async function applyCoverage(
           isAwaitingCoverageCheckIn: ct !== 'EXTEND',
         }),
       ...(existingCov ? {} : { createdAt: coverageServerTime() }),
+      ...(existingCov?.acceptedAt ? {} : { acceptedAt: params.acceptedAt || coverageServerTime() }),
       ...(params.convocatoriaId ? { assignedByConvocatoria: params.convocatoriaId } : {}),
     },
     { merge: true },

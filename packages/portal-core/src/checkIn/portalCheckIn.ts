@@ -158,11 +158,14 @@ function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date
   if (!plannedStart) return null;
 
   if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-    const created =
+    const anchor =
+      timestampLikeToMillis(shift.acceptedAt) ||
       timestampLikeToMillis(shift.createdAt) ||
       timestampLikeToMillis(shift.coverageCreatedAt) ||
       plannedStart;
-    return new Date(Math.max(created, plannedStart) + 60 * 60 * 1000);
+    const plus60 = anchor + 60 * 60 * 1000;
+    const end = timestampLikeToMillis(shift.endTime);
+    return new Date(end > 0 ? Math.min(plus60, end) : plus60);
   }
 
   if (shift.isEarlyStart === true) {
