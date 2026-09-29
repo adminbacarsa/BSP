@@ -2,6 +2,7 @@ import { db } from '@/lib/firebase';
 import {
   addDoc,
   collection,
+  deleteDoc,
   deleteField,
   doc,
   getDocs,
@@ -13,6 +14,14 @@ import { filterRowsByEmpresa, stampEmpresaId } from '@/lib/multiempresa';
 import type { PurchaseOrder } from '@/lib/crm/slaBilling.types';
 
 const COL = 'ordenes_compra';
+
+export type SlaUsingPurchaseOrder = {
+  id: string;
+  objectiveName: string;
+  clientName: string;
+  status?: string;
+  closed?: boolean;
+};
 
 export const purchaseOrderService = {
   async getByClient(
@@ -79,5 +88,32 @@ export const purchaseOrderService = {
       status: 'INACTIVE',
       updatedAt: new Date().toISOString(),
     });
+  },
+
+  /** Contratos (servicios_sla) que tienen esta OC asignada en billingPurchaseOrderId. */
+  async findSlaUsingOrder(ocId: string): Promise<SlaUsingPurchaseOrder[]> {
+    const snap = await getDocs(query(collection(db, 'servicios_sla'), where('billingPurchaseOrderId', '==', ocId)));
+    return snap.docs.map((d) => {
+      const data = d.data() as Record<string, unknown>;
+      return {
+        id: d.id,
+        objectiveName: String(data.objectiveName || data.objectiveId || d.id),
+        clientName: String(data.clientName || ''),
+        status: data.status ? String(data.status) : undefined,
+        closed: data.closed === true,
+      };
+    });
+  },
+
+  /** Saca la OC de los contratos: quedan en modo Orden de compra sin OC. */
+  async unassignFromSla(slaIds: string[]): Promise<void> {
+    await Promise.all(
+      slaIds.map((id) => updateDoc(doc(db, 'servicios_sla', id), { billingPurchaseOrderId: deleteField() })),
+    );
+  },
+
+  /** Borrado físico. Antes desasignar los contratos con unassignFromSla. */
+  async remove(id: string): Promise<void> {
+    await deleteDoc(doc(db, COL, id));
   },
 };
