@@ -317,7 +317,6 @@ export function OperacionesMapPopup({
                     </span>
                   )}
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayName}</span>
-                  <ShiftCodeBadge shift={shift} />
                 </span>
                 <span
                   style={{

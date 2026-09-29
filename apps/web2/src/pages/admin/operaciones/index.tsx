@@ -1292,7 +1292,6 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <div className="min-w-0">
                             <span className={`text-[13px] font-black truncate ${shift.isUnassigned ? 'text-rose-600' : 'text-slate-800'} inline-flex items-center gap-1.5 max-w-full`}>
                                 <span className="truncate">{name}</span>
-                                <ShiftCodeBadge shift={shift} />
                             </span>
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
