@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onEmployeeNotificationCreated = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const convocatoriaEventos_1 = require("../coverage/convocatoriaEventos");
 const INBOX_NEEDS_FCM = new Set([
     'CONVOCATORIA_EVENTO',
     'EVENTO_CONFIRMADO',
@@ -64,9 +65,14 @@ exports.onEmployeeNotificationCreated = functions
             tokens = await collectTokens(db, empUid, employeeId);
         }
     }
+    const convocatoriaId = String(data.convocatoriaId || '').trim();
+    const auditPush = type === 'CONVOCATORIA_COBERTURA' && !!convocatoriaId;
     if (tokens.length === 0) {
         console.warn(`[onEmployeeNotificationCreated] Sin tokens FCM type=${type} emp=${employeeId} uid=${uid}`);
         await snap.ref.set({ fcmSent: false, fcmSkipReason: 'no_tokens', fcmCheckedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        if (auditPush) {
+            await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, { type: 'PUSH', result: 'no_token' });
+        }
         return;
     }
     const link = type === 'CONVOCATORIA_EVENTO' || type === 'EVENTO_CONFIRMADO'
@@ -114,6 +120,18 @@ exports.onEmployeeNotificationCreated = functions
                 invalid.push(tokens[i]);
             }
         });
+        if (auditPush) {
+            for (let i = 0; i < result.responses.length; i++) {
+                const r = result.responses[i];
+                const token = tokens[i] || '';
+                await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, {
+                    type: 'PUSH',
+                    tokenSuffix: token.slice(-6),
+                    result: r.success ? 'sent' : 'failed',
+                    ...(r.error?.code ? { errorCode: r.error.code } : {}),
+                });
+            }
+        }
         if (invalid.length > 0) {
             const cleanSnap = await db.collection('device_tokens').where('token', 'in', invalid.slice(0, 10)).get();
             const batch = db.batch();

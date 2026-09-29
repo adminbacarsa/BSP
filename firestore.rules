@@ -880,6 +880,11 @@ service cloud.firestore {
       allow create: if tenantAdminCreate();
       allow update: if tenantAdminUpdate() || empleadoDocOwnedByAuth(resource.data.candidateEmployeeId);
       allow delete: if tenantAdminDelete();
+
+      match /eventos/{eventId} {
+        allow read: if tenantAdminRead();
+        allow write: if false;
+      }
     }
 
     // Sesiones de capacitación sandbox (training_sessions).

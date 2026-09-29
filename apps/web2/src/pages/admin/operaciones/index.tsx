@@ -70,6 +70,8 @@ import { EarlyWithdrawModal } from '@/components/operaciones/EarlyWithdrawModal'
 import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPanel';
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
+import { convocadoCountdownLabel } from '@/lib/operaciones/convocadoVentana';
+import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
@@ -1128,6 +1130,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
+    const convocadoCuenta = convocadoCountdownLabel(shift);
     const canCover = isActionableOpsVacancy(shift);
     // Devolver a planificación: solo vacantes NO originadas por ausencia, dentro de las 12h previas al inicio
     const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
@@ -1226,6 +1229,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
+                    {convocadoCuenta && <span className="shrink-0 font-bold text-indigo-600">{convocadoCuenta}</span>}
                 </div>
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
@@ -1303,6 +1307,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
+                {convocadoCuenta && (
+                    <p className="text-[10px] font-bold text-indigo-700 mb-1.5 pl-10">{convocadoCuenta}</p>
+                )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
                         Cubre: {coveringEmployeeName}
@@ -4763,6 +4770,7 @@ export default function OperacionesPage() {
                                           <div className="flex-1 min-w-0">
                                             <p className="text-[9px] font-bold text-slate-800 truncate">{c.candidateEmployeeName}</p>
                                             <p className="text-[8px] text-slate-400 truncate">{TYPE_LABEL[c.type] || c.type}</p>
+                                            <ConvocatoriaTimeline convocatoriaId={c.id} />
                                           </div>
                                           <div className="text-right shrink-0">
                                             <span className={`text-[8px] font-black px-1 py-0.5 rounded border ${sm.cls}`}>{sm.label}</span>

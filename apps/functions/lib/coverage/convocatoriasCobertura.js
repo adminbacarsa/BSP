@@ -17,6 +17,7 @@ const firestore_1 = require("firebase-admin/firestore");
 const eligibilityFilter_1 = require("./eligibilityFilter");
 const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
 const simulableShift_1 = require("../common/simulableShift");
+const convocatoriaEventos_1 = require("./convocatoriaEventos");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
     const urgencyLabel = conv.urgency === 'URGENTE' ? '⚡ URGENTE' : conv.urgency === 'INTERMEDIO' ? 'Intermedia' : 'Normal';
@@ -173,6 +174,12 @@ async function crearConvocatoriaDoc(db, data) {
     });
     const ref = await db.collection('convocatorias_cobertura').add(docData);
     await crearNotifConvocatoria(db, { ...docData, id: ref.id });
+    await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, ref.id, {
+        type: 'CREADA',
+        origin: (0, convocatoriaEventos_1.canalOrigenConvocatoria)(data.createdBy),
+        createdBy: data.createdBy,
+        at: now,
+    });
     const typeLabel = {
         RET: 'RET',
         REF: 'Refuerzo',
@@ -418,6 +425,11 @@ async function resolverCobertura(db, conv) {
     });
     if (!claim.ok) {
         console.log(`[resolverCobertura] skip ${conv.id}: ausencia ${conv.shiftId} ya cubierta`);
+        await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, conv.id, {
+            type: 'RESULTADO',
+            outcome: 'cancelada',
+            reason: 'ALREADY_COVERED',
+        });
         return { ok: false, message: 'El hueco ya fue cubierto.' };
     }
     const claimHeld = !!claim.heldClaim && !claim.already;
@@ -443,14 +455,20 @@ async function resolverCobertura(db, conv) {
             ...(huecoCubierto ? { cancelReason: 'ALREADY_COVERED', cancelledAt: firestore_1.FieldValue.serverTimestamp() } : {}),
         });
         await releaseClaim();
+        await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, conv.id, {
+            type: 'RESULTADO',
+            outcome: huecoCubierto ? 'cancelada' : 'revalidacion_rechazada',
+            reason: check.reason || 'NO_DISPONIBLE',
+        });
         if (!huecoCubierto)
             await avanzarCascadaOrPartialVacante(db, conv, 'REJECTED');
         return { ok: false, message: check.message || 'No se puede tomar esta cobertura.' };
     }
+    const acceptedAt = firestore_1.Timestamp.now();
     await convRef.update({
         status: 'ACCEPTED',
-        respondedAt: firestore_1.Timestamp.now(),
-        resolvedAt: firestore_1.Timestamp.now(),
+        respondedAt: acceptedAt,
+        resolvedAt: acceptedAt,
     });
     const batch = db.batch();
     const resolvedBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO'
@@ -483,6 +501,7 @@ async function resolverCobertura(db, conv) {
                 objectiveName: conv.objectiveName,
                 clientId: conv.clientId,
                 convocatoriaId: conv.id,
+                acceptedAt,
                 titularCloseMode,
                 covSegmentStart: seg.extCov.start,
                 covSegmentEnd: seg.extCov.end,
@@ -510,6 +529,7 @@ async function resolverCobertura(db, conv) {
                 objectiveName: conv.objectiveName,
                 clientId: conv.clientId,
                 convocatoriaId: conv.id,
+                acceptedAt,
                 titularCloseMode,
                 covSegmentStart: seg.advCov.start,
                 covSegmentEnd: seg.advCov.end,
@@ -537,6 +557,7 @@ async function resolverCobertura(db, conv) {
                 objectiveName: conv.objectiveName,
                 clientId: conv.clientId,
                 convocatoriaId: conv.id,
+                acceptedAt,
                 titularCloseMode: 'FULL',
             });
         }
@@ -550,6 +571,7 @@ async function resolverCobertura(db, conv) {
                 empresaId: conv.empresaId || null,
             }, batch);
         }
+        const cancelledByFull = [];
         if (titularCloseMode === 'FULL') {
             const [pendingSnap, escalatedSnap] = await Promise.all([
                 db.collection('convocatorias_cobertura').where('shiftId', '==', conv.shiftId).where('status', '==', 'PENDING').get(),
@@ -558,7 +580,12 @@ async function resolverCobertura(db, conv) {
             for (const d of [...pendingSnap.docs, ...escalatedSnap.docs]) {
                 if (d.id === conv.id)
                     continue;
-                batch.update(d.ref, { status: 'CANCELLED', cancelledAt: firestore_1.FieldValue.serverTimestamp() });
+                cancelledByFull.push(d.id);
+                batch.update(d.ref, {
+                    status: 'CANCELLED',
+                    cancelReason: 'FULL',
+                    cancelledAt: firestore_1.FieldValue.serverTimestamp(),
+                });
             }
         }
         const novedadRef = db.collection('novedades').doc();
@@ -593,6 +620,17 @@ async function resolverCobertura(db, conv) {
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
         await batch.commit();
+        await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, conv.id, {
+            type: 'RESULTADO',
+            outcome: 'aplicada',
+        });
+        for (const cancelledId of cancelledByFull) {
+            await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, cancelledId, {
+                type: 'RESULTADO',
+                outcome: 'cancelada',
+                reason: 'FULL',
+            });
+        }
         if (titularCloseMode === 'PARTIAL'
             && (conv.type === 'EXTEND' || conv.type === 'ADVANCE')) {
             await ensureMissingDualLegConvocatoria(db, conv);
@@ -705,7 +743,13 @@ exports.responderConvocatoriaCobertura = functions
         throw new functions.https.HttpsError('unauthenticated', 'Login requerido.');
     }
     const db = admin.firestore();
-    const { convocatoriaId, response, rejectionReason, etaMinutes } = data;
+    const { convocatoriaId, response, rejectionReason, etaMinutes, responseChannel, deviceId, platform, appVersion } = data;
+    const responseMeta = {
+        ...(responseChannel ? { responseChannel } : {}),
+        ...(deviceId ? { deviceId } : {}),
+        ...(platform ? { platform } : {}),
+        ...(appVersion ? { appVersion } : {}),
+    };
     if (!convocatoriaId || !response) {
         throw new functions.https.HttpsError('invalid-argument', 'convocatoriaId y response son requeridos.');
     }
@@ -733,7 +777,16 @@ exports.responderConvocatoriaCobertura = functions
         }
         const startMs = shiftData.startTime?.toMillis?.() ?? 0;
         if (response === 'ACCEPTED') {
-            await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now });
+            await convRef.update({ status: 'ACCEPTED', respondedAt: now, resolvedAt: now, ...responseMeta });
+            await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, {
+                type: 'RESPUESTA',
+                response: 'ACCEPTED',
+                channel: responseChannel || 'PORTAL',
+                deviceId,
+                platform,
+                appVersion,
+                at: now,
+            });
             const eta = Number.isFinite(Number(etaMinutes))
                 ? Math.min(60, Math.max(1, Math.floor(Number(etaMinutes))))
                 : 30;
@@ -748,7 +801,17 @@ exports.responderConvocatoriaCobertura = functions
             await applyLateReliefNoticeToOutgoing(db, conv.shiftId, shiftData, etaAt).catch(() => { });
         }
         else {
-            await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null });
+            await convRef.update({ status: 'REJECTED', respondedAt: now, rejectionReason: rejectionReason || null, ...responseMeta });
+            await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, {
+                type: 'RESPUESTA',
+                response: 'REJECTED',
+                channel: responseChannel || 'PORTAL',
+                deviceId,
+                platform,
+                appVersion,
+                reason: rejectionReason || undefined,
+                at: now,
+            });
             await (0, markShiftAbsent_1.markShiftAbsent)(db, conv.shiftId, {
                 reason: 'LLEGADA_TARDE_RECHAZADA',
                 by: context.auth.uid,
@@ -757,6 +820,17 @@ exports.responderConvocatoriaCobertura = functions
         return { success: true };
     }
     if (response === 'ACCEPTED') {
+        await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, {
+            type: 'RESPUESTA',
+            response: 'ACCEPTED',
+            channel: responseChannel || 'PORTAL',
+            deviceId,
+            platform,
+            appVersion,
+            at: now,
+        });
+        if (Object.keys(responseMeta).length > 0)
+            await convRef.update(responseMeta);
         const result = await resolverCobertura(db, { ...conv, id: convocatoriaId });
         if (!result.ok) {
             throw new functions.https.HttpsError('failed-precondition', result.message || 'No se puede tomar esta cobertura.');
@@ -767,6 +841,17 @@ exports.responderConvocatoriaCobertura = functions
             status: 'REJECTED',
             respondedAt: now,
             rejectionReason: rejectionReason || null,
+            ...responseMeta,
+        });
+        await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convocatoriaId, {
+            type: 'RESPUESTA',
+            response: 'REJECTED',
+            channel: responseChannel || 'PORTAL',
+            deviceId,
+            platform,
+            appVersion,
+            reason: rejectionReason || undefined,
+            at: now,
         });
         await db.collection('novedades').add({
             type: 'CONVOCATORIA_RECHAZADA',
@@ -922,11 +1007,13 @@ async function simularRespuestasConvocatorias(db, empresaId, opCache = new simul
         const accept = hashVal <= 7;
         try {
             if (accept) {
-                await convDoc.ref.update({ status: 'ACCEPTED', respondedAt: now, respondedBy: 'MODO_DEMO' });
+                await convDoc.ref.update({ status: 'ACCEPTED', respondedAt: now, respondedBy: 'MODO_DEMO', responseChannel: 'DEMO' });
+                await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convDoc.id, { type: 'RESPUESTA', response: 'ACCEPTED', channel: 'DEMO', at: now });
                 await resolverCobertura(db, { ...conv, id: convDoc.id });
             }
             else {
-                await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO' });
+                await convDoc.ref.update({ status: 'REJECTED', respondedAt: now, rejectionReason: 'MODO_DEMO_AUTO', respondedBy: 'MODO_DEMO', responseChannel: 'DEMO' });
+                await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, convDoc.id, { type: 'RESPUESTA', response: 'REJECTED', channel: 'DEMO', reason: 'MODO_DEMO_AUTO', at: now });
                 await avanzarCascadaOrPartialVacante(db, { ...conv, id: convDoc.id }, 'REJECTED');
             }
             respondidas++;
@@ -957,6 +1044,7 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
         try {
             if (conv.type === 'LLEGADA_TARDE') {
                 await d.ref.update({ status: 'TIMEOUT', escalatedAt: now });
+                await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, d.id, { type: 'RESPUESTA', response: 'TIMEOUT', channel: 'TIMEOUT', at: now });
                 const sh = (await db.collection('turnos').doc(conv.shiftId).get()).data();
                 const alreadyHandled = !!(sh?.isPresent || sh?.isCompleted || sh?.lateArrivalAt || sh?.lateArrivalConfirmed);
                 const startMs = sh?.startTime?.toMillis?.() ?? 0;
@@ -971,6 +1059,7 @@ exports.checkConvocatoriaTimeouts = (0, scheduler_1.onSchedule)({
             }
             else {
                 await d.ref.update({ status: 'ESCALATED', escalatedAt: now });
+                await (0, convocatoriaEventos_1.logConvocatoriaEvento)(db, d.id, { type: 'RESPUESTA', response: 'TIMEOUT', channel: 'TIMEOUT', at: now });
                 await avanzarCascadaOrPartialVacante(db, { ...conv, id: d.id }, 'TIMEOUT');
             }
         }
