@@ -5,17 +5,14 @@
  */
 import { calculateMonthlyBreakdown } from '@/lib/servicios/slaHoursCalculator';
 import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
-import {
-  buildDemandaByObjective,
-  coveragePlannedFromDemandaRow,
-} from '@/lib/analisis/analisisDemanda';
+import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
 import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { executedBillableHoursByFranja } from '@/lib/crm/executedBillableHoursByFranja';
-import { calcPlanificadorShiftHours } from '@/lib/planificacion/planningScheduledHours';
 import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
+  sumPublishedPlanHours,
 } from '../../packages/hours-core/src/index';
 import { assignWorkedShares, classifySlaBucket } from './slaPolicy';
 import {
@@ -685,7 +682,7 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
         bumpLicencia(row, code, jornadaPagada(t));
         continue;
       }
-      const hs = calcPlanificadorShiftHours(t);
+      const hs = sumPublishedPlanHours([t], field === 'planDraft' ? { anyDraftState: true } : undefined).hours;
       if (!(hs > 0)) continue;
       const when = dateStr(t.startTime);
       const day = when && when.startsWith(periodKey) ? when : ymd(year, month, 1);
@@ -839,7 +836,9 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       objectiveId: r.id, objectiveName: r.name || r.id,
       puestoId: '_', puestoName: '_', ...blankMetrics(),
     });
-    m.planPublished = r1(coveragePlannedFromDemandaRow(r));
+    m.planPublished = r1(sumPublishedPlanHours(
+      publishedTurnos.filter((t) => String(t.objectiveId || '').trim() === r.id),
+    ).hours);
     const who = resolveClient(r.id, null);
     if (who.clientId) {
       m.clientId = who.clientId;
@@ -853,13 +852,46 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
       objectiveId: r.id, objectiveName: r.name || r.id,
       puestoId: '_', puestoName: '_', ...blankMetrics(),
     });
-    m.planDraft = r1(coveragePlannedFromDemandaRow(r));
+    m.planDraft = r1(sumPublishedPlanHours(
+      draftTurnos.filter((t) => String(t.objectiveId || '').trim() === r.id),
+      { anyDraftState: true },
+    ).hours);
     const who = resolveClient(r.id, null);
     if (who.clientId) {
       m.clientId = who.clientId;
       m.clientName = who.clientName || m.clientName;
     }
   }
+
+  const stampPlan = (list: any[], field: 'planPublished' | 'planDraft', anyDraftState: boolean) => {
+    const grouped = new Map<string, any[]>();
+    for (const t of list) {
+      const id = String(t.objectiveId || '').trim();
+      if (!id) continue;
+      const arr = grouped.get(id) || [];
+      arr.push(t);
+      grouped.set(id, arr);
+    }
+    for (const [id, arr] of grouped) {
+      const sample = arr[0] || {};
+      const m = ensureObj({
+        empresaId, periodKey, date: ymd(year, month, 1),
+        clientId: String(sample.clientId || ''),
+        clientName: String(sample.clientName || ''),
+        objectiveId: id,
+        objectiveName: String(sample.objectiveName || id),
+        puestoId: '_', puestoName: '_', ...blankMetrics(),
+      });
+      m[field] = r1(sumPublishedPlanHours(arr, anyDraftState ? { anyDraftState: true } : undefined).hours);
+      const who = resolveClient(id, null);
+      if (who.clientId) {
+        m.clientId = who.clientId;
+        m.clientName = who.clientName || m.clientName;
+      }
+    }
+  };
+  stampPlan(publishedTurnos, 'planPublished', false);
+  stampPlan(draftTurnos, 'planDraft', true);
 
   for (const d of days) {
     const m = ensureObj(d);

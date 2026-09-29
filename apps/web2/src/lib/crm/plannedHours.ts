@@ -1,6 +1,7 @@
 import { clientRowMatchesClient, type ClientRef } from './clientRowMatch';
 import { getDateKeyInTimezone, resolveTurnoScheduleDateKey, toDateSafe as toDateSafeCore } from './crmDateUtils';
 import { isProformaVacancyShift } from './proformaVacancy';
+import { sumPublishedPlanHours } from '@cosp/hours-core';
 import {
   calcPlanificadorShiftHours,
   calcPlanningSlaReconciliationHours,
@@ -236,10 +237,16 @@ export function sumPlannedHoursForObjective(
   turnos: any[],
   objectiveId: string,
   range: PlannedHoursRange,
-  slaExclusion?: SlaExclusionContext,
-  slaCodeHoursHint?: Record<string, number>,
+  _slaExclusion?: SlaExclusionContext,
+  _slaCodeHoursHint?: Record<string, number>,
 ): number {
-  return sumPlannedCellHoursForObjective(turnos, objectiveId, range, slaExclusion, 'billable', slaCodeHoursHint);
+  const oid = String(objectiveId || '').trim();
+  const list = turnos.filter((t) => {
+    if (String(t?.objectiveId || '').trim() !== oid) return false;
+    const start = toDateSafe(t.startTime);
+    return !!start && shiftPlannedStartInRange(start, range);
+  });
+  return sumPublishedPlanHours(list).hours;
 }
 
 function sumPlannedCellHoursForClient(
@@ -296,31 +303,26 @@ export function sumPlannedHoursForClient(
   turnos: any[],
   client: ClientRef,
   range: PlannedHoursRange,
-  slaExclusion?: SlaExclusionContext,
-  slaCodeHoursHint?: Record<string, number>,
-  slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
+  _slaExclusion?: SlaExclusionContext,
+  _slaCodeHoursHint?: Record<string, number>,
+  _slaCodeHoursHintByObjective?: Record<string, Record<string, number>>,
 ): number {
-  return sumPlannedCellHoursForClient(
-    turnos, client, range, slaExclusion, 'billable', slaCodeHoursHint, slaCodeHoursHintByObjective,
-  );
+  const ids = objectiveIdsForClient(client);
+  const list = turnos.filter((t) => {
+    const oid = String(t?.objectiveId || '').trim();
+    if (!ids.has(oid) && !turnoMatchesAnyClientObjective(t, client)) return false;
+    const start = toDateSafe(t.startTime);
+    return !!start && shiftPlannedStartInRange(start, range);
+  });
+  return sumPublishedPlanHours(list).hours;
 }
 
-export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange, slaCodeHoursHint?: Record<string, number>): number {
-  const groups = new Map<string, any[]>();
-  for (const t of turnos) {
-    if (!isCrmPlannedEligibleShift(t)) continue;
-    pushTurnoIntoPlanningCellGroups(groups, t, range, (row, dateKey) => {
-      const objId = String(row.objectiveId || 'sin-obj');
-      const empId = String(row.employeeId || 'unknown');
-      return `${objId}_${empId}_${dateKey}`;
-    });
-  }
-  let total = 0;
-  for (const rows of groups.values()) {
-    const hrs = coalescePlannedCellBillableHours(rows, slaCodeHoursHint);
-    if (hrs > 0) total += hrs;
-  }
-  return total;
+export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange, _slaCodeHoursHint?: Record<string, number>): number {
+  const list = turnos.filter((t) => {
+    const start = toDateSafe(t.startTime);
+    return !!start && shiftPlannedStartInRange(start, range);
+  });
+  return sumPublishedPlanHours(list).hours;
 }
 
 export function resolveClientIdForTurno(

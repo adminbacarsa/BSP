@@ -70,6 +70,12 @@ export {
 } from './motors/planning/planningTurnoCoalesce';
 
 export {
+  sumPublishedPlanHours,
+  type PublishedPlanHours,
+  type PublishedPlanCodeRow,
+} from './motors/planning/publishedPlanHours';
+
+export {
   PLANNING_NON_BILLABLE_CODES,
   normalizePlanningPositionName,
 } from './motors/planning/positionCoverageUnits';

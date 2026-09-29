@@ -7,13 +7,7 @@ import {
   parsePlanificacionEstadoDocId,
   planificacionPublishLookupKey,
 } from '@/lib/multiempresa';
-import {
-  buildDemandaByObjective,
-  coveragePlannedFromDemandaRow,
-} from '@/lib/analisis/analisisDemanda';
-import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalance';
-import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
-import { pickVigenteSlasForPeriod } from '@/lib/crm/slaObjectiveHours';
+import { sumPublishedPlanHours } from '@cosp/hours-core';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -189,20 +183,6 @@ export async function loadCronogramaOverview(params: {
   const turnosByObjective = new Map<string, any[]>();
   const activityFromShifts = new Map<string, ActivityMeta>();
 
-  const svcSnap = await getDocs(
-    empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa),
-  );
-  const slaRaw: any[] = [];
-  svcSnap.docs.forEach((d) => {
-    const data = { id: d.id, ...d.data() };
-    if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
-    slaRaw.push(data);
-  });
-  const vigenteSlas = pickVigenteSlasForPeriod(slaRaw, firstDay, lastDay);
-  const objectiveAliases = buildObjectiveAliasesFromSla(vigenteSlas);
-  const slaExclusionCtx = buildSlaExclusionContext(vigenteSlas, firstDay, lastDay);
-  const plannedRange = { start: firstDay, end: lastDay };
-
   const turnosQ = scopeEmpresa
     ? query(
         collection(db, 'turnos'),
@@ -243,19 +223,12 @@ export async function loadCronogramaOverview(params: {
     activityFromShifts.set(objId, pickLaterActivity(prev, createdAt, actor));
   });
 
-  const allObjectiveTurnos = [...turnosByObjective.values()].flat();
-  const demandaOverview = buildDemandaByObjective({
-    turnos: allObjectiveTurnos,
-    ausenciasStats: null,
-    vigenteServices: vigenteSlas,
-    periodStart: firstDay,
-    periodEnd: lastDay,
-    objectiveAliases,
-    slaExclusionCtx,
-  });
-  const plannedByObjective = new Map<string, number>(
-    demandaOverview.rows.map((r) => [r.id, coveragePlannedFromDemandaRow(r)]),
-  );
+  const plannedByObjective = new Map<string, number>();
+  const draftByObjective = new Map<string, number>();
+  for (const [objId, list] of turnosByObjective) {
+    plannedByObjective.set(objId, sumPublishedPlanHours(list).hours);
+    draftByObjective.set(objId, sumPublishedPlanHours(list, { onlyDraft: true }).hours);
+  }
 
   const rows: CronogramaOverviewRow[] = [];
 
@@ -279,8 +252,8 @@ export async function loadCronogramaOverview(params: {
         shiftActivity?.lastModifiedBy ?? '',
       );
       const estado = deriveCronogramaEstado(!!(pub?.publishedAt), counts.draft, counts.published);
-          const plannedHours = plannedByObjective.get(objectiveId) || 0;
-      const planDraftHours = 0;
+      const plannedHours = plannedByObjective.get(objectiveId) || 0;
+      const planDraftHours = draftByObjective.get(objectiveId) || 0;
 
       rows.push({
         clientId: client.id,

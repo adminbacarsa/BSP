@@ -17,10 +17,8 @@ import {
   isVacantShift,
   shiftStartMs,
 } from '@/lib/analisis/analisisQueries';
-import {
-  buildDemandaByObjective,
-  coveragePlannedFromDemandaRow,
-} from '@/lib/analisis/analisisDemanda';
+import { buildDemandaByObjective } from '@/lib/analisis/analisisDemanda';
+import { sumPublishedPlanHours } from '@cosp/hours-core';
 import { demandaFromHoursBalances, financieraFromHoursBalances } from '@/lib/analisis/analisisFromHoursBalance';
 import {
   buildAnalisisFinanciera,
@@ -1108,6 +1106,31 @@ export default function AnalisisPage() {
     [turnosLive, extractReady, extractRows, liveSlaByObjective, ausenciasStats, vigenteServices, objectiveAliasesFromServices, slaExclusionCtx, periodKey],
   );
 
+  const planMesh = useMemo(() => {
+    const byObj = new Map<string, any[]>();
+    for (const t of turnosLive) {
+      const id = String(t?.objectiveId || '').trim();
+      if (!id) continue;
+      const list = byObj.get(id) || [];
+      list.push(t);
+      byObj.set(id, list);
+    }
+    const map = new Map<string, number>();
+    const draftMap = new Map<string, number>();
+    for (const [id, list] of byObj) {
+      map.set(id, sumPublishedPlanHours(list).hours);
+      draftMap.set(id, sumPublishedPlanHours(list, { onlyDraft: true }).hours);
+    }
+    const total = sumPublishedPlanHours(turnosLive).hours;
+    const draft = sumPublishedPlanHours(turnosLive, { onlyDraft: true }).hours;
+    return { map, draftMap, total, draft };
+  }, [turnosLive]);
+
+  const planMeshHours = (row?: { id?: string } | null) => {
+    if (!row?.id || row.id === '_total') return planMesh.total;
+    return planMesh.map.get(String(row.id)) || 0;
+  };
+
   const finBases = useMemo(
     () => {
       const liveOpts = {
@@ -1260,11 +1283,13 @@ export default function AnalisisPage() {
         ledgerHours: periodMode === 'month' && ledgerMonth?.empresa
           ? {
             sla: officialHoursFromEmpresa(ledgerMonth.empresa).sla,
-            planPublished: planMode === 'draft'
-              ? officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
-              : planMode === 'both'
-                ? officialHoursFromEmpresa(ledgerMonth.empresa).planPublished + officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
-                : officialHoursFromEmpresa(ledgerMonth.empresa).planPublished,
+            planPublished: turnosLive.length
+              ? (planMode === 'draft' ? planMesh.draft : planMode === 'both' ? planMesh.total + planMesh.draft : planMesh.total)
+              : (planMode === 'draft'
+                ? officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
+                : planMode === 'both'
+                  ? officialHoursFromEmpresa(ledgerMonth.empresa).planPublished + officialHoursFromEmpresa(ledgerMonth.empresa).planDraft
+                  : officialHoursFromEmpresa(ledgerMonth.empresa).planPublished),
             worked: officialHoursFromEmpresa(ledgerMonth.empresa).worked,
           }
           : undefined,
@@ -1278,7 +1303,7 @@ export default function AnalisisPage() {
           modo: bolsaRealista.modo,
         },
       }),
-    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista, ledgerMonth, planMode, periodMode],
+    [employees.length, capHsPerGuardPeriod, demanda.totals, ausenciasStats, turnos, bolsaRealista, ledgerMonth, planMode, periodMode, turnosLive.length, planMesh],
   );
 
   const vacacionesCapacidad = useMemo(() => {
@@ -1931,7 +1956,7 @@ export default function AnalisisPage() {
   const gap                = theoretical.totalGuards - availableGuards;
   /** Misma fuente que Demanda / Informe (no el motor `actual` de drill-down). */
   const coveragePct = demanda.totals.slaHours > 0
-    ? Math.round(coveragePlannedFromDemandaRow(demanda.totals) / demanda.totals.slaHours * 100)
+    ? Math.round(planMeshHours(demanda.totals) / demanda.totals.slaHours * 100)
     : 0;
   const vacancyPct = demanda.totals.slaHours > 0
     ? Math.round(demanda.totals.vacantHours / demanda.totals.slaHours * 100)
@@ -1940,7 +1965,7 @@ export default function AnalisisPage() {
     () =>
       demanda.rows
         .map((r) => {
-          const planned = coveragePlannedFromDemandaRow(r);
+          const planned = planMeshHours(r);
           const vacant = Math.round(r.vacantHours || 0);
           const total = planned + vacant;
           return {
@@ -2004,7 +2029,7 @@ export default function AnalisisPage() {
   // ── Chart data ───────────────────────────────────────────────────────────────
   // Capacidad: donut — misma fuente que Demanda (plan facturable + vacante vs SLA)
   const coverageDonut = useMemo(() => {
-    const prog = coveragePlannedFromDemandaRow(demanda.totals);
+    const prog = planMeshHours(demanda.totals);
     const vac = Math.round(demanda.totals.vacantHours || 0);
     const sla = Math.round(demanda.totals.slaHours || theoretical.totalHours || 0);
     const noSrv = Math.max(0, sla - prog - vac);
@@ -2013,7 +2038,7 @@ export default function AnalisisPage() {
       { name: 'Vacantes', value: vac, color: '#f59e0b' },
       { name: 'Gap vs SLA', value: noSrv, color: '#e2e8f0' },
     ].filter((d) => d.value > 0);
-  }, [demanda.totals, theoretical.totalHours]);
+  }, [demanda.totals, theoretical.totalHours, planMesh]);
 
   // Capacidad: barras por servicio SLA + demanda del objetivo
   const capacidadBars = useMemo(() => theoretical.active.map((srv) => {
@@ -2023,10 +2048,10 @@ export default function AnalisisPage() {
     return {
       name: shortName(srv.objectiveName || srv.clientName, 13),
       Teóricas: srv.monthHours,
-      Programadas: row ? Math.round(coveragePlannedFromDemandaRow(row)) : 0,
+      Programadas: row ? Math.round(planMeshHours(row)) : 0,
       Vacantes: Math.round(row?.vacantHours ?? 0),
     };
-  }), [theoretical.active, demanda.rows, objectiveAliasesFromServices]);
+  }), [theoretical.active, demanda.rows, objectiveAliasesFromServices, planMesh]);
 
   const clientIdByObjectiveId = useMemo(() => {
     const m = new Map<string, string>();
@@ -3883,7 +3908,7 @@ export default function AnalisisPage() {
                             || r.id === String(srv.objectiveId ?? '')
                             || r.name === srv.objectiveName,
                           );
-                          const scheduled = row ? coveragePlannedFromDemandaRow(row) : 0;
+                          const scheduled = row ? planMeshHours(row) : 0;
                           const vacant = Math.round(row?.vacantHours ?? 0);
                           const cov = srv.monthHours>0 ? Math.round(scheduled/srv.monthHours*100) : 0;
                           return (
@@ -3939,7 +3964,7 @@ export default function AnalisisPage() {
                           <td className="p-4 text-right" colSpan={2}>Total</td>
                           <td className="p-4 text-center text-emerald-400">{(demanda.totals.slaHours || theoretical.totalHours).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center">{theoretical.totalGuards}</td>
-                          <td className="p-4 text-center">{Math.round(coveragePlannedFromDemandaRow(demanda.totals)).toLocaleString('es-AR')}</td>
+                          <td className="p-4 text-center">{Math.round(planMeshHours(demanda.totals)).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center">{coveragePct}%</td>
                           <td className="p-4 text-center text-amber-400">{Math.round(demanda.totals.vacantHours).toLocaleString('es-AR')}</td>
                           <td className="p-4 text-center text-violet-300">{theoretical.totalSurplus.toLocaleString('es-AR')} hs</td>

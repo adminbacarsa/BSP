@@ -177,7 +177,7 @@ import {
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
 /** Incrementar cuando cambia la fórmula de KPIs. v10: primer pintado = extracto + SLA vivo. */
-const CRM_DASHBOARD_METRICS_VERSION = 10;
+const CRM_DASHBOARD_METRICS_VERSION = 11;
 
 function latestBalanceUpdatedAt(rows: Array<{ updatedAt?: unknown }>): Date | null {
   let latest: Date | null = null;
@@ -1007,8 +1007,38 @@ export default function CRMPage() {
         if (book.empresa && runId === metricsRunRef.current) {
           const official = officialHoursFromEmpresa(book.empresa);
           const byClient = byClientMetricsFromLedger(book, planMode);
-          const { metrics } = storePeriodMetrics(selectedPeriodKey, byClient);
           const { start, end } = getRangeDates();
+          const clientRefsPlan: ClientRef[] = clients.map((c) => ({
+            id: c.id,
+            name: c.name,
+            legalName: c.legalName,
+            objetivos: c.objetivos || [],
+          }));
+          let totalPlanned = planMode === 'draft'
+            ? official.planDraft
+            : planMode === 'both'
+              ? official.planPublished + official.planDraft
+              : official.planPublished;
+          if (planMode === 'published' && start && end) {
+            const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+            const turnosPlan = await fetchCrmDashboardTurnos(
+              empresaId,
+              scopeEmpresa,
+              start,
+              end,
+              clientRefsPlan,
+              migracionCompleta,
+            );
+            totalPlanned = 0;
+            for (const c of clientRefsPlan) {
+              const planned = Math.round(sumPlannedHoursForClient(turnosPlan, c, { start, end }));
+              const row = byClient[c.id] || { sla: 0, planned: 0, real: 0 };
+              row.planned = planned;
+              byClient[c.id] = row;
+              totalPlanned += planned;
+            }
+          }
+          const { metrics } = storePeriodMetrics(selectedPeriodKey, byClient);
           const slaRows = await fetchSlaRowsForCrmDashboard(
             clients.map((c) => ({ id: c.id, name: c.name, legalName: c.legalName, objetivos: c.objetivos || [] })),
             { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), migracionCompleta },
@@ -1018,11 +1048,7 @@ export default function CRMPage() {
           setClientMetricsMap(metrics);
           setGlobalMetrics({
             totalSold: official.sla,
-            totalPlanned: planMode === 'draft'
-              ? official.planDraft
-              : planMode === 'both'
-                ? official.planPublished + official.planDraft
-                : official.planPublished,
+            totalPlanned,
             totalExecuted: official.worked,
             criticalClients: [],
           });

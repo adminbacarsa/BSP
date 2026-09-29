@@ -8,8 +8,6 @@ import {
 } from '@/lib/planificacion/planningCronogramaOverview';
 import {
   HOURS_LEDGER_PLAN_OPTIONS,
-  loadHoursLedgerOrPreview,
-  periodKeyOf,
   planHoursOf,
   type HoursLedgerPlanMode,
 } from '@/lib/hoursLedger/hoursLedgerRead';
@@ -98,21 +96,7 @@ export default function PlanningCronogramasOverviewModal({
         month,
         clients,
       });
-      try {
-        const book = await loadHoursLedgerOrPreview(empresaId, periodKeyOf(year, month));
-        const byOid = new Map(book.objectives.map((o) => [o.objectiveId, o]));
-        setRows(data.map((r) => {
-          const led = byOid.get(r.objectiveId);
-          if (!led) return r;
-          return {
-            ...r,
-            plannedHours: led.planPublished || 0,
-            planDraftHours: led.planDraft || 0,
-          };
-        }));
-      } catch {
-        setRows(data);
-      }
+      setRows(data);
     } catch (e) {
       console.error('[plan] cronograma overview', e);
       setRows([]);

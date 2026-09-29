@@ -321,6 +321,7 @@ import {
     planningShiftBillableBreakdown,
 } from '@/lib/planificacion/planningScheduledHours';
 import { computePlanningMonthHoursBreakdown } from '@/lib/planificacion/planningMonthHoursBreakdown';
+import { sumPublishedPlanHours } from '@cosp/hours-core';
 import {
     billableHoursForPlanningCell,
     resolveTurnosForPlanningCellKey,
@@ -2436,6 +2437,23 @@ export default function PlanificacionPage() {
         });
         return result;
     }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap, selectedObjective, slaCodeHoursHint, positionStructure, selectedGrupo, grupoUnifiedMode, planningSlaExclusion]);
+
+    const publishedPlanMesh = useMemo(() => {
+        const seen = new Set<string>();
+        const list: any[] = [];
+        const take = (t: any) => {
+            if (!t || typeof t !== 'object') return;
+            const id = String(t.id || '');
+            if (id && seen.has(id)) return;
+            if (id) seen.add(id);
+            const ao = String(t.objectiveId || '');
+            if (selectedObjective && ao && ao !== String(selectedObjective)) return;
+            list.push(t);
+        };
+        Object.values(cellTurnosMap).forEach((arr) => { if (Array.isArray(arr)) arr.forEach(take); });
+        Object.values(shiftsMap).forEach(take);
+        return sumPublishedPlanHours(list);
+    }, [cellTurnosMap, shiftsMap, selectedObjective]);
 
     /** Tramos ext/adel del mes (no cierran contra horas vendidas SLA). */
     const objectiveMonthCoverageExtraHours = useMemo(() => {
@@ -12640,7 +12658,7 @@ export default function PlanificacionPage() {
                     const sourceHours = hoursMode === 'cct' ? empCctCurrentHours : empMonthlyHours;
                     const totalHrs = Object.values(sourceHours).reduce((a: number, b: any) => a + (b || 0), 0);
                     const slaCloseHours = hoursMode === 'mes' ? objectiveMonthSlaBaseHours : totalHrs;
-                    const facturableTotalHrs = totalHrs;
+                    const facturableTotalHrs = hoursMode === 'cct' ? totalHrs : publishedPlanMesh.hours;
                     const nativeAssignedHours = displayedEmployees
                         .filter((emp: any) => isEmployeeNativeToObjective(emp))
                         .reduce((sum: number, emp: any) => sum + (sourceHours[emp.id] || 0), 0);
@@ -15623,7 +15641,7 @@ export default function PlanificacionPage() {
                                             : getObjectiveName(selectedObjective)}
                                     </h3>
                                     <p className="text-xs text-slate-500 mt-1">
-                                        Mes calendario · Misma lógica que pre-factura (facturable) y cierre SLA (base sin ext/adel).
+                                        Mes calendario · Plan publicado de la malla (jornada del puesto).
                                     </p>
                                 </div>
                                 <button type="button" onClick={() => setShowHoursBreakdownModal(false)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-xl"><X size={18}/></button>
@@ -15634,8 +15652,10 @@ export default function PlanificacionPage() {
                                     const legajoSum = Math.round(Object.values(empMonthlyHours).reduce((a: number, v: number) => a + (v || 0), 0));
                                     const vend = (selectedGrupo && grupoUnifiedMode && grupoTotalVendidas > 0) ? grupoTotalVendidas : slaVendidas;
                                     const deltaBaseVsVend = vend > 0 ? Math.round(b.baseSla - vend) : 0;
-                                    const deltaFactVsVend = vend > 0 ? Math.round(b.gross - vend) : 0;
-                                    const codes = Object.entries(b.byCodeGross).sort((a, c) => c[1] - a[1]);
+                                    const deltaFactVsVend = vend > 0 ? Math.round(publishedPlanMesh.hours - vend) : 0;
+                                    const codes = Object.entries(publishedPlanMesh.byCode)
+                                        .map(([code, v]) => [code, v.hours] as [string, number])
+                                        .sort((a, c) => c[1] - a[1]);
                                     return (
                                         <>
                                             {planningAuxiliarySummary && (planningAuxiliarySummary.hasEnc || planningAuxiliarySummary.hasEvt) && (
@@ -15668,9 +15688,13 @@ export default function PlanificacionPage() {
                                                     <p className="text-[10px] text-slate-500">Suma filas de la grilla</p>
                                                 </div>
                                                 <div className="rounded-xl border border-indigo-200 p-3 bg-indigo-50/50">
-                                                    <p className="text-[9px] font-black uppercase text-indigo-600">Facturable contado</p>
-                                                    <p className="text-xl font-black text-indigo-700">{b.gross}h</p>
-                                                    <p className="text-[10px] text-slate-500">Sin días 🚫 excluidos</p>
+                                                    <p className="text-[9px] font-black uppercase text-indigo-600">Plan publicado</p>
+                                                    <p className="text-xl font-black text-indigo-700">{publishedPlanMesh.hours}h</p>
+                                                    <p className="text-[10px] text-slate-500">
+                                                        Malla: jornada del puesto
+                                                        {publishedPlanMesh.uncodedCount > 0 ? ` · ${publishedPlanMesh.uncodedCount} sin código (${publishedPlanMesh.uncodedHours}h)` : ''}
+                                                        {publishedPlanMesh.ftCount > 0 ? ` · FT ${publishedPlanMesh.ftHours}h` : ''}
+                                                    </p>
                                                 </div>
                                                 <div className="rounded-xl border border-teal-200 p-3 bg-teal-50/50">
                                                     <p className="text-[9px] font-black uppercase text-teal-700">Base cierre SLA</p>
