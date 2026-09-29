@@ -107,6 +107,7 @@ export type PersonaHoursBreakdown = {
   cobertura: number;
   ft: number;
   tura: number;
+  eventos: number;
   planificadas: number;
 };
 
@@ -123,6 +124,7 @@ function emptyBreakdown(planificadas = 0): PersonaHoursBreakdown {
     cobertura: 0,
     ft: 0,
     tura: 0,
+    eventos: 0,
     planificadas,
   };
 }
@@ -139,10 +141,13 @@ function breakdownForWorked(
   if (isFT) {
     return { ...emptyBreakdown(0), totales: worked, ft: worked, planificadas: 0 };
   }
+  const origin = String(data.origin || '').toUpperCase();
+  if (code === 'EV' || code === 'EVT' || origin === 'EVENTO') {
+    return { ...emptyBreakdown(planificadas), totales: worked, eventos: worked };
+  }
   if (code === 'TURA' || code === 'RFZ') {
     return { ...emptyBreakdown(planificadas), totales: worked, tura: worked };
   }
-  const origin = String(data.origin || '').toUpperCase();
   const coverageType = String(data.coverageType || '').toUpperCase();
   const isCobertura = origin === 'OPERATIONS_COVERAGE'
     && data.coverageHoursOnSource !== true
