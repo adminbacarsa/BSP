@@ -31,7 +31,31 @@ export type HoursLedgerMonthRow = {
   ext?: number;
   adv?: number;
   novedadPaga?: number;
+  licV?: number;
+  licE?: number;
+  licL?: number;
+  licA?: number;
+  licPG?: number;
+  licSUS?: number;
+  licSGS?: number;
+  ausenciaHoras?: number;
+  ausenciaTurnos?: number;
+  ausenciaLegajos?: number;
+  uncoveredAusencia?: number;
+  uncoveredRetiro?: number;
+  uncoveredFaltaPlan?: number;
 };
+
+/** Códigos de la tarjeta Licencias, en el orden que se muestran. */
+export const HOURS_LEDGER_LIC_CODES = [
+  { key: 'licV', label: 'V' },
+  { key: 'licE', label: 'E' },
+  { key: 'licL', label: 'L' },
+  { key: 'licA', label: 'ART' },
+  { key: 'licPG', label: 'PG' },
+  { key: 'licSUS', label: 'SUS' },
+  { key: 'licSGS', label: 'SGS' },
+] as const;
 
 export type HoursLedgerSource = 'libro' | 'preview' | 'anterior' | 'vacio' | 'calculando';
 
@@ -94,6 +118,19 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     ext: Number(raw.ext) || 0,
     adv: Number(raw.adv) || 0,
     novedadPaga: Number(raw.novedadPaga) || 0,
+    licV: Number(raw.licV) || 0,
+    licE: Number(raw.licE) || 0,
+    licL: Number(raw.licL) || 0,
+    licA: Number(raw.licA) || 0,
+    licPG: Number(raw.licPG) || 0,
+    licSUS: Number(raw.licSUS) || 0,
+    licSGS: Number(raw.licSGS) || 0,
+    ausenciaHoras: Number(raw.ausenciaHoras) || 0,
+    ausenciaTurnos: Number(raw.ausenciaTurnos) || 0,
+    ausenciaLegajos: Number(raw.ausenciaLegajos) || 0,
+    uncoveredAusencia: Number(raw.uncoveredAusencia) || 0,
+    uncoveredRetiro: Number(raw.uncoveredRetiro) || 0,
+    uncoveredFaltaPlan: Number(raw.uncoveredFaltaPlan) || 0,
   };
 }
 
