@@ -1776,9 +1776,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const catalogStats = useMemo(() => ({
     totalObjectives: rawCatalog.length,
     withSla: rawCatalog.filter((r) => r.hasSlaInMonth).length,
+    serviceNoOp: rawCatalog.filter((r) => r.hasServiceWithoutOperation).length,
     closedSla: rawCatalog.filter((r) => r.hasClosedSlaInMonth).length,
-    withoutSla: rawCatalog.filter((r) => !r.hasSlaInMonth && !r.hasClosedSlaInMonth).length,
+    withoutSla: rawCatalog.filter((r) => !r.hasSlaInMonth && !r.hasClosedSlaInMonth && !r.hasServiceWithoutOperation).length,
   }), [rawCatalog]);
+  const noOperationThisMonth = !ledgerBusy && catalogStats.withSla === 0 && !srvSearch.trim()
+    && srvCatalogFilter !== 'without_sla' && srvCatalogFilter !== 'closed_sla' && srvCatalogFilter !== 'service_no_op';
 
 
   const kpiHistory = useMemo(() => {
@@ -2068,18 +2071,21 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               {([
                 { v: 'all' as const, label: 'Todos' },
                 { v: 'with_sla' as const, label: '● En operación' },
+                { v: 'service_no_op' as const, label: '◐ Con servicio, sin operación' },
                 { v: 'closed_sla' as const, label: '🔒 Cerrados' },
                 { v: 'without_sla' as const, label: '○ Sin servicio' },
               ]).map(({ v, label }) => (
                 <button key={v} onClick={() => setSrvCatalogFilter(v)}
                   title={
                     v === 'with_sla'
-                      ? `Contrato abierto + cronograma publicado en ${kpiCurrent.label} (como Operaciones)`
-                      : v === 'closed_sla'
-                        ? `Contrato cerrado que cubre ${kpiCurrent.label} (solo lectura)`
-                        : v === 'without_sla'
-                          ? `Sin SLA operativo ni cerrado en ${kpiCurrent.label}`
-                          : undefined
+                      ? `Contrato activo + cronograma publicado en ${kpiCurrent.label}`
+                      : v === 'service_no_op'
+                        ? `Contrato activo vigente en ${kpiCurrent.label} sin cronograma publicado`
+                        : v === 'closed_sla'
+                          ? `Contrato cerrado que cubre ${kpiCurrent.label}`
+                          : v === 'without_sla'
+                            ? `Sin ningún contrato en ${kpiCurrent.label}`
+                            : undefined
                   }
                   className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${srvCatalogFilter === v ? 'bg-white dark:bg-slate-700 text-indigo-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
                 >
@@ -2177,9 +2183,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             {listMode === 'clients'
               ? `${clientGroups.length} cliente${clientGroups.length !== 1 ? 's' : ''} · ${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`
               : `${objectiveCatalog.length} objetivo${objectiveCatalog.length !== 1 ? 's' : ''}`}
-            {` · ${catalogStats.withSla} en operación · ${catalogStats.closedSla} cerrados · ${catalogStats.withoutSla} sin servicio`}
+            {` · ${catalogStats.withSla} en operación · ${catalogStats.serviceNoOp} con servicio sin operación · ${catalogStats.closedSla} cerrados · ${catalogStats.withoutSla} sin servicio`}
             {srvSearch && ` · búsqueda: "${srvSearch}"`}
             {srvCatalogFilter === 'with_sla' && ` · solo en operación (${kpiCurrent.label})`}
+            {srvCatalogFilter === 'service_no_op' && ` · con servicio sin operación (${kpiCurrent.label})`}
             {srvCatalogFilter === 'closed_sla' && ` · solo cerrados (${kpiCurrent.label})`}
             {srvCatalogFilter === 'without_sla' && ` · sin servicio en ${kpiCurrent.label}`}
             {srvCatalogFilter === 'closed_sla' && (
@@ -2196,7 +2203,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 <RotateCw size={20} className="animate-spin mr-2"/> Cargando...
               </div>
             ) : clientGroups.length === 0 ? (
-              <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron clientes.</div>
+              <div className="text-center py-16 text-slate-400 text-sm font-bold">
+                {noOperationThisMonth ? 'Sin servicios en operación este mes.' : 'No se encontraron clientes.'}
+              </div>
             ) : (
               <div className="space-y-3">
                 {clientGroups.map(cg => {
@@ -2225,6 +2234,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                               <MapPin size={9}/> {cg.rows.length} objetivo{cg.rows.length !== 1 ? 's' : ''}
                               {cg.withSla > 0 && (
                                 <span className="text-emerald-500">({cg.withSla} con servicio)</span>
+                              )}
+                              {cg.serviceNoOp > 0 && (
+                                <span className="text-amber-600">({cg.serviceNoOp} sin operación)</span>
                               )}
                               {cg.withoutSla > 0 && (
                                 <span className="text-amber-500">({cg.withoutSla} sin servicio)</span>
@@ -2295,6 +2307,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     <span className="text-[9px] font-mono font-bold text-slate-400">
                                       {currentSrv.startDate} → {currentSrv.endDate}
                                     </span>
+                                    {row.hasServiceWithoutOperation && (
+                                      <span className="text-[9px] font-black text-amber-600 uppercase">Sin cronograma publicado</span>
+                                    )}
                                     {group.services.length > 1 && (
                                       <span className="text-[9px] font-black text-indigo-400">{group.services.length} contratos</span>
                                     )}
@@ -2359,7 +2374,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             </div>
           )}
           {listMode === 'objectives' && !loading && objectiveCatalog.length === 0 && (
-            <div className="text-center py-16 text-slate-400 text-sm font-bold">No se encontraron objetivos para este filtro.</div>
+            <div className="text-center py-16 text-slate-400 text-sm font-bold">
+              {noOperationThisMonth ? 'Sin servicios en operación este mes.' : 'No se encontraron objetivos para este filtro.'}
+            </div>
           )}
           {listMode === 'objectives' && !loading && objectiveCatalog.length > 0 && (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
