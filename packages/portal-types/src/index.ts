@@ -32,6 +32,8 @@ export type Shift = {
   isFranco?: boolean;
   isFrancoTrabajado?: boolean;
   checkInTime?: FirestoreTimestampLike;
+  /** Hora real de la fichada (auditoría). El pago usa realStartTime. */
+  checkInAt?: FirestoreTimestampLike;
   checkInRequestedAt?: FirestoreTimestampLike;
   checkInRequestStatus?: string;
   lateArrivalAt?: FirestoreTimestampLike;

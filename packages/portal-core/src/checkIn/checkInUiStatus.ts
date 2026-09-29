@@ -59,34 +59,21 @@ export function resolveCheckInUiStatus(
 
   if (isShiftPresent(shift)) {
     const isOpsCoverage = String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
-    const checkInAt = toDate(shift.checkInTime);
-    const turnoStart = toDate(shift.startTime) ?? checkInAt;
-    if (isOpsCoverage && checkInAt) {
-      return {
-        status: 'present',
-        title: `Presente desde las ${formatTimeAr(checkInAt)}`,
-        subtitle: turnoStart
-          ? `Turno asignado ${formatTimeAr(turnoStart)} · Cobertura`
-          : 'Cobertura confirmada',
-        tone: 'success',
-      };
-    }
+    const punch = toDate(shift.checkInAt) ?? toDate(shift.checkInTime);
     const plannedStart = toDate(shift.startTime);
-    const realStart = toDate((shift as { realStartTime?: Parameters<typeof toDate>[0] }).realStartTime) ?? checkInAt;
-    const lateMin =
-      plannedStart && realStart ? Math.round((realStart.getTime() - plannedStart.getTime()) / 60000) : 0;
-    if (plannedStart && realStart && lateMin > 5) {
-      return {
-        status: 'present',
-        title: `Presente desde las ${formatTimeAr(realStart)}`,
-        subtitle: `Turno ${formatTimeAr(plannedStart)} · llegada tarde ${lateMin} min`,
-        tone: 'success',
-      };
-    }
+    const lateMin = plannedStart && punch
+      ? Math.round((punch.getTime() - plannedStart.getTime()) / 60000)
+      : 0;
+    const hh = punch ? formatTimeAr(punch) : '';
+    const title = punch
+      ? (lateMin > 5 ? `Ingresó ${hh} (${lateMin} min tarde)` : `Ingresó ${hh}`)
+      : 'Presente confirmado';
     return {
       status: 'present',
-      title: turnoStart ? `Tu turno comenzó a las ${formatTimeAr(turnoStart)}` : 'Presente confirmado',
-      subtitle: turnoStart ? 'Presente confirmado' : undefined,
+      title,
+      subtitle: isOpsCoverage
+        ? (plannedStart ? `Turno asignado ${formatTimeAr(plannedStart)} · Cobertura` : 'Cobertura confirmada')
+        : (plannedStart ? `Turno ${formatTimeAr(plannedStart)}` : undefined),
       tone: 'success',
     };
   }

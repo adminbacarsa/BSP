@@ -20,7 +20,14 @@ export function formatDateAr(val: FirestoreTimestampLike): string {
 
 export function formatTimeAr(val: FirestoreTimestampLike): string {
   const d = toDate(val);
-  return d ? d.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '-';
+  return d
+    ? d.toLocaleTimeString('es-AR', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hourCycle: 'h23',
+        timeZone: 'America/Argentina/Buenos_Aires',
+      })
+    : '-';
 }
 
 /** Fecha + hora AR (dd/MM/yyyy HH:mm) para bandeja de alertas. */

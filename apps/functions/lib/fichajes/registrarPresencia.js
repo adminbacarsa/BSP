@@ -4,6 +4,7 @@ exports.registrarPresencia = registrarPresencia;
 const admin = require("firebase-admin");
 const firestore_1 = require("firebase-admin/firestore");
 const checkInWindow_1 = require("./checkInWindow");
+const checkInPay_1 = require("./checkInPay");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTardeConvocatorias");
 const relevoNotifications_1 = require("./relevoNotifications");
@@ -102,36 +103,37 @@ async function registrarPresencia(db, input) {
     }
     const scheduledStartTs = shiftData.startTime ?? null;
     const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
-    const isLate = (windowEval.lateMinutes ?? 0) > 0
-        || (scheduledStartMs > 0 && nowMs > scheduledStartMs + 5 * 60 * 1000);
+    const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
+    const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
+        ? adjustedStartMs
+        : scheduledStartMs;
+    const pay = (0, checkInPay_1.resolveCheckInPayClock)({
+        nowMs,
+        plannedStartMs: payAnchorMs,
+        windowLateMinutes: windowEval.lateMinutes ?? 0,
+    });
+    const isLate = pay.isLate;
     let realStartTime;
-    if (source === 'OPERATIONS' || source === 'VIGI' || source === 'DEMO' || source === 'MANUAL_RADIO' || source === 'MANUAL_PHONE') {
-        realStartTime = scheduledStartTs && scheduledStartMs > nowMs ? scheduledStartTs : firestore_1.Timestamp.fromMillis(nowMs);
+    if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+        realStartTime = shiftData.adjustedStartTime;
     }
-    else if (windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
-        realStartTime =
-            windowEval.usePlannedStart
-                ? shiftData.adjustedStartTime
-                : firestore_1.Timestamp.fromMillis(nowMs);
-    }
-    else if (windowEval.usePlannedStart && scheduledStartTs) {
+    else if (!pay.isLate && scheduledStartTs) {
         realStartTime = scheduledStartTs;
     }
     else {
-        realStartTime = firestore_1.Timestamp.fromMillis(nowMs);
+        realStartTime = firestore_1.Timestamp.fromMillis(pay.realStartMs);
     }
     const incomingPatch = {
         isPresent: true,
         status: 'PRESENT',
         checkInTime: now,
+        checkInAt: firestore_1.Timestamp.fromMillis(pay.checkInAtMs),
         realStartTime,
         checkInMethod: source,
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
         isLate,
-        lateMinutes: isLate && scheduledStartMs
-            ? Math.max(windowEval.lateMinutes ?? 0, Math.round((nowMs - scheduledStartMs) / 60000))
-            : (windowEval.lateMinutes ?? 0),
+        lateMinutes: pay.lateMinutes,
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,
