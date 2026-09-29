@@ -6,6 +6,7 @@ import { getPortalFirebase } from '../lib/portal';
 import { routeFromNotificationData } from '../lib/notificationNavigation';
 import { appRoutes } from '../lib/appRoutes';
 import {
+  ensureAlertasTurnoChannel,
   getStoredFcmToken,
   registerPushNotifications,
   subscribeWebForegroundMessages,
@@ -66,6 +67,10 @@ export function PushNotificationsBootstrap({ onStatusChange }: PushNotifications
       }
     }
   };
+
+  useEffect(() => {
+    void ensureAlertasTurnoChannel().catch(() => {});
+  }, []);
 
   const canAutoRegister =
     !!user &&
