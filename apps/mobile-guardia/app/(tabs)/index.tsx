@@ -273,10 +273,14 @@ function HoyScreenContent() {
   }, [navigation, headerTitle]);
 
   const now = useClockNow(30_000);
-  const todayAbsentShift = pickTodayAbsentShift(allShifts ?? shifts, now);
-  const mainShift = todayAbsentShift
+  const hero = heroShift(allShifts ?? shifts, now, { empDocId, authUid: user?.uid ?? null });
+  const heroPresent = !!hero && (
+    hero.isPresent === true || String(hero.status || '').toUpperCase() === 'PRESENT'
+  );
+  const todayAbsentShift = heroPresent
     ? undefined
-    : heroShift(shifts, now, { empDocId, authUid: user?.uid ?? null });
+    : pickTodayAbsentShift(allShifts ?? shifts, now);
+  const mainShift = todayAbsentShift ? undefined : hero;
   const placement = resolveShiftPlacement(todayAbsentShift || mainShift, objectivesMap);
   const objective = placement.objectiveLocation;
   const labRelaxedCheckIn = isEmulatorMode() && objective?.allowRemoteCheckIn === true;

@@ -16,6 +16,7 @@ import {
   toDate,
   isAbsentLikeShift,
   isActiveAbsenceRecord,
+  isFrancoCoverageOriginDoc,
 } from '@cosp/portal-core';
 import { getPortalFirebase } from '../lib/portal';
 import { sortShiftsByStart } from '../lib/shifts';
@@ -367,14 +368,16 @@ export function useEmployeeShifts(
     );
   }, [rawShifts, publishedKeys, absentShiftIds]);
 
-  /** Incluye ausentes (para hero "Ausente" en Hoy). */
+  /** Incluye ausentes (para hero "Ausente" en Hoy). El franco origen de una cobertura no es un turno. */
   const allShifts = useMemo(() => {
     return sortShiftsByStart(
-      rawShifts.map((s) =>
-        absentShiftIds.has(s.id)
-          ? ({ ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift)
-          : s,
-      ),
+      rawShifts
+        .filter((s) => !isFrancoCoverageOriginDoc(s as unknown as Record<string, unknown>))
+        .map((s) =>
+          absentShiftIds.has(s.id)
+            ? ({ ...s, isAbsent: true, status: s.status || 'ABSENT' } as Shift)
+            : s,
+        ),
     );
   }, [rawShifts, absentShiftIds]);
 

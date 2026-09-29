@@ -319,6 +319,7 @@ export async function registrarPresencia(
     !isReliefEligibleShift(shiftData as Record<string, unknown>);
   const wantOverride =
     typeof overrideRelieveShiftId === 'string' && overrideRelieveShiftId.trim().length > 0;
+  let operatorChoseOther: { name: string; code: string } | null = null;
 
   if (!wantSkip) {
     try {
@@ -354,6 +355,10 @@ export async function registrarPresencia(
               );
               if (kind === 'REJECT') {
                 overrideRejectedBySeries = true;
+                operatorChoseOther = {
+                  name: String(od.employeeName || '').trim() || 'guardia',
+                  code: String(od.code || '').trim().toUpperCase() || '—',
+                };
                 console.warn(
                   `[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`,
                 );
@@ -484,11 +489,14 @@ export async function registrarPresencia(
       objectiveName: shiftData.objectiveName || '',
       shiftId,
       empresaId: shiftData.empresaId || null,
-      details: relieved
+      details: (relieved
         ? relievedScheduleMs > 0
           ? `${shiftData.employeeName || empId} ingresó (${source}). Relevo de ${relieved.employeeName} programado a las ${formatHmAr(relievedScheduleMs)}.`
           : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}). Relevó a ${relieved.employeeName}.`
-        : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`,
+        : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`)
+        + (operatorChoseOther
+          ? ` El operador eligió a ${operatorChoseOther.name} (${operatorChoseOther.code}); se aplicó la serie.`
+          : ''),
     })
     .catch(() => {});
 

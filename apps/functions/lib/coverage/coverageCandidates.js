@@ -22,6 +22,7 @@ exports.COVERAGE_LEGACY_CANDIDATE_TYPES = [
 ];
 exports.COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 exports.COVERAGE_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
+const COVERAGE_MIN_REST_MS = 10 * 60 * 60 * 1000;
 const AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 exports.COVERAGE_LICENSE_CODES = new Set([
@@ -47,6 +48,7 @@ exports.COVERAGE_REJECT_LABEL = {
     FALTA_APTITUD: 'Le falta una aptitud del puesto',
     RESTRICCION: 'Tiene restricción de objetivo o cliente',
     EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
+    DESCANSO: 'No cumple el descanso entre turnos (10 h)',
 };
 function coverageRejectMessage(reason) {
     switch (reason) {
@@ -61,6 +63,8 @@ function coverageRejectMessage(reason) {
             return 'No se puede tomar esta cobertura: ya estás convocado en otro hueco.';
         case 'TOPE_12_59':
             return 'No se puede tomar esta cobertura: superarías el tope de 12:59 h.';
+        case 'DESCANSO':
+            return 'No se puede tomar esta cobertura: no cumplís las 10 h de descanso entre turnos.';
         case 'ZOMBI':
             return 'No se puede tomar esta cobertura: el turno está vencido.';
         case 'HUECO_CUBIERTO':
@@ -243,6 +247,30 @@ function rowFrom(type, shift, gap, reason) {
         ...(reason ? { rejectReason: reason } : {}),
     };
 }
+function sameGapDay(shift, gap) {
+    return !!shift?.startMs && !!gap.startMs && arMidnight(shift.startMs) === arMidnight(gap.startMs);
+}
+function collapseByEmployee(rows, shifts, gap) {
+    const byId = new Map(shifts.map((s) => [s.id, s]));
+    const best = new Map();
+    const beats = (next, prev) => {
+        if (next.eligible !== prev.eligible)
+            return next.eligible;
+        const nextDay = sameGapDay(byId.get(next.sourceShiftId), gap);
+        const prevDay = sameGapDay(byId.get(prev.sourceShiftId), gap);
+        if (nextDay !== prevDay)
+            return nextDay;
+        if (next.positionRank !== prev.positionRank)
+            return next.positionRank < prev.positionRank;
+        return false;
+    };
+    for (const row of rows) {
+        const prev = best.get(row.employeeId);
+        if (!prev || beats(row, prev))
+            best.set(row.employeeId, row);
+    }
+    return [...best.values()];
+}
 function pushUnique(bucket, seen, row) {
     const key = `${row.type}|${row.employeeId}|${row.sourceShiftId}|${row.eligible ? '1' : row.rejectReason}`;
     if (seen.has(key))
@@ -334,17 +362,57 @@ function considerInternal(shift, input, accept, kind) {
         return 'COMPLETADO';
     return null;
 }
+function isRealCoverageWork(sh) {
+    if (sh.coverageSuperseded === true || sh.isDeleted === true || sh.isAbsent === true)
+        return false;
+    if (norm(sh.origin) !== 'OPERATIONS_COVERAGE')
+        return false;
+    if (sh.coverageHoursOnSource === true)
+        return false;
+    return !!sh.startMs && !!sh.endMs && sh.endMs > sh.startMs;
+}
+function ftAlreadyWorked(shift, input) {
+    const gap = input.gap;
+    const hardCapMs = input.hardCapMs ?? exports.COVERAGE_HARD_CAP_MS;
+    const gapLen = Math.max(0, (gap.endMs || 0) - (gap.startMs || 0));
+    const gapDay = arMidnight(gap.startMs);
+    let worked = 0;
+    for (const sh of input.shifts) {
+        if (sh.employeeId !== shift.employeeId || sh.id === shift.id)
+            continue;
+        if (!isRealCoverageWork(sh))
+            continue;
+        if (sh.absenceShiftId && sh.absenceShiftId === gap.titularShiftId)
+            return 'SOLAPA_COBERTURA';
+        if (rangesOverlap(sh.startMs, sh.endMs, gap.startMs, gap.endMs))
+            return 'SOLAPA_COBERTURA';
+        if (sh.endMs <= gap.startMs && gap.startMs - sh.endMs < COVERAGE_MIN_REST_MS)
+            return 'DESCANSO';
+        if (gap.endMs <= sh.startMs && sh.startMs - gap.endMs < COVERAGE_MIN_REST_MS)
+            return 'DESCANSO';
+        const touchesGapDay = arMidnight(sh.startMs) === gapDay || arMidnight(sh.endMs - 1) === gapDay;
+        if (touchesGapDay)
+            worked += sh.endMs - sh.startMs;
+    }
+    if (worked + gapLen > hardCapMs)
+        return 'TOPE_12_59';
+    return null;
+}
 function considerFt(shift, input, accept) {
     const common = baseReject(shift, input, accept);
     if (common)
         return common;
-    if (norm(shift.code) === 'FT' || shift.isFranco !== true && !FRANCO_CODES.has(norm(shift.code))) {
+    const code = norm(shift.code);
+    const franco = shift.isFranco === true || FRANCO_CODES.has(code);
+    const alreadyFt = code === 'FT';
+    if (!franco && !alreadyFt)
         return 'SIN_SOLAPE';
-    }
+    if (!shift.startMs || arMidnight(shift.startMs) !== arMidnight(input.gap.startMs))
+        return 'SIN_SOLAPE';
     if (overlappingCoverage(shift.employeeId, { startMs: input.gap.startMs, endMs: input.gap.endMs }, input)) {
         return 'SOLAPA_COBERTURA';
     }
-    return null;
+    return ftAlreadyWorked(shift, input);
 }
 function plausible(type, shift, gap) {
     if (!shift.employeeId || shift.employeeId === 'VACANTE')
@@ -355,8 +423,11 @@ function plausible(type, shift, gap) {
         return false;
     const sameObj = String(shift.objectiveId || '') === String(gap.objectiveId || '');
     const code = norm(shift.code);
-    if (type === 'FT')
-        return FRANCO_CODES.has(code);
+    if (type === 'FT') {
+        if (norm(shift.origin) === 'OPERATIONS_COVERAGE')
+            return false;
+        return FRANCO_CODES.has(code) || code === 'FT';
+    }
     if (!sameObj)
         return false;
     if (type === 'RET')
@@ -425,6 +496,7 @@ function buildCoverageCandidates(input) {
         }
     }
     for (const type of types) {
+        byType[type] = collapseByEmployee(byType[type], input.shifts, input.gap);
         byType[type].sort((a, b) => {
             if (a.eligible !== b.eligible)
                 return a.eligible ? -1 : 1;

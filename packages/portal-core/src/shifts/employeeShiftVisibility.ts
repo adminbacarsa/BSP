@@ -1,5 +1,6 @@
 import { toDate } from '../utils/dates';
 import { isAbsentLikeShift } from './isAbsentLikeShift';
+import { isFrancoCoverageOriginDoc } from './francoCoverageOrigin';
 import { isCoverageHoursOnSourceShift } from '../checkIn/portalCheckIn';
 
 export type EmployeeShiftVisibilityInput = {
@@ -79,6 +80,9 @@ export function isShiftVisibleToEmployee(
   shift: EmployeeShiftVisibilityInput,
   publishedKeys: Set<string> | null,
 ): boolean {
+  // Franco origen (día F o F pasado a FT): la cobertura ops_cov es el turno.
+  if (isFrancoCoverageOriginDoc(shift as Record<string, unknown>)) return false;
+
   // Ausente / cubierto: el titular no ve ese turno como fichable (la cobertura es otro doc).
   if (isAbsentLikeShift(shift as Record<string, unknown>)) {
     return false;

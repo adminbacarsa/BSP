@@ -188,6 +188,128 @@ const acceptBad = core.acceptanceStillValid(
 );
 report('r10-rechaza', acceptBad.ok === false && !!acceptBad.message, acceptBad.message || acceptBad.reason || 'sin mensaje');
 
+const gapBazan = gap({
+  titularShiftId: 'macarena',
+  absentEmployeeId: 'macarena',
+  objectiveId: 'obrador',
+  positionName: 'Puesto 1',
+  startMs: hm('2026-09-29T16:00:00-03:00'),
+  endMs: hm('2026-09-30T00:00:00-03:00'),
+  band: 'T',
+});
+const franco = (id, day) => ({
+  id,
+  employeeId: 'bazan',
+  employeeName: 'BAZAN, ANA CAROLINA',
+  code: 'F',
+  isFranco: true,
+  objectiveId: 'peaje',
+  positionName: 'General',
+  startMs: hm(`2026-09-${day}T00:00:00-03:00`),
+  endMs: hm(`2026-09-${day}T23:59:59-03:00`),
+});
+const dedupe = core.buildCoverageCandidates({
+  nowMs: hm('2026-09-29T18:30:00-03:00'),
+  gap: gapBazan,
+  shifts: [franco('f-hoy', '29'), franco('f-manana', '30')],
+});
+const bazanFt = dedupe.byType.FT.filter((r) => r.employeeId === 'bazan');
+report('p9e-dedupe', bazanFt.length === 1 && bazanFt[0].eligible === true && bazanFt[0].sourceShiftId === 'f-hoy',
+  bazanFt.map((r) => `${r.sourceShiftId}:${r.eligible}`).join(',') || 'nadie');
+
+const yaCubre = core.buildCoverageCandidates({
+  nowMs: hm('2026-09-29T18:40:00-03:00'),
+  gap: gapBazan,
+  shifts: [
+    { ...franco('ft-hoy', '29'), code: 'FT', isFranco: false },
+    franco('f-manana', '30'),
+    {
+      id: 'ops-obrador',
+      employeeId: 'bazan',
+      employeeName: 'BAZAN, ANA CAROLINA',
+      code: 'FT',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'FT',
+      objectiveId: 'obrador',
+      positionName: 'Puesto 1',
+      startMs: gapBazan.startMs,
+      endMs: gapBazan.endMs,
+      absenceShiftId: 'macarena',
+      isPresent: true,
+    },
+  ],
+});
+const ya = yaCubre.byType.FT.filter((r) => r.employeeId === 'bazan');
+report('p9e-ya-cubre', ya.length === 1 && ya[0].eligible === false && ya[0].rejectReason === 'SOLAPA_COBERTURA',
+  ya[0] ? `${ya[0].sourceShiftId}:${ya[0].rejectReason}` : 'nadie');
+
+const gapNoche = gap({
+  titularShiftId: 'otro',
+  absentEmployeeId: 'otro',
+  objectiveId: 'obrador',
+  positionName: 'Puesto 1',
+  startMs: hm('2026-09-29T20:00:00-03:00'),
+  endMs: hm('2026-09-30T04:00:00-03:00'),
+  band: 'N',
+});
+const tope = core.buildCoverageCandidates({
+  nowMs: hm('2026-09-29T18:30:00-03:00'),
+  gap: gapNoche,
+  shifts: [
+    { ...franco('ft-hoy', '29'), code: 'FT', isFranco: false },
+    {
+      id: 'ops-manana',
+      employeeId: 'bazan',
+      employeeName: 'BAZAN, ANA CAROLINA',
+      code: 'FT',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'FT',
+      objectiveId: 'peaje',
+      positionName: 'General',
+      startMs: hm('2026-09-29T00:00:00-03:00'),
+      endMs: hm('2026-09-29T08:00:00-03:00'),
+      absenceShiftId: 'otro-hueco',
+      isPresent: true,
+    },
+  ],
+});
+const topeRow = tope.byType.FT.find((r) => r.employeeId === 'bazan');
+report('p9e-tope', topeRow?.eligible === false && topeRow.rejectReason === 'TOPE_12_59', topeRow?.rejectReason || 'elegible');
+
+const descanso = core.buildCoverageCandidates({
+  nowMs: hm('2026-09-29T18:30:00-03:00'),
+  gap: gapBazan,
+  shifts: [
+    { ...franco('ft-hoy', '29'), code: 'FT', isFranco: false },
+    {
+      id: 'ops-siesta',
+      employeeId: 'bazan',
+      employeeName: 'BAZAN, ANA CAROLINA',
+      code: 'FT',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'FT',
+      objectiveId: 'peaje',
+      positionName: 'General',
+      startMs: hm('2026-09-29T07:00:00-03:00'),
+      endMs: hm('2026-09-29T11:00:00-03:00'),
+      absenceShiftId: 'hueco-manana',
+      isPresent: true,
+    },
+  ],
+});
+const descRow = descanso.byType.FT.find((r) => r.employeeId === 'bazan');
+report('p9e-descanso', descRow?.eligible === false && descRow.rejectReason === 'DESCANSO', descRow?.rejectReason || 'elegible');
+
+const geo = await import('../apps/web2/src/lib/operaciones/coverageGeo.ts');
+const sinObj = geo.coverageGeoForEmployee({ objectiveId: 'obrador' }, { lat: '-31.3867', lng: '-64.1670' });
+report('p9e-geo-objetivo', sinObj.hasGeo === false && sinObj.geoMiss === 'objetivo', sinObj.geoMiss || 'geo');
+const conDom = geo.coverageGeoForEmployee(
+  { objectiveId: 'obrador', lat: -31.44700088880517, lng: -64.34663142666159 },
+  { lat: '-31.386702396379015', lng: '-64.16703988778258' },
+);
+report('p9e-geo-domicilio', conDom.hasGeo === true && conDom.distanceKm > 1 && conDom.etaMinutes > 0,
+  conDom.distanceKm != null ? `${conDom.distanceKm.toFixed(1)} km` : 'sin');
+
 const failed = results.filter((r) => !r.ok);
 console.log(`\n${results.length - failed.length}/${results.length} OK`);
 if (failed.length) process.exitCode = 1;

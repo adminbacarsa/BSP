@@ -6,7 +6,9 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   heroShift,
+  isFrancoCoverageOriginShift,
   isRestFrancoShift,
+  pickTodayAbsentShift,
   pickTodayWorkShift,
   type HeroShiftLike,
 } from './heroShiftSelection.ts';
@@ -63,6 +65,40 @@ describe('heroShift — Barrionuevo: franco + ops_cov 15–23', () => {
   it('pickTodayWorkShift ignora franco aunque sea el primero del día', () => {
     const now = new Date('2026-09-26T16:00:00-03:00');
     assert.equal(pickTodayWorkShift([franco, opsCov], now)?.id, opsCov.id);
+  });
+});
+
+describe('heroShift — Bazán: franco origen FT ausente + ops_cov presente', () => {
+  const now = new Date('2026-09-29T18:40:00-03:00');
+  const origen = shift({
+    id: 'IyiwO0Dyh7LxBKXLkx7a',
+    employeeId: 'textkEqMdkBC4U7Aa3et',
+    code: 'FT',
+    isFranco: false,
+    isFrancoTrabajado: true,
+    isAbsent: true,
+    status: 'ABSENT',
+    coverageDocId: 'ops_cov_R5MsjwU3eryItmbhRDbZ_textkEqMdkBC4U7Aa3et',
+    comments: 'Franco Trabajado (cobertura ops_cov_R5MsjwU3eryItmbhRDbZ_textkEqMdkBC4U7Aa3et)',
+    startTime: '2026-09-29T00:00:00-03:00',
+    endTime: '2026-09-29T23:59:59-03:00',
+  });
+  const ops = shift({
+    id: 'ops_cov_R5MsjwU3eryItmbhRDbZ_textkEqMdkBC4U7Aa3et',
+    employeeId: 'textkEqMdkBC4U7Aa3et',
+    code: 'FT',
+    origin: 'OPERATIONS_COVERAGE',
+    isPresent: true,
+    status: 'PRESENT',
+    startTime: '2026-09-29T16:00:00-03:00',
+    endTime: '2026-09-30T00:00:00-03:00',
+  });
+
+  it('el origen no es turno y el presente manda', () => {
+    assert.equal(isFrancoCoverageOriginShift(origen), true);
+    assert.equal(isFrancoCoverageOriginShift(ops), false);
+    assert.equal(pickTodayAbsentShift([origen, ops], now), undefined);
+    assert.equal(heroShift([origen, ops], now, { empDocId: 'textkEqMdkBC4U7Aa3et' })?.id, ops.id);
   });
 });
 

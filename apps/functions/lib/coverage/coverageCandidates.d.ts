@@ -5,7 +5,7 @@ export type CoverageWizardStepKey = 'INTERNO' | 'RETENCION' | 'FT';
 export declare const COVERAGE_JOIN_TOLERANCE_MS: number;
 export declare const COVERAGE_HARD_CAP_MS: number;
 export declare const COVERAGE_LICENSE_CODES: ReadonlySet<string>;
-export type CoverageRejectReason = 'ES_EL_AUSENTE' | 'LICENCIA_TURNO' | 'LICENCIA_RRHH' | 'ZOMBI' | 'NO_CONTIGUO' | 'TOPE_12_59' | 'YA_CONVOCADO' | 'SOLAPA_COBERTURA' | 'AUSENTE' | 'NO_PRESENTE' | 'COMPLETADO' | 'SIN_SOLAPE' | 'COBERTURA_USADA' | 'HUECO_CUBIERTO' | 'FALTA_APTITUD' | 'RESTRICCION' | 'EN_OTRA_SESION';
+export type CoverageRejectReason = 'ES_EL_AUSENTE' | 'LICENCIA_TURNO' | 'LICENCIA_RRHH' | 'ZOMBI' | 'NO_CONTIGUO' | 'TOPE_12_59' | 'YA_CONVOCADO' | 'SOLAPA_COBERTURA' | 'AUSENTE' | 'NO_PRESENTE' | 'COMPLETADO' | 'SIN_SOLAPE' | 'COBERTURA_USADA' | 'HUECO_CUBIERTO' | 'FALTA_APTITUD' | 'RESTRICCION' | 'EN_OTRA_SESION' | 'DESCANSO';
 export declare const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string>;
 export declare function coverageRejectMessage(reason: CoverageRejectReason): string;
 export declare function coverageWizardStepKeys(order?: readonly string[]): CoverageWizardStepKey[];

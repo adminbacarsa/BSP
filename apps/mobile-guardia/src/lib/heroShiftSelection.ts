@@ -77,6 +77,42 @@ export function isActiveRetentionShift(shift: HeroShiftLike | null | undefined):
   );
 }
 
+function instantMs(value: unknown): number {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  if (typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isNaN(ms) ? 0 : ms;
+  }
+  if (typeof value === 'object') {
+    const o = value as { toMillis?: () => number; toDate?: () => Date; seconds?: number };
+    if (typeof o.toMillis === 'function') return o.toMillis();
+    if (typeof o.toDate === 'function') return o.toDate().getTime();
+    if (typeof o.seconds === 'number') return o.seconds * 1000;
+  }
+  return 0;
+}
+
+/** Franco origen de una cobertura (día 00:00–23:59 o F pasado a FT). No es el turno a mostrar. */
+export function isFrancoCoverageOriginShift(shift: HeroShiftLike | null | undefined): boolean {
+  if (!shift) return false;
+  if (String(shift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE') return false;
+  const code = String(shift.code || '').trim().toUpperCase();
+  const francoCode = shift.isFranco === true || code === 'F' || code === 'FF' || code === 'FP';
+  const linked = String(shift.coverageDocId || '').trim().length > 0 || shift.coverageUsed === true;
+  const comment = /franco trabajado\s*\(cobertura/i.test(String(shift.comments || ''));
+  const start = instantMs(shift.startTime);
+  const end = instantMs(shift.endTime);
+  const span = end > start ? end - start : 0;
+  const fromMidnight = start ? (start + 3 * 3600000) % (24 * 3600000) : 99;
+  const fullDay = span >= 23.5 * 3600000 && span <= 24.5 * 3600000 && fromMidnight < 2 * 60 * 1000;
+  const converted = shift.isFrancoTrabajado === true || (code === 'FT' && (comment || fullDay));
+  if (linked && (francoCode || converted || comment)) return true;
+  if (converted && fullDay) return true;
+  return false;
+}
+
 /** Franco de descanso (F/FF/FP); no FT ni cobertura ops. */
 export function isRestFrancoShift(shift: HeroShiftLike | null | undefined): boolean {
   if (!shift) return false;
@@ -97,7 +133,14 @@ export function isOperationsCoverageHeroShift(shift: HeroShiftLike | null | unde
   return true;
 }
 
+function isPresentHeroShift(s: HeroShiftLike): boolean {
+  if (isFrancoCoverageOriginShift(s) || isCoverageHoursOnSourceShift(s)) return false;
+  if (s.isPresent === true) return true;
+  return String(s.status || '').toUpperCase() === 'PRESENT';
+}
+
 function isHeroCandidate(s: HeroShiftLike): boolean {
+  if (isFrancoCoverageOriginShift(s)) return false;
   if (isAbsentLikeShift(s)) return false;
   if (isCoverageHoursOnSourceShift(s)) return false;
   return true;
@@ -172,6 +215,7 @@ export function pickTodayAbsentShift<T extends HeroShiftLike>(shifts: T[], now =
   const endOfDay = new Date(now);
   endOfDay.setHours(23, 59, 59, 999);
   return sorted.find((s) => {
+    if (isFrancoCoverageOriginShift(s)) return false;
     if (!isAbsentLikeShift(s)) return false;
     const start = toDate(s.startTime);
     if (!start || start < startOfDay || start > endOfDay) return false;
@@ -208,6 +252,13 @@ export function heroShift<T extends HeroShiftLike>(
 
   const retention = sortShiftsByStart(scoped).find((s) => isActiveRetentionShift(s));
   if (retention) return retention;
+
+  const presentToday = sortShiftsByStart(scoped).filter(
+    (s) => isPresentHeroShift(s) && (isStillActiveToday(s, now) || isShiftInProgress(s, now) || shiftStartsToday(s, now)),
+  );
+  const presentOps = presentToday.find((s) => isOperationsCoverageHeroShift(s));
+  if (presentOps) return presentOps;
+  if (presentToday.length > 0) return presentToday[presentToday.length - 1];
 
   return pickTodayWorkShift(scoped, now) ?? pickNextShift(scoped, now);
 }

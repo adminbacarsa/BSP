@@ -393,6 +393,24 @@ export async function applyCoverage(
         doc(db, 'turnos', sourceId),
         buildEscRefSourceConvertedPatch(srcData, covDocId),
       );
+    } else if (ct === 'FT') {
+      const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
+      const francoCode = srcData.isFranco === true || srcCode === 'F' || srcCode === 'FF' || srcCode === 'FP';
+      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
+      const franco = francoCode || comment || srcCode === 'FT';
+      batch.update(doc(db, 'turnos', sourceId), {
+        ...usedBase,
+        coverageUsed: true,
+        coverageUsedForShiftId: titularId,
+        ...(franco
+          ? {
+            isFranco: true,
+            isFrancoTrabajado: false,
+            code: francoCode ? srcCode : 'F',
+            comments: `Franco Trabajado (cobertura ${covDocId})`,
+          }
+          : {}),
+      });
     } else {
       batch.update(doc(db, 'turnos', sourceId), usedBase);
     }

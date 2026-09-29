@@ -1,22 +1,3 @@
-/**
- * ops_cov EXT/ADV de registro (coverageHoursOnSource): trazabilidad; el guardia ficha su turno propio.
- * No participan en ausencias automáticas, retención ni listas operativas como titular fichable.
- */
-export function isOpsCoverageHoursOnSourceDoc(
-  data: Record<string, unknown> | null | undefined,
-): boolean {
-  if (!data) return false;
-  if (data.coverageHoursOnSource === true) return true;
-  const ct = String(data.coverageType || '').toUpperCase();
-  if (
-    String(data.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE'
-    && (ct === 'EXTEND' || ct === 'ADVANCE')
-  ) {
-    return true;
-  }
-  return false;
-}
-
 function instantMs(value: unknown): number {
   if (!value) return 0;
   if (value instanceof Date) return value.getTime();
@@ -48,8 +29,8 @@ export function isCalendarFrancoSpan(data: Record<string, unknown> | null | unde
 }
 
 /**
- * Franco origen de una cobertura: el día F (o el F ya pasado a FT) que apunta al ops_cov.
- * No es el turno que el guardia ficha. El titular cubierto (M/T/N con coverageDocId) no entra.
+ * Franco origen de una cobertura. El turno que se ficha es el ops_cov.
+ * Un M/T/N cubierto (coverageDocId en el titular) no es este doc.
  */
 export function isFrancoCoverageOriginDoc(data: Record<string, unknown> | null | undefined): boolean {
   if (!data) return false;
@@ -64,14 +45,4 @@ export function isFrancoCoverageOriginDoc(data: Record<string, unknown> | null |
   if (converted && fullDay) return true;
   if (francoCode && fullDay && linked) return true;
   return false;
-}
-
-/** Excluir de detectarAusencias, trigger ausencia, vacantes, auto-completar y retención por hueco. */
-export function skipAbsencePipelineForShift(data: Record<string, unknown> | null | undefined): boolean {
-  if (isFrancoCoverageOriginDoc(data)) return true;
-  if (isOpsCoverageHoursOnSourceDoc(data)) return true;
-  if (data?.isDeleted === true) return true;
-  // Turno origen RET con coverageUsed; EXT/ADV marcan isExtended/isEarlyStart (sin coverageUsed).
-  if (data?.isExtended === true || data?.isEarlyStart === true) return false;
-  return data?.coverageUsed === true;
 }

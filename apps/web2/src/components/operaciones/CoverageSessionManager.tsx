@@ -51,6 +51,7 @@ import {
   coverageGeoForEmployee,
   filterByCoverageRadius,
   formatCoverageDistanceLine,
+  resolveObjectiveCoords,
   sortByDistanceAsc,
   type CoverageGeoFields,
 } from '@/lib/operaciones/coverageGeo';
@@ -140,7 +141,7 @@ const CoverageDistanceLine = ({ geo }: { geo: WithGeo }) => {
     return (
       <span className="text-[10px] font-semibold text-amber-600 flex items-center gap-1">
         <MapPin size={10} className="shrink-0" />
-        Sin ubicación GPS en legajo
+        {formatCoverageDistanceLine(geo)}
       </span>
     );
   }
@@ -425,6 +426,17 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const confirmDualTogetherRef = useRef<() => Promise<void>>(async () => {});
   const tid = s.empresaId;
   const absenceShift = s.absentShift;
+  const absenceForGeo = React.useMemo(() => {
+    const base = (absenceShift || {}) as Record<string, unknown>;
+    const direct = resolveObjectiveCoords(base);
+    if (direct.lat != null && direct.lng != null) return base;
+    const oid = String(base.objectiveId || '');
+    const obj = (logic.objectives || []).find((o: { id?: unknown }) => String(o.id || '') === oid) as
+      | { lat?: unknown; lng?: unknown; latitude?: unknown; longitude?: unknown }
+      | undefined;
+    if (!obj) return base;
+    return { ...base, lat: obj.lat ?? obj.latitude, lng: obj.lng ?? obj.longitude };
+  }, [absenceShift, logic.objectives]);
   const step = STEPS[s.currentStep];
   const now = new Date();
   const absenceEnd = toDate(absenceShift.endDateObj);
@@ -484,18 +496,18 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       const emp = eid ? empById.get(eid) : undefined;
       return {
         ...row,
-        ...coverageGeoForEmployee(absenceShift, emp, row),
+        ...coverageGeoForEmployee(absenceForGeo, emp, row),
       };
     },
-    [absenceShift, empById],
+    [absenceForGeo, empById],
   );
 
   const attachInternalGeo = React.useCallback(
     (c: InternalCoverageCandidate): InternalCoverageCandidate & WithGeo => ({
       ...c,
-      ...coverageGeoForEmployee(absenceShift, empById.get(c.employeeId), c.shiftRow as Record<string, unknown>),
+      ...coverageGeoForEmployee(absenceForGeo, empById.get(c.employeeId), c.shiftRow as Record<string, unknown>),
     }),
-    [absenceShift, empById],
+    [absenceForGeo, empById],
   );
 
   function applyDistanceTier<T extends WithGeo>(list: T[]): T[] {
@@ -1566,7 +1578,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                             const phone = c.phone || simPhone(empId);
                             const isNotifying = loading === 'notif_' + empId;
                             return (
-                              <div key={c.id || empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white">
+                              <div key={empId} className="flex items-center gap-3 p-3 rounded-xl border border-slate-200 bg-white">
                                 <div className="w-9 h-9 rounded-full bg-slate-100 flex items-center justify-center text-xs font-black">{initials(name)}</div>
                                 <div className="flex-1 min-w-0">
                                   <div className="text-sm font-bold truncate">

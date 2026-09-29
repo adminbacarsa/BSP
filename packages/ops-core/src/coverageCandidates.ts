@@ -31,6 +31,9 @@ export const COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 /** Mismo valor que `SHIFT_HARD_CAP_MS` en scheduling/shiftClose.ts. */
 export const COVERAGE_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
 
+/** Interjornada mínima (SUVICO `REST.DAILY_MIN_HOURS`). */
+const COVERAGE_MIN_REST_MS = 12 * 60 * 60 * 1000;
+
 const AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -58,7 +61,8 @@ export type CoverageRejectReason =
   | 'HUECO_CUBIERTO'
   | 'FALTA_APTITUD'
   | 'RESTRICCION'
-  | 'EN_OTRA_SESION';
+  | 'EN_OTRA_SESION'
+  | 'DESCANSO';
 
 export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   ES_EL_AUSENTE: 'Es el ausente de esta vacante',
@@ -78,6 +82,7 @@ export const COVERAGE_REJECT_LABEL: Record<CoverageRejectReason, string> = {
   FALTA_APTITUD: 'Le falta una aptitud del puesto',
   RESTRICCION: 'Tiene restricción de objetivo o cliente',
   EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
+  DESCANSO: 'No cumple el descanso entre turnos (12 h)',
 };
 
 export function coverageRejectMessage(reason: CoverageRejectReason): string {
@@ -93,6 +98,8 @@ export function coverageRejectMessage(reason: CoverageRejectReason): string {
       return 'No se puede tomar esta cobertura: ya estás convocado en otro hueco.';
     case 'TOPE_12_59':
       return 'No se puede tomar esta cobertura: superarías el tope de 12:59 h.';
+    case 'DESCANSO':
+      return 'No se puede tomar esta cobertura: no cumplís las 12 h de descanso entre turnos.';
     case 'ZOMBI':
       return 'No se puede tomar esta cobertura: el turno está vencido.';
     case 'HUECO_CUBIERTO':
@@ -394,6 +401,33 @@ function rowFrom(
   };
 }
 
+function sameGapDay(shift: CoverageShiftView | undefined, gap: CoverageGapView): boolean {
+  return !!shift?.startMs && !!gap.startMs && arMidnight(shift.startMs) === arMidnight(gap.startMs);
+}
+
+/** Una fila por persona. Gana el elegible, el franco del día del hueco y el mismo puesto. */
+function collapseByEmployee(
+  rows: CoverageCandidateRow[],
+  shifts: readonly CoverageShiftView[],
+  gap: CoverageGapView,
+): CoverageCandidateRow[] {
+  const byId = new Map(shifts.map((s) => [s.id, s]));
+  const best = new Map<string, CoverageCandidateRow>();
+  const beats = (next: CoverageCandidateRow, prev: CoverageCandidateRow): boolean => {
+    if (next.eligible !== prev.eligible) return next.eligible;
+    const nextDay = sameGapDay(byId.get(next.sourceShiftId), gap);
+    const prevDay = sameGapDay(byId.get(prev.sourceShiftId), gap);
+    if (nextDay !== prevDay) return nextDay;
+    if (next.positionRank !== prev.positionRank) return next.positionRank < prev.positionRank;
+    return false;
+  };
+  for (const row of rows) {
+    const prev = best.get(row.employeeId);
+    if (!prev || beats(row, prev)) best.set(row.employeeId, row);
+  }
+  return [...best.values()];
+}
+
 function pushUnique(
   bucket: CoverageCandidateRow[],
   seen: Set<string>,
@@ -491,6 +525,37 @@ function considerInternal(
   return null;
 }
 
+function isRealCoverageWork(sh: CoverageShiftView): boolean {
+  if (sh.coverageSuperseded === true || sh.isDeleted === true || sh.isAbsent === true) return false;
+  if (norm(sh.origin) !== 'OPERATIONS_COVERAGE') return false;
+  if (sh.coverageHoursOnSource === true) return false;
+  return !!sh.startMs && !!sh.endMs && sh.endMs > sh.startMs;
+}
+
+/** Franco ya pasado a FT: otra cobertura el mismo día solo si no solapa, cabe en 12:59 y deja 12 h (art. 197 LCT). */
+function ftAlreadyWorked(
+  shift: CoverageShiftView,
+  input: BuildCoverageCandidatesInput,
+): CoverageRejectReason | null {
+  const gap = input.gap;
+  const hardCapMs = input.hardCapMs ?? COVERAGE_HARD_CAP_MS;
+  const gapLen = Math.max(0, (gap.endMs || 0) - (gap.startMs || 0));
+  const gapDay = arMidnight(gap.startMs);
+  let worked = 0;
+  for (const sh of input.shifts) {
+    if (sh.employeeId !== shift.employeeId || sh.id === shift.id) continue;
+    if (!isRealCoverageWork(sh)) continue;
+    if (sh.absenceShiftId && sh.absenceShiftId === gap.titularShiftId) return 'SOLAPA_COBERTURA';
+    if (rangesOverlap(sh.startMs, sh.endMs, gap.startMs, gap.endMs)) return 'SOLAPA_COBERTURA';
+    if (sh.endMs <= gap.startMs && gap.startMs - sh.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
+    if (gap.endMs <= sh.startMs && sh.startMs - gap.endMs < COVERAGE_MIN_REST_MS) return 'DESCANSO';
+    const touchesGapDay = arMidnight(sh.startMs) === gapDay || arMidnight(sh.endMs - 1) === gapDay;
+    if (touchesGapDay) worked += sh.endMs - sh.startMs;
+  }
+  if (worked + gapLen > hardCapMs) return 'TOPE_12_59';
+  return null;
+}
+
 function considerFt(
   shift: CoverageShiftView,
   input: BuildCoverageCandidatesInput,
@@ -498,13 +563,15 @@ function considerFt(
 ): CoverageRejectReason | null {
   const common = baseReject(shift, input, accept);
   if (common) return common;
-  if (norm(shift.code) === 'FT' || shift.isFranco !== true && !FRANCO_CODES.has(norm(shift.code))) {
-    return 'SIN_SOLAPE';
-  }
+  const code = norm(shift.code);
+  const franco = shift.isFranco === true || FRANCO_CODES.has(code);
+  const alreadyFt = code === 'FT';
+  if (!franco && !alreadyFt) return 'SIN_SOLAPE';
+  if (!shift.startMs || arMidnight(shift.startMs) !== arMidnight(input.gap.startMs)) return 'SIN_SOLAPE';
   if (overlappingCoverage(shift.employeeId, { startMs: input.gap.startMs, endMs: input.gap.endMs }, input)) {
     return 'SOLAPA_COBERTURA';
   }
-  return null;
+  return ftAlreadyWorked(shift, input);
 }
 
 function plausible(type: CoverageCascadeType, shift: CoverageShiftView, gap: CoverageGapView): boolean {
@@ -513,7 +580,10 @@ function plausible(type: CoverageCascadeType, shift: CoverageShiftView, gap: Cov
   if (shift.id === gap.titularShiftId) return false;
   const sameObj = String(shift.objectiveId || '') === String(gap.objectiveId || '');
   const code = norm(shift.code);
-  if (type === 'FT') return FRANCO_CODES.has(code);
+  if (type === 'FT') {
+    if (norm(shift.origin) === 'OPERATIONS_COVERAGE') return false;
+    return FRANCO_CODES.has(code) || code === 'FT';
+  }
   if (!sameObj) return false;
   if (type === 'RET') return code === 'RET';
   if (type === 'REF') return code === 'REF';
@@ -579,6 +649,7 @@ export function buildCoverageCandidates(input: BuildCoverageCandidatesInput): Co
   }
 
   for (const type of types) {
+    byType[type] = collapseByEmployee(byType[type], input.shifts, input.gap);
     byType[type].sort((a, b) => {
       if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
       if (a.positionRank !== b.positionRank) return a.positionRank - b.positionRank;
