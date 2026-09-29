@@ -116,11 +116,12 @@ import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, buildProformaPositionGrids } from '@/lib/crm/proformaGrid';
 import type { ProformaLayoutMode } from '@/lib/crm/proformaTypes';
-import { turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
+import { proformaDetailGridMode, turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
 import {
   autoDetailUsesExecutedForObjective,
   buildProformaBillingRows,
   clientHasOpenCommercialContract,
+  proformaDetailModeToBillingHint,
   resolveClientDefaultProformaDetailMode,
   sumBillableContractHours,
 } from '@/lib/crm/slaBilling';
@@ -2173,11 +2174,12 @@ export default function CRMPage() {
       setProformaContractDetailMode(billingDefault.mode);
       setProformaContractBillingMixed(billingDefault.mixed);
       const contractDetailMode = billingDefault.mode;
-      setProformaDetailModeOverride(
-        proformaDetailMode !== 'auto'
-        && proformaDetailMode !== 'sin_cobertura'
-        && proformaDetailMode !== contractDetailMode,
-      );
+      const explicitGridMode = proformaDetailGridMode(proformaDetailMode);
+      const detailModeIsOverride =
+        explicitGridMode != null
+        && explicitGridMode !== 'sin_cobertura'
+        && explicitGridMode !== contractDetailMode;
+      setProformaDetailModeOverride(detailModeIsOverride);
       const autoExecutedForObjective = (objectiveId: unknown, objectiveName: unknown) =>
         autoDetailUsesExecutedForObjective(billingDefault, objectiveId, objectiveName);
       const useExecutedForAuto: AutoExecutedResolver = (t: any) =>
@@ -2362,11 +2364,11 @@ export default function CRMPage() {
         });
         return { byObjective };
       };
-      const breakdownSource = proformaDetailMode === 'sin_cobertura'
+      const breakdownSource = explicitGridMode === 'sin_cobertura'
         ? sinCobertura
-        : proformaDetailMode === 'executed'
+        : explicitGridMode === 'executed'
           ? executed
-          : proformaDetailMode === 'planned'
+          : explicitGridMode === 'planned'
             ? planned
             : autoBreakdownByContract();
       const breakdown = Object.entries(breakdownSource.byObjective)
@@ -2480,6 +2482,7 @@ export default function CRMPage() {
         franjaByObjectiveId: franja.byObjectiveId,
         franjaByObjectiveName: franja.byObjectiveName,
         clientHasOpenContract,
+        modeOverride: proformaDetailModeToBillingHint(proformaDetailMode),
       });
       setProformaBillingRows(billingRows);
 
@@ -2579,10 +2582,7 @@ export default function CRMPage() {
         billingSummary: billingRows,
         contractDetailMode,
         contractBillingMixed: billingDefault.mixed,
-        detailModeOverride:
-          proformaDetailMode !== 'auto'
-          && proformaDetailMode !== 'sin_cobertura'
-          && proformaDetailMode !== contractDetailMode,
+        detailModeOverride: detailModeIsOverride,
         adicionalHours: adicionalHoursTotal,
         sourceDebug: {
           clientId: selectedClient.id,
@@ -2593,7 +2593,7 @@ export default function CRMPage() {
         },
       });
 
-      const modeIsSinCobertura = proformaDetailMode === 'sin_cobertura';
+      const modeIsSinCobertura = explicitGridMode === 'sin_cobertura';
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
       const plannedBase = Math.round(sumPlannedHoursForClient(
         turnosList,
