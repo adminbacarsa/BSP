@@ -18,7 +18,7 @@ async function processPortalCheckIn(db, input) {
     }
     const shiftData = shiftDoc.data();
     if ((shiftData.isAbsent === true || shiftData.status === 'ABSENT')
-        && !(0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shiftData, Date.now())) {
+        && !(0, lateAbsenceWindow_1.isReversibleLateAbsence)(shiftData, Date.now())) {
         throw new Error('SHIFT_ABSENT');
     }
     if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {

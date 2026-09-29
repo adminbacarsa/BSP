@@ -52,7 +52,7 @@ function finishAllowed(anchorStartMs, nowMs, useAdjustedStart, lateNoNoticeEligi
 function evaluateServerCheckInWindow(shift, nowMs, opts) {
     const plannedStartEarly = startMs(shift);
     if ((shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
-        && (0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shift, nowMs)
+        && (0, lateAbsenceWindow_1.isReversibleLateAbsence)(shift, nowMs)
         && plannedStartEarly > 0) {
         const endEarly = endMs(shift);
         if (endEarly > 0 && nowMs > endEarly)

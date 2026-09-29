@@ -5,7 +5,7 @@ import { isEmpresaManualMode } from '../ops/opsManualMode';
 import { lateVacancyDue } from './lateAbsenceWindow';
 
 /**
- * Abre vacante/cascada cuando corresponde (operador o T+60).
+ * Abre vacante/cascada: sin aviso al marcar AUTO_T30; con aviso al T+60; o si declara el operador.
  * Idempotente: si ya hay convocatoria activa, la cascada no duplica.
  */
 export async function openLateAbsenceVacancy(db: Firestore, shiftId: string): Promise<boolean> {

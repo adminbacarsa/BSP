@@ -1,4 +1,4 @@
-import { computeOpsLateArrivalMonitorState } from './opsLateArrivalMonitor';
+import { computeOpsLateArrivalMonitorState, hasLateArrivalNotice } from './opsLateArrivalMonitor';
 import { isPassiveRetStandbyShift } from './passiveRetShift';
 import { getVacancyElapsedRatio, VACANCY_DESCUBIERTO_RATIO } from './vacancyOps';
 
@@ -238,7 +238,8 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
   } = lateMonitor;
   const vacancyAtMs = startMs > 0 ? startMs + 60 * 60_000 : 0;
   const absenceBy = String(shift.absenceDetectedBy || '').toUpperCase();
-  const provisionalReason = absenceBy === 'AUTO_T30' || absenceBy === 'ETA_VENCIDA';
+  const notifiedLate = hasLateArrivalNotice(shift);
+  const provisionalReason = absenceBy === 'ETA_VENCIDA';
   const operatorDeclared =
     absenceBy === 'MANUAL_OPS'
     || String(shift.absenceType || '').toUpperCase() === 'MANUAL_OPS'
@@ -248,7 +249,7 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     beforeVacancyCap
     && !operatorDeclared
     && (
-      (isPotentialAbsence && !isAbsent)
+      (isPotentialAbsence && !isAbsent && notifiedLate)
       || (isAbsent && provisionalReason)
     );
   const opensCoverageVacancy =

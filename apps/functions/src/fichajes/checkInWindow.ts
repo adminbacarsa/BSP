@@ -1,5 +1,5 @@
 import { Timestamp } from 'firebase-admin/firestore';
-import { isProvisionalLateAbsence, lateAbsenceDeadlineMs } from '../attendance/lateAbsenceWindow';
+import { isReversibleLateAbsence, lateAbsenceDeadlineMs } from '../attendance/lateAbsenceWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 
 export type CheckInWindowResult = {
@@ -86,7 +86,7 @@ export function evaluateServerCheckInWindow(
   const plannedStartEarly = startMs(shift);
   if (
     (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
-    && isProvisionalLateAbsence(shift, nowMs)
+    && isReversibleLateAbsence(shift, nowMs)
     && plannedStartEarly > 0
   ) {
     const endEarly = endMs(shift);

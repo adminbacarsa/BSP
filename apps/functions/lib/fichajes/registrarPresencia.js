@@ -84,7 +84,7 @@ async function registrarPresencia(db, input) {
         throw new Error('TURNO_NOT_FOUND');
     const shiftData = shiftDoc.data();
     if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-        if (!(0, lateAbsenceWindow_1.isProvisionalLateAbsence)(shiftData, Date.now())) {
+        if (!(0, lateAbsenceWindow_1.isReversibleLateAbsence)(shiftData, Date.now())) {
             throw new Error('SHIFT_ABSENT');
         }
         const rev = await (0, revertirAusencia_1.revertirAusenciaShift)(db, {

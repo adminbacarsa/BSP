@@ -1,6 +1,6 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
-import { isProvisionalLateAbsence } from '../attendance/lateAbsenceWindow';
+import { isReversibleLateAbsence } from '../attendance/lateAbsenceWindow';
 import { revertirAusenciaShift } from '../attendance/revertirAusencia';
 import { evaluateServerCheckInWindow } from './checkInWindow';
 import { resolveCheckInPayClock } from './checkInPay';
@@ -145,7 +145,7 @@ export async function registrarPresencia(
   const shiftData = shiftDoc.data()!;
 
   if (shiftData.isAbsent === true || shiftData.status === 'ABSENT') {
-    if (!isProvisionalLateAbsence(shiftData as Record<string, unknown>, Date.now())) {
+    if (!isReversibleLateAbsence(shiftData as Record<string, unknown>, Date.now())) {
       throw new Error('SHIFT_ABSENT');
     }
     const rev = await revertirAusenciaShift(db, {

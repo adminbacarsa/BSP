@@ -5,8 +5,10 @@ export const LATE_ABSENCE_FLOOR_MS = 30 * 60 * 1000;
 /** Tope de aviso y de reversión. Pasado esto, la ausencia abre vacante. */
 export const LATE_ABSENCE_CAP_MS = 60 * 60 * 1000;
 
-/** AA automática que todavía no abre vacante ni cascada. */
-export const PROVISIONAL_LATE_REASONS = new Set(['AUTO_T30', 'ETA_VENCIDA']);
+/** Quien avisó: AA sin vacante hasta T+60. Sin aviso (AUTO_T30) abre vacante al momento. */
+export const PROVISIONAL_LATE_REASONS = new Set(['ETA_VENCIDA']);
+/** Las dos se revierten al fichar hasta T+60, aunque la sin aviso ya tenga vacante. */
+export const REVERSIBLE_LATE_REASONS = new Set(['AUTO_T30', 'ETA_VENCIDA']);
 
 export function shiftStartMs(shift: Record<string, unknown>): number {
   const st = shift.startTime as Timestamp | { toMillis?: () => number } | undefined;
@@ -26,19 +28,28 @@ export function lateAbsenceDeadlineMs(plannedStartMs: number, etaAtMs: number): 
   return floor;
 }
 
-export function isProvisionalLateAbsence(shift: Record<string, unknown>, nowMs: number): boolean {
+function absentBeforeCap(shift: Record<string, unknown>, nowMs: number, reasons: Set<string>): boolean {
   const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
   if (!absent) return false;
   const by = String(shift.absenceDetectedBy || '').toUpperCase();
-  if (!PROVISIONAL_LATE_REASONS.has(by)) return false;
+  if (!reasons.has(by)) return false;
   const start = shiftStartMs(shift);
   if (start <= 0) return false;
   return nowMs < start + LATE_ABSENCE_CAP_MS;
 }
 
+/** Solo quien avisó llegada tarde: sin vacante ni cascada hasta T+60. */
+export function isProvisionalLateAbsence(shift: Record<string, unknown>, nowMs: number): boolean {
+  return absentBeforeCap(shift, nowMs, PROVISIONAL_LATE_REASONS);
+}
+
+/** Fichada o LLEGÓ? revierten AUTO_T30 y ETA_VENCIDA hasta T+60. */
+export function isReversibleLateAbsence(shift: Record<string, unknown>, nowMs: number): boolean {
+  return absentBeforeCap(shift, nowMs, REVERSIBLE_LATE_REASONS);
+}
+
 /**
- * Vacante y cascada: el operador declaró (MANUAL_OPS) o se cumplió T+60
- * de una AA provisoria. Otros motivos siguen el trigger al marcarse.
+ * Vacante: sin aviso (AUTO_T30) en el momento; con aviso al T+60; o si el operador declara.
  */
 export function lateVacancyDue(shift: Record<string, unknown>, nowMs: number): boolean {
   const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
@@ -51,6 +62,7 @@ export function lateVacancyDue(shift: Record<string, unknown>, nowMs: number): b
     || String(shift.absenceType || '').toUpperCase() === 'MANUAL_OPS'
     || !!shift.absenceConfirmedBy;
   if (operatorDeclared) return true;
+  if (by === 'AUTO_T30') return true;
   if (PROVISIONAL_LATE_REASONS.has(by)) {
     return start > 0 && nowMs >= start + LATE_ABSENCE_CAP_MS;
   }

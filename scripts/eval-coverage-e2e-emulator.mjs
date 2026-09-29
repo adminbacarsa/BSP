@@ -2506,6 +2506,47 @@ async function run() {
       const ok = opened === true && (nov.size >= 1 || !!sh?.absenceVacancyOpenedAt);
       report(62, ok, ok ? 'operador a T+35 abre vacante' : `opened=${opened} nov=${nov.size}`);
     }
+
+    // Caso 63 — sin aviso: AA y vacante juntas a T+30
+    {
+      const prefix = `${runId}_c63`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 31 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'SinAviso',
+        objectiveId: `${prefix}_obj`, objectiveName: 'Peaje', positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'AUTO_T30', by: 'E2E' });
+      const sh0 = (await db.collection('turnos').doc(shiftId).get()).data();
+      const due = lateVacancyDue(sh0, Date.now());
+      const opened = await openLateAbsenceVacancy(db, shiftId);
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const conv = await db.collection('convocatorias_cobertura').where('shiftId', '==', shiftId).get();
+      const ok = due === true && opened === true && !!sh?.absenceVacancyOpenedAt && conv.size >= 1;
+      report(63, ok, ok ? 'sin aviso T+30 abre vacante y cascada' : `due=${due} opened=${opened} conv=${conv.size}`);
+    }
+
+    // Caso 64 — sin aviso: la fichada a T+40 igual revierte
+    {
+      const prefix = `${runId}_c64`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 40 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'SinAviso',
+        objectiveId: `${prefix}_obj`, positionName: 'M2', code: 'M',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 4 * 60 * 60 * 1000),
+        status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'AUTO_T30', by: 'E2E' });
+      await registrarPresencia(db, { shiftId, source: 'PORTAL_GPS', empId: `${prefix}_e` });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = sh?.isAbsent !== true && sh?.isPresent === true;
+      report(64, ok, ok ? 'sin aviso T+40 fichada revierte' : `absent=${sh?.isAbsent} present=${sh?.isPresent}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;
