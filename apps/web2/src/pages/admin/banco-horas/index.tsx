@@ -44,6 +44,7 @@ const SUM_KEYS = [
   'licV', 'licE', 'licL', 'licA', 'licPG', 'licSUS', 'licSGS',
   'ausenciaHoras', 'ausenciaHorasOutside', 'ausenciaTurnos', 'ausenciaTurnosOutside', 'ausenciaLegajos',
   'uncoveredAusencia', 'uncoveredRetiro', 'uncoveredFaltaPlan',
+  'billable', 'workedNotBilled', 'billedNotWorked',
 ] as const;
 
 function groupClients(objectives: MonthRow[]): MonthRow[] {
@@ -284,6 +285,9 @@ export default function BancoHorasPage() {
       'Ausencias AA (hs)': Math.round(r.ausenciaHoras || 0),
       'Ausencias AA (turnos)': r.ausenciaTurnos || 0,
       'Ausencias AA (legajos)': r.ausenciaLegajos || 0,
+      Facturable: Math.round(r.billable || 0),
+      'Trabajado no facturado': Math.round(r.workedNotBilled || 0),
+      'Facturado no trabajado': Math.round(r.billedNotWorked || 0),
       'Licencias (total)': Math.round(r.novedadPaga || 0),
       ...Object.fromEntries(HOURS_LEDGER_LIC_CODES.map(({ key, label }) => [`Lic. ${label}`, Math.round((r as any)[key] || 0)])),
     }));
@@ -310,6 +314,9 @@ export default function BancoHorasPage() {
     ['Trab. fuera', empresa?.workedOutside],
     ['Cubiertas', empresa?.covered],
     ['Descubiertas', empresa?.uncovered],
+    ['Facturable', empresa?.billable],
+    ['Trabajado no facturado', empresa?.workedNotBilled],
+    ['Facturado no trabajado', empresa?.billedNotWorked],
     ['FT', empresa?.ft],
     ['EXT', empresa?.ext],
     ['ADV', empresa?.adv],
@@ -441,6 +448,7 @@ export default function BancoHorasPage() {
                     'x Ausencia', 'x Retiro', 'x Falta plan', 'FT', 'EXT', 'ADV',
                     'Lic. total', 'Lic. V', 'Lic. E', 'Lic. L', 'Lic. ART', 'Lic. PG', 'Lic. SUS', 'Lic. SGS',
                     'AA hs', 'AA turnos', 'AA legajos',
+                    'Facturable', 'Trab. no fact.', 'Fact. no trab.',
                   ].map((h) => (
                     <th key={h} className="text-right first:text-left px-3 py-2 font-black">{h}</th>
                   ))}
@@ -462,6 +470,7 @@ export default function BancoHorasPage() {
                         r.uncoveredAusencia, r.uncoveredRetiro, r.uncoveredFaltaPlan, r.ft, r.ext, r.adv,
                         r.novedadPaga, r.licV, r.licE, r.licL, r.licA, r.licPG, r.licSUS, r.licSGS,
                         r.ausenciaHoras, r.ausenciaTurnos, r.ausenciaLegajos,
+                        r.billable, r.workedNotBilled, r.billedNotWorked,
                       ].map((n, i) => (
                         <td key={i} className="px-3 py-2 text-right tabular-nums text-slate-600">{nf(n)}</td>
                       ))}
@@ -469,7 +478,7 @@ export default function BancoHorasPage() {
                   );
                 })}
                 {!visible.length && (
-                  <tr><td colSpan={27} className="px-4 py-8 text-center text-slate-400 font-bold">
+                  <tr><td colSpan={30} className="px-4 py-8 text-center text-slate-400 font-bold">
                     {empresa
                       ? 'El libro tiene totales de empresa, pero no hay detalle para este nivel.'
                       : canRebuild

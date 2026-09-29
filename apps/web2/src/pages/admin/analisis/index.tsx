@@ -441,6 +441,69 @@ type ExpandedDuration = number | 'all' | null;
 type FinMode = FinHoursMode;
 
 // ─── PAGE ─────────────────────────────────────────────────────────────────────
+function FacturadoDesdeLibro({ book }: { book: { empresa: { billable?: number; workedNotBilled?: number; billedNotWorked?: number } | null; clients: Array<{ clientName: string; billable?: number; workedNotBilled?: number; billedNotWorked?: number }>; objectives: Array<{ objectiveName: string; clientName: string; billable?: number; workedNotBilled?: number; billedNotWorked?: number }> } | null }) {
+  if (!book?.empresa) return null;
+  const e = book.empresa;
+  const byGap = <T extends { workedNotBilled?: number }>(rows: T[]) => [...rows]
+    .filter((o) => (Number(o.workedNotBilled) || 0) > 0)
+    .sort((a, b) => (Number(b.workedNotBilled) || 0) - (Number(a.workedNotBilled) || 0));
+  const clients = byGap(book.clients).slice(0, 8);
+  const rank = byGap(book.objectives).slice(0, 8);
+  const nf = (n: number | undefined) => Math.round(Number(n) || 0).toLocaleString('es-AR');
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white shadow-sm p-4 space-y-3">
+      <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">Servicio ≠ prestado ≠ facturado</div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="rounded-2xl bg-indigo-50 border border-indigo-100 p-3">
+          <div className="text-[10px] font-black uppercase text-indigo-500">Facturable</div>
+          <div className="text-xl font-black text-indigo-700 tabular-nums">{nf(e.billable)}</div>
+        </div>
+        <div className="rounded-2xl bg-amber-50 border border-amber-100 p-3">
+          <div className="text-[10px] font-black uppercase text-amber-600">Trabajado no facturado</div>
+          <div className="text-xl font-black text-amber-700 tabular-nums">{nf(e.workedNotBilled)}</div>
+        </div>
+        <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3">
+          <div className="text-[10px] font-black uppercase text-emerald-600">Facturado no trabajado</div>
+          <div className="text-xl font-black text-emerald-700 tabular-nums">{nf(e.billedNotWorked)}</div>
+        </div>
+      </div>
+      {clients.length > 0 && (
+        <div>
+          <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Por cliente</div>
+          <table className="w-full text-xs">
+            <tbody>
+              {clients.map((c) => (
+                <tr key={c.clientName} className="border-t border-slate-100">
+                  <td className="py-1 font-bold text-slate-700">{c.clientName || 'Sin cliente'}</td>
+                  <td className="py-1 text-right tabular-nums text-indigo-700">{nf(c.billable)}</td>
+                  <td className="py-1 text-right font-black tabular-nums text-amber-700">{nf(c.workedNotBilled)}</td>
+                  <td className="py-1 text-right tabular-nums text-emerald-700">{nf(c.billedNotWorked)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {rank.length > 0 && (
+        <div>
+          <div className="text-[10px] font-black uppercase text-slate-400 mb-1">Ranking · trabajado no facturado</div>
+          <table className="w-full text-xs">
+            <tbody>
+              {rank.map((o) => (
+                <tr key={o.objectiveName + o.clientName} className="border-t border-slate-100">
+                  <td className="py-1 font-bold text-slate-700">{o.objectiveName || o.clientName}</td>
+                  <td className="py-1 text-right text-slate-400">{o.clientName}</td>
+                  <td className="py-1 text-right font-black tabular-nums text-amber-700">{nf(o.workedNotBilled)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AnalisisPage() {
   useAuth();
   const { empresaId, empresa, loadingEmpresa } = useEmpresa();
@@ -2872,6 +2935,7 @@ export default function AnalisisPage() {
                 <strong className="text-slate-700 dark:text-slate-200">Solo horas.</strong> Consumo hs-hombre y novedades CCT (V/L/E/… = <strong>hs muertas pagadas</strong>, no productivas).
                 Las <strong>hs liquidadas / trabajadas</strong> del legajo viven en Informe (mismo motor que Reportes → Liquidación). Acá no se liquidan pesos.
               </p>
+              <FacturadoDesdeLibro book={periodMode === 'month' ? ledgerMonth : null} />
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-3">
                 <p className="text-[11px] text-slate-500 max-w-3xl leading-relaxed">
                   Consumo de <strong>hs-hombre</strong> en <strong>{periodRange.labelShort}</strong>:
@@ -3263,6 +3327,7 @@ export default function AnalisisPage() {
                 </div>
               </div>
 
+              <FacturadoDesdeLibro book={periodMode === 'month' ? ledgerMonth : null} />
               <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                 <KpiCard icon={Users} color="#0891b2" label="Dotación activa" value={informe.dotacionActiva} subtext="Legajos activos"/>
                 <KpiCard icon={Target} color="#4f46e5" label="Horas vendidas" value={informe.hsVendidas.toLocaleString('es-AR')} unit="hs" subtext="SLA / contrato"/>

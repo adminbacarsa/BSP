@@ -47,6 +47,10 @@ export type HoursLedgerMonthRow = {
   uncoveredAusencia?: number;
   uncoveredRetiro?: number;
   uncoveredFaltaPlan?: number;
+  billable?: number;
+  workedNotBilled?: number;
+  billedNotWorked?: number;
+  billingMode?: string;
 };
 
 /** Códigos de la tarjeta Licencias, en el orden que se muestran. */
@@ -137,6 +141,10 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
     uncoveredAusencia: Number(raw.uncoveredAusencia) || 0,
     uncoveredRetiro: Number(raw.uncoveredRetiro) || 0,
     uncoveredFaltaPlan: Number(raw.uncoveredFaltaPlan) || 0,
+    billable: Number(raw.billable) || 0,
+    workedNotBilled: Number(raw.workedNotBilled) || 0,
+    billedNotWorked: Number(raw.billedNotWorked) || 0,
+    billingMode: raw.billingMode ? String(raw.billingMode) : undefined,
   };
 }
 

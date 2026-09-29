@@ -278,8 +278,6 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
 
 type RangeMode = CrmRangeMode;
 type ViewMode = 'grid' | 'list';
-type ProformaBase = 'requested' | 'planned' | 'executed';
-
 function ProformaOcQuickPanel(props: {
   clientId?: string;
   empresaId: string;
@@ -469,7 +467,6 @@ export default function CRMPage() {
   const [proformaEndDate, setProformaEndDate] = useState('');
   const [proformaDetailMode, setProformaDetailMode] = useState<ProformaDetailMode>('auto');
   const [proformaLayoutMode, setProformaLayoutMode] = useState<ProformaLayoutMode>('both');
-  const [proformaBase, setProformaBase] = useState<ProformaBase>('requested');
   const [proformaHourlyValue, setProformaHourlyValue] = useState('');
   const [proformaTotals, setProformaTotals] = useState<{
     planned: number | null;
@@ -2538,18 +2535,6 @@ export default function CRMPage() {
         const key = normalize(String(srv.objectiveName ?? ''));
         if (oid) plannedByObjectiveId[oid] = plannedByObjectiveName[key] ?? 0;
       }
-      const billingRows = buildProformaBillingRows({
-        vigenteSlas: vigenteSlas as unknown as (import('@/services/slaService').ServiceSLA & { id: string })[],
-        purchaseOrders: clientPurchaseOrders,
-        periodStartYmd,
-        periodEndYmd,
-        plannedByObjectiveId,
-        plannedByObjectiveName,
-        franjaByObjectiveId: franja.byObjectiveId,
-        franjaByObjectiveName: franja.byObjectiveName,
-        clientHasOpenContract,
-      });
-      setProformaBillingRows(billingRows);
 
       let adicionalRefuerzoHours = 0;
       const padYmd = (n: number) => String(n).padStart(2, '0');
@@ -2563,13 +2548,18 @@ export default function CRMPage() {
       }
 
       const slaHoursByObjectiveId: Record<string, number> = {};
+      let workedByObjectiveId: Record<string, number> | undefined;
       const sameCalendarMonth = start.getFullYear() === end.getFullYear() && start.getMonth() === end.getMonth();
       if (sameCalendarMonth && empresaId) {
         try {
           const book = await loadHoursLedgerOrPreview(empresaId, periodKeyOf(start.getFullYear(), start.getMonth() + 1));
+          const fromBook: Record<string, number> = {};
           for (const o of book.objectives) {
-            if (o.objectiveId) slaHoursByObjectiveId[o.objectiveId] = Math.round(o.slaActive || 0);
+            if (!o.objectiveId) continue;
+            slaHoursByObjectiveId[o.objectiveId] = Math.round(o.slaActive || 0);
+            fromBook[o.objectiveId] = Math.round(o.worked || 0);
           }
+          if (Object.values(fromBook).some((n) => n > 0)) workedByObjectiveId = fromBook;
         } catch { /* si el libro no responde, se usa el SLA vivo de abajo */ }
       }
       if (!Object.keys(slaHoursByObjectiveId).length) {
@@ -2578,6 +2568,21 @@ export default function CRMPage() {
           if (oid) slaHoursByObjectiveId[oid] = (slaHoursByObjectiveId[oid] || 0) + slaHoursForServiceInRange(srv, start, end);
         }
       }
+      if (!workedByObjectiveId) workedByObjectiveId = { ...franja.byObjectiveId };
+      const billingRows = buildProformaBillingRows({
+        vigenteSlas: vigenteSlas as unknown as (import('@/services/slaService').ServiceSLA & { id: string })[],
+        purchaseOrders: clientPurchaseOrders,
+        periodStartYmd,
+        periodEndYmd,
+        plannedByObjectiveId,
+        plannedByObjectiveName,
+        franjaByObjectiveId: franja.byObjectiveId,
+        franjaByObjectiveName: franja.byObjectiveName,
+        slaByObjectiveId: slaHoursByObjectiveId,
+        workedByObjectiveId,
+        clientHasOpenContract,
+      });
+      setProformaBillingRows(billingRows);
       const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
       const startKey = getDateKeyInTimezone(start);
       const endKey = getDateKeyInTimezone(end);
@@ -2765,16 +2770,11 @@ export default function CRMPage() {
   };
 
   const baseHours = useMemo(() => {
-    if (proformaBillingRows.length > 0) {
-      return sumBillableContractHours(proformaBillingRows);
-    }
+    if (proformaBillingRows.length > 0) return sumBillableContractHours(proformaBillingRows);
     if (!selectedClient) return 0;
     const { start, end } = getProformaRange();
-    const requested = Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end, selectedClient.id));
-    if (proformaBase === 'requested') return requested;
-    if (proformaBase === 'planned') return proformaTotals.planned ?? 0;
-    return proformaTotals.executed ?? 0;
-  }, [selectedClient, clientServices, proformaBase, proformaTotals, proformaBillingRows, proformaStartDate, proformaEndDate, proformaMonth, proformaYear]);
+    return Math.round(sumVigenteSlaHoursInRange(clientServices || [], start, end, selectedClient.id));
+  }, [selectedClient, clientServices, proformaBillingRows, proformaStartDate, proformaEndDate, proformaMonth, proformaYear]);
 
   const totalEstimate = useMemo(() => {
     const hourly = Number(proformaHourlyValue) || 0;
@@ -4395,7 +4395,6 @@ export default function CRMPage() {
                     proformaEndDate={proformaEndDate}
                     proformaDetailMode={proformaDetailMode}
                     proformaLayoutMode={proformaLayoutMode}
-                    proformaBase={proformaBase}
                     proformaHourlyValue={proformaHourlyValue}
                     proformaTotals={proformaTotals}
                     proformaBreakdown={proformaBreakdown}
@@ -4410,7 +4409,6 @@ export default function CRMPage() {
                     onEndDateChange={setProformaEndDate}
                     onDetailModeChange={setProformaDetailMode}
                     onLayoutModeChange={setProformaLayoutMode}
-                    onBaseChange={setProformaBase}
                     onHourlyValueChange={setProformaHourlyValue}
                     onRecalculate={calculateProformaTurnos}
                     onToggleExpanded={toggleExpandedKey}

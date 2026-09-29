@@ -26,7 +26,6 @@ export type ProformaPanelProps = {
   proformaEndDate: string;
   proformaDetailMode: ProformaDetailMode;
   proformaLayoutMode: ProformaLayoutMode;
-  proformaBase: 'requested' | 'planned' | 'executed';
   proformaHourlyValue: string;
   proformaTotals: {
     planned: number | null;
@@ -50,7 +49,6 @@ export type ProformaPanelProps = {
   onEndDateChange: (v: string) => void;
   onDetailModeChange: (v: ProformaDetailMode) => void;
   onLayoutModeChange: (v: ProformaLayoutMode) => void;
-  onBaseChange: (v: 'requested' | 'planned' | 'executed') => void;
   onHourlyValueChange: (v: string) => void;
   onRecalculate: () => void;
   onToggleExpanded: (k: string) => void;
@@ -80,7 +78,6 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     proformaEndDate,
     proformaDetailMode,
     proformaLayoutMode,
-    proformaBase,
     proformaHourlyValue,
     proformaTotals,
     proformaBreakdown,
@@ -95,7 +92,6 @@ export default function ProformaPanel(props: ProformaPanelProps) {
     onEndDateChange,
     onDetailModeChange,
     onLayoutModeChange,
-    onBaseChange,
     onHourlyValueChange,
     onRecalculate,
     onToggleExpanded,
@@ -271,41 +267,44 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 <option value="positions">Solo puestos</option>
               </select>
             </div>
-            <div>
-              <label className="text-[9px] font-black text-slate-400 uppercase block mb-1">Base horas</label>
-              <select className="w-full p-2.5 rounded-lg border bg-white text-xs font-bold" value={proformaBase} onChange={(e) => onBaseChange(e.target.value as any)}>
-                <option value="requested">SLA solicitado</option>
-                <option value="planned">Planificado</option>
-                <option value="executed">Ejecutado</option>
-              </select>
-            </div>
           </div>
           {billingRows.length > 0 && (
             <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+              <div className="px-3 py-2 text-[9px] font-black uppercase tracking-wide text-slate-400">Detalle por contrato</div>
               <table className="w-full text-[10px]">
                 <thead>
                   <tr className="bg-slate-100 text-slate-500 uppercase font-black">
-                    <th className="text-left p-2">Objetivo</th>
-                    <th className="text-left p-2">Modo</th>
+                    <th className="text-left p-2">Contrato</th>
+                    <th className="text-right p-2">SLA</th>
                     <th className="text-right p-2">Prestado</th>
-                    <th className="text-right p-2">Facturable</th>
-                    <th className="text-right p-2">Auth. OC</th>
-                    <th className="text-right p-2">Saldo OC</th>
+                    <th className="text-right p-2">Facturado</th>
+                    <th className="text-left p-2">Modo</th>
+                    <th className="text-right p-2">Diferencia</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {billingRows.map((r) => (
-                    <tr key={`${r.objectiveId}-${r.slaId || ''}`} className="border-t border-slate-100">
-                      <td className="p-2 font-bold text-slate-800">{r.objectiveName}</td>
-                      <td className="p-2 font-bold text-indigo-600">{billingModeLabel(r.billingMode)}{r.ocNumber ? ` · ${r.ocNumber}` : ''}</td>
-                      <td className="p-2 text-right tabular-nums">{r.prestadoHours}</td>
-                      <td className="p-2 text-right font-black tabular-nums">{r.billableHours}</td>
-                      <td className="p-2 text-right tabular-nums">{r.authorizedHours ?? '—'}</td>
-                      <td className="p-2 text-right tabular-nums">{r.balanceHours ?? '—'}</td>
-                    </tr>
-                  ))}
+                  {billingRows.map((r) => {
+                    const diff = r.diferenciaHours != null ? Number(r.diferenciaHours) : r.prestadoHours - r.billableHours;
+                    return (
+                      <tr key={`${r.objectiveId}-${r.slaId || ''}`} className="border-t border-slate-100">
+                        <td className="p-2 font-bold text-slate-800">{r.objectiveName}</td>
+                        <td className="p-2 text-right tabular-nums">{r.slaHours ?? '—'}</td>
+                        <td className="p-2 text-right tabular-nums">{r.prestadoHours}</td>
+                        <td className="p-2 text-right font-black tabular-nums text-indigo-700">{r.billableHours}</td>
+                        <td className="p-2 font-bold text-indigo-600">
+                          {billingModeLabel(r.billingMode)}
+                          {r.ocNumber ? ` · ${r.ocNumber}` : ''}
+                          {r.balanceHours != null ? ` · saldo ${r.balanceHours}` : ''}
+                        </td>
+                        <td className={`p-2 text-right font-black tabular-nums ${diff > 0 ? 'text-amber-700' : diff < 0 ? 'text-emerald-700' : 'text-slate-500'}`}>
+                          {diff > 0 ? `+${diff}` : diff}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
+              <p className="px-3 py-2 text-[9px] font-bold text-slate-400">Diferencia = prestado − facturado. El importe usa las horas facturadas × valor hora.</p>
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
