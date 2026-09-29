@@ -41,31 +41,27 @@ export function claseEnEmpresa(matches) {
 }
 
 /**
- * ACTIVO y BAJA de la planilla son el estado en ARCA.
- * Golondrina usa la fecha de baja si la tiene; si no, queda en alta.
+ * Pregunta abierta para Mauro. No es el estado ARCA.
+ * Hipótesis: ACTIVO sigue convocable; BAJA queda fuera, como histórico.
  */
-export function arcaDePlanilla({ estado, ingreso, fechaBaja }) {
-  const riesgoEncadenamiento = estado === 'GOLONDRINA';
-  const enBaja = estado === 'BAJA' || (estado === 'GOLONDRINA' && Boolean(fechaBaja));
-  if (enBaja) {
-    const historial = [];
-    if (ingreso) historial.push({ estado: 'ALTA', fecha: ingreso, origen: 'IMPORT_PLANILLA' });
-    historial.push({ estado: 'BAJA', fecha: fechaBaja || '', origen: 'IMPORT_PLANILLA' });
-    return {
-      estadoArca: 'BAJA',
-      fechaArca: fechaBaja || '',
-      requiereAltaNueva: true,
-      riesgoEncadenamiento,
-      arcaHistorial: historial,
-    };
-  }
-  return {
-    estadoArca: 'ALTA',
-    fechaArca: ingreso || '',
-    requiereAltaNueva: false,
-    riesgoEncadenamiento,
-    arcaHistorial: [{ estado: 'ALTA', fecha: ingreso || '', origen: 'IMPORT_PLANILLA' }],
-  };
+export const PLANILLA_ENTRA_BOLSA = {
+  ACTIVO: true,
+  BAJA: false,
+  GOLONDRINA: true,
+};
+
+export const PLANILLA_DISPONIBILIDAD = {
+  ACTIVO: 'DISPONIBLE',
+  BAJA: 'NO_DISPONIBLE',
+  GOLONDRINA: 'DISPONIBLE',
+};
+
+/** Las fechas de la planilla van al historial. La bolsa no guarda un alta vigente. */
+export function historialPlanilla({ ingreso, fechaBaja }) {
+  const historial = [];
+  if (ingreso) historial.push({ estado: 'ALTA', fecha: ingreso, origen: 'IMPORT_PLANILLA', contratoId: null });
+  if (fechaBaja) historial.push({ estado: 'BAJA', fecha: fechaBaja, origen: 'IMPORT_PLANILLA', contratoId: null });
+  return historial;
 }
 
 /** true en la 2ª aparición (y siguientes) del mismo legajo o del mismo CUIL. */
@@ -110,10 +106,7 @@ export function buildBolsaDoc({ nombre, legajo, ingreso }, plan) {
     nombre: nombre || '',
     legajoPlanilla: String(legajo || '').trim(),
     primerIngreso: ingreso || '',
-    disponibilidad: 'DISPONIBLE',
-    estadoArca: plan.estadoArca,
-    fechaArca: plan.fechaArca || '',
-    requiereAltaNueva: Boolean(plan.requiereAltaNueva),
+    disponibilidad: plan.disponibilidad,
     riesgoEncadenamiento: Boolean(plan.riesgoEncadenamiento),
     arcaHistorial: plan.arcaHistorial || [],
     createdBy: IMPORT_CREATED_BY,
@@ -131,6 +124,8 @@ export function planImportRow({
   fechaBaja,
   matches,
   repetidoEnPlanilla,
+  entraBolsaPorEstado = PLANILLA_ENTRA_BOLSA,
+  disponibilidadPorEstado = PLANILLA_DISPONIBILIDAD,
 }) {
   const estado = classifyEstadoActual(estadoRaw);
   const cuil = normalizeCuil(cuilRaw);
@@ -155,11 +150,8 @@ export function planImportRow({
     indeterminadoConFecha,
     entraBolsa: false,
     disponibilidad: 'NO_DISPONIBLE',
-    estadoArca: null,
-    fechaArca: '',
-    requiereAltaNueva: false,
-    riesgoEncadenamiento: false,
-    arcaHistorial: [],
+    riesgoEncadenamiento: estado === 'GOLONDRINA',
+    arcaHistorial: historialPlanilla({ ingreso, fechaBaja }),
   };
 
   if (!cuil) return { ...base, bucket: 'CUIL_INVALIDO' };
@@ -167,16 +159,14 @@ export function planImportRow({
   if (estado === 'DESCONOCIDO') return { ...base, bucket: 'ESTADO_DESCONOCIDO' };
   if (repetidoEnPlanilla) return { ...base, bucket: 'REPETIDO_PLANILLA' };
 
-  const arca = arcaDePlanilla({ estado, ingreso, fechaBaja });
-  const conArca = { ...base, ...arca };
+  if (duplicadoPlanta) return { ...base, bucket: 'DUPLICADO_PLANTA' };
 
-  if (duplicadoPlanta) return { ...conArca, bucket: 'DUPLICADO_PLANTA' };
-
+  const entra = Boolean(entraBolsaPorEstado[estado]);
   return {
-    ...conArca,
+    ...base,
     bucket: estado,
-    entraBolsa: true,
-    disponibilidad: 'DISPONIBLE',
+    entraBolsa: entra,
+    disponibilidad: disponibilidadPorEstado[estado] || 'NO_DISPONIBLE',
   };
 }
 

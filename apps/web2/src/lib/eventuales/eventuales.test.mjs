@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { cuilCheckDigit, normalizeCuil } from './cuil.mjs';
 import { planEfectivizacion, causaContratoValida } from './efectivizacion.mjs';
 import { buildBolsaDoc, bolsaDocId, classifyEstadoActual, planImportRow, repetidosEnPlanilla } from './planilla.mjs';
+import { fechaBajaDeJornadas, turnoDentroDeJornadas, validarJornadasContrato } from './jornadas.mjs';
 
 function cuilValidoDesde(first10) {
   return first10 + cuilCheckDigit(first10);
@@ -42,14 +43,16 @@ describe('clasificación de planilla', () => {
     });
     assert.equal(activoNuevo.entraBolsa, true);
     assert.equal(activoNuevo.disponibilidad, 'DISPONIBLE');
-    assert.equal(activoNuevo.estadoArca, 'ALTA');
-    assert.equal(activoNuevo.fechaArca, '2026-02-15');
+    assert.equal(activoNuevo.arcaHistorial[0].estado, 'ALTA');
+    assert.equal(activoNuevo.arcaHistorial[0].fecha, '2026-02-15');
+    assert.equal('estadoArca' in activoNuevo, false);
     assert.equal(bolsaDocId(cuil), cuil);
     const ficha = buildBolsaDoc({ nombre: 'Persona', legajo: '100', ingreso: '2026-02-15' }, activoNuevo);
     assert.equal(ficha.cuil, cuil);
     assert.equal(ficha.legajoPlanilla, '100');
     assert.equal(ficha.createdBy, 'import-planilla-2026-09-29');
     assert.equal('employeeId' in ficha, false);
+    assert.equal('estadoArca' in ficha, false);
 
     const baja = planImportRow({
       estadoRaw: '3. BAJA',
@@ -58,12 +61,18 @@ describe('clasificación de planilla', () => {
       fechaBaja: '2025-06-01',
       matches: [],
     });
-    assert.equal(baja.disponibilidad, 'DISPONIBLE');
-    assert.equal(baja.estadoArca, 'BAJA');
-    assert.equal(baja.fechaArca, '2025-06-01');
-    assert.equal(baja.requiereAltaNueva, true);
-    assert.equal(baja.arcaHistorial.length, 2);
-    assert.equal(baja.entraBolsa, true);
+    assert.equal(baja.disponibilidad, 'NO_DISPONIBLE');
+    assert.equal(baja.arcaHistorial.map((h) => h.estado).join(','), 'ALTA,BAJA');
+    assert.equal(baja.entraBolsa, false);
+    const bajaSiEntra = planImportRow({
+      estadoRaw: '3. BAJA',
+      cuilRaw: cuil,
+      ingreso: '2025-01-01',
+      fechaBaja: '2025-06-01',
+      matches: [],
+      entraBolsaPorEstado: { BAJA: true },
+    });
+    assert.equal(bajaSiEntra.entraBolsa, true);
 
     const gol = planImportRow({
       estadoRaw: '4. GOLONDRINA',
@@ -73,8 +82,9 @@ describe('clasificación de planilla', () => {
       matches: [],
     });
     assert.equal(gol.riesgoEncadenamiento, true);
-    assert.equal(gol.estadoArca, 'BAJA');
+    assert.equal('estadoArca' in gol, false);
     assert.equal(gol.disponibilidad, 'DISPONIBLE');
+    assert.equal(gol.arcaHistorial.some((h) => h.estado === 'BAJA' && h.fecha === '2024-08-01'), true);
 
     const permanente = planImportRow({
       estadoRaw: '1. ACTIVO',
@@ -102,6 +112,50 @@ describe('clasificación de planilla', () => {
     assert.deepEqual(flags, [false, true]);
 
     assert.equal(planImportRow({ estadoRaw: '1. ACTIVO', cuilRaw: '20-1', matches: [] }).bucket, 'CUIL_INVALIDO');
+  });
+});
+
+describe('jornadas del contrato', () => {
+  const viernes = { fecha: '2026-10-02', horaInicio: '08:00', horaFin: '16:00', horas: 8 };
+  const domingo = { fecha: '2026-10-04', horaInicio: '08:00', horaFin: '16:00', horas: 8 };
+  const domingoNoche = { fecha: '2026-10-04', horaInicio: '23:30', horaFin: '05:30', horas: 6 };
+
+  it('la baja es el domingo, o el lunes si la jornada cruza medianoche', () => {
+    assert.equal(fechaBajaDeJornadas([viernes, domingo]), '2026-10-04');
+    assert.equal(fechaBajaDeJornadas([viernes, domingoNoche]), '2026-10-05');
+  });
+
+  it('el sábado dentro del período, sin jornada, no habilita un turno', () => {
+    const jornadas = [viernes, domingo];
+    assert.equal(turnoDentroDeJornadas(viernes, jornadas), true);
+    assert.equal(turnoDentroDeJornadas({ fecha: '2026-10-03', horaInicio: '08:00', horaFin: '16:00' }, jornadas), false);
+  });
+
+  it('exige alta confirmada antes de la primera jornada, tope 12:59 y 12 h de descanso', () => {
+    const ok = validarJornadasContrato([viernes, domingo], [], '2026-10-01');
+    assert.equal(ok.ok, true);
+    assert.equal(ok.fechaAlta, '2026-10-02');
+    assert.equal(ok.fechaBaja, '2026-10-04');
+
+    const sinAlta = validarJornadasContrato([viernes], [], null);
+    assert.equal(sinAlta.errores.some((e) => e.codigo === 'ALTA_NO_CONFIRMADA'), true);
+
+    const tarde = validarJornadasContrato([viernes], [], '2026-10-02T12:00:00-03:00');
+    assert.equal(tarde.errores.some((e) => e.codigo === 'ALTA_DESPUES_DE_JORNADA'), true);
+
+    const larga = { fecha: '2026-10-02', horaInicio: '06:00', horaFin: '20:00', horas: 14 };
+    const tope = validarJornadasContrato([larga], [], '2026-10-01');
+    assert.equal(tope.errores.some((e) => e.codigo === 'TOPE_JORNADA'), true);
+
+    const otraEmpresa = { fecha: '2026-10-02', horaInicio: '18:00', horaFin: '23:00', horas: 5 };
+    const descanso = validarJornadasContrato([domingo], [otraEmpresa], '2026-10-01');
+    assert.equal(descanso.ok, true);
+    const pegada = validarJornadasContrato(
+      [{ fecha: '2026-10-04', horaInicio: '23:30', horaFin: '05:30', horas: 6 }],
+      [{ fecha: '2026-10-05', horaInicio: '08:00', horaFin: '12:00', horas: 4 }],
+      '2026-10-01',
+    );
+    assert.equal(pegada.errores.some((e) => e.codigo === 'DESCANSO_12H'), true);
   });
 });
 

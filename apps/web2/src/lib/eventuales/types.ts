@@ -1,14 +1,34 @@
 export type ModalidadLaboral = 'INDETERMINADO' | 'EVENTUAL' | 'PLAZO_FIJO';
 
-/** En la bolsa. Independiente del alta o la baja en ARCA. */
+/** En la bolsa. No es un alta ARCA vigente: la persona está disponible sin alta. */
 export type BolsaDisponibilidad = 'DISPONIBLE' | 'NO_DISPONIBLE';
 
-export type EstadoArcaBolsa = 'ALTA' | 'BAJA';
+export type EstadoArcaMovimiento = 'ALTA' | 'BAJA';
 
 export interface ArcaHistorialItem {
-  estado: EstadoArcaBolsa;
+  estado: EstadoArcaMovimiento;
   fecha: string;
   origen: 'IMPORT_PLANILLA' | 'CONTRATO' | 'EFECTIVIZACION';
+  contratoId?: string | null;
+}
+
+export interface JornadaContrato {
+  fecha: string;
+  horaInicio: string;
+  horaFin: string;
+  horas: number;
+}
+
+export interface ContratoEventual {
+  empresaId: string;
+  employeeId: string;
+  bolsaCuil: string;
+  causa: string;
+  fechaAlta: string;
+  fechaBaja: string;
+  jornadas: JornadaContrato[];
+  estado: ContratoEventualEstado;
+  status: 'ACTIVE' | 'INACTIVE';
 }
 
 export type ContratoEventualEstado =

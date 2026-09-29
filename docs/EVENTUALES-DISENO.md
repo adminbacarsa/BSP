@@ -13,9 +13,11 @@
 
 Hay una **bolsa de eventuales**, módulo aparte de la nómina. Hoy el grupo es **Bacar S.A. y Grupo Bacar**; la lista es configurable (`grupos_eventuales`). La persona existe **una vez**, por CUIL, en `eventuales_bolsa/{cuil}`. Puede no trabajar para nadie, o para una o varias empresas del grupo.
 
-### 0.2 Alta en la empresa que lo usa
+### 0.2 Contrato, ARCA y vuelta a la bolsa
 
-El legajo (`empleados`) **no se crea al importar**. Se crea cuando esa empresa lo da de alta: contrato eventual + alta ARCA con el CUIT de esa empresa. Puede tener legajo en más de una a la vez. Al terminar el contrato vuelve a la bolsa `DISPONIBLE`. Si se efectiviza, sale de la bolsa y queda en la planta de esa empresa.
+La bolsa **no tiene un alta ARCA vigente**. El eventual está disponible sin alta. Cada vez que una empresa lo necesita: contrato → alta en ARCA antes de la primera jornada → trabaja esas jornadas → baja al terminar → vuelve a la bolsa. La próxima vez es un alta nueva, en la misma empresa o en otra. El legajo (`empleados`) se crea en ese alta, no al importar. Si se efectiviza, sale de la bolsa y queda en la planta de esa empresa.
+
+El contrato es un período con sus jornadas `{ fecha, horaInicio, horaFin, horas }`. `fechaAlta` es el día en que empieza la primera. `fechaBaja` es el día en que termina la última, en hora de Argentina: si cruza medianoche, es el día siguiente. El sábado puede quedar adentro del período sin jornada. El TXT de ARCA de ese contrato informa desde y hasta. Los turnos de Planificación salen de esas jornadas. Un turno que no coincide con una jornada del contrato vigente se bloquea.
 
 ### 0.3 Turnos y liquidación en paralelo
 
@@ -136,10 +138,8 @@ eventuales_bolsa/{cuil}: {
   grupoId, cuil, dni, nombre,
   nombre, legajoPlanilla,                 // el número de la planilla es referencia, no un empleados.id
   primerIngreso?: string;
-  disponibilidad: 'DISPONIBLE' | 'NO_DISPONIBLE';
-  estadoArca: 'ALTA' | 'BAJA';
-  arcaHistorial: Array<{ estado: 'ALTA' | 'BAJA', fecha, origen }>;
-  requiereAltaNueva?: boolean;
+  disponibilidad: 'DISPONIBLE' | 'NO_DISPONIBLE';   // convocable o no; no es el alta ARCA
+  arcaHistorial: Array<{ estado: 'ALTA' | 'BAJA', fecha, origen, contratoId? }>;
   riesgoEncadenamiento?: boolean;
   legajos: Array<{ empresaId, employeeId }>;  // vacío hasta el alta de una empresa
   createdBy?: string;
@@ -173,8 +173,9 @@ contratos_eventuales: {
   empresaId, employeeId, bolsaCuil,
   clientId?, objectiveId?, eventoId?,
   causa: string,                         // obligatoria, art. 99; no se guarda vacía
-  fechaInicio, fechaFin,                 // fin obligatorio en COSP
-  horario: { inicio, fin }, jornadaHoras,
+  fechaAlta: string,                     // día de inicio de la primera jornada
+  fechaBaja: string,                     // día AR en que termina la última (día siguiente si cruza medianoche)
+  jornadas: Array<{ fecha, horaInicio, horaFin, horas }>,
   estado: 'BORRADOR' | 'DOCUMENTADO' | 'ACUSE_RECIBIDO' | 'ALTA_ARCA' | 'VIGENTE' | 'FINALIZADO' | 'BAJA_ARCA' | 'ANULADO',
   documento: { storagePath, sha256, tipo: 'PAPEL_ESCANEADO' | 'FIRMA_DIGITAL_CERTIFICADA' },
   acuse?: { at, uid, deviceId, metodo: 'SESION' | 'OTP' | 'BIOMETRIA', docSha256 },
@@ -191,8 +192,8 @@ No hay campo de remuneración fija. La plantilla (`contratos_templates/{empresaI
 
 ### 3.4 Reglas de turno
 
-1. **Asignar** (Planificación, Centro de Control, `eventoAssignService.ts:128-212`, `applyCoverage`): si el legajo es `EVENTUAL`, el turno tiene que caer dentro de un contrato de **esa** empresa en estado `DOCUMENTADO` o posterior, no anulado. Y tiene que pasar el cruce del §0.4 contra los turnos del mismo CUIL en el grupo. Si no hay legajo en esa empresa, la acción abre el alta de legajo desde la bolsa.
-2. **Fichar** (`requestCheckIn` / `registrarPresencia`): solo si el contrato que cubre el turno está en `ALTA_ARCA` o `VIGENTE` en esa empresa. Si no: bloqueo y alerta a RRHH (`ALTA_ARCA_PENDIENTE`). Vale también para un turno de 2 h.
+1. **Asignar** (Planificación, Centro de Control, eventos y `applyCoverage`): el turno tiene que coincidir con una jornada del contrato de esa empresa. El día intermedio, sin jornada, no alcanza. Además, horas de la jornada y del día ≤ 12:59, y 12 h de descanso contra las otras jornadas del grupo (§0.4).
+2. **Fichar**: la alta ARCA de ese contrato tiene que estar confirmada antes del inicio de la primera jornada. Si no: bloqueo y alerta.
 3. **Encadenamiento:** al guardar un contrato, si en la ventana configurada se supera la cantidad de contratos, de días, o hay patrón semanal fijo con el mismo CUIL en el grupo, el contrato queda marcado `riesgoEncadenamiento` y la UI sugiere efectivizar. No impide guardar (la decisión es de RRHH), pero entra al reporte de riesgo.
 4. **Cierre:** `FINALIZADO` dispara la liquidación final de esa empresa (SAC y vacaciones proporcionales, §2.4) y habilita el TXT de baja ARCA.
 
@@ -229,14 +230,9 @@ Se extiende `credenciales_publicas/{empDocId}` (un doc por legajo / empresa pres
 
 Script `scripts/import-eventuales-planilla.mjs`. Escribe **solo** `eventuales_bolsa` (id = CUIL, re-correr no duplica, no borra). No crea ni modifica `empleados`. `--apply` exige también `--allow-prod`. `createdBy` = `import-planilla-2026-09-29` y deja un `audit_logs`. El cotejo de planta permanente es por CUIL y por legajo contra `bacarsa`, `grupos_bacar_sa` y `pruebas_sa`. El detalle con datos personales va a `scripts/out/` (gitignored).
 
-En la planilla, ACTIVO y BAJA son el **estado en ARCA**, no si la persona está en la bolsa. Los dos entran `DISPONIBLE`.
+La bolsa no guarda un `estadoArca` vigente. El 1º ingreso y la última baja de la planilla entran al `arcaHistorial` como movimientos, sin contrato.
 
-| Estado en la planilla | Bolsa | ARCA |
-|------------------------|-------|------|
-| 1. ACTIVO | `DISPONIBLE` | `ALTA`, fecha = 1º ingreso |
-| 3. BAJA | `DISPONIBLE` (antes de trabajar hace falta un alta nueva) | `BAJA`, fecha = última baja. El historial guarda el alta previa si hay 1º ingreso |
-| 4. GOLONDRINA | `DISPONIBLE` + `riesgoEncadenamiento` | Igual que el resto: `BAJA` si hay fecha de baja; si no, `ALTA` |
-| 2. EFECTIVIZADOS | No entran | Planta permanente |
+**Pregunta abierta (no resuelta):** qué significa ACTIVO / BAJA en ESTADO ACTUAL. Hipótesis parametrizada en `PLANILLA_ENTRA_BOLSA` / `PLANILLA_DISPONIBILIDAD`: ACTIVO sigue convocable; BAJA queda fuera, como histórico. Golondrina entra con marca de riesgo. Efectivizados no entran. Mauro tiene que confirmar el mapa antes de un `--apply`.
 
 No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empresas (`modalidad` `INDETERMINADO`, o sin modalidad y activo), ni si el legajo o el CUIL está repetido en la planilla (se informa; queda la primera fila).
 
@@ -244,10 +240,11 @@ No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empre
 
 ## 5. Pendiente de verificar (el dictamen ya cerró el resto)
 
-1. Código de modalidad **14 o 102** contra la tabla ARCA/SICOSS vigente, y bajar el diseño de registro del TXT.
-2. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
-3. Texto nuevo del contrato sin remuneración fija (abogado).
-4. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.
+1. **Qué significa ACTIVO / BAJA en la planilla** (hipótesis en §4: convocable vs. fuera de la bolsa). No es el alta ARCA.
+2. Código de modalidad **14 o 102** contra la tabla ARCA/SICOSS vigente, y bajar el diseño de registro del TXT. El TXT de cada contrato tiene que informar desde (`fechaAlta`) y hasta (`fechaBaja`); la RG 5508 dice que la fecha de fin del alta inicial es solo de plazo fijo: hay que confirmarlo con el diseño de registro.
+3. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
+4. Texto nuevo del contrato sin remuneración fija (abogado).
+5. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.
 
 ---
 
