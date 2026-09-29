@@ -2,19 +2,20 @@ import type { ServiceSLA } from '@/services/slaService';
 import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import { calculateMonthlyBreakdown, parseYmdToLocalDate } from '@/lib/servicios/slaHoursCalculator';
 import { isObjectivePlanificacionPublished } from '@/lib/multiempresa';
+import { objectiveMonthSlaPresence } from '@/lib/crm/proformaOperation';
 import {
   filterSlasForPlanningContext,
   isSlaContractActive,
   isSlaOpenForOperations,
   pickClosedSlaForPlanningMonth,
   pickSlaForPlanningMonth,
-  planningMonthHasActiveSla,
   type SlaPlanningRow,
 } from '@/lib/slaPlanningMatch';
 
 export type ServiciosClientRef = {
   id: string;
   name?: string;
+  status?: unknown;
   objectives?: Array<{ id?: string; name?: string }>;
   objetivos?: Array<{ id?: string; name?: string }>;
 };
@@ -25,16 +26,20 @@ export type ServiciosCatalogRow = {
   clientName: string;
   objectiveId: string;
   objectiveName: string;
-  /** En operación (abierto + cronograma publicado) — mismo criterio que Ops/KPI. */
+  /** En operación (classifySlaBucket = active): contrato activo + cronograma publicado. */
   hasSlaInMonth: boolean;
-  /** Contrato cerrado que cubre el mes (sin duplicar filas ya operativas). */
+  /** Contrato activo vigente sin cronograma publicado (classifySlaBucket = withoutPlan). */
+  hasServiceWithoutOperation: boolean;
+  /** Contrato cerrado que cubre el mes (classifySlaBucket = closed), sin fila operativa ni sin plan. */
   hasClosedSlaInMonth: boolean;
   activeSla: (ServiceSLA & { id: string }) | null;
+  /** Contrato activo del mes cuando todavía no hay cronograma publicado. */
+  pendingSla: (ServiceSLA & { id: string }) | null;
   closedSla: (ServiceSLA & { id: string }) | null;
   allSlas: (ServiceSLA & { id: string })[];
 };
 
-export type ServiciosCatalogFilter = 'all' | 'with_sla' | 'without_sla' | 'closed_sla';
+export type ServiciosCatalogFilter = 'all' | 'with_sla' | 'service_no_op' | 'without_sla' | 'closed_sla';
 export type ServiciosCatalogSort = 'alpha' | 'sla_desc' | 'status_active';
 
 export type ServiciosKpiSnapshot = {
@@ -121,7 +126,7 @@ function rowPassesFeatureFilter(
   featureFilter: 'all' | 'rotaciones' | 'condiciones',
 ): boolean {
   if (featureFilter === 'all') return true;
-  const srv = row.activeSla || row.closedSla;
+  const srv = row.activeSla || row.pendingSla || row.closedSla;
   if ((!row.hasSlaInMonth && !row.hasClosedSlaInMonth) || !srv) return false;
   if (featureFilter === 'rotaciones') {
     return Array.isArray(srv.serviceRotations) && srv.serviceRotations.length > 0;
@@ -140,7 +145,8 @@ export function applyServiciosCatalogFilters(
   const featureFilter = opts?.featureFilter || 'all';
   return rows.filter((row) => {
     if (catalogFilter === 'with_sla' && !row.hasSlaInMonth) return false;
-    if (catalogFilter === 'without_sla' && (row.hasSlaInMonth || row.hasClosedSlaInMonth)) return false;
+    if (catalogFilter === 'service_no_op' && !row.hasServiceWithoutOperation) return false;
+    if (catalogFilter === 'without_sla' && (row.hasSlaInMonth || row.hasClosedSlaInMonth || row.hasServiceWithoutOperation)) return false;
     if (catalogFilter === 'closed_sla' && !row.hasClosedSlaInMonth) return false;
     if (!rowPassesFeatureFilter(row, featureFilter)) return false;
     return true;
@@ -153,7 +159,9 @@ export function serviciosCatalogDisplaySla(
   catalogFilter: ServiciosCatalogFilter = 'all',
 ): (ServiceSLA & { id: string }) | null {
   if (catalogFilter === 'closed_sla') return row.closedSla;
+  if (catalogFilter === 'service_no_op') return row.pendingSla;
   if (row.hasSlaInMonth) return row.activeSla;
+  if (row.hasServiceWithoutOperation && catalogFilter === 'all') return row.pendingSla;
   if (catalogFilter === 'all' && row.hasClosedSlaInMonth) return row.closedSla;
   return null;
 }
@@ -276,21 +284,29 @@ export function buildServiciosObjectiveCatalog(
       const matching = matchingRows as unknown as (ServiceSLA & { id: string })[];
 
       const { vigente } = pickSlaForPlanningMonth(matchingRows, kpiYear, kpiMonth);
-      const contractInMonth = planningMonthHasActiveSla(matchingRows, kpiYear, kpiMonth);
-      const published =
+      const hasPublishedPlan =
         !requirePublished
-        || !obj.id
-        || isObjectivePlanificacionPublished(publishStatusMap, obj.id, kpiYear, kpiMonth + 1);
-      const hasSlaInMonth = contractInMonth && published;
+        || (!!obj.id && isObjectivePlanificacionPublished(publishStatusMap, obj.id, kpiYear, kpiMonth + 1));
+      const presence = objectiveMonthSlaPresence({
+        slas: matchingRows as unknown as Parameters<typeof objectiveMonthSlaPresence>[0]['slas'],
+        year: kpiYear,
+        monthIndex0: kpiMonth,
+        hasPublishedPlan,
+        clientStatus: client.status,
+      });
+      const hasSlaInMonth = presence === 'active';
+      const hasServiceWithoutOperation = presence === 'withoutPlan';
+      const hasClosedSlaInMonth = presence === 'closed';
       const vigenteSla = vigente && hasSlaInMonth
         ? (vigente as unknown as ServiceSLA & { id: string })
         : null;
+      const pendingSla = vigente && hasServiceWithoutOperation
+        ? (vigente as unknown as ServiceSLA & { id: string })
+        : null;
       const closedPick = pickClosedSlaForPlanningMonth(matchingRows, kpiYear, kpiMonth);
-      const closedSla =
-        published && closedPick && !hasSlaInMonth
-          ? (closedPick as unknown as ServiceSLA & { id: string })
-          : null;
-      const hasClosedSlaInMonth = !!closedSla;
+      const closedSla = hasClosedSlaInMonth && closedPick
+        ? (closedPick as unknown as ServiceSLA & { id: string })
+        : null;
 
       if (q) {
         const matchSearch =
@@ -307,8 +323,10 @@ export function buildServiciosObjectiveCatalog(
         objectiveId: obj.id,
         objectiveName: obj.name || obj.id || 'Sin nombre',
         hasSlaInMonth,
+        hasServiceWithoutOperation,
         hasClosedSlaInMonth,
         activeSla: vigenteSla,
+        pendingSla,
         closedSla,
         allSlas: [...matching].sort((a, b) => (b.startDate || '').localeCompare(a.startDate || '')),
       });
@@ -403,6 +421,7 @@ export type ServiciosCatalogClientGroup = {
   clientName: string;
   rows: ServiciosCatalogRow[];
   withSla: number;
+  serviceNoOp: number;
   withoutSla: number;
   totalHoursKpi: number;
   totalPositions: number;
@@ -424,6 +443,7 @@ export function buildServiciosCatalogClientGroups(
         clientName: row.clientName,
         rows: [],
         withSla: 0,
+        serviceNoOp: 0,
         withoutSla: 0,
         totalHoursKpi: 0,
         totalPositions: 0,
@@ -436,6 +456,13 @@ export function buildServiciosCatalogClientGroups(
       group.withSla += 1;
       group.hasActive = true;
       const srv = row.activeSla;
+      if (srv) {
+        group.totalHoursKpi += getHours(srv);
+        group.totalPositions += (srv.positions || []).reduce((s, p) => s + (p.quantity || 1), 0);
+      }
+    } else if (row.hasServiceWithoutOperation) {
+      group.serviceNoOp += 1;
+      const srv = row.pendingSla;
       if (srv) {
         group.totalHoursKpi += getHours(srv);
         group.totalPositions += (srv.positions || []).reduce((s, p) => s + (p.quantity || 1), 0);

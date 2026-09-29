@@ -61,3 +61,34 @@ export function buildInOperationObjectiveIds(input: {
   }
   return inOperationObjectiveIds(buckets);
 }
+
+/**
+ * Presencia del objetivo en el mes, con la misma regla que el libro (`classifySlaBucket`).
+ * active = en operación; withoutPlan = contrato activo sin cronograma publicado;
+ * closed = cerrado del mes; none = sin contrato que cubra el mes.
+ */
+export function objectiveMonthSlaPresence(input: {
+  slas: ProformaSlaRow[];
+  year: number;
+  monthIndex0: number;
+  hasPublishedPlan: boolean;
+  clientStatus?: unknown;
+}): 'active' | 'withoutPlan' | 'closed' | 'none' {
+  let sawWithoutPlan = false;
+  let sawClosed = false;
+  for (const srv of input.slas) {
+    if (!slaCoversCalendarMonth(srv.startDate, srv.endDate, input.year, input.monthIndex0)) continue;
+    const bucket = classifySlaBucket({
+      closed: srv.closed === true,
+      contractActive: contractIsActive(srv.status),
+      clientActive: clientIsActive(input.clientStatus),
+      hasPublishedPlan: input.hasPublishedPlan,
+    });
+    if (bucket === 'active') return 'active';
+    if (bucket === 'withoutPlan') sawWithoutPlan = true;
+    else if (bucket === 'closed') sawClosed = true;
+  }
+  if (sawWithoutPlan) return 'withoutPlan';
+  if (sawClosed) return 'closed';
+  return 'none';
+}
