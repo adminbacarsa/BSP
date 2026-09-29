@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import type { OperacionesMapMarker } from '@/hooks/useOperacionesMapMarkers';
 import { opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
+import { canRevertAbsenceNow } from '@/lib/operaciones/revertAbsenceWindow';
 
 const getRefuerzoLabel = (shift: any): 'RFZ' | 'TURA' | null => {
   const code = String(shift?.code || '').toUpperCase();
@@ -214,7 +215,8 @@ export function OperacionesMapPopup({
                   : new Date(shift.endTime)
                 : null;
             const diffMin = (now.getTime() - start.getTime()) / 60000;
-            const canCheckIn = diffMin >= -15 && diffMin <= 60 && !shift.isPresent;
+            const canRevertAbsence = canRevertAbsenceNow(shift, now.getTime());
+            const canCheckIn = (diffMin >= -15 && diffMin <= 60 && !shift.isPresent) || canRevertAbsence;
             const s = getShiftStatusStyle(shift, diffMin);
             const t1 = start.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' });
             const t2 = end ? end.toLocaleTimeString('es-AR', { hour: '2-digit', minute: '2-digit' }) : '';
@@ -402,8 +404,8 @@ export function OperacionesMapPopup({
                       {shift.vacancyOrigin === 'ABSENCE' ? 'ausencia' : 'sin plan'}
                     </span>
                   )}
-                  {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && (!shift.isAbsent || shift.isProvisionalLateAbsence) && !shift.isFranco &&
-                    (diffMin > 30 && !shift.isProvisionalLateAbsence ? (
+                  {!shift.isPresent && !shift.isUnassigned && !shift.isCompleted && (!shift.isAbsent || shift.isProvisionalLateAbsence || canRevertAbsence) && !shift.isFranco &&
+                    (diffMin > 30 && !shift.isProvisionalLateAbsence && !canRevertAbsence ? (
                       <button
                         onClick={() => onOpenAttendance(shift)}
                         style={{

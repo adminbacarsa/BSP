@@ -73,7 +73,7 @@ import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonito
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
-import { isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
+import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
 
 const OperacionesMap = dynamic(() => import('@/components/operaciones/OperacionesMap'), { loading: () => <div className="h-full flex items-center justify-center text-slate-400">Cargando Mapa...</div>, ssr: false });
@@ -1147,6 +1147,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     const avatarClass = getGuardAvatarClass(shift);
     const isAbsentOperativelyCovered = isShiftOperativelyCovered(shift);
     const coveringEmployeeName = isAbsentOperativelyCovered ? formatCoveringEmployeeLabel(shift) : null;
+    const canRevertAbsence = canRevertAbsenceNow(shift, now.getTime());
 
     // Badge de estado
     let badge = null;
@@ -1252,22 +1253,22 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <button onClick={() => onOpenAttendance(shift)} className="p-1.5 bg-amber-50 text-amber-600 border border-amber-200 rounded-lg hover:bg-amber-100 transition-colors" title="Declarar ausencia"><AlertTriangle size={12}/></button>
                 )}
                 {(viewTab === 'ACTIVOS' || viewTab === 'RETENIDOS') && (<><button onClick={() => onOpenManualRetention?.(shift)} className="p-1.5 bg-orange-50 text-orange-600 border border-orange-200 rounded-lg hover:bg-orange-100 transition-colors" title="Retención manual"><Timer size={12}/></button><button onClick={() => onOpenCheckout(shift)} className="p-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors" title="Salida"><LogOut size={12}/></button><button onClick={() => onOpenInterrupt(shift)} className="p-1.5 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 transition-colors" title="Baja anticipada"><Siren size={12}/></button></>)}
+                {viewTab !== 'AUSENTES' && canRevertAbsence && (
+                    <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Llegó? — revertir ausencia (hasta T+60)"><XCircle size={12}/></button>
+                )}
                 {viewTab === 'AUSENTES' && (shift.isAbsent
                     ? (() => {
                         const endMs = shift.endDateObj?.getTime?.() ?? 0;
                         const shiftEnded = endMs > 0 && Date.now() > endMs;
-                        if (shiftEnded) {
+                        if (shiftEnded && !canRevertAbsence) {
                             return <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold">VENCIDO</span>;
-                        }
-                        if (isAbsentOperativelyCovered) {
-                            return null;
                         }
                         return (
                             <div className="flex gap-1">
-                                <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>
-                                {isRevertAbsenceExpired(shift, now.getTime())
-                                    ? <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold" title="Revertir vencido (T+60)">VENCIDO</span>
-                                    : <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia — error de sistema"><XCircle size={12}/></button>}
+                                {!isAbsentOperativelyCovered && <span className="text-[9px] px-2 py-1 rounded bg-rose-50 text-rose-500 border border-rose-200 font-bold">→ VAC</span>}
+                                {canRevertAbsence
+                                    ? <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Llegó? — revertir ausencia (hasta T+60)"><XCircle size={12}/></button>
+                                    : <span className="text-[9px] px-2 py-1 rounded bg-slate-100 text-slate-400 font-bold" title="Revertir vencido (T+60)">VENCIDO</span>}
                             </div>
                         );
                       })()
@@ -1372,22 +1373,22 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <button onClick={() => onOpenCheckout(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:bg-purple-700 transition-colors"><LogOut size={11}/>SALIDA</button>
                         <button onClick={() => onOpenInterrupt(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-red-50 text-red-700 border border-red-200 rounded-lg text-[10px] font-bold hover:bg-red-100 transition-colors"><Siren size={11}/>BAJA</button>
                     </>)}
+                    {viewTab !== 'AUSENTES' && canRevertAbsence && (
+                        <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition-colors"><XCircle size={11}/>LLEGÓ? / REVERTIR</button>
+                    )}
                     {viewTab === 'AUSENTES' && (shift.isAbsent
                         ? (() => {
                             const endMs = shift.endDateObj?.getTime?.() ?? 0;
                             const shiftEnded = endMs > 0 && Date.now() > endMs;
-                            if (shiftEnded) {
+                            if (shiftEnded && !canRevertAbsence) {
                                 return <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold">VENCIDO</span>;
-                            }
-                            if (isAbsentOperativelyCovered) {
-                                return null;
                             }
                             return (
                                 <div className="flex gap-1.5 items-center">
-                                    <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>
-                                    {isRevertAbsenceExpired(shift, now.getTime())
-                                        ? <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold" title="Revertir vencido (T+60)">VENCIDO</span>
-                                        : <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="p-1.5 bg-slate-50 text-slate-400 border border-slate-200 rounded-lg hover:bg-slate-100 transition-colors" title="Revertir ausencia"><XCircle size={11}/></button>}
+                                    {!isAbsentOperativelyCovered && <span className="flex items-center gap-1 px-2.5 py-1.5 bg-rose-50 text-rose-500 border border-rose-200 rounded-lg text-[10px] font-bold">→ Cubrir desde VACANTES</span>}
+                                    {canRevertAbsence
+                                        ? <button onClick={() => onRevertAbsence && onRevertAbsence(shift)} className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-50 text-slate-500 border border-slate-200 rounded-lg text-[10px] font-bold hover:bg-slate-100 transition-colors"><XCircle size={11}/>LLEGÓ? / REVERTIR</button>
+                                        : <span className="flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold" title="Revertir vencido (T+60)">VENCIDO</span>}
                                 </div>
                             );
                           })()

@@ -16,3 +16,14 @@ export function isRevertAbsenceExpired(shift: any, nowMs: number = Date.now()): 
     const startMs = plannedStartMs(shift);
     return startMs > 0 && nowMs > startMs + REVERT_ABSENCE_WINDOW_MS;
 }
+
+/**
+ * Desde el instante de la ausencia hasta T+60 el operador siempre tiene salida,
+ * esté la vacante abierta, la cascada corriendo o el protocolo asistido tomado.
+ */
+export function canRevertAbsenceNow(shift: any, nowMs: number = Date.now()): boolean {
+    if (!shift) return false;
+    const absent = shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT';
+    if (!absent || shift.isCompleted === true || shift.isPresent === true) return false;
+    return !isRevertAbsenceExpired(shift, nowMs);
+}

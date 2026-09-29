@@ -2657,6 +2657,68 @@ async function run() {
       const ok = clampLateEtaMinutes(60) === 30 && clampLateEtaMinutes(10) === 10 && clampLateEtaMinutes(15) === 15;
       report(68, ok, ok ? 'ETA máxima 30 min' : `60→${clampLateEtaMinutes(60)}`);
     }
+
+    // Caso 69 — AA recién marcada en Manual: revertir con vacante abierta y convocatoria pendiente
+    {
+      const prefix = `${runId}_c69`;
+      const empresaId = `${prefix}_emp`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 32 * 60 * 1000;
+      await db.collection('sesiones_operador').doc(`${prefix}_ses`).set({
+        empresaId, status: 'ACTIVO', operatorUid: `${prefix}_op`,
+        startedAt: Timestamp.now(), lastHeartbeatAt: Timestamp.now(),
+      });
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId, employeeId: `${prefix}_e`, employeeName: 'Guerrero',
+        objectiveId: `${prefix}_obj`, objectiveName: 'Peaje', positionName: 'Puesto 1', code: 'T',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 150 * 60 * 1000),
+        status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'AUTO_T30', by: 'E2E' });
+      await openLateAbsenceVacancy(db, shiftId);
+      await db.collection('convocatorias_cobertura').doc(`${prefix}_conv`).set({
+        empresaId, shiftId, status: 'PENDING', tipo: 'RET', createdAt: Timestamp.now(),
+      });
+      const manual = await isEmpresaManualMode(db, empresaId);
+      const rev = await revertirAusenciaShift(db, { shiftId, operatorUid: `${prefix}_op` });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const conv = (await db.collection('convocatorias_cobertura').doc(`${prefix}_conv`).get()).data();
+      const ok = manual === true && rev.success === true
+        && sh?.isAbsent !== true && sh?.isPresent === true
+        && String(conv?.status) === 'CANCELLED';
+      report(69, ok, ok ? 'AA en Manual se revierte con vacante y convocatoria abiertas'
+        : `manual=${manual} rev=${rev.reason} absent=${sh?.isAbsent} conv=${conv?.status}`);
+    }
+
+    // Caso 70 — AA ya cubierta: el operador igual sale (cancelCoverage) dentro de T+60
+    {
+      const prefix = `${runId}_c70`;
+      const shiftId = `${prefix}_sh`;
+      const startMs = Date.now() - 35 * 60 * 1000;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId: `${prefix}_emp`, employeeId: `${prefix}_e`, employeeName: 'Guerrero',
+        objectiveId: `${prefix}_obj`, positionName: 'Puesto 1', code: 'T',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 150 * 60 * 1000),
+        status: 'PENDING',
+      });
+      await markShiftAbsent(db, shiftId, { reason: 'AUTO_T30', by: 'E2E' });
+      await db.collection('turnos').doc(`ops_cov_${shiftId}_${prefix}_cov`).set({
+        empresaId: `${prefix}_emp`, objectiveId: `${prefix}_obj`, positionName: 'Puesto 1',
+        employeeId: `${prefix}_cov`, employeeName: 'Cubre', origin: 'OPERATIONS_COVERAGE',
+        absenceShiftId: shiftId, status: 'PENDING',
+        startTime: Timestamp.fromMillis(startMs),
+        endTime: Timestamp.fromMillis(startMs + 150 * 60 * 1000),
+      });
+      const blocked = await revertirAusenciaShift(db, { shiftId, operatorUid: `${prefix}_op` });
+      const forced = await revertirAusenciaShift(db, { shiftId, cancelCoverage: true, operatorUid: `${prefix}_op` });
+      const sh = (await db.collection('turnos').doc(shiftId).get()).data();
+      const ok = blocked.success === false && blocked.reason === 'COVERAGE_IN_PROGRESS'
+        && forced.success === true && sh?.isAbsent !== true;
+      report(70, ok, ok ? 'cubierta: revierte cancelando la cobertura'
+        : `blocked=${blocked.reason} forced=${forced.reason} absent=${sh?.isAbsent}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;
