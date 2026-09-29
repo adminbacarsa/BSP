@@ -116,11 +116,12 @@ import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, buildProformaPositionGrids } from '@/lib/crm/proformaGrid';
 import type { ProformaLayoutMode } from '@/lib/crm/proformaTypes';
-import { turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
+import { proformaDetailGridMode, turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
 import {
   autoDetailUsesExecutedForObjective,
   buildProformaBillingRows,
   clientHasOpenCommercialContract,
+  proformaDetailModeToBillingHint,
   resolveClientDefaultProformaDetailMode,
   sumBillableContractHours,
 } from '@/lib/crm/slaBilling';
@@ -128,6 +129,7 @@ import { buildInOperationObjectiveIds, splitHoursByOperation, type ProformaSlaRo
 import { fetchPlanificacionEstadoDoc } from '@/lib/multiempresa';
 import type { ProformaBillingRow, PurchaseOrder } from '@/lib/crm/slaBilling.types';
 import { purchaseOrderService } from '@/services/purchaseOrderService';
+import { ProformaOcQuickPanel } from '@/components/crm/ProformaOcQuickPanel';
 import { isSolicitudRefuerzoExtraVendible } from '@/lib/refuerzo/refuerzoDisplay';
 import { executedBillableHoursByFranja } from '@/lib/crm/executedBillableHoursByFranja';
 import { isSinCoberturaShift } from '@/lib/crm/proformaVacancy';
@@ -283,79 +285,6 @@ const clampDateRange = (start: Date | null, end: Date | null, min: Date | null, 
 type RangeMode = CrmRangeMode;
 type ViewMode = 'grid' | 'list';
 type ProformaBase = 'requested' | 'planned' | 'executed';
-
-function ProformaOcQuickPanel(props: {
-  clientId?: string;
-  empresaId: string;
-  orders: PurchaseOrder[];
-  onRefresh: () => void | Promise<void>;
-}) {
-  const { clientId, empresaId, orders, onRefresh } = props;
-  const [ocNumber, setOcNumber] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [authorizedHours, setAuthorizedHours] = useState('');
-  const [saving, setSaving] = useState(false);
-
-  if (!clientId) return null;
-
-  const handleCreate = async () => {
-    if (!ocNumber.trim() || !startDate || !endDate) {
-      toast.error('Completá número de OC y vigencia');
-      return;
-    }
-    setSaving(true);
-    try {
-      await purchaseOrderService.create(
-        {
-          empresaId,
-          clientId,
-          ocNumber: ocNumber.trim(),
-          startDate,
-          endDate,
-          status: 'ACTIVE',
-          authorizedHours: authorizedHours ? Number(authorizedHours) : undefined,
-          currency: 'ARS',
-        },
-        { empresaId },
-      );
-      toast.success('Orden de compra creada');
-      setOcNumber('');
-      setAuthorizedHours('');
-      await onRefresh();
-    } catch (e) {
-      console.error(e);
-      toast.error('No se pudo crear la OC');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  return (
-    <div className="mb-4 bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm p-4 space-y-3">
-      <p className="text-[10px] font-black uppercase text-slate-500 tracking-widest">Órdenes de compra (Ministerio / OC externa)</p>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-2">
-        <input className="col-span-2 p-2 rounded-lg border text-xs font-bold" placeholder="Nº OC" value={ocNumber} onChange={(e) => setOcNumber(e.target.value)} />
-        <input type="date" className="p-2 rounded-lg border text-xs font-bold" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-        <input type="date" className="p-2 rounded-lg border text-xs font-bold" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-        <input className="p-2 rounded-lg border text-xs font-bold" placeholder="Hs auth." value={authorizedHours} onChange={(e) => setAuthorizedHours(e.target.value)} />
-        <button type="button" disabled={saving} onClick={() => void handleCreate()} className="col-span-2 md:col-span-5 py-2 rounded-lg bg-indigo-600 text-white text-[10px] font-black uppercase disabled:opacity-50">
-          Agregar OC
-        </button>
-      </div>
-      {orders.length > 0 && (
-        <ul className="text-xs space-y-1">
-          {orders.map((o) => (
-            <li key={o.id} className="font-bold text-slate-700 dark:text-slate-200">
-              OC {o.ocNumber} · {o.startDate} → {o.endDate}
-              {o.authorizedHours != null ? ` · ${o.authorizedHours} hs` : ''}
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
 
 export default function CRMPage() {
   const router = useRouter();
@@ -542,9 +471,13 @@ export default function CRMPage() {
   useEffect(() => {
     if (!router.isReady || loadingClients) return;
     const qid = String(router.query.clientId ?? '').trim();
+    const qtab = String(router.query.tab ?? '').trim();
     if (qid) {
-      if (view === 'detail') return;
-      void openClientDetail({ id: qid });
+      crmRestoredRef.current = true;
+      if (qtab) setActiveTab(qtab);
+      if (!(view === 'detail' && selectedClient?.id === qid)) {
+        void openClientDetail({ id: qid });
+      }
       router.replace('/admin/crm', undefined, { shallow: true });
       return;
     }
@@ -556,7 +489,7 @@ export default function CRMPage() {
       if (saved.tab) setActiveTab(saved.tab);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [router.isReady, router.query.clientId, loadingClients, clients.length]);
+  }, [router.isReady, router.query.clientId, router.query.tab, loadingClients, clients.length]);
 
   useEffect(() => {
     writeSessionJson('cosp:crm:view', {
@@ -2259,11 +2192,12 @@ export default function CRMPage() {
       setProformaContractDetailMode(billingDefault.mode);
       setProformaContractBillingMixed(billingDefault.mixed);
       const contractDetailMode = billingDefault.mode;
-      setProformaDetailModeOverride(
-        proformaDetailMode !== 'auto'
-        && proformaDetailMode !== 'sin_cobertura'
-        && proformaDetailMode !== contractDetailMode,
-      );
+      const explicitGridMode = proformaDetailGridMode(proformaDetailMode);
+      const detailModeIsOverride =
+        explicitGridMode != null
+        && explicitGridMode !== 'sin_cobertura'
+        && explicitGridMode !== contractDetailMode;
+      setProformaDetailModeOverride(detailModeIsOverride);
       const autoExecutedForObjective = (objectiveId: unknown, objectiveName: unknown) =>
         autoDetailUsesExecutedForObjective(billingDefault, objectiveId, objectiveName);
       const useExecutedForAuto: AutoExecutedResolver = (t: any) =>
@@ -2448,11 +2382,11 @@ export default function CRMPage() {
         });
         return { byObjective };
       };
-      const breakdownSource = proformaDetailMode === 'sin_cobertura'
+      const breakdownSource = explicitGridMode === 'sin_cobertura'
         ? sinCobertura
-        : proformaDetailMode === 'executed'
+        : explicitGridMode === 'executed'
           ? executed
-          : proformaDetailMode === 'planned'
+          : explicitGridMode === 'planned'
             ? planned
             : autoBreakdownByContract();
       const breakdown = Object.entries(breakdownSource.byObjective)
@@ -2566,6 +2500,7 @@ export default function CRMPage() {
         franjaByObjectiveId: franja.byObjectiveId,
         franjaByObjectiveName: franja.byObjectiveName,
         clientHasOpenContract,
+        modeOverride: proformaDetailModeToBillingHint(proformaDetailMode),
       });
       setProformaBillingRows(billingRows);
 
@@ -2665,10 +2600,7 @@ export default function CRMPage() {
         billingSummary: billingRows,
         contractDetailMode,
         contractBillingMixed: billingDefault.mixed,
-        detailModeOverride:
-          proformaDetailMode !== 'auto'
-          && proformaDetailMode !== 'sin_cobertura'
-          && proformaDetailMode !== contractDetailMode,
+        detailModeOverride: detailModeIsOverride,
         adicionalHours: adicionalHoursTotal,
         sourceDebug: {
           clientId: selectedClient.id,
@@ -2679,7 +2611,7 @@ export default function CRMPage() {
         },
       });
 
-      const modeIsSinCobertura = proformaDetailMode === 'sin_cobertura';
+      const modeIsSinCobertura = explicitGridMode === 'sin_cobertura';
       const gridTotal = Math.round(grids.reduce((a: number, g: any) => a + g.grandTotal.total, 0));
       const plannedBase = Math.round(sumPlannedHoursForClient(
         turnosList,
@@ -4395,6 +4327,11 @@ export default function CRMPage() {
                     clientId={selectedClient?.id}
                     empresaId={empresaId || ''}
                     orders={clientPurchaseOrders}
+                    objectives={(selectedClient?.objetivos || []).map((o: any) => normalizeClientObjetivo(o)).filter((o: { id: string }) => o.id)}
+                    billingRows={proformaBillingRows}
+                    periodLabel={proformaStartDate && proformaEndDate ? `${proformaStartDate.split('-').reverse().join('/')} → ${proformaEndDate.split('-').reverse().join('/')}` : 'del período'}
+                    consumptionLoading={proformaTotals.loading}
+                    actorName={currentUserName}
                     onRefresh={async () => {
                       if (!selectedClient?.id) return;
                       const rows = await purchaseOrderService.getByClient(selectedClient.id, {

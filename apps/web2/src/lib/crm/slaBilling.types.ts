@@ -9,22 +9,31 @@
  * - empresaId, clientId
  * - ocNumber: string (número oficial del cliente)
  * - startDate, endDate: YYYY-MM-DD
- * - status: 'ACTIVE' | 'INACTIVE' (soft delete)
- * - authorizedHours?: number (techo global del período)
+ * - status: 'ACTIVE' | 'INACTIVE' (soft delete) | 'CANCELLED' (anulada; no se borra)
+ * - cancelledAt / cancelledBy: solo si status es CANCELLED
+ * - kind?: 'GENERAL' | 'POR_OBJETIVO' | 'BOLSA' (tipo de tope; legacy sin kind: lines → POR_OBJETIVO, si no GENERAL)
+ *   GENERAL      = un tope total único (authorizedHours) que consumen todos los objetivos que usan la OC.
+ *   POR_OBJETIVO = horas por objetivo (lines); el total es la suma de las líneas.
+ *   BOLSA        = total fijo (authorizedHours) + asignación por objetivo (lines); lo sin asignar queda
+ *                  disponible y, si BOLSA_UNASSIGNED_SHARED_BY_ANY_OBJECTIVE, lo consume cualquier objetivo
+ *                  que agotó su asignación. Nunca se supera el total.
+ * - authorizedHours?: number (techo total: GENERAL y BOLSA)
  * - authorizedAmount?: number (techo en ARS, opcional si facturan por monto)
  * - currency?: 'ARS'
  * - lines?: Array<{ objectiveId?, positionName?, authorizedHours?, authorizedAmount? }>
- *   (opcional: reparte el techo por objetivo/puesto; si falta, usa authorizedHours global)
+ *   (POR_OBJETIVO y BOLSA: horas por objetivo)
  * - notes?: string
  *
  * SLA en modo ORDEN_COMPRA: billingPurchaseOrderId → doc anterior.
- * La prefactura factura min(prestado, autorizado) y muestra saldo.
+ * La prefactura factura min(prestado, autorizado) y muestra saldo (ver purchaseOrderAllocation.ts).
  * "Prestado" en ORDEN_COMPRA = horas cubiertas por franja (executedBillableHoursByFranja),
  * el mismo criterio que billingMode EJECUTADO: no es el plan ni el reloj crudo.
  */
 export type SlaBillingMode = 'PLANIFICADO' | 'EJECUTADO' | 'FIJO' | 'ORDEN_COMPRA';
 
 export const DEFAULT_SLA_BILLING_MODE: SlaBillingMode = 'PLANIFICADO';
+
+export type PurchaseOrderKind = 'GENERAL' | 'POR_OBJETIVO' | 'BOLSA';
 
 export type PurchaseOrderLine = {
   objectiveId?: string;
@@ -40,7 +49,8 @@ export type PurchaseOrder = {
   ocNumber: string;
   startDate: string;
   endDate: string;
-  status: 'ACTIVE' | 'INACTIVE';
+  status: 'ACTIVE' | 'INACTIVE' | 'CANCELLED';
+  kind?: PurchaseOrderKind;
   authorizedHours?: number;
   authorizedAmount?: number;
   currency?: 'ARS';
@@ -48,6 +58,8 @@ export type PurchaseOrder = {
   notes?: string;
   createdAt?: string;
   updatedAt?: string;
+  cancelledAt?: string;
+  cancelledBy?: string;
 };
 
 export type SlaBillingFields = {
@@ -75,4 +87,7 @@ export type ProformaBillingRow = {
   fixedMonthlyAmount?: number;
   ocNumber?: string;
   ocId?: string;
+  ocKind?: PurchaseOrderKind;
+  /** BOLSA: horas tomadas de lo sin asignar de la OC para este objetivo. */
+  ocFromUnassignedHours?: number;
 };

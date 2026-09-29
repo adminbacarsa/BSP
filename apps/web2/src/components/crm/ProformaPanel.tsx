@@ -13,9 +13,10 @@ import type { ProformaExportBundle, ProformaLayoutMode } from '@/lib/crm/proform
 import { formatMoney } from '@/lib/crm/proformaFormat';
 import { formatHoursColonTotal, shortDayHeader } from '@/lib/crm/proformaGrid';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
-import type { ProformaDetailMode } from '@/lib/crm/proformaMode';
+import { proformaDetailGridMode, type ProformaDetailMode } from '@/lib/crm/proformaMode';
 import type { ProformaBillingRow } from '@/lib/crm/slaBilling.types';
 import { billingModeLabel } from '@/lib/crm/slaBilling';
+import { purchaseOrderKindLabel } from '@/lib/crm/purchaseOrderAllocation';
 
 export type ProformaPanelProps = {
   client: any;
@@ -254,10 +255,18 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                 <option value="auto">Auto (contrato)</option>
                 <option value="planned">Planificado</option>
                 <option value="executed">Ejecutado (fichaje)</option>
+                <option value="fijo">Fijo (contrato)</option>
+                <option value="orden_compra">Orden de compra (tope OC)</option>
                 <option value="sin_cobertura">Sin cobertura (ops)</option>
               </select>
               {detailModeOverride && (
                 <p className="text-[9px] font-bold text-amber-700 mt-1">Override manual: no coincide con el modo del contrato ({contractDetailMode === 'executed' ? 'Ejecutado' : 'Planificado'}).</p>
+              )}
+              {proformaDetailMode === 'fijo' && (
+                <p className="text-[9px] font-bold text-slate-500 mt-1">Fijo: factura las horas fijas/mes de cada contrato; sin horas fijas cargadas, factura lo planificado.</p>
+              )}
+              {proformaDetailMode === 'orden_compra' && (
+                <p className="text-[9px] font-bold text-slate-500 mt-1">Orden de compra: ejecutado con tope de la OC de cada contrato; sin OC vigente, ejecutado sin tope.</p>
               )}
               {contractBillingMixed && proformaDetailMode === 'auto' && (
                 <p className="text-[9px] font-bold text-amber-700 mt-1">Contratos con modos distintos — revisá facturación por objetivo abajo.</p>
@@ -297,11 +306,15 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                   {billingRows.map((r) => (
                     <tr key={`${r.objectiveId}-${r.slaId || ''}`} className="border-t border-slate-100">
                       <td className="p-2 font-bold text-slate-800">{r.objectiveName}</td>
-                      <td className="p-2 font-bold text-indigo-600">{billingModeLabel(r.billingMode)}{r.ocNumber ? ` · ${r.ocNumber}` : ''}</td>
+                      <td className="p-2 font-bold text-indigo-600">
+                        {billingModeLabel(r.billingMode)}{r.ocNumber ? ` · ${r.ocNumber}` : ''}
+                        {r.ocKind ? <span className="block text-[9px] font-bold text-slate-400">{purchaseOrderKindLabel(r.ocKind)}{r.ocFromUnassignedHours ? ` · +${r.ocFromUnassignedHours} hs de la bolsa` : ''}</span> : null}
+                        {r.billingMode === 'ORDEN_COMPRA' && !r.ocId ? <span className="block text-[9px] font-bold text-amber-700">Sin OC vigente: ejecutado sin tope</span> : null}
+                      </td>
                       <td className="p-2 text-right tabular-nums">{r.prestadoHours}</td>
                       <td className="p-2 text-right font-black tabular-nums">{r.billableHours}</td>
                       <td className="p-2 text-right tabular-nums">{r.authorizedHours ?? '—'}</td>
-                      <td className="p-2 text-right tabular-nums">{r.balanceHours ?? '—'}</td>
+                      <td className={`p-2 text-right tabular-nums ${r.authorizedHours != null && r.balanceHours === 0 ? 'text-rose-600 font-black' : r.authorizedHours ? (r.prestadoHours / r.authorizedHours >= 0.8 ? 'text-amber-700 font-bold' : '') : ''}`}>{r.balanceHours ?? '—'}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -328,10 +341,10 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                     <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.sinCobertura, proformaTotals.loading)}</span>
                     <span>Sin cobertura (ops). Huecos declarados en Operaciones.</span>
                   </>
-                ) : proformaDetailMode === 'executed' ? (
+                ) : proformaDetailGridMode(proformaDetailMode) === 'executed' ? (
                   <>
                     <span className="tabular-nums text-slate-800">{formatProformaHours(proformaTotals.executed, proformaTotals.loading)}</span>
-                    <span>Ejecutado (fichaje).</span>
+                    <span>{proformaDetailMode === 'orden_compra' ? 'Ejecutado por franja (tope OC en la tabla por objetivo).' : 'Ejecutado (fichaje).'}</span>
                     <span className="font-medium">Requiere fichaje realStart/realEnd del guardia.</span>
                   </>
                 ) : (
