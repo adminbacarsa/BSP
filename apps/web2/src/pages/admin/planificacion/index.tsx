@@ -10052,8 +10052,8 @@ export default function PlanificacionPage() {
     const planningEventosCellsByDay = useMemo(() => {
         if (!selectedObjective) return {};
         const monthPrefix = `${currentDate.getFullYear()}-${String(currentDate.getMonth() + 1).padStart(2, '0')}`;
-        return buildPlanningEventosCellsByDay(turaMap, shiftsMap, selectedObjective, monthPrefix);
-    }, [turaMap, shiftsMap, selectedObjective, currentDate]);
+        return buildPlanningEventosCellsByDay(eventos, selectedObjective, monthPrefix);
+    }, [eventos, selectedObjective, currentDate]);
 
     const hasSlaExcludedDatesInMonth = Object.keys(excludedPositionsByDate).length > 0;
 
@@ -10647,7 +10647,7 @@ export default function PlanificacionPage() {
                         </React.Fragment>
                     );
                 })}
-                {/* ── Fila Eventos: TURAs imputadas a extras (prefactura) — no cubre SLA ── */}
+                {/* ── Fila Eventos: horas vendidas del día — no cubre SLA ni suma TURA/EV ── */}
                 {!isSnapshotView && Object.keys(planningEventosCellsByDay).length > 0 && (
                     <tr className="hover:bg-violet-50/40 dark:hover:bg-violet-950/20">
                         <td
@@ -10658,8 +10658,8 @@ export default function PlanificacionPage() {
                                 <span className="text-[9px] font-black uppercase tracking-wide leading-tight text-violet-800 dark:text-violet-200">
                                     Eventos
                                 </span>
-                                <span className="text-[8px] font-bold truncate text-violet-600 dark:text-violet-400" title="TURAs imputadas a Eventos — facturan en prefactura, no suman cobertura SLA">
-                                    Extras TURA · prefactura
+                                <span className="text-[8px] font-bold truncate text-violet-600 dark:text-violet-400" title="Horas vendidas del evento en este objetivo. No suma fichadas ni TURA.">
+                                    Horas vendidas
                                 </span>
                             </div>
                         </td>
@@ -10680,7 +10680,7 @@ export default function PlanificacionPage() {
                                         setShiftTooltip({
                                             label: tooltip,
                                             pos: 'Eventos',
-                                            range: cell.entries.map((en) => `${en.guardName} ${en.range}`).join(' · '),
+                                            range: cell.entries.map((en) => `${en.nombre} ${en.hours}h`).join(' · '),
                                             x: e.clientX,
                                             y: e.clientY,
                                             restHours: null,
@@ -18208,16 +18208,34 @@ export default function PlanificacionPage() {
                                 </div>
                             </div>
                         </div>
-                        <div>
-                            <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Cupo de guardias</label>
-                            <input
-                                type="number"
-                                min={1}
-                                className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
-                                value={eventoForm.cupoGuardias ?? 5}
-                                onChange={e => setEventoForm(p => ({ ...p, cupoGuardias: parseInt(e.target.value) || 1 }))}
-                            />
+                        <div className="flex gap-3">
+                            <div className="flex-1">
+                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Cupo de guardias</label>
+                                <input
+                                    type="number"
+                                    min={1}
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                    value={eventoForm.cupoGuardias ?? 5}
+                                    onChange={e => setEventoForm(p => ({ ...p, cupoGuardias: parseInt(e.target.value) || 1 }))}
+                                />
+                            </div>
+                            <div className="flex-1">
+                                <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Horas vendidas / día</label>
+                                <input
+                                    type="number"
+                                    min={0}
+                                    step={0.5}
+                                    className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm"
+                                    placeholder="Lo que se factura"
+                                    value={eventoForm.horasVendidas ?? ''}
+                                    onChange={e => {
+                                        const raw = e.target.value;
+                                        setEventoForm(p => ({ ...p, horasVendidas: raw === '' ? undefined : Number(raw) }));
+                                    }}
+                                />
+                            </div>
                         </div>
+                        <p className="text-[10px] text-slate-500 -mt-2">Se factura este número por día. No son las fichadas ni el plan del guardia.</p>
                         <div>
                             <label className="block text-[11px] font-bold text-slate-500 uppercase mb-1">Descripción (opcional)</label>
                             <textarea
@@ -18238,6 +18256,22 @@ export default function PlanificacionPage() {
                                 setEventoFormSaving(true);
                                 try {
                                     const horas = calcHorasEvento(eventoForm.horaInicio || '08:00', eventoForm.horaFin || '20:00');
+                                    const vendidas = Number(eventoForm.horasVendidas);
+                                    const horasVendidas = Number.isFinite(vendidas) && vendidas > 0 ? vendidas : undefined;
+                                    const fechasDias = [eventoForm.fecha!, ...(eventoForm.fechas || [])].filter(Boolean);
+                                    const servicios: ServicioEvento[] = fechasDias.map((fecha) => ({
+                                        id: crypto.randomUUID(),
+                                        nombre: eventoForm.nombre!.trim(),
+                                        fecha,
+                                        tipoTurno: 'libre',
+                                        horaInicio: eventoForm.horaInicio || '08:00',
+                                        horaFin: eventoForm.horaFin || '20:00',
+                                        horasTotal: horas,
+                                        ubicacion: { tipo: 'nueva' },
+                                        cupo: eventoForm.cupoGuardias || 1,
+                                        status: 'pendiente',
+                                        ...(horasVendidas != null ? { horasVendidas } : {}),
+                                    }));
                                     const newEvento: Omit<Evento, 'id'> = {
                                         empresaId,
                                         nombre: eventoForm.nombre.trim(),
@@ -18249,7 +18283,9 @@ export default function PlanificacionPage() {
                                         horaInicio: eventoForm.horaInicio || '08:00',
                                         horaFin: eventoForm.horaFin || '20:00',
                                         horasEvento: horas,
+                                        ...(horasVendidas != null ? { horasVendidas } : {}),
                                         cupoGuardias: eventoForm.cupoGuardias || 1,
+                                        servicios,
                                         status: 'activo',
                                         creadoPor: activeActorName || 'Sistema',
                                     };

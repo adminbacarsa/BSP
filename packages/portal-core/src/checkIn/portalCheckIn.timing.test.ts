@@ -92,41 +92,55 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(after.rejectCode).toBe('TOO_LATE');
   });
 
-  it('OPERATIONS_COVERAGE: desde inicio−15 hasta max(createdAt, inicio)+60', () => {
+  it('convocado: desde que aceptó hasta el fin del hueco, nunca tarde', () => {
     const start = new Date('2026-09-14T20:00:00-03:00');
+    const end = new Date('2026-09-15T04:00:00-03:00');
     const created = new Date('2026-09-14T17:30:00-03:00');
     const s = shift({
       id: 'ops1',
       origin: 'OPERATIONS_COVERAGE',
       startTime: start,
-      endTime: new Date('2026-09-15T04:00:00-03:00'),
+      endTime: end,
       createdAt: created,
     });
-    const early = getCheckInTiming(s, now);
-    expect(early.canCheckIn).toBe(false);
-    expect(early.tooEarly).toBe(true);
+    const afterAccept = getCheckInTiming(s, now);
+    expect(afterAccept.convocado).toBe(true);
+    expect(afterAccept.canCheckIn).toBe(true);
+    expect(afterAccept.canNotifyLate).toBe(false);
+    expect(afterAccept.lateNoNotice).toBe(false);
+    expect(afterAccept.lateMinutes).toBe(0);
+    expect(afterAccept.checkInDeadline?.getTime()).toBe(end.getTime());
 
-    const inWin = getCheckInTiming(s, new Date('2026-09-14T19:50:00-03:00'));
-    expect(inWin.canCheckIn).toBe(true);
-    expect(inWin.checkInDeadline?.getTime()).toBe(start.getTime() + 60 * 60_000);
+    const beforeAccept = getCheckInTiming(
+      shift({ ...s, id: 'ops1b', createdAt: new Date('2026-09-14T19:00:00-03:00') }),
+      now,
+    );
+    expect(beforeAccept.canCheckIn).toBe(false);
+    expect(beforeAccept.tooEarly).toBe(true);
 
-    const late = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
-    expect(late.canCheckIn).toBe(false);
+    const pastStart = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
+    expect(pastStart.canCheckIn).toBe(true);
+    expect(pastStart.canNotifyLate).toBe(false);
+
+    const afterEnd = getCheckInTiming(s, new Date('2026-09-15T04:01:00-03:00'));
+    expect(afterEnd.canCheckIn).toBe(false);
+    expect(afterEnd.rejectCode).toBe('SHIFT_ENDED');
   });
 
-  it('OPERATIONS_COVERAGE: coverageCreatedAt si no hay createdAt', () => {
-    const start = new Date('2026-09-14T17:00:00-03:00');
+  it('convocado: coverageCreatedAt abre la fichada; el tope es el fin del hueco', () => {
+    const end = new Date('2026-09-15T01:00:00-03:00');
     const created = new Date('2026-09-14T17:30:00-03:00');
     const s = shift({
       id: 'ops2',
       origin: 'OPERATIONS_COVERAGE',
-      startTime: start,
-      endTime: new Date('2026-09-15T01:00:00-03:00'),
+      startTime: new Date('2026-09-14T17:00:00-03:00'),
+      endTime: end,
       coverageCreatedAt: created,
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
-    expect(t.checkInDeadline?.getTime()).toBe(created.getTime() + 60 * 60_000);
+    expect(t.checkInDeadline?.getTime()).toBe(end.getTime());
+    expect(t.canNotifyLate).toBe(false);
   });
 
   it('ADV (isEarlyStart): adjustedStartTime −15 … +60', () => {

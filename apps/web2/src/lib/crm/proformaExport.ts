@@ -335,40 +335,31 @@ export function exportProformaPdf(bundle: ProformaExportBundle) {
     drawPdfHeaderBar(doc, empresa, `EVENTOS — ${bundle.clientName}`, bundle.periodLabel);
     const evRows: (string | number)[][] = [];
     bundle.eventos.forEach((ev: ProformaEvento) => {
-      ev.servicios.forEach((srv) => {
-        const horario = srv.horaInicio && srv.horaFin ? `${srv.horaInicio}–${srv.horaFin}` : '—';
-        const pax = srv.cupo != null ? `${srv.guardias.length}/${srv.cupo}` : `${srv.guardias.length}`;
-        srv.guardias.forEach((g, i) => {
-          evRows.push([
-            i === 0 ? ev.eventoNombre : '',
-            i === 0 ? srv.servicioNombre : '',
-            i === 0 ? srv.fecha : '',
-            i === 0 ? horario : '',
-            i === 0 ? pax : '',
-            g.name,
-            formatHoursColonTotal(g.hours),
-          ]);
-        });
-        evRows.push(['', '', '', '', '', `Subtotal ${srv.servicioNombre}`, formatHoursColonTotal(srv.totalHoras)]);
+      ev.dias.forEach((dia) => {
+        evRows.push([
+          ev.eventoNombre,
+          dia.fecha,
+          dia.servicios.map((s) => s.servicioNombre).join(' · ') || '—',
+          formatHoursColonTotal(dia.horasVendidas),
+          formatHoursColonTotal(dia.horasTrabajadas),
+        ]);
       });
-      evRows.push(['', '', '', '', '', `Total ${ev.eventoNombre}`, formatHoursColonTotal(ev.totalHoras)]);
+      evRows.push(['', '', `Total ${ev.eventoNombre}`, formatHoursColonTotal(ev.totalHoras), formatHoursColonTotal(ev.horasTrabajadas)]);
     });
     autoTable(doc, {
       startY: PDF_CONTENT_TOP,
-      head: [['Evento', 'Servicio', 'Fecha', 'Horario', 'PAX', 'Guardia', 'Horas']],
+      head: [['Evento', 'Día', 'Servicio', 'Hs vendidas', 'Hs trabajadas']],
       body: evRows,
-      foot: [['', '', '', '', '', 'Total eventos', formatHoursColonTotal(evTotalHoras)]],
+      foot: [['', '', 'Total eventos', formatHoursColonTotal(evTotalHoras), formatHoursColonTotal(bundle.eventos.reduce((a, e) => a + e.horasTrabajadas, 0))]],
       styles: { fontSize: 7, cellPadding: 1.2 },
       headStyles: { fillColor: [51, 65, 85], textColor: 255, fontStyle: 'bold' },
       footStyles: { fillColor: [241, 245, 249], fontStyle: 'bold', fontSize: 7, textColor: [30, 41, 59] },
       columnStyles: {
-        0: { cellWidth: 40 },
-        1: { cellWidth: 40 },
-        2: { cellWidth: 18 },
-        3: { cellWidth: 18 },
-        4: { cellWidth: 12, halign: 'center' },
-        5: { cellWidth: 'auto' },
-        6: { cellWidth: 14, halign: 'center' },
+        0: { cellWidth: 48 },
+        1: { cellWidth: 22 },
+        2: { cellWidth: 'auto' },
+        3: { cellWidth: 28, halign: 'center' },
+        4: { cellWidth: 28, halign: 'center' },
       },
       theme: 'grid',
       showFoot: 'lastPage',
@@ -439,20 +430,17 @@ export function exportProformaCsv(bundle: ProformaExportBundle) {
 
   if (bundle.eventos && bundle.eventos.length > 0) {
     lines.push('EVENTOS');
-    lines.push(['Evento', 'Servicio', 'Fecha', 'Horario', 'PAX (cub/req)', 'Guardia', 'Horas'].map(esc).join(','));
+    lines.push(['Evento', 'Día', 'Servicio', 'Hs vendidas', 'Hs trabajadas (no facturan)'].map(esc).join(','));
     bundle.eventos.forEach((ev) => {
-      ev.servicios.forEach((srv) => {
-        const horario = srv.horaInicio && srv.horaFin ? `${srv.horaInicio}–${srv.horaFin}` : '';
-        const pax = srv.cupo != null ? `${srv.guardias.length}/${srv.cupo}` : `${srv.guardias.length}`;
-        srv.guardias.forEach((g) => {
-          lines.push([ev.eventoNombre, srv.servicioNombre, srv.fecha, horario, pax, g.name, formatHoursColonTotal(g.hours)].map(esc).join(','));
-        });
-        lines.push(['', `Subtotal ${srv.servicioNombre}`, '', '', '', '', formatHoursColonTotal(srv.totalHoras)].map(esc).join(','));
+      ev.dias.forEach((dia) => {
+        const servicios = dia.servicios.map((s) => s.servicioNombre).join(' · ');
+        lines.push([ev.eventoNombre, dia.fecha, servicios, formatHoursColonTotal(dia.horasVendidas), formatHoursColonTotal(dia.horasTrabajadas)].map(esc).join(','));
       });
-      lines.push(['', `Total ${ev.eventoNombre}`, '', '', '', '', formatHoursColonTotal(ev.totalHoras)].map(esc).join(','));
+      lines.push(['', `Total ${ev.eventoNombre}`, '', formatHoursColonTotal(ev.totalHoras), formatHoursColonTotal(ev.horasTrabajadas)].map(esc).join(','));
     });
     const evTotal = bundle.eventos.reduce((a, e) => a + e.totalHoras, 0);
-    lines.push(['', '', 'Total eventos', '', formatHoursColonTotal(evTotal)].map(esc).join(','));
+    const evTrab = bundle.eventos.reduce((a, e) => a + e.horasTrabajadas, 0);
+    lines.push(['', '', 'Total eventos', formatHoursColonTotal(evTotal), formatHoursColonTotal(evTrab)].map(esc).join(','));
     lines.push('');
   }
 
@@ -532,20 +520,27 @@ export function exportProformaExcel(bundle: ProformaExportBundle) {
     const evRows: (string | number)[][] = [
       [bundle.empresaName || 'COSP', 'EVENTOS', bundle.periodLabel],
       [],
-      ['Evento', 'Servicio', 'Fecha', 'Horario', 'PAX (cub/req)', 'Guardia', 'Horas'],
+      ['Evento', 'Día', 'Servicio', 'Hs vendidas', 'Hs trabajadas (no facturan)'],
     ];
     bundle.eventos.forEach((ev) => {
-      ev.servicios.forEach((srv) => {
-        const horario = srv.horaInicio && srv.horaFin ? `${srv.horaInicio}–${srv.horaFin}` : '';
-        const pax = srv.cupo != null ? `${srv.guardias.length}/${srv.cupo}` : `${srv.guardias.length}`;
-        srv.guardias.forEach((g) => {
-          evRows.push([ev.eventoNombre, srv.servicioNombre, srv.fecha, horario, pax, g.name, formatHoursColonTotal(g.hours)]);
-        });
-        evRows.push(['', `Subtotal ${srv.servicioNombre}`, '', '', '', '', formatHoursColonTotal(srv.totalHoras)]);
+      ev.dias.forEach((dia) => {
+        evRows.push([
+          ev.eventoNombre,
+          dia.fecha,
+          dia.servicios.map((s) => s.servicioNombre).join(' · '),
+          formatHoursColonTotal(dia.horasVendidas),
+          formatHoursColonTotal(dia.horasTrabajadas),
+        ]);
       });
-      evRows.push(['', `Total ${ev.eventoNombre}`, '', '', '', '', formatHoursColonTotal(ev.totalHoras)]);
+      evRows.push(['', `Total ${ev.eventoNombre}`, '', formatHoursColonTotal(ev.totalHoras), formatHoursColonTotal(ev.horasTrabajadas)]);
     });
-    evRows.push(['', 'Total eventos', '', '', '', '', formatHoursColonTotal(bundle.eventos.reduce((a, e) => a + e.totalHoras, 0))]);
+    evRows.push([
+      '',
+      'Total eventos',
+      '',
+      formatHoursColonTotal(bundle.eventos.reduce((a, e) => a + e.totalHoras, 0)),
+      formatHoursColonTotal(bundle.eventos.reduce((a, e) => a + e.horasTrabajadas, 0)),
+    ]);
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(evRows), 'Eventos');
   }
 

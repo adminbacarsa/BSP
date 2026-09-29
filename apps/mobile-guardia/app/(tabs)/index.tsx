@@ -1,12 +1,21 @@
 import { useEffect, useMemo, useRef } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  formatEnCaminoLine,
   getCheckInTiming,
+  isExtendedDutyShift,
+  isRecordatorioPendiente,
+  isShiftPresent,
+  mapsSearchUrl,
+  timestampLikeToMillis,
+  toDate,
   resolveCheckInUiStatus,
   resolveEvShiftDisplay,
+  resolveExpectedArrivalAt,
 } from '@cosp/portal-core';
+import type { ConvocadoEtaMinutes } from '@cosp/portal-core';
 import { isEmulatorMode } from '../../src/lib/portal';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../../src/hooks/useEmployeeShifts';
@@ -33,6 +42,7 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
+import { ConvocadoRecordatorioBanner } from '../../src/components/ConvocadoRecordatorioBanner';
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
 import { PreviewModeBanner } from '../../src/components/PreviewModeBanner';
@@ -56,6 +66,7 @@ import type { ConvocatoriaCobertura } from '../../src/lib/convocatoriasCobertura
 import Constants from 'expo-constants';
 import { appAlert } from '@/lib/appAlert';
 import { buildCoberturaRespondFeedback } from '../../src/lib/coberturaRespondFeedback';
+import { responderRecordatorioConvocado } from '../../src/lib/responderRecordatorioConvocado';
 
 export default function HoyScreen() {
   return (
@@ -68,7 +79,11 @@ export default function HoyScreen() {
 function HoyScreenContent() {
   const router = useRouter();
   const navigation = useNavigation();
-  const params = useLocalSearchParams<{ focus?: string; convocatoriaId?: string }>();
+  const params = useLocalSearchParams<{
+    focus?: string;
+    convocatoriaId?: string;
+    etaMinutes?: string;
+  }>();
   const { palette } = useTheme();
   const { isCompact, contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
@@ -110,6 +125,7 @@ function HoyScreenContent() {
   const {
     coberturaPendientes,
     llegadaTardePendientes,
+    aceptadas,
     busyId: coberturaBusyId,
     responder: responderCobertura,
   } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
@@ -129,8 +145,35 @@ function HoyScreenContent() {
 
   const focusCobertura =
     String(params.focus || '').toLowerCase() === 'cobertura' ||
-    !!String(params.convocatoriaId || '').trim();
+    (!!String(params.convocatoriaId || '').trim() &&
+      String(params.focus || '').toLowerCase() !== 'recordatorio');
   const highlightConvocatoriaId = String(params.convocatoriaId || '').trim() || null;
+  const focusRecordatorio = String(params.focus || '').toLowerCase() === 'recordatorio';
+  const etaFromPush = Number(params.etaMinutes);
+
+  const recordatorios = useMemo(() => {
+    const pool = allShifts ?? shifts;
+    const checked = (shiftId?: string) => {
+      const row = pool.find((s) => s.id === shiftId);
+      return !!row && isShiftPresent(row);
+    };
+    const pending = aceptadas.filter((c) => isRecordatorioPendiente(c, checked(c.shiftId)));
+    if (!focusRecordatorio || !highlightConvocatoriaId) return pending;
+    if (pending.some((c) => c.id === highlightConvocatoriaId)) return pending;
+    const known = aceptadas.find((c) => c.id === highlightConvocatoriaId);
+    if (known && checked(known.shiftId)) return pending;
+    // Push recibido antes de que el snapshot traiga reminderSentAt / si ya respondió: no lo repite.
+    if (known && timestampLikeToMillis(known.convocadoReplyAt) > 0) return pending;
+    return [
+      {
+        ...(known ?? { id: highlightConvocatoriaId, type: 'RET', status: 'ACCEPTED' }),
+        reminderSentAt: known?.reminderSentAt ?? new Date(),
+        etaMinutes:
+          known?.etaMinutes ?? (Number.isFinite(etaFromPush) && etaFromPush > 0 ? etaFromPush : undefined),
+      },
+      ...pending,
+    ];
+  }, [aceptadas, allShifts, shifts, focusRecordatorio, highlightConvocatoriaId, etaFromPush]);
 
   async function onResponderConvocatoria(sol: SolicitudEvento, acepta: boolean) {
     const result = await responderConvocatoria(sol, acepta);
@@ -173,6 +216,32 @@ function HoyScreenContent() {
       result.ok ? 'Listo' : 'Error',
       result.ok ? `Avisaste que llegás en ${etaMinutes} min` : result.message,
     );
+  }
+
+  async function onRecordatorioOnWay(
+    c: { id: string },
+    etaMinutes: ConvocadoEtaMinutes,
+  ) {
+    const result = await responderRecordatorioConvocado({
+      convocatoriaId: c.id,
+      action: 'ON_WAY',
+      etaMinutes,
+    });
+    appAlert(
+      result.ok ? 'En camino' : 'Recordatorio',
+      result.ok ? `Avisaste que llegás en ${etaMinutes} min` : result.message,
+    );
+    if (result.ok) router.replace('/(tabs)' as never);
+  }
+
+  async function onRecordatorioProblem(c: { id: string }, note: string) {
+    const result = await responderRecordatorioConvocado({
+      convocatoriaId: c.id,
+      action: 'PROBLEM',
+      note,
+    });
+    appAlert(result.ok ? 'Avisamos a operaciones' : 'Recordatorio', result.ok ? 'Quedó registrado.' : result.message);
+    if (result.ok) router.replace('/(tabs)' as never);
   }
 
   async function onNoVoyLlegadaTarde(c: ConvocatoriaCobertura) {
@@ -224,15 +293,16 @@ function HoyScreenContent() {
   const isOpsHero =
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
   const isRetentionHero = isActiveRetentionShift(mainShift);
+  const extendDuty = !!mainShift && isExtendedDutyShift(mainShift as never);
   const heroSectionLabel = todayAbsentShift
     ? 'Ausente'
     : isRetentionHero
       ? 'Retenido'
       : isOpsHero
-        ? 'Turno asignado'
-        : heroInProgress
-          ? 'Turno actual'
-          : 'Próximo turno';
+          ? 'Turno asignado'
+          : heroInProgress
+            ? 'Turno actual'
+            : 'Próximo turno';
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
@@ -255,10 +325,30 @@ function HoyScreenContent() {
       offlinePendingForShift: !!mainShift && pendingShiftIds.includes(mainShift.id),
     },
   );
+  const convocadoHero = !!timing?.convocado && !isConfirmed && !todayAbsentShift;
+  const acceptedForHero = mainShift
+    ? aceptadas.find((c) => c.shiftId === mainShift.id)
+    : undefined;
+  const enCaminoEta = convocadoHero
+    ? resolveExpectedArrivalAt({
+        expectedArrivalAt: mainShift?.expectedArrivalAt ?? acceptedForHero?.expectedArrivalAt,
+        etaMinutes: mainShift?.etaMinutes ?? acceptedForHero?.etaMinutes ?? null,
+        anchorMs:
+          timestampLikeToMillis(acceptedForHero?.acceptedAt) ||
+          timestampLikeToMillis(acceptedForHero?.respondedAt) ||
+          now.getTime(),
+        nowMs: now.getTime(),
+      }) ?? toDate(mainShift?.startTime)
+    : null;
+  const enCaminoLine = convocadoHero
+    ? formatEnCaminoLine(placement.objective, enCaminoEta && !Number.isNaN(enCaminoEta.getTime()) ? enCaminoEta : null)
+    : null;
+  const mapsUrl = mapsSearchUrl(objective?.lat, objective?.lng, objective?.address);
   const canCheckIn =
     portalFeatures.checkIn &&
     !!mainShift &&
     !mainShift.isFranco &&
+    !extendDuty &&
     timing?.canCheckIn &&
     !hasPendingRequest &&
     !isConfirmed;
@@ -407,6 +497,15 @@ function HoyScreenContent() {
             />
           ) : null}
 
+          {recordatorios.length > 0 ? (
+            <ConvocadoRecordatorioBanner
+              convocatorias={recordatorios}
+              busyId={coberturaBusyId}
+              onOnWay={(c, eta) => void onRecordatorioOnWay(c, eta)}
+              onProblem={(c, note) => void onRecordatorioProblem(c, note)}
+            />
+          ) : null}
+
           {llegadaTardePendientes.length > 0 ? (
             <LlegadaTardeVenisBanner
               convocatorias={llegadaTardePendientes}
@@ -463,7 +562,7 @@ function HoyScreenContent() {
               headline={
                 todayAbsentShift
                   ? 'HOY'
-                  : formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
+                  : enCaminoLine || formatHeroShiftHeadline(mainShift, { isToday: isHeroToday, now })
               }
               subline={
                 todayAbsentShift
@@ -473,7 +572,7 @@ function HoyScreenContent() {
               shift={todayAbsentShift || mainShift}
               placement={placement}
               empresaNombre={empresaNombre || 'Tu empresa'}
-              sectionLabel={heroSectionLabel}
+              sectionLabel={convocadoHero ? 'EN CAMINO' : heroSectionLabel}
               statusSlot={
                 todayAbsentShift ? (
                   <Text style={[styles.pendingLine, { color: palette.warning || '#b45309' }]}>
@@ -494,6 +593,13 @@ function HoyScreenContent() {
               footer={
                 todayAbsentShift ? null : (
                   <View style={styles.heroActions}>
+                    {convocadoHero && mapsUrl ? (
+                      <CommandButton
+                        label="Cómo llegar"
+                        variant="onHero"
+                        onPress={() => void Linking.openURL(mapsUrl)}
+                      />
+                    ) : null}
                     {portalFeatures.checkIn && canCheckIn ? (
                       <CommandButton
                         label={checkInStatusView.actionLabel || 'Presente'}

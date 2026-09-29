@@ -119,6 +119,11 @@ export function useConvocatoriasCobertura(
     [active],
   );
 
+  const aceptadas = useMemo(
+    () => items.filter((c) => String(c.status || '').toUpperCase() === 'ACCEPTED'),
+    [items],
+  );
+
   const responder = useCallback(
     async (
       convocatoriaId: string,
@@ -148,6 +153,7 @@ export function useConvocatoriasCobertura(
   return {
     coberturaPendientes,
     llegadaTardePendientes,
+    aceptadas,
     busyId,
     loading,
     error,

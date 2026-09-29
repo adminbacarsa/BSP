@@ -54,28 +54,30 @@ const pantallas = { planificacion: mesh.hours, cronograma: cronogramaYAnalisis, 
 console.log('PANTALLAS', JSON.stringify(pantallas));
 if (new Set(Object.values(pantallas)).size !== 1) throw new Error(`pantallas distintas ${JSON.stringify(pantallas)}`);
 const expect: Record<string, number> = {
-  M: 808, M1: 440, T: 656, N: 640, D12: 96, N12: 96, SIN_CODIGO: 24, FT: 32,
+  M: 808, M1: 440, T: 656, N: 640, D12: 96, N12: 96, SIN_CODIGO: 24,
 };
 const got: Record<string, number> = {};
 for (const [code, row] of Object.entries(mesh.byCode)) got[code] = row.hours;
 const fail: string[] = [];
-if (mesh.hours !== 2792) fail.push(`total ${mesh.hours} != 2792`);
-if (crm !== 2792) fail.push(`crm ${crm} != 2792`);
+// 2792 − 24 (3 FT MODO_DEMO) − 8 (Bustamante, franco convertido por cobertura) = 2760.
+if (mesh.hours !== 2760) fail.push(`total ${mesh.hours} != 2760`);
+if (crm !== 2760) fail.push(`crm ${crm} != 2760`);
 if (mesh.hours !== crm) fail.push(`malla ${mesh.hours} != crm ${crm}`);
 for (const [code, hours] of Object.entries(expect)) {
   if (got[code] !== hours) fail.push(`${code} ${got[code] ?? 0} != ${hours}`);
 }
-if (mesh.uncodedCount !== 2 || mesh.ftCount !== 4) fail.push(`sin código ${mesh.uncodedCount} FT ${mesh.ftCount}`);
+if (got.FT) fail.push(`FT de cobertura sigue en el plan: ${got.FT}`);
+if (mesh.uncodedCount !== 2 || mesh.ftCount !== 0) fail.push(`sin código ${mesh.uncodedCount} FT ${mesh.ftCount}`);
 if (got.RET) fail.push('RET no entra en el plan');
 const opsOrigin = (t: any) => ['RETEN', 'OPERATIONS_COVERAGE', 'SLA_VIRTUAL'].includes(String(t.origin || '').toUpperCase());
 const cronoViejo = sumPublishedPlanHours((rows as any[]).filter((t) => !opsOrigin(t) && String(t.resolvedBy || '').toUpperCase() !== 'OPERACIONES')).hours;
-if (cronoViejo !== 2784) fail.push(`cronograma viejo ${cronoViejo} != 2784`);
+if (cronoViejo !== 2752) fail.push(`cronograma viejo ${cronoViejo} != 2752`);
 const marcadoOps = (rows as any[]).filter((t) => sumPublishedPlanHours([t]).hours > 0 && String(t.resolvedBy || '').toUpperCase() === 'OPERACIONES');
 if (marcadoOps.length !== 1 || marcadoOps[0].id !== 'rMkxHxOlHahC9Gtx2xbk') fail.push(`turno que el cronograma tiraba: ${marcadoOps.map((t) => t.id).join(',')}`);
 const enFila = sumPublishedPlanHours((rows as any[]).filter((t) => String(t.employeeId || '') !== 'SIN_COBERTURA')).hours;
 const fueraFila = sumPublishedPlanHours((rows as any[]).filter((t) => String(t.employeeId || '') === 'SIN_COBERTURA')).hours;
-if (enFila + fueraFila !== 2792 || fueraFila !== 24) fail.push(`filas ${enFila} + fuera ${fueraFila} != 2792`);
-if (enFila !== 2768) fail.push(`suma de filas ${enFila} != 2768`);
+if (enFila + fueraFila !== 2760 || fueraFila !== 24) fail.push(`filas ${enFila} + fuera ${fueraFila} != 2760`);
+if (enFila !== 2736) fail.push(`suma de filas ${enFila} != 2736`);
 if (fail.length) {
   console.error(JSON.stringify({ mesh, got }, null, 2));
   throw new Error(fail.join('; '));

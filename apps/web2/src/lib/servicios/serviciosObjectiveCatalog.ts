@@ -2,7 +2,8 @@ import type { ServiceSLA } from '@/services/slaService';
 import { slaCoversCalendarMonth } from '@/lib/firestoreDates';
 import { calculateMonthlyBreakdown, parseYmdToLocalDate } from '@/lib/servicios/slaHoursCalculator';
 import { isObjectivePlanificacionPublished } from '@/lib/multiempresa';
-import { objectiveMonthSlaPresence } from '@/lib/crm/proformaOperation';
+import { objectiveMonthHasClosedSla, objectiveMonthSlaPresence } from '@/lib/crm/proformaOperation';
+import { classifySlaBucket } from '../../../../../scripts/hours-ledger/slaPolicy';
 import {
   filterSlasForPlanningContext,
   isSlaContractActive,
@@ -81,20 +82,22 @@ export function slaOperationalInCalendarMonth(
   return isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
 }
 
-/** Contrato cerrado que cubre el mes + cronograma publicado (histórico, no cuenta en Ops). */
+/** Contrato cerrado que cubre el mes (classifySlaBucket = closed). No lo tapa un contrato activo del mismo objetivo. */
 export function slaClosedInCalendarMonth(
   srv: ServiceSLA & { id: string },
   year: number,
   monthIndex0: number,
   publishStatusMap: Record<string, boolean>,
 ): boolean {
-  if ((srv as { closed?: unknown }).closed !== true) return false;
-  if (!isSlaContractActive(srv.status)) return false;
-  if (slaOperationalInCalendarMonth(srv, year, monthIndex0, publishStatusMap)) return false;
   if (!slaCoversCalendarMonth(srv.startDate, srv.endDate, year, monthIndex0)) return false;
   const oid = String(srv.objectiveId ?? '').trim();
-  if (!oid) return false;
-  return isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
+  const published = !!oid && isObjectivePlanificacionPublished(publishStatusMap, oid, year, monthIndex0 + 1);
+  return classifySlaBucket({
+    closed: (srv as { closed?: unknown }).closed === true,
+    contractActive: isSlaContractActive(srv.status),
+    clientActive: true,
+    hasPublishedPlan: published,
+  }) === 'closed';
 }
 
 export function monthBoundsYmd(year: number, month: number): { start: string; end: string } {
@@ -296,7 +299,13 @@ export function buildServiciosObjectiveCatalog(
       });
       const hasSlaInMonth = presence === 'active';
       const hasServiceWithoutOperation = presence === 'withoutPlan';
-      const hasClosedSlaInMonth = presence === 'closed';
+      const hasClosedSlaInMonth = objectiveMonthHasClosedSla({
+        slas: matchingRows as unknown as Parameters<typeof objectiveMonthSlaPresence>[0]['slas'],
+        year: kpiYear,
+        monthIndex0: kpiMonth,
+        hasPublishedPlan,
+        clientStatus: client.status,
+      });
       const vigenteSla = vigente && hasSlaInMonth
         ? (vigente as unknown as ServiceSLA & { id: string })
         : null;
@@ -432,6 +441,7 @@ export function buildServiciosCatalogClientGroups(
   catalog: ServiciosCatalogRow[],
   getHours: (srv: ServiceSLA & { id: string }) => number,
   sort: ServiciosCatalogSort = 'alpha',
+  catalogFilter: ServiciosCatalogFilter = 'all',
 ): ServiciosCatalogClientGroup[] {
   const map = new Map<string, ServiciosCatalogClientGroup>();
 
@@ -452,7 +462,11 @@ export function buildServiciosCatalogClientGroups(
       map.set(row.clientId, group);
     }
     group.rows.push(row);
-    if (row.hasSlaInMonth) {
+    if (catalogFilter === 'closed_sla' && row.hasClosedSlaInMonth && row.closedSla) {
+      group.withSla += 1;
+      group.totalHoursKpi += getHours(row.closedSla);
+      group.totalPositions += (row.closedSla.positions || []).reduce((s, p) => s + (p.quantity || 1), 0);
+    } else if (row.hasSlaInMonth) {
       group.withSla += 1;
       group.hasActive = true;
       const srv = row.activeSla;

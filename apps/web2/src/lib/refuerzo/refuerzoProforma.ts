@@ -3,6 +3,7 @@ import { calcRefuerzoPactadaHours, isSolicitudRefuerzoExtraVendible, refuerzoTip
 import type { ProformaDayCell, ProformaObjectiveGrid, ProformaPositionObjectiveGrid } from '@/lib/crm/proformaTypes';
 import { formatHoursHm } from '@/lib/crm/proformaGrid';
 import { isEventosPosition } from '@/lib/servicios/eventosPosition';
+import { refuerzoImputaPuestoEventos } from '@/lib/crm/eventosGuardHours';
 
 const BILLABLE_ESTADOS = new Set(['APROBADA', 'ASIGNADA', 'COMPLETADA']);
 
@@ -58,6 +59,7 @@ export function applyRefuerzoHorasVendidasToBreakdown(
   for (const sol of solicitudes) {
     if (!BILLABLE_ESTADOS.has(sol.estado)) continue;
     if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
+    if (refuerzoImputaPuestoEventos(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, rangeStart, rangeEnd)) continue;
 
     const hrs = calcRefuerzoHorasVendidas(sol);
@@ -214,6 +216,7 @@ export function applyRefuerzoHorasVendidasToGrids(
   for (const sol of solicitudes) {
     if (!BILLABLE_ESTADOS.has(sol.estado)) continue;
     if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
+    if (refuerzoImputaPuestoEventos(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, startYmd, endYmd)) continue;
 
     const fecha = String(sol.fecha || '').slice(0, 10);
@@ -302,6 +305,7 @@ export function applyRefuerzoHorasVendidasToPositionGrids(
   for (const sol of solicitudes) {
     if (!BILLABLE_ESTADOS.has(sol.estado)) continue;
     if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
+    if (refuerzoImputaPuestoEventos(sol)) continue;
     if (!solicitudRefuerzoInRange(sol, startYmd, endYmd)) continue;
 
     const posLabel = refuerzoPositionGridLabel(sol);

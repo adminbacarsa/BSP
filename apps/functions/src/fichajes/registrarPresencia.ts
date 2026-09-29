@@ -10,6 +10,7 @@ import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTard
 import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
 import { buildAutoClosePatch } from '../scheduling/shiftClose';
 
 export type PresenciaSource =
@@ -101,7 +102,12 @@ export async function registrarPresencia(
     if (!rev.success) throw new Error('SHIFT_ABSENT');
     return { success: true, alreadyPresent: false, relieved: null };
   }
-  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>)) {
+  const covTypeGate = String(shiftData.coverageType || '').toUpperCase();
+  const originGate = String(shiftData.origin || '').toUpperCase();
+  if (originGate === 'OPERATIONS_COVERAGE' && covTypeGate === 'EXTEND') {
+    throw new Error('EXT_NO_CHECKIN');
+  }
+  if (isOpsCoverageHoursOnSourceDoc(shiftData as Record<string, unknown>) && covTypeGate !== 'ADVANCE') {
     throw new Error('TRACE_REGISTRATION_SHIFT');
   }
 
@@ -124,6 +130,9 @@ export async function registrarPresencia(
 
   const scheduledStartTs = shiftData.startTime ?? null;
   const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
+  const originUp = String(shiftData.origin || '').toUpperCase();
+  const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
+  const convocadoPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND';
   const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
   const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
     ? adjustedStartMs
@@ -133,9 +142,12 @@ export async function registrarPresencia(
     plannedStartMs: payAnchorMs,
     windowLateMinutes: windowEval.lateMinutes ?? 0,
   });
-  const isLate = pay.isLate;
+  let isLate = convocadoPunch ? false : pay.isLate;
+  let lateMinutes = convocadoPunch ? 0 : pay.lateMinutes;
   let realStartTime: FirebaseFirestore.Timestamp | FirebaseFirestore.FieldValue;
-  if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+  if (convocadoPunch) {
+    realStartTime = Timestamp.fromMillis(nowMs);
+  } else if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
     realStartTime = shiftData.adjustedStartTime;
   } else if (!pay.isLate && scheduledStartTs) {
     realStartTime = scheduledStartTs;
@@ -153,7 +165,7 @@ export async function registrarPresencia(
     checkInCoords: coords || null,
     checkInRecordedAt: recordedAt || null,
     isLate,
-    lateMinutes: pay.lateMinutes,
+    lateMinutes,
     isAbsent: false,
     absenceType: null,
     absenceDetectedAt: null,
@@ -174,6 +186,45 @@ export async function registrarPresencia(
   }
 
   await shiftRef.update(incomingPatch);
+
+  if (convocadoPunch) {
+    const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
+    if (convId) {
+      const { logConvocatoriaEvento } = await import('../coverage/convocatoriaEventos');
+      const { convocadoFollowUpClosePatch } = await import('../attendance/convocadoFollowUp');
+      const punchTs = Timestamp.fromMillis(nowMs);
+      await db.collection('convocatorias_cobertura').doc(convId)
+        .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
+        .catch(() => undefined);
+      await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
+    }
+    if (covTypeUp === 'ADVANCE') {
+      const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();
+      if (titularId) {
+        const extConvs = await db.collection('convocatorias_cobertura')
+          .where('shiftId', '==', titularId)
+          .limit(8)
+          .get();
+        for (const c of extConvs.docs) {
+          if (String(c.data().type || '') !== 'EXTEND') continue;
+          const extId = String(c.data().extendShiftId || '').trim();
+          if (!extId) continue;
+          const ext = await db.collection('turnos').doc(extId).get();
+          const ed = ext.data();
+          if (!ed || ed.isCompleted === true || ed.isExtended !== true) continue;
+          await ext.ref.update({
+            isExtended: false,
+            isCompleted: true,
+            isPresent: false,
+            isRetention: false,
+            status: 'COMPLETED',
+            completionReason: 'RELEVO_ADVANCE',
+            realEndTime: Timestamp.fromMillis(nowMs),
+          });
+        }
+      }
+    }
+  }
   await cancelLlegadaTardeConvocatorias(db, shiftId, 'CHECKED_IN').catch((e) =>
     console.warn('[registrarPresencia] cancelar ¿Venís?:', (e as Error).message),
   );
@@ -281,6 +332,9 @@ export async function registrarPresencia(
       if (objectiveId && positionName) {
         let outDoc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot | null =
           null;
+        // El operador eligió a alguien que no es de la serie (M2 frente a un T): se ignora
+        // y el relevo vuelve a la serie (P5g). El compañero del mismo horario no se cierra.
+        let overrideRejectedBySeries = false;
 
         if (wantOverride) {
           const ov = await db.collection('turnos').doc(overrideRelieveShiftId!.trim()).get();
@@ -294,10 +348,22 @@ export async function registrarPresencia(
               normPos(od.positionName) === normPos(positionName) &&
               ov.id !== shiftId
             ) {
-              outDoc = ov;
+              const kind = seriesHandoffKind(
+                seriesCodeOf(od as Record<string, unknown>),
+                seriesCodeOf(shiftData as Record<string, unknown>),
+              );
+              if (kind === 'REJECT') {
+                overrideRejectedBySeries = true;
+                console.warn(
+                  `[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`,
+                );
+              } else {
+                outDoc = ov;
+              }
             }
           }
-        } else if (incomingStartMs > 0) {
+        }
+        if (!outDoc && (!wantOverride || overrideRejectedBySeries) && incomingStartMs > 0) {
           const pick = await findPresentOutgoingAlignedToGapStart(db, {
             objectiveId,
             positionName,
@@ -319,7 +385,9 @@ export async function registrarPresencia(
           const outPosName = outData.positionName || '';
           const outEndMs = outData.endTime?.toMillis?.() ?? 0;
           const handoffMs = Math.max(incomingStartMs, outEndMs || incomingStartMs);
-          const scheduleHandoff = !wantOverride && nowMs < handoffMs;
+          // Fichada anticipada (también la del operador): el saliente cierra a su hora, no a la fichada.
+          const scheduleHandoff = nowMs < handoffMs;
+          const manualRelief = wantOverride && !overrideRejectedBySeries;
 
           await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
           if (scheduleHandoff) {
@@ -334,7 +402,7 @@ export async function registrarPresencia(
               relievedSource: source,
             });
           } else {
-            const realEndMs = wantOverride ? nowMs : Math.max(handoffMs, nowMs);
+            const realEndMs = Math.max(handoffMs, nowMs);
             const outClose = buildAutoClosePatch(outData as Record<string, unknown>, {
               realEndMs,
               reason: 'RELEVO_PRESENTE',
@@ -343,11 +411,12 @@ export async function registrarPresencia(
             });
             await outDoc.ref.update({
               ...outClose,
+              ...(outData.isRetention === true ? { isRetention: false } : {}),
               relievedBy: empId || null,
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),
               relieveScheduledAt: Timestamp.fromMillis(handoffMs),
-              autoRelevo: !wantOverride,
+              autoRelevo: !manualRelief,
               relievedEarly: false,
               relievedSource: source,
             });
@@ -388,8 +457,9 @@ export async function registrarPresencia(
                 ? `Relevo de ${outName} programado a las ${when} (${source})`
                 : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
               createdAt: FieldValue.serverTimestamp(),
-              autoProcessed: !wantOverride,
-              source: wantOverride ? source : 'AUTO_RELEVO',
+              autoProcessed: !manualRelief,
+              source: manualRelief ? source : 'AUTO_RELEVO',
+              ...(overrideRejectedBySeries ? { overrideRejectedBySeries: true } : {}),
             })
             .catch(() => {});
         }

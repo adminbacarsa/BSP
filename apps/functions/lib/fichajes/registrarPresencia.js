@@ -13,6 +13,7 @@ const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTa
 const relevoNotifications_1 = require("./relevoNotifications");
 const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 const shiftClose_1 = require("../scheduling/shiftClose");
 function normPos(n) {
     return String(n ?? '')
@@ -46,7 +47,12 @@ async function registrarPresencia(db, input) {
             throw new Error('SHIFT_ABSENT');
         return { success: true, alreadyPresent: false, relieved: null };
     }
-    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData)) {
+    const covTypeGate = String(shiftData.coverageType || '').toUpperCase();
+    const originGate = String(shiftData.origin || '').toUpperCase();
+    if (originGate === 'OPERATIONS_COVERAGE' && covTypeGate === 'EXTEND') {
+        throw new Error('EXT_NO_CHECKIN');
+    }
+    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shiftData) && covTypeGate !== 'ADVANCE') {
         throw new Error('TRACE_REGISTRATION_SHIFT');
     }
     if (shiftData.isPresent === true || shiftData.status === 'PRESENT') {
@@ -65,6 +71,9 @@ async function registrarPresencia(db, input) {
     }
     const scheduledStartTs = shiftData.startTime ?? null;
     const scheduledStartMs = scheduledStartTs?.toMillis?.() ?? 0;
+    const originUp = String(shiftData.origin || '').toUpperCase();
+    const covTypeUp = String(shiftData.coverageType || '').toUpperCase();
+    const convocadoPunch = originUp === 'OPERATIONS_COVERAGE' && covTypeUp !== 'EXTEND';
     const adjustedStartMs = shiftData.adjustedStartTime?.toMillis?.() ?? 0;
     const payAnchorMs = windowEval.useAdjustedStart && adjustedStartMs > 0
         ? adjustedStartMs
@@ -74,9 +83,13 @@ async function registrarPresencia(db, input) {
         plannedStartMs: payAnchorMs,
         windowLateMinutes: windowEval.lateMinutes ?? 0,
     });
-    const isLate = pay.isLate;
+    let isLate = convocadoPunch ? false : pay.isLate;
+    let lateMinutes = convocadoPunch ? 0 : pay.lateMinutes;
     let realStartTime;
-    if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
+    if (convocadoPunch) {
+        realStartTime = firestore_1.Timestamp.fromMillis(nowMs);
+    }
+    else if (!pay.isLate && windowEval.useAdjustedStart && shiftData.adjustedStartTime) {
         realStartTime = shiftData.adjustedStartTime;
     }
     else if (!pay.isLate && scheduledStartTs) {
@@ -95,7 +108,7 @@ async function registrarPresencia(db, input) {
         checkInCoords: coords || null,
         checkInRecordedAt: recordedAt || null,
         isLate,
-        lateMinutes: pay.lateMinutes,
+        lateMinutes,
         isAbsent: false,
         absenceType: null,
         absenceDetectedAt: null,
@@ -114,6 +127,47 @@ async function registrarPresencia(db, input) {
         incomingPatch.absenceReversedBy = source === 'OPERATIONS' ? 'OPERACIONES' : source;
     }
     await shiftRef.update(incomingPatch);
+    if (convocadoPunch) {
+        const convId = String(shiftData.coverageConvocatoriaId || shiftData.assignedByConvocatoria || '').trim();
+        if (convId) {
+            const { logConvocatoriaEvento } = await Promise.resolve().then(() => require('../coverage/convocatoriaEventos'));
+            const { convocadoFollowUpClosePatch } = await Promise.resolve().then(() => require('../attendance/convocadoFollowUp'));
+            const punchTs = firestore_1.Timestamp.fromMillis(nowMs);
+            await db.collection('convocatorias_cobertura').doc(convId)
+                .update({ ...convocadoFollowUpClosePatch('FICHO', punchTs), checkedInAt: punchTs })
+                .catch(() => undefined);
+            await logConvocatoriaEvento(db, convId, { type: 'FICHO', at: punchTs }).catch(() => undefined);
+        }
+        if (covTypeUp === 'ADVANCE') {
+            const titularId = String(shiftData.absenceShiftId || shiftData.coveredShiftId || '').trim();
+            if (titularId) {
+                const extConvs = await db.collection('convocatorias_cobertura')
+                    .where('shiftId', '==', titularId)
+                    .limit(8)
+                    .get();
+                for (const c of extConvs.docs) {
+                    if (String(c.data().type || '') !== 'EXTEND')
+                        continue;
+                    const extId = String(c.data().extendShiftId || '').trim();
+                    if (!extId)
+                        continue;
+                    const ext = await db.collection('turnos').doc(extId).get();
+                    const ed = ext.data();
+                    if (!ed || ed.isCompleted === true || ed.isExtended !== true)
+                        continue;
+                    await ext.ref.update({
+                        isExtended: false,
+                        isCompleted: true,
+                        isPresent: false,
+                        isRetention: false,
+                        status: 'COMPLETED',
+                        completionReason: 'RELEVO_ADVANCE',
+                        realEndTime: firestore_1.Timestamp.fromMillis(nowMs),
+                    });
+                }
+            }
+        }
+    }
     await (0, cancelLlegadaTardeConvocatorias_1.cancelLlegadaTardeConvocatorias)(db, shiftId, 'CHECKED_IN').catch((e) => console.warn('[registrarPresencia] cancelar ¿Venís?:', e.message));
     void (async () => {
         try {
@@ -208,6 +262,7 @@ async function registrarPresencia(db, input) {
             const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
             if (objectiveId && positionName) {
                 let outDoc = null;
+                let overrideRejectedBySeries = false;
                 if (wantOverride) {
                     const ov = await db.collection('turnos').doc(overrideRelieveShiftId.trim()).get();
                     if (ov.exists) {
@@ -218,11 +273,18 @@ async function registrarPresencia(db, input) {
                             String(od.objectiveId || '') === objectiveId &&
                             normPos(od.positionName) === normPos(positionName) &&
                             ov.id !== shiftId) {
-                            outDoc = ov;
+                            const kind = (0, shiftSeries_1.seriesHandoffKind)((0, shiftSeries_1.seriesCodeOf)(od), (0, shiftSeries_1.seriesCodeOf)(shiftData));
+                            if (kind === 'REJECT') {
+                                overrideRejectedBySeries = true;
+                                console.warn(`[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`);
+                            }
+                            else {
+                                outDoc = ov;
+                            }
                         }
                     }
                 }
-                else if (incomingStartMs > 0) {
+                if (!outDoc && (!wantOverride || overrideRejectedBySeries) && incomingStartMs > 0) {
                     const pick = await (0, relevoOutgoingMatch_1.findPresentOutgoingAlignedToGapStart)(db, {
                         objectiveId,
                         positionName,
@@ -244,7 +306,8 @@ async function registrarPresencia(db, input) {
                     const outPosName = outData.positionName || '';
                     const outEndMs = outData.endTime?.toMillis?.() ?? 0;
                     const handoffMs = Math.max(incomingStartMs, outEndMs || incomingStartMs);
-                    const scheduleHandoff = !wantOverride && nowMs < handoffMs;
+                    const scheduleHandoff = nowMs < handoffMs;
+                    const manualRelief = wantOverride && !overrideRejectedBySeries;
                     await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
                     if (scheduleHandoff) {
                         relievedScheduleMs = handoffMs;
@@ -259,7 +322,7 @@ async function registrarPresencia(db, input) {
                         });
                     }
                     else {
-                        const realEndMs = wantOverride ? nowMs : Math.max(handoffMs, nowMs);
+                        const realEndMs = Math.max(handoffMs, nowMs);
                         const outClose = (0, shiftClose_1.buildAutoClosePatch)(outData, {
                             realEndMs,
                             reason: 'RELEVO_PRESENTE',
@@ -268,11 +331,12 @@ async function registrarPresencia(db, input) {
                         });
                         await outDoc.ref.update({
                             ...outClose,
+                            ...(outData.isRetention === true ? { isRetention: false } : {}),
                             relievedBy: empId || null,
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),
                             relieveScheduledAt: firestore_1.Timestamp.fromMillis(handoffMs),
-                            autoRelevo: !wantOverride,
+                            autoRelevo: !manualRelief,
                             relievedEarly: false,
                             relievedSource: source,
                         });
@@ -310,8 +374,9 @@ async function registrarPresencia(db, input) {
                             ? `Relevo de ${outName} programado a las ${when} (${source})`
                             : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
                         createdAt: firestore_1.FieldValue.serverTimestamp(),
-                        autoProcessed: !wantOverride,
-                        source: wantOverride ? source : 'AUTO_RELEVO',
+                        autoProcessed: !manualRelief,
+                        source: manualRelief ? source : 'AUTO_RELEVO',
+                        ...(overrideRejectedBySeries ? { overrideRejectedBySeries: true } : {}),
                     })
                         .catch(() => { });
                 }

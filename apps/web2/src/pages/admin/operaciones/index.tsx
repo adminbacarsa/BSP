@@ -71,7 +71,9 @@ import { GuardDeviceApprovalBell } from '@/components/rrhh/GuardDeviceApprovalPa
 import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
-import { isExtraNonReliefShift, isReliefEligibleShift } from '@cosp/ops-core';
+import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
+import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
+import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
@@ -1130,6 +1132,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     );
     const handleReport = (e: any) => { e.stopPropagation(); if(confirm(`¿CONFIRMAR NOTIFICACIÓN?\nSe enviará alerta a Planificación.`)) onReportPlanning(shift); };
     const elapsedInShift = useElapsedTime(shift.activeStartTime || null);
+    const convocadoCuenta = convocadoEnCaminoLabel(shift);
     const canCover = isActionableOpsVacancy(shift);
     // Devolver a planificación: solo vacantes NO originadas por ausencia, dentro de las 12h previas al inicio
     const hoursUntilStart = shift.shiftDateObj ? (toDate(shift.shiftDateObj).getTime() - now.getTime()) / 3600000 : Infinity;
@@ -1171,8 +1174,8 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.isPendingRetention) badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>RET. EN PUESTO</span>;
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
-    else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RECARGO {shift.retentionMinutes > 0 ? `+${shift.retentionMinutes}min` : ''}</span>;
-    else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>CIERRE PENDIENTE</span>;
+    else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RETENIDO{shift.retentionMinutes > 0 ? ` ${formatRetentionDuration(shift.retentionMinutes)}` : ''}</span>;
+    else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ESPERANDO RELEVO{shift.retentionMinutes > 0 ? ` ${formatRetentionDuration(shift.retentionMinutes)}` : ''}</span>;
     else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0 max-w-[min(100%,260px)] truncate" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
     }
@@ -1230,9 +1233,13 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
                     <span className={`shrink-0 font-bold ${dayInlineClass}`}>{dayTag.label}</span>
                     <span className="shrink-0 font-mono">{displayShiftTimeRange(shift)}</span>
+                    {convocadoCuenta && <span className="shrink-0 font-bold text-indigo-600">{convocadoCuenta}</span>}
                 </div>
                 {shift.isPresent && formatIngresoLine(shift) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate">{formatIngresoLine(shift)}</p>
+                )}
+                {shift.isPresent && shift.retentionWait && (
+                    <p className="text-[9px] font-bold text-orange-700 truncate" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
@@ -1292,7 +1299,6 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         <div className="min-w-0">
                             <span className={`text-[13px] font-black truncate ${shift.isUnassigned ? 'text-rose-600' : 'text-slate-800'} inline-flex items-center gap-1.5 max-w-full`}>
                                 <span className="truncate">{name}</span>
-                                <ShiftCodeBadge shift={shift} />
                             </span>
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
@@ -1313,8 +1319,14 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
+                {shift.isPresent && shift.retentionWait && (
+                    <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10">{formatRetentionLine(shift.retentionWait)}</p>
+                )}
                 {shift.isPresent && formatIngresoLine(shift) && (
                     <p className="text-[10px] font-bold text-emerald-700 mb-1.5 pl-10">{formatIngresoLine(shift)}</p>
+                )}
+                {convocadoCuenta && (
+                    <p className="text-[10px] font-bold text-indigo-700 mb-1.5 pl-10">{convocadoCuenta}</p>
                 )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <div className="flex items-center gap-1.5 text-[10px] font-bold text-emerald-700 mb-1.5 pl-10 truncate" title={`Cubierto por ${coveringEmployeeName}`}>
@@ -2717,7 +2729,7 @@ export default function OperacionesPage() {
         // Denominador: turnos operativos del día (excl. vacantes, francos y virtuales)
         const operationalShifts = todayShifts.filter((s:any) => !s.isUnassigned && !s.isFranco && !s.isVirtual);
         const plannedShifts  = operationalShifts.length;
-        const totalOpShifts  = plannedShifts || (logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes);
+        const totalOpShifts  = plannedShifts || (logic.stats.plan + logic.stats.activos + logic.stats.vacantes + logic.stats.ausentes);
         // DEBUG audit — ver en consola del navegador al generar el PDF
         console.group('[PDF] Auditoría turnos planificados');
         console.log('Total todayShifts:', todayShifts.length, '| Sin asignar:', vacantToday.length, '| Francos:', todayShifts.filter((s:any)=>s.isFranco).length, '| Virtuales:', todayShifts.filter((s:any)=>s.isVirtual).length, '| OPERACIONALES:', plannedShifts);
@@ -3429,7 +3441,7 @@ export default function OperacionesPage() {
     const autoTabDoneRef = useRef(false);
     useEffect(() => {
         if (autoTabDoneRef.current) return;
-        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
+        const total = logic.stats.plan + logic.stats.activos + logic.stats.vacantes + logic.stats.ausentes;
         if (total === 0) return; // datos aún no cargaron
         autoTabDoneRef.current = true;
         if (logic.stats.ausentes > 0 && (logic.viewTab === 'PRIORIDAD' || logic.viewTab === 'PLAN')) {
@@ -3649,8 +3661,8 @@ export default function OperacionesPage() {
         : 'space-y-1.5';
 
     const dayStatusKpi = useMemo(() => {
-        const total = logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes;
-        const cubiertos = logic.stats.activos + logic.stats.retenidos;
+        const total = logic.stats.plan + logic.stats.activos + logic.stats.vacantes + logic.stats.ausentes;
+        const cubiertos = logic.stats.activos;
         // Cobertura operativa = puestos con gente / (puestos con gente + vacantes abiertas).
         // Un ausente ya cubierto no baja el %: el reemplazo está en ACT y no hay VAC.
         const huecos = logic.stats.vacantes;
@@ -4122,7 +4134,7 @@ export default function OperacionesPage() {
                             <button type="button" onClick={() => logic.setViewTab('TRABAJARON' as any)} title="Quiénes trabajaron (por cliente y objetivo)"
                                 className={`flex-1 px-1 py-1.5 rounded-lg flex flex-col items-center gap-0 transition-all active:scale-95 ${logic.viewTab === ('TRABAJARON' as any) ? 'bg-slate-800' : 'bg-slate-100 hover:bg-slate-200'}`}>
                                 <span className={`text-sm font-black leading-none ${logic.viewTab === ('TRABAJARON' as any) ? 'text-white' : 'text-slate-600'}`}>
-                                    {logic.stats.plan + logic.stats.activos + logic.stats.retenidos + logic.stats.vacantes + logic.stats.ausentes}
+                                    {logic.stats.plan + logic.stats.activos + logic.stats.vacantes + logic.stats.ausentes}
                                 </span>
                                 <span className="text-[8px] font-black uppercase leading-none mt-0.5 text-slate-400">TOT</span>
                             </button>
@@ -4786,6 +4798,7 @@ export default function OperacionesPage() {
                                           <div className="flex-1 min-w-0">
                                             <p className="text-[9px] font-bold text-slate-800 truncate">{c.candidateEmployeeName}</p>
                                             <p className="text-[8px] text-slate-400 truncate">{TYPE_LABEL[c.type] || c.type}</p>
+                                            <ConvocatoriaTimeline convocatoriaId={c.id} />
                                           </div>
                                           <div className="text-right shrink-0">
                                             <span className={`text-[8px] font-black px-1 py-0.5 rounded border ${sm.cls}`}>{sm.label}</span>

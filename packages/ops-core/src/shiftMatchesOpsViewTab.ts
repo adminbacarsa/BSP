@@ -43,6 +43,7 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
       return (
         (s.isImminent
           || s.isRetention
+          || s.isPendingClose
           || s.isPendingRetention
           || s.isEarlyStart
           || s.isAwaitingCoverageCheckIn
@@ -74,9 +75,10 @@ export function shiftMatchesOpsViewTab(s: OpsViewTabShift, viewTab: string, now:
         && !s.isPassiveRetStandby
       );
     case 'ACTIVOS':
-      return s.isPresent && !s.isCompleted && !s.isRetention && !s.isPendingRetention && !s.isPendingClose;
+      return s.isPresent && !s.isCompleted;
     case 'RETENIDOS':
-      return !!s.isRetention;
+      // Retenido por el servidor o saliente con el fin vencido esperando relevo (P9).
+      return !!s.isRetention || (!!s.isPendingClose && !!s.isPresent && !s.isCompleted);
     case 'VACANTES':
       return isActionableOpsVacancy(s, now);
     case 'AUSENTES':

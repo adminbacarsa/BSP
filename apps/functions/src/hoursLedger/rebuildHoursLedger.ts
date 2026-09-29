@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { buildLedgerMonth, personaMonthWorked } from './bundledEngine';
+import { LEDGER_ENGINE_VERSION, ledgerDirtyDocId, hotPeriodKeys, objectivesNeedingEngine } from './ledgerDirtyPlan';
 
 const DAY_COL = 'hours_ledger';
 const MONTH_COL = 'hours_ledger_monthly';
@@ -46,6 +47,17 @@ function docId(parts: string[]) {
   return parts.join('_').replace(/[/\s#?[\]]+/g, '_').slice(0, 700);
 }
 
+const coreFlagCache = new Map<string, { on: boolean; at: number }>();
+
+export async function hoursCoreOn(empresaId: string): Promise<boolean> {
+  const hit = coreFlagCache.get(empresaId);
+  if (hit && Date.now() - hit.at < 60_000) return hit.on;
+  const snap = await admin.firestore().collection('empresas').doc(empresaId).get();
+  const on = snap.data()?.hoursCoreEnabled === true;
+  coreFlagCache.set(empresaId, { on, at: Date.now() });
+  return on;
+}
+
 /**
  * Doc id siempre gana sobre un campo `id` del data. Los clients clonados entre empresas
  * (pruebas_sa) traen el `id` viejo de bacarsa y el libro terminaba agrupando por un cliente borrado.
@@ -63,6 +75,18 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
   const start = new Date(`${year}-${pad(month)}-01T00:00:00.000-03:00`);
   const endDay = new Date(year, month, 0).getDate();
   const end = new Date(`${year}-${pad(month)}-${pad(endDay)}T23:59:59.999-03:00`);
+  const onlyIds = [...new Set((opts?.objectiveIds || []).map((id) => String(id || '').trim()).filter(Boolean))];
+  let turnosQuery: FirebaseFirestore.Query = db.collection('turnos')
+    .where('empresaId', '==', empresaId)
+    .where('startTime', '>=', Timestamp.fromDate(start))
+    .where('startTime', '<=', Timestamp.fromDate(end));
+  if (onlyIds.length > 0 && onlyIds.length <= 30) {
+    turnosQuery = db.collection('turnos')
+      .where('empresaId', '==', empresaId)
+      .where('objectiveId', 'in', onlyIds)
+      .where('startTime', '>=', Timestamp.fromDate(start))
+      .where('startTime', '<=', Timestamp.fromDate(end));
+  }
   const [empresaSnap, clientsSnap, slaSnap, planifSnap, empSnap, ausSnap, contractsSnap, ordersSnap, turnosSnap] = await Promise.all([
     db.collection('empresas').doc(empresaId).get(),
     db.collection('clients').where('empresaId', '==', empresaId).get(),
@@ -72,11 +96,7 @@ async function loadMonth(empresaId: string, year: number, month: number, opts?: 
     db.collection('ausencias').where('empresaId', '==', empresaId).get(),
     db.collection('contracts').get(),
     db.collection('ordenes_compra').where('empresaId', '==', empresaId).get(),
-    db.collection('turnos')
-      .where('empresaId', '==', empresaId)
-      .where('startTime', '>=', Timestamp.fromDate(start))
-      .where('startTime', '<=', Timestamp.fromDate(end))
-      .get(),
+    turnosQuery.get(),
   ]);
   const empNameById: Record<string, string> = {};
   empSnap.docs.forEach((d) => {
@@ -163,7 +183,7 @@ export async function rebuildHoursLedger(opts: {
 
   const dayRows = built.days.map((d) => {
     const id = docId([empresaId, d.objectiveId, d.puestoId, d.date]);
-    return { id, data: { ...d, id, updatedAt: now } };
+    return { id, data: { ...d, id, updatedAt: now, engineVersion: LEDGER_ENGINE_VERSION } };
   });
   const monthRows = built.monthly.map((m) => {
     const id = m.level === 'empresa'
@@ -171,7 +191,7 @@ export async function rebuildHoursLedger(opts: {
       : m.level === 'cliente'
         ? docId([empresaId, 'cli', m.clientId || 'sin', periodKey])
         : docId([empresaId, 'obj', m.objectiveId, periodKey]);
-    return { id, data: { ...m, id, updatedAt: now } };
+    return { id, data: { ...m, id, updatedAt: now, engineVersion: LEDGER_ENGINE_VERSION } };
   });
 
   if (!dryRun) {
@@ -197,18 +217,20 @@ export async function markLedgerDirty(opts: {
   empresaId: string;
   objectiveId?: string;
   periodKey?: string;
+  reason?: string;
 }) {
   const empresaId = String(opts.empresaId || '').trim();
-  if (!empresaId) return;
-  const ar = arParts();
-  const periodKey = opts.periodKey || `${ar.year}-${pad(ar.month)}`;
-  const objectiveId = String(opts.objectiveId || '_empresa').trim() || '_empresa';
-  const id = docId([empresaId, objectiveId, periodKey]);
+  const objectiveId = String(opts.objectiveId || '').trim();
+  const periodKey = String(opts.periodKey || '').trim();
+  if (!empresaId || !objectiveId || !/^\d{4}-\d{2}$/.test(periodKey)) return;
+  if (!(await hoursCoreOn(empresaId))) return;
+  const id = ledgerDirtyDocId(empresaId, objectiveId, periodKey);
   const due = Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
   await admin.firestore().collection('hours_ledger_dirty').doc(id).set({
     empresaId,
     objectiveId,
     periodKey,
+    reason: opts.reason || '',
     dueAt: due,
     touchAt: Timestamp.now(),
   }, { merge: true });
@@ -234,18 +256,23 @@ export async function runDueLedgerDirty(limit = 20) {
     g.refs.push(d.ref);
     groups.set(key, g);
   }
+  const { enqueueHoursLedgerJob } = await import('./hoursLedgerJob');
   for (const g of groups.values()) {
-    if (g.full || g.ids.size === 0) {
-      const { enqueueHoursLedgerJob } = await import('./hoursLedgerJob');
-      await enqueueHoursLedgerJob({ empresaId: g.empresaId, period: g.period, dryRun: false, createdBy: 'sucio' });
-    } else {
-      await rebuildObjectives({
-        empresaId: g.empresaId,
-        period: g.period,
-        objectiveIds: [...g.ids],
-        dryRun: false,
-      });
-      await rollupStoredMonth(g.empresaId, g.period);
+    if (!(await hoursCoreOn(g.empresaId))) {
+      for (const ref of g.refs) await ref.delete();
+      continue;
+    }
+    const queued = await enqueueHoursLedgerJob({
+      empresaId: g.empresaId,
+      period: g.period,
+      dryRun: false,
+      createdBy: 'sucio',
+      objectiveIds: g.full || g.ids.size === 0 ? undefined : [...g.ids],
+    });
+    if (queued.covered === false) {
+      const later = Timestamp.fromMillis(Date.now() + 5 * 60 * 1000);
+      for (const ref of g.refs) await ref.set({ dueAt: later }, { merge: true });
+      continue;
     }
     for (const ref of g.refs) await ref.delete();
   }
@@ -278,11 +305,11 @@ export async function rebuildObjectives(opts: {
   const now = new Date().toISOString();
   const dayRows = built.days.map((d) => {
     const id = docId([empresaId, d.objectiveId, d.puestoId, d.date]);
-    return { id, data: { ...d, id, updatedAt: now } };
+    return { id, data: { ...d, id, updatedAt: now, engineVersion: LEDGER_ENGINE_VERSION } };
   });
   const monthRows = objectives.map((m) => {
     const id = docId([empresaId, 'obj', m.objectiveId, periodKey]);
-    return { id, data: { ...m, id, updatedAt: now } };
+    return { id, data: { ...m, id, updatedAt: now, engineVersion: LEDGER_ENGINE_VERSION } };
   });
   if (!dryRun) {
     await preserveWorked(monthRows);
@@ -347,11 +374,12 @@ export async function rollupStoredMonth(empresaId: string, periodKey: string) {
       data: {
         empresaId, periodKey, level: 'empresa', clientId: '', clientName: '', objectiveId: '', objectiveName: '',
         hoursCoreEnabled: prevEmpresa?.hoursCoreEnabled === true, ...empresa, id: empresaIdDoc, updatedAt: now,
+        engineVersion: LEDGER_ENGINE_VERSION,
       },
     },
     ...[...byClient.entries()].map(([cid, c]) => {
       const id = docId([empresaId, 'cli', cid === '_sin_cliente' ? 'sin' : cid, periodKey]);
-      return { id, data: { ...c, id, updatedAt: now } };
+      return { id, data: { ...c, id, updatedAt: now, engineVersion: LEDGER_ENGINE_VERSION } };
     }),
   ];
   await commitWrites(rows.map((r) => ({ ref: db.collection(MONTH_COL).doc(r.id), data: r.data })));
@@ -393,4 +421,32 @@ export async function personaOfMonth(empresaId: string, period: string) {
 export async function rebuildOpenMonthAllEmpresas() {
   const { enqueueOpenMonthAllEmpresas } = await import('./hoursLedgerJob');
   return enqueueOpenMonthAllEmpresas();
+}
+
+/** Meses hot cuyo libro tiene engineVersion vieja: el job H2c los reescribe en tandas. */
+export async function enqueueStaleEngineMonths(limitEmpresas = 6) {
+  const { enqueueHoursLedgerJob } = await import('./hoursLedgerJob');
+  const empresas = await admin.firestore().collection('empresas').where('hoursCoreEnabled', '==', true).limit(limitEmpresas).get();
+  const periods = hotPeriodKeys();
+  let enqueued = 0;
+  for (const e of empresas.docs) {
+    for (const period of periods) {
+      const snap = await admin.firestore().collection(MONTH_COL)
+        .where('empresaId', '==', e.id)
+        .where('periodKey', '==', period)
+        .select('level', 'objectiveId', 'engineVersion')
+        .get();
+      const stale = objectivesNeedingEngine(snap.docs.map((d) => d.data() as { level?: string; objectiveId?: string; engineVersion?: unknown }));
+      if (!stale.length) continue;
+      await enqueueHoursLedgerJob({
+        empresaId: e.id,
+        period,
+        dryRun: false,
+        createdBy: 'engine',
+        objectiveIds: stale,
+      });
+      enqueued += 1;
+    }
+  }
+  return { enqueued, version: LEDGER_ENGINE_VERSION };
 }

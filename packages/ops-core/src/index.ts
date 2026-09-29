@@ -49,12 +49,38 @@ export {
   keepsNextBandSlot,
 } from './shiftSeries';
 export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts } from './shiftSeries';
+export {
+  CONVOCADO_ETA_SPEED_KMH,
+  CONVOCADO_ETA_WAIT_MIN,
+  CONVOCADO_SAME_SITE_ETA_MIN,
+  CONVOCADO_DELAY_GRACE_MIN,
+  haversineKm,
+  busEtaMinutes,
+  convocadoTravelEta,
+  convocadoReminderAtMs,
+} from './convocadoEta';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';
 export type { ShiftCodeBadge, ShiftCodeBadgeTone } from './shiftCodeBadge';
+export {
+  RETENTION_HARD_CAP_MS,
+  formatHmAR,
+  formatRetentionDuration,
+  buildRetentionWaitInfo,
+  formatRetentionLine,
+} from './retentionDisplay';
+export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
+export {
+  EVENT_COVERAGE_CASCADE_ORDER,
+  isEventoShift,
+  eventoTieneFranjasEncadenadas,
+  eventualesParaHueco,
+  planEventualAusente,
+} from './eventoCoverage';
+export type { EventualCandidato, EventualAusentePlan } from './eventoCoverage';
 export {
   COVERAGE_CASCADE_ORDER,
   COVERAGE_LEGACY_CANDIDATE_TYPES,

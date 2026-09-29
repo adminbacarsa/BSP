@@ -799,6 +799,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let horasRealesCobertura = 0;
     let horasRealesDespliegue = 0;
     let turnosConDatosReales = 0;
+    let desgloseEventos = 0;
 
     sortedDocs.forEach(d => {
         try {
@@ -815,7 +816,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const rawCode = (d.code || '').trim().toUpperCase();
             const isFT = isFrancoTrabajadoShift(d);
-            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'EV'].includes(rawCode) && !isFT) return;
+            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
             // Doc F sin fichada: liquida en el turno de cobertura si ese día tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
@@ -918,6 +919,11 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             if (isFT && worked > 0) horasFTReal += worked;
             horasRealesTotal += worked;
             if (worked > 0) {
+                const codeUp = rawCode.includes('/') ? rawCode.split('/')[0] : rawCode;
+                const originUp = String(d.origin || '').toUpperCase();
+                if (!isFT && (codeUp === 'EV' || codeUp === 'EVT' || originUp === 'EVENTO')) desgloseEventos += worked;
+            }
+            if (worked > 0) {
                 if (isDespliegue && !isFT) horasRealesDespliegue += worked;
                 else horasRealesCobertura += worked;
             }
@@ -959,6 +965,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
         extra100: horasFTReal, // Fix 1: usar horas FT reales, no teóricas
         plusFeriado: hoursFeriado,
         horasExtra: Math.max(0, horasRealesTotal - horasTeoricas),
+        desglose: { eventos: desgloseEventos },
     };
 };
 
@@ -1114,6 +1121,7 @@ export function buildPayrollExportPayload(
                     nota: 'FT y Feriados se pagan aparte.',
                 },
                 novedadesRRHH: row.novedadesRRHH ?? countNovedadesRRHHFromShifts(row.rawShifts || []),
+                desglose: row.desglose ?? null,
                 turnosCount: row.shiftsTotal ?? row.shifts ?? 0,
                 turnosConFichada: row.turnosConDatosReales ?? 0,
             };
@@ -1806,6 +1814,7 @@ export const useReportes = (forcedClientId?: string | null) => {
                     extra50: stats.extra50,
                     extra100: stats.extra100,
                     plusFeriado: stats.plusFeriado,
+                    desglose: stats.desglose,
                     ftCount,
                     ffCount,
                     rawShifts: shifts

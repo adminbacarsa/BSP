@@ -712,7 +712,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                                 <td className={`sticky left-0 z-10 border-r px-2 py-1.5 font-bold ${isEvtRow ? 'bg-violet-50 text-violet-900' : 'bg-white text-slate-800'}`}>
                                   {p.positionName}
                                   {isEvtRow && (
-                                    <span className="block text-[8px] font-bold uppercase text-violet-500 tracking-wide">Extras TURA</span>
+                                    <span className="block text-[8px] font-bold uppercase text-violet-500 tracking-wide">No factura · ver eventos</span>
                                   )}
                                 </td>
                                 {grid.dateColumns.map((d) => {
@@ -722,7 +722,7 @@ export default function ProformaPanel(props: ProformaPanelProps) {
                                     <td
                                       key={d}
                                       className={`px-0.5 py-1 text-center border-r font-mono whitespace-nowrap ${isEvtRow ? 'text-violet-800' : 'text-slate-700'}`}
-                                      title={isEvtRow && h > 0 ? `TURA imputada a Eventos: ${cell?.display || h}h` : undefined}
+                                      title={isEvtRow && h > 0 ? `Puesto eventos: no se factura (las horas vendidas están en el bloque Eventos)` : undefined}
                                     >
                                       {h > 0 ? (cell?.display || Math.round(h * 10) / 10) : ''}
                                     </td>
@@ -868,8 +868,10 @@ export default function ProformaPanel(props: ProformaPanelProps) {
               <p className="text-[10px] font-black uppercase text-slate-500">Eventos</p>
               <p className="text-xs font-bold text-slate-400 mt-0.5">
                 {proformaBundle.eventos.length} evento(s) ·{' '}
-                {proformaBundle.eventos.reduce((a, e) => a + e.servicios.reduce((b, s) => b + s.guardias.length, 0), 0)} guardia(s) ·{' '}
-                {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs
+                {proformaBundle.eventos.reduce((a, e) => a + e.dias.length, 0)} día(s) ·{' '}
+                {proformaBundle.eventos.reduce((a, e) => a + e.totalHoras, 0)} hs vendidas
+                {' · '}
+                {proformaBundle.eventos.reduce((a, e) => a + e.horasTrabajadas, 0)} hs trabajadas (no facturan)
               </p>
             </div>
             {openEventos ? <ChevronUp size={18} className="text-slate-400 shrink-0" /> : <ChevronDown size={18} className="text-slate-400 shrink-0" />}
@@ -877,69 +879,40 @@ export default function ProformaPanel(props: ProformaPanelProps) {
           {openEventos && (
             <div className="p-6 space-y-4">
               {proformaBundle.eventos.map((ev) => {
-                const evTotalGuardias = ev.servicios.reduce((a, s) => a + s.guardias.length, 0);
                 return (
                   <div key={ev.eventoId} className="border rounded-xl overflow-hidden">
-                    {/* Encabezado del evento */}
                     <div className="px-4 py-3 bg-slate-800 flex items-center justify-between">
                       <div>
                         <p className="text-sm font-black text-white">{ev.eventoNombre}</p>
                         <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">
-                          {ev.servicios.length} servicio(s) · {evTotalGuardias} guardia(s)
+                          {ev.dias.length} día(s) · trabajadas {ev.horasTrabajadas} hs (no facturan)
                         </p>
                       </div>
-                      <span className="text-sm font-black text-amber-400">{ev.totalHoras} hs</span>
+                      <span className="text-sm font-black text-amber-400">{ev.totalHoras} hs vendidas</span>
                     </div>
-
-                    {/* Servicios */}
-                    {ev.servicios.map((srv, sIdx) => {
-                      const paxCubierto = srv.guardias.length;
-                      const paxReq = srv.cupo ?? '—';
-                      const horario = srv.horaInicio && srv.horaFin ? `${srv.horaInicio}–${srv.horaFin}` : null;
-                      return (
-                        <div key={srv.servicioId} className={sIdx > 0 ? 'border-t' : ''}>
-                          {/* Subencabezado servicio */}
-                          <div className="px-4 py-2 bg-slate-100 flex flex-wrap items-center gap-x-4 gap-y-0.5">
-                            <p className="text-xs font-black text-slate-700">{srv.servicioNombre}</p>
-                            <span className="text-[11px] font-bold text-slate-500">{srv.fecha}</span>
-                            {horario && <span className="text-[11px] font-bold text-slate-500">{horario}</span>}
-                            <span className="text-[11px] font-bold text-slate-500">
-                              PAX: <span className={paxCubierto >= Number(srv.cupo ?? 0) && srv.cupo ? 'text-green-600' : 'text-slate-600'}>{paxCubierto}</span>
-                              {srv.cupo != null ? ` / ${srv.cupo}` : ''}
-                            </span>
-                          </div>
-
-                          {/* Tabla guardias */}
-                          <table className="w-full text-xs">
-                            <thead>
-                              <tr className="border-b bg-slate-50/60">
-                                <th className="text-left px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Guardia</th>
-                                <th className="text-right px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Hs</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {srv.guardias.map((g, i) => (
-                                <tr key={`${g.employeeId}-${i}`} className="border-b border-slate-50 hover:bg-slate-50/40">
-                                  <td className="px-4 py-1.5 font-bold text-slate-700">{g.name}</td>
-                                  <td className="px-4 py-1.5 font-bold text-slate-600 text-right tabular-nums">{g.hours}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                            <tfoot>
-                              <tr className="bg-slate-100/80">
-                                <td className="px-4 py-1.5 font-black text-slate-600 text-right text-[11px] uppercase">Subtotal</td>
-                                <td className="px-4 py-1.5 font-black text-slate-800 text-right tabular-nums">{srv.totalHoras}</td>
-                              </tr>
-                            </tfoot>
-                          </table>
-                        </div>
-                      );
-                    })}
-
-                    {/* Total evento */}
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b bg-slate-50/60">
+                          <th className="text-left px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Día</th>
+                          <th className="text-left px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Servicio</th>
+                          <th className="text-right px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Hs vendidas</th>
+                          <th className="text-right px-4 py-1.5 font-black text-slate-500 uppercase text-[10px]">Hs trabajadas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ev.dias.map((dia) => (
+                          <tr key={dia.fecha} className="border-b border-slate-50 hover:bg-slate-50/40">
+                            <td className="px-4 py-1.5 font-bold text-slate-700">{dia.fecha}</td>
+                            <td className="px-4 py-1.5 font-bold text-slate-500">{dia.servicios.map((s) => s.servicioNombre).join(' · ') || '—'}</td>
+                            <td className="px-4 py-1.5 font-black text-slate-800 text-right tabular-nums">{dia.horasVendidas}</td>
+                            <td className="px-4 py-1.5 font-bold text-slate-400 text-right tabular-nums">{dia.horasTrabajadas}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                     <div className="px-4 py-2 bg-slate-800/10 flex justify-between items-center border-t border-slate-200">
                       <span className="text-xs font-black text-slate-600 uppercase">Total {ev.eventoNombre}</span>
-                      <span className="text-sm font-black text-slate-800 tabular-nums">{ev.totalHoras} hs</span>
+                      <span className="text-sm font-black text-slate-800 tabular-nums">{ev.totalHoras} hs vendidas</span>
                     </div>
                   </div>
                 );

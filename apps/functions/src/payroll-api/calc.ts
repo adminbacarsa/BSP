@@ -107,6 +107,7 @@ export interface EmployeeLiquidacion {
         cobertura: number;
         ft: number;
         tura: number;
+        eventos: number;
     };
     turnosCount: number;
     turnosConFichada: number;

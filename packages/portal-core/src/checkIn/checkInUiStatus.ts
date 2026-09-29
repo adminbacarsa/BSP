@@ -1,6 +1,7 @@
 import type { Shift } from '@cosp/portal-types';
 import type { CheckInTiming } from './portalCheckIn';
-import { lateNoNoticeCheckInCopy } from './evaluateCheckInWindow.ts';
+import { isConvocadoCoverageShift, lateNoNoticeCheckInCopy } from './evaluateCheckInWindow.ts';
+import { advanceStartLine, extendUntilLine } from './convocadoArrival';
 import { toDate, formatTimeAr } from '../utils/dates.ts';
 
 export type CheckInUiStatus =
@@ -63,8 +64,11 @@ export function presentArrivalCopy(shift: Shift): { title: string; subtitle?: st
     return { title: 'Presente confirmado', subtitle: coverage };
   }
   const lateMin = planned ? Math.round((pay.getTime() - planned.getTime()) / 60000) : 0;
+  const convocado = isConvocadoCoverageShift(shift as unknown as Record<string, unknown>);
   const title =
-    lateMin > 5 ? `Ingresaste ${formatTimeAr(pay)} (${lateMin} min tarde)` : `Ingresaste ${formatTimeAr(pay)}`;
+    !convocado && lateMin > 5
+      ? `Ingresaste ${formatTimeAr(pay)} (${lateMin} min tarde)`
+      : `Ingresaste ${formatTimeAr(pay)}`;
   const marked =
     punch && Math.abs(punch.getTime() - pay.getTime()) >= 60_000
       ? `Marcaste ${formatTimeAr(punch)}`
@@ -89,6 +93,15 @@ export function resolveCheckInUiStatus(
 
   if (isShiftPresent(shift)) {
     const arrival = presentArrivalCopy(shift);
+    const extended = extendUntilLine(shift as never);
+    if (extended) {
+      return {
+        status: 'present',
+        title: extended,
+        subtitle: arrival.title,
+        tone: 'success',
+      };
+    }
     return {
       status: 'present',
       title: arrival.title,
@@ -152,6 +165,27 @@ export function resolveCheckInUiStatus(
     };
   }
 
+  if (timing?.convocado) {
+    if (timing.canCheckIn) {
+      return {
+        status: 'ready',
+        title: 'En camino',
+        subtitle: 'Marcá ingreso al llegar al objetivo.',
+        tone: 'info',
+        actionLabel: 'Marcar ingreso al llegar',
+      };
+    }
+    const ended = String(timing.rejectCode || '') === 'SHIFT_ENDED';
+    return {
+      status: ended ? 'shift_ended' : 'too_early',
+      title: ended ? 'Turno terminado' : 'En camino',
+      subtitle: timing.rejectMessage,
+      tone: 'neutral',
+    };
+  }
+
+  const advanced = advanceStartLine(shift as never);
+
   if (shift.lateArrivalAt || (shift as { lateArrivalConfirmed?: boolean }).lateArrivalConfirmed) {
     const deadline = timing?.checkInDeadline;
     const until =
@@ -204,12 +238,14 @@ export function resolveCheckInUiStatus(
   if (timing?.canCheckIn) {
     return {
       status: 'ready',
-      title: isOpsCoverage ? 'Cobertura: listo para fichar' : 'Listo para fichar',
-      subtitle: timing.checkInDeadline
-        ? `Fichá hasta las ${formatTimeAr(timing.checkInDeadline)}`
-        : isOpsCoverage
-          ? 'Al llegar al objetivo, marcá presente con GPS'
-          : 'Usá el botón con GPS en el puesto',
+      title: advanced || (isOpsCoverage ? 'Cobertura: listo para fichar' : 'Listo para fichar'),
+      subtitle: advanced
+        ? 'Fichá con GPS en la ventana habitual'
+        : timing.checkInDeadline
+          ? `Fichá hasta las ${formatTimeAr(timing.checkInDeadline)}`
+          : isOpsCoverage
+            ? 'Al llegar al objetivo, marcá presente con GPS'
+            : 'Usá el botón con GPS en el puesto',
       tone: 'info',
     };
   }

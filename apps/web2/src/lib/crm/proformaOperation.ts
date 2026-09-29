@@ -67,15 +67,16 @@ export function buildInOperationObjectiveIds(input: {
  * active = en operación; withoutPlan = contrato activo sin cronograma publicado;
  * closed = cerrado del mes; none = sin contrato que cubra el mes.
  */
-export function objectiveMonthSlaPresence(input: {
+function scanObjectiveMonth(input: {
   slas: ProformaSlaRow[];
   year: number;
   monthIndex0: number;
   hasPublishedPlan: boolean;
   clientStatus?: unknown;
-}): 'active' | 'withoutPlan' | 'closed' | 'none' {
-  let sawWithoutPlan = false;
-  let sawClosed = false;
+}): { active: boolean; withoutPlan: boolean; closed: boolean } {
+  let active = false;
+  let withoutPlan = false;
+  let closed = false;
   for (const srv of input.slas) {
     if (!slaCoversCalendarMonth(srv.startDate, srv.endDate, input.year, input.monthIndex0)) continue;
     const bucket = classifySlaBucket({
@@ -84,11 +85,34 @@ export function objectiveMonthSlaPresence(input: {
       clientActive: clientIsActive(input.clientStatus),
       hasPublishedPlan: input.hasPublishedPlan,
     });
-    if (bucket === 'active') return 'active';
-    if (bucket === 'withoutPlan') sawWithoutPlan = true;
-    else if (bucket === 'closed') sawClosed = true;
+    if (bucket === 'active') active = true;
+    else if (bucket === 'withoutPlan') withoutPlan = true;
+    else if (bucket === 'closed') closed = true;
   }
-  if (sawWithoutPlan) return 'withoutPlan';
-  if (sawClosed) return 'closed';
+  return { active, withoutPlan, closed };
+}
+
+export function objectiveMonthSlaPresence(input: {
+  slas: ProformaSlaRow[];
+  year: number;
+  monthIndex0: number;
+  hasPublishedPlan: boolean;
+  clientStatus?: unknown;
+}): 'active' | 'withoutPlan' | 'closed' | 'none' {
+  const flags = scanObjectiveMonth(input);
+  if (flags.active) return 'active';
+  if (flags.withoutPlan) return 'withoutPlan';
+  if (flags.closed) return 'closed';
   return 'none';
+}
+
+/** Hay al menos un contrato cerrado que cubre el mes (classifySlaBucket), aunque el objetivo también esté en operación. */
+export function objectiveMonthHasClosedSla(input: {
+  slas: ProformaSlaRow[];
+  year: number;
+  monthIndex0: number;
+  hasPublishedPlan: boolean;
+  clientStatus?: unknown;
+}): boolean {
+  return scanObjectiveMonth(input).closed;
 }

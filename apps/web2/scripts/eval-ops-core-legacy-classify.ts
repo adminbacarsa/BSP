@@ -106,8 +106,8 @@ export function legacyClassifyOpsShift(input: LegacyClassifyInput): Record<strin
   const isPendingRetention = isPresent && !isCompleted && shift.isRetention === true && !shiftEnded;
   const isRetention = isRetentionByField;
   let retentionMinutes = 0;
-  if (isRetentionByField && effectiveEndDateObj && shiftEnded) {
-    retentionMinutes = Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000);
+  if ((isRetentionByField || isPendingClose) && effectiveEndDateObj && shiftEnded) {
+    retentionMinutes = Math.max(0, Math.floor((currentTime.getTime() - effectiveEndDateObj.getTime()) / 60000));
   } else if (isRetentionByField && shift.autoRetentionAt?.seconds) {
     retentionMinutes = Math.floor((currentTime.getTime() - shift.autoRetentionAt.seconds * 1000) / 60000);
   }

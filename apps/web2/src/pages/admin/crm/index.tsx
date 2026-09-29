@@ -114,6 +114,9 @@ import {
 } from '@/lib/crm/clientDataMatch';
 import { resolveTurnoScheduleDateKey } from '@/lib/crm/crmDateUtils';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
+import { eventoService } from '@/services/eventoService';
+import { buildEventosPrefactura } from '@/lib/crm/eventosProforma';
+import { refuerzoImputaPuestoEventos } from '@/lib/crm/eventosGuardHours';
 import { buildProformaObjectiveGrids, buildPeriodLabel, buildProformaSummary, buildProformaPositionGrids } from '@/lib/crm/proformaGrid';
 import type { ProformaLayoutMode } from '@/lib/crm/proformaTypes';
 import { proformaDetailGridMode, turnoEligibleForProformaGrid, type AutoExecutedResolver, type ProformaDetailMode } from '@/lib/crm/proformaMode';
@@ -2523,6 +2526,7 @@ export default function CRMPage() {
         if (!isSolicitudRefuerzoExtraVendible(sol)) continue;
         if (!['APROBADA', 'ASIGNADA', 'COMPLETADA'].includes(sol.estado)) continue;
         if (!solicitudRefuerzoInRange(sol, refStart, refEnd)) continue;
+        if (refuerzoImputaPuestoEventos(sol)) continue;
         adicionalRefuerzoHours += calcRefuerzoHorasVendidas(sol);
       }
 
@@ -2566,49 +2570,18 @@ export default function CRMPage() {
       const summary = buildProformaSummary(grids, slaHoursByObjectiveId);
       const startKey = getDateKeyInTimezone(start);
       const endKey = getDateKeyInTimezone(end);
-      const evByEvento = new Map<string, { nombre: string; srvs: Map<string, any> }>();
-      turnosEnriched.forEach((t: any) => {
-        if (String(t.code || '').toUpperCase() !== 'EV') return;
-        const eventoId = String(t.eventoId || '');
-        if (!eventoId) return;
-        if (t.clientId && t.clientId !== selectedClient.id) return;
-        const plannedStart = toDateSafe(t.startTime);
-        if (!plannedStart) return;
-        const dateKey = getDateKeyInTimezone(plannedStart);
-        if (dateKey < startKey || dateKey > endKey) return;
-        if (!evByEvento.has(eventoId)) evByEvento.set(eventoId, { nombre: t.eventoNombre || eventoId, srvs: new Map() });
-        const ev = evByEvento.get(eventoId)!;
-        const srvKey = String(t.servicioId || '_');
-        if (!ev.srvs.has(srvKey)) {
-          ev.srvs.set(srvKey, { servicioId: srvKey, servicioNombre: t.servicioNombre || 'Servicio', fecha: dateKey, guardias: [], totalHoras: 0 });
-        }
-        const srv = ev.srvs.get(srvKey)!;
-        const hrs = Number(t.hours) || 0;
-        srv.guardias.push({ employeeId: String(t.employeeId || ''), name: String(t.employeeName || t.employeeId || ''), fecha: dateKey, hours: hrs });
-        srv.totalHoras += hrs;
-      });
-      // Enriquecer servicios con cupo/horario desde el doc del evento
-      const eventoIds = Array.from(evByEvento.keys());
-      if (eventoIds.length > 0) {
-        await Promise.all(eventoIds.map(async (eid) => {
-          const snap = await getDoc(doc(db, 'eventos', eid));
-          if (!snap.exists()) return;
-          const srvList: any[] = snap.data()?.servicios || [];
-          const ev = evByEvento.get(eid)!;
-          srvList.forEach((s: any) => {
-            const srvKey = String(s.id || '');
-            if (!srvKey || !ev.srvs.has(srvKey)) return;
-            const srv = ev.srvs.get(srvKey)!;
-            srv.cupo = typeof s.cupo === 'number' ? s.cupo : undefined;
-            srv.horaInicio = s.horaInicio || undefined;
-            srv.horaFin = s.horaFin || undefined;
-          });
-        }));
-      }
+      const eventosDesde = new Date(start.getFullYear(), start.getMonth(), start.getDate() - 92);
+      const eventosCliente = empresaId
+        ? (await eventoService.getByEmpresaAndRange(empresaId, getDateKeyInTimezone(eventosDesde), endKey, true))
+          .filter((ev) => ev.clienteId === selectedClient.id)
+        : [];
       if (stale()) return;
-      const eventosProforma = Array.from(evByEvento.entries()).map(([eventoId, ev]) => {
-        const servicios = Array.from(ev.srvs.values());
-        return { eventoId, eventoNombre: ev.nombre, servicios, totalHoras: servicios.reduce((a: number, s: any) => a + s.totalHoras, 0) };
+      const eventosProforma = buildEventosPrefactura({
+        eventos: eventosCliente,
+        turnos: turnosEnriched,
+        clientId: selectedClient.id,
+        startYmd: startKey,
+        endYmd: endKey,
       });
       const eventosAdicionalHours = eventosProforma.reduce((a, e) => a + e.totalHoras, 0);
       const adicionalHoursTotal = Math.round(adicionalRefuerzoHours + eventosAdicionalHours);

@@ -57,29 +57,22 @@ export type ProformaSummaryRow = {
   slaHours?: number;
 };
 
-export type ProformaEventoGuardia = {
-  employeeId: string;
-  name: string;
+export type ProformaEventoDia = {
   fecha: string;
-  hours: number;
-};
-
-export type ProformaEventoServicio = {
-  servicioId: string;
-  servicioNombre: string;
-  fecha: string;
-  horaInicio?: string;
-  horaFin?: string;
-  cupo?: number;
-  guardias: ProformaEventoGuardia[];
-  totalHoras: number;
+  /** Horas contratadas con el cliente ese día. Es lo que se factura. */
+  horasVendidas: number;
+  /** Fichadas del evento ese día. No se facturan. */
+  horasTrabajadas: number;
+  servicios: { servicioId: string; servicioNombre: string; horasVendidas: number }[];
 };
 
 export type ProformaEvento = {
   eventoId: string;
   eventoNombre: string;
-  servicios: ProformaEventoServicio[];
+  dias: ProformaEventoDia[];
+  /** Suma de horas vendidas. */
   totalHoras: number;
+  horasTrabajadas: number;
 };
 
 export type { ProformaBillingRow } from './slaBilling.types';

@@ -13,6 +13,7 @@ export const SHIFT_ALERT_FCM_TYPES = new Set([
   'RETENCION_AVISO',
   'SOLICITUD_ESTADO_LLEGADA',
   'SOLICITUD_ESTADO_RELEVO',
+  'CONVOCADO_RECORDATORIO',
 ]);
 
 export function isShiftAlertFcmType(type: string): boolean {

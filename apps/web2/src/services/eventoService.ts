@@ -43,6 +43,11 @@ export interface ServicioEvento {
     ubicacion: UbicacionServicio;
     /** Cupo de guardias para este servicio */
     cupo: number;
+    /**
+     * Horas contratadas con el cliente para este día de servicio.
+     * La prefactura factura este número. No son las fichadas ni el plan del guardia.
+     */
+    horasVendidas?: number;
     /** Códigos de aptitud requeridos para convocar (ej. ['BOMBERO', 'LICENCIA_MOTO']) */
     aptitudesRequeridas?: string[];
     requisitos?: string;
@@ -71,6 +76,8 @@ export interface Evento {
     horaFin?: string;
     horasEvento?: number;
     cupoGuardias?: number;
+    /** Legacy: horas vendidas de cada día cuando el evento no tiene servicios[]. */
+    horasVendidas?: number;
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -90,7 +97,13 @@ export function calcHorasServicio(s: Pick<ServicioEvento, 'tipoTurno' | 'horaIni
     return calcHorasEvento(s.horaInicio, s.horaFin);
 }
 
-/** Calcula horas a partir de strings HH:MM, cruza medianoche correctamente. */
+/** Horas vendidas guardadas. Vacío o inválido = 0 (no se infiere del cupo ni de la fichada). */
+export function horasVendidasDeServicio(s: { horasVendidas?: unknown } | null | undefined): number {
+    const n = Number(s?.horasVendidas);
+    if (!Number.isFinite(n) || n <= 0) return 0;
+    return Math.round(n * 10) / 10;
+}
+
 export function calcHorasEvento(horaInicio: string, horaFin: string): number {
     const [sh, sm] = horaInicio.split(':').map(Number);
     const [eh, em] = horaFin.split(':').map(Number);
@@ -149,6 +162,7 @@ export function serviciosParaFecha(
                     horasTotal: ev.horasEvento ?? 8,
                     ubicacion: { tipo: 'nueva' },
                     cupo: ev.cupoGuardias ?? 0,
+                    horasVendidas: ev.horasVendidas,
                     status: 'pendiente',
                 },
             });

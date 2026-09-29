@@ -20,7 +20,7 @@ type PushNotificationsBootstrapProps = {
 
 function hrefFromRoute(route: string) {
   if (route === '/(tabs)' || route === '/(tabs)/') return appRoutes.hoy;
-  if (route.startsWith('/(tabs)?')) return appRoutes.hoy;
+  if (route.startsWith('/(tabs)?')) return route as typeof appRoutes.hoy;
   if (route === '/(tabs)/agenda') return appRoutes.agenda;
   if (route === '/(tabs)/alertas') return appRoutes.alertas;
   if (route === '/(tabs)/mas') return appRoutes.mas;

@@ -1,5 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.convocadoPunchAnchorMs = convocadoPunchAnchorMs;
+exports.convocadoPunchCapMs = convocadoPunchCapMs;
 exports.evaluateServerCheckInWindow = evaluateServerCheckInWindow;
 const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
@@ -13,6 +15,16 @@ function createdMs(shift) {
     return (shift.createdAt?.toMillis?.()
         ?? shift.coverageCreatedAt?.toMillis?.()
         ?? startMs(shift));
+}
+function convocadoPunchAnchorMs(shift) {
+    const acc = shift.acceptedAt?.toMillis?.() ?? 0;
+    if (acc > 0)
+        return acc;
+    return createdMs(shift);
+}
+function convocadoPunchCapMs(shift) {
+    const end = endMs(shift);
+    return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
 }
 function adjustedStartMs(shift) {
     const adj = shift.adjustedStartTime?.toMillis?.() ?? 0;
@@ -62,7 +74,12 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
     if (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT') {
         return { allowed: false, rejectCode: 'ABSENT' };
     }
-    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shift)) {
+    const originEarly = String(shift.origin || '').toUpperCase();
+    const ctEarly = String(shift.coverageType || '').toUpperCase();
+    if (originEarly === 'OPERATIONS_COVERAGE' && ctEarly === 'EXTEND') {
+        return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+    }
+    if ((0, coverageTraceShift_1.isOpsCoverageHoursOnSourceDoc)(shift) && ctEarly !== 'ADVANCE') {
         return { allowed: false, rejectCode: 'TRACE_REGISTRATION' };
     }
     const source = String(opts?.source || '').toUpperCase();
@@ -81,15 +98,17 @@ function evaluateServerCheckInWindow(shift, nowMs, opts) {
         return { allowed: false, rejectCode: 'SHIFT_ENDED' };
     if (!plannedStart)
         return { allowed: false, rejectCode: 'TOO_EARLY' };
-    if (origin === 'OPERATIONS_COVERAGE' && ct !== 'EXTEND' && ct !== 'ADVANCE') {
-        const gapStart = plannedStart;
-        const windowStart = gapStart - 15 * 60 * 1000;
-        const windowEnd = Math.max(createdMs(shift), gapStart) + 60 * 60 * 1000;
-        if (nowMs < windowStart)
+    if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') {
+        return { allowed: false, rejectCode: 'EXT_NO_CHECKIN' };
+    }
+    if (origin === 'OPERATIONS_COVERAGE') {
+        const anchor = convocadoPunchAnchorMs(shift);
+        const cap = convocadoPunchCapMs(shift);
+        if (anchor > 0 && nowMs < anchor)
             return { allowed: false, rejectCode: 'TOO_EARLY' };
-        if (nowMs > windowEnd)
-            return { allowed: false, rejectCode: 'TOO_LATE' };
-        return finishAllowed(gapStart, nowMs, false);
+        if (cap > 0 && nowMs > cap)
+            return { allowed: false, rejectCode: 'SHIFT_ENDED' };
+        return { allowed: true, usePlannedStart: false, lateMinutes: 0 };
     }
     if (shift.isEarlyStart === true) {
         const advStart = adjustedStartMs(shift);

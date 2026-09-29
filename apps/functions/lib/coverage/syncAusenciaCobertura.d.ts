@@ -66,6 +66,7 @@ export type ApplyCoverageParams = {
     clientName?: string;
     titularCloseMode?: 'FULL' | 'PARTIAL' | 'NONE';
     convocatoriaId?: string;
+    acceptedAt?: admin.firestore.Timestamp | null;
     allowReplace?: boolean;
     covSegmentStart?: admin.firestore.Timestamp | null;
     covSegmentEnd?: admin.firestore.Timestamp | null;

@@ -2,10 +2,10 @@
 import { Building2, Plus, Save, Play, CheckCircle2, AlertCircle, Loader2, ChevronDown, ChevronUp, Bot, EyeOff, Eye, Trash2, AlertTriangle, Copy, X, Upload, CreditCard, Image as ImageIcon, Radio, MapPin, Zap, Timer } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
+import { migrarEmpresa, guardarEmpresa, desactivarEmpresa, activarEmpresa, eliminarEmpresaYDatos, stampEmpresaId, type ProgresoMigracion, type ProgresoEliminacion } from '@/lib/multiempresa';
 import { toast } from 'sonner';
 import { db, functions, auth, storage } from '@/lib/firebase';
-import { collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
+import { addDoc, collection, doc, getDocs, query, serverTimestamp, updateDoc, where } from 'firebase/firestore';
 import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
@@ -23,7 +23,7 @@ function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
 }
 
 export default function EmpresasTab() {
-  const { isSuperAdmin } = useAuth();
+  const { isSuperAdmin, user } = useAuth();
   const { empresa, empresas, empresaId, switchEmpresa } = useEmpresa();
 
   // Formulario nueva empresa
@@ -275,6 +275,35 @@ export default function EmpresasTab() {
 
   // Toggle activo/inactivo por empresa
   const [toggling, setToggling] = useState<string | null>(null);
+  const [togglingHoursCore, setTogglingHoursCore] = useState<string | null>(null);
+  const handleToggleHoursCore = async (target: typeof empresas[0]) => {
+    const next = target.hoursCoreEnabled !== true;
+    const nombre = target.name || target.id;
+    const ok = window.confirm(
+      next
+        ? `¿Activar el nuevo cálculo de horas en ${nombre}? Activa el Banco de Horas automático y el motor nuevo de Reportes → Liquidación.`
+        : `¿Desactivar el nuevo cálculo de horas en ${nombre}? El Banco de Horas deja de recalcular solo y Liquidación vuelve al motor anterior.`,
+    );
+    if (!ok) return;
+    setTogglingHoursCore(target.id);
+    try {
+      await guardarEmpresa(target.id, { hoursCoreEnabled: next });
+      await addDoc(collection(db, 'audit_logs'), stampEmpresaId({
+        action: 'HOURS_CORE_TOGGLE',
+        module: 'CONFIG',
+        details: `${next ? 'Activó' : 'Desactivó'} el nuevo cálculo de horas en ${nombre}`,
+        timestamp: serverTimestamp(),
+        actorUid: user?.uid || auth.currentUser?.uid || '',
+        actorName: user?.displayName || user?.email || 'SuperAdmin',
+        hoursCoreEnabled: next,
+      }, target.id));
+      toast.success(next ? 'Nuevo cálculo de horas activado' : 'Nuevo cálculo de horas desactivado');
+    } catch (err) {
+      toast.error(empresaWriteErrorMessage(err, isSuperAdmin));
+    } finally {
+      setTogglingHoursCore(null);
+    }
+  };
   const handleToggleActivo = async (e: typeof empresas[0]) => {
     setToggling(e.id);
     try {
@@ -489,6 +518,23 @@ export default function EmpresasTab() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0 ml-2">
+                  <div className="text-right max-w-[220px] mr-1">
+                    <p className="text-[10px] font-black text-slate-600 uppercase tracking-wide">Nuevo cálculo de horas</p>
+                    <p className="text-[10px] text-slate-400 leading-snug">Activa el Banco de Horas automático y el motor nuevo de Reportes → Liquidación.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleHoursCore(e)}
+                    disabled={togglingHoursCore === e.id}
+                    role="switch"
+                    aria-checked={e.hoursCoreEnabled === true}
+                    aria-label={`Nuevo cálculo de horas de ${e.name || e.id}`}
+                    title="Activa el Banco de Horas automático y el motor nuevo de Reportes → Liquidación."
+                    className={`relative h-7 w-12 rounded-full shrink-0 transition-colors disabled:opacity-60 ${e.hoursCoreEnabled === true ? 'bg-indigo-600' : 'bg-slate-300'}`}
+                  >
+                    <span className={`absolute top-0.5 left-0.5 h-6 w-6 rounded-full bg-white shadow-sm transition-transform ${e.hoursCoreEnabled === true ? 'translate-x-5' : 'translate-x-0'}`} />
+                    {togglingHoursCore === e.id && <Loader2 size={11} className="absolute inset-0 m-auto animate-spin text-white" />}
+                  </button>
                   {(e as any).migracionCompleta && (
                     <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full hidden sm:flex items-center gap-1">
                       <CheckCircle2 size={10} /> Migrada
