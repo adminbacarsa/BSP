@@ -17,6 +17,7 @@ import { isActiveOpsCoverageDoc, isTitularCoverageAssigned } from '@/lib/cosp/co
 export { isActiveOpsCoverageDoc } from '@/lib/cosp/coverageSemantics';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import { resolveCoverageBandCode } from '@/lib/operaciones/coverageExtAdvSegments';
+import { isEventoShift } from '@cosp/ops-core';
 import {
   gapFromAbsenceLikeShift,
   sourceShiftEligibleForCoverageGap,
@@ -409,8 +410,17 @@ export async function applyCoverage(
         objectiveName: params.objectiveName ?? titular.objectiveName ?? '',
         positionName: posName,
         coversPositionName: posName,
-        code: ct === 'FT' ? 'FT' : bandCode,
-        type: ct === 'FT' ? 'FT' : bandCode,
+        code: isEventoShift(titular) ? 'EV' : (ct === 'FT' ? 'FT' : bandCode),
+        type: isEventoShift(titular) ? 'EV' : (ct === 'FT' ? 'FT' : bandCode),
+        ...(isEventoShift(titular)
+          ? {
+            eventoId: titular.eventoId ?? null,
+            eventoNombre: titular.eventoNombre ?? null,
+            servicioId: titular.servicioId ?? null,
+            servicioNombre: titular.servicioNombre ?? null,
+            eventGap: true,
+          }
+          : {}),
         startTime: startTs,
         endTime: endTs,
         status: 'PENDING',

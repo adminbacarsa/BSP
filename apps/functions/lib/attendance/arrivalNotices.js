@@ -7,6 +7,7 @@ const reliefEligibility_1 = require("../common/reliefEligibility");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
 const convocatoriasCobertura_1 = require("../coverage/convocatoriasCobertura");
 const pushGreeting_1 = require("../common/pushGreeting");
+const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const arrivalNoticeWindow_1 = require("./arrivalNoticeWindow");
 const SKIP_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'A', 'E', 'AA', 'ART', 'PG', 'SGS', 'SUS']);
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
@@ -85,6 +86,8 @@ async function writeHeadsUp(db, shiftId, shift, startMs) {
 async function alertOutgoing(db, incoming) {
     if ((0, reliefEligibility_1.isExtraNonReliefShift)(incoming))
         return;
+    if ((0, eventoCoverage_1.isEventoShift)(incoming) && !(0, eventoCoverage_1.eventoTieneFranjasEncadenadas)(incoming))
+        return;
     const empresaId = String(incoming.empresaId || '').trim();
     const objectiveId = String(incoming.objectiveId || '').trim();
     const posName = String(incoming.positionName || '').trim().toLowerCase();
@@ -161,7 +164,7 @@ async function runShiftArrivalNotices(db, now, cc) {
             const flag = kind === 'HEADS_UP' ? 'preStartArrivalNoticeAt' : 'earlyRetentionAlertAt';
             if (shift[flag])
                 continue;
-            if (!(await cache.isShiftInOperation(db, shift)))
+            if (!(0, eventoCoverage_1.isEventoShift)(shift) && !(await cache.isShiftInOperation(db, shift)))
                 continue;
             const claimed = await claimFlag(db, docSnap.ref, flag, now);
             if (!claimed)

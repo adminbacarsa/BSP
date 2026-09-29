@@ -6,6 +6,7 @@ import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoing
 import { guardFirstName } from '../common/pushGreeting';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { seriesCodeOf } from '../common/shiftSeries';
+import { eventoTieneFranjasEncadenadas, isEventoShift } from '../eventos/eventoCoverage';
 import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
@@ -86,6 +87,9 @@ export async function retainOutgoingForGap(
   // ESC/REF/RET ausente no deja hueco de SLA: la franja sigue cubierta por el titular.
   if (!isReliefEligibleShift(titularShift)) {
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EXTRA_SHIFT_NO_GAP' };
+  }
+  if (isEventoShift(titularShift) && !eventoTieneFranjasEncadenadas(titularShift)) {
+    return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EVENTO_SIN_CONTINUIDAD' };
   }
 
   const absenceShiftId = String(titularShift.id || '').trim();

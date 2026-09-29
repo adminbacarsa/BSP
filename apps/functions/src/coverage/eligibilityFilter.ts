@@ -11,7 +11,8 @@ export type CandidateType =
   | 'FT'                 // Franco trabajado (último recurso)
   | 'VOLANTE'            // Legacy cascada / listados
   | 'SIN_TURNO_CON_EXP'
-  | 'SIN_TURNO';
+  | 'SIN_TURNO'
+  | 'EVENTUAL';
 
 export interface EligibilityContext {
   objectiveId: string;

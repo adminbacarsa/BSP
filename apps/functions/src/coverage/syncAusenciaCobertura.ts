@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { isFrancoShiftCode } from '../common/simulableShift';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
+import { isEventoShift } from '../eventos/eventoCoverage';
 import {
   gapWindowFromTitularShift,
   sourceShiftEligibleForCoverageGap,
@@ -417,6 +418,8 @@ export async function applyCoverage(
   const posName = params.positionName || titular.positionName || null;
   const ct = ctEarly;
   const isRet = ct === 'RET';
+  const eventGap = isEventoShift(titular as { code?: unknown; origin?: unknown });
+  const writtenCode = eventGap ? 'EV' : (ct === 'FT' ? 'FT' : bandCode);
 
   const sourceId = String(params.sourceShiftId || '').trim();
   if (sourceId) {
@@ -511,8 +514,17 @@ export async function applyCoverage(
       objectiveName: params.objectiveName ?? titular.objectiveName ?? '',
       positionName: posName,
       coversPositionName: posName,
-      code: ct === 'FT' ? 'FT' : bandCode,
-      type: ct === 'FT' ? 'FT' : bandCode,
+      code: writtenCode,
+      type: writtenCode,
+      ...(eventGap
+        ? {
+          eventoId: titular.eventoId ?? null,
+          eventoNombre: titular.eventoNombre ?? null,
+          servicioId: titular.servicioId ?? null,
+          servicioNombre: titular.servicioNombre ?? null,
+          eventGap: true,
+        }
+        : {}),
       startTime: startTs,
       endTime: endTs,
       origin: 'OPERATIONS_COVERAGE',

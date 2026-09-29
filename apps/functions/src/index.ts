@@ -27,6 +27,7 @@ import { createNestApp } from './main';
 import { iniciarCascadaCobertura, simularRespuestasConvocatorias } from './coverage/convocatoriasCobertura';
 import { retainOutgoingForGap, releaseInvalidRetentionsRun } from './coverage/coverageRetention';
 import { skipAbsencePipelineForShift } from './coverage/coverageTraceShift';
+import { isEventoShift } from './eventos/eventoCoverage';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from './common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEligibility';
 import { arPlanificacionEstadoKey } from './common/arClock';
@@ -2815,6 +2816,7 @@ export const gestionarVacantes = functions
       // Ignorar borradores de planificación (draft flag)
       if (shift.draft === true) continue;
       if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
+      if (isEventoShift(shift as Record<string, unknown>)) continue;
       // Solo vacantes sin asignación
       if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE') continue;
       // Turnos de planning: solo procesar si la planificación está publicada (BORRADOR → skip)

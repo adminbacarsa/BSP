@@ -66,6 +66,14 @@ export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOp
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
 export {
+  EVENT_COVERAGE_CASCADE_ORDER,
+  isEventoShift,
+  eventoTieneFranjasEncadenadas,
+  eventualesParaHueco,
+  planEventualAusente,
+} from './eventoCoverage';
+export type { EventualCandidato, EventualAusentePlan } from './eventoCoverage';
+export {
   COVERAGE_CASCADE_ORDER,
   COVERAGE_LEGACY_CANDIDATE_TYPES,
   COVERAGE_JOIN_TOLERANCE_MS,

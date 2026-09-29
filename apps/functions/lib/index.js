@@ -20,6 +20,7 @@ const main_1 = require("./main");
 const convocatoriasCobertura_1 = require("./coverage/convocatoriasCobertura");
 const coverageRetention_1 = require("./coverage/coverageRetention");
 const coverageTraceShift_1 = require("./coverage/coverageTraceShift");
+const eventoCoverage_1 = require("./eventos/eventoCoverage");
 const simulableShift_1 = require("./common/simulableShift");
 const reliefEligibility_1 = require("./common/reliefEligibility");
 const arClock_1 = require("./common/arClock");
@@ -2357,6 +2358,8 @@ exports.gestionarVacantes = functions
         if (shift.draft === true)
             continue;
         if ((0, coverageTraceShift_1.skipAbsencePipelineForShift)(shift))
+            continue;
+        if ((0, eventoCoverage_1.isEventoShift)(shift))
             continue;
         if (shift.isUnassigned !== true && shift.employeeId !== 'VACANTE')
             continue;
