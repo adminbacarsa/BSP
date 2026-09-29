@@ -5,8 +5,29 @@
 import { collection, doc, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '@/lib/firebase';
+import {
+  buildObjectiveOwnerIndex,
+  resolveObjectiveOwner,
+  type OwnerClientLike,
+} from '@/lib/crm/objectiveClientOwner';
 
 export type HoursLedgerPlanMode = 'published' | 'draft' | 'both';
+
+/** Día por puesto del libro (`hours_ledger`). */
+export type HoursLedgerDayRow = {
+  id?: string;
+  empresaId?: string;
+  periodKey?: string;
+  date: string;
+  clientId: string;
+  objectiveId: string;
+  puestoId: string;
+  slaActive: number;
+  slaClosed: number;
+  planPublished: number;
+  planDraft: number;
+  worked: number;
+};
 
 export type HoursLedgerMonthRow = {
   id?: string;
@@ -42,6 +63,8 @@ export type HoursLedgerMonth = {
   clients: HoursLedgerMonthRow[];
   objectives: HoursLedgerMonthRow[];
   monthly: HoursLedgerMonthRow[];
+  /** Detalle diario si vino con el libro (preview sincrónico). Si no, `fetchHoursLedgerDays`. */
+  days?: HoursLedgerDayRow[];
 };
 
 export const HOURS_LEDGER_PLAN_OPTIONS: { value: HoursLedgerPlanMode; label: string }[] = [
@@ -97,7 +120,29 @@ function asMonthRow(raw: Record<string, unknown>, id?: string): HoursLedgerMonth
   };
 }
 
-function fromMonthlyList(periodKey: string, monthly: HoursLedgerMonthRow[], source: HoursLedgerSource): HoursLedgerMonth {
+function asDayRow(raw: Record<string, unknown>, id?: string): HoursLedgerDayRow {
+  return {
+    id: id || String(raw.id || ''),
+    empresaId: String(raw.empresaId || ''),
+    periodKey: String(raw.periodKey || ''),
+    date: String(raw.date || ''),
+    clientId: String(raw.clientId || ''),
+    objectiveId: String(raw.objectiveId || ''),
+    puestoId: String(raw.puestoId || ''),
+    slaActive: Number(raw.slaActive) || 0,
+    slaClosed: Number(raw.slaClosed) || 0,
+    planPublished: Number(raw.planPublished) || 0,
+    planDraft: Number(raw.planDraft) || 0,
+    worked: Number(raw.worked) || 0,
+  };
+}
+
+function fromMonthlyList(
+  periodKey: string,
+  monthly: HoursLedgerMonthRow[],
+  source: HoursLedgerSource,
+  days?: HoursLedgerDayRow[],
+): HoursLedgerMonth {
   return {
     periodKey,
     source,
@@ -105,6 +150,7 @@ function fromMonthlyList(periodKey: string, monthly: HoursLedgerMonthRow[], sour
     clients: monthly.filter((r) => r.level === 'cliente'),
     objectives: monthly.filter((r) => r.level === 'objetivo'),
     monthly,
+    ...(days ? { days } : {}),
   };
 }
 
@@ -116,6 +162,53 @@ export async function fetchHoursLedgerMonthly(empresaId: string, periodKey: stri
   ));
   const monthly = snap.docs.map((d) => asMonthRow(d.data() as Record<string, unknown>, d.id));
   return fromMonthlyList(periodKey, monthly, monthly.length ? 'libro' : 'vacio');
+}
+
+/** Días por puesto del libro guardado (`hours_ledger`). Vacío si el mes no está persistido. */
+export async function fetchHoursLedgerDays(empresaId: string, periodKey: string): Promise<HoursLedgerDayRow[]> {
+  const snap = await getDocs(query(
+    collection(db, 'hours_ledger'),
+    where('empresaId', '==', empresaId),
+    where('periodKey', '==', periodKey),
+  ));
+  return snap.docs.map((d) => asDayRow(d.data() as Record<string, unknown>, d.id));
+}
+
+export type HoursLedgerTrendPoint = { label: string; sla: number; planificado: number; ejecutado: number };
+
+/**
+ * Serie diaria SLA / plan (según selector) / trabajadas a partir del detalle del libro.
+ * Un punto por día calendario del mes (los días sin filas quedan en 0).
+ */
+export function dailyTrendFromLedgerDays(
+  days: HoursLedgerDayRow[],
+  planMode: HoursLedgerPlanMode,
+  year: number,
+  month: number,
+): HoursLedgerTrendPoint[] {
+  const periodKey = periodKeyOf(year, month);
+  const lastDay = new Date(year, month, 0).getDate();
+  const byDay = new Map<string, { sla: number; plan: number; worked: number }>();
+  for (const d of days) {
+    if (!d.date || !d.date.startsWith(periodKey)) continue;
+    const cur = byDay.get(d.date) || { sla: 0, plan: 0, worked: 0 };
+    cur.sla += Number(d.slaActive) || 0;
+    cur.plan += planHoursOf(planMode, d);
+    cur.worked += Number(d.worked) || 0;
+    byDay.set(d.date, cur);
+  }
+  const out: HoursLedgerTrendPoint[] = [];
+  for (let day = 1; day <= lastDay; day++) {
+    const key = `${periodKey}-${String(day).padStart(2, '0')}`;
+    const v = byDay.get(key);
+    out.push({
+      label: String(day),
+      sla: Math.round(v?.sla || 0),
+      planificado: Math.round(v?.plan || 0),
+      ejecutado: Math.round(v?.worked || 0),
+    });
+  }
+  return out;
 }
 
 export type HoursLedgerJobView = {
@@ -200,10 +293,13 @@ function waitHoursLedgerJob(empresaId: string, periodKey: string, dryRun: boolea
 export async function previewHoursLedgerMonth(empresaId: string, periodKey: string): Promise<HoursLedgerMonth> {
   const call = httpsCallable(functions, 'rebuildHoursLedger', { timeout: 60000 });
   const res = await call({ empresaId, period: periodKey, dryRun: true, force: true });
-  const data = (res.data || {}) as { monthly?: HoursLedgerMonthRow[]; jobId?: string };
+  const data = (res.data || {}) as { monthly?: HoursLedgerMonthRow[]; days?: HoursLedgerDayRow[]; jobId?: string };
   if (data.monthly) {
     const monthly = data.monthly.map((r) => asMonthRow(r as unknown as Record<string, unknown>, r.id));
-    return fromMonthlyList(periodKey, monthly, monthly.length ? 'preview' : 'vacio');
+    const days = Array.isArray(data.days)
+      ? data.days.map((r) => asDayRow(r as unknown as Record<string, unknown>, r.id))
+      : undefined;
+    return fromMonthlyList(periodKey, monthly, monthly.length ? 'preview' : 'vacio', days);
   }
   if (!data.jobId) return fromMonthlyList(periodKey, [], 'vacio');
   return waitHoursLedgerJob(empresaId, periodKey, true);
@@ -219,17 +315,42 @@ export async function loadHoursLedgerOrPreview(empresaId: string, periodKey: str
   return previewHoursLedgerMonth(empresaId, periodKey);
 }
 
+/**
+ * Horas por cliente del libro. Con `clients` (listado del CRM) agrupa los objetivos por su
+ * dueño actual (`clients.objetivos[].id`, mismo criterio que el motor y el trigger I1), así un
+ * libro guardado con clientId de un cliente borrado igual cae en el cliente vigente.
+ * Sin `clients` usa las filas `level=cliente` tal cual.
+ */
 export function byClientMetricsFromLedger(
   book: HoursLedgerMonth,
   planMode: HoursLedgerPlanMode = 'published',
+  clients?: OwnerClientLike[],
 ): Record<string, { sla: number; planned: number; real: number }> {
   const out: Record<string, { sla: number; planned: number; real: number }> = {};
-  for (const c of book.clients) {
-    const cid = c.clientId || '_sin_cliente';
+  const add = (cid: string, row: { slaActive?: number; planPublished?: number; planDraft?: number; worked?: number }) => {
+    const cur = out[cid] || { sla: 0, planned: 0, real: 0 };
+    cur.sla += Number(row.slaActive) || 0;
+    cur.planned += planHoursOf(planMode, row);
+    cur.real += Number(row.worked) || 0;
+    out[cid] = cur;
+  };
+  if (clients && clients.length > 0 && book.objectives.length > 0) {
+    const index = buildObjectiveOwnerIndex(clients);
+    for (const o of book.objectives) {
+      const owner = resolveObjectiveOwner(index, o.objectiveId, { objectiveName: o.objectiveName, clientName: o.clientName });
+      const cid = owner?.clientId
+        || (o.clientId && index.clientById.has(o.clientId) ? o.clientId : '')
+        || '_sin_cliente';
+      add(cid, o);
+    }
+  } else {
+    for (const c of book.clients) add(c.clientId || '_sin_cliente', c);
+  }
+  for (const cid of Object.keys(out)) {
     out[cid] = {
-      sla: Math.round(c.slaActive || 0),
-      planned: Math.round(planHoursOf(planMode, c)),
-      real: Math.round(c.worked || 0),
+      sla: Math.round(out[cid].sla),
+      planned: Math.round(out[cid].planned),
+      real: Math.round(out[cid].real),
     };
   }
   return out;

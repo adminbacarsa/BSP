@@ -13,6 +13,7 @@ import { buildObjectiveAliasesFromSla } from '@/lib/hoursBalance/buildHoursBalan
 import { buildSlaExclusionContext } from '@/lib/crm/slaExclusionForPlanned';
 import { executedBillableHoursByFranja } from '@/lib/crm/executedBillableHoursByFranja';
 import { calcPlanificadorShiftHours } from '@/lib/planificacion/planningScheduledHours';
+import { buildObjectiveOwnerIndex, resolveObjectiveOwner } from '@/lib/crm/objectiveClientOwner';
 import {
   buildPersonaBook,
   calculateLiquidationHoursStatsF0,
@@ -378,43 +379,18 @@ export function buildLedgerMonth(input: LedgerBuildInput): {
     if (v && k.endsWith(suffix)) publishedObj.add(k.slice(0, -suffix.length));
   }
   const { start, end } = arRange(year, month);
-  const clientById = new Map(clients.map((c) => [String(c.id), c]));
-
-  const normName = (v: unknown) => String(v ?? '').trim().toLowerCase().normalize('NFD').replace(/\p{Mn}/gu, '');
-  const ownerByObjective = new Map<string, { clientId: string; clientName: string }>();
-  const ownerByObjName = new Map<string, { clientId: string; clientName: string }>();
-  for (const c of clients) {
-    const objs = c.objetivos || c.objectives || [];
-    const meta = { clientId: String(c.id), clientName: String(c.name || c.razonSocial || '') };
-    for (const o of objs) {
-      const id = String(o?.id || o?.objectiveId || '').trim();
-      const name = normName(o?.name || o?.nombre);
-      if (id && !ownerByObjective.has(id)) ownerByObjective.set(id, meta);
-      if (name && !ownerByObjName.has(name)) ownerByObjName.set(name, meta);
-    }
-  }
-
-  const clientByName = new Map<string, any>();
-  for (const c of clients) {
-    const n = normName(c.name || c.razonSocial);
-    if (n && !clientByName.has(n)) clientByName.set(n, c);
-  }
-
+  // Dueño actual del objetivo dentro de la empresa (objetivos[].id), como el trigger I1.
+  // El clientId del SLA/turno puede apuntar a un cliente borrado: no se usa para agrupar.
+  const ownerIndex = buildObjectiveOwnerIndex(clients);
   const resolveClient = (objectiveId: string, sla?: any) => {
-    const fromSla = String(sla?.clientId || '').trim();
-    const direct = fromSla ? clientById.get(fromSla) : undefined;
-    if (direct) {
-      return { clientId: fromSla, clientName: String(direct.name || direct.razonSocial || sla?.clientName || ''), client: direct };
-    }
-    const owner = ownerByObjective.get(objectiveId) || ownerByObjName.get(normName(sla?.objectiveName));
+    const owner = resolveObjectiveOwner(ownerIndex, objectiveId, {
+      objectiveName: sla?.objectiveName,
+      clientName: sla?.clientName,
+    });
     if (owner) {
-      return { ...owner, client: clientById.get(owner.clientId) };
+      return { ...owner, client: ownerIndex.clientById.get(owner.clientId) };
     }
-    const byName = clientByName.get(normName(sla?.clientName));
-    if (byName) {
-      return { clientId: String(byName.id), clientName: String(byName.name || byName.razonSocial || ''), client: byName };
-    }
-    return { clientId: fromSla, clientName: String(sla?.clientName || ''), client: undefined as any };
+    return { clientId: '', clientName: String(sla?.clientName || ''), client: undefined as any };
   };
 
   type Bucket = 'active' | 'inactive' | 'closed' | 'withoutPlan';
