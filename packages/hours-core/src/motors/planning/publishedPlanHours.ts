@@ -5,7 +5,9 @@
  * Entra: turno de trabajo del puesto (M/T/N/M1/D12/N12 y equivalentes) con la
  * jornada del horario; FT con jornada real de 8 o 12 h (un día calendario no es 24 h);
  * turno sin código con su horario, marcado SIN_CODIGO.
- * No entra: franco, licencia, RET, REF, ESC, ops_cov / origen operativo, vacante.
+ * No entra: franco, licencia, RET, REF, ESC, ops_cov / origen operativo, vacante,
+ * ni un turno creado por cobertura (FT Demo/Ops, franco convertido). Un turno de
+ * malla que Operaciones solo resolvió o marcó ausente sigue en el plan.
  */
 
 const EXCLUDED_CODES = new Set([
@@ -79,6 +81,26 @@ function isFt(shift: any, code: string): boolean {
   return code === 'FT' || shift?.isFrancoTrabajado === true || String(shift?.type || '').toUpperCase() === 'EXTRA_FRANCO';
 }
 
+/**
+ * Nacido de cobertura (doc nuevo o franco convertido a FT). `resolvedBy: OPERACIONES`
+ * en un turno de malla no alcanza: ese caso lo resolvió Operaciones, no lo creó.
+ */
+function createdByCoverage(shift: any, code: string): boolean {
+  const ft = isFt(shift, code);
+  const comments = String(shift?.comments || '');
+  const coverageDocId = String(shift?.coverageDocId || '').trim();
+  if (coverageDocId && ft) return true;
+  if (/franco trabajado\s*\(cobertura/i.test(comments)) return true;
+  const resolved = String(shift?.resolvedBy || '').trim().toUpperCase();
+  if ((resolved === 'MODO_DEMO' || resolved === 'AUTO') && ft) return true;
+  const createdBy = String(shift?.createdBy || '').trim().toUpperCase();
+  if ((createdBy === 'MODO_DEMO' || createdBy === 'AUTO') && ft) return true;
+  const convocatoria = String(
+    shift?.assignedByConvocatoria || shift?.convocatoriaId || shift?.coverageFor || shift?.coverageForShiftId || '',
+  ).trim();
+  return Boolean(convocatoria) && ft;
+}
+
 function excludedShift(shift: any, opts?: { onlyDraft?: boolean; anyDraftState?: boolean }): boolean {
   if (!shift || shift.isDeleted === true) return true;
   const status = String(shift.status || '').toUpperCase();
@@ -93,6 +115,7 @@ function excludedShift(shift: any, opts?: { onlyDraft?: boolean; anyDraftState?:
   if (shift.isReten === true) return true;
   if (String(shift.id || '').startsWith('ops_cov')) return true;
   const code = codeOf(shift);
+  if (createdByCoverage(shift, code)) return true;
   if (code && EXCLUDED_CODES.has(code) && !isFt(shift, code)) return true;
   return false;
 }

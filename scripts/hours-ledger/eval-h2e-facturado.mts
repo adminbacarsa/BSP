@@ -144,10 +144,10 @@ const built = buildLedgerMonth({
 const r1 = (n: number) => Math.round((Number(n) || 0) * 10) / 10;
 const empresa = built.monthly.find((m) => m.level === 'empresa')!;
 const nk = built.monthly.find((m) => m.level === 'objetivo' && m.objectiveId === 'NK1i1DUwlaDxC4Hn8QwJ');
-if (!nk || nk.planPublished !== 2792) throw new Error(`plan publicado Nuevo Edificio en el libro ${nk?.planPublished} != 2792`);
+if (!nk || nk.planPublished !== 2760) throw new Error(`plan publicado Nuevo Edificio en el libro ${nk?.planPublished} != 2760`);
 const nkDays = built.days.filter((d: any) => d.objectiveId === 'NK1i1DUwlaDxC4Hn8QwJ');
 const nkDaysPlan = r1(nkDays.reduce((a: number, d: any) => a + (Number(d.planPublished) || 0), 0));
-if (nkDaysPlan !== 2792) throw new Error(`plan publicado Nuevo Edificio por día ${nkDaysPlan} != 2792`);
+if (nkDaysPlan !== 2760) throw new Error(`plan publicado Nuevo Edificio por día ${nkDaysPlan} != 2760`);
 console.log('NK_LIBRO_PLAN', nk.planPublished, 'dias', nkDaysPlan);
 const objs = built.monthly.filter((m) => m.level === 'objetivo' && m.billingMode);
 const clients = built.monthly.filter((m) => m.level === 'cliente');
