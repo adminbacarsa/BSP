@@ -252,6 +252,7 @@ async function registrarPresencia(db, input) {
         overrideRelieveShiftId === null ||
         !(0, reliefEligibility_1.isReliefEligibleShift)(shiftData);
     const wantOverride = typeof overrideRelieveShiftId === 'string' && overrideRelieveShiftId.trim().length > 0;
+    let operatorChoseOther = null;
     if (!wantSkip) {
         try {
             const objectiveId = String(shiftData.objectiveId || '').trim();
@@ -276,6 +277,10 @@ async function registrarPresencia(db, input) {
                             const kind = (0, shiftSeries_1.seriesHandoffKind)((0, shiftSeries_1.seriesCodeOf)(od), (0, shiftSeries_1.seriesCodeOf)(shiftData));
                             if (kind === 'REJECT') {
                                 overrideRejectedBySeries = true;
+                                operatorChoseOther = {
+                                    name: String(od.employeeName || '').trim() || 'guardia',
+                                    code: String(od.code || '').trim().toUpperCase() || '—',
+                                };
                                 console.warn(`[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`);
                             }
                             else {
@@ -400,11 +405,14 @@ async function registrarPresencia(db, input) {
         objectiveName: shiftData.objectiveName || '',
         shiftId,
         empresaId: shiftData.empresaId || null,
-        details: relieved
+        details: (relieved
             ? relievedScheduleMs > 0
                 ? `${shiftData.employeeName || empId} ingresó (${source}). Relevo de ${relieved.employeeName} programado a las ${formatHmAr(relievedScheduleMs)}.`
                 : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}). Relevó a ${relieved.employeeName}.`
-            : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`,
+            : `${shiftData.employeeName || empId} ingresó${isLate ? ' tarde' : ''} (${source}).`)
+            + (operatorChoseOther
+                ? ` El operador eligió a ${operatorChoseOther.name} (${operatorChoseOther.code}); se aplicó la serie.`
+                : ''),
     })
         .catch(() => { });
     if (isLate && !shiftData.absenceType) {

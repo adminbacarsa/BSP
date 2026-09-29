@@ -74,6 +74,7 @@ import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
 import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
+import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
 import { ShiftCodeBadge } from '@/components/operaciones/ShiftCodeBadge';
 import { canRevertAbsenceNow, isRevertAbsenceExpired } from '@/lib/operaciones/revertAbsenceWindow';
 import { shiftHardCapAt } from '@/lib/operaciones/shiftHardCap';
@@ -133,6 +134,7 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
     const { empresaId, empresa } = useEmpresa();
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const [saving, setSaving] = React.useState(false);
+    const [reliefPick, setReliefPick] = React.useState({ id: '', message: '' });
     if (!isOpen || !incomingShift) return null;
     const now = new Date();
     const start = toDate(incomingShift.shiftDateObj);
@@ -314,12 +316,14 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         if (mode === 'override' && prevShiftId) onRelieved?.(prevShiftId);
         else onClose();
         const effectiveMode = incomingIsExtra ? 'skip' : mode;
+        const seriesOverride = !incomingIsExtra && mode === 'auto' && reliefPick.id ? reliefPick.id : null;
+        const sentMode = seriesOverride ? 'override' : effectiveMode;
         toast.success(
             incomingIsExtra
                 ? (status === 'LATE' ? 'Ingreso tarde al sobreturno.' : 'Ingreso al sobreturno.')
-                : effectiveMode === 'skip'
+                : sentMode === 'skip'
                 ? (status === 'LATE' ? 'Ingreso tarde registrado (sin relevo).' : 'Ingreso registrado (sin relevo).')
-                : effectiveMode === 'override'
+                : sentMode === 'override'
                     ? (status === 'LATE' ? 'Ingreso tarde y relevo registrados.' : 'Ingreso y relevo registrados.')
                     : (status === 'LATE' ? 'Ingreso tarde — relevo de la serie.' : 'Ingreso — relevo de la serie.'),
         );
@@ -327,14 +331,16 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
         void registrarPresenciaOps({
             shiftId: incomingShift.id,
             source: 'OPERATIONS',
-            skipAutoRelevo: effectiveMode === 'skip',
-            overrideRelieveShiftId: effectiveMode === 'override' && prevShiftId ? prevShiftId : effectiveMode === 'skip' ? null : undefined,
+            skipAutoRelevo: sentMode === 'skip',
+            overrideRelieveShiftId: sentMode === 'override'
+              ? (seriesOverride || prevShiftId || null)
+              : sentMode === 'skip' ? null : undefined,
         }).then((res) => {
             if (res.alreadyPresent) toast.message('El turno ya estaba marcado presente.');
-            else if (effectiveMode === 'auto' && res.relieved) {
+            else if (sentMode === 'auto' && res.relieved) {
                 toast.success(`Relevó a ${res.relieved.employeeName}.`);
                 onRelieved?.(res.relieved.shiftId);
-            } else if (effectiveMode === 'auto' && !res.relieved) {
+            } else if (sentMode === 'auto' && !res.relieved) {
                 toast.message('Presente OK — no había saliente para relevar.');
             }
         }).catch((e: any) => {
@@ -406,46 +412,25 @@ const HandoverModal = ({ isOpen, onClose, incomingShift, logic, onOpenSwap, rece
                         </div>
                     ) : (
                     <>
+                        <SeriesReliefPicker
+                            incoming={incomingShift}
+                            guards={activeGuards}
+                            onChange={(id, message) => setReliefPick({ id, message })}
+                        />
                         <button type="button" onClick={() => handleConfirm('auto')}
-                            className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
+                            className={`w-full py-3.5 font-black text-white rounded-xl transition-colors text-sm mb-3 ${reliefPick.message ? 'bg-amber-600 hover:bg-amber-700' : status === 'LATE' ? 'bg-amber-500 hover:bg-amber-600' : 'bg-emerald-600 hover:bg-emerald-700'}`}>
                             {incomingIsExtra
                                 ? (status === 'LATE' ? 'DAR PRESENTE (TARDE)' : 'DAR PRESENTE')
-                                : (status === 'LATE' ? 'DAR PRESENTE (TARDE) · AUTO-RELEVO' : 'DAR PRESENTE · AUTO-RELEVO FIFO')}
+                                : reliefPick.message
+                                    ? 'CONFIRMAR IGUAL'
+                                    : (status === 'LATE' ? 'DAR PRESENTE (TARDE) · RELEVO DE LA SERIE' : 'DAR PRESENTE · RELEVO DE LA SERIE')}
                         </button>
                         {mustRelevar && (
                             <div className="mb-3 px-3 py-2 bg-rose-50 border border-rose-200 rounded-xl">
-                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). Auto-relevo FIFO o forzá quién sale.</p>
+                                <p className="text-xs font-bold text-rose-600">Puesto al tope ({activeGuards.length}/{positionCapacity}). El de la serie queda elegido; si marcás otro, el aviso explica qué pasa.</p>
                             </div>
                         )}
-                        {activeGuards.length > 0 ? (
-                            <div className="space-y-2 mb-3">
-                                <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Forzar relevo (opcional):</p>
-                                {activeGuards.map((s: any) => {
-                                    const minutesWorked = s.totalMinutesWorked ?? 0;
-                                    const hoursWorked = (minutesWorked / 60).toFixed(1);
-                                    const isOver12h = minutesWorked >= 12 * 60;
-                                    return (
-                                        <button key={s.id} type="button" onClick={() => handleConfirm('override', s.id)}
-                                            className={`w-full p-3 border rounded-xl flex justify-between items-center group ${s.isRetention ? 'border-orange-300 bg-orange-50/40 hover:bg-orange-50' : isOver12h ? 'border-red-200 bg-red-50/30 hover:bg-red-50/50' : 'border-slate-200 hover:bg-slate-50'}`}>
-                                            <div className="flex items-center gap-2.5 text-left">
-                                                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${s.isRetention ? 'bg-orange-100 text-orange-700' : 'bg-slate-100 text-slate-600'}`}>
-                                                    {(s.employeeName || '?')[0]}
-                                                </div>
-                                                <div>
-                                                    <div className="flex items-center gap-1.5">
-                                                        <span className="text-xs font-bold text-slate-700">{s.employeeName}</span>
-                                                        {s.isRetention && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-orange-500 text-white">RETENIDO</span>}
-                                                        {isOver12h && !s.isRetention && <span className="text-[9px] font-black px-1 py-0.5 rounded-full bg-red-100 text-red-700">+12h</span>}
-                                                    </div>
-                                                    <span className="text-[10px] text-slate-400">Salida: {fmt24h(s.endDateObj)} · {hoursWorked}h trabajadas</span>
-                                                </div>
-                                            </div>
-                                            <span className="text-[10px] font-black bg-indigo-600 text-white px-3 py-1.5 rounded-lg group-hover:bg-indigo-700 transition-colors shrink-0">RELEVAR</span>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        ) : (
+                        {activeGuards.length === 0 && (
                             <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-center mb-3 space-y-1">
                                 <p className="text-xs font-bold text-slate-600">
                                     {incomingIsExtra ? 'Sobreturno: no toma la franja del puesto' : 'No hay guardia saliente en el puesto'}

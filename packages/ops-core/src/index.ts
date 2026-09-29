@@ -69,6 +69,8 @@ export {
   formatRetentionLine,
 } from './retentionDisplay';
 export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';
+export { seriesReliefChoiceNotice } from './seriesReliefNotice';
+export type { SeriesReliefNotice } from './seriesReliefNotice';
 export { classifyOpsShift } from './classifyOpsShift';
 export type { ClassifyOpsShiftInput, ClassifyOpsShiftResult } from './classifyOpsShift';
 export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
