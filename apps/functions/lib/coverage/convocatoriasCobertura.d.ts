@@ -88,4 +88,5 @@ export declare function crearConvocatoriaLlegadaTarde(db: admin.firestore.Firest
     employeeName: string;
     employeeUid?: string;
 }): Promise<void>;
+export declare const responderRecordatorioConvocado: functions.HttpsFunction & functions.Runnable<any>;
 export {};

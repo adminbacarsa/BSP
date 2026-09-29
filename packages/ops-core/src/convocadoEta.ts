@@ -1,0 +1,55 @@
+/**
+ * ETA del convocado: colectivo (~20 km/h) + espera. Espejo en functions/src/common.
+ * ESC/REF en el mismo objetivo no viajan.
+ */
+
+export const CONVOCADO_ETA_SPEED_KMH = 20;
+export const CONVOCADO_ETA_WAIT_MIN = 10;
+export const CONVOCADO_SAME_SITE_ETA_MIN = 5;
+export const CONVOCADO_DELAY_GRACE_MIN = 15;
+
+export function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number | null {
+  if (![lat1, lon1, lat2, lon2].every((n) => Number.isFinite(n))) return null;
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2
+    + Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/** Minutos de viaje + espera. Sin distancia, solo la espera. */
+export function busEtaMinutes(
+  distanceKm: number | null,
+  speedKmh = CONVOCADO_ETA_SPEED_KMH,
+  waitMin = CONVOCADO_ETA_WAIT_MIN,
+): number {
+  const speed = speedKmh > 0 ? speedKmh : CONVOCADO_ETA_SPEED_KMH;
+  const wait = waitMin >= 0 ? waitMin : CONVOCADO_ETA_WAIT_MIN;
+  if (distanceKm == null || !Number.isFinite(distanceKm) || distanceKm <= 0.05) return Math.max(1, Math.round(wait));
+  return Math.max(1, Math.round((distanceKm / speed) * 60 + wait));
+}
+
+export function convocadoTravelEta(input: {
+  coverageType: string;
+  sameObjective: boolean;
+  distanceKm: number | null;
+  speedKmh?: number;
+  waitMin?: number;
+}): { etaMinutes: number; traveled: boolean } {
+  const ct = String(input.coverageType || '').toUpperCase();
+  if ((ct === 'ESC' || ct === 'REF') && input.sameObjective) {
+    return { etaMinutes: CONVOCADO_SAME_SITE_ETA_MIN, traveled: false };
+  }
+  return {
+    etaMinutes: busEtaMinutes(input.distanceKm, input.speedKmh, input.waitMin),
+    traveled: true,
+  };
+}
+
+/** Recordatorio a los 2/3 del ETA, contado desde la aceptación. */
+export function convocadoReminderAtMs(acceptedAtMs: number, etaMinutes: number): number {
+  const eta = Math.max(1, etaMinutes);
+  return acceptedAtMs + Math.round((eta * 2) / 3) * 60 * 1000;
+}

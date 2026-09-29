@@ -1192,12 +1192,8 @@ async function run() {
       const cov = (await db.collection('turnos').doc(covId).get()).data();
       const tit = (await db.collection('turnos').doc(titularId).get()).data();
       const aus = await db.collection('ausencias').where('shiftId', '==', titularId).limit(1).get();
-      const ok =
-        cov?.isAbsent === true
-        && cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO'
-        && tit?.operacionallyCovered === false
-        && aus.docs[0]?.data()?.coberturaEstado === 'PENDIENTE';
-      report(26, ok, ok ? 'CONVOCADO_NO_LLEGO + titular descubierto' : `abs=${cov?.isAbsent} cov=${tit?.operacionallyCovered}`);
+      const ok = cov?.isAbsent !== true && cov?.absenceDetectedBy !== 'CONVOCADO_NO_LLEGO' && tit?.operacionallyCovered === true;
+      report(26, ok, ok ? 'convocado sin AA automática' : `abs=${cov?.isAbsent} by=${cov?.absenceDetectedBy}`);
     }
 
     // Caso 27 — revertir T+45 sin cobertura
@@ -1559,11 +1555,8 @@ async function run() {
       const cov = (await db.collection('turnos').doc(covId).get()).data();
       const tit = (await db.collection('turnos').doc(titularId).get()).data();
       const aus = await db.collection('ausencias').where('shiftId', '==', titularId).limit(1).get();
-      const ok =
-        cov?.absenceDetectedBy === 'CONVOCADO_NO_LLEGO'
-        && tit?.operacionallyCovered === false
-        && aus.docs[0]?.data()?.coberturaEstado === 'PENDIENTE';
-      report(38, ok, ok ? 'Real: AA convocado + titular PENDIENTE' : `cov=${cov?.absenceDetectedBy} tit=${tit?.operacionallyCovered}`);
+      const ok = cov?.isAbsent !== true && tit?.operacionallyCovered === true && aus.docs[0]?.data()?.coberturaEstado === 'GESTIONADA';
+      report(38, ok, ok ? 'Real: sin AA, la cobertura sigue' : `cov=${cov?.absenceDetectedBy} tit=${tit?.operacionallyCovered}`);
     }
 
     // Caso 39 — revertir ausencia + cancelCoverage restaura REF convertido

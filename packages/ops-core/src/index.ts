@@ -49,6 +49,16 @@ export {
   keepsNextBandSlot,
 } from './shiftSeries';
 export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts } from './shiftSeries';
+export {
+  CONVOCADO_ETA_SPEED_KMH,
+  CONVOCADO_ETA_WAIT_MIN,
+  CONVOCADO_SAME_SITE_ETA_MIN,
+  CONVOCADO_DELAY_GRACE_MIN,
+  haversineKm,
+  busEtaMinutes,
+  convocadoTravelEta,
+  convocadoReminderAtMs,
+} from './convocadoEta';
 export { opsShiftCodeBadge, opsShiftCodeRangeLabel } from './shiftCodeBadge';
 export type { ShiftCodeBadge, ShiftCodeBadgeTone } from './shiftCodeBadge';
 export { classifyOpsShift } from './classifyOpsShift';

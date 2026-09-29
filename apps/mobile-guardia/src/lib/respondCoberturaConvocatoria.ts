@@ -1,3 +1,4 @@
+import Constants from 'expo-constants';
 import { getPortalCallables } from './portal';
 import { getMobilePlatform, getOrCreateDeviceId } from './deviceId';
 import { mapPortalCallableError } from './mapPortalCallableError';
@@ -10,7 +11,7 @@ export type RespondCoberturaResult =
   | { ok: false; message: string; dismissInbox: boolean };
 
 /**
- * Misma callable que el banner de Hoy. Telemetry opcional (P6 server = no-op hasta deploy).
+ * Misma callable que el banner de Hoy. El servidor guarda canal, device y versión en la convocatoria.
  */
 export async function respondCoberturaConvocatoria(params: {
   convocatoriaId: string;
@@ -41,6 +42,7 @@ export async function respondCoberturaConvocatoria(params: {
       responseChannel: params.responseChannel,
       deviceId: deviceId || undefined,
       platform,
+      appVersion: Constants.expoConfig?.version || undefined,
     });
     return {
       ok: true,
