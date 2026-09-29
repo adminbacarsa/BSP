@@ -220,7 +220,15 @@ export function buildFrancoDocLiquidationSkipIds(shifts: any[], opts?: { usePlan
         if (!dk || !s.id) continue;
         const bucket = byDay.get(dk) ?? { francoIds: [], hasWorkCheckIn: false };
         const code = String(s.code || '').trim().toUpperCase();
-        if (isFrancoTrabajadoShift(s) && code === 'F' && !shiftHasRealCheckIn(s)) {
+        const originFt = String(s.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE'
+            && !shiftHasRealCheckIn(s)
+            && (code === 'F' || code === 'FF' || code === 'FP' || code === 'FT')
+            && (
+                String(s.coverageDocId || '').trim().length > 0
+                || s.coverageUsed === true
+                || /franco trabajado\s*\(cobertura/i.test(String(s.comments || ''))
+            );
+        if ((isFrancoTrabajadoShift(s) && code === 'F' && !shiftHasRealCheckIn(s)) || originFt) {
             bucket.francoIds.push(s.id);
         } else if (
             isLiquidationWorkCandidate(s)

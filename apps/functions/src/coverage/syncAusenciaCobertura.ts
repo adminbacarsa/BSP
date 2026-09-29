@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import { isFrancoCoverageOriginDoc } from './coverageTraceShift';
 import { isFrancoShiftCode } from '../common/simulableShift';
 import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 import { isEventoShift } from '../eventos/eventoCoverage';
@@ -204,6 +205,14 @@ export function buildRestoreSourceShiftAfterCoveragePatch(
   srcData: Record<string, unknown> | null | undefined,
 ): Record<string, unknown> {
   if (!srcData) return clearSourceCoverageUsedPatch();
+  const srcCode = String(srcData.code || srcData.shiftCode || '').trim().toUpperCase();
+  const francoComment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
+  const restoreFranco = srcCode === 'FT'
+    && String(srcData.origin || '').toUpperCase() !== 'OPERATIONS_COVERAGE'
+    && (francoComment || srcData.isFrancoTrabajado === true || isFrancoCoverageOriginDoc(srcData));
+  const francoBack = restoreFranco
+    ? { code: 'F', isFranco: true, isFrancoTrabajado: false }
+    : {};
   if (isSourceShiftConvertedForCoverage(srcData)) {
     const prevStatus = String(srcData.statusBeforeDelete || 'ACTIVE');
     return {
@@ -213,10 +222,12 @@ export function buildRestoreSourceShiftAfterCoveragePatch(
       convertedToCoverageDocId: admin.firestore.FieldValue.delete(),
       statusBeforeDelete: admin.firestore.FieldValue.delete(),
       ...clearSourceCoverageUsedPatch(),
+      ...francoBack,
     };
   }
   return {
     ...clearSourceCoverageUsedPatch(),
+    ...francoBack,
     isRetentionActivated: admin.firestore.FieldValue.delete(),
     retentionActivatedAt: admin.firestore.FieldValue.delete(),
   };
@@ -477,14 +488,25 @@ export async function applyCoverage(
         buildEscRefSourceConvertedPatch(srcData, covDocId),
       );
     } else if (ct === 'FT') {
-      const franco = srcData.isFranco === true || isFrancoShiftCode(srcCode);
+      const comment = /franco trabajado\s*\(cobertura/i.test(String(srcData.comments || ''));
+      const franco = srcData.isFranco === true
+        || isFrancoShiftCode(srcCode)
+        || comment
+        || isFrancoCoverageOriginDoc(srcData);
+      const keepCode = isFrancoShiftCode(srcCode) ? srcCode : 'F';
       batch.update(db.collection('turnos').doc(sourceId), {
         ...usedBase,
         ...clearAdvanceMarkers,
-        isFranco: false,
-        isFrancoTrabajado: true,
-        code: 'FT',
-        ...(franco ? { comments: `Franco Trabajado (cobertura ${covDocId})` } : {}),
+        coverageUsed: true,
+        coverageUsedForShiftId: titularId,
+        ...(franco
+          ? {
+            isFranco: true,
+            isFrancoTrabajado: false,
+            code: keepCode,
+            comments: `Franco Trabajado (cobertura ${covDocId})`,
+          }
+          : {}),
       });
     } else if (ct === 'RET') {
       batch.update(db.collection('turnos').doc(sourceId), {
