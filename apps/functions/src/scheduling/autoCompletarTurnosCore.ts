@@ -130,6 +130,22 @@ function pickSeriesRelief(
   return hits.find((d) => d.id === String(winner.id));
 }
 
+/** Limpia un relevo programado que dejó de ser válido (serie, ventana o el entrante ya no está). */
+export function staleProgrammedReliefPatch(shift: FirebaseFirestore.DocumentData): Record<string, unknown> {
+  return {
+    relievedBy: null,
+    relievedByName: null,
+    relieveScheduledAt: null,
+    relievedEarly: false,
+    staleReliefInvalidatedAt: Timestamp.now(),
+    staleReliefPrevious: {
+      relievedBy: shift.relievedBy ?? null,
+      relievedByName: shift.relievedByName ?? null,
+      relieveScheduledAt: shift.relieveScheduledAt ?? null,
+    },
+  };
+}
+
 export function isReliefPresent(incoming: FirebaseFirestore.DocumentData): boolean {
   if (incoming.isCompleted === true) return false;
   const st = String(incoming.status || '').toUpperCase();
@@ -439,13 +455,23 @@ export async function runAutoCompletarTurnosPass(
         && !isOpsCoverageHoursOnSourceDoc(d.data() as Record<string, unknown>),
     );
 
-    // El relevo programado solo cierra si el entrante sigue siendo de la serie y
-    // arranca en la ventana del fin. Un compañero del mismo horario (M junto a M2)
-    // no puede cerrar al saliente a las 15:00.
+    // El relevo programado se revalida al cerrar: el entrante tiene que seguir presente,
+    // ser de la serie y arrancar en la ventana del fin. Un compañero del mismo horario
+    // (M junto a M2) o un relevo que después faltó no cierran al saliente: se ignora el
+    // `relieveScheduledAt` viejo y sigue la lógica actual (retener / cerrar).
     const programmedIncoming = relievedBy
       ? relieveDocs.find((d) => String(d.data().employeeId || '').trim() === relievedBy
+        && isReliefPresent(d.data())
         && isValidReliefForOutgoing(d.data(), endTimeMs, shift))
       : undefined;
+    if (relievedBy && !programmedIncoming && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
+      const stale = staleProgrammedReliefPatch(shift);
+      if (!dryRun) await docSnap.ref.update(stale).catch(() => undefined);
+      Object.assign(shift, stale);
+      const rk = reservedReliefKey(shift.objectiveId, relievedBy);
+      if (reservedRelief.get(rk) === docSnap.id) reservedRelief.delete(rk);
+      actions.push(describe(docSnap.id, shift, 'WAIT', 'RELEVO_PROGRAMADO_INVALIDO'));
+    }
     if (programmedIncoming && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
       const incomingName = String(shift.relievedByName || programmedIncoming.data().employeeName || 'relevo').trim();
       close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO');

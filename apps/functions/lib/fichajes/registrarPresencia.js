@@ -13,6 +13,7 @@ const cancelLlegadaTardeConvocatorias_1 = require("../attendance/cancelLlegadaTa
 const relevoNotifications_1 = require("./relevoNotifications");
 const relevoOutgoingMatch_1 = require("./relevoOutgoingMatch");
 const reliefEligibility_1 = require("../common/reliefEligibility");
+const shiftSeries_1 = require("../common/shiftSeries");
 const shiftClose_1 = require("../scheduling/shiftClose");
 function normPos(n) {
     return String(n ?? '')
@@ -261,6 +262,7 @@ async function registrarPresencia(db, input) {
             const incomingStartMs = shiftData.startTime?.toMillis?.() ?? nowMs;
             if (objectiveId && positionName) {
                 let outDoc = null;
+                let overrideRejectedBySeries = false;
                 if (wantOverride) {
                     const ov = await db.collection('turnos').doc(overrideRelieveShiftId.trim()).get();
                     if (ov.exists) {
@@ -271,11 +273,18 @@ async function registrarPresencia(db, input) {
                             String(od.objectiveId || '') === objectiveId &&
                             normPos(od.positionName) === normPos(positionName) &&
                             ov.id !== shiftId) {
-                            outDoc = ov;
+                            const kind = (0, shiftSeries_1.seriesHandoffKind)((0, shiftSeries_1.seriesCodeOf)(od), (0, shiftSeries_1.seriesCodeOf)(shiftData));
+                            if (kind === 'REJECT') {
+                                overrideRejectedBySeries = true;
+                                console.warn(`[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`);
+                            }
+                            else {
+                                outDoc = ov;
+                            }
                         }
                     }
                 }
-                else if (incomingStartMs > 0) {
+                if (!outDoc && (!wantOverride || overrideRejectedBySeries) && incomingStartMs > 0) {
                     const pick = await (0, relevoOutgoingMatch_1.findPresentOutgoingAlignedToGapStart)(db, {
                         objectiveId,
                         positionName,
@@ -297,7 +306,8 @@ async function registrarPresencia(db, input) {
                     const outPosName = outData.positionName || '';
                     const outEndMs = outData.endTime?.toMillis?.() ?? 0;
                     const handoffMs = Math.max(incomingStartMs, outEndMs || incomingStartMs);
-                    const scheduleHandoff = !wantOverride && nowMs < handoffMs;
+                    const scheduleHandoff = nowMs < handoffMs;
+                    const manualRelief = wantOverride && !overrideRejectedBySeries;
                     await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
                     if (scheduleHandoff) {
                         relievedScheduleMs = handoffMs;
@@ -312,7 +322,7 @@ async function registrarPresencia(db, input) {
                         });
                     }
                     else {
-                        const realEndMs = wantOverride ? nowMs : Math.max(handoffMs, nowMs);
+                        const realEndMs = Math.max(handoffMs, nowMs);
                         const outClose = (0, shiftClose_1.buildAutoClosePatch)(outData, {
                             realEndMs,
                             reason: 'RELEVO_PRESENTE',
@@ -326,7 +336,7 @@ async function registrarPresencia(db, input) {
                             relievedByName: incomingName,
                             relievedAt: firestore_1.FieldValue.serverTimestamp(),
                             relieveScheduledAt: firestore_1.Timestamp.fromMillis(handoffMs),
-                            autoRelevo: !wantOverride,
+                            autoRelevo: !manualRelief,
                             relievedEarly: false,
                             relievedSource: source,
                         });
@@ -364,8 +374,9 @@ async function registrarPresencia(db, input) {
                             ? `Relevo de ${outName} programado a las ${when} (${source})`
                             : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
                         createdAt: firestore_1.FieldValue.serverTimestamp(),
-                        autoProcessed: !wantOverride,
-                        source: wantOverride ? source : 'AUTO_RELEVO',
+                        autoProcessed: !manualRelief,
+                        source: manualRelief ? source : 'AUTO_RELEVO',
+                        ...(overrideRejectedBySeries ? { overrideRejectedBySeries: true } : {}),
                     })
                         .catch(() => { });
                 }

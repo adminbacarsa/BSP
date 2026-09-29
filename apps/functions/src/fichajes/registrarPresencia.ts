@@ -10,6 +10,7 @@ import { cancelLlegadaTardeConvocatorias } from '../attendance/cancelLlegadaTard
 import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
 import { buildAutoClosePatch } from '../scheduling/shiftClose';
 
 export type PresenciaSource =
@@ -331,6 +332,9 @@ export async function registrarPresencia(
       if (objectiveId && positionName) {
         let outDoc: FirebaseFirestore.QueryDocumentSnapshot | FirebaseFirestore.DocumentSnapshot | null =
           null;
+        // El operador eligió a alguien que no es de la serie (M2 frente a un T): se ignora
+        // y el relevo vuelve a la serie (P5g). El compañero del mismo horario no se cierra.
+        let overrideRejectedBySeries = false;
 
         if (wantOverride) {
           const ov = await db.collection('turnos').doc(overrideRelieveShiftId!.trim()).get();
@@ -344,10 +348,22 @@ export async function registrarPresencia(
               normPos(od.positionName) === normPos(positionName) &&
               ov.id !== shiftId
             ) {
-              outDoc = ov;
+              const kind = seriesHandoffKind(
+                seriesCodeOf(od as Record<string, unknown>),
+                seriesCodeOf(shiftData as Record<string, unknown>),
+              );
+              if (kind === 'REJECT') {
+                overrideRejectedBySeries = true;
+                console.warn(
+                  `[registrarPresencia] override ${ov.id} (${String(od.code || '')}) no es de la serie de ${String(shiftData.code || '')}: se usa el relevo de la serie`,
+                );
+              } else {
+                outDoc = ov;
+              }
             }
           }
-        } else if (incomingStartMs > 0) {
+        }
+        if (!outDoc && (!wantOverride || overrideRejectedBySeries) && incomingStartMs > 0) {
           const pick = await findPresentOutgoingAlignedToGapStart(db, {
             objectiveId,
             positionName,
@@ -369,7 +385,9 @@ export async function registrarPresencia(
           const outPosName = outData.positionName || '';
           const outEndMs = outData.endTime?.toMillis?.() ?? 0;
           const handoffMs = Math.max(incomingStartMs, outEndMs || incomingStartMs);
-          const scheduleHandoff = !wantOverride && nowMs < handoffMs;
+          // Fichada anticipada (también la del operador): el saliente cierra a su hora, no a la fichada.
+          const scheduleHandoff = nowMs < handoffMs;
+          const manualRelief = wantOverride && !overrideRejectedBySeries;
 
           await shiftRef.update({ relievedOutgoingShiftId: outDoc.id }).catch(() => undefined);
           if (scheduleHandoff) {
@@ -384,7 +402,7 @@ export async function registrarPresencia(
               relievedSource: source,
             });
           } else {
-            const realEndMs = wantOverride ? nowMs : Math.max(handoffMs, nowMs);
+            const realEndMs = Math.max(handoffMs, nowMs);
             const outClose = buildAutoClosePatch(outData as Record<string, unknown>, {
               realEndMs,
               reason: 'RELEVO_PRESENTE',
@@ -398,7 +416,7 @@ export async function registrarPresencia(
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),
               relieveScheduledAt: Timestamp.fromMillis(handoffMs),
-              autoRelevo: !wantOverride,
+              autoRelevo: !manualRelief,
               relievedEarly: false,
               relievedSource: source,
             });
@@ -439,8 +457,9 @@ export async function registrarPresencia(
                 ? `Relevo de ${outName} programado a las ${when} (${source})`
                 : `${incomingName} relevó a ${outName} en ${objectiveName}${outPosName ? ` — ${outPosName}` : ''} (${source})`,
               createdAt: FieldValue.serverTimestamp(),
-              autoProcessed: !wantOverride,
-              source: wantOverride ? source : 'AUTO_RELEVO',
+              autoProcessed: !manualRelief,
+              source: manualRelief ? source : 'AUTO_RELEVO',
+              ...(overrideRejectedBySeries ? { overrideRejectedBySeries: true } : {}),
             })
             .catch(() => {});
         }

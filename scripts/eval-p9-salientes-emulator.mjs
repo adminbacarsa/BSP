@@ -24,6 +24,7 @@ admin.initializeApp({ projectId: process.env.GCLOUD_PROJECT || 'demo-p9' });
 const db = admin.firestore();
 const Timestamp = admin.firestore.Timestamp;
 const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletarTurnosCore.js');
+const { registrarPresencia } = requireFn('./lib/fichajes/registrarPresencia.js');
 const { classifyOpsShift } = await import(pathToFileURL(path.join(__dirname, '../packages/ops-core/src/classifyOpsShift.ts')).href);
 const { shiftMatchesOpsViewTab } = await import(pathToFileURL(path.join(__dirname, '../packages/ops-core/src/shiftMatchesOpsViewTab.ts')).href);
 
@@ -147,7 +148,7 @@ async function main() {
   const inActivos = shiftMatchesOpsViewTab(tab, 'ACTIVOS', nowDate);
   report(
     'ui esperando relevo',
-    pending.isPendingClose === true && pending.retentionMinutes === 6 && inActivos && !shiftMatchesOpsViewTab(tab, 'RETENIDOS', nowDate),
+    pending.isPendingClose === true && pending.retentionMinutes === 6 && inActivos && shiftMatchesOpsViewTab(tab, 'RETENIDOS', nowDate),
     `pending=${pending.isPendingClose} min=${pending.retentionMinutes} activos=${inActivos}`,
   );
   const held = classify(ar(11, 30).toDate(), END.toDate(), { isPresent: true, isRetention: true, code: 'M' });
@@ -158,9 +159,94 @@ async function main() {
     `ret=${held.isRetention} min=${held.retentionMinutes}`,
   );
 
+  await casoRioPrimero();
+  await casoRelevoProgramadoLegacy();
+
   const failed = results.filter((r) => !r.ok);
   if (failed.length) process.exitCode = 1;
   console.log(`P9 ${results.length - failed.length}/${results.length}`);
+}
+
+/** A — H. Río Primero: el operador da presente a Banega T (14:56) eligiendo a Molina M2. */
+async function casoRioPrimero() {
+  const oid = 'p9a_rio_primero';
+  const base = { empresaId: 'p9a_emp', objectiveId: oid, objectiveName: 'H. Rio Primero', positionName: 'Puesto 1' };
+  await db.collection('servicios_sla').doc('p9a_sla').set({
+    objectiveId: oid, clientId: 'p9a_cli', status: 'active', startDate: '2026-01-01', endDate: '2027-12-31',
+    positions: [{
+      name: 'Puesto 1', quantity: 1, coverageType: 'custom', activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+      allowedShiftTypes: [
+        { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+        { code: 'T', startTime: '15:00', endTime: '23:00', hours: 8 },
+        { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+        { code: 'M2', startTime: '07:00', endTime: '15:00', hours: 8 },
+      ],
+    }],
+  });
+  await db.batch()
+    .set(db.collection('turnos').doc('p9a_coronel'), { ...base, ...present({ employeeId: 'e_coronel', employeeName: 'CORONEL', code: 'M', startTime: ar(7, 0), endTime: END, realStartTime: ar(7, 0), checkInTime: ar(6, 58) }) })
+    .set(db.collection('turnos').doc('p9a_molina'), { ...base, ...present({ employeeId: 'e_molina', employeeName: 'MOLINA', code: 'M2', startTime: ar(7, 0), endTime: END, realStartTime: ar(7, 0), checkInTime: ar(7, 3) }) })
+    .set(db.collection('turnos').doc('p9a_banega'), { ...base, employeeId: 'e_banega', employeeName: 'BANEGA', code: 'T', status: 'PENDING', startTime: END, endTime: ar(23, 0) })
+    .commit();
+
+  const res = await registrarPresencia(db, {
+    shiftId: 'p9a_banega', source: 'OPERATIONS', empId: 'e_banega',
+    recordedAt: '2026-09-29T14:56:12-03:00', overrideRelieveShiftId: 'p9a_molina',
+  });
+  const molina1 = (await db.collection('turnos').doc('p9a_molina').get()).data() || {};
+  const coronel1 = (await db.collection('turnos').doc('p9a_coronel').get()).data() || {};
+  const okA1 = res.relieved?.shiftId === 'p9a_coronel' && res.relieved?.scheduled === true
+    && !molina1.relievedBy && molina1.isCompleted !== true
+    && coronel1.relievedBy === 'e_banega' && coronel1.isCompleted !== true
+    && coronel1.relieveScheduledAt?.toMillis?.() === END.toMillis();
+  report('A rio primero: override M2 → releva al M de la serie a las 15:00', okA1,
+    okA1 ? 'Coronel programado 15:00, Molina intacto' : `relieved=${res.relieved?.shiftId}/${res.relieved?.scheduled} molinaBy=${molina1.relievedBy} coronelBy=${coronel1.relievedBy} sched=${coronel1.relieveScheduledAt?.toMillis?.()}`);
+
+  await runAutoCompletarTurnosPass(db, ctx, ar(15, 1));
+  const molina2 = (await db.collection('turnos').doc('p9a_molina').get()).data() || {};
+  const coronel2 = (await db.collection('turnos').doc('p9a_coronel').get()).data() || {};
+  const okA2 = coronel2.completionReason === 'RELEVO_PROGRAMADO'
+    && coronel2.realEndTime?.toMillis?.() === END.toMillis()
+    && molina2.isCompleted === true && molina2.isRetention !== true
+    && molina2.realEndTime?.toMillis?.() === END.toMillis()
+    && ['SIN_CONTINUIDAD_SLA', 'SIN_LUGAR_FRANJA'].includes(String(molina2.completionReason));
+  report('A rio primero: cron 15:01 cierra Coronel por relevo y Molina a su hora sin retención', okA2,
+    okA2 ? `coronel=${coronel2.completionReason} molina=${molina2.completionReason}`
+      : `coronel=${coronel2.completionReason}/${coronel2.realEndTime?.toMillis?.()} molina=${molina2.completionReason}/ret=${molina2.isRetention}/end=${molina2.realEndTime?.toMillis?.()}`);
+}
+
+/** B — Peaje legacy: BOSIO relievedBy GARCIA (M2, misma salida) con relieveScheduledAt 15:00. */
+async function casoRelevoProgramadoLegacy() {
+  const oid = 'p9b_peaje';
+  const base = { empresaId: 'p9b_emp', objectiveId: oid, objectiveName: 'Peaje legacy', positionName: 'Puesto 2' };
+  await db.collection('servicios_sla').doc('p9b_sla').set({
+    objectiveId: oid, clientId: 'p9b_cli', status: 'active', startDate: '2026-01-01', endDate: '2027-12-31',
+    positions: [{
+      name: 'Puesto 2', quantity: 2, coverageType: 'custom', activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+      allowedShiftTypes: [
+        { code: 'M', startTime: '11:30', endTime: '15:00', hours: 8 },
+        { code: 'M2', startTime: '11:45', endTime: '15:00', hours: 8 },
+        { code: 'T', startTime: '15:00', endTime: '16:00', hours: 8 },
+        { code: 'T2', startTime: '15:30', endTime: '16:30', hours: 8 },
+      ],
+    }],
+  });
+  await db.batch()
+    .set(db.collection('turnos').doc('p9b_bosio'), { ...base, ...present({ employeeId: 'e_bosio', employeeName: 'BOSIO', code: 'M', startTime: ar(11, 30), endTime: END, checkInTime: ar(11, 21), realStartTime: ar(11, 30), relievedBy: 'e_garcia', relievedByName: 'GARCIA', relieveScheduledAt: END, relievedEarly: true, autoRelevo: true }) })
+    .set(db.collection('turnos').doc('p9b_garcia'), { ...base, ...present({ employeeId: 'e_garcia', employeeName: 'GARCIA', code: 'M2', startTime: ar(11, 45), endTime: END, checkInTime: ar(11, 31), realStartTime: ar(11, 45) }) })
+    .set(db.collection('turnos').doc('p9b_lopez'), { ...base, employeeId: 'e_lopez', employeeName: 'LOPEZ', code: 'T', status: 'PENDING', startTime: END, endTime: ar(16, 0) })
+    .set(db.collection('turnos').doc('p9b_gonzalez'), { ...base, employeeId: 'e_gonzalez', employeeName: 'GONZALEZ', code: 'T2', status: 'PENDING', startTime: ar(15, 30), endTime: ar(16, 30) })
+    .commit();
+
+  await runAutoCompletarTurnosPass(db, ctx, ar(15, 0));
+  const bosio = (await db.collection('turnos').doc('p9b_bosio').get()).data() || {};
+  const garcia = (await db.collection('turnos').doc('p9b_garcia').get()).data() || {};
+  const okB = bosio.isCompleted !== true && bosio.isRetention === true
+    && String(bosio.retentionReason || '').startsWith('RELEVO_NO_PRESENTADO')
+    && !bosio.relievedBy && !bosio.relieveScheduledAt && bosio.staleReliefPrevious?.relievedBy === 'e_garcia'
+    && garcia.isCompleted !== true && garcia.isRetention === true;
+  report('B legacy: relieveScheduledAt contra compañero se ignora; Bosio y Garcia retenidos', okB,
+    okB ? `bosio=${bosio.retentionReason}` : `bosio=${bosio.completionReason}/ret=${bosio.isRetention}/by=${bosio.relievedBy} garcia=${garcia.completionReason}/ret=${garcia.isRetention}`);
 }
 
 main().catch((err) => {
