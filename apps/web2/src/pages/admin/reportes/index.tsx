@@ -945,6 +945,7 @@ export default function ReportsPage() {
                         { color: 'bg-rose-500',   label: 'Al 100% (FT, se paga aparte)' },
                         { color: 'bg-emerald-500',label: 'Plus feriado' },
                         { color: 'bg-slate-400',  label: 'Diurnas y nocturnas: desglose del total, no se suman' },
+                        { color: 'bg-amber-500',  label: 'Eventos: ya están en el total, no se suman de nuevo' },
                     ].map(({ color, label }) => (
                         <span key={label} className="flex items-center gap-1 text-[10px] text-slate-500 font-medium">
                             <span className={`w-2.5 h-2.5 rounded-sm ${color} flex-shrink-0`} aria-hidden="true"/>
@@ -967,6 +968,7 @@ export default function ReportsPage() {
                                 <th className="p-4 text-center text-slate-800">Total trabajado</th>
                                 <th className="p-4 text-center text-amber-500" title="Desglose del total, no se suma">Diurnas</th>
                                 <th className="p-4 text-center text-violet-600" title="Desglose del total, no se suma">Nocturnas</th>
+                                <th className="p-4 text-center text-amber-700" title="Horas EV fichadas. Ya entran en normales, al 50%, feriado y nocturnas.">Eventos</th>
                                 <th className="p-4 text-center no-print">Ver</th>
                             </tr>
                         </thead>
@@ -1001,6 +1003,7 @@ export default function ReportsPage() {
                                     <td className="p-4 text-center font-black text-slate-800 text-lg">{pay.total.toFixed(1)}</td>
                                     <td className="p-4 text-center text-amber-600/80 text-xs" title="Desglose del total">{pay.diurnas.toFixed(1)}</td>
                                     <td className="p-4 text-center text-violet-600/80 text-xs" title="Desglose del total">{pay.nocturnas.toFixed(1)}</td>
+                                    <td className="p-4 text-center text-amber-700/90 text-xs" title="Desglose Eventos, ya incluido en el total">{Number(row.desglose?.eventos) > 0 ? Number(row.desglose.eventos).toFixed(1) : <span className="text-slate-300">—</span>}</td>
                                     <td className="p-4 text-center text-slate-300 group-hover:text-indigo-600 no-print"><ChevronRight size={16}/></td>
                                 </tr>
                                 );
@@ -1018,6 +1021,7 @@ export default function ReportsPage() {
                                 <td className="p-4 text-center">{grandPay.total.toFixed(1)}</td>
                                 <td className="p-4 text-center text-amber-400 print:text-black">{grandPay.diurnas.toFixed(1)}</td>
                                 <td className="p-4 text-center text-violet-300 print:text-black">{grandPay.nocturnas.toFixed(1)}</td>
+                                <td className="p-4 text-center text-amber-300 print:text-black">{payRows.reduce((a, x) => a + (Number(x.row.desglose?.eventos) || 0), 0).toFixed(1)}</td>
                                 <td className="no-print"></td>
                             </tr>
                         </tfoot>

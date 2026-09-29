@@ -789,7 +789,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const rawCode = (d.code || '').trim().toUpperCase();
             const isFT = isFrancoTrabajadoShift(d);
-            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'EV'].includes(rawCode) && !isFT) return;
+            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
             // Doc F sin fichada: liquida en el turno de cobertura si ese día tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;

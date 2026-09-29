@@ -314,6 +314,7 @@ export function personaStatsToPayrollFigures(
             cobertura: round2(stats.desglose.cobertura),
             ft: round2(stats.desglose.ft),
             tura: round2(stats.desglose.tura),
+            eventos: round2(stats.desglose.eventos),
         },
         turnosCount: entry.shifts.length,
         turnosConFichada: stats.turnosConDatosReales,

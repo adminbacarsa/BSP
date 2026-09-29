@@ -862,6 +862,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
     let desgloseCobertura = 0;
     let desgloseFt = 0;
     let desgloseTura = 0;
+    let desgloseEventos = 0;
     const warnings: string[] = [];
     const exceeds12hDaysWarned = new Set<string>();
     const parts: LiquidationShiftPart[] = [];
@@ -888,7 +889,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
 
             const rawCode = (d.code || '').trim().toUpperCase();
             const isFT = isFrancoTrabajadoShift(d);
-            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'EV'].includes(rawCode) && !isFT) return;
+            if (['FF', 'V', 'L', 'PG', 'A', 'E', 'AA'].includes(rawCode) && !isFT) return;
             if (rawCode === 'F' && !isFT) return;
             // Doc F sin fichada: liquida en el turno de cobertura si ese día tiene fichada
             if (isFT && rawCode === 'F' && !shiftHasRealCheckIn(d) && francoDocSkipIds.has(d.id)) return;
@@ -1023,7 +1024,10 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
                     && !['EXTEND', 'ADVANCE'].includes(String(d.coverageType || '').toUpperCase());
                 let partExt = 0;
                 let partAdv = 0;
+                const originUp = String(d.origin || '').toUpperCase();
+                const isEvento = codeUp === 'EV' || codeUp === 'EVT' || originUp === 'EVENTO';
                 if (isFT) desgloseFt += worked;
+                else if (isEvento) desgloseEventos += worked;
                 else if (codeUp === 'TURA' || codeUp === 'RFZ') desgloseTura += worked;
                 else if (isCobertura) desgloseCobertura += worked;
                 else if (d.isEarlyStart === true) {
@@ -1099,6 +1103,7 @@ const calculateStatsExact = (shifts: any[], holidaysMap: Record<string, boolean>
             cobertura: desgloseCobertura,
             ft: desgloseFt,
             tura: desgloseTura,
+            eventos: desgloseEventos,
         },
         /** Decisión Mauro H1 #2: días con jornadas independientes que suman >12 h (revisar, no se recorta el pago). */
         warnings,

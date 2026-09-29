@@ -894,7 +894,7 @@ async function main() {
   const figures1 = core.personaStatsToPayrollFigures(persona1, 0);
   const figures2 = core.personaStatsToPayrollFigures(persona2, 0);
   const desgloseSum2 = figures2.desglose.plan + figures2.desglose.ext + figures2.desglose.adv
-    + figures2.desglose.cobertura + figures2.desglose.ft + figures2.desglose.tura;
+    + figures2.desglose.cobertura + figures2.desglose.ft + figures2.desglose.tura + figures2.desglose.eventos;
 
   const liqExt = core.calculateLiquidationHoursStats([extWorked], {});
   const liqExtWithOpsCov = core.calculateLiquidationHoursStats([extWorked, extOpsCov], {});
