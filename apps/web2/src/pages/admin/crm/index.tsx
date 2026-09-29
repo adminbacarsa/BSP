@@ -138,10 +138,13 @@ import { callableErrorText } from '@/lib/callableError';
 import { fetchHoursBalances, sumBalancesByClient, overlayLiveSlaOnBalanceRows } from '@/lib/hoursBalance';
 import {
   byClientMetricsFromLedger,
+  dailyTrendFromLedgerDays,
+  fetchHoursLedgerDays,
   HOURS_LEDGER_PLAN_OPTIONS,
   loadHoursLedgerOrPreview,
   officialHoursFromEmpresa,
   periodKeyOf,
+  type HoursLedgerDayRow,
   type HoursLedgerPlanMode,
 } from '@/lib/hoursLedger/hoursLedgerRead';
 import {
@@ -223,13 +226,14 @@ function isClientStatusActivo(status: unknown): boolean {
 
 function resolveCanonicalClientIdForCrmRow(
   rowClientId: unknown,
-  clientList: { id: string }[],
+  clientList: { id: string; empresaId?: string }[],
+  empresaId?: string,
 ): string | null {
   const cid = String(rowClientId ?? '').trim();
   if (!cid) return null;
   for (const c of clientList) {
     if (c.id === cid) return c.id;
-    if (getClientIdAliases(c.id).includes(cid)) return c.id;
+    if (getClientIdAliases(c.id, c.empresaId || empresaId).includes(cid)) return c.id;
   }
   return null;
 }
@@ -1009,15 +1013,27 @@ export default function CRMPage() {
         const book = await loadHoursLedgerOrPreview(empresaId, selectedPeriodKey);
         if (book.empresa && runId === metricsRunRef.current) {
           const official = officialHoursFromEmpresa(book.empresa);
-          const byClient = byClientMetricsFromLedger(book, planMode);
+          // Agrupa por el dueño actual del objetivo (clients.objetivos[].id): un libro guardado con
+          // clientId de un cliente borrado igual cae en el cliente vigente del CRM.
+          const byClient = byClientMetricsFromLedger(book, planMode, clients);
           const { metrics } = storePeriodMetrics(selectedPeriodKey, byClient);
           const { start, end } = getRangeDates();
-          const slaRows = await fetchSlaRowsForCrmDashboard(
-            clients.map((c) => ({ id: c.id, name: c.name, legalName: c.legalName, objetivos: c.objetivos || [] })),
-            { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), migracionCompleta },
-          );
+          const [slaRows, ledgerDays] = await Promise.all([
+            fetchSlaRowsForCrmDashboard(
+              clients.map((c) => ({ id: c.id, name: c.name, legalName: c.legalName, objetivos: c.objetivos || [], empresaId })),
+              { empresaId, scopeEmpresa: shouldScopeQueriesToEmpresa(empresaId, migracionCompleta), migracionCompleta },
+            ),
+            book.days && book.days.length > 0
+              ? Promise.resolve(book.days)
+              : fetchHoursLedgerDays(empresaId, selectedPeriodKey).catch(() => [] as HoursLedgerDayRow[]),
+          ]);
+          if (runId !== metricsRunRef.current) return;
           const footprint = slaFootprintFromServices(slaRows, start, end);
-          const trend = trendSeriesFromBuckets(bucketsEarly);
+          // Gráfico diario desde el libro; sin detalle (preview en segundo plano) cae al total del mes.
+          const dailyTrend = dailyTrendFromLedgerDays(ledgerDays, planMode, rangeYear, rangeMonth + 1);
+          const trend = dailyTrend.some((p) => p.sla > 0 || p.planificado > 0 || p.ejecutado > 0)
+            ? dailyTrend
+            : trendSeriesFromBuckets(bucketsEarly);
           setClientMetricsMap(metrics);
           setGlobalMetrics({
             totalSold: official.sla,
@@ -1050,6 +1066,7 @@ export default function CRMPage() {
           name: c.name,
           legalName: c.legalName,
           objetivos: c.objetivos || [],
+          empresaId,
         }));
         const { start, end } = getRangeDates();
         if (!start || !end) throw new Error('rango CRM sin fechas');
@@ -1079,7 +1096,7 @@ export default function CRMPage() {
           const closedByClient: Record<string, number> = {};
           contractRows.forEach((c: any) => {
             if (!c.clientId) return;
-            const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
+            const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients, empresaId);
             if (!canonical) return;
             if (scopeEmpresa) {
               if (!clients.some((cl) => cl.id === canonical)) return;
@@ -1316,6 +1333,7 @@ export default function CRMPage() {
         name: c.name,
         legalName: c.legalName,
         objetivos: c.objetivos || [],
+        empresaId,
       }));
       const buckets = buildCrmTrendBuckets(rangeMode, rangeMonth, rangeYear);
       const { start, end } = getRangeDates();
@@ -1333,7 +1351,7 @@ export default function CRMPage() {
       ) => {
         contractRows.forEach((c) => {
           if (!c.clientId) return;
-          const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients);
+          const canonical = resolveCanonicalClientIdForCrmRow(c.clientId, clients, empresaId);
           if (!canonical) return;
           const cid = canonical;
           if (scopeEmpresa) {
