@@ -14,6 +14,12 @@ export function isEventosPosition(pos: { coverageType?: string; code?: string; n
   return String(pos.code || '').toUpperCase() === EVENTOS_SHIFT_CODE;
 }
 
+/** Nombre del puesto extras. No usa coverageType: si se lo fuerza, todo puesto parecería eventos. */
+export function isEventosPositionName(name: unknown): boolean {
+  const n = String(name || '').trim().toLowerCase();
+  return n === 'eventos' || n === 'evento';
+}
+
 export function listEventosPositions(positions: Array<{ id?: string; name?: string; coverageType?: string; code?: string }> | undefined | null) {
   return (positions || []).filter(isEventosPosition);
 }

@@ -1,6 +1,7 @@
 import { toDateSafe } from './crmDateUtils';
 import { isPlanificadorPlannedHoursShift } from '@/lib/planificacion/planningScheduledHours';
 import { isProformaVacancyShift, isSinCoberturaShift } from './proformaVacancy';
+import { isEventoGuardHoursShift } from './eventosGuardHours';
 
 /**
  * Modo de detalle de la pre-factura (grilla por objetivo/legajo).
@@ -58,6 +59,7 @@ export function turnoEligibleForProformaGrid(
   }
 
   if (isSinCoberturaShift(t) || isProformaVacancyShift(t)) return false;
+  if (isEventoGuardHoursShift(t)) return false;
   if (!isPlanificadorPlannedHoursShift(t)) return false;
 
   if (resolved === 'executed') {

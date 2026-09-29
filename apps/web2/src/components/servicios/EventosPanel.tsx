@@ -336,6 +336,10 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
             return;
         }
         const horasTotal = calcHorasServicio(srvForm as ServicioEvento);
+        const vendidasN = Number(srvForm.horasVendidas);
+        const horasVendidas = srvForm.horasVendidas == null || !Number.isFinite(vendidasN)
+            ? undefined
+            : Math.round(Math.max(0, vendidasN) * 10) / 10;
         const srv: ServicioEvento = {
             id: editingSrvId || crypto.randomUUID(),
             nombre: nombre.trim(),
@@ -346,6 +350,7 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
             horasTotal,
             ubicacion: srvForm.ubicacion || { tipo: 'nueva', direccion: '' },
             cupo: Number(cupo),
+            ...(horasVendidas != null ? { horasVendidas } : {}),
             aptitudesRequeridas: srvForm.aptitudesRequeridas || [],
             requisitos: srvForm.requisitos || '',
             instrucciones: srvForm.instrucciones || '',
@@ -547,6 +552,7 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         <th className="pb-2 text-left font-bold text-slate-400 pr-3">Turno</th>
                                         <th className="pb-2 text-left font-bold text-slate-400 pr-3">Horario</th>
                                         <th className="pb-2 text-center font-bold text-slate-400 pr-3">Cupo</th>
+                                        <th className="pb-2 text-center font-bold text-slate-400 pr-3">Hs vendidas</th>
                                         <th className="pb-2 text-left font-bold text-slate-400">Ubicación</th>
                                         <th className="pb-2"/>
                                     </tr>
@@ -563,6 +569,7 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                                     : `${srv.horasTotal} h`}
                                             </td>
                                             <td className="py-2 pr-3 text-center font-black text-slate-700 dark:text-slate-200">{srv.cupo}</td>
+                                            <td className="py-2 pr-3 text-center font-black text-amber-700 dark:text-amber-300">{srv.horasVendidas ?? '—'}</td>
                                             <td className="py-2 text-slate-400 max-w-[130px] truncate">
                                                 {srv.ubicacion.tipo === 'objetivo_existente'
                                                     ? (srv.ubicacion.objectiveNombre || '—')
@@ -679,6 +686,22 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         onChange={e => setSrvForm(f => ({ ...f, cupo: Number(e.target.value) }))}
                                         className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-yellow-400"
                                     />
+                                </div>
+                                <div>
+                                    <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">Horas vendidas</label>
+                                    <input
+                                        type="number"
+                                        min={0}
+                                        step={0.5}
+                                        value={srvForm.horasVendidas ?? ''}
+                                        onChange={e => {
+                                            const raw = e.target.value;
+                                            setSrvForm(f => ({ ...f, horasVendidas: raw === '' ? undefined : Number(raw) }));
+                                        }}
+                                        placeholder="Se facturan al cliente"
+                                        className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white placeholder-slate-300 outline-none focus:border-yellow-400"
+                                    />
+                                    <p className="mt-1 text-[10px] text-slate-400">Por este día. No son las fichadas ni el plan del guardia.</p>
                                 </div>
                                 {/* Tipo ubicación */}
                                 <div>
