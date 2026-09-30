@@ -143,9 +143,9 @@ O creá un acceso directo en Inicio que ejecute `caddy run` en esa carpeta.
 
 1. Windows inicia sesión solo con el usuario **Soporte** (pide la contraseña una vez).
 2. Al iniciar sesión, la tarea **COSP Servidor N8N** corre `scripts/start-n8n-server.ps1`:
-   - arranca el servicio `n8n` (NSSM) y espera el puerto 5678;
-   - `pm2 resurrect` (restaura lo guardado con `pm2 save` en `C:\Users\Soporte\.pm2`);
-   - Caddy: si existe el servicio `caddy` lo inicia; si no, corre `D:\APP\caddy\caddy.exe run` oculto con el `Caddyfile.n8n` del repo.
+   - `pm2 resurrect`: restaura lo guardado con `pm2 save` en `C:\Users\Soporte\.pm2` (en la PC N8N son `caddy`, `n8n` y `ping-api`);
+   - si además existe un servicio Windows `n8n` (NSSM) lo arranca; espera el puerto 5678;
+   - Caddy: si PM2 ya lo levantó no hace nada; si existe el servicio `caddy` lo inicia; si no, corre `D:\APP\caddy\caddy.exe run` oculto con el `Caddyfile.n8n` del repo.
 
 Antes de instalarlo, dejá corriendo en PM2 lo que necesites y guardalo:
 

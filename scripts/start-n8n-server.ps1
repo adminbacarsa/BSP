@@ -1,4 +1,4 @@
-# Arranque PC N8N: servicio n8n (NSSM) -> espera :5678 -> pm2 resurrect -> Caddy (HTTPS).
+# Arranque PC N8N: pm2 resurrect (caddy, n8n, ping-api) -> servicio n8n si existe -> espera :5678 -> Caddy si falta.
 # Lo dispara la tarea "COSP Servidor N8N" al iniciar sesion de Soporte.
 # Log: %ProgramData%\COSP\n8n-server-startup.log
 param(
@@ -91,21 +91,7 @@ if ($BootDelaySec -gt 0) {
   Start-Sleep -Seconds $BootDelaySec
 }
 
-# 1) N8N
-if (Get-ServiceSafe $N8nService) {
-  [void](Start-WindowsService $N8nService)
-} else {
-  Write-Log "AVISO: no existe el servicio '$N8nService' (NSSM). N8N no se inicia desde aca."
-}
-
-Write-Log "Esperando 127.0.0.1:$N8nPort (N8N)..."
-if (Wait-Port $N8nPort 180) {
-  Write-Log "N8N responde en :$N8nPort"
-} else {
-  Write-Log "AVISO: N8N no respondio en :$N8nPort en 180 s; sigo con PM2 y Caddy"
-}
-
-# 2) PM2
+# 1) PM2 (en la PC N8N maneja caddy, n8n y ping-api)
 $pm2 = Find-Pm2
 if (-not $pm2) {
   Write-Log 'AVISO: pm2 no encontrado (npm install -g pm2). Se omite PM2.'
@@ -120,7 +106,21 @@ if (-not $pm2) {
   & $pm2 list 2>&1 | ForEach-Object { Write-Log "pm2: $_" }
 }
 
-# 3) Caddy
+# 2) N8N como servicio Windows (solo si existe; si lo maneja PM2 ya subio en el paso 1)
+if (Get-ServiceSafe $N8nService) {
+  [void](Start-WindowsService $N8nService)
+} elseif (-not (Test-Port $N8nPort)) {
+  Write-Log "AVISO: no existe el servicio '$N8nService' y :$N8nPort aun no responde; espero a PM2."
+}
+
+Write-Log "Esperando 127.0.0.1:$N8nPort (N8N)..."
+if (Wait-Port $N8nPort 180) {
+  Write-Log "N8N responde en :$N8nPort"
+} else {
+  Write-Log "AVISO: N8N no respondio en :$N8nPort en 180 s; revisar 'pm2 logs n8n'"
+}
+
+# 3) Caddy (solo si no lo levanto PM2 ni es servicio)
 if (Get-ServiceSafe $CaddyService) {
   [void](Start-WindowsService $CaddyService)
 } else {
