@@ -57,20 +57,22 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
   const auth = await exigir(context, permiso);
-  const { validarFicha, planBaja, planReactivar } = await import('../../../web2/src/lib/eventuales/ficha.mjs') as {
+  const { validarFicha, planBaja, planReactivar, sugerirObraSocial } = await import('../../../web2/src/lib/eventuales/ficha.mjs') as {
     validarFicha: (input: unknown, ctx: unknown) => { ok: boolean; codigo?: string; doc?: Record<string, unknown> };
     planBaja: (motivo: string, fecha: string) => { ok: boolean; codigo?: string; patch?: Record<string, unknown> };
     planReactivar: () => Record<string, unknown>;
+    sugerirObraSocial: (fichaRnos: unknown, legajos: { empresaId?: string; obraSocialRnos?: string }[]) => Record<string, unknown>;
   };
 
   if (accion === 'detalle') {
     const cuil = String(data?.cuil || '');
     const ficha = await db().collection('eventuales_bolsa').doc(cuil).get();
     if (!ficha.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
-    const [contratos, envios, historial] = await Promise.all([
+    const [contratos, envios, historial, legajosOs] = await Promise.all([
       db().collection('contratos_eventuales').where('bolsaCuil', '==', cuil).get(),
       db().collection('arca_envios').where('bolsaCuil', '==', cuil).get(),
       db().collection('audit_logs').where('bolsaCuil', '==', cuil).limit(30).get(),
+      db().collection('empleados').where('cuil', '==', cuil).limit(20).get(),
     ]);
     return {
       ficha: { id: ficha.id, ...ficha.data() },
@@ -83,6 +85,10 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         const h = d.data();
         return { id: d.id, action: h.action, details: h.details || '', at: h.timestamp?.toDate?.()?.toISOString?.() || null };
       }),
+      rnos: sugerirObraSocial(ficha.data()?.obraSocialRnos, legajosOs.docs.map((d) => ({
+        empresaId: String(d.data().empresaId || ''),
+        obraSocialRnos: String(d.data().obraSocialRnos || ''),
+      }))),
     };
   }
 

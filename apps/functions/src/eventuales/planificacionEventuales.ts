@@ -196,7 +196,7 @@ async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil:
       lineasCargaMasiva: (i: Record<string, unknown>) => { lineas: string[]; advertencias: string[]; enviable: boolean };
       brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; codigo?: string; bruto: number };
     };
-    const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
+    const empresa = { id: empresaId, ...((await db().collection('empresas').doc(empresaId).get()).data() || {}) };
     const escalasSnap = await db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
     const bruto = brutoParaTxt({ contrato, escalas: escalasSnap.docs.map((d) => d.data()) });
     const out = lineasCargaMasiva({ contrato, cuil, bruto: bruto.bruto, obraSocial: bolsa.obraSocialRnos || '', empresa });

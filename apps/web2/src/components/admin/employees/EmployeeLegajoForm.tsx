@@ -255,6 +255,12 @@ export default function EmployeeLegajoForm({
                             <label className={labelClass}>Inicio Ciclo Liquidación (Día)</label>
                             <input type="number" min="1" max="31" className={inputClass} value={form.cycleStartDay || 26} onChange={e => setForm({ ...form, cycleStartDay: parseInt(e.target.value, 10) })} />
                         </div>
+                        {form.modalidad === 'EVENTUAL' && (
+                            <div>
+                                <label className={`${labelClass} ${form.obraSocialRnos ? '' : 'text-rose-600'}`}>Obra social RNOS</label>
+                                <input className={`${inputClass} ${form.obraSocialRnos ? '' : 'border-rose-500 bg-rose-50'}`} value={form.obraSocialRnos || ''} onChange={e => setForm({ ...form, obraSocialRnos: e.target.value })} placeholder="Obligatorio" />
+                            </div>
+                        )}
                         <div>
                             <label className={labelClass}>Estado</label>
                             <select className={selectClass} value={form.status || 'activo'} onChange={e => setForm({ ...form, status: e.target.value })}>
@@ -504,7 +510,14 @@ export default function EmployeeLegajoForm({
 
                 <div className="pt-8 border-t dark:border-slate-700 flex justify-end gap-4">
                     <button type="button" onClick={onCancel} className="px-6 py-3 bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300 rounded-xl font-bold uppercase text-xs">Cancelar</button>
-                    <button type="button" onClick={onSave} className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-indigo-700 transition-transform hover:scale-105">Guardar Cambios</button>
+                    <button type="button" onClick={() => {
+                        if (form.modalidad === 'EVENTUAL' && !String(form.obraSocialRnos || '').replace(/\D/g, '')) {
+                            setActiveFormTab('LABORAL');
+                            addToast('El RNOS es obligatorio en el legajo eventual.', 'error');
+                            return;
+                        }
+                        onSave();
+                    }} className="px-8 py-3 bg-indigo-600 text-white rounded-xl font-black uppercase text-xs shadow-lg hover:bg-indigo-700 transition-transform hover:scale-105">Guardar Cambios</button>
                 </div>
             </div>
         </div>
