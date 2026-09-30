@@ -11,6 +11,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { installGeocodeWriteGuard } from './geocode-legajos-guard.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const requireFn = createRequire(path.join(__dirname, '../apps/functions/package.json'));
@@ -29,23 +30,7 @@ if (apply && empresaArg !== APPLY_EMPRESA) {
   process.exit(1);
 }
 
-const { DocumentReference, WriteBatch, CollectionReference, Firestore } = admin.firestore;
-const GEO_FIELDS = new Set(['lat', 'lng', 'geoSource', 'geocodedAt']);
-const deny = (what) => function denied() { throw new Error(`escritura bloqueada (${what})`); };
-for (const m of ['set', 'delete', 'create']) DocumentReference.prototype[m] = deny(m);
-CollectionReference.prototype.add = deny('add');
-WriteBatch.prototype.commit = deny('batch');
-Firestore.prototype.runTransaction = deny('tx');
-Firestore.prototype.recursiveDelete = deny('recursiveDelete');
-const realUpdate = DocumentReference.prototype.update;
-DocumentReference.prototype.update = function guardedUpdate(data) {
-  if (!apply) throw new Error('escritura bloqueada (dryRun)');
-  const keys = Object.keys(data || {});
-  if (keys.length !== 4 || keys.some((k) => !GEO_FIELDS.has(k))) {
-    throw new Error(`update fuera de lat/lng/geoSource/geocodedAt: ${keys.join(',')}`);
-  }
-  return realUpdate.call(this, data);
-};
+installGeocodeWriteGuard(admin, { apply });
 
 if (!admin.apps.length) {
   admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'comtroldata' });
