@@ -10,7 +10,22 @@ function expoDevHostPort(): string | null {
   return null;
 }
 
-export function buildMobilePreviewDeepLink(empDocId: string): string {
+export function buildMobilePreviewDeepLink(empDocId: string, opts?: { bolsaCuil?: string }): string {
+  const bolsa = opts?.bolsaCuil?.trim();
+  if (bolsa) {
+    const customBase = process.env.EXPO_PUBLIC_MOBILE_PREVIEW_LINK_BASE?.trim();
+    if (customBase) {
+      const separator = customBase.includes('?') ? '&' : '?';
+      return `${customBase}${separator}bolsa=${encodeURIComponent(bolsa)}`;
+    }
+    const devHost = expoDevHostPort();
+    if (devHost && __DEV__) {
+      return `exp://${devHost}/--/preview?bolsa=${encodeURIComponent(bolsa)}`;
+    }
+    const schemeRaw = Constants.expoConfig?.scheme;
+    const scheme = Array.isArray(schemeRaw) ? schemeRaw[0] : schemeRaw ?? 'cosp-guardia';
+    return Linking.createURL('/preview', { queryParams: { bolsa }, scheme });
+  }
   const trimmed = empDocId.trim();
   const customBase = process.env.EXPO_PUBLIC_MOBILE_PREVIEW_LINK_BASE?.trim();
   if (customBase) {
@@ -30,6 +45,19 @@ export function buildMobilePreviewDeepLink(empDocId: string): string {
     queryParams: { emp: trimmed },
     scheme,
   });
+}
+
+export function parsePreviewBolsaFromUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  try {
+    const parsed = Linking.parse(url);
+    const bolsa = parsed.queryParams?.bolsa;
+    if (typeof bolsa === 'string' && bolsa.trim()) return bolsa.trim();
+    if (Array.isArray(bolsa) && typeof bolsa[0] === 'string' && bolsa[0].trim()) return bolsa[0].trim();
+  } catch {
+    /* ignore malformed urls */
+  }
+  return null;
 }
 
 export function parsePreviewEmpFromUrl(url: string | null | undefined): string | null {

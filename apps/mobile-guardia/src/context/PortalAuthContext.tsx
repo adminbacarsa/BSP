@@ -21,8 +21,14 @@ import {
   type PortalFeatures,
   type EmpleadoPortal,
 } from '@cosp/portal-types';
-import { resolveEmpDocIdWithRetry } from '@cosp/portal-core';
+import {
+  bolsaCuilFromClaims,
+  isEventualClaims,
+  resolveEmpDocIdWithRetry,
+  type EventualLegajo,
+} from '@cosp/portal-core';
 import { getPortalFirebase, isEmulatorMode } from '../lib/portal';
+import { loadEventualPerfil, mapEventualEmpleado } from '../lib/eventualSession';
 import { withTimeout } from '../lib/emulatorHost';
 import { getOrCreateDeviceId, getStoredDeviceId } from '../lib/deviceId';
 import {
@@ -31,7 +37,7 @@ import {
   type DeviceVerifyResult,
 } from '../lib/deviceVerification';
 import { detachPushTokenOnServer, unregisterPushForUser } from '../lib/pushNotifications';
-import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
+import { parsePreviewBolsaFromUrl, parsePreviewEmpFromUrl } from '../lib/previewLinks';
 import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
 
 const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
@@ -58,10 +64,18 @@ type PortalAuthContextValue = {
   /** Motivo de bloqueo cuando deviceVerified === false. */
   deviceBlockReason: DeviceBlockReason | null;
   employeeProfileError: string | null;
+  /** Claim `role: EVENTUAL`: perfil desde la bolsa, turnos de todas las empresas. */
+  isEventual: boolean;
+  bolsaCuil: string | null;
+  eventualLegajos: EventualLegajo[];
+  /** Nombres de empresas del eventual (por `empresaId`). */
+  empresasNombres: Record<string, string>;
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
   enterPreview: (empDocId: string) => Promise<void>;
+  /** Preview de una persona de la bolsa: la app se comporta como su cuenta EVENTUAL. */
+  enterPreviewEventual: (bolsaCuil: string) => Promise<void>;
   exitPreview: () => Promise<void>;
 };
 
@@ -76,6 +90,7 @@ async function isEmployeeUser(user: User, db: ReturnType<typeof getPortalFirebas
   if (EMPLOYEE_ROLES.includes(claimRole) || EMPLOYEE_ROLES.includes(claimType)) {
     return true;
   }
+  if (isEventualClaims(token.claims)) return true;
   try {
     const empId = await resolveEmpDocIdWithRetry(db, user, 2);
     return empId !== null;
@@ -180,6 +195,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [initializing, setInitializing] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [previewEmpDocId, setPreviewEmpDocId] = useState<string | null>(null);
+  const [previewBolsaCuil, setPreviewBolsaCuil] = useState<string | null>(null);
   const [employeeProfileLoading, setEmployeeProfileLoading] = useState(false);
   const [employeeProfileReady, setEmployeeProfileReady] = useState(false);
   const [empDocId, setEmpDocId] = useState<string | null>(null);
@@ -188,7 +204,18 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [deviceVerified, setDeviceVerified] = useState<boolean | null>(null);
   const [deviceBlockReason, setDeviceBlockReason] = useState<DeviceBlockReason | null>(null);
   const [employeeProfileError, setEmployeeProfileError] = useState<string | null>(null);
+  const [isEventual, setIsEventual] = useState(false);
+  const [bolsaCuil, setBolsaCuil] = useState<string | null>(null);
+  const [eventualLegajos, setEventualLegajos] = useState<EventualLegajo[]>([]);
+  const [empresasNombres, setEmpresasNombres] = useState<Record<string, string>>({});
   const pendingPreviewRef = useRef<string | null>(null);
+
+  const clearEventual = useCallback(() => {
+    setIsEventual(false);
+    setBolsaCuil(null);
+    setEventualLegajos([]);
+    setEmpresasNombres({});
+  }, []);
   const initialUrlHandledRef = useRef(false);
 
   const applyDeviceVerifyResult = useCallback((result: DeviceVerifyResult) => {
@@ -201,7 +228,8 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       initialUrlHandledRef.current = true;
       try {
         const initialUrl = await Linking.getInitialURL();
-        const fromUrl = parsePreviewEmpFromUrl(initialUrl);
+        const bolsa = parsePreviewBolsaFromUrl(initialUrl);
+        const fromUrl = bolsa ? `bolsa:${bolsa}` : parsePreviewEmpFromUrl(initialUrl);
         if (fromUrl) pendingPreviewRef.current = fromUrl;
       } catch {
         /* ignore */
@@ -330,6 +358,53 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     [db],
   );
 
+  /** Eventual: la cuenta no tiene un legajo único; el perfil sale de la bolsa (§7). */
+  const loadEventual = useCallback(
+    async (currentUser: User, claimCuil: string | null, opts?: { previewBolsaCuil?: string }) => {
+      setEmployeeProfileLoading(true);
+      setEmployeeProfileError(null);
+      try {
+        const perfil = await withTimeout(
+          loadEventualPerfil(db, currentUser, claimCuil, {
+            previewBolsaCuil: opts?.previewBolsaCuil,
+            bindUid: !opts?.previewBolsaCuil,
+          }),
+          FIRESTORE_PROFILE_TIMEOUT_MS,
+          'Carga de perfil eventual',
+        );
+        setIsEventual(true);
+        setBolsaCuil(perfil.bolsaCuil);
+        setEventualLegajos(perfil.legajos);
+        setEmpresasNombres(perfil.empresasNombres);
+        setEmpDocId(perfil.principal?.id ?? null);
+        setEmployee(mapEventualEmpleado(perfil, opts?.previewBolsaCuil ? '' : currentUser.uid));
+        setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+        if (opts?.previewBolsaCuil) setPreviewEmpDocId(perfil.principal?.id ?? null);
+        if (perfil.legajos.length === 0) {
+          setEmployeeProfileError(
+            'Todavía no tenés legajo en ninguna empresa del grupo. Cuando te asignen un turno, aparece acá.',
+          );
+        }
+      } catch (err) {
+        setIsEventual(true);
+        setBolsaCuil(claimCuil);
+        setEventualLegajos([]);
+        setEmployee(null);
+        setEmpDocId(null);
+        if (opts?.previewBolsaCuil) setPreviewEmpDocId(null);
+        if (isNetworkOrFirestoreError(err)) {
+          setEmployeeProfileError('No se pudo leer tu perfil de eventual. Revisá la conexión y reintentá.');
+        } else {
+          setEmployeeProfileError(err instanceof Error ? err.message : 'Error cargando perfil eventual');
+        }
+      } finally {
+        setEmployeeProfileLoading(false);
+        setEmployeeProfileReady(true);
+      }
+    },
+    [db],
+  );
+
   const bootstrapSession = useCallback(
     async (currentUser: User, previewId: string | null) => {
       const superAdmin = await userIsSuperAdmin(currentUser);
@@ -348,10 +423,17 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       if (superAdmin) {
         setDeviceVerified(true);
         setDeviceBlockReason(null);
-        if (previewId) {
+        if (previewId?.startsWith('bolsa:')) {
+          const cuil = previewId.slice('bolsa:'.length);
+          setPreviewBolsaCuil(cuil);
+          await loadEventual(currentUser, cuil, { previewBolsaCuil: cuil });
+        } else if (previewId) {
+          clearEventual();
+          setPreviewBolsaCuil(null);
           setPreviewEmpDocId(previewId);
           await loadEmployeeByDocId(previewId, currentUser);
         } else {
+          setPreviewBolsaCuil(null);
           setPreviewEmpDocId(null);
           setEmpDocId(null);
           setEmployee(null);
@@ -364,6 +446,26 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       }
 
       setPreviewEmpDocId(null);
+
+      const token = await currentUser.getIdTokenResult().catch(() => null);
+      if (token && isEventualClaims(token.claims)) {
+        await loadEventual(currentUser, bolsaCuilFromClaims(token.claims));
+        const result = await verifyDeviceForUser(currentUser, db);
+        applyDeviceVerifyResult(result);
+        if (result.verified) {
+          const { registerPushNotifications } = await import('../lib/pushNotifications');
+          await registerPushNotifications({
+            user: currentUser,
+            db,
+            empDocId: null,
+            empresaId: null,
+            interactive: false,
+          }).catch(() => {});
+        }
+        return;
+      }
+
+      clearEventual();
       // Gate: no registrar push ni exponer datos de ops hasta deviceVerified === true.
       // loadEmployee es necesario para device-blocked (nombre / empDocId) pero las
       // pantallas con tabs solo montan hooks de datos tras el gate.
@@ -383,16 +485,29 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         }).catch(() => {});
       }
     },
-    [auth, db, loadEmployee, loadEmployeeByDocId, applyDeviceVerifyResult],
+    [auth, db, loadEmployee, loadEmployeeByDocId, loadEventual, clearEventual, applyDeviceVerifyResult],
   );
 
   const enterPreview = useCallback(
     async (id: string) => {
       if (!user || !isSuperAdmin) return;
+      clearEventual();
+      setPreviewBolsaCuil(null);
       setPreviewEmpDocId(id);
       await loadEmployeeByDocId(id, user);
     },
-    [user, isSuperAdmin, loadEmployeeByDocId],
+    [user, isSuperAdmin, loadEmployeeByDocId, clearEventual],
+  );
+
+  const enterPreviewEventual = useCallback(
+    async (cuil: string) => {
+      if (!user || !isSuperAdmin) return;
+      const id = cuil.trim();
+      if (!id) return;
+      setPreviewBolsaCuil(id);
+      await loadEventual(user, id, { previewBolsaCuil: id });
+    },
+    [user, isSuperAdmin, loadEventual],
   );
 
   const exitPreview = useCallback(async () => {
@@ -402,16 +517,24 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       /* no bloquear salida de preview */
     }
     setPreviewEmpDocId(null);
+    setPreviewBolsaCuil(null);
     setEmpDocId(null);
     setEmployee(null);
+    clearEventual();
     setPortalFeatures(DEFAULT_PORTAL_FEATURES);
     setEmployeeProfileError(null);
     setEmployeeProfileReady(true);
     setEmployeeProfileLoading(false);
-  }, [db]);
+  }, [db, clearEventual]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {
+      const bolsa = parsePreviewBolsaFromUrl(url);
+      if (bolsa) {
+        if (user && isSuperAdmin) void enterPreviewEventual(bolsa);
+        else pendingPreviewRef.current = `bolsa:${bolsa}`;
+        return;
+      }
       const emp = parsePreviewEmpFromUrl(url);
       if (!emp) return;
       if (user && isSuperAdmin) {
@@ -422,7 +545,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => sub.remove();
-  }, [user, isSuperAdmin, enterPreview]);
+  }, [user, isSuperAdmin, enterPreview, enterPreviewEventual]);
 
   useEffect(() => {
     const authReadyTimer = setTimeout(() => {
@@ -435,9 +558,11 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       if (!nextUser) {
         setIsSuperAdmin(false);
         setPreviewEmpDocId(null);
+        setPreviewBolsaCuil(null);
         pendingPreviewRef.current = null;
         setEmpDocId(null);
         setEmployee(null);
+        clearEventual();
         setEmployeeProfileReady(false);
         setPortalFeatures(DEFAULT_PORTAL_FEATURES);
         setDeviceVerified(null);
@@ -463,6 +588,14 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
           setDeviceVerified(true);
           setDeviceBlockReason(null);
           setEmployeeProfileReady(true);
+        } else if (isEventualClaims(token?.claims)) {
+          try {
+            await loadEventual(nextUser, bolsaCuilFromClaims(token?.claims));
+          } catch {
+            /* Functions / Firestore intermitente */
+          }
+          setDeviceVerified(null);
+          setDeviceBlockReason(null);
         } else if (EMPLOYEE_ROLES.includes(role) || EMPLOYEE_ROLES.includes(type)) {
           try {
             await loadEmployee(nextUser);
@@ -484,7 +617,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(authReadyTimer);
       unsub();
     };
-  }, [auth, bootstrapSession, loadEmployee, resolvePendingPreviewId]);
+  }, [auth, bootstrapSession, loadEmployee, loadEventual, clearEventual, resolvePendingPreviewId]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {
@@ -523,27 +656,49 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setIsSuperAdmin(false);
     setPreviewEmpDocId(null);
+    setPreviewBolsaCuil(null);
     setEmpDocId(null);
     setEmployee(null);
+    clearEventual();
     setPortalFeatures(DEFAULT_PORTAL_FEATURES);
     setEmployeeProfileReady(false);
     setDeviceVerified(null);
     setDeviceBlockReason(null);
     setEmployeeProfileError(null);
-  }, [auth, db]);
+  }, [auth, db, clearEventual]);
 
   const refreshEmployee = useCallback(async () => {
     if (!user) return;
+    if (isSuperAdmin && previewBolsaCuil) {
+      await loadEventual(user, previewBolsaCuil, { previewBolsaCuil });
+      return;
+    }
     if (isSuperAdmin && previewEmpDocId) {
       await loadEmployeeByDocId(previewEmpDocId, user);
       return;
     }
-    await loadEmployee(user);
+    if (isEventual) {
+      await loadEventual(user, bolsaCuil);
+    } else {
+      await loadEmployee(user);
+    }
     const result = await verifyDeviceForUser(user, db);
     applyDeviceVerifyResult(result);
-  }, [user, isSuperAdmin, previewEmpDocId, loadEmployee, loadEmployeeByDocId, db, applyDeviceVerifyResult]);
+  }, [
+    user,
+    isSuperAdmin,
+    previewEmpDocId,
+    previewBolsaCuil,
+    isEventual,
+    bolsaCuil,
+    loadEmployee,
+    loadEventual,
+    loadEmployeeByDocId,
+    db,
+    applyDeviceVerifyResult,
+  ]);
 
-  const isPreviewMode = isSuperAdmin && !!previewEmpDocId;
+  const isPreviewMode = isSuperAdmin && (!!previewEmpDocId || !!previewBolsaCuil);
 
   const value = useMemo(
     () => ({
@@ -560,10 +715,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       deviceVerified,
       deviceBlockReason,
       employeeProfileError,
+      isEventual,
+      bolsaCuil,
+      eventualLegajos,
+      empresasNombres,
       signIn,
       signOut,
       refreshEmployee,
       enterPreview,
+      enterPreviewEventual,
       exitPreview,
     }),
     [
@@ -580,10 +740,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       deviceVerified,
       deviceBlockReason,
       employeeProfileError,
+      isEventual,
+      bolsaCuil,
+      eventualLegajos,
+      empresasNombres,
       signIn,
       signOut,
       refreshEmployee,
       enterPreview,
+      enterPreviewEventual,
       exitPreview,
     ],
   );

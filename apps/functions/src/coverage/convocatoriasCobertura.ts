@@ -1225,13 +1225,27 @@ export const responderConvocatoriaCobertura = functions
       throw new functions.https.HttpsError('failed-precondition', `La convocatoria ya fue ${conv.status}.`);
     }
 
-    // Verificar que quien responde es el candidato
+    // Verificar que quien responde es el candidato.
+    // Preview SuperAdmin: solo si manda asEmployeeId igual al candidato (no otros roles).
     const uid = context.auth.uid;
     const empByUid = await db.collection('empleados').where('uid', '==', uid).limit(1).get();
     const empId = empByUid.empty ? uid : empByUid.docs[0].id;
+    const asEmployeeId = String((data as { asEmployeeId?: string }).asEmployeeId || '').trim();
+    const callerMatches =
+      !conv.candidateUid || conv.candidateUid === uid || conv.candidateEmployeeId === empId;
+    const { isEventualPreviewSuperAdmin, canRespondCoberturaAsPreview } = await import('../eventuales/eventualPreviewAuth');
+    const token = context.auth.token as { role?: unknown; type?: unknown };
+    const previewOk = canRespondCoberturaAsPreview({
+      isSuperAdmin: isEventualPreviewSuperAdmin(token.role, token.type),
+      asEmployeeId,
+      candidateEmployeeId: conv.candidateEmployeeId,
+    });
 
-    if (conv.candidateUid && conv.candidateUid !== uid && conv.candidateEmployeeId !== empId) {
+    if (!callerMatches && !previewOk) {
       throw new functions.https.HttpsError('permission-denied', 'No podés responder una convocatoria que no te pertenece.');
+    }
+    if (previewOk && !callerMatches) {
+      (responseMeta as { previewRespondedBy?: string }).previewRespondedBy = uid;
     }
 
     const now = Timestamp.now();

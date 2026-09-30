@@ -2,7 +2,7 @@ export * from '@cosp/portal-types';
 export { createPortalFirebase, validateFirebaseConfig } from './firebase/createPortalFirebase';
 export type { PortalFirebase } from './firebase/createPortalFirebase';
 export { createPortalCallables } from './callables';
-export type { PortalCallables } from './callables';
+export type { PortalCallables, ListarTurnosEventualResponse } from './callables';
 export { PORTAL_CALLABLES } from './callables/names';
 export type { PortalCallableName } from './callables/names';
 export { resolveEmpDocId, resolveEmpDocIdWithRetry } from './empleado/resolveEmpDocId';
@@ -22,8 +22,10 @@ export {
   resolveAdjustedStartTime,
   evaluateCheckInWindow,
   isCoverageHoursOnSourceDoc,
+  isAltaArcaConfirmada,
   checkInRejectMessage,
   timestampLikeToMillis,
+  ALTA_ARCA_PENDIENTE_MESSAGE,
 } from './checkIn/portalCheckIn';
 export type {
   PendingCheckInItem,
@@ -104,3 +106,29 @@ export {
 export type { EmployeeShiftVisibilityInput } from './shifts/employeeShiftVisibility';
 export { isAbsentLikeShift, isActiveAbsenceRecord } from './shifts/isAbsentLikeShift';
 export { isFrancoCoverageOriginDoc, isCalendarFrancoSpan } from './shifts/francoCoverageOrigin';
+export {
+  isEventualClaims,
+  bolsaCuilFromClaims,
+  todayKeyAr,
+  contratoEstadoLabel,
+  clasificarContratoEventual,
+  acuseRecibido,
+  puedeAcusarRecibo,
+  horasContrato,
+  periodoContratoLabel,
+  formatBrutoArs,
+  contratoVigenteParaCredencial,
+  credencialContratoPublico,
+  sinDatosSensibles,
+  legajoParaEmpresa,
+  empresaLabelDeTurno,
+  turnoEsDelEventual,
+} from './eventuales/eventualPortal';
+export type {
+  EventualLegajo,
+  ContratoEventualPortal,
+  ContratoEventualEstado,
+  ContratoBucket,
+  JornadaContrato,
+  CredencialContratoPublica,
+} from './eventuales/eventualPortal';

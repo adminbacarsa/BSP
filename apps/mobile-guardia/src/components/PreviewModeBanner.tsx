@@ -6,21 +6,23 @@ import { radius } from '../theme/tokens';
 
 export function PreviewModeBanner() {
   const router = useRouter();
-  const { isPreviewMode, employee, previewEmpDocId, exitPreview } = usePortalAuth();
+  const { isPreviewMode, employee, previewEmpDocId, exitPreview, isEventual, bolsaCuil } = usePortalAuth();
 
   if (!isPreviewMode) return null;
 
   const label =
     employee?.lastName || employee?.firstName
       ? `${employee.lastName ?? ''} ${employee.firstName ?? ''}`.trim()
-      : previewEmpDocId ?? 'Guardia';
+      : isEventual
+        ? bolsaCuil || 'Eventual'
+        : previewEmpDocId ?? 'Guardia';
 
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
         <Text style={styles.label} numberOfLines={2}>
           PREVIEW · {label}
-          {'\n'}Convocatorias: Acepto/No puedo actúan como este legajo.
+          {`\nConvocatorias: Acepto/No puedo actúan como este ${isEventual ? 'eventual' : 'legajo'}.`}
         </Text>
         <Pressable
           style={styles.btn}

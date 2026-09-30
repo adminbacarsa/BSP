@@ -20,6 +20,8 @@ export async function respondCoberturaConvocatoria(params: {
   responseChannel: CoberturaResponseChannel;
   rejectionReason?: string;
   etaMinutes?: number;
+  /** Preview SuperAdmin: legajo candidato de la convocatoria. */
+  asEmployeeId?: string;
 }): Promise<RespondCoberturaResult> {
   const convocatoriaId = String(params.convocatoriaId || '').trim();
   if (!convocatoriaId) {
@@ -50,6 +52,7 @@ export async function respondCoberturaConvocatoria(params: {
       platform,
       appVersion: Constants.expoConfig?.version || undefined,
       ...(originCoords ? { originCoords } : {}),
+      ...(params.asEmployeeId ? { asEmployeeId: params.asEmployeeId } : {}),
     });
     return {
       ok: true,

@@ -27,6 +27,7 @@ export type AlertaConvocatoriaVista = {
   cancelReason?: string;
   respondedAt?: unknown;
   cancelledAt?: unknown;
+  candidateEmployeeId?: string;
 };
 
 export type AlertaCardInput = {

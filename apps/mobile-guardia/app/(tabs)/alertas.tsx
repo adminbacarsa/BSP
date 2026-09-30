@@ -322,10 +322,14 @@ function AlertasScreenContent() {
                     );
                     return;
                   }
+                  const asEmployeeId = isPreviewMode
+                    ? String(coberturaById[convId]?.candidateEmployeeId || '').trim()
+                    : '';
                   const result = await respondCoberturaConvocatoria({
                     convocatoriaId: convId,
                     response,
                     responseChannel: 'ALERTAS',
+                    ...(asEmployeeId ? { asEmployeeId } : {}),
                   });
                   if (result.ok) {
                     try {

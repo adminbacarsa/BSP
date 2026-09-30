@@ -5,7 +5,16 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 import QRCode from 'react-native-qrcode-svg';
 import { doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import {
+  contratoVigenteParaCredencial,
+  credencialContratoPublico,
+  legajoParaEmpresa,
+  periodoContratoLabel,
+  sinDatosSensibles,
+  type CredencialContratoPublica,
+} from '@cosp/portal-core';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
+import { useContratosEventuales } from '../src/hooks/useContratosEventuales';
 import { useEmpresaBranding } from '../src/hooks/useEmpresaBranding';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { CommandCard } from '../src/components/ui/CommandCard';
@@ -29,6 +38,9 @@ type PublicCred = {
   dni?: string;
   fileNumber?: string;
   category?: string;
+  /** Eventual: empresa prestadora y vigencia del contrato (sin domicilio ni sueldo). */
+  contratoVigente?: CredencialContratoPublica | null;
+  esEventual?: boolean;
 };
 
 export default function CredencialScreen() {
@@ -40,9 +52,25 @@ export default function CredencialScreen() {
 }
 
 function CredencialScreenContent() {
-  const { employee, empDocId } = usePortalAuth();
+  const { employee, empDocId: sessionEmpDocId, isEventual, eventualLegajos, empresasNombres } = usePortalAuth();
   const { palette } = useTheme();
-  const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
+  const { contratos, hoyKey } = useContratosEventuales(isEventual ? eventualLegajos : []);
+  // Eventual: la credencial es la del contrato vigente (legajo de esa empresa), no la del legajo principal.
+  const contratoVigente = useMemo(
+    () => (isEventual ? contratoVigenteParaCredencial(contratos, hoyKey) : null),
+    [isEventual, contratos, hoyKey],
+  );
+  const legajoCred = isEventual ? legajoParaEmpresa(eventualLegajos, contratoVigente?.empresaId) : null;
+  const empDocId = isEventual ? legajoCred?.employeeId ?? sessionEmpDocId : sessionEmpDocId;
+  const empresaIdCred = isEventual ? legajoCred?.empresaId ?? employee?.empresaId : employee?.empresaId;
+  const { empresaNombre: brandingNombre } = useEmpresaBranding(empresaIdCred);
+  const empresaNombre = isEventual
+    ? empresasNombres[empresaIdCred || ''] || brandingNombre
+    : brandingNombre;
+  const contratoPublico = useMemo(
+    () => (isEventual ? credencialContratoPublico(contratoVigente, empresaNombre || undefined) : null),
+    [isEventual, contratoVigente, empresaNombre],
+  );
   const [publicCred, setPublicCred] = useState<PublicCred | null>(null);
   const [loading, setLoading] = useState(true);
   const [fromCache, setFromCache] = useState(false);
@@ -60,8 +88,16 @@ function CredencialScreenContent() {
       category: publicCred?.category || employee?.category || '—',
       empresa: publicCred?.empresaNombre || empresaNombre || 'Empresa',
       photoUrl: publicCred?.photoUrl || employee?.photoUrl,
+      vigencia: contratoVigente
+        ? periodoContratoLabel(contratoVigente)
+        : publicCred?.contratoVigente
+          ? periodoContratoLabel({
+              fechaAlta: publicCred.contratoVigente.fechaAlta ?? undefined,
+              fechaBaja: publicCred.contratoVigente.fechaBaja ?? undefined,
+            })
+          : null,
     };
-  }, [publicCred, employee, empresaNombre]);
+  }, [publicCred, employee, empresaNombre, contratoVigente]);
 
   const verifyUrl = empDocId ? credencialPublicVerifyUrl(empDocId) : '';
 
@@ -98,18 +134,32 @@ function CredencialScreenContent() {
           verifyUrl,
           cachedAt: Date.now(),
         });
+        if (isEventual && contratoPublico) {
+          // El QR del eventual muestra la empresa del contrato vigente y su vigencia (§3.5).
+          await setDoc(
+            doc(db, 'credenciales_publicas', empDocId),
+            sinDatosSensibles({
+              esEventual: true,
+              empresaNombre: contratoPublico.empresaNombre,
+              contratoVigente: contratoPublico,
+              updatedAt: serverTimestamp(),
+            }),
+            { merge: true },
+          ).catch(() => {});
+        }
       } else if (employee) {
         await setDoc(
           doc(db, 'credenciales_publicas', empDocId),
-          {
+          sinDatosSensibles({
             firstName: employee.firstName || '',
             lastName: employee.lastName || '',
             dni: employee.dni || '',
             fileNumber: employee.fileNumber || employee.legajo || '',
             category: employee.category || '',
-            empresaNombre: empresaNombre || '',
+            empresaNombre: (isEventual && contratoPublico?.empresaNombre) || empresaNombre || '',
+            ...(isEventual ? { esEventual: true, contratoVigente: contratoPublico } : {}),
             updatedAt: serverTimestamp(),
-          },
+          }),
           { merge: true },
         );
       }
@@ -118,7 +168,7 @@ function CredencialScreenContent() {
     } finally {
       setLoading(false);
     }
-  }, [empDocId, employee, empresaNombre, verifyUrl]);
+  }, [empDocId, employee, empresaNombre, verifyUrl, isEventual, contratoPublico]);
 
   useEffect(() => {
     load();
@@ -193,8 +243,15 @@ function CredencialScreenContent() {
                 </Text>
               ) : null}
               <View style={[styles.card, { backgroundColor: palette.primary, borderColor: palette.cardBorder }]}>
-                <Text style={styles.cardTitle}>CREDENCIAL DE ACCESO</Text>
+                <Text style={styles.cardTitle}>{isEventual ? 'CREDENCIAL · EVENTUAL' : 'CREDENCIAL DE ACCESO'}</Text>
                 <Text style={styles.empresa}>{display.empresa}</Text>
+                {isEventual ? (
+                  <Text style={styles.vigencia}>
+                    {display.vigencia
+                      ? `Contrato vigente · ${display.vigencia}`
+                      : 'Sin contrato vigente hoy'}
+                  </Text>
+                ) : null}
                 <View style={styles.photoRow}>
                   {display.photoUrl ? (
                     <Image source={{ uri: display.photoUrl }} style={styles.photo} />
@@ -265,6 +322,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   empresa: { color: '#fff', fontSize: 16, fontWeight: '800', marginTop: 6 },
+  vigencia: { color: '#a7f3d0', fontSize: 12, fontWeight: '700', marginTop: 4 },
   photoRow: { flexDirection: 'row', gap: 14, marginTop: 16, alignItems: 'center' },
   photo: { width: 96, height: 96, borderRadius: radius.md, backgroundColor: '#1e293b' },
   photoPlaceholder: { alignItems: 'center', justifyContent: 'center' },

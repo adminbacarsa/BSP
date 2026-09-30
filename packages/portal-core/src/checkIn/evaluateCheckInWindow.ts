@@ -10,7 +10,8 @@ export type CheckInWindowRejectCode =
   | 'TOO_EARLY'
   | 'TOO_LATE'
   | 'SHIFT_ENDED'
-  | 'EXT_NO_CHECKIN';
+  | 'EXT_NO_CHECKIN'
+  | 'ALTA_ARCA_PENDIENTE';
 
 export type CheckInWindowResult = {
   allowed: boolean;
@@ -21,6 +22,17 @@ export type CheckInWindowResult = {
   /** Entre T+5 y T+30 sin aviso previo: la fichada es llegada tarde (novedad LLEGADA_TARDE). */
   lateNoNotice?: boolean;
 };
+
+/**
+ * Espejo de `apps/functions/src/arca/altaArcaGate.ts`: un turno eventual solo ficha
+ * con el alta AT de esa empresa confirmada. El turno trae el estado denormalizado.
+ */
+export function isAltaArcaConfirmada(
+  shift: Record<string, unknown> | null | undefined,
+): boolean {
+  if (!shift || shift.esEventual !== true) return true;
+  return shift.eventualAltaArcaConfirmada === true;
+}
 
 /** ops_cov EXT/ADV de registro — mismo criterio que isOpsCoverageHoursOnSourceDoc (functions). */
 export function isCoverageHoursOnSourceDoc(
@@ -180,6 +192,10 @@ export function evaluateCheckInWindow(
   nowMs: number,
   opts?: { source?: string },
 ): CheckInWindowResult {
+  // Bloqueo legal, antes que cualquier ventana ni bypass del CC: sin alta AT confirmada no se ficha.
+  if (!isAltaArcaConfirmada(shift)) {
+    return { allowed: false, rejectCode: 'ALTA_ARCA_PENDIENTE' };
+  }
   if (isProvisionalLatePunch(shift, nowMs)) {
     const planned = startMs(shift);
     const endEarly = endMs(shift);
@@ -266,6 +282,10 @@ export function lateNoNoticeCheckInCopy(lateMinutes: number): {
 }
 
 /** Mensajes UX para rechazo de ventana (portal guardia). */
+/** Mismo código que devuelve `registrarPresencia` (`ALTA_ARCA_PENDIENTE`). */
+export const ALTA_ARCA_PENDIENTE_MESSAGE =
+  'Alta en trámite — no podés fichar todavía. La empresa tiene que confirmar tu alta en ARCA antes del inicio del turno.';
+
 export function checkInRejectMessage(code: CheckInWindowRejectCode | undefined): string {
   switch (code) {
     case 'TOO_EARLY':
@@ -280,6 +300,8 @@ export function checkInRejectMessage(code: CheckInWindowRejectCode | undefined):
       return 'Este turno figura como ausente; no se puede fichar.';
     case 'EXT_NO_CHECKIN':
       return 'La extensión ya está en curso: no se ficha de nuevo.';
+    case 'ALTA_ARCA_PENDIENTE':
+      return ALTA_ARCA_PENDIENTE_MESSAGE;
     default:
       return 'No se puede fichar en este momento.';
   }

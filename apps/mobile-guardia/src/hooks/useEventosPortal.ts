@@ -23,10 +23,16 @@ export function useEventosPortal(
   opts?: { isPreviewMode?: boolean },
 ) {
   const { db } = getPortalFirebase();
-  const { deviceVerified } = usePortalAuth();
+  const { deviceVerified, eventualLegajos } = usePortalAuth();
   const isPreviewMode = !!opts?.isPreviewMode;
   const [eventos, setEventos] = useState<Evento[]>([]);
   const [solicitudes, setSolicitudes] = useState<SolicitudEvento[]>([]);
+  const [solicitudesOtras, setSolicitudesOtras] = useState<SolicitudEvento[]>([]);
+  // Eventual: convocatorias de eventos de las otras empresas donde tiene legajo.
+  const otrosLegajosKey = eventualLegajos
+    .filter((l) => l.employeeId !== empDocId || l.empresaId !== empresaId)
+    .map((l) => `${l.empresaId}:${l.employeeId}`)
+    .join('|');
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -82,6 +88,45 @@ export function useEventosPortal(
     return () => unsub();
   }, [db, empresaId, empDocId, reloadEventos, deviceVerified]);
 
+  useEffect(() => {
+    const pares = otrosLegajosKey
+      .split('|')
+      .filter(Boolean)
+      .map((p) => {
+        const [emp, legajo] = p.split(':');
+        return { empresaId: emp, employeeId: legajo };
+      });
+    if (deviceVerified !== true || pares.length === 0) {
+      setSolicitudesOtras([]);
+      return;
+    }
+    const { from, to } = portalEventosDateRange();
+    const buckets: Record<string, SolicitudEvento[]> = {};
+    const publish = () => setSolicitudesOtras(Object.values(buckets).flat());
+    const unsubs = pares.map((par) => {
+      const key = `${par.empresaId}:${par.employeeId}`;
+      buckets[key] = [];
+      return onSnapshot(
+        query(
+          collection(db, 'solicitudes_evento'),
+          where('empresaId', '==', par.empresaId),
+          where('empleadoId', '==', par.employeeId),
+          where('servicioFecha', '>=', from),
+          where('servicioFecha', '<=', to),
+        ),
+        (snap) => {
+          buckets[key] = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SolicitudEvento);
+          publish();
+        },
+        () => {
+          buckets[key] = [];
+          publish();
+        },
+      );
+    });
+    return () => unsubs.forEach((u) => u());
+  }, [db, otrosLegajosKey, deviceVerified]);
+
   const reload = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -94,10 +139,16 @@ export function useEventosPortal(
     [eventos],
   );
 
-  const convocatoriasPendientes = useMemo(
-    () => solicitudes.filter((s) => s.tipo === 'admin_convoca' && s.status === 'convocado'),
-    [solicitudes],
-  );
+  const convocatoriasPendientes = useMemo(() => {
+    const vistos = new Set<string>();
+    return [...solicitudes, ...solicitudesOtras].filter((s) => {
+      if (s.tipo !== 'admin_convoca' || s.status !== 'convocado') return false;
+      const id = String(s.id || '');
+      if (id && vistos.has(id)) return false;
+      if (id) vistos.add(id);
+      return true;
+    });
+  }, [solicitudes, solicitudesOtras]);
 
   const solicitar = useCallback(
     async (evento: Evento, servicio: ServicioEvento) => {
@@ -155,7 +206,8 @@ export function useEventosPortal(
       if (!sol.id) {
         return { ok: false as const, message: 'Solicitud inválida' };
       }
-      if (isPreviewMode && !empDocId) {
+      const asId = String(sol.empleadoId || empDocId || '').trim();
+      if (isPreviewMode && !asId) {
         return {
           ok: false as const,
           message: 'Preview sin legajo. Elegí un vigilador en Preview y reintentá.',
@@ -167,7 +219,7 @@ export function useEventosPortal(
         await callables.respondEventoConvocatoria({
           solicitudId: sol.id,
           accept: acepta,
-          ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
+          ...(isPreviewMode && asId ? { asEmployeeId: asId } : {}),
         });
         return {
           ok: true as const,

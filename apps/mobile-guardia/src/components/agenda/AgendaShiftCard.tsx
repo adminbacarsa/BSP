@@ -16,9 +16,11 @@ type Props = {
   item: Shift;
   eventosMap: Record<string, Evento>;
   objectivesMap: Record<string, ObjectiveLocation>;
+  /** Eventual: empresa dueña del turno (se muestra como etiqueta). */
+  empresaLabel?: string | null;
 };
 
-export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
+export function AgendaShiftCard({ item, eventosMap, objectivesMap, empresaLabel }: Props) {
   const { palette } = useTheme();
   const isOps = isOpsCoverageShift(item);
   const isAbsent = isAgendaAbsentShift(item);
@@ -117,6 +119,13 @@ export function AgendaShiftCard({ item, eventosMap, objectivesMap }: Props) {
         <Text style={[styles.codeText, { color: accentColor }]}>{codeLabel}</Text>
       </View>
       <View style={styles.rowBody}>
+        {empresaLabel ? (
+          <View style={[styles.empresaBadge, { backgroundColor: palette.inputBg, borderColor: palette.cardBorder }]}>
+            <Text style={[styles.empresaBadgeText, { color: palette.primary }]} numberOfLines={1}>
+              {empresaLabel}
+            </Text>
+          </View>
+        ) : null}
         <Text style={[styles.rowTitle, { color: palette.onSurface }]}>{title}</Text>
         <Text style={[styles.rowSub, { color: palette.onSurfaceMuted }]}>{timeLine}</Text>
         <Text
@@ -240,6 +249,15 @@ const styles = StyleSheet.create({
   codeText: { fontWeight: '900', fontSize: 11 },
   rowBody: { flex: 1, paddingVertical: 14, paddingRight: 8, gap: 4 },
   rowTitle: { fontWeight: '800', fontSize: 16 },
+  empresaBadge: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    marginBottom: 2,
+  },
+  empresaBadgeText: { fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   rowSub: { fontSize: 13, fontWeight: '600' },
   rowMeta: { fontSize: 12, fontWeight: '700' },
   certHint: { fontSize: 11, fontWeight: '700', lineHeight: 15, marginTop: 2 },

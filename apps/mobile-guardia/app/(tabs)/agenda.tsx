@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { Shift } from '@cosp/portal-types';
+import { empresaLabelDeTurno } from '@cosp/portal-core';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
 import { useEmployeeShifts } from '../../src/hooks/useEmployeeShifts';
 import { useEventosMap } from '../../src/hooks/useEventosMap';
@@ -52,7 +53,8 @@ export default function AgendaScreen() {
 }
 
 function AgendaScreenContent() {
-  const { empDocId, portalFeatures, user, employee } = usePortalAuth();
+  const { empDocId, portalFeatures, user, employee, isEventual, eventualLegajos, empresasNombres } =
+    usePortalAuth();
   const { palette } = useTheme();
   const { contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { isOffline } = useNetworkStatus();
@@ -205,6 +207,9 @@ function AgendaScreenContent() {
                     item={item}
                     eventosMap={eventosMap}
                     objectivesMap={objectivesMap}
+                    empresaLabel={
+                      isEventual ? empresaLabelDeTurno(item, eventualLegajos, empresasNombres) : null
+                    }
                   />
                 ))
               )}

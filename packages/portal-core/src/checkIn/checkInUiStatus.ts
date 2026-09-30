@@ -138,6 +138,15 @@ export function resolveCheckInUiStatus(
   }
 
   // Rechazos de ventana alineados al servidor (prioridad sobre late/ready).
+  if (String(timing?.rejectCode || '') === 'ALTA_ARCA_PENDIENTE') {
+    return {
+      status: 'blocked',
+      title: 'Alta en trámite — no podés fichar todavía',
+      subtitle: timing?.rejectMessage,
+      tone: 'warning',
+    };
+  }
+
   if (timing?.rejectCode === 'TRACE_REGISTRATION') {
     return {
       status: 'trace_registration',

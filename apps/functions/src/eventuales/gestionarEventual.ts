@@ -4,6 +4,7 @@
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { isEventualPreviewSuperAdmin, resolveBolsaCuilForListar } from './eventualPreviewAuth';
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 
@@ -181,13 +182,24 @@ export const crearAccesoEventual = functions.https.onCall(async (data, context) 
   return { ok: true, uid, activacion: `https://comtroldata.web.app/app/activar?t=${token}` };
 });
 
-export const listarTurnosEventual = functions.https.onCall(async (_data, context) => {
+export const listarTurnosEventual = functions.https.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
-  const bolsaSnap = await db().collection('eventuales_bolsa').where('uid', '==', context.auth.uid).limit(1).get();
-  if (bolsaSnap.empty) throw new functions.https.HttpsError('permission-denied', 'No es un eventual.');
-  const bolsa = bolsaSnap.docs[0];
+  const token = context.auth.token as { role?: unknown; type?: unknown };
+  const isSuper = isEventualPreviewSuperAdmin(token.role, token.type);
+  const ownSnap = await db().collection('eventuales_bolsa').where('uid', '==', context.auth.uid).limit(1).get();
+  const target = resolveBolsaCuilForListar({
+    isSuperAdmin: isSuper,
+    ownBolsaCuil: ownSnap.empty ? null : ownSnap.docs[0].id,
+    requestedBolsaCuil: String((data as { bolsaCuil?: string } | null)?.bolsaCuil || ''),
+  });
+  if (!target) throw new functions.https.HttpsError('permission-denied', 'No es un eventual.');
+  const bolsaSnap = target.preview
+    ? await db().collection('eventuales_bolsa').doc(target.bolsaCuil).get()
+    : ownSnap.docs[0];
+  if (!bolsaSnap.exists) throw new functions.https.HttpsError('not-found', 'Eventual no encontrado.');
+  const bolsa = bolsaSnap;
   const cuil = bolsa.id;
-  const legajos = (bolsa.data().legajos || []) as { empresaId?: string; employeeId?: string }[];
+  const legajos = ((bolsa.data()?.legajos) || []) as { empresaId?: string; employeeId?: string }[];
   const porCuil = await db().collection('turnos').where('bolsaCuil', '==', cuil).limit(200).get();
   const vistos = new Set(porCuil.docs.map((d) => d.id));
   const extra: { id: string; data: () => Record<string, unknown> }[] = [];

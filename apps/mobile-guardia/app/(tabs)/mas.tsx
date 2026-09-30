@@ -24,7 +24,7 @@ export default function MasScreen() {
 function MasScreenContent() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { portalFeatures, signOut, employee, empDocId } = usePortalAuth();
+  const { portalFeatures, signOut, employee, empDocId, isEventual, eventualLegajos } = usePortalAuth();
   const { palette, mode, setThemeMode } = useTheme();
   const { contentMaxWidth, horizontalPadding } = useResponsiveLayout();
   const { convocatoriasPendientes } = useConvocatoriasPendientes(employee?.empresaId, empDocId);
@@ -117,6 +117,16 @@ function MasScreenContent() {
           </Text>
           <CommandButton label="Ver credencial" onPress={() => router.push('/credencial')} />
         </CommandCard>
+
+        {isEventual ? (
+          <CommandCard title="Mis contratos">
+            <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+              Contratos eventuales vigentes y pasados: empresa, período, jornadas y acuse de recibo.
+              {eventualLegajos.length > 0 ? ` · ${eventualLegajos.length} empresa(s)` : ''}
+            </Text>
+            <CommandButton label="Ver mis contratos" onPress={() => router.push('/contratos')} />
+          </CommandCard>
+        ) : null}
 
         {portalFeatures.viewEvents ? (
           <CommandCard title="Eventos (EV)">
