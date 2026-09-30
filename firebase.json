@@ -41,6 +41,14 @@
         "destination": "/app/index.html"
       },
       {
+        "source": "/privacidad",
+        "destination": "/privacidad/index.html"
+      },
+      {
+        "source": "/privacidad/**",
+        "destination": "/privacidad/index.html"
+      },
+      {
         "source": "**",
         "destination": "/index.html"
       }

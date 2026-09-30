@@ -1,10 +1,19 @@
 import type * as admin from 'firebase-admin';
 
 /**
- * Avisos de turno: llegada, ¿Venís?, cobertura.
- * Android: la app crea el canal `alertas_turno` (alta importancia, sonido).
+ * Avisos de turno: llegada, ¿Venís?, cobertura, retención, código de anexo.
+ * Android: el binario nuevo crea `alertas_turno_v2` con el wav embebido.
+ * El canal `alertas_turno` no se puede re-sonorizar. Si el teléfono todavía
+ * no tiene v2, FCM muestra el aviso en el canal default del manifest.
  */
-export const SHIFT_ALERT_CHANNEL_ID = 'alertas_turno';
+export const SHIFT_ALERT_CHANNEL_ID_LEGACY = 'alertas_turno';
+
+export const SHIFT_ALERT_CHANNEL_ID = 'alertas_turno_v2';
+
+/** Recurso res/raw (sin extensión). iOS usa el archivo con extensión. */
+export const SHIFT_ALERT_SOUND = 'alertas_turno';
+
+export const SHIFT_ALERT_SOUND_IOS = 'alertas_turno.wav';
 
 export const SHIFT_ALERT_FCM_TYPES = new Set([
   'CONVOCATORIA_COBERTURA',
@@ -30,7 +39,7 @@ export function shiftAlertPlatformConfig(): {
       priority: 'high',
       notification: {
         channelId: SHIFT_ALERT_CHANNEL_ID,
-        sound: 'default',
+        sound: SHIFT_ALERT_SOUND,
         priority: 'high',
       },
     },
@@ -41,7 +50,7 @@ export function shiftAlertPlatformConfig(): {
       },
       payload: {
         aps: {
-          sound: 'default',
+          sound: SHIFT_ALERT_SOUND_IOS,
           'interruption-level': 'time-sensitive',
         },
       },

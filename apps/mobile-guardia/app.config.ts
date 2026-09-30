@@ -7,7 +7,7 @@ const config: ExpoConfig = {
   name: 'COSP Guardia',
   slug: 'cosp-guardia',
   owner: 'cosp-guardia',
-  version: '1.1.3',
+  version: '1.2.0',
   orientation: 'portrait',
   scheme: 'cosp-guardia',
   userInterfaceStyle: 'light',
@@ -44,8 +44,13 @@ const config: ExpoConfig = {
       'ACCESS_FINE_LOCATION',
       'CAMERA',
       'POST_NOTIFICATIONS',
-      'RECEIVE_BOOT_COMPLETED',
       'VIBRATE',
+    ],
+    blockedPermissions: [
+      'android.permission.ACCESS_BACKGROUND_LOCATION',
+      'android.permission.RECEIVE_BOOT_COMPLETED',
+      'android.permission.RECORD_AUDIO',
+      'android.permission.SYSTEM_ALERT_WINDOW',
     ],
     softwareKeyboardLayoutMode: 'resize',
     ...(useEmulator ? { usesCleartextTraffic: true } : {}),
@@ -98,6 +103,8 @@ const config: ExpoConfig = {
       {
         locationWhenInUsePermission:
           'COSP Guardia usa tu ubicación al aceptar una convocatoria para estimar la llegada. Si la negás, usamos el domicilio del legajo. También valida que estés en el puesto al fichar.',
+        isAndroidBackgroundLocationEnabled: false,
+        isIosBackgroundLocationEnabled: false,
       },
     ],
     [
@@ -115,10 +122,7 @@ const config: ExpoConfig = {
         icon: './assets/android-icon-monochrome.png',
         color: '#D32F2F',
         defaultChannel: 'default',
-        // Sonido propio: './assets/sounds/alertas_turno.wav' acá y sound del canal.
-        // El plugin lo copia al binario nativo: requiere build EAS, no OTA.
-        // Hoy el canal usa el stream de alarma del sistema (USAGE_ALARM).
-        sounds: [],
+        sounds: ['./assets/sounds/alertas_turno.wav'],
       },
     ],
   ],

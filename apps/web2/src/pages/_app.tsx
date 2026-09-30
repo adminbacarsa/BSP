@@ -61,7 +61,8 @@ export default function App({ Component, pageProps }: AppProps) {
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
     && !router.pathname.includes('crono-popout')
-    && router.pathname !== '/admin/operaciones';
+    && router.pathname !== '/admin/operaciones'
+    && !router.pathname.startsWith('/privacidad');
   useEffect(() => {
     initTheme();
     applyCompanyThemeFromStorage();

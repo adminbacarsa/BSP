@@ -1,14 +1,21 @@
 /**
- * Canal Android `alertas_turno` (avisos de turno y convocatorias).
+ * Canal Android de avisos de turno (¿Venís?, convocatorias, retención, código de anexo).
  *
- * Se crea en runtime con setNotificationChannelAsync al abrir la app.
- * Sonido: stream de alarma del sistema (USAGE_ALARM) + sonido default.
- * Un .wav propio va en el plugin expo-notifications (`sounds`) de app.config.ts
- * y se embebe en el binario: eso exige un build EAS nuevo, no alcanza un OTA.
- * iOS time-sensitive: el entitlement de app.config también exige build nativo;
- * el payload lo manda Plataforma (interruptionLevel time-sensitive).
+ * `alertas_turno` ya existe en teléfonos con el binario anterior y Android no deja
+ * cambiarle el sonido. El sonido propio vive en `alertas_turno_v2` (este binario).
+ * El canal viejo se sigue creando con el sonido default para mensajes que todavía
+ * lleguen con ese id. El .wav lo embebe el plugin expo-notifications: hace falta
+ * un build EAS, no alcanza un OTA.
+ * iOS: el mismo wav va en el bundle; el payload usa interruption-level time-sensitive.
  */
-export const ALERTAS_TURNO_CHANNEL_ID = 'alertas_turno';
+export const ALERTAS_TURNO_CHANNEL_ID_LEGACY = 'alertas_turno';
+
+export const ALERTAS_TURNO_CHANNEL_ID = 'alertas_turno_v2';
+
+/** Nombre del raw Android (sin extensión). En iOS el archivo lleva .wav. */
+export const ALERTAS_TURNO_SOUND = 'alertas_turno';
+
+export const ALERTAS_TURNO_SOUND_IOS = 'alertas_turno.wav';
 
 export const ALERTAS_TURNO_CHANNEL = {
   name: 'Alertas de turno',
@@ -16,7 +23,14 @@ export const ALERTAS_TURNO_CHANNEL = {
   importance: 'MAX' as const,
   vibrationPattern: [0, 500, 250, 500, 250, 800],
   lockscreenVisibility: 'PUBLIC' as const,
-  sound: 'default' as const,
+  sound: ALERTAS_TURNO_SOUND,
   enableVibrate: true,
   audioUsage: 'ALARM' as const,
+};
+
+export const ALERTAS_TURNO_CHANNEL_LEGACY = {
+  name: 'Avisos de turno',
+  description: 'Canal anterior. Los avisos nuevos usan Alertas de turno.',
+  importance: 'MAX' as const,
+  sound: 'default' as const,
 };

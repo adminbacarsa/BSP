@@ -6,7 +6,12 @@ import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { getPortalFirebase } from './portal';
 import { buildDeviceTokenDoc } from './deviceTokenDoc';
-import { ALERTAS_TURNO_CHANNEL, ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
+import {
+  ALERTAS_TURNO_CHANNEL,
+  ALERTAS_TURNO_CHANNEL_ID,
+  ALERTAS_TURNO_CHANNEL_ID_LEGACY,
+  ALERTAS_TURNO_CHANNEL_LEGACY,
+} from './alertasTurnoChannel';
 
 export { buildDeviceTokenDoc } from './deviceTokenDoc';
 export { ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
@@ -14,8 +19,8 @@ export { ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
 let alertasTurnoChannelReady: Promise<void> | null = null;
 
 /**
- * Crea el canal Android `alertas_turno` al abrir la app (también en iOS deja
- * el handler con sonido). Idempotente. No pide permiso.
+ * Crea `alertas_turno_v2` (sonido propio) y el canal legado `alertas_turno`.
+ * Idempotente. No pide permiso. En iOS solo deja el handler con sonido.
  */
 export function ensureAlertasTurnoChannel(): Promise<void> {
   if (Platform.OS === 'web') return Promise.resolve();
@@ -51,6 +56,14 @@ export function ensureAlertasTurnoChannel(): Promise<void> {
             requestHardwareAudioVideoSynchronization: false,
           },
         },
+      });
+      await Notifications.setNotificationChannelAsync(ALERTAS_TURNO_CHANNEL_ID_LEGACY, {
+        name: ALERTAS_TURNO_CHANNEL_LEGACY.name,
+        description: ALERTAS_TURNO_CHANNEL_LEGACY.description,
+        importance: Notifications.AndroidImportance.MAX,
+        sound: ALERTAS_TURNO_CHANNEL_LEGACY.sound,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
       });
     })().catch((err) => {
       alertasTurnoChannelReady = null;
@@ -273,15 +286,6 @@ async function registerNativePush(params: {
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
       lightColor: '#312e81',
-    });
-    await Notifications.setNotificationChannelAsync('alertas_turno', {
-      name: 'Avisos de turno',
-      description: 'Llegada, ¿Venís? y convocatorias de cobertura',
-      importance: Notifications.AndroidImportance.HIGH,
-      sound: 'default',
-      vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#D32F2F',
-      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     });
   }
 

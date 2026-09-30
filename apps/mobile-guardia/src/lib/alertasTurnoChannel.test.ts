@@ -4,16 +4,23 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { ALERTAS_TURNO_CHANNEL, ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel.ts';
+import {
+  ALERTAS_TURNO_CHANNEL,
+  ALERTAS_TURNO_CHANNEL_ID,
+  ALERTAS_TURNO_CHANNEL_ID_LEGACY,
+  ALERTAS_TURNO_SOUND_IOS,
+} from './alertasTurnoChannel.ts';
 
 describe('alertas_turno', () => {
   it('id, importancia MAX, sonido, vibración y pantalla bloqueada', () => {
-    assert.equal(ALERTAS_TURNO_CHANNEL_ID, 'alertas_turno');
+    assert.equal(ALERTAS_TURNO_CHANNEL_ID, 'alertas_turno_v2');
     assert.equal(ALERTAS_TURNO_CHANNEL.importance, 'MAX');
-    assert.equal(ALERTAS_TURNO_CHANNEL.sound, 'default');
+    assert.equal(ALERTAS_TURNO_CHANNEL.sound, 'alertas_turno');
     assert.equal(ALERTAS_TURNO_CHANNEL.lockscreenVisibility, 'PUBLIC');
     assert.equal(ALERTAS_TURNO_CHANNEL.enableVibrate, true);
     assert.equal(ALERTAS_TURNO_CHANNEL.audioUsage, 'ALARM');
+    assert.equal(ALERTAS_TURNO_CHANNEL_ID_LEGACY, 'alertas_turno');
+    assert.equal(ALERTAS_TURNO_SOUND_IOS, 'alertas_turno.wav');
     assert.ok(ALERTAS_TURNO_CHANNEL.vibrationPattern.some((n) => n >= 500));
   });
 });

@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Linking, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePortalAuth } from '../../src/context/PortalAuthContext';
@@ -12,6 +12,8 @@ import { useResponsiveLayout } from '../../src/hooks/useResponsiveLayout';
 import { useConvocatoriasPendientes } from '../../src/hooks/useConvocatoriasPendientes';
 import { checkAndApplyAppUpdate, getAppVersionLabel } from '../../src/lib/appUpdate';
 import { appAlert } from '@/lib/appAlert';
+
+const PRIVACIDAD_URL = 'https://comtroldata.web.app/privacidad/';
 
 export default function MasScreen() {
   return (
@@ -167,6 +169,13 @@ function MasScreenContent() {
             <CommandButton label="Solicitar novedad" onPress={() => router.push('/novedad')} />
           </CommandCard>
         ) : null}
+
+        <CommandCard title="Privacidad">
+          <Text style={[styles.cardSub, { color: palette.onSurfaceMuted }]}>
+            Qué datos usa COSP Guardia, para qué, y cómo pedir acceso o supresión (Ley 25.326).
+          </Text>
+          <CommandButton label="Ver política de privacidad" variant="secondary" onPress={() => void Linking.openURL(PRIVACIDAD_URL)} />
+        </CommandCard>
 
         <CommandCard title="Sesión">
           <CommandButton
