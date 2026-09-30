@@ -421,7 +421,7 @@ service cloud.firestore {
       allow create, delete: if isSuperAdmin();
       allow update: if isSuperAdmin() || (
         isAdmin() && empresaId == userEmpresaId()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos', 'arcaTandas'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos', 'arcaTandas', 'driveEventualesFolderId'])
       );
     }
 
@@ -921,6 +921,20 @@ service cloud.firestore {
       allow read: if isSuperAdmin() || isAdmin();
       allow create, update: if isSuperAdmin();
       allow delete: if false;
+    }
+
+    match /contratos_marco/{marcoId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
+    match /anexos_eventuales/{anexoId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
+    match /anexo_codigos/{codigoId} {
+      allow read, write: if false;
     }
 
     match /contratos_eventuales/{contratoId} {

@@ -6,6 +6,7 @@
  * las alimenta con Firestore y escribe el resultado.
  */
 import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, MOVIMIENTO_ANULACION_ALTA, ANULACION_ALTA_MAX_HORAS, TANDA_DEFAULT } from './flujo.mjs';
+import { marcoDeBolsa, MOTIVO_SIN_MARCO } from './marcoAnexo.mjs';
 import { fechaAltaDeJornadas, fechaBajaDeJornadas, horasDeJornada } from './jornadas.mjs';
 import { vencePronto } from './ficha.mjs';
 
@@ -129,6 +130,7 @@ export function vencimientosDe(bolsa, hoy, dias = 30) {
 }
 
 const MOTIVOS = {
+  SIN_MARCO: MOTIVO_SIN_MARCO,
   NO_DISPONIBLE: 'No está disponible en la bolsa.',
   EMPRESA_NO_HABILITADA: 'No está habilitado para esta empresa.',
   CREDENCIAL_VENCIDA: 'Credencial vencida.',
@@ -155,6 +157,9 @@ export function evaluarCandidato({ bolsa, empresaId, jornadas, otrasJornadas = [
   const bloquear = (codigo, mensaje) => ({ ...base, elegible: false, motivoCodigo: codigo, motivo: mensaje || MOTIVOS[codigo] || codigo });
   if (bolsa?.disponibilidad === 'NO_DISPONIBLE') return bloquear('NO_DISPONIBLE');
   if (!habilitadoEnEmpresa(bolsa, empresaId)) return bloquear('EMPRESA_NO_HABILITADA');
+  const marco = marcoDeBolsa(bolsa, empresaId, hoy);
+  if (marco.estado !== 'MARCO_VIGENTE') return bloquear('SIN_MARCO');
+  if (marco.avisar) base.alertas.push(`contrato marco vence ${marco.vencimiento}`);
   const vencido = vencimientos.find((v) => v.estado === 'VENCIDO');
   if (vencido) {
     const codigo = vencido.tipo === 'credencial' ? 'CREDENCIAL_VENCIDA' : vencido.tipo === 'apto' ? 'APTO_VENCIDO' : 'HABILITACION_VENCIDA';

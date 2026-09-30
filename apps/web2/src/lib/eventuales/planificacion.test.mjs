@@ -10,6 +10,7 @@ const bolsa = {
   cuil: '20999999991', nombre: 'PEREZ, JUAN', disponibilidad: 'DISPONIBLE', empresasHabilitadas: ['bacarsa'],
   domicilioGeo: { lat: '-31.42', lon: '-64.18' }, credencialVencimiento: '2027-01-01', aptoPsicofisico: { vencimiento: '2026-10-20' },
   habilitacion9236: { vencimiento: '2027-06-01' }, confiabilidad: 90,
+  marcos: { bacarsa: { firmado: true, fechaFirma: '2026-01-01', vigenciaDias: 365 } },
 };
 const objetivoGeo = { lat: -31.40, lng: -64.19 };
 const M = { fecha: '2026-10-05', horaInicio: '07:00', horaFin: '15:00', horas: 8 };

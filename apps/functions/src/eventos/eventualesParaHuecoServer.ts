@@ -83,7 +83,7 @@ export async function loadEventualesParaHueco(
       hoyYmd: arYmd(Date.now()),
     },
     otrasJornadas: otras,
-  });
+  }).filter((row) => row.elegible !== false);
 }
 
 /**

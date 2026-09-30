@@ -1626,9 +1626,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                           <button
                             key={row.cuil}
                             type="button"
-                            disabled={!!loading}
-                            onClick={() => sendNotification(row)}
-                            className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:bg-slate-50 text-left"
+                            disabled={!!loading || row.elegible === false}
+                            onClick={() => row.elegible !== false && sendNotification(row)}
+                            className={`flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border shadow-sm text-left ${row.elegible === false ? 'border-slate-100 bg-slate-50 text-slate-400' : 'border-slate-200 bg-white hover:bg-slate-50'}`}
                           >
                             <span className="min-w-0">
                               <span className="block text-sm font-black text-slate-800 truncate">{row.employeeName}</span>
@@ -1636,7 +1636,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                                 {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
                               </span>
                             </span>
-                            <span className="text-[10px] font-black text-indigo-700 shrink-0">Convocar</span>
+                            <span className={`text-[10px] font-black shrink-0 ${row.elegible === false ? 'text-slate-400' : 'text-indigo-700'}`}>{row.elegible === false ? (row.motivo || 'Sin contrato marco') : 'Convocar'}</span>
                           </button>
                         ))}
                       </div>

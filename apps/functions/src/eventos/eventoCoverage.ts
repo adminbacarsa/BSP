@@ -19,6 +19,8 @@ export type EventualCandidato = {
   uid?: string;
   distanceKm: number | null;
   confiabilidad: number;
+  elegible?: boolean;
+  motivo?: string;
 };
 
 export type EventualBolsaRow = {
@@ -32,6 +34,7 @@ export type EventualBolsaRow = {
   confiabilidad?: number;
   uid?: string;
   legajos?: { employeeId?: string; empresaId?: string }[];
+  marcos?: Record<string, { firmado?: boolean; vencimiento?: string; estado?: string; fechaFirma?: string }>;
 };
 
 export type EventualHueco = {
@@ -138,6 +141,11 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
       otras.filter((j) => j.cuil === cuil),
     );
     if (!cruce.ok) continue;
+    const marco = (row.marcos || {})[hueco.empresaId];
+    const marcoOk = marco?.firmado === true
+      && marco.estado !== 'VENCIDO'
+      && marco.estado !== 'SIN_MARCO'
+      && (!marco.vencimiento || String(marco.vencimiento) >= hoy);
     const geo = row.domicilioGeo;
     const distanceKm = geo && hueco.lat != null && hueco.lng != null && Number.isFinite(geo.lat) && Number.isFinite(geo.lng)
       ? Math.round(haversineKm(Number(geo.lat), Number(geo.lng), Number(hueco.lat), Number(hueco.lng)) * 10) / 10
@@ -150,6 +158,8 @@ export function eventualesParaHueco(input?: EventualesHuecoInput | null): Eventu
       ...(row.uid ? { uid: String(row.uid) } : {}),
       distanceKm,
       confiabilidad: Number(row.confiabilidad) || 0,
+      elegible: marcoOk,
+      ...(marcoOk ? {} : { motivo: 'Sin contrato marco' }),
     });
   }
   out.sort((a, b) => {

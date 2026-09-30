@@ -3705,6 +3705,7 @@ export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigH
 // Endpoint del n8n local y del link manual. Requiere el secreto ARCA_ROBOT_KEY: no desplegar antes de crearlo.
 export { arcaEnviosApi } from './arca/arcaEnviosApi';
 export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './eventuales/gestionarEventual';
+export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventual } from './eventuales/marcoAnexoCall';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
 export {

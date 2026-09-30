@@ -63,6 +63,9 @@ export default function EventualesPage() {
   const [editando, setEditando] = useState('');
   const [baja, setBaja] = useState({ motivo: '', fecha: hoy() });
   const [guardando, setGuardando] = useState(false);
+  const [marcos, setMarcos] = useState<Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }>>({});
+  const [firmaFecha, setFirmaFecha] = useState(hoy());
+  const [vigenciaDias, setVigenciaDias] = useState('365');
 
   useEffect(() => {
     const q = query(collection(db, 'eventuales_bolsa'), where('grupoId', '==', GRUPO_EVENTUALES_ID));
@@ -114,6 +117,10 @@ export default function EventualesPage() {
     setDetalle(null);
     try {
       setDetalle(await llamar('gestionarEventual', { accion: 'detalle', cuil: id }));
+      const lista = await llamar('gestionarMarcoEventual', { accion: 'listar', cuil: id }) as { marcos?: { empresaId: string; estado?: string; vencimiento?: string; avisar?: boolean }[] };
+      const map: Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }> = {};
+      (lista.marcos || []).forEach((row) => { map[row.empresaId] = row; });
+      setMarcos(map);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo abrir la ficha.');
     }
@@ -231,6 +238,50 @@ export default function EventualesPage() {
                     {puede('update') && <button type="button" className="ml-2 underline" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, mail: ficha.mail, telefono: ficha.telefono, dni: ficha.dni, domicilio: ficha.domicilio, empresasHabilitadas: ficha.empresasHabilitadas, obraSocialRnos: (detalle?.rnos as { sugerencia: string }).sugerencia }); }}>Usar esa</button>}
                   </p>
                 )}
+                <div className="rounded-2xl border border-slate-100 p-3">
+                  <h3 className="text-sm font-black text-slate-700">Contrato marco</h3>
+                  <p className="text-[11px] text-slate-500">Una vez por empresa, en papel. Cada aceptación en la app es un anexo. La firma en la app (CiDi) queda para más adelante.</p>
+                  {GRUPO_EVENTUALES_EMPRESA_IDS.map((emp) => {
+                    const marco = marcos[emp];
+                    const estado = marco?.estado || 'SIN_MARCO';
+                    return (
+                      <div key={emp} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                        <span className={`font-bold ${estado === 'MARCO_VIGENTE' ? 'text-emerald-700' : 'text-rose-600'}`}>{emp}: {estado}{marco?.vencimiento ? ` · vence ${fmt(marco.vencimiento)}` : ''}</span>
+                        {marco?.avisar && <span className="font-bold text-amber-700">Aviso RRHH: vence en menos de 30 días</span>}
+                        {puede('update') && <button type="button" className="rounded-xl bg-slate-100 px-2 py-1 font-bold" onClick={async () => {
+                          const res = await llamar('gestionarMarcoEventual', { accion: 'generar', cuil: ficha.id, empresaId: emp, fecha: firmaFecha });
+                          const bin = atob(String(res.pdfBase64 || ''));
+                          const bytes = new Uint8Array(bin.length);
+                          for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+                          const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+                          const a = document.createElement('a');
+                          a.href = url; a.download = `Marco-${emp}.pdf`; a.click();
+                          toast.success('PDF del marco generado.');
+                        }}>Generar PDF</button>}
+                      </div>
+                    );
+                  })}
+                  {puede('update') && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <input type="date" value={firmaFecha} onChange={(e) => setFirmaFecha(e.target.value)} className="rounded-xl border px-2 py-1 text-xs" />
+                      <input value={vigenciaDias} onChange={(e) => setVigenciaDias(e.target.value)} className="w-16 rounded-xl border px-2 py-1 text-xs" title="Días de vigencia" />
+                      <label className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white">Subir marco firmado
+                        <input type="file" accept="application/pdf,image/*" className="hidden" onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          const emp = ficha.empresasHabilitadas[0] || GRUPO_EVENTUALES_EMPRESA_IDS[0];
+                          if (!file) return;
+                          const buf = await file.arrayBuffer();
+                          const bytes = new Uint8Array(buf);
+                          let bin = '';
+                          bytes.forEach((b) => { bin += String.fromCharCode(b); });
+                          await llamar('gestionarMarcoEventual', { accion: 'firmar', cuil: ficha.id, empresaId: emp, fechaFirma: firmaFecha, vigenciaDias: Number(vigenciaDias) || 365, pdfBase64: btoa(bin) });
+                          toast.success('Marco firmado cargado.');
+                          abrirDetalle(ficha.id);
+                        }} />
+                      </label>
+                    </div>
+                  )}
+                </div>
                 <p className="text-sm text-slate-700">Encadenamiento: {ficha.riesgoEncadenamiento || 'sin alerta'}. Habilitación {fmt(ficha.habilitacionVencimiento)} · credencial {fmt(ficha.credencialVencimiento)} · apto {fmt(ficha.aptoVencimiento)}.</p>
                 {puede('delete') && ficha.disponibilidad !== 'NO_DISPONIBLE' && (
                   <div className="flex flex-wrap gap-2 rounded-2xl bg-slate-50 p-3">
