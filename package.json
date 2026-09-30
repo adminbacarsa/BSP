@@ -102,7 +102,8 @@
     "fix:p1b-demo-licencias": "node scripts/fix-p1b-demo-licencias.mjs",
     "fix:p1d-demo-fuera-operacion": "node scripts/fix-p1d-demo-fuera-operacion.mjs",
     "import:eventuales:dry": "node scripts/import-eventuales-planilla.mjs",
-    "test:eventuales": "node --experimental-strip-types --test apps/web2/src/lib/eventuales/eventuales.test.mjs apps/web2/src/lib/eventuales/remuneracion.test.mjs apps/web2/src/lib/eventuales/arcaTxt.test.mjs apps/web2/src/lib/eventuales/arcaEnvios.test.mjs apps/web2/src/lib/eventuales/avisos.test.mjs apps/web2/src/lib/eventuales/flujo.test.mjs apps/web2/src/lib/eventuales/ficha.test.mjs apps/web2/src/lib/eventuales/planificacion.test.mjs apps/web2/src/lib/eventuales/marcoAnexo.test.mjs"
+    "test:eventuales": "node --experimental-strip-types --test apps/web2/src/lib/eventuales/eventuales.test.mjs apps/web2/src/lib/eventuales/remuneracion.test.mjs apps/web2/src/lib/eventuales/arcaTxt.test.mjs apps/web2/src/lib/eventuales/arcaEnvios.test.mjs apps/web2/src/lib/eventuales/avisos.test.mjs apps/web2/src/lib/eventuales/flujo.test.mjs apps/web2/src/lib/eventuales/ficha.test.mjs apps/web2/src/lib/eventuales/planificacion.test.mjs apps/web2/src/lib/eventuales/marcoAnexo.test.mjs apps/web2/src/lib/eventuales/marcosLote.test.mjs",
+    "eval:marcos-lote": "npx tsx scripts/eval-marcos-lote-qr.mts"
   },
   "keywords": [
     "firebase",

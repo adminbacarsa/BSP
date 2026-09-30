@@ -15,7 +15,7 @@ function db() {
   return admin.firestore();
 }
 
-async function exigirRrhh(context: functions.https.CallableContext) {
+export async function exigirRrhh(context: functions.https.CallableContext) {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
   const role = String(context.auth.token.role || '');
   if (SUPER.includes(role)) return context.auth;
@@ -28,7 +28,7 @@ async function exigirRrhh(context: functions.https.CallableContext) {
   throw new functions.https.HttpsError('permission-denied', 'No tenés permiso de eventuales.');
 }
 
-async function lib() {
+export async function lib() {
   return import('../eventuales-shared/marcoAnexo.mjs') as Promise<{
     textoMarco: (i: Record<string, string>) => string;
     textoAnexo: (i: Record<string, unknown>) => string;
@@ -95,7 +95,7 @@ async function carpetaPersona(cuil: string, bolsa: Record<string, unknown>) {
   return { folderId, nombre };
 }
 
-async function guardarPdf(cuil: string, bolsa: Record<string, unknown>, nombre: string, bytes: Buffer) {
+export async function guardarPdf(cuil: string, bolsa: Record<string, unknown>, nombre: string, bytes: Buffer) {
   const storagePath = `eventuales/${cuil}/${nombre}`;
   try {
     const { drive } = await clienteDrive();
@@ -122,12 +122,48 @@ async function guardarPdf(cuil: string, bolsa: Record<string, unknown>, nombre: 
   }
 }
 
-async function registrarDoc(cuil: string, empresaId: string, tipo: string, nombre: string, hash: string, guardado: { link: string | null; driveFileId: string | null; drivePendiente: boolean; storagePath: string | null }) {
+export async function registrarDoc(cuil: string, empresaId: string, tipo: string, nombre: string, hash: string, guardado: { link: string | null; driveFileId: string | null; drivePendiente: boolean; storagePath: string | null }) {
   await db().collection('eventuales_documentos').add({
     bolsaCuil: cuil, empresaId, tipo, nombre, hash, link: guardado.link, driveFileId: guardado.driveFileId,
     drivePendiente: guardado.drivePendiente, storagePath: guardado.storagePath,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
+}
+
+/** Marco firmado en papel: guarda el escaneo, marca MARCO_VIGENTE y deja auditoría. Lo usan la ficha y el lote. */
+export async function firmarMarco(params: {
+  cuil: string; empresaId: string; fechaFirma: string; vigenciaDias?: number; bytes: Buffer; actorUid: string;
+  marcoVersion?: number; origen?: string;
+}) {
+  const m = await lib();
+  const { cuil, empresaId, fechaFirma, bytes, actorUid } = params;
+  const vigenciaDias = Number(params.vigenciaDias) > 0 ? Number(params.vigenciaDias) : m.VIGENCIA_MARCO_DIAS;
+  const hoy = new Date().toISOString().slice(0, 10);
+  const plan = m.planMarco({ firmado: true, fechaFirma, vigenciaDias, hoy });
+  if (plan.estado === 'SIN_MARCO') throw new functions.https.HttpsError('invalid-argument', 'Falta la fecha de firma.');
+  if (!bytes?.length) throw new functions.https.HttpsError('invalid-argument', 'Falta el escaneo firmado.');
+  const bolsaSnap = await db().collection('eventuales_bolsa').doc(cuil).get();
+  if (!bolsaSnap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
+  const bolsa = bolsaSnap.data() || {};
+  const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
+  const empresaNombre = String(empresa.razonSocial || empresa.nombre || empresaId);
+  const hash = m.sha256(bytes);
+  const nombrePdf = m.nombreArchivo({ tipo: 'MARCO', fecha: fechaFirma, empresa: empresaNombre });
+  const guardado = await guardarPdf(cuil, bolsa, nombrePdf, bytes);
+  await registrarDoc(cuil, empresaId, 'MARCO', nombrePdf, hash, guardado);
+  const ficha = { firmado: true, fechaFirma, vigenciaDias, vencimiento: plan.vencimiento, estado: plan.estado, hash, link: guardado.link };
+  await db().collection('contratos_marco').doc(`${cuil}_${empresaId}`).set({
+    bolsaCuil: cuil, empresaId, ...ficha, storagePath: guardado.storagePath, driveFileId: guardado.driveFileId, drivePendiente: guardado.drivePendiente,
+    firmadoPor: actorUid, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ...(params.marcoVersion ? { marcoVersion: params.marcoVersion } : {}),
+    ...(params.origen ? { origen: params.origen } : {}),
+  }, { merge: true });
+  await db().collection('eventuales_bolsa').doc(cuil).set({ marcos: { [empresaId]: ficha } }, { merge: true });
+  await db().collection('audit_logs').add({
+    action: 'EVENTUAL_MARCO', module: 'EVENTUALES', actorUid, bolsaCuil: cuil, empresaId,
+    details: `${plan.estado} hasta ${plan.vencimiento}${params.origen ? ` (${params.origen})` : ''}`, timestamp: admin.firestore.FieldValue.serverTimestamp(),
+  });
+  return { ok: true, ...plan, hash, ...guardado };
 }
 
 export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
@@ -226,29 +262,12 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   }
 
   if (accion === 'firmar') {
-    const fechaFirma = String(data?.fechaFirma || '');
-    const vigenciaDias = Number(data?.vigenciaDias) > 0 ? Number(data.vigenciaDias) : m.VIGENCIA_MARCO_DIAS;
-    const hoy = new Date().toISOString().slice(0, 10);
-    const plan = m.planMarco({ firmado: true, fechaFirma, vigenciaDias, hoy });
-    if (plan.estado === 'SIN_MARCO') throw new functions.https.HttpsError('invalid-argument', 'Falta la fecha de firma.');
     const raw = String(data?.pdfBase64 || '');
     if (!raw) throw new functions.https.HttpsError('invalid-argument', 'Falta el escaneo firmado.');
-    const bytes = Buffer.from(raw, 'base64');
-    const hash = m.sha256(bytes);
-    const nombrePdf = m.nombreArchivo({ tipo: 'MARCO', fecha: fechaFirma, empresa: empresaNombre });
-    const guardado = await guardarPdf(cuil, bolsa, nombrePdf, bytes);
-    await registrarDoc(cuil, empresaId, 'MARCO', nombrePdf, hash, guardado);
-    const ficha = { firmado: true, fechaFirma, vigenciaDias, vencimiento: plan.vencimiento, estado: plan.estado, hash, link: guardado.link };
-    await db().collection('contratos_marco').doc(`${cuil}_${empresaId}`).set({
-      bolsaCuil: cuil, empresaId, ...ficha, storagePath: guardado.storagePath, driveFileId: guardado.driveFileId, drivePendiente: guardado.drivePendiente,
-      firmadoPor: auth.uid, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-    }, { merge: true });
-    await db().collection('eventuales_bolsa').doc(cuil).set({ marcos: { [empresaId]: ficha } }, { merge: true });
-    await db().collection('audit_logs').add({
-      action: 'EVENTUAL_MARCO', module: 'EVENTUALES', actorUid: auth.uid, bolsaCuil: cuil, empresaId,
-      details: `${plan.estado} hasta ${plan.vencimiento}`, timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    return firmarMarco({
+      cuil, empresaId, fechaFirma: String(data?.fechaFirma || ''), vigenciaDias: Number(data?.vigenciaDias),
+      bytes: Buffer.from(raw, 'base64'), actorUid: auth.uid,
     });
-    return { ok: true, ...plan, hash, ...guardado };
   }
 
   throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');

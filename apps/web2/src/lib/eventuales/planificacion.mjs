@@ -6,7 +6,8 @@
  * las alimenta con Firestore y escribe el resultado.
  */
 import { bloqueoCruce, clasificarAlta, habilitadoEnEmpresa, MOVIMIENTO_ANULACION_ALTA, ANULACION_ALTA_MAX_HORAS, TANDA_DEFAULT } from './flujo.mjs';
-import { marcoDeBolsa, MOTIVO_SIN_MARCO } from './marcoAnexo.mjs';
+import { MOTIVO_SIN_MARCO } from './marcoAnexoConst.mjs';
+import { marcoDeBolsa } from './marcoTexto.mjs';
 import { fechaAltaDeJornadas, fechaBajaDeJornadas, horasDeJornada } from './jornadas.mjs';
 import { vencePronto } from './ficha.mjs';
 
