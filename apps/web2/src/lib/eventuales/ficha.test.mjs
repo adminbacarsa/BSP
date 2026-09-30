@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { planAccesoEventual, planBaja, planReactivar, puedeGestionar, sugerirObraSocial, validarFicha, vencePronto } from './ficha.mjs';
+import { planAccesoEventual, planBaja, planReactivar, puedeGestionar, RNOS_DEFAULT_FICHA, sugerirObraSocial, validarFicha, vencePronto } from './ficha.mjs';
 
 const base = { nombre: 'Juan Pérez', cuil: '20-12345678-6', mail: 'juan@bacar.test', empresasHabilitadas: ['bacarsa', 'otra'] };
 
@@ -37,10 +37,12 @@ describe('ficha de la bolsa', () => {
 
   it('sin RNOS queda pendiente y sugiere el de otro legajo', () => {
     assert.equal(validarFicha(base).doc.obraSocialRnos, '');
+    assert.equal(RNOS_DEFAULT_FICHA, '122807');
     const sugerida = sugerirObraSocial('', [{ empresaId: 'bacarsa', obraSocialRnos: '12.345' }]);
-    assert.equal(sugerida.codigo, 'RNOS_PENDIENTE');
-    assert.equal(sugerida.sugerido, true);
-    assert.equal(sugerida.rnos, '012345');
+    assert.equal(sugerida.pendiente, false);
+    assert.equal(sugerida.rnos, '122807');
+    assert.equal(sugerida.sugerencia, '012345');
+    assert.equal(sugerirObraSocial('', [], '').codigo, 'RNOS_PENDIENTE');
     assert.equal(sugerirObraSocial('112233', [{ obraSocialRnos: '999999' }]).pendiente, false);
   });
 });

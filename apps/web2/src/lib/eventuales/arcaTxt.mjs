@@ -30,15 +30,22 @@ export const LARGO_REGISTRO_ARCA = 130;
 
 /** Vigilador. Default de bacarsa, grupos_bacar_sa y pruebas_sa. Se pisa con arcaEventuales.categoria. */
 export const CATEGORIA_VIGILADOR = '033104';
+/** O.S. del personal de vigilancia de Córdoba (tabla ARCA tab 5). Default SUVICO. */
+export const RNOS_SUVICO = '122807';
 export const EMPRESAS_CATEGORIA_VIGILADOR = ['bacarsa', 'grupos_bacar_sa', 'pruebas_sa'];
 
 export function arcaEventualesDe(empresa) {
   const cfg = { ...ARCA_EVENTUALES_DEFAULT, ...(empresa?.arcaEventuales || {}) };
   const guardada = empresa?.arcaEventuales || {};
-  const explicita = 'categoria' in guardada || 'categoriaProfesional' in guardada;
-  cfg.categoria = explicita
+  const id = String(empresa?.id || empresa?.empresaId || '');
+  const delGrupo = EMPRESAS_CATEGORIA_VIGILADOR.includes(id);
+  const categoriaExplicita = 'categoria' in guardada || 'categoriaProfesional' in guardada;
+  cfg.categoria = categoriaExplicita
     ? String(guardada.categoria ?? guardada.categoriaProfesional ?? '')
-    : (EMPRESAS_CATEGORIA_VIGILADOR.includes(String(empresa?.id || empresa?.empresaId || '')) ? CATEGORIA_VIGILADOR : '');
+    : (delGrupo ? CATEGORIA_VIGILADOR : '');
+  cfg.obraSocialDefault = 'obraSocialDefault' in guardada
+    ? String(guardada.obraSocialDefault ?? '')
+    : (delGrupo ? RNOS_SUVICO : '');
   return cfg;
 }
 

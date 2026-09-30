@@ -71,6 +71,33 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(editada.lineas[0].slice(100, 106), '999999');
     assert.equal(editada.advertencias.includes('CCT_CODIGO_PENDIENTE'), false);
   });
+
+  it('el RNOS default de SUVICO es 122807 y la persona lo pisa', () => {
+    const out = lineasCargaMasiva({
+      contrato,
+      cuil,
+      bruto: 8000,
+      empresa: { id: 'pruebas_sa', arcaEventuales: { cctCodigo: '42205', categoria: '033104' } },
+    });
+    assert.equal(out.lineas[0].slice(39, 45), '122807');
+    assert.equal(out.advertencias.includes('RNOS_PENDIENTE'), false);
+    const personal = lineasCargaMasiva({
+      contrato,
+      cuil,
+      bruto: 8000,
+      obraSocial: '999999',
+      empresa: { id: 'bacarsa', arcaEventuales: { cctCodigo: '42205', categoria: '033104' } },
+    });
+    assert.equal(personal.lineas[0].slice(39, 45), '999999');
+    const sinNada = lineasCargaMasiva({
+      contrato,
+      cuil,
+      bruto: 8000,
+      empresa: { id: 'bacarsa', arcaEventuales: { obraSocialDefault: '', cctCodigo: '42205', categoria: '033104' } },
+    });
+    assert.equal(sinNada.advertencias.includes('RNOS_PENDIENTE'), true);
+    assert.equal(sinNada.enviable, false);
+  });
 });
 
 describe('propuesta de escala', () => {

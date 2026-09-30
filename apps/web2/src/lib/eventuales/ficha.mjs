@@ -1,3 +1,4 @@
+import { RNOS_SUVICO } from './arcaTxt.mjs';
 import { normalizeCuil } from './cuil.mjs';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from './grupo.mjs';
 import { sumarDias } from './jornadas.mjs';
@@ -19,15 +20,24 @@ export function rnosDigitos(raw) {
   return digits.padStart(6, '0').slice(-6);
 }
 
-/** Si la ficha no tiene RNOS y otro legajo del mismo CUIL sí, se sugiere. No alcanza para enviar. */
-export function sugerirObraSocial(fichaRnos, legajos) {
+export const RNOS_DEFAULT_FICHA = RNOS_SUVICO;
+
+/** Personal primero. Si no hay, el default SUVICO. Pendiente solo si faltan los dos. El otro legajo se sugiere, no se envía solo. */
+export function sugerirObraSocial(fichaRnos, legajos, obraSocialDefault = RNOS_SUVICO) {
   const propio = rnosDigitos(fichaRnos);
-  if (propio) return { rnos: propio, sugerido: false, pendiente: false };
+  if (propio) return { rnos: propio, sugerido: false, pendiente: false, origen: 'PERSONA' };
   const otro = (legajos || []).find((l) => rnosDigitos(l?.obraSocialRnos));
-  if (otro) {
-    return { rnos: rnosDigitos(otro.obraSocialRnos), sugerido: true, pendiente: true, empresaId: otro.empresaId || '', codigo: 'RNOS_PENDIENTE' };
-  }
-  return { rnos: '', sugerido: false, pendiente: true, codigo: 'RNOS_PENDIENTE' };
+  const def = rnosDigitos(obraSocialDefault);
+  if (!def && !otro) return { rnos: '', sugerido: false, pendiente: true, codigo: 'RNOS_PENDIENTE' };
+  return {
+    rnos: def,
+    origen: def ? 'DEFAULT' : '',
+    sugerido: !!otro,
+    sugerencia: otro ? rnosDigitos(otro.obraSocialRnos) : '',
+    empresaId: otro?.empresaId || '',
+    pendiente: !def,
+    ...(def ? {} : { codigo: 'RNOS_PENDIENTE' }),
+  };
 }
 
 export function validarFicha(input, ctx = {}) {
