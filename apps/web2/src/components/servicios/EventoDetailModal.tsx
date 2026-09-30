@@ -12,8 +12,11 @@ import { assignGuardToEvent } from '@/services/eventoAssignService';
 import { type Evento, type ServicioEvento } from '@/services/eventoService';
 import { solicitudEventoService, type SolicitudEvento } from '@/services/solicitudEventoService';
 import { useToast } from '@/context/ToastContext';
+import { useAuth } from '@/context/AuthContext';
 import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType, type EmpleadoAptitud } from '@/lib/rrhh/aptitudTypes';
+import EventualesCandidatosPanel from '@/components/eventuales/EventualesCandidatosPanel';
+import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -89,6 +92,11 @@ interface Props {
 
 export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const { addToast } = useToast();
+    const { isSuperAdmin, rolePermissions } = useAuth();
+    const canConvocarEventual = canConvocarEventuales(isSuperAdmin, rolePermissions);
+    /** Origen del convocado: EVENTUALES (bolsa) primero, después la nómina de la empresa. */
+    const [fuente, setFuente] = useState<'eventuales' | 'nomina'>('eventuales');
+    const [eventualBusy, setEventualBusy] = useState(false);
     const [selectedSrvId, setSelectedSrvId] = useState<string>(evento.servicios?.[0]?.id || '');
     const [empleados, setEmpleados] = useState<EmpRow[]>([]);
     const [availMap, setAvailMap] = useState<Record<string, string>>({});   // empleadoId → código turno | 'libre'
@@ -675,7 +683,63 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         </div>
                                     ) : (
                                         <>
-                                            <div className="px-4 pt-3 pb-2 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800 flex-wrap">
+                                            <div className="flex border-b border-slate-100 dark:border-slate-800 shrink-0">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFuente('eventuales')}
+                                                    className={`flex-1 py-2 text-[10px] font-black transition-colors ${fuente === 'eventuales' ? 'border-b-2 border-fuchsia-600 text-fuchsia-700' : 'text-slate-500 hover:text-slate-700'}`}
+                                                >
+                                                    Eventuales (bolsa)
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setFuente('nomina')}
+                                                    className={`flex-1 py-2 text-[10px] font-black transition-colors ${fuente === 'nomina' ? 'border-b-2 border-slate-700 text-slate-800 dark:text-slate-100' : 'text-slate-500 hover:text-slate-700'}`}
+                                                >
+                                                    Nómina
+                                                </button>
+                                            </div>
+                                            {fuente === 'eventuales' && selectedSrv && (() => {
+                                                const horas = selectedSrv.tipoTurno === '3x8' ? 8 : selectedSrv.tipoTurno === '2x12' ? 12 : calcHorasServicio(selectedSrv.horaInicio, selectedSrv.horaFin);
+                                                const jornada = { fecha: selectedSrv.fecha, horaInicio: selectedSrv.horaInicio || '08:00', horaFin: selectedSrv.horaFin || '16:00', horas };
+                                                return (
+                                                    <div className="flex-1 overflow-hidden flex flex-col px-3 py-3">
+                                                        <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2 shrink-0">
+                                                            {selectedSrv.nombre} · {fmtFecha(selectedSrv.fecha)} · {jornada.horaInicio}–{jornada.horaFin} ({horas}h). El eventual queda asignado con turno EV; el contrato de la empresa se confirma y entra al lote AT.
+                                                        </p>
+                                                        <EventualesCandidatosPanel
+                                                            empresaId={empresaId}
+                                                            objectiveId={null}
+                                                            clientId={evento.clienteId || null}
+                                                            jornadas={[jornada]}
+                                                            canConvocar={canConvocarEventual}
+                                                            busy={eventualBusy}
+                                                            onSelect={async (candidato) => {
+                                                                setEventualBusy(true);
+                                                                try {
+                                                                    await asignarEventualPlanificacion({
+                                                                        empresaId,
+                                                                        cuil: candidato.cuil,
+                                                                        objectiveId: null,
+                                                                        clientId: evento.clienteId || null,
+                                                                        clientName: evento.clienteNombre || null,
+                                                                        positionName: selectedSrv.nombre || 'Evento',
+                                                                        turnos: [{ ...jornada, code: 'EV', name: 'Evento', positionName: selectedSrv.nombre || 'Evento' }],
+                                                                        modo: 'TURNOS',
+                                                                        evento: { eventoId: evento.id!, eventoNombre: evento.nombre, servicioId: selectedSrv.id, servicioNombre: selectedSrv.nombre },
+                                                                    });
+                                                                    addToast(`${candidato.nombre.split(',')[0]} (eventual) asignado a ${selectedSrv.nombre}`, 'success');
+                                                                } catch (e) {
+                                                                    addToast(eventualErrorMessage(e), 'error');
+                                                                } finally {
+                                                                    setEventualBusy(false);
+                                                                }
+                                                            }}
+                                                        />
+                                                    </div>
+                                                );
+                                            })()}
+                                            <div className={`px-4 pt-3 pb-2 flex items-center gap-3 shrink-0 border-b border-slate-100 dark:border-slate-800 flex-wrap ${fuente === 'eventuales' ? 'hidden' : ''}`}>
                                                 <div className="relative flex-1 min-w-32">
                                                     <Search size={11} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
                                                     <input
@@ -704,7 +768,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                 </button>
                                             </div>
                                             {/* Filtros de disponibilidad */}
-                                            {!loadingAvail && (
+                                            {!loadingAvail && fuente === 'nomina' && (
                                                 <div className="px-4 py-2 flex items-center gap-1.5 flex-wrap border-b border-slate-100 dark:border-slate-800 shrink-0">
                                                     {([
                                                         { key: 'todos',    label: 'Todos' },
@@ -727,7 +791,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                     })}
                                                 </div>
                                             )}
-                                            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1.5">
+                                            <div className={`flex-1 overflow-y-auto px-4 py-3 space-y-1.5 ${fuente === 'eventuales' ? 'hidden' : ''}`}>
                                                 {loadingAvail && (
                                                     <p className="text-[11px] text-slate-400 text-center py-4">Cargando disponibilidad…</p>
                                                 )}

@@ -35,6 +35,22 @@ La liquidación ya es por empresa: `payroll-api/calc.ts` arma el snapshot con el
 
 **Sustitución.** El planificador elige otro de la bolsa. Si el AT todavía no se subió, sale del lote. Si ya se subió y no trabajó, dentro de las 24 h el movimiento es **NA** (anulación de alta, hipótesis: confirmar con el contador). Después de 24 h ARCA no deja anular (rechazo BTU) y queda una BT marcada para el contador, no el motivo 30. El sustituto recibe su contrato y su AT. Queda en el historial del contrato.
 
+### 0.1c Implementado en Planificación (rama `cursor/planif-eventuales`)
+
+| Pieza | Archivo |
+|-------|---------|
+| Reglas puras: candidatos (`evaluarCandidato`, `ordenarCandidatos`), turno → jornada AR (`turnoAJornada`), contrato por turnos (`planContratoDesdeTurnos`) | `apps/web2/src/lib/eventuales/planificacion.mjs` (+ `.test.mjs`, `npm run test:eventuales`) |
+| Callables `listarCandidatosEventuales`, `asignarEventualPlanificacion` (modo `LEGAJO` / `TURNOS`), `sustituirEventualPlanificacion`; trigger `onTurnoEventualWrite` → `sincronizarContratoEventual` | `apps/functions/src/eventuales/planificacionEventuales.ts` |
+| Solapa **Eventuales** compartida | `apps/web2/src/components/eventuales/EventualesCandidatosPanel.tsx` |
+| Grilla: cobertura de ausencias (`PlanningCoverageModal`), suplente de licencia (modal V/L/E/A → «Traer suplente» → **Eventuales (bolsa)**), **Sustituir eventual** en la celda, badge `EVENTUAL` en la fila | `apps/web2/src/pages/admin/planificacion/index.tsx` |
+| Eventos: `EventoDetailModal` → Convocar → **Eventuales (bolsa)** primero (escribe el `EV` desde el servidor) | `apps/web2/src/components/servicios/EventoDetailModal.tsx` |
+
+Permiso: `EVENTUALES.convocar` (el servidor lo exige; sin permiso la solapa muestra el aviso). Candidatos = bolsa `DISPONIBLE` con la empresa del objetivo en `empresasHabilitadas`; el cruce (`bloqueoCruce`) se calcula contra los turnos del CUIL en todo el grupo (`turnos.bolsaCuil`, índice `bolsaCuil + scheduleDate`) y se muestra como motivo. Distancia = `domicilioGeo` → coordenadas del objetivo. Vencimiento pasado de credencial/apto/habilitación bloquea; a 30 días avisa.
+
+**Legajo.** El primer turno en una empresa crea `empleados` con `modalidad: 'EVENTUAL'`, `bolsaCuil`, `preferredObjectiveId: null` (aparece en la grilla como invitado del objetivo con sus turnos y el mismo cálculo de horas) y lo registra en `eventuales_bolsa.legajos`. Al guardar la grilla, todo turno de un legajo eventual sale con `esEventual: true` y `bolsaCuil`.
+
+**Contrato = turnos.** Doc `contratos_eventuales/{empresaId}_{cuil}_{yyyy-mm}`, `origen: 'PLANIFICADOR'`, jornadas = turnos del eventual en esa empresa y mes. Turnos `draft` → contrato **BORRADOR** sin envío. Al publicar (la grilla pone `draft: false`) → **CONFIRMADO** y nace el `arca_envios` **AT** (canal `LOTE`/`URGENTE` por `clasificarAlta`). Mes ya publicado: cada guardado recalcula; si el AT está `PENDIENTE` se corrigen sus fechas, si ya se subió y cambian `fechaAlta`/`fechaBaja` nace un **MR**. Sin turnos: AT sin subir → contrato ANULADO y el envío `quitadoDelLote` (fuera de `armarLote`); AT subido → **NA** dentro de las 24 h del alta, **BT** después. Los turnos llevan `eventualContratoId` y `eventualAltaArcaConfirmada` (gate de fichada). Sustituir mueve los turnos guardados desde ese día al sustituto y recalcula ambos contratos. El TXT del AT/BT se arma con `lineasCargaMasiva` (`RETRIBUCION_PENDIENTE` hasta que haya bruto).
+
 ### 0.2 Contrato, ARCA y vuelta a la bolsa
 
 La bolsa **no tiene un alta ARCA vigente**. El eventual está disponible sin alta. Cada vez que una empresa lo necesita: contrato → alta en ARCA antes de la primera jornada → trabaja esas jornadas → baja al terminar → vuelve a la bolsa. La próxima vez es un alta nueva, en la misma empresa o en otra. El legajo (`empleados`) se crea en ese alta, no al importar. Si se efectiviza, sale de la bolsa y queda en la planta de esa empresa.

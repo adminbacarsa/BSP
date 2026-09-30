@@ -548,6 +548,14 @@
       ]
     },
     {
+      "collectionGroup": "turnos",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "bolsaCuil", "order": "ASCENDING" },
+        { "fieldPath": "scheduleDate", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "empleados",
       "queryScope": "COLLECTION",
       "fields": [

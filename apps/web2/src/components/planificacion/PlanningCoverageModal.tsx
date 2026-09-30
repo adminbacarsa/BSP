@@ -11,6 +11,7 @@ import { X, User, Search, CheckCircle, Loader2, ChevronDown, ChevronRight, Clock
 import { db } from '@/lib/firebase';
 import { collection, query, where, getDocs, limit } from 'firebase/firestore';
 import type { CoverageGap } from '@/lib/planificacion/coverageEngine';
+import EventualesCandidatosPanel, { type CandidatoEventual, type JornadaEventual } from '@/components/eventuales/EventualesCandidatosPanel';
 
 // ─── tipos ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +55,14 @@ type Props = {
     /** Cobertura D12: registrar que esos días se cubren con extensión interna */
     onAssignD12: () => void;
     onClose: () => void;
+    /** Solapa EVENTUALES (bolsa). Sin estas props la solapa no se muestra. */
+    eventuales?: {
+        canConvocar: boolean;
+        clientId?: string | null;
+        /** Jornadas del hueco (una por gap) para el cruce 12 h del grupo. */
+        jornadas: JornadaEventual[];
+        onAssign: (candidato: CandidatoEventual) => Promise<void> | void;
+    } | null;
 };
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
@@ -107,9 +116,10 @@ function codeToCategory(code: string | null): EmpRow['category'] {
 export default function PlanningCoverageModal({
     gaps, objectiveEmpIds, objLat, objLng, objectiveId,
     pendingChanges, shiftsMap, empresaId, positionName,
-    onAssignExternal, onAssignD12, onClose,
+    onAssignExternal, onAssignD12, onClose, eventuales,
 }: Props) {
-    const [tab, setTab] = useState<'external' | 'd12'>('external');
+    const [tab, setTab] = useState<'external' | 'd12' | 'eventuales'>('external');
+    const [eventualBusy, setEventualBusy] = useState(false);
     const [employees, setEmployees] = useState<EmpRow[]>([]);
     const [loading, setLoading] = useState(false);
     const [search, setSearch] = useState('');
@@ -254,7 +264,42 @@ export default function PlanningCoverageModal({
                     >
                         Turno D12
                     </button>
+                    {eventuales && (
+                        <button
+                            onClick={() => setTab('eventuales')}
+                            className={`flex-1 py-2 text-[10px] font-black transition-colors ${tab === 'eventuales' ? 'border-b-2 border-fuchsia-600 text-fuchsia-700' : 'text-slate-500 hover:text-slate-700'}`}
+                        >
+                            Eventuales
+                        </button>
+                    )}
                 </div>
+
+                {/* ── Tab: Eventuales (bolsa) ───────────────────────────── */}
+                {tab === 'eventuales' && eventuales && (
+                    <div className="flex-1 min-h-0 overflow-hidden flex flex-col px-2 py-2">
+                        <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2 shrink-0">
+                            Bolsa del grupo: solo disponibles y habilitados para esta empresa. El contrato queda en borrador hasta publicar el cronograma.
+                        </p>
+                        <EventualesCandidatosPanel
+                            empresaId={empresaId}
+                            objectiveId={objectiveId || null}
+                            clientId={eventuales.clientId || null}
+                            objetivoGeo={objLat != null && objLng != null ? { lat: Number(objLat), lng: Number(objLng) } : null}
+                            jornadas={eventuales.jornadas}
+                            canConvocar={eventuales.canConvocar}
+                            busy={eventualBusy}
+                            onSelect={async (c) => {
+                                setEventualBusy(true);
+                                try {
+                                    await eventuales.onAssign(c);
+                                    onClose();
+                                } finally {
+                                    setEventualBusy(false);
+                                }
+                            }}
+                        />
+                    </div>
+                )}
 
                 {/* ── Tab: Desde nómina ─────────────────────────────────── */}
                 {tab === 'external' && phase === 'list' && (

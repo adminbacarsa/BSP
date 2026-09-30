@@ -312,6 +312,9 @@ import {
 } from '@/lib/planificacion/deploymentRoles';
 import { checkGeneroPuesto, getPreferenciaGeneroFromPositionStructure, getPreferenciaGeneroUi, preferenciaGeneroOptionSuffix, preferenciaGeneroLabel } from '@/lib/planificacion/genderPreference';
 import { experienciaBadgeForReplacement, patchExperienciaForTurno } from '@/lib/planificacion/experienciaObjetivos';
+import EventualesCandidatosPanel, { type CandidatoEventual } from '@/components/eventuales/EventualesCandidatosPanel';
+import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage, sustituirEventualPlanificacion } from '@/services/eventualesPlanificacionService';
+import { esLegajoEventual, jornadaEventualDesdeBanda } from '@/lib/eventuales/planificacionUi';
 import { gruposService, GrupoObjetivos } from '@/services/gruposService';
 import { solicitudRefuerzoService } from '@/services/solicitudRefuerzoService';
 import {
@@ -1053,6 +1056,7 @@ export default function PlanificacionPage() {
     const canCorrectPlanning = isSuperAdmin || (rolePermissions['PLANNING'] || []).includes('correct');
     const canAutoLab = canAccessAutoLab(isSuperAdmin, rolePermissions);
     const canAssignFT = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
+    const canConvocarEventual = canConvocarEventuales(isSuperAdmin, rolePermissions as Record<string, string[]>);
     const migracionCompleta = (empresa as any)?.migracionCompleta === true;
     const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
 
@@ -1567,6 +1571,12 @@ export default function PlanificacionPage() {
     const [vacancyReplacementSearch, setVacancyReplacementSearch] = useState('');
     const [vacancyReplacementOpen, setVacancyReplacementOpen] = useState(false);
     const [vacancyPickerTab, setVacancyPickerTab] = useState<'substitute' | 'split'>('substitute');
+    /** Solapa EVENTUALES (bolsa) dentro de "Traer suplente". */
+    const [vacancyEventualesOpen, setVacancyEventualesOpen] = useState(false);
+    const [vacancyEventualBusy, setVacancyEventualBusy] = useState(false);
+    /** Sustituir eventual desde la celda: titular (legajo + CUIL) y fecha desde la que se reemplaza. */
+    const [eventualSustituir, setEventualSustituir] = useState<{ empId: string; cuil: string; name: string; dateStr: string } | null>(null);
+    const [eventualSustituirBusy, setEventualSustituirBusy] = useState(false);
     const [vacancySplitExtId, setVacancySplitExtId] = useState('');
     const [vacancySplitAdelId, setVacancySplitAdelId] = useState('');
     const [vacancyApplyToAllSelected, setVacancyApplyToAllSelected] = useState(true);
@@ -4941,6 +4951,8 @@ export default function PlanificacionPage() {
                         restriccionesCliente: data.restriccionesCliente || [],
                         conflictosEmpleados: data.conflictosEmpleados || [],
                         volante: data.volante || [],
+                        modalidad: data.modalidad || '',
+                        bolsaCuil: data.bolsaCuil || '',
                     };
                 });
             setEmployees(map(snap));
@@ -6461,6 +6473,12 @@ export default function PlanificacionPage() {
                             actorName: realActorName,
                             ...deploymentFieldsForFirestore(change),
                         };
+                        // Legajo EVENTUAL (bolsa): el turno lleva el CUIL para el contrato y el gate de fichada (alta ARCA).
+                        if (esLegajoEventual(employeesById[empId])) {
+                            turnoPayload.esEventual = true;
+                            turnoPayload.bolsaCuil = employeesById[empId]?.bolsaCuil || null;
+                            turnoPayload.eventualAltaArcaConfirmada = existing?.eventualAltaArcaConfirmada === true;
+                        }
 
                         if (
                             change.coveragePackageId
@@ -10386,7 +10404,9 @@ export default function PlanificacionPage() {
                                                         <Grip size={8} className="shrink-0 text-slate-200 group-hover:text-slate-400 transition-colors mr-0.5" />
                                                         <span className="text-[9px] font-bold truncate text-slate-700 dark:text-slate-200" title={emp.name}>{emp.name}</span>
                                                         {isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Volante — base: ${homeObjectiveName}`}><Shuffle size={8} /> VOL</div>)}
-                                        {isGuest && !isVolante && (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>)}
+                                        {isGuest && !isVolante && (esLegajoEventual(emp)
+                                            ? (<div className="shrink-0 px-1.5 py-0.5 rounded bg-violet-600 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Eventual de la bolsa · CUIL ${emp.bolsaCuil || '—'}`}><Briefcase size={8} /> EVENTUAL</div>)
+                                            : (<div className="shrink-0 px-1.5 py-0.5 rounded bg-amber-500 text-white text-[8px] font-black uppercase flex items-center gap-1 cursor-help shadow-sm" title={`Base: ${homeObjectiveName}`}><Briefcase size={8} /> {emp._kind || 'EXT'}</div>))}
                                                         {selectedGrupo && grupoUnifiedMode && (() => {
                                                             const _native = selectedGrupo.objectiveIds.includes(emp.preferredObjectiveId)
                                                                 ? emp.preferredObjectiveId
@@ -13113,7 +13133,19 @@ export default function PlanificacionPage() {
                     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={() => setSelectedCell(null)}>
                         <div className="bg-white p-6 rounded-xl shadow-2xl w-full max-w-[540px] animate-in zoom-in-95" onClick={e => e.stopPropagation()}>
                             {(() => {
-                                const employeeName = employees.find(e => e.id === selectedCell.empId)?.name || 'Empleado';
+                                const cellEmpRecord = employees.find(e => e.id === selectedCell.empId) as any;
+                                const employeeName = cellEmpRecord?.name || 'Empleado';
+                                const cellEmpIsEventual = esLegajoEventual(cellEmpRecord);
+                                const sustituirEventualButton = cellEmpIsEventual && canConvocarEventual && cellEmpRecord?.bolsaCuil ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setEventualSustituir({ empId: selectedCell.empId, cuil: String(cellEmpRecord.bolsaCuil), name: employeeName, dateStr: selectedCell.dateStr })}
+                                        className="px-2.5 py-1.5 rounded-xl bg-fuchsia-50 text-fuchsia-800 border border-fuchsia-200 text-[10px] font-black uppercase hover:bg-fuchsia-100 flex items-center gap-1"
+                                        title="Reemplazar al eventual por otro de la bolsa desde este día (baja/alta automáticas)"
+                                    >
+                                        <ArrowLeftRight size={12}/> Sustituir eventual
+                                    </button>
+                                ) : null;
                                 const key = `${selectedCell.empId}_${selectedCell.dateStr}`;
                                 const pending = pendingChanges[key];
                                 const shift = selectedCell.currentShift;
@@ -13520,8 +13552,12 @@ export default function PlanificacionPage() {
                                                 <div>
                                                     <h3 className="font-black text-lg text-slate-800">{employeeName}</h3>
                                                     <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">{selectedCell.dateStr}</p>
+                                                    {cellEmpIsEventual && <span className="inline-block mt-1 text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">Eventual · bolsa</span>}
                                                 </div>
-                                                <button onClick={() => setSelectedCell(null)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400"><X size={16}/></button>
+                                                <div className="flex items-center gap-2">
+                                                    {sustituirEventualButton}
+                                                    <button onClick={() => setSelectedCell(null)} className="p-1.5 hover:bg-slate-100 rounded-lg text-slate-400"><X size={16}/></button>
+                                                </div>
                                             </div>
 
                                             {/* Badge principal del turno */}
@@ -13752,6 +13788,7 @@ export default function PlanificacionPage() {
                                                 )}
                                             </div>
                                             <div className="flex items-center gap-2">
+                                                {sustituirEventualButton}
                                                 {shift && <button onClick={() => setCellEditMode(false)} className="p-2 bg-slate-100 text-slate-500 rounded-xl hover:bg-slate-200" title="Volver a vista previa"><ChevronLeft size={16}/></button>}
                                                 <button onClick={handleDelete} className="p-2 bg-rose-50 text-rose-500 rounded-xl hover:bg-rose-100" disabled={isServiceLocked}><Trash2 size={18}/></button>
                                             </div>
@@ -15312,7 +15349,73 @@ export default function PlanificacionPage() {
                                         <p className="text-[10px] font-bold text-teal-800 bg-teal-50 border-b border-teal-100 px-3 py-2">
                                             Preferí <strong>RET</strong>, <strong>ESC</strong> o guardias <strong>sin turno</strong> — evitás franco trabajado (FT) y costo extra.
                                         </p>
-                                        <div className="p-2 border-b bg-white">
+                                        <div className="flex border-b border-slate-200">
+                                            <button
+                                                type="button"
+                                                onClick={() => setVacancyEventualesOpen(false)}
+                                                className={`flex-1 py-2 text-[10px] font-black transition-colors ${!vacancyEventualesOpen ? 'border-b-2 border-indigo-600 text-indigo-700' : 'text-slate-500 hover:text-slate-700'}`}
+                                            >
+                                                Nómina
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => setVacancyEventualesOpen(true)}
+                                                className={`flex-1 py-2 text-[10px] font-black transition-colors ${vacancyEventualesOpen ? 'border-b-2 border-fuchsia-600 text-fuchsia-700' : 'text-slate-500 hover:text-slate-700'}`}
+                                            >
+                                                Eventuales (bolsa)
+                                            </button>
+                                        </div>
+                                        {vacancyEventualesOpen && (() => {
+                                            const targetDays = shouldApplyCoverageToAllDays()
+                                                ? sortedActiveDates
+                                                : (vacancyEditingDay ? [vacancyEditingDay] : sortedActiveDates.slice(0, 1));
+                                            const jornadas = targetDays.map((d) => {
+                                                const tit = resolveTitularForCoverageDay(d, splitReferenceDate || undefined);
+                                                return jornadaEventualDesdeBanda(d, tit?.code || 'M', { scheduleLabel: tit?.scheduleLabel, hours: tit?.hours });
+                                            });
+                                            const objGeo = objLat && objLng ? { lat: objLat, lng: objLng } : null;
+                                            return (
+                                                <div className="p-2">
+                                                    <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2">
+                                                        {targetDays.length} día(s): {jornadas.map((j) => `${j.fecha.slice(8, 10)} ${j.code} ${j.horaInicio}–${j.horaFin}`).join(' · ')}. El eventual entra como suplente; al guardar, el contrato queda en borrador hasta publicar.
+                                                    </p>
+                                                    <EventualesCandidatosPanel
+                                                        empresaId={empresaId || ''}
+                                                        objectiveId={selectedObjective || null}
+                                                        clientId={selectedClient || null}
+                                                        objetivoGeo={objGeo}
+                                                        jornadas={jornadas}
+                                                        canConvocar={canConvocarEventual}
+                                                        busy={vacancyEventualBusy}
+                                                        compact
+                                                        onSelect={async (candidato) => {
+                                                            setVacancyEventualBusy(true);
+                                                            try {
+                                                                const res = await asignarEventualPlanificacion({
+                                                                    empresaId: empresaId || '',
+                                                                    cuil: candidato.cuil,
+                                                                    objectiveId: selectedObjective || null,
+                                                                    objectiveName: getObjectiveName(selectedObjective || '') || null,
+                                                                    clientId: selectedClient || null,
+                                                                    positionName: vacancyGapPreferredPosition || null,
+                                                                    turnos: jornadas,
+                                                                    modo: 'LEGAJO',
+                                                                });
+                                                                applySubstituteToActiveDays(res.employeeId);
+                                                                setVacancyReplacementOpen(false);
+                                                                setVacancyEventualesOpen(false);
+                                                                toast.success(`${(res.nombre || candidato.nombre).split(',')[0]} (eventual) como suplente en ${targetDays.length} día(s).`);
+                                                            } catch (e) {
+                                                                toast.error(eventualErrorMessage(e));
+                                                            } finally {
+                                                                setVacancyEventualBusy(false);
+                                                            }
+                                                        }}
+                                                    />
+                                                </div>
+                                            );
+                                        })()}
+                                        <div className={`p-2 border-b bg-white ${vacancyEventualesOpen ? 'hidden' : ''}`}>
                                             <div className="relative">
                                                 <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                                                 <input
@@ -15324,7 +15427,7 @@ export default function PlanificacionPage() {
                                                 />
                                             </div>
                                         </div>
-                                        <div className="overflow-y-auto custom-scrollbar p-1 max-h-[min(38vh,260px)]">
+                                        <div className={`overflow-y-auto custom-scrollbar p-1 max-h-[min(38vh,260px)] ${vacancyEventualesOpen ? 'hidden' : ''}`}>
                                             <button
                                                 type="button"
                                                 onClick={() => {
@@ -16022,18 +16125,16 @@ export default function PlanificacionPage() {
                         N12: { name: 'Nocturno', hours: 12, startTime: '19:00', endTime: '07:00' },
                     };
                     const objectiveEmpIds = new Set(planningDotacionEmployees.map((e: any) => e.id));
-                    return (
-                        <PlanningCoverageModal
-                            gaps={planCoverageModalGaps}
-                            objectiveEmpIds={objectiveEmpIds}
-                            objLat={selectedObjectiveData?.lat ?? null}
-                            objLng={selectedObjectiveData?.lng ?? null}
-                            objectiveId={selectedObjective}
-                            pendingChanges={pendingChanges}
-                            shiftsMap={shiftsMap}
-                            empresaId={empresaId || ''}
-                            positionName={positionStructure[0]?.positionName ?? 'General'}
-                            onAssignExternal={(empId, nombre) => {
+                    const slaBandFor = (gap: { band: string; positionName?: string }) => {
+                        const posName = gap.positionName || positionStructure[0]?.positionName || '';
+                        const pos = (positionStructure as any[]).find((p) => p.positionName === posName) || positionStructure[0];
+                        return ((pos?.shifts || []) as any[]).find((s) => String(s.code || '').toUpperCase() === gap.band) || null;
+                    };
+                    const eventualJornadas = planCoverageModalGaps.map((gap) => {
+                        const sla = slaBandFor(gap);
+                        return jornadaEventualDesdeBanda(gap.dateStr, gap.band, { startTime: sla?.startTime, endTime: sla?.endTime, hours: sla?.hours });
+                    });
+                    const assignCoverageToGaps = (empId: string, nombre: string) => {
                                 const updates: Record<string, any> = {};
                                 const gapKeys: string[] = [];
                                 for (const gap of planCoverageModalGaps) {
@@ -16069,6 +16170,43 @@ export default function PlanificacionPage() {
                                 applyCoverageToStats(n, n * bandHrs);
                                 toast.success(`${nombre.split(',')[0]} asignado a ${n} día(s) (+${n * bandHrs}h)`);
                                 setPlanCoverageModalGaps([]);
+                    };
+                    return (
+                        <PlanningCoverageModal
+                            gaps={planCoverageModalGaps}
+                            objectiveEmpIds={objectiveEmpIds}
+                            objLat={selectedObjectiveData?.lat ?? null}
+                            objLng={selectedObjectiveData?.lng ?? null}
+                            objectiveId={selectedObjective}
+                            pendingChanges={pendingChanges}
+                            shiftsMap={shiftsMap}
+                            empresaId={empresaId || ''}
+                            positionName={positionStructure[0]?.positionName ?? 'General'}
+                            onAssignExternal={assignCoverageToGaps}
+                            eventuales={{
+                                canConvocar: canConvocarEventual,
+                                clientId: selectedClient || null,
+                                jornadas: eventualJornadas,
+                                onAssign: async (candidato: CandidatoEventual) => {
+                                    try {
+                                        // Solo el legajo: los turnos van por la grilla (pendientes → Guardar) como cualquier cobertura.
+                                        const res = await asignarEventualPlanificacion({
+                                            empresaId: empresaId || '',
+                                            cuil: candidato.cuil,
+                                            objectiveId: selectedObjective || null,
+                                            objectiveName: getObjectiveName(selectedObjective || '') || null,
+                                            clientId: selectedClient || null,
+                                            positionName: planCoverageModalGaps[0]?.positionName || positionStructure[0]?.positionName || null,
+                                            turnos: eventualJornadas,
+                                            modo: 'LEGAJO',
+                                        });
+                                        assignCoverageToGaps(res.employeeId, res.nombre || candidato.nombre);
+                                        toast.message('Eventual en la grilla', { description: 'Guardá el cronograma. El contrato queda en borrador hasta publicar.' });
+                                    } catch (e) {
+                                        toast.error(eventualErrorMessage(e));
+                                        throw e;
+                                    }
+                                },
                             }}
                             onAssignD12={() => {
                                 // D12 interno: D12 + N12 = cubre las 24hs con 2 guardias en vez de 3 (M+T+N).
@@ -16143,6 +16281,81 @@ export default function PlanificacionPage() {
                             }}
                             onClose={() => setPlanCoverageModalGaps([])}
                         />
+                    );
+                })()}
+
+                {eventualSustituir && (() => {
+                    const lastDay = getDateKey(daysInMonth[daysInMonth.length - 1]);
+                    const turnosTitular = daysInMonth
+                        .map((d) => getDateKey(d))
+                        .filter((ds) => ds >= eventualSustituir.dateStr)
+                        .map((ds) => ({ ds, s: shiftsMap[`${eventualSustituir.empId}_${ds}`] }))
+                        .filter(({ s }) => s && s.id && !s.isDeleted && (!selectedObjective || String(s.objectiveId || '') === String(selectedObjective)) && !['F', 'FF', 'FP', 'V', 'L', 'E', 'A', 'AA', 'PG'].includes(String(s.code || '').toUpperCase()));
+                    const jornadas = turnosTitular.map(({ ds, s }) => jornadaEventualDesdeBanda(ds, String(s.code || 'M'), {
+                        startTime: s.startTime && typeof s.startTime !== 'string' ? formatTime(s.startTime) : s.startTime,
+                        endTime: s.endTime && typeof s.endTime !== 'string' ? formatTime(s.endTime) : s.endTime,
+                        hours: s.hours,
+                    }));
+                    const objGeo = selectedObjectiveData?.lat && selectedObjectiveData?.lng ? { lat: Number(selectedObjectiveData.lat), lng: Number(selectedObjectiveData.lng) } : null;
+                    return (
+                        <div className="fixed inset-0 z-[9999] bg-black/60 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => !eventualSustituirBusy && setEventualSustituir(null)}>
+                            <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col max-h-[88vh]" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-start justify-between px-4 py-3 border-b border-slate-200 shrink-0">
+                                    <div>
+                                        <p className="text-[11px] font-black text-slate-800 uppercase tracking-wide">Sustituir eventual</p>
+                                        <p className="text-[10px] font-bold text-slate-500">
+                                            {eventualSustituir.name} · desde {eventualSustituir.dateStr.slice(8, 10)}/{eventualSustituir.dateStr.slice(5, 7)} · {jornadas.length} turno(s) guardado(s) en {getObjectiveName(selectedObjective || '')}
+                                        </p>
+                                    </div>
+                                    <button onClick={() => setEventualSustituir(null)} className="p-1.5 rounded-lg hover:bg-slate-100 text-slate-400 shrink-0"><X size={16}/></button>
+                                </div>
+                                <div className="px-3 py-2 flex-1 min-h-0 overflow-hidden flex flex-col">
+                                    {jornadas.length === 0 ? (
+                                        <p className="text-[11px] font-bold text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-3 py-4 text-center">
+                                            No hay turnos guardados del eventual desde ese día en este objetivo. Guardá el cronograma primero.
+                                        </p>
+                                    ) : (
+                                        <>
+                                            <p className="text-[9px] font-bold text-fuchsia-800 bg-fuchsia-50 border border-fuchsia-100 rounded-lg px-3 py-1.5 mb-2 shrink-0">
+                                                El sustituto toma {jornadas.map((j) => `${j.fecha.slice(8, 10)} ${j.code}`).join(', ')}. Baja del titular y alta del sustituto se recalculan solas (AT sale del lote, NA en 24 h o BT).
+                                            </p>
+                                            <EventualesCandidatosPanel
+                                                empresaId={empresaId || ''}
+                                                objectiveId={selectedObjective || null}
+                                                clientId={selectedClient || null}
+                                                objetivoGeo={objGeo}
+                                                jornadas={jornadas}
+                                                excluirCuil={eventualSustituir.cuil}
+                                                canConvocar={canConvocarEventual}
+                                                busy={eventualSustituirBusy}
+                                                onSelect={async (candidato) => {
+                                                    setEventualSustituirBusy(true);
+                                                    try {
+                                                        const res = await sustituirEventualPlanificacion({
+                                                            empresaId: empresaId || '',
+                                                            cuilTitular: eventualSustituir.cuil,
+                                                            cuilSustituto: candidato.cuil,
+                                                            desdeFecha: eventualSustituir.dateStr,
+                                                            hastaFecha: lastDay,
+                                                            objectiveId: selectedObjective || null,
+                                                            clientId: selectedClient || null,
+                                                            objetivoGeo: objGeo,
+                                                        });
+                                                        toast.success(`${candidato.nombre.split(',')[0]} sustituye a ${eventualSustituir.name.split(',')[0]} en ${res.turnoIds.length} turno(s).`);
+                                                        setEventualSustituir(null);
+                                                        setSelectedCell(null);
+                                                    } catch (e) {
+                                                        toast.error(eventualErrorMessage(e, 'No se pudo sustituir al eventual.'));
+                                                    } finally {
+                                                        setEventualSustituirBusy(false);
+                                                    }
+                                                }}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
                     );
                 })()}
 
