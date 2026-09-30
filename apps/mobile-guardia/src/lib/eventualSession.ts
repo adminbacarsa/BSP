@@ -57,11 +57,13 @@ export async function loadEventualPerfil(
   db: Firestore,
   user: User,
   claimCuil: string | null,
+  opts?: { previewBolsaCuil?: string; bindUid?: boolean },
 ): Promise<EventualPerfil> {
   const { listarTurnosEventual } = getPortalCallables();
-  const res = await listarTurnosEventual();
+  const previewCuil = String(opts?.previewBolsaCuil || '').trim();
+  const res = await listarTurnosEventual(previewCuil ? { bolsaCuil: previewCuil } : undefined);
   const data = (res?.data ?? {}) as Partial<ListarTurnosEventualResponse>;
-  const bolsaCuil = String(data.bolsaCuil || claimCuil || '').trim();
+  const bolsaCuil = String(data.bolsaCuil || previewCuil || claimCuil || '').trim();
   if (!bolsaCuil) throw new Error('No es un eventual de la bolsa.');
 
   const legajosSnap = await getDocs(
@@ -76,7 +78,7 @@ export async function loadEventualPerfil(
     const empresaId = String(r.data.empresaId || '').trim();
     if (!empresaId) continue;
     legajos.push({ empresaId, employeeId: r.id });
-    if (r.data.uid !== user.uid) {
+    if (opts?.bindUid !== false && r.data.uid !== user.uid) {
       try {
         await updateDoc(doc(db, 'empleados', r.id), { uid: user.uid });
       } catch {

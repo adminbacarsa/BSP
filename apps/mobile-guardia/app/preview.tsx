@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { collection, getDocs, orderBy, query } from 'firebase/firestore';
 import { usePortalAuth } from '../src/context/PortalAuthContext';
+import { esLegajoDeBolsa } from '../src/lib/previewEventual';
 import { LoadingScreen } from '../src/components/LoadingScreen';
 import { CommandButton } from '../src/components/ui/CommandButton';
 import { buildMobilePreviewDeepLink } from '../src/lib/previewLinks';
@@ -26,15 +27,26 @@ type PreviewEmployee = {
   name: string;
   empresa?: string;
   fileNumber?: string;
+  kind: 'legajo' | 'eventual';
+  bolsaCuil?: string;
 };
+
+type PreviewTab = 'legajos' | 'eventuales';
 
 export default function PreviewPickerScreen() {
   const router = useRouter();
-  const { emp: empParam } = useLocalSearchParams<{ emp?: string | string[] }>();
+  const { emp: empParam, bolsa: bolsaParam } = useLocalSearchParams<{
+    emp?: string | string[];
+    bolsa?: string | string[];
+  }>();
   const deepLinkEmpId = typeof empParam === 'string' ? empParam : Array.isArray(empParam) ? empParam[0] : undefined;
+  const deepLinkBolsa =
+    typeof bolsaParam === 'string' ? bolsaParam : Array.isArray(bolsaParam) ? bolsaParam[0] : undefined;
   const { palette } = useTheme();
-  const { user, initializing, isSuperAdmin, enterPreview, signOut } = usePortalAuth();
+  const { user, initializing, isSuperAdmin, enterPreview, enterPreviewEventual, signOut } = usePortalAuth();
+  const [tab, setTab] = useState<PreviewTab>('legajos');
   const [employees, setEmployees] = useState<PreviewEmployee[]>([]);
+  const [eventuales, setEventuales] = useState<PreviewEmployee[]>([]);
   const [loadingList, setLoadingList] = useState(true);
   const [listError, setListError] = useState<string | null>(null);
   const [listReloadKey, setListReloadKey] = useState(0);
@@ -49,22 +61,44 @@ export default function PreviewPickerScreen() {
     setLoadingList(true);
     setListError(null);
     const { db } = getPortalFirebase();
-    void getDocs(query(collection(db, 'empleados'), orderBy('lastName')))
-      .then((snap) => {
+    void Promise.all([
+      getDocs(query(collection(db, 'empleados'), orderBy('lastName'))),
+      getDocs(collection(db, 'eventuales_bolsa')),
+    ])
+      .then(([empSnap, bolsaSnap]) => {
         if (cancelled) return;
         setEmployees(
-          snap.docs.map((d) => {
-            const data = d.data();
-            const name = `${data.lastName || ''}, ${data.firstName || data.nombre || ''}`
-              .trim()
-              .replace(/^,\s*/, '');
-            return {
-              id: d.id,
-              name: name || d.id,
-              empresa: data.empresaId || '',
-              fileNumber: data.fileNumber || data.legajo || '',
-            };
-          }),
+          empSnap.docs
+            .filter((d) => !esLegajoDeBolsa(d.data()))
+            .map((d) => {
+              const data = d.data();
+              const name = `${data.lastName || ''}, ${data.firstName || data.nombre || ''}`
+                .trim()
+                .replace(/^,\s*/, '');
+              return {
+                id: d.id,
+                name: name || d.id,
+                empresa: data.empresaId || '',
+                fileNumber: data.fileNumber || data.legajo || '',
+                kind: 'legajo' as const,
+              };
+            }),
+        );
+        setEventuales(
+          bolsaSnap.docs
+            .map((d) => {
+              const data = d.data();
+              const n = Array.isArray(data.legajos) ? data.legajos.length : 0;
+              return {
+                id: d.id,
+                name: String(data.nombre || d.id),
+                empresa: n ? `${n} empresa${n === 1 ? '' : 's'}` : 'Sin legajo todavía',
+                fileNumber: d.id,
+                kind: 'eventual' as const,
+                bolsaCuil: d.id,
+              };
+            })
+            .sort((a, b) => a.name.localeCompare(b.name, 'es')),
         );
       })
       .catch((err) => {
@@ -85,9 +119,10 @@ export default function PreviewPickerScreen() {
     [employees],
   );
 
+  const source = tab === 'eventuales' ? eventuales : employees;
   const filtered = useMemo(
     () =>
-      employees.filter((e) => {
+      source.filter((e) => {
         const matchEmpresa = !empresaFilter || e.empresa === empresaFilter;
         const q = search.trim().toLowerCase();
         const matchSearch =
@@ -96,17 +131,24 @@ export default function PreviewPickerScreen() {
           (e.fileNumber && e.fileNumber.toLowerCase().includes(q));
         return matchEmpresa && matchSearch;
       }),
-    [employees, empresaFilter, search],
+    [source, empresaFilter, search],
   );
 
-  const selectedEmployee = employees.find((e) => e.id === selectedId) ?? null;
-  const previewLink = selectedId ? buildMobilePreviewDeepLink(selectedId) : null;
+  const selectedEmployee = source.find((e) => e.id === selectedId) ?? null;
+  const previewLink = selectedEmployee
+    ? selectedEmployee.kind === 'eventual'
+      ? buildMobilePreviewDeepLink('', { bolsaCuil: selectedEmployee.bolsaCuil || selectedEmployee.id })
+      : buildMobilePreviewDeepLink(selectedEmployee.id)
+    : null;
 
   useEffect(() => {
-    if (initializing || !isSuperAdmin || !deepLinkEmpId?.trim()) return;
+    const bolsa = deepLinkBolsa?.trim();
+    const emp = deepLinkEmpId?.trim();
+    if (initializing || !isSuperAdmin || (!bolsa && !emp)) return;
     let cancelled = false;
     setEntering(true);
-    void enterPreview(deepLinkEmpId.trim())
+    const open = bolsa ? enterPreviewEventual(bolsa) : enterPreview(emp!);
+    void open
       .then(() => {
         if (!cancelled) router.replace(appRoutes.hoy);
       })
@@ -116,19 +158,20 @@ export default function PreviewPickerScreen() {
     return () => {
       cancelled = true;
     };
-  }, [initializing, isSuperAdmin, deepLinkEmpId, enterPreview, router]);
+  }, [initializing, isSuperAdmin, deepLinkEmpId, deepLinkBolsa, enterPreview, enterPreviewEventual, router]);
 
-  async function handleEnter(empId: string) {
+  async function handleEnter(row: PreviewEmployee) {
     setEntering(true);
     try {
-      await enterPreview(empId);
+      if (row.kind === 'eventual') await enterPreviewEventual(row.bolsaCuil || row.id);
+      else await enterPreview(row.id);
       router.replace(appRoutes.hoy);
     } finally {
       setEntering(false);
     }
   }
 
-  if (initializing || (deepLinkEmpId && entering)) {
+  if (initializing || ((deepLinkEmpId || deepLinkBolsa) && entering)) {
     return <LoadingScreen label="Abriendo vista previa…" />;
   }
 
@@ -147,12 +190,32 @@ export default function PreviewPickerScreen() {
         <View style={styles.header}>
           <Text style={[styles.title, { color: palette.onSurface }]}>Vista previa portal guardia</Text>
           <Text style={[styles.sub, { color: palette.onSurfaceMuted }]}>
-            {filtered.length} empleado{filtered.length !== 1 ? 's' : ''}
+            {filtered.length} {tab === 'eventuales' ? 'eventual' : 'empleado'}{filtered.length !== 1 ? 'es' : ''}
             {empresaFilter ? ` · ${empresaFilter}` : empresas.length ? ` · ${empresas.length} empresas` : ''}
           </Text>
         </View>
 
-        {empresas.length > 1 ? (
+        <View style={styles.tabs}>
+          {(['legajos', 'eventuales'] as const).map((key) => {
+            const active = tab === key;
+            const label = key === 'legajos' ? `Legajos (${employees.length})` : `Eventuales (${eventuales.length})`;
+            return (
+              <Pressable
+                key={key}
+                style={[styles.tab, active ? styles.chipActive : styles.chipIdle]}
+                onPress={() => {
+                  setTab(key);
+                  setSelectedId(null);
+                  setEmpresaFilter(null);
+                }}
+              >
+                <Text style={[styles.chipText, active ? styles.chipTextActive : null]}>{label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {tab === 'legajos' && empresas.length > 1 ? (
           <View style={styles.chipsRow}>
             <Pressable
               style={[styles.chip, !empresaFilter ? styles.chipActive : styles.chipIdle]}
@@ -176,7 +239,7 @@ export default function PreviewPickerScreen() {
           <TextInput
             value={search}
             onChangeText={setSearch}
-            placeholder="Buscar por nombre o legajo…"
+            placeholder={tab === 'eventuales' ? 'Buscar por nombre o CUIL…' : 'Buscar por nombre o legajo…'}
             placeholderTextColor={palette.onSurfaceMuted}
             style={[styles.searchInput, { color: palette.onSurface }]}
             autoCorrect={false}
@@ -205,8 +268,10 @@ export default function PreviewPickerScreen() {
             windowSize={10}
             ListEmptyComponent={
               <Text style={[styles.empty, { color: palette.onSurfaceMuted }]}>
-                {employees.length === 0
-                  ? 'No hay empleados para mostrar.'
+                {source.length === 0
+                  ? tab === 'eventuales'
+                    ? 'No hay eventuales en la bolsa.'
+                    : 'No hay empleados para mostrar.'
                   : `Sin resultados para "${search}".`}
               </Text>
             }
@@ -256,7 +321,7 @@ export default function PreviewPickerScreen() {
             </Text>
             <CommandButton
               label={entering ? 'Ingresando…' : `Entrar como ${selectedEmployee.name.split(',')[0]}`}
-              onPress={() => void handleEnter(selectedEmployee.id)}
+              onPress={() => void handleEnter(selectedEmployee)}
               disabled={entering}
             />
           </View>
@@ -275,6 +340,17 @@ const styles = StyleSheet.create({
   header: { paddingHorizontal: spacing.container, paddingTop: 8, paddingBottom: 4, gap: 4 },
   title: { fontSize: 18, fontWeight: '900' },
   sub: { fontSize: 12, fontWeight: '600' },
+  tabs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: spacing.container,
+    paddingTop: 8,
+  },
+  tab: {
+    borderRadius: radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
   chipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',

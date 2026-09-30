@@ -206,7 +206,8 @@ export function useEventosPortal(
       if (!sol.id) {
         return { ok: false as const, message: 'Solicitud inválida' };
       }
-      if (isPreviewMode && !empDocId) {
+      const asId = String(sol.empleadoId || empDocId || '').trim();
+      if (isPreviewMode && !asId) {
         return {
           ok: false as const,
           message: 'Preview sin legajo. Elegí un vigilador en Preview y reintentá.',
@@ -218,7 +219,7 @@ export function useEventosPortal(
         await callables.respondEventoConvocatoria({
           solicitudId: sol.id,
           accept: acepta,
-          ...(isPreviewMode && empDocId ? { asEmployeeId: empDocId } : {}),
+          ...(isPreviewMode && asId ? { asEmployeeId: asId } : {}),
         });
         return {
           ok: true as const,

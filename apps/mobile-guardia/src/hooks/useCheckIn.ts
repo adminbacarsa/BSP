@@ -65,7 +65,7 @@ export function useCheckIn() {
     setPendingShiftIds(list.map((item) => item.shiftId));
   }, []);
 
-  const invokeCheckIn = useCallback(async (payload: ReturnType<typeof buildCheckInPayload>) => {
+  const invokeCheckIn = useCallback(async (payload: ReturnType<typeof buildCheckInPayload>, asEmployeeId?: string) => {
     const { auth } = getPortalFirebase();
     const user = auth.currentUser;
     if (!user) {
@@ -73,7 +73,7 @@ export function useCheckIn() {
     }
     await user.getIdToken(true);
     const { requestCheckIn } = getPortalCallables();
-    await requestCheckIn(payload);
+    await requestCheckIn(asEmployeeId ? { ...payload, asEmployeeId } : payload);
   }, []);
 
   const flushQueue = useCallback(async () => {
@@ -108,7 +108,13 @@ export function useCheckIn() {
     async (
       shift: Shift,
       objectivesMap: Record<string, ObjectiveLocation>,
-      owner?: { empDocId: string | null; authUid: string | null; employeeIds?: string[] },
+      owner?: {
+        empDocId: string | null;
+        authUid: string | null;
+        employeeIds?: string[];
+        /** Preview SuperAdmin: el turno se ficha a nombre de este legajo. */
+        previewAsEmployeeId?: string | null;
+      },
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyShiftId(shift.id);
       try {
@@ -170,7 +176,7 @@ export function useCheckIn() {
           return { ok: true, message: 'Sin conexión. Presente guardado y se enviará al reconectar.' };
         }
 
-        await invokeCheckIn(payload);
+        await invokeCheckIn(payload, owner?.previewAsEmployeeId?.trim() || undefined);
         return { ok: true, message: 'Solicitud de presente enviada' };
       } catch (e) {
         return { ok: false, message: mapPortalCallableError(e) };

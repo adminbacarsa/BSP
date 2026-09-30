@@ -385,6 +385,7 @@ function HoyScreenContent() {
       empDocId,
       authUid: user?.uid ?? null,
       employeeIds: eventualLegajos.map((l) => l.employeeId),
+      previewAsEmployeeId: isPreviewMode ? String(mainShift.employeeId || '') : null,
     });
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }

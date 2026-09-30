@@ -37,7 +37,7 @@ import {
   type DeviceVerifyResult,
 } from '../lib/deviceVerification';
 import { detachPushTokenOnServer, unregisterPushForUser } from '../lib/pushNotifications';
-import { parsePreviewEmpFromUrl } from '../lib/previewLinks';
+import { parsePreviewBolsaFromUrl, parsePreviewEmpFromUrl } from '../lib/previewLinks';
 import { isSuperAdminRole, userIsSuperAdmin } from '../lib/superAdmin';
 
 const FIRESTORE_PROFILE_TIMEOUT_MS = 22_000;
@@ -74,6 +74,8 @@ type PortalAuthContextValue = {
   signOut: () => Promise<void>;
   refreshEmployee: () => Promise<void>;
   enterPreview: (empDocId: string) => Promise<void>;
+  /** Preview de una persona de la bolsa: la app se comporta como su cuenta EVENTUAL. */
+  enterPreviewEventual: (bolsaCuil: string) => Promise<void>;
   exitPreview: () => Promise<void>;
 };
 
@@ -193,6 +195,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const [initializing, setInitializing] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [previewEmpDocId, setPreviewEmpDocId] = useState<string | null>(null);
+  const [previewBolsaCuil, setPreviewBolsaCuil] = useState<string | null>(null);
   const [employeeProfileLoading, setEmployeeProfileLoading] = useState(false);
   const [employeeProfileReady, setEmployeeProfileReady] = useState(false);
   const [empDocId, setEmpDocId] = useState<string | null>(null);
@@ -225,7 +228,8 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       initialUrlHandledRef.current = true;
       try {
         const initialUrl = await Linking.getInitialURL();
-        const fromUrl = parsePreviewEmpFromUrl(initialUrl);
+        const bolsa = parsePreviewBolsaFromUrl(initialUrl);
+        const fromUrl = bolsa ? `bolsa:${bolsa}` : parsePreviewEmpFromUrl(initialUrl);
         if (fromUrl) pendingPreviewRef.current = fromUrl;
       } catch {
         /* ignore */
@@ -356,12 +360,15 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   /** Eventual: la cuenta no tiene un legajo único; el perfil sale de la bolsa (§7). */
   const loadEventual = useCallback(
-    async (currentUser: User, claimCuil: string | null) => {
+    async (currentUser: User, claimCuil: string | null, opts?: { previewBolsaCuil?: string }) => {
       setEmployeeProfileLoading(true);
       setEmployeeProfileError(null);
       try {
         const perfil = await withTimeout(
-          loadEventualPerfil(db, currentUser, claimCuil),
+          loadEventualPerfil(db, currentUser, claimCuil, {
+            previewBolsaCuil: opts?.previewBolsaCuil,
+            bindUid: !opts?.previewBolsaCuil,
+          }),
           FIRESTORE_PROFILE_TIMEOUT_MS,
           'Carga de perfil eventual',
         );
@@ -370,8 +377,9 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setEventualLegajos(perfil.legajos);
         setEmpresasNombres(perfil.empresasNombres);
         setEmpDocId(perfil.principal?.id ?? null);
-        setEmployee(mapEventualEmpleado(perfil, currentUser.uid));
+        setEmployee(mapEventualEmpleado(perfil, opts?.previewBolsaCuil ? '' : currentUser.uid));
         setPortalFeatures(DEFAULT_PORTAL_FEATURES);
+        if (opts?.previewBolsaCuil) setPreviewEmpDocId(perfil.principal?.id ?? null);
         if (perfil.legajos.length === 0) {
           setEmployeeProfileError(
             'Todavía no tenés legajo en ninguna empresa del grupo. Cuando te asignen un turno, aparece acá.',
@@ -383,6 +391,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
         setEventualLegajos([]);
         setEmployee(null);
         setEmpDocId(null);
+        if (opts?.previewBolsaCuil) setPreviewEmpDocId(null);
         if (isNetworkOrFirestoreError(err)) {
           setEmployeeProfileError('No se pudo leer tu perfil de eventual. Revisá la conexión y reintentá.');
         } else {
@@ -414,10 +423,17 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       if (superAdmin) {
         setDeviceVerified(true);
         setDeviceBlockReason(null);
-        if (previewId) {
+        if (previewId?.startsWith('bolsa:')) {
+          const cuil = previewId.slice('bolsa:'.length);
+          setPreviewBolsaCuil(cuil);
+          await loadEventual(currentUser, cuil, { previewBolsaCuil: cuil });
+        } else if (previewId) {
+          clearEventual();
+          setPreviewBolsaCuil(null);
           setPreviewEmpDocId(previewId);
           await loadEmployeeByDocId(previewId, currentUser);
         } else {
+          setPreviewBolsaCuil(null);
           setPreviewEmpDocId(null);
           setEmpDocId(null);
           setEmployee(null);
@@ -475,10 +491,23 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
   const enterPreview = useCallback(
     async (id: string) => {
       if (!user || !isSuperAdmin) return;
+      clearEventual();
+      setPreviewBolsaCuil(null);
       setPreviewEmpDocId(id);
       await loadEmployeeByDocId(id, user);
     },
-    [user, isSuperAdmin, loadEmployeeByDocId],
+    [user, isSuperAdmin, loadEmployeeByDocId, clearEventual],
+  );
+
+  const enterPreviewEventual = useCallback(
+    async (cuil: string) => {
+      if (!user || !isSuperAdmin) return;
+      const id = cuil.trim();
+      if (!id) return;
+      setPreviewBolsaCuil(id);
+      await loadEventual(user, id, { previewBolsaCuil: id });
+    },
+    [user, isSuperAdmin, loadEventual],
   );
 
   const exitPreview = useCallback(async () => {
@@ -488,16 +517,24 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       /* no bloquear salida de preview */
     }
     setPreviewEmpDocId(null);
+    setPreviewBolsaCuil(null);
     setEmpDocId(null);
     setEmployee(null);
+    clearEventual();
     setPortalFeatures(DEFAULT_PORTAL_FEATURES);
     setEmployeeProfileError(null);
     setEmployeeProfileReady(true);
     setEmployeeProfileLoading(false);
-  }, [db]);
+  }, [db, clearEventual]);
 
   useEffect(() => {
     const sub = Linking.addEventListener('url', ({ url }) => {
+      const bolsa = parsePreviewBolsaFromUrl(url);
+      if (bolsa) {
+        if (user && isSuperAdmin) void enterPreviewEventual(bolsa);
+        else pendingPreviewRef.current = `bolsa:${bolsa}`;
+        return;
+      }
       const emp = parsePreviewEmpFromUrl(url);
       if (!emp) return;
       if (user && isSuperAdmin) {
@@ -508,7 +545,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     });
 
     return () => sub.remove();
-  }, [user, isSuperAdmin, enterPreview]);
+  }, [user, isSuperAdmin, enterPreview, enterPreviewEventual]);
 
   useEffect(() => {
     const authReadyTimer = setTimeout(() => {
@@ -521,6 +558,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       if (!nextUser) {
         setIsSuperAdmin(false);
         setPreviewEmpDocId(null);
+        setPreviewBolsaCuil(null);
         pendingPreviewRef.current = null;
         setEmpDocId(null);
         setEmployee(null);
@@ -618,6 +656,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setIsSuperAdmin(false);
     setPreviewEmpDocId(null);
+    setPreviewBolsaCuil(null);
     setEmpDocId(null);
     setEmployee(null);
     clearEventual();
@@ -630,6 +669,10 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
 
   const refreshEmployee = useCallback(async () => {
     if (!user) return;
+    if (isSuperAdmin && previewBolsaCuil) {
+      await loadEventual(user, previewBolsaCuil, { previewBolsaCuil });
+      return;
+    }
     if (isSuperAdmin && previewEmpDocId) {
       await loadEmployeeByDocId(previewEmpDocId, user);
       return;
@@ -645,6 +688,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     user,
     isSuperAdmin,
     previewEmpDocId,
+    previewBolsaCuil,
     isEventual,
     bolsaCuil,
     loadEmployee,
@@ -654,7 +698,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
     applyDeviceVerifyResult,
   ]);
 
-  const isPreviewMode = isSuperAdmin && !!previewEmpDocId;
+  const isPreviewMode = isSuperAdmin && (!!previewEmpDocId || !!previewBolsaCuil);
 
   const value = useMemo(
     () => ({
@@ -679,6 +723,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshEmployee,
       enterPreview,
+      enterPreviewEventual,
       exitPreview,
     }),
     [
@@ -703,6 +748,7 @@ export function PortalAuthProvider({ children }: { children: ReactNode }) {
       signOut,
       refreshEmployee,
       enterPreview,
+      enterPreviewEventual,
       exitPreview,
     ],
   );

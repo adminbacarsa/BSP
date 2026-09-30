@@ -139,6 +139,8 @@ export type RequestCheckInRequest = {
   offline?: boolean;
   recordedAt?: string;
   idempotencyKey?: string;
+  /** Preview SuperAdmin: legajo del turno (el servidor lo ignora si el caller no es SuperAdmin). */
+  asEmployeeId?: string;
   deviceId?: string;
   platform?: PortalPlatform;
 };

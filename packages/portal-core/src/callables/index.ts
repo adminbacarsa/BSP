@@ -44,6 +44,8 @@ export function createPortalCallables(functions: Functions) {
         appVersion?: string;
         /** GPS al aceptar. Si falta, el servidor usa el domicilio. */
         originCoords?: { lat: number; lng: number; accuracy?: number };
+        /** Preview SuperAdmin: legajo candidato. Otros roles: el servidor lo ignora. */
+        asEmployeeId?: string;
       },
       { success?: boolean }
     >(functions, PORTAL_CALLABLES.responderConvocatoriaCobertura),
@@ -86,7 +88,7 @@ export function createPortalCallables(functions: Functions) {
       { solicitudId: string; accept: boolean; asEmployeeId?: string },
       { success?: boolean; status?: string }
     >(functions, PORTAL_CALLABLES.respondEventoConvocatoria),
-    listarTurnosEventual: httpsCallable<Record<string, never> | undefined, ListarTurnosEventualResponse>(
+    listarTurnosEventual: httpsCallable<{ bolsaCuil?: string } | undefined, ListarTurnosEventualResponse>(
       functions,
       PORTAL_CALLABLES.listarTurnosEventual,
     ),

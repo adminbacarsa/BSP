@@ -34,7 +34,7 @@ export function useConvocatoriasCobertura(
   authUid: string | null | undefined,
 ) {
   const { db } = getPortalFirebase();
-  const { deviceVerified, eventualLegajos } = usePortalAuth();
+  const { deviceVerified, eventualLegajos, isPreviewMode, isEventual } = usePortalAuth();
   const eventualKeys = eventualLegajos.map((l) => l.employeeId).join('|');
   const [items, setItems] = useState<ConvocatoriaCobertura[]>([]);
   const [loading, setLoading] = useState(true);
@@ -44,7 +44,7 @@ export function useConvocatoriasCobertura(
 
   useEffect(() => {
     const emp = empDocId?.trim() || '';
-    const uid = authUid?.trim() || '';
+    const uid = isPreviewMode && isEventual ? '' : authUid?.trim() || '';
     const extras = eventualKeys.split('|').map((k) => k.trim()).filter((k) => k && k !== emp && k !== uid);
     if (deviceVerified !== true || (!emp && !uid && extras.length === 0)) {
       setItems([]);
@@ -105,7 +105,7 @@ export function useConvocatoriasCobertura(
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [db, empDocId, authUid, deviceVerified, eventualKeys]);
+  }, [db, empDocId, authUid, deviceVerified, eventualKeys, isPreviewMode, isEventual]);
 
   const active = useMemo(
     () => items.filter((c) => isActiveCoberturaStatus(c.status)),
@@ -135,12 +135,16 @@ export function useConvocatoriasCobertura(
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyId(convocatoriaId);
       try {
+        const asEmployeeId = isPreviewMode
+          ? String(items.find((c) => c.id === convocatoriaId)?.candidateEmployeeId || '').trim()
+          : '';
         const result = await respondCoberturaConvocatoria({
           convocatoriaId,
           response,
           responseChannel: 'BANNER_HOY',
           rejectionReason: opts?.rejectionReason,
           etaMinutes: opts?.etaMinutes,
+          ...(asEmployeeId ? { asEmployeeId } : {}),
         });
         if (result.ok) return { ok: true, message: result.message };
         return { ok: false, message: result.message };
@@ -150,7 +154,7 @@ export function useConvocatoriasCobertura(
         setBusyId(null);
       }
     },
-    [],
+    [isPreviewMode, items],
   );
 
   return {

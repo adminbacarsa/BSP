@@ -1305,17 +1305,30 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
     const shiftData = shiftDoc.data()!;
 
     const callerRole = String(context.auth.token?.role ?? context.auth.token?.['custom:role'] ?? '');
-    const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole);
+    const callerType = (context.auth.token as { type?: unknown } | undefined)?.type;
+    const { isEventualPreviewSuperAdmin, resolvePreviewCheckIn } = await import('./eventuales/eventualPreviewAuth');
+    const callerIsSuperAdmin = isSuperAdminBackupRole(callerRole) || isEventualPreviewSuperAdmin(callerRole, callerType);
 
     const { resolvePortalEmployeeDocId } = await import('./fichajes/resolvePortalEmployee');
     let empId: string | null = await resolvePortalEmployeeDocId(db, {
       uid: context.auth.uid,
       email: context.auth.token.email,
     });
-    if (!empId) {
+    const shiftEmp = String(shiftData.employeeId ?? '');
+    const previewCheckIn = resolvePreviewCheckIn({
+      isSuperAdmin: callerIsSuperAdmin,
+      asEmployeeId: String(data?.asEmployeeId || ''),
+      shiftEmployeeId: shiftEmp,
+    });
+    if ('deny' in previewCheckIn) {
+      throw new functions.https.HttpsError('permission-denied', 'Turno no pertenece al legajo de preview.');
+    }
+    if (previewCheckIn.scoped) {
+      empId = previewCheckIn.empId;
+    } else if (!empId) {
         if (callerIsSuperAdmin) {
-            if (!shiftData.employeeId) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
-            empId = shiftData.employeeId;
+            if (!shiftEmp) throw new functions.https.HttpsError('not-found', 'Turno sin empleado asignado.');
+            empId = shiftEmp;
         } else {
             throw new functions.https.HttpsError(
                 'not-found',
@@ -1324,9 +1337,8 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
         }
     }
 
-    const shiftEmp = String(shiftData.employeeId ?? '');
     const ownsShift =
-      callerIsSuperAdmin ||
+      (callerIsSuperAdmin && !previewCheckIn.scoped) ||
       shiftEmp === empId ||
       shiftEmp === context.auth.uid;
     if (!ownsShift) {

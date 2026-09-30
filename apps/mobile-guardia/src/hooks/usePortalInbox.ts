@@ -60,7 +60,9 @@ function inboxTimestampMs(value: unknown): number {
  */
 export function usePortalInbox(user: User | null, previewEmpDocId?: string | null) {
   const { db } = getPortalFirebase();
-  const { deviceVerified } = usePortalAuth();
+  const { deviceVerified, isPreviewMode, isEventual, eventualLegajos } = usePortalAuth();
+  const previewLegajosKey =
+    isPreviewMode && isEventual ? eventualLegajos.map((l) => l.employeeId).join('|') : '';
   const [items, setItems] = useState<PortalInboxItem[]>([]);
   const [coberturaById, setCoberturaById] = useState<Record<string, AlertaConvocatoriaVista>>({});
   const [loading, setLoading] = useState(true);
@@ -138,6 +140,8 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
               cancelReason: typeof data.cancelReason === 'string' ? data.cancelReason : undefined,
               respondedAt: data.respondedAt,
               cancelledAt: data.cancelledAt,
+              candidateEmployeeId:
+                typeof data.candidateEmployeeId === 'string' ? data.candidateEmployeeId : undefined,
             };
           });
           publishConv();
@@ -166,10 +170,13 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
       );
     };
 
-    // Preview: solo legajo (evita vacantes/ops del SuperAdmin).
-    if (previewId) {
-      registerEmp(previewId);
-      listenConv(`conv-uid:${user.uid}`, 'candidateUid', user.uid);
+    // Preview: solo el legajo (o todos los de la bolsa). No el uid del SuperAdmin.
+    if (previewId || previewLegajosKey) {
+      const ids = new Set<string>();
+      if (previewId) ids.add(previewId);
+      for (const id of previewLegajosKey.split('|')) if (id.trim()) ids.add(id.trim());
+      ids.forEach((id) => registerEmp(id));
+      if (!previewLegajosKey) listenConv(`conv-uid:${user.uid}`, 'candidateUid', user.uid);
       return () => {
         unsubs.forEach((u) => u());
       };
@@ -210,7 +217,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [user?.uid, previewEmpDocId, db, deviceVerified]);
+  }, [user?.uid, previewEmpDocId, previewLegajosKey, db, deviceVerified]);
 
   const unreadCount = useMemo(
     () =>
