@@ -114,19 +114,22 @@ export function useEmployeeShifts(
   authUid: string | null,
   monthAnchor: Date = new Date(),
 ) {
-  const { deviceVerified } = usePortalAuth();
+  const { deviceVerified, eventualLegajos } = usePortalAuth();
   const [rawShifts, setRawShifts] = useState<Shift[]>([]);
   const [absentShiftIds, setAbsentShiftIds] = useState<Set<string>>(new Set());
   const [publishedKeys, setPublishedKeys] = useState<Set<string> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Eventual: un legajo por empresa; los turnos de todas se leen con las mismas queries.
+  const eventualKeys = eventualLegajos.map((l) => l.employeeId).join('|');
   const employeeKeys = useMemo(() => {
     const keys = new Set<string>();
     if (empDocId?.trim()) keys.add(empDocId.trim());
     if (authUid?.trim()) keys.add(authUid.trim());
+    for (const k of eventualKeys.split('|')) if (k.trim()) keys.add(k.trim());
     return [...keys];
-  }, [empDocId, authUid]);
+  }, [empDocId, authUid, eventualKeys]);
 
   const monthKey = `${monthAnchor.getFullYear()}-${monthAnchor.getMonth()}`;
 

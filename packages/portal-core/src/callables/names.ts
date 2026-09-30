@@ -15,6 +15,10 @@ export const PORTAL_CALLABLES = {
   deleteMyTokens: 'deleteMyTokens',
   sendTestNotification: 'sendTestNotification',
   respondEventoConvocatoria: 'respondEventoConvocatoria',
+  /** Eventuales (docs/EVENTUALES-DISENO.md §7). */
+  listarTurnosEventual: 'listarTurnosEventual',
+  /** Acuse de recibo del contrato (§3.3). Pendiente en el servidor. */
+  acusarReciboContrato: 'acusarReciboContrato',
 } as const;
 
 export type PortalCallableName = (typeof PORTAL_CALLABLES)[keyof typeof PORTAL_CALLABLES];

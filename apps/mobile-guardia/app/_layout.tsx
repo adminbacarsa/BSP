@@ -52,6 +52,7 @@ function RootNavigator() {
         <Stack.Screen name="permutas" options={{ title: 'Permutas' }} />
         <Stack.Screen name="novedad" options={{ title: 'Novedad' }} />
         <Stack.Screen name="credencial" options={{ title: 'Credencial' }} />
+        <Stack.Screen name="contratos" options={{ title: 'Mis contratos' }} />
         <Stack.Screen name="device-blocked" options={{ title: 'Dispositivo' }} />
         <Stack.Screen name="activar" options={{ title: 'Activar' }} />
         <Stack.Screen name="empleado/activar" options={{ title: 'Activar' }} />

@@ -47,6 +47,13 @@ export type Shift = {
   convocadoReply?: 'ON_WAY' | 'PROBLEM' | string;
   convocadoDemorado?: boolean;
   originSource?: 'DEVICE' | 'DOMICILIO' | 'SIN_COORD' | string;
+  /** Empresa dueña del turno (el eventual ve turnos de varias). */
+  empresaId?: string;
+  /** Eventual: contrato de esa empresa y alta ARCA confirmada (gate de fichada). */
+  esEventual?: boolean;
+  bolsaCuil?: string;
+  eventualContratoId?: string;
+  eventualAltaArcaConfirmada?: boolean;
 };
 
 export type PortalFeatures = {

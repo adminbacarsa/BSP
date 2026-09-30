@@ -5,6 +5,7 @@ import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
 import {
   checkInRejectMessage,
   evaluateCheckInWindow,
+  isAltaArcaConfirmada,
   isConvocadoCoverageShift,
   isCoverageHoursOnSourceDoc,
   timestampLikeToMillis,
@@ -13,10 +14,12 @@ import {
 
 export {
   evaluateCheckInWindow,
+  isAltaArcaConfirmada,
   isConvocadoCoverageShift,
   isCoverageHoursOnSourceDoc,
   checkInRejectMessage,
   timestampLikeToMillis,
+  ALTA_ARCA_PENDIENTE_MESSAGE,
 } from './evaluateCheckInWindow';
 export type { CheckInWindowResult, CheckInWindowRejectCode } from './evaluateCheckInWindow';
 
@@ -227,6 +230,15 @@ export function getCheckInTiming(
     tooEarly: false,
     checkInDeadline: null,
   };
+
+  // Eventual sin alta ARCA confirmada: bloqueo legal antes que cualquier ventana (espejo del servidor).
+  if (!isAltaArcaConfirmada(s as unknown as Record<string, unknown>)) {
+    return {
+      ...empty,
+      rejectCode: 'ALTA_ARCA_PENDIENTE',
+      rejectMessage: checkInRejectMessage('ALTA_ARCA_PENDIENTE'),
+    };
+  }
 
   const absenceBy = String((s as { absenceDetectedBy?: unknown }).absenceDetectedBy || '').toUpperCase();
   const provisionalPunch =

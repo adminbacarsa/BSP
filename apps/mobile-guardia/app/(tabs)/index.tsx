@@ -3,6 +3,7 @@ import { ActivityIndicator, Linking, Pressable, ScrollView, StyleSheet, Text, Vi
 import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
+  empresaLabelDeTurno,
   formatEnCaminoLine,
   getCheckInTiming,
   isExtendedDutyShift,
@@ -98,6 +99,9 @@ function HoyScreenContent() {
     employeeProfileError,
     isPreviewMode,
     previewEmpDocId,
+    isEventual,
+    eventualLegajos,
+    empresasNombres,
   } = usePortalAuth();
   const { shifts, allShifts, loading, error } = useEmployeeShifts(empDocId, user?.uid ?? null);
   const { objectivesMap } = useObjectivesMap();
@@ -106,10 +110,11 @@ function HoyScreenContent() {
   const { empresaNombre } = useEmpresaBranding(employee?.empresaId);
   const appVersion = Constants.expoConfig?.version ?? '—';
   const headerTitle = useMemo(() => {
+    if (isEventual) return `COSP · Eventual · v${appVersion}`;
     const emp = (empresaNombre || '').trim();
     if (emp) return `COSP · ${emp} · v${appVersion}`;
     return `COSP Guardia · v${appVersion}`;
-  }, [empresaNombre, appVersion]);
+  }, [empresaNombre, appVersion, isEventual]);
   const displayName = useMemo(() => {
     if (employee?.lastName || employee?.firstName) {
       return `${employee.lastName || ''}${employee.lastName && employee.firstName ? ', ' : ''}${employee.firstName || ''}`.trim();
@@ -298,7 +303,7 @@ function HoyScreenContent() {
     !!mainShift && String(mainShift.origin || '').toUpperCase() === 'OPERATIONS_COVERAGE';
   const isRetentionHero = isActiveRetentionShift(mainShift);
   const extendDuty = !!mainShift && isExtendedDutyShift(mainShift as never);
-  const heroSectionLabel = todayAbsentShift
+  const heroSectionBase = todayAbsentShift
     ? 'Ausente'
     : isRetentionHero
       ? 'Retenido'
@@ -307,6 +312,11 @@ function HoyScreenContent() {
           : heroInProgress
             ? 'Turno actual'
             : 'Próximo turno';
+  // Eventual: cada turno lleva la empresa a la que pertenece.
+  const heroEmpresaLabel = isEventual
+    ? empresaLabelDeTurno((todayAbsentShift || mainShift || {}) as { empresaId?: string }, eventualLegajos, empresasNombres)
+    : null;
+  const heroSectionLabel = heroEmpresaLabel ? `${heroSectionBase} · ${heroEmpresaLabel}` : heroSectionBase;
 
   const rawStatus = mainShift?.status || (mainShift?.isPresent ? 'PRESENT' : 'ASSIGNED');
   const isConfirmed =
@@ -374,6 +384,7 @@ function HoyScreenContent() {
     const result = await requestCheckInForShift(mainShift, objectivesMap, {
       empDocId,
       authUid: user?.uid ?? null,
+      employeeIds: eventualLegajos.map((l) => l.employeeId),
     });
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }
@@ -576,7 +587,13 @@ function HoyScreenContent() {
               shift={todayAbsentShift || mainShift}
               placement={placement}
               empresaNombre={empresaNombre || 'Tu empresa'}
-              sectionLabel={convocadoHero ? 'EN CAMINO' : heroSectionLabel}
+              sectionLabel={
+                convocadoHero
+                  ? heroEmpresaLabel
+                    ? `EN CAMINO · ${heroEmpresaLabel}`
+                    : 'EN CAMINO'
+                  : heroSectionLabel
+              }
               statusSlot={
                 todayAbsentShift ? (
                   <Text style={[styles.pendingLine, { color: palette.warning || '#b45309' }]}>

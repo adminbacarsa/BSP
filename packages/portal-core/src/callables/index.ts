@@ -6,6 +6,21 @@ import type {
   RequestCheckInRequest,
 } from '@cosp/portal-types';
 
+/** Respuesta de `listarTurnosEventual` (uid de Auth alcanza; sin argumentos). */
+export type ListarTurnosEventualResponse = {
+  bolsaCuil: string;
+  empresas: string[];
+  turnos: Array<{
+    id: string;
+    empresaId: string | null;
+    fecha: string | null;
+    code: string | null;
+    objectiveName: string | null;
+    startTime: unknown;
+    endTime: unknown;
+  }>;
+};
+
 export function createPortalCallables(functions: Functions) {
   return {
     activateAndSetPassword: httpsCallable<ActivateAndSetPasswordRequest, ActivateAndSetPasswordResponse>(
@@ -71,6 +86,14 @@ export function createPortalCallables(functions: Functions) {
       { solicitudId: string; accept: boolean; asEmployeeId?: string },
       { success?: boolean; status?: string }
     >(functions, PORTAL_CALLABLES.respondEventoConvocatoria),
+    listarTurnosEventual: httpsCallable<Record<string, never> | undefined, ListarTurnosEventualResponse>(
+      functions,
+      PORTAL_CALLABLES.listarTurnosEventual,
+    ),
+    acusarReciboContrato: httpsCallable<
+      { contratoId: string; metodo?: 'SESION' | 'OTP' | 'BIOMETRIA'; deviceId?: string; docSha256?: string },
+      { ok?: boolean; success?: boolean }
+    >(functions, PORTAL_CALLABLES.acusarReciboContrato),
   };
 }
 

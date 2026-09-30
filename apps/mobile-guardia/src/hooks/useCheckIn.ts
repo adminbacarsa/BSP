@@ -108,17 +108,20 @@ export function useCheckIn() {
     async (
       shift: Shift,
       objectivesMap: Record<string, ObjectiveLocation>,
-      owner?: { empDocId: string | null; authUid: string | null },
+      owner?: { empDocId: string | null; authUid: string | null; employeeIds?: string[] },
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyShiftId(shift.id);
       try {
         const shiftEmp = String(shift.employeeId ?? '').trim();
         const empDocId = owner?.empDocId?.trim() ?? '';
         const authUid = owner?.authUid?.trim() ?? '';
+        // Eventual: el turno es del legajo de la empresa de ese turno, no del principal.
+        const extraIds = (owner?.employeeIds ?? []).map((id) => id.trim()).filter(Boolean);
         const owns =
           !shiftEmp ||
           (empDocId && shiftEmp === empDocId) ||
-          (authUid && shiftEmp === authUid);
+          (authUid && shiftEmp === authUid) ||
+          extraIds.includes(shiftEmp);
         if (!owns) {
           return {
             ok: false,

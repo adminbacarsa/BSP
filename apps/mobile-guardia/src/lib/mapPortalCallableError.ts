@@ -1,3 +1,4 @@
+import { ALTA_ARCA_PENDIENTE_MESSAGE } from '@cosp/portal-core';
 import { isEmulatorMode, getEmulatorHostLabel } from './portal';
 import { mapPlatformDeviceErrorMessage } from './deviceVerification';
 
@@ -8,6 +9,9 @@ export function mapPortalCallableError(err: unknown): string {
   const e = err as { code?: string; message?: string };
   const code = (e?.code ?? '').replace('functions/', '');
   const msg = (e?.message ?? '').trim();
+
+  // registrarPresencia lanza `new Error(rejectCode)`: el eventual sin alta ARCA recibe el código pelado.
+  if (/ALTA_ARCA_PENDIENTE/.test(msg)) return ALTA_ARCA_PENDIENTE_MESSAGE;
 
   if (code === 'unauthenticated' || msg === 'Sin permisos.') {
     if (isEmulatorMode()) {

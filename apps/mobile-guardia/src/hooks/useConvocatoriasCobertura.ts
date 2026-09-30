@@ -34,7 +34,8 @@ export function useConvocatoriasCobertura(
   authUid: string | null | undefined,
 ) {
   const { db } = getPortalFirebase();
-  const { deviceVerified } = usePortalAuth();
+  const { deviceVerified, eventualLegajos } = usePortalAuth();
+  const eventualKeys = eventualLegajos.map((l) => l.employeeId).join('|');
   const [items, setItems] = useState<ConvocatoriaCobertura[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +45,8 @@ export function useConvocatoriasCobertura(
   useEffect(() => {
     const emp = empDocId?.trim() || '';
     const uid = authUid?.trim() || '';
-    if (deviceVerified !== true || (!emp && !uid)) {
+    const extras = eventualKeys.split('|').map((k) => k.trim()).filter((k) => k && k !== emp && k !== uid);
+    if (deviceVerified !== true || (!emp && !uid && extras.length === 0)) {
       setItems([]);
       setLoading(deviceVerified === null && (!!emp || !!uid));
       setError(null);
@@ -98,11 +100,12 @@ export function useConvocatoriasCobertura(
 
     if (emp) listen('emp', 'candidateEmployeeId', emp);
     if (uid && uid !== emp) listen('uid', 'candidateUid', uid);
+    for (const extra of extras) listen(`emp:${extra}`, 'candidateEmployeeId', extra);
 
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [db, empDocId, authUid, deviceVerified]);
+  }, [db, empDocId, authUid, deviceVerified, eventualKeys]);
 
   const active = useMemo(
     () => items.filter((c) => isActiveCoberturaStatus(c.status)),
