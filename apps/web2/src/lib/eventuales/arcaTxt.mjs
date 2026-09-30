@@ -17,6 +17,7 @@ export const ARCA_EVENTUALES_DEFAULT = {
   puesto: '5414',
   rectificacion: '00',
   cctCodigo: '',
+  categoria: '',
   categoriaProfesional: '',
   tipoServicio: '',
   marcaCovid: '0',
@@ -25,8 +26,18 @@ export const ARCA_EVENTUALES_DEFAULT = {
 
 export const LARGO_REGISTRO_ARCA = 130;
 
+/** Vigilador. Default de bacarsa, grupos_bacar_sa y pruebas_sa. Se pisa con arcaEventuales.categoria. */
+export const CATEGORIA_VIGILADOR = '033104';
+export const EMPRESAS_CATEGORIA_VIGILADOR = ['bacarsa', 'grupos_bacar_sa', 'pruebas_sa'];
+
 export function arcaEventualesDe(empresa) {
-  return { ...ARCA_EVENTUALES_DEFAULT, ...(empresa?.arcaEventuales || {}) };
+  const cfg = { ...ARCA_EVENTUALES_DEFAULT, ...(empresa?.arcaEventuales || {}) };
+  const guardada = empresa?.arcaEventuales || {};
+  const explicita = 'categoria' in guardada || 'categoriaProfesional' in guardada;
+  cfg.categoria = explicita
+    ? String(guardada.categoria ?? guardada.categoriaProfesional ?? '')
+    : (EMPRESAS_CATEGORIA_VIGILADOR.includes(String(empresa?.id || empresa?.empresaId || '')) ? CATEGORIA_VIGILADOR : '');
+  return cfg;
 }
 
 function alfa(value, len) {
@@ -58,7 +69,7 @@ function campoObraSocial(valor) {
 function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, obraSocial, cfg }) {
   const os = campoObraSocial(obraSocial || cfg.obraSocialDefault);
   const cct = alfa(cfg.cctCodigo, 10);
-  const categoria = alfa(String(cfg.categoriaProfesional || '').replace(/\D/g, ''), 6);
+  const categoria = alfa(String(cfg.categoria || cfg.categoriaProfesional || '').replace(/\D/g, ''), 6);
   const linea = [
     num(cfg.tipoRegistro, 2),
     alfa(movimiento, 2),
@@ -77,7 +88,7 @@ function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, ob
     alfa(cfg.puesto, 4),
     num(cfg.rectificacion, 2),
     cct,
-    categoria.trim() ? num(cfg.categoriaProfesional, 6) : ' '.repeat(6),
+    categoria.trim() ? num(cfg.categoria || cfg.categoriaProfesional, 6) : ' '.repeat(6),
     cfg.tipoServicio ? num(cfg.tipoServicio, 3) : ' '.repeat(3),
     ' '.repeat(10),
     ' '.repeat(10),
@@ -104,7 +115,7 @@ export function lineasCargaMasiva({ contrato, cuil, bruto, obraSocial, empresa }
   const advertencias = [];
   if (alta.faltaCct) advertencias.push('CCT_CODIGO_PENDIENTE');
   if (alta.faltaCategoria) advertencias.push('CATEGORIA_PROFESIONAL_PENDIENTE');
-  if (alta.faltaObraSocial) advertencias.push('OBRA_SOCIAL_PENDIENTE');
+  if (alta.faltaObraSocial) advertencias.push('RNOS_PENDIENTE');
   if (String(cfg.puesto) === '5414') advertencias.push('PUESTO_A_VERIFICAR');
   return {
     lineas: [alta.linea, baja.linea],

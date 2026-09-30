@@ -45,6 +45,31 @@ describe('TXT ARCA posiciones fijas', () => {
     assert.equal(out.enviable, false);
     assert.equal(out.advertencias.includes('CCT_CODIGO_PENDIENTE'), true);
     assert.equal(out.advertencias.includes('CATEGORIA_PROFESIONAL_PENDIENTE'), true);
+    assert.equal(out.advertencias.includes('RNOS_PENDIENTE'), true);
+    assert.equal(out.advertencias.includes('CCT_CODIGO_PENDIENTE'), true);
+  });
+
+  it('Vigilador es 033104 en las posiciones 101-106 y el CCT sigue pendiente', () => {
+    const out = lineasCargaMasiva({
+      contrato,
+      cuil,
+      bruto: 8000,
+      obraSocial: '112233',
+      empresa: { id: 'bacarsa' },
+    });
+    assert.equal(out.lineas[0].slice(100, 106), '033104');
+    assert.equal(out.lineas[1].slice(100, 106), '033104');
+    assert.equal(out.advertencias.includes('CCT_CODIGO_PENDIENTE'), true);
+    assert.equal(out.enviable, false);
+    const editada = lineasCargaMasiva({
+      contrato,
+      cuil,
+      bruto: 8000,
+      obraSocial: '112233',
+      empresa: { id: 'grupos_bacar_sa', arcaEventuales: { categoria: '999999', cctCodigo: '42205' } },
+    });
+    assert.equal(editada.lineas[0].slice(100, 106), '999999');
+    assert.equal(editada.advertencias.includes('CCT_CODIGO_PENDIENTE'), false);
   });
 });
 

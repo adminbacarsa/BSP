@@ -195,7 +195,7 @@ async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil:
     const { lineasCargaMasiva } = await import('../../../web2/src/lib/eventuales/arcaTxt.mjs') as {
       lineasCargaMasiva: (i: Record<string, unknown>) => { lineas: string[]; advertencias: string[]; enviable: boolean };
     };
-    const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
+    const empresa = { id: empresaId, ...((await db().collection('empresas').doc(empresaId).get()).data() || {}) };
     const out = lineasCargaMasiva({ contrato, cuil, bruto: Number(contrato.brutoEstimado || 0), obraSocial: bolsa.obraSocialRnos || '', empresa });
     const advertencias = [...out.advertencias];
     if (!(Number(contrato.brutoEstimado) > 0)) advertencias.push('RETRIBUCION_PENDIENTE');

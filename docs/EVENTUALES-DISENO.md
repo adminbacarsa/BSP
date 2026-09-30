@@ -348,7 +348,7 @@ No entra a la bolsa si el CUIL o el legajo ya es planta permanente en esas empre
 ## 5. Pendiente de verificar (el dictamen ya cerró el resto)
 
 1. **Qué significa ACTIVO / BAJA en la planilla** (hipótesis en §4: convocable vs. fuera de la bolsa). No es el alta ARCA.
-2. Código de CCT 422/05 (10 caracteres de la tabla de convenios), código numérico de categoría profesional Vigilador General, y confirmar puesto 5414. Modalidad ya cerrada: **012**. Baja: movimiento BT, situación de revista **30** (vencimiento de plazo, art. 250 LCT).
+2. Código de CCT 422/05 (10 caracteres de la tabla de convenios) sigue pendiente. Categoría profesional Vigilador = **033104** (`arcaEventuales.categoria`, editable). Confirmar puesto 5414. Modalidad ya cerrada: **012**. Baja: movimiento BT, situación de revista **30** (vencimiento de plazo, art. 250 LCT). El RNOS es de cada vigilador: si falta, el envío queda `RNOS_PENDIENTE`.
 3. Umbrales del alerta de encadenamiento (cantidad, meses, patrón semanal).
 4. El abogado revisa la cláusula de §2.8. El monto ya sale de la escala; falta la tabla paritaria (básicos, % nocturno, presentismo, adicionales, 25 o 30 días para vacaciones).
 5. Si el apto psicofísico y la habilitación 9236 viven en el legajo de cada empresa o se copian desde la bolsa cuando la habilitación es de la persona. El QR igual los muestra por empresa prestadora.

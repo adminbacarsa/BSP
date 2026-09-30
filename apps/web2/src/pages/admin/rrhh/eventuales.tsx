@@ -24,6 +24,7 @@ type Ficha = {
   aptoVencimiento: string;
   riesgoEncadenamiento: string;
   uid: string;
+  obraSocialRnos: string;
 };
 
 type Form = {
@@ -84,6 +85,7 @@ export default function EventualesPage() {
           aptoVencimiento: String(apto.vencimiento || ''),
           riesgoEncadenamiento: String(data.riesgoEncadenamiento || ''),
           uid: String(data.uid || ''),
+          obraSocialRnos: String(data.obraSocialRnos || ''),
         };
       }));
     });
@@ -199,7 +201,7 @@ export default function EventualesPage() {
             {visibles.map((f) => (
               <li key={f.id}>
                 <button type="button" onClick={() => abrirDetalle(f.id)} className={`w-full rounded-2xl px-3 py-2 text-left hover:bg-slate-50 ${elegida === f.id ? 'bg-indigo-50' : ''}`}>
-                  <span className="block text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
+                  <span className={`block text-sm font-bold ${f.obraSocialRnos ? 'text-slate-800' : 'text-rose-600'}`}>{f.nombre || f.id}{f.obraSocialRnos ? '' : ' · RNOS'}</span>
                   <span className="text-[11px] text-slate-500">{f.disponibilidad} · {f.empresasHabilitadas.join(', ') || 'sin empresa'}</span>
                 </button>
               </li>
@@ -217,11 +219,17 @@ export default function EventualesPage() {
                     <p className="text-xs text-slate-500">{ficha.domicilio || 'Sin domicilio'} · {ficha.telefono || 'sin teléfono'} · {ficha.mail || 'sin mail'}</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    {puede('update') && <button type="button" className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, dni: ficha.dni, domicilio: ficha.domicilio, telefono: ficha.telefono, mail: ficha.mail, empresasHabilitadas: ficha.empresasHabilitadas, habilitacionVencimiento: ficha.habilitacionVencimiento, credencialVencimiento: ficha.credencialVencimiento, aptoVencimiento: ficha.aptoVencimiento }); }}>Editar</button>}
+                    {puede('update') && <button type="button" className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, dni: ficha.dni, domicilio: ficha.domicilio, telefono: ficha.telefono, mail: ficha.mail, obraSocialRnos: ficha.obraSocialRnos, empresasHabilitadas: ficha.empresasHabilitadas, habilitacionVencimiento: ficha.habilitacionVencimiento, credencialVencimiento: ficha.credencialVencimiento, aptoVencimiento: ficha.aptoVencimiento }); }}>Editar</button>}
                     {puede('update') && <button type="button" className="rounded-2xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white" onClick={acceso}>Crear acceso a la app</button>}
                     {puede('update') && ficha.disponibilidad === 'NO_DISPONIBLE' && <button type="button" className="rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white" onClick={reactivar}>Reactivar</button>}
                   </div>
                 </div>
+                {!ficha.obraSocialRnos && <p className="text-sm font-bold text-rose-600">RNOS pendiente. El alta ARCA no se puede enviar.</p>}
+                {!!(detalle?.rnos as { sugerido?: boolean; rnos?: string; empresaId?: string } | undefined)?.sugerido && (
+                  <p className="text-sm text-rose-700">Hay RNOS {(detalle?.rnos as { rnos: string }).rnos} en {(detalle?.rnos as { empresaId: string }).empresaId}.
+                    {puede('update') && <button type="button" className="ml-2 underline" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, mail: ficha.mail, telefono: ficha.telefono, dni: ficha.dni, domicilio: ficha.domicilio, empresasHabilitadas: ficha.empresasHabilitadas, obraSocialRnos: (detalle?.rnos as { rnos: string }).rnos }); }}>Usar esa</button>}
+                  </p>
+                )}
                 <p className="text-sm text-slate-700">Encadenamiento: {ficha.riesgoEncadenamiento || 'sin alerta'}. Habilitación {fmt(ficha.habilitacionVencimiento)} · credencial {fmt(ficha.credencialVencimiento)} · apto {fmt(ficha.aptoVencimiento)}.</p>
                 {puede('delete') && ficha.disponibilidad !== 'NO_DISPONIBLE' && (
                   <div className="flex flex-wrap gap-2 rounded-2xl bg-slate-50 p-3">
@@ -265,7 +273,7 @@ export default function EventualesPage() {
                   ['credencialVencimiento', 'Vence credencial'], ['aptoEstado', 'Apto'], ['aptoVencimiento', 'Vence apto'],
                 ] as const).map(([key, label]) => (
                   <label key={key} className="text-xs font-bold text-slate-500">{label}
-                    <input value={String(form[key] || '')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className="mt-1 w-full rounded-xl border px-2 py-1 text-sm font-normal text-slate-800" />
+                    <input value={String(form[key] || '')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className={`mt-1 w-full rounded-xl border px-2 py-1 text-sm font-normal text-slate-800 ${key === 'obraSocialRnos' && !form.obraSocialRnos ? 'border-rose-500 bg-rose-50' : ''}`} />
                   </label>
                 ))}
               </div>

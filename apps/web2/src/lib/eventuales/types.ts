@@ -70,6 +70,8 @@ export interface ArcaEventualesConfig {
   actividad: string;
   puesto: string;
   cctCodigo: string;
+  /** Código de 6 dígitos. Vigilador = 033104. Editable por empresa. */
+  categoria?: string;
   categoriaProfesional: string;
   obraSocialDefault?: string;
 }

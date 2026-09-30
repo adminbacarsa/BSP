@@ -13,6 +13,23 @@ function texto(value) {
   return String(value ?? '').trim();
 }
 
+export function rnosDigitos(raw) {
+  const digits = String(raw ?? '').replace(/\D/g, '');
+  if (!digits) return '';
+  return digits.padStart(6, '0').slice(-6);
+}
+
+/** Si la ficha no tiene RNOS y otro legajo del mismo CUIL sí, se sugiere. No alcanza para enviar. */
+export function sugerirObraSocial(fichaRnos, legajos) {
+  const propio = rnosDigitos(fichaRnos);
+  if (propio) return { rnos: propio, sugerido: false, pendiente: false };
+  const otro = (legajos || []).find((l) => rnosDigitos(l?.obraSocialRnos));
+  if (otro) {
+    return { rnos: rnosDigitos(otro.obraSocialRnos), sugerido: true, pendiente: true, empresaId: otro.empresaId || '', codigo: 'RNOS_PENDIENTE' };
+  }
+  return { rnos: '', sugerido: false, pendiente: true, codigo: 'RNOS_PENDIENTE' };
+}
+
 export function validarFicha(input, ctx = {}) {
   const nombre = texto(input?.nombre);
   if (!nombre) return { ok: false, codigo: 'SIN_NOMBRE' };
@@ -38,7 +55,7 @@ export function validarFicha(input, ctx = {}) {
       domicilioGeo: input?.domicilioGeo || null,
       telefono: texto(input?.telefono),
       mail,
-      obraSocialRnos: texto(input?.obraSocialRnos),
+      obraSocialRnos: rnosDigitos(input?.obraSocialRnos),
       empresasHabilitadas: empresas,
       habilitacion9236: {
         numero: texto(input?.habilitacionNumero),

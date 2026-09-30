@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { planAccesoEventual, planBaja, planReactivar, puedeGestionar, validarFicha, vencePronto } from './ficha.mjs';
+import { planAccesoEventual, planBaja, planReactivar, puedeGestionar, sugerirObraSocial, validarFicha, vencePronto } from './ficha.mjs';
 
 const base = { nombre: 'Juan Pérez', cuil: '20-12345678-6', mail: 'juan@bacar.test', empresasHabilitadas: ['bacarsa', 'otra'] };
 
@@ -33,5 +33,14 @@ describe('ficha de la bolsa', () => {
     assert.equal(planAccesoEventual({ disponibilidad: 'NO_DISPONIBLE', mail: 'a@b.com' }).codigo, 'NO_DISPONIBLE');
     assert.equal(vencePronto('2026-10-15', '2026-10-01', 30), true);
     assert.equal(vencePronto('2026-12-01', '2026-10-01', 30), false);
+  });
+
+  it('sin RNOS queda pendiente y sugiere el de otro legajo', () => {
+    assert.equal(validarFicha(base).doc.obraSocialRnos, '');
+    const sugerida = sugerirObraSocial('', [{ empresaId: 'bacarsa', obraSocialRnos: '12.345' }]);
+    assert.equal(sugerida.codigo, 'RNOS_PENDIENTE');
+    assert.equal(sugerida.sugerido, true);
+    assert.equal(sugerida.rnos, '012345');
+    assert.equal(sugerirObraSocial('112233', [{ obraSocialRnos: '999999' }]).pendiente, false);
   });
 });
