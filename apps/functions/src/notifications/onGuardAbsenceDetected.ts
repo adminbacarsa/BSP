@@ -5,6 +5,7 @@
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { arYmd, vacancyActionTargetAr } from '../common/arClock';
 
 export async function stampTitularAbsenceVacancyMark(
   db: admin.firestore.Firestore,
@@ -52,12 +53,10 @@ export const onGuardAbsenceDetected = functions
     const result = await stampTitularAbsenceVacancyMark(db, turnoId);
     if (result !== 'STAMPED') return;
 
-    const scheduleDate = typeof after.scheduleDate === 'string' ? after.scheduleDate : '';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const nowH = new Date().getHours();
-    const isTomorrow = scheduleDate > todayStr;
-    const actionTarget: 'PLANIFICACION' | 'OPERACIONES' =
-      (isTomorrow && nowH < 19) ? 'PLANIFICACION' : 'OPERACIONES';
+    const scheduleDate = typeof after.scheduleDate === 'string'
+      ? after.scheduleDate
+      : (typeof after.startTime?.toMillis === 'function' ? arYmd(after.startTime.toMillis()) : '');
+    const actionTarget = vacancyActionTargetAr(scheduleDate, Date.now());
 
     const sysSnap = await db.collection('system_users').where('empresaId', '==', empresaId).get();
     if (sysSnap.empty) return;

@@ -40,6 +40,7 @@ import { COVERAGE_REJECT_LABEL, coverageWizardStepKeys, type CoverageWizardStepK
 import { pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
 import {
   convocatoriaTypeForInternalKind,
+  invokeCancelarConvocatoriaCobertura,
   invokeCrearConvocatoriaCobertura,
   type OpsConvocatoriaCallableType,
 } from '@/lib/operaciones/opsConvocatoriaCobertura';
@@ -266,6 +267,21 @@ interface Props {
   onUpdate: (id: string, fn: (s: CoverageSession) => CoverageSession) => void;
 }
 
+/**
+ * Convocatorias en app que siguen esperando respuesta en una sesión del protocolo.
+ * Al cerrar la sesión (X del panel o de la pestaña) se cancelan en el servidor: si no,
+ * el guardia puede aceptar horas después sobre un hueco que el CC ya resolvió por otro lado.
+ */
+export function pendingConvocatoriaIdsForSession(
+  s: Pick<CoverageSession, 'status' | 'pending' | 'pendingExt' | 'pendingAdv'>,
+): string[] {
+  if (s.status !== 'PENDING' && s.status !== 'PENDING_DUAL') return [];
+  const ids = [s.pending?.convocatoriaId, s.pendingExt?.convocatoriaId, s.pendingAdv?.convocatoriaId]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean);
+  return Array.from(new Set(ids));
+}
+
 export function CoverageSessionManager({ sessions, activeId, logic, onActivate, onClose, onUpdate }: Props) {
   const timerRefs = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const unsubRefs = useRef<Record<string, () => void>>({});
@@ -273,6 +289,22 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
   const upd = useCallback((id: string, patch: Partial<CoverageSession>) => {
     onUpdate(id, s => ({ ...s, ...patch }));
   }, [onUpdate]);
+
+  /** Cierra la sesión y cancela las convocatorias PENDING que quedaban abiertas en la app. */
+  const closeSession = useCallback((id: string) => {
+    const sess = sessions.find((x) => x.id === id);
+    const ids = sess ? pendingConvocatoriaIdsForSession(sess) : [];
+    (['single', 'ext', 'adv'] as const).forEach((role) => {
+      const key = `${id}_${role}`;
+      if (unsubRefs.current[key]) { unsubRefs.current[key](); delete unsubRefs.current[key]; }
+    });
+    if (ids.length) {
+      void Promise.all(ids.map((cid) => invokeCancelarConvocatoriaCobertura(cid))).then((res) => {
+        if (res.some(Boolean)) toast.info('Convocatoria cancelada — el protocolo se cerró sin respuesta');
+      });
+    }
+    onClose(id);
+  }, [sessions, onClose]);
 
   useEffect(() => {
     sessions.forEach(s => {
@@ -339,7 +371,7 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
           allSessions={sessions}
           logic={logic}
           onUpd={(patch) => upd(activeSession.id, patch)}
-          onClose={() => onClose(activeSession.id)}
+          onClose={() => closeSession(activeSession.id)}
           onMinimize={() => upd(activeSession.id, { minimized: true })}
           unsubRefs={unsubRefs.current}
         />
@@ -388,7 +420,7 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
                   <span className="text-[9px] opacity-70">P{s.currentStep + 1}</span>
                 )}
                 <button
-                  onClick={e => { e.stopPropagation(); onClose(s.id); }}
+                  onClick={e => { e.stopPropagation(); closeSession(s.id); }}
                   className="ml-1 opacity-60 hover:opacity-100 transition-opacity"
                 >
                   <X size={11} />
@@ -668,6 +700,10 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   };
 
   // ── Acciones ────────────────────────────────────────────────────────────────
+  const stopListening = (role: 'single' | 'ext' | 'adv') => {
+    const key = `${s.id}_${role}`;
+    if (unsubRefs[key]) { unsubRefs[key](); delete unsubRefs[key]; }
+  };
   const listenConvocatoria = (convocatoriaId: string, role: 'single' | 'ext' | 'adv') => {
     const key = `${s.id}_${role}`;
     if (unsubRefs[key]) unsubRefs[key]();
@@ -766,6 +802,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     if (!cand) return;
     setLoading('confirm');
     try {
+      // Aceptó por teléfono: la convocatoria en app deja de esperar respuesta. Si el guardia ya
+      // había aceptado en la app, el servidor no la cancela y el chequeo de abajo ve la cobertura.
+      if (s.pending.convocatoriaId) {
+        stopListening('single');
+        await invokeCancelarConvocatoriaCobertura(s.pending.convocatoriaId);
+      }
       // Idempotencia: si la ausencia ya tiene cobertura activa, no crear otra (evita N COB en Plan).
       if (absenceShift.id) {
         const titularSnap = await getDoc(doc(db, 'turnos', absenceShift.id));
@@ -915,7 +957,15 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   // Mantener ref siempre actualizado (evita closures stale en onSnapshot)
   confirmCandidateRef.current = confirmCandidate;
 
-  const rejectCandidate = () => onUpd({ status: 'SELECTING', pending: null, awaitingPhone: false });
+  /** Rechazo / no contesta: la convocatoria PENDING se cancela en el servidor para que el guardia no acepte después. */
+  const rejectCandidate = () => {
+    const cid = s.pending?.convocatoriaId;
+    if (cid) {
+      stopListening('single');
+      void invokeCancelarConvocatoriaCobertura(cid);
+    }
+    onUpd({ status: 'SELECTING', pending: null, awaitingPhone: false });
+  };
   const skipStep = () => {
     rejectCandidate();
     const next = s.currentStep + 1;
@@ -1118,6 +1168,12 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   confirmDualTogetherRef.current = confirmDualTogether;
 
   const rejectDualTogether = () => {
+    for (const [role, slot] of [['ext', s.pendingExt], ['adv', s.pendingAdv]] as const) {
+      if (slot?.convocatoriaId) {
+        stopListening(role);
+        void invokeCancelarConvocatoriaCobertura(slot.convocatoriaId);
+      }
+    }
     onUpd({
       status: 'SELECTING',
       pendingExt: null,
@@ -1182,12 +1238,11 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
         {/* Acciones */}
         <div className="w-full flex flex-col gap-2">
-          {(timedOut || !s.pending?.convocatoriaId) && (
+          {/* Siempre visible: el operador puede cerrar por teléfono aunque la convocatoria en app siga esperando. */}
           <button onClick={() => void confirmCandidate()} disabled={!!loading}
             className="w-full py-3 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-2xl text-sm transition-colors shadow-sm">
-            {loading === 'confirm' ? '...' : timedOut ? '✓ Acepta por teléfono (manual)' : '✓ Acepta'}
+            {loading === 'confirm' ? '...' : (timedOut || s.pending?.convocatoriaId) ? '✓ Acepta por teléfono (manual)' : '✓ Acepta'}
           </button>
-          )}
           <button onClick={rejectCandidate}
             className="w-full py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold rounded-2xl text-sm transition-colors">
             {timedOut ? '✗ No contesta / No puede' : '✗ Rechaza'} — siguiente

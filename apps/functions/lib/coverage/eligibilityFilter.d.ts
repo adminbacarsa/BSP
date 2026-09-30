@@ -11,7 +11,7 @@ export interface EligibilityResult {
     eligible: boolean;
     reason?: string;
 }
-export declare function checkEligibility(employee: Record<string, any>, ctx: EligibilityContext, candidateType: CandidateType, distanceKm?: number): EligibilityResult;
+export declare function checkEligibility(employee: Record<string, any>, ctx: EligibilityContext, candidateType: CandidateType, distanceKm?: number, nowMs?: number): EligibilityResult;
 export declare const CASCADE_ORDER: CandidateType[];
 export declare function nextCascadeStep(current: CandidateType): CandidateType | null;
 export declare function getUrgency(startTime: Timestamp | {

@@ -36,6 +36,8 @@ export interface CoverageShiftView {
     checkInMs?: number;
     deploymentBand?: string;
     absenceShiftId?: string;
+    isRetention?: boolean;
+    retentionAbsenceShiftId?: string;
 }
 export interface CoverageAbsenceView {
     employeeId: string;
@@ -98,6 +100,7 @@ export interface CoverageCandidateRow {
     otherPosition: boolean;
     eligible: boolean;
     rejectReason?: CoverageRejectReason;
+    retainedForGap?: boolean;
 }
 export interface CoverageCandidateSet {
     byType: Record<CoverageCascadeType, CoverageCandidateRow[]>;

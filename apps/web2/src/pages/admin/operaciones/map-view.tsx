@@ -689,6 +689,9 @@ const ManualRetentionModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
+/** Turnos con "declarar ausente" en curso: un clic repetido no duplica callable ni ausencia. */
+const markAbsentInFlightMap = new Set<string>();
+
 export default function TacticalMapView() {
     const router = useRouter();
     const { empresaId, empresa } = useEmpresa();
@@ -981,22 +984,39 @@ export default function TacticalMapView() {
         setWaData({ isOpen: true, ctx: { employeeName: shift.employeeName || '', phone: shift.phone || '', objectiveName: shift.objectiveName, horaInicio: shift.shiftDateObj ? new Date(shift.shiftDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '', horaFin: shift.endDateObj ? new Date(shift.endDateObj).toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',hour12:false}) : '' } });
     };
     const handleDeclareAbsentT5 = async (shift: any) => {
-        const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
-        const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
-        const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
-        const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
-        try {
-            const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
-            await fn({ shiftId: shift.id });
-        } catch (callErr) {
-            console.warn('[handleDeclareAbsentT5] callable', callErr);
+        // Una declaración por turno (auditoría 29/09: clics repetidos duplicaban ausencias y cascadas).
+        if (markAbsentInFlightMap.has(shift.id)) return;
+        if (shift.isAbsent === true && String(shift.absenceDetectedBy || shift.absenceType || '').toUpperCase() === 'MANUAL_OPS') {
+            toast.info(`La ausencia de ${shift.employeeName} ya fue declarada desde Operaciones.`);
+            openCoverageProtocol(shift);
+            return;
         }
-        await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true, absenceType: 'MANUAL_OPS', absenceDetectedBy: 'MANUAL_OPS', absenceConfirmedBy: 'OPERACIONES', absenceConfirmedAt: serverTimestamp() }, empresaId, migracionCompleta);
-        await addDoc(collection(db, 'ausencias'), stampEmpresaId({ employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, type: 'NO_PRESENTACION', startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd), status: 'Pendiente', reason: `No presentación — ${shift.objectiveName} (${shift.positionName})`, hasCertificate: false, createdAt: serverTimestamp(), origin: 'OPERACIONES', shiftId: shift.id }, shiftEmpresaId));
-        if (shift.employeeId) await addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: shift.employeeId, type: 'AUSENCIA_DECLARADA', title: 'Ausencia registrada', read: false, body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`, objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5', status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, shiftId: shift.id, objectiveName: shift.objectiveName || '', positionName: shift.positionName || '', description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
-        openCoverageProtocol(shift);
-        toast.success(`Ausencia de ${shift.employeeName} registrada.`);
+        markAbsentInFlightMap.add(shift.id);
+        try {
+            const shiftEmpresaId = String(shift.empresaId || empresaId || '').trim();
+            const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
+            const dayStart = new Date(shiftDate); dayStart.setHours(0,0,0,0);
+            const dayEnd   = new Date(shiftDate); dayEnd.setHours(23,59,59,999);
+            // El servidor (markShiftAbsent) escribe turno, `ausencias` y novedad AA; el cliente solo repite si falló.
+            let serverApplied = false;
+            try {
+                const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
+                const res: any = await fn({ shiftId: shift.id });
+                serverApplied = res?.data?.success === true;
+            } catch (callErr) {
+                console.warn('[handleDeclareAbsentT5] callable', callErr);
+            }
+            if (!serverApplied) {
+                await updateDocForEmpresa('turnos', shift.id, { status: 'ABSENT', isAbsent: true, absenceType: 'MANUAL_OPS', absenceDetectedBy: 'MANUAL_OPS', absenceConfirmedBy: 'OPERACIONES', absenceConfirmedAt: serverTimestamp() }, empresaId, migracionCompleta);
+                await addDoc(collection(db, 'ausencias'), stampEmpresaId({ employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, type: 'NO_PRESENTACION', startDate: Timestamp.fromDate(dayStart), endDate: Timestamp.fromDate(dayEnd), status: 'Pendiente', reason: `No presentación — ${shift.objectiveName} (${shift.positionName})`, hasCertificate: false, createdAt: serverTimestamp(), origin: 'OPERACIONES', shiftId: shift.id }, shiftEmpresaId));
+            }
+            if (shift.employeeId) await addDoc(collection(db, 'user_notifications'), stampEmpresaId({ userId: shift.employeeId, type: 'AUSENCIA_DECLARADA', title: 'Ausencia registrada', read: false, body: `Tu ausencia en ${shift.objectiveName} fue registrada por Operaciones.`, objectiveId: shift.objectiveId, shiftId: shift.id, createdAt: serverTimestamp() }, shiftEmpresaId));
+            await addDoc(collection(db, 'novedades'), stampEmpresaId({ type: 'AUSENCIA_OPERATIVA', title: 'Ausencia declarada T+5', status: 'pending', employeeId: shift.employeeId, employeeName: shift.employeeName, clientId: shift.clientId || null, objectiveId: shift.objectiveId || null, shiftId: shift.id, objectiveName: shift.objectiveName || '', positionName: shift.positionName || '', description: `${shift.employeeName} no se presentó en ${shift.objectiveName} — ${shift.positionName}`, createdAt: serverTimestamp(), reportedBy: 'OPERACIONES' }, shiftEmpresaId));
+            openCoverageProtocol(shift);
+            toast.success(`Ausencia de ${shift.employeeName} registrada.`);
+        } finally {
+            markAbsentInFlightMap.delete(shift.id);
+        }
     };
     const handleLateArrival = async (shift: any, etaTime: string) => {
         try { await updateDocForEmpresa('turnos', shift.id, { lateArrivalAt: serverTimestamp(), lateETA: etaTime }, empresaId, migracionCompleta); toast.info(`Llegada tarde de ${shift.employeeName} registrada. ETA: ${etaTime}`); }

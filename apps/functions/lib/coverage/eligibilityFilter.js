@@ -7,8 +7,9 @@ exports.getUrgency = getUrgency;
 exports.findEmployeeUid = findEmployeeUid;
 const firestore_1 = require("firebase-admin/firestore");
 const coverageCandidates_1 = require("./coverageCandidates");
-function checkEligibility(employee, ctx, candidateType, distanceKm) {
-    const today = new Date().toISOString().slice(0, 10);
+const arClock_1 = require("../common/arClock");
+function checkEligibility(employee, ctx, candidateType, distanceKm, nowMs = Date.now()) {
+    const today = (0, arClock_1.arYmd)(nowMs);
     const restricObjs = employee.restriccionesObjetivo || [];
     if (restricObjs.some((r) => r.objectiveId === ctx.objectiveId)) {
         return { eligible: false, reason: 'RESTRICCION_OBJETIVO' };

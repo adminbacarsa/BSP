@@ -178,6 +178,26 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             return false;
         return (await slasFor(oid)).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', end, (0, shiftSeries_1.seriesCodeOf)(shift)));
     }
+    async function retainedGapEndedWithoutContinuity(shift, relieveDocs) {
+        const gapId = String(shift.retentionAbsenceShiftId || '').trim();
+        const oid = String(shift.objectiveId || '');
+        if (!gapId || !oid)
+            return null;
+        const inWindow = relieveDocs.find((d) => d.id === gapId);
+        const gapData = inWindow
+            ? inWindow.data()
+            : ((await db.collection('turnos').doc(gapId).get()).data() ?? null);
+        if (!gapData)
+            return null;
+        const gapEndMs = shiftEndMs(gapData);
+        if (!gapEndMs || nowMs < gapEndMs)
+            return null;
+        const gapEnd = new Date(gapEndMs);
+        const continuous = (await slasFor(oid)).some((sla) => (0, positionHasContinuity_1.positionHasContinuityFromSlaDoc)(sla, shift.positionName || '', gapEnd, (0, shiftSeries_1.seriesCodeOf)(gapData)));
+        if (continuous)
+            return null;
+        return { gapId, gapEndMs };
+    }
     async function nextBandSlots(shift) {
         const oid = String(shift.objectiveId || '');
         const end = shiftEndDate(shift);
@@ -434,6 +454,11 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
             continue;
         }
         if (shift.isRetention === true) {
+            const gapEnded = await retainedGapEndedWithoutContinuity(shift, relieveDocs);
+            if (gapEnded) {
+                close(docSnap, shift, gapEnded.gapEndMs, 'FIN_HUECO_SIN_CONTINUIDAD', undefined, gapEnded.gapId);
+                continue;
+            }
             const linkTarget = relieveAbsent ?? relievePending;
             if (!shift.retentionAbsenceShiftId && linkTarget) {
                 update(docSnap.ref, { retentionAbsenceShiftId: linkTarget.id });

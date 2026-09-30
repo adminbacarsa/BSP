@@ -13,3 +13,4 @@ export declare function arDayBoundsMs(ms: number): {
     startMs: number;
     endMs: number;
 };
+export declare function vacancyActionTargetAr(scheduleDateYmd: string, nowMs: number): 'PLANIFICACION' | 'OPERACIONES';

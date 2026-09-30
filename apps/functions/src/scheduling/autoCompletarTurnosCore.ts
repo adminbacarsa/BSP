@@ -300,6 +300,34 @@ export async function runAutoCompletarTurnosPass(
     );
   }
 
+  /**
+   * Retenido por un hueco (`retentionAbsenceShiftId`) que ya terminó: si a esa hora el puesto
+   * no tiene franja siguiente, devuelve el fin del hueco para cerrar ahí. Si el hueco sigue
+   * abierto, no se conoce, o hay continuidad (otra franja arranca ±30 min), devuelve null y
+   * el retenido sigue esperando relevo o tope.
+   */
+  async function retainedGapEndedWithoutContinuity(
+    shift: FirebaseFirestore.DocumentData,
+    relieveDocs: QueryDocumentSnapshot[],
+  ): Promise<{ gapId: string; gapEndMs: number } | null> {
+    const gapId = String(shift.retentionAbsenceShiftId || '').trim();
+    const oid = String(shift.objectiveId || '');
+    if (!gapId || !oid) return null;
+    const inWindow = relieveDocs.find((d) => d.id === gapId);
+    const gapData = inWindow
+      ? inWindow.data()
+      : ((await db.collection('turnos').doc(gapId).get()).data() ?? null);
+    if (!gapData) return null;
+    const gapEndMs = shiftEndMs(gapData);
+    if (!gapEndMs || nowMs < gapEndMs) return null;
+    const gapEnd = new Date(gapEndMs);
+    const continuous = (await slasFor(oid)).some((sla) =>
+      positionHasContinuityFromSlaDoc(sla, shift.positionName || '', gapEnd, seriesCodeOf(gapData as Record<string, unknown>)),
+    );
+    if (continuous) return null;
+    return { gapId, gapEndMs };
+  }
+
   async function nextBandSlots(shift: FirebaseFirestore.DocumentData): Promise<number | null> {
     const oid = String(shift.objectiveId || '');
     const end = shiftEndDate(shift);
@@ -582,6 +610,14 @@ export async function runAutoCompletarTurnosPass(
     }
 
     if (shift.isRetention === true) {
+      // El hueco que motivó la retención ya terminó y el puesto no sigue (sin franja siguiente
+      // ±30 min): el retenido cierra al fin del hueco. Auditoría 29/09: FARIAS (Peaje, M3 12–16)
+      // retenido por VENENCIA (T3 16–17) siguió "retenido" hasta el checkout manual de las 20:28.
+      const gapEnded = await retainedGapEndedWithoutContinuity(shift, relieveDocs);
+      if (gapEnded) {
+        close(docSnap, shift, gapEnded.gapEndMs, 'FIN_HUECO_SIN_CONTINUIDAD', undefined, gapEnded.gapId);
+        continue;
+      }
       // Retenido dentro del tope y sin relevo presente: sigue retenido.
       const linkTarget = relieveAbsent ?? relievePending;
       if (!shift.retentionAbsenceShiftId && linkTarget) {

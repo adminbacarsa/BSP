@@ -150,6 +150,9 @@ export interface CoverageShiftView {
   checkInMs?: number;
   deploymentBand?: string;
   absenceShiftId?: string;
+  /** Saliente retenido en el puesto (P9): ya está cubriendo el hueco. */
+  isRetention?: boolean;
+  retentionAbsenceShiftId?: string;
 }
 
 export interface CoverageAbsenceView {
@@ -214,6 +217,8 @@ export interface CoverageCandidateRow {
   otherPosition: boolean;
   eligible: boolean;
   rejectReason?: CoverageRejectReason;
+  /** EXT: el saliente ya retenido por este hueco va primero (ya está en el puesto). */
+  retainedForGap?: boolean;
 }
 
 export interface CoverageCandidateSet {
@@ -249,17 +254,23 @@ function emptyByType(): Record<CoverageCascadeType, CoverageCandidateRow[]> {
   return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], FT: [] };
 }
 
+/**
+ * Corte Ext + Adel: mitad del hueco real (HH:MM del titular), no la hora fija del código.
+ * M 07–15 y T 15–23 dan lo mismo que antes (11:00 / 19:00); un N 23–07 corta a las 03:00 y un
+ * puesto custom 12–16 a las 14:00. Sin horario válido se cae al corte CCT por código.
+ */
 export function dualSegmentBounds(gap: CoverageGapView): { extEndMs: number; advStartMs: number } {
-  const band = norm(gap.band);
-  let hm = 11;
-  if (band === 'T') hm = 19;
-  else if (band === 'N' || band === 'N12') hm = 23;
-  else if (band === 'M' || band === 'D12') hm = 11;
-  else if (gap.startMs && gap.endMs && gap.endMs > gap.startMs) {
+  if (gap.startMs && gap.endMs && gap.endMs > gap.startMs && gap.endMs - gap.startMs <= COVERAGE_HARD_CAP_MS + 60_000) {
     const mid = gap.startMs + Math.floor((gap.endMs - gap.startMs) / 2);
     return { extEndMs: mid, advStartMs: mid };
   }
-  const ms = gap.startMs ? arHmOnDay(gap.startMs, hm, 0) : 0;
+  const band = norm(gap.band);
+  let hm = 11;
+  if (band === 'T') hm = 19;
+  else if (band === 'N' || band === 'N12') hm = 3;
+  else if (band === 'M' || band === 'D12') hm = 11;
+  const dayMs = band === 'N' || band === 'N12' ? gap.startMs + DAY_MS : gap.startMs;
+  const ms = gap.startMs ? arHmOnDay(dayMs, hm, 0) : 0;
   return { extEndMs: ms, advStartMs: ms };
 }
 
@@ -389,6 +400,7 @@ function rowFrom(
   reason?: CoverageRejectReason,
 ): CoverageCandidateRow {
   const other = !samePosition(gap, shift);
+  const retained = type === 'EXTEND' && isRetainedForGap(shift, gap);
   return {
     type,
     employeeId: shift.employeeId,
@@ -398,7 +410,16 @@ function rowFrom(
     otherPosition: other,
     eligible: !reason,
     ...(reason ? { rejectReason: reason } : {}),
+    ...(retained ? { retainedForGap: true } : {}),
   };
+}
+
+/** Retenido por este hueco: `retentionAbsenceShiftId` = titular, o retenido en el mismo puesto sin id. */
+function isRetainedForGap(shift: CoverageShiftView, gap: CoverageGapView): boolean {
+  if (shift.isRetention !== true) return false;
+  const ref = String(shift.retentionAbsenceShiftId || '').trim();
+  if (ref) return ref === String(gap.titularShiftId || '');
+  return samePosition(gap, shift) && String(shift.objectiveId || '') === String(gap.objectiveId || '');
 }
 
 function sameGapDay(shift: CoverageShiftView | undefined, gap: CoverageGapView): boolean {
@@ -415,6 +436,7 @@ function collapseByEmployee(
   const best = new Map<string, CoverageCandidateRow>();
   const beats = (next: CoverageCandidateRow, prev: CoverageCandidateRow): boolean => {
     if (next.eligible !== prev.eligible) return next.eligible;
+    if (!!next.retainedForGap !== !!prev.retainedForGap) return !!next.retainedForGap;
     const nextDay = sameGapDay(byId.get(next.sourceShiftId), gap);
     const prevDay = sameGapDay(byId.get(prev.sourceShiftId), gap);
     if (nextDay !== prevDay) return nextDay;
@@ -652,6 +674,7 @@ export function buildCoverageCandidates(input: BuildCoverageCandidatesInput): Co
     byType[type] = collapseByEmployee(byType[type], input.shifts, input.gap);
     byType[type].sort((a, b) => {
       if (a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+      if (!!a.retainedForGap !== !!b.retainedForGap) return a.retainedForGap ? -1 : 1;
       if (a.positionRank !== b.positionRank) return a.positionRank - b.positionRank;
       return a.employeeName.localeCompare(b.employeeName, 'es');
     });

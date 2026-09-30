@@ -11,26 +11,20 @@
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
+import { arYmd, vacancyActionTargetAr } from '../common/arClock';
 
 const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA', 'INTERRUPTION']);
 
 function resolveDateStr(data: Record<string, unknown>): string {
   if (typeof data.scheduleDate === 'string' && data.scheduleDate) return data.scheduleDate;
-  // Fallback: extraer de startTime Timestamp
+  // Fallback: día calendario AR del startTime (no el día UTC).
   const st = data.startTime as admin.firestore.Timestamp | null | undefined;
-  if (st && typeof st.toDate === 'function') {
-    const d = st.toDate();
-    return d.toISOString().slice(0, 10);
-  }
+  if (st && typeof st.toMillis === 'function') return arYmd(st.toMillis());
   return '';
 }
 
 function resolveActionTarget(scheduleDate: string): 'PLANIFICACION' | 'OPERACIONES' {
-  if (!scheduleDate) return 'OPERACIONES';
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const nowH = new Date().getHours();
-  const isTomorrow = scheduleDate > todayStr;
-  return (isTomorrow && nowH < 19) ? 'PLANIFICACION' : 'OPERACIONES';
+  return vacancyActionTargetAr(scheduleDate, Date.now());
 }
 
 export const onVacanteCorrectionCreated = functions

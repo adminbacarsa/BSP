@@ -9,6 +9,7 @@ exports.arHmOnYmdMs = arHmOnYmdMs;
 exports.arYearMonth = arYearMonth;
 exports.arPlanificacionEstadoKey = arPlanificacionEstadoKey;
 exports.arDayBoundsMs = arDayBoundsMs;
+exports.vacancyActionTargetAr = vacancyActionTargetAr;
 exports.AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 function arMidnightMs(ms) {
@@ -38,5 +39,12 @@ function arPlanificacionEstadoKey(objectiveId, ms) {
 function arDayBoundsMs(ms) {
     const startMs = arMidnightMs(ms);
     return { startMs, endMs: startMs + DAY_MS - 1000 };
+}
+function vacancyActionTargetAr(scheduleDateYmd, nowMs) {
+    const ymd = String(scheduleDateYmd || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd))
+        return 'OPERACIONES';
+    const isTomorrowOrLater = ymd > arYmd(nowMs);
+    return isTomorrowOrLater && arHour(nowMs) < 19 ? 'PLANIFICACION' : 'OPERACIONES';
 }
 //# sourceMappingURL=arClock.js.map

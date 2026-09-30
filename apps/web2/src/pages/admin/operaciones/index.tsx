@@ -1711,6 +1711,9 @@ const useElapsedTime = (startTime: Date | null) => {
     return elapsed;
 };
 
+/** Turnos con "marcar ausente" en curso: un clic repetido no duplica callable, ausencia ni bitácora. */
+const markAbsentInFlight = new Set<string>();
+
 export default function OperacionesPage() {
     const router = useRouter();
     const { assignedClientId, userRole, isSuperAdmin } = useAuth();
@@ -3157,6 +3160,16 @@ export default function OperacionesPage() {
         setWaData({ isOpen: true, ctx: { employeeName: shift.employeeName || '', phone: shift.phone || '', objectiveName: shift.objectiveName, horaInicio: formatTimeSimple(shift.shiftDateObj), horaFin: formatTimeSimple(shift.endDateObj) } });
     };
     const handleMarkAbsent = async (shift: any) => {
+        // Auditoría 29/09: HERRANTE quedó con 5 MARK_ABSENT y 3 cascadas por clics repetidos.
+        // Una declaración por turno: si ya la hizo el operador, o si hay una en curso, no se repite.
+        if (markAbsentInFlight.has(shift.id)) return;
+        if (shift.isAbsent === true && String(shift.absenceDetectedBy || shift.absenceType || '').toUpperCase() === 'MANUAL_OPS') {
+            toast.info(`La ausencia de ${shift.employeeName} ya fue declarada desde Operaciones.`);
+            setAttendanceData({isOpen:false, shift:null});
+            setCoverageData({isOpen:true, shift: shift});
+            return;
+        }
+        markAbsentInFlight.add(shift.id);
         try {
             const shiftDate = shift.shiftDateObj instanceof Date ? shift.shiftDateObj : new Date(shift.shiftDateObj);
             const dayStart  = new Date(shiftDate); dayStart.setHours(0,0,0,0);
@@ -3166,24 +3179,30 @@ export default function OperacionesPage() {
             // Si ya fue marcado automáticamente (AA), evitar doble registro en ausencias
             const alreadyAutoAbsent = shift.isAbsent === true && shift.absenceType === 'AA';
 
-            // 1. Marcar el turno como ausente (confirma la ausencia con origen operador)
+            // 1. Marcar el turno como ausente (confirma la ausencia con origen operador).
+            //    El servidor (markShiftAbsent) ya escribe el turno, el doc de `ausencias` y la novedad AA;
+            //    el cliente solo repite la escritura si la callable falló.
+            let serverApplied = false;
             try {
                 const fn = httpsCallable(getFunctions(app, 'us-central1'), 'marcarAusenciaOperaciones');
-                await fn({ shiftId: shift.id });
+                const res: any = await fn({ shiftId: shift.id });
+                serverApplied = res?.data?.success === true;
             } catch (callErr) {
                 console.warn('[handleMarkAbsent] callable', callErr);
             }
-            await updateDocForEmpresa('turnos', shift.id, {
-                status:       'ABSENT',
-                isAbsent:     true,
-                absenceType:  'MANUAL_OPS',
-                absenceDetectedBy: 'MANUAL_OPS',
-                absenceConfirmedBy: 'OPERACIONES',
-                absenceConfirmedAt: serverTimestamp(),
-            }, empresaId, migracionCompleta);
+            if (!serverApplied) {
+                await updateDocForEmpresa('turnos', shift.id, {
+                    status:       'ABSENT',
+                    isAbsent:     true,
+                    absenceType:  'MANUAL_OPS',
+                    absenceDetectedBy: 'MANUAL_OPS',
+                    absenceConfirmedBy: 'OPERACIONES',
+                    absenceConfirmedAt: serverTimestamp(),
+                }, empresaId, migracionCompleta);
+            }
 
-            // 2. Crear registro en ausencias SOLO si no fue creado automáticamente
-            if (!alreadyAutoAbsent) {
+            // 2. Crear registro en ausencias SOLO si no lo creó el servidor ni la detección automática
+            if (!alreadyAutoAbsent && !serverApplied) {
                 await addDoc(collection(db, 'ausencias'), stampEmpresaId({
                     employeeId:     shift.employeeId,
                     employeeName:   shift.employeeName,
@@ -3234,6 +3253,8 @@ export default function OperacionesPage() {
             toast.success(msg);
         } catch (e: any) {
             toast.error('Error al marcar ausencia: ' + (e?.message || e?.code || String(e)));
+        } finally {
+            markAbsentInFlight.delete(shift.id);
         }
     };
     const handleVacancyCreated = (newVacancyShift: any) => { setInterruptData({isOpen:false, shift:null}); setCoverageData({isOpen:true, shift: newVacancyShift}); };

@@ -76,6 +76,8 @@ function mapShift(sh: Record<string, unknown>): CoverageShiftView | null {
     checkInMs: coverageMs(sh.checkInTime) || coverageMs(sh.presenciaAt) || undefined,
     deploymentBand: String(sh.deploymentBand || sh.coversBandCode || ''),
     absenceShiftId: String(sh.absenceShiftId || ''),
+    isRetention: sh.isRetention === true,
+    retentionAbsenceShiftId: String(sh.retentionAbsenceShiftId || ''),
   };
 }
 
