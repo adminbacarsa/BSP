@@ -8,6 +8,7 @@ import {
   planificacionPublishLookupKey,
 } from '@/lib/multiempresa';
 import { sumPublishedPlanHours } from '@cosp/hours-core';
+import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
 
 export type CronogramaEstado =
   | 'PUBLICADO'
@@ -36,6 +37,9 @@ export interface CronogramaOverviewRow {
   lastModifiedAt: Date | null;
   lastModifiedBy: string;
   lookupKey: string;
+  /** Pares del legajo con menos de 12 h entre el tope de cierre y el turno siguiente (art. 197). Aviso, no bloquea. */
+  shortRestGaps: number;
+  shortRestDetail: string;
 }
 
 function isOperationalOriginShift(data: Record<string, unknown>): boolean {
@@ -180,6 +184,7 @@ export async function loadCronogramaOverview(params: {
   const shiftCountsByObjective = new Map<string, ShiftCounts>();
   const turnosByObjective = new Map<string, any[]>();
   const activityFromShifts = new Map<string, ActivityMeta>();
+  const lctInputs: LctShiftInput[] = [];
 
   const turnosQ = scopeEmpresa
     ? query(
@@ -215,6 +220,18 @@ export async function loadCronogramaOverview(params: {
     list.push({ id: d.id, ...data });
     turnosByObjective.set(objId, list);
 
+    lctInputs.push({
+      employeeId: String(data.employeeId || ''),
+      employeeName: String(data.employeeName || ''),
+      code: String(data.code || data.type || ''),
+      startTime: data.startTime,
+      endTime: data.endTime,
+      hours: Number(data.hours) || undefined,
+      objectiveId: objId,
+      objectiveName: String(data.objectiveName || ''),
+      origin: String(data.origin || ''),
+    });
+
     const createdAt = toDate(data.createdAt) ?? toDate(data.updatedAt);
     const actor = shiftActorLabel(data);
     const prev = activityFromShifts.get(objId) || { lastModifiedAt: null, lastModifiedBy: '' };
@@ -226,6 +243,20 @@ export async function loadCronogramaOverview(params: {
   for (const [objId, list] of turnosByObjective) {
     plannedByObjective.set(objId, sumPublishedPlanHours(list).hours);
     draftByObjective.set(objId, sumPublishedPlanHours(list, { onlyDraft: true }).hours);
+  }
+
+  const restByObj = new Map<string, { n: number; names: string[] }>();
+  const noteRest = (objectiveId: string, label: string) => {
+    if (!objectiveId) return;
+    const cur = restByObj.get(objectiveId) || { n: 0, names: [] };
+    cur.n += 1;
+    if (label && !cur.names.includes(label) && cur.names.length < 4) cur.names.push(label);
+    restByObj.set(objectiveId, cur);
+  };
+  for (const gap of findLctRestGaps(lctInputs)) {
+    const label = `${gap.employeeName || gap.employeeId} ${gap.gapLabel} (${gap.closeAtLabel}→${gap.nextStartLabel})`;
+    noteRest(gap.fromObjectiveId, label);
+    if (gap.toObjectiveId !== gap.fromObjectiveId) noteRest(gap.toObjectiveId, label);
   }
 
   const rows: CronogramaOverviewRow[] = [];
@@ -272,6 +303,8 @@ export async function loadCronogramaOverview(params: {
         lastModifiedAt: mergedActivity.lastModifiedAt,
         lastModifiedBy: mergedActivity.lastModifiedBy,
         lookupKey,
+        shortRestGaps: restByObj.get(objectiveId)?.n || 0,
+        shortRestDetail: (restByObj.get(objectiveId)?.names || []).join(' · '),
       });
     }
   }

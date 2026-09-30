@@ -121,6 +121,7 @@ export default function PlanningCronogramasOverviewModal({
   }, [rows]);
 
   const totalOpenVacancies = useMemo(() => rows.reduce((acc, r) => acc + (r.openVacancies || 0), 0), [rows]);
+  const totalShortRest = useMemo(() => rows.reduce((acc, r) => acc + (r.shortRestGaps || 0), 0), [rows]);
   const objectivesWithOpenVacancies = useMemo(() => rows.filter((r) => r.openVacancies > 0).length, [rows]);
 
   const filtered = useMemo(() => {
@@ -317,6 +318,9 @@ export default function PlanningCronogramasOverviewModal({
                     <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
                       Modificado por
                     </th>
+                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el cierre por tope (12:59) y el turno siguiente, también en otro objetivo. No bloquea.">
+                      Desc. &lt;12h
+                    </th>
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-slate-500 px-2 py-3 w-[4%] bg-slate-100">
                       Ir
                     </th>
@@ -427,6 +431,19 @@ export default function PlanningCronogramasOverviewModal({
                               <span className="text-slate-300">—</span>
                             )}
                           </td>
+                          <td className="px-2 py-2.5 border-r border-slate-100 text-center">
+                            {r.shortRestGaps > 0 ? (
+                              <span
+                                className="inline-flex items-center gap-1 text-[10px] font-black text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg"
+                                title={r.shortRestDetail || 'Descanso menor a 12 h (art. 197 LCT)'}
+                              >
+                                <AlertTriangle size={9} />
+                                {r.shortRestGaps}
+                              </span>
+                            ) : (
+                              <span className="text-slate-200 text-[10px]">—</span>
+                            )}
+                          </td>
                           <td className="px-2 py-2.5 text-center">
                             <button
                               type="button"
@@ -471,6 +488,12 @@ export default function PlanningCronogramasOverviewModal({
                 <span className="flex items-center gap-1 text-[10px] font-black text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-lg">
                   <AlertTriangle size={9} />
                   {totalOpenVacancies} ausencia(s) sin cobertura en {objectivesWithOpenVacancies} objetivo(s)
+                </span>
+              )}
+              {totalShortRest > 0 && (
+                <span className="flex items-center gap-1 text-[10px] font-black text-amber-800 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-lg" title="Art. 197 LCT. El mismo par entre dos objetivos se cuenta en los dos.">
+                  <AlertTriangle size={9} />
+                  {totalShortRest} descanso(s) &lt; 12 h
                 </span>
               )}
             </div>

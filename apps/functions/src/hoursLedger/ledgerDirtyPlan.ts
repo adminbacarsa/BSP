@@ -100,11 +100,34 @@ export function dirtyMarksForPlanif(docId: string, data: Record<string, unknown>
   return out;
 }
 
+function monthsInclusive(start: string, end: string): string[] {
+  if (!/^\d{4}-\d{2}$/.test(start)) return [];
+  const last = /^\d{4}-\d{2}$/.test(end) && end >= start ? end : start;
+  const out: string[] = [];
+  let [y, m] = start.split('-').map(Number);
+  const [ey, em] = last.split('-').map(Number);
+  for (let i = 0; i < 36; i += 1) {
+    out.push(`${y}-${String(m).padStart(2, '0')}`);
+    if (y === ey && m === em) break;
+    m += 1;
+    if (m > 12) { m = 1; y += 1; }
+  }
+  return out;
+}
+
+/** Ausencia: cada mes entre startDate y endDate del objetivo. Sin objectiveId no marca. */
 export function dirtyMarksForAbsence(data: Record<string, unknown> | undefined): DirtyMark[] {
   const out: DirtyMark[] = [];
   if (!data) return out;
-  const period = periodKeyFromInstant(data.startTime) || periodKeyFromInstant(data.fecha) || periodKeyFromInstant(data.date) || periodKeyFromInstant(data.scheduleDate);
-  push(out, empresaOf(data), objectiveOf(data), period);
+  const start = periodKeyFromInstant(data.startDate)
+    || periodKeyFromInstant(data.startTime)
+    || periodKeyFromInstant(data.fecha)
+    || periodKeyFromInstant(data.date)
+    || periodKeyFromInstant(data.scheduleDate);
+  const end = periodKeyFromInstant(data.endDate) || periodKeyFromInstant(data.endTime) || start;
+  for (const period of monthsInclusive(start, end)) {
+    push(out, empresaOf(data), objectiveOf(data), period);
+  }
   return out;
 }
 

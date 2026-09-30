@@ -1,12 +1,22 @@
 /**
- * Ausencias sin objectiveId: propuesta de asignación con evidencia. SOLO LECTURA (dryRun).
+ * Ausencias sin objectiveId: propuesta de asignación con evidencia.
  *   npx tsx scripts/hours-ledger/propose-ausencias-objetivo.mts [empresaId ...]
+ *   npx tsx scripts/hours-ledger/propose-ausencias-objetivo.mts --apply --allow-prod pruebas_sa bacarsa
+ *
+ * Sin --apply es dryRun (escritura bloqueada). --apply exige --allow-prod.
+ * Escribe solo objectiveId, objectiveName, objectiveIdAssignedBy y objectiveIdEvidence
+ * en ALTA o MEDIA con objetivo que existe en clients.objetivos (el id propuesto o el canónico por nombre).
+ * HELMANN / LOPEZ (objetivo de legajo fuera de clientes, sin canónico) no se tocan: quedan en decisionHumana.
+ * No borra campos. Un audit_logs por lote. Marca hours_ledger_dirty del objetivo-mes
+ * (el trigger desplegado no lee startDate; el planificador ya sí, para el próximo deploy).
  *
  * Evidencia, en orden: turno vinculado (shiftId) → malla del legajo en los días de la ausencia →
  * último puesto antes / primero después (±60 días) → objetivo del legajo. Si la malla del período
  * muestra más de un objetivo y antes/después no coinciden, queda AMBIGUA con los candidatos.
  * Salida: scripts/out/ausencias-sin-objetivo-{empresa}.json (gitignored).
  */
+import { classifyAusenciaObjetivo, AUSENCIA_OBJETIVO_ASSIGNED_BY } from './ausenciaObjetivoApply.ts';
+import { dirtyMarksForAbsence, ledgerDirtyDocId } from '../../apps/functions/src/hoursLedger/ledgerDirtyPlan.ts';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -16,17 +26,26 @@ delete process.env.FIREBASE_AUTH_EMULATOR_HOST;
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')), '..', '..');
 const requireFn = createRequire(path.join(repo, 'apps/functions/package.json'));
 const admin = requireFn('firebase-admin');
+const argv = process.argv.slice(2);
+const apply = argv.includes('--apply');
+const allowProd = argv.includes('--allow-prod');
+if (apply && !allowProd) {
+  console.error('Falta --allow-prod. No se escribió nada.');
+  process.exit(1);
+}
 const { DocumentReference, WriteBatch, CollectionReference, Firestore } = admin.firestore;
-const deny = (what: string) => function denied() { throw new Error(`escritura bloqueada (${what})`); };
-for (const m of ['set', 'update', 'delete', 'create']) DocumentReference.prototype[m] = deny(m);
-CollectionReference.prototype.add = deny('add');
-WriteBatch.prototype.commit = deny('batch');
-Firestore.prototype.runTransaction = deny('tx');
-Firestore.prototype.recursiveDelete = deny('recursiveDelete');
+if (!apply) {
+  const deny = (what: string) => function denied() { throw new Error(`escritura bloqueada (${what})`); };
+  for (const m of ['set', 'update', 'delete', 'create']) DocumentReference.prototype[m] = deny(m);
+  CollectionReference.prototype.add = deny('add');
+  WriteBatch.prototype.commit = deny('batch');
+  Firestore.prototype.runTransaction = deny('tx');
+  Firestore.prototype.recursiveDelete = deny('recursiveDelete');
+}
 if (!admin.apps.length) admin.initializeApp({ credential: admin.credential.applicationDefault(), projectId: 'comtroldata' });
 const db = admin.firestore();
 
-const empresas = process.argv.slice(2).filter(Boolean);
+const empresas = argv.filter((a) => !a.startsWith('--'));
 if (!empresas.length) empresas.push('pruebas_sa', 'bacarsa', 'grupos_bacar_sa');
 const LICENSE_CODES = new Set(['V', 'L', 'E', 'A', 'ART', 'AA', 'PG', 'SGS', 'SUS', 'F', 'FF', 'FP']);
 
@@ -54,12 +73,14 @@ async function proposeEmpresa(empresaId: string) {
   const sin = snap.docs.filter((d) => !String(d.data().objectiveId || '').trim());
   const clients = await db.collection('clients').where('empresaId', '==', empresaId).get();
   const objName = new Map<string, string>();
+  const objPlain = new Map<string, string>();
   const clientObjIds = new Set<string>();
   const canonicalByName = new Map<string, string>();
   for (const c of clients.docs) {
     for (const o of (c.data().objetivos || []) as Array<{ id?: string; name?: string }>) {
       if (!o?.id) continue;
       objName.set(String(o.id), `${o.name || o.id} (${c.data().name || c.id})`);
+      objPlain.set(String(o.id), String(o.name || o.id));
       clientObjIds.add(String(o.id));
       if (o.name) canonicalByName.set(String(o.name).trim().toLowerCase(), String(o.id));
     }
@@ -140,22 +161,97 @@ async function proposeEmpresa(empresaId: string) {
       if (confianza === 'ALTA') confianza = 'MEDIA';
       fuente += canonicoSugerido ? `; el id no está en clients.objetivos → canónico por nombre ${canonicoSugerido}` : '; el id no está en clients.objetivos';
     }
+    const decision = classifyAusenciaObjetivo({ confianza, propuesta, canonicoSugerido }, clientObjIds);
     rows.push({
       id: d.id, empresaId, employeeId, employee: a.employeeName || '', type: a.type || a.codigo || a.code, status: a.status, start, end,
       propuesta, propuestaNombre: propuesta ? objName.get(propuesta) || propuesta : '', canonicoSugerido, fuente, confianza,
+      accion: decision.action,
+      objetivoAplicar: decision.objectiveId,
+      objectiveName: decision.objectiveId ? (objPlain.get(decision.objectiveId) || '') : '',
+      evidenceCorta: fuente.slice(0, 240),
       candidatos: [...candidates.entries()].map(([oid, c]) => ({ objectiveId: oid, nombre: objName.get(oid) || oid, enRango: c.rango, codigos: [...c.codigos], antes: c.antes, despues: c.despues }))
         .sort((x, y) => (y.enRango - x.enRango) || ((y.antes + y.despues) - (x.antes + x.despues))),
       evidence,
     });
   }
-  const resumen = { empresaId, ausencias: snap.size, sinObjetivo: sin.length, ALTA: 0, MEDIA: 0, AMBIGUA: 0, SIN_EVIDENCIA: 0 } as Record<string, unknown>;
-  for (const r of rows) resumen[r.confianza] = Number(resumen[r.confianza] || 0) + 1;
+  const resumen = { empresaId, ausencias: snap.size, sinObjetivo: sin.length, ALTA: 0, MEDIA: 0, AMBIGUA: 0, SIN_EVIDENCIA: 0, aplicar: 0, decisionHumana: 0 } as Record<string, unknown>;
+  for (const r of rows) {
+    resumen[r.confianza] = Number(resumen[r.confianza] || 0) + 1;
+    if (r.accion === 'APLICAR') resumen.aplicar = Number(resumen.aplicar) + 1;
+    else resumen.decisionHumana = Number(resumen.decisionHumana) + 1;
+  }
   fs.mkdirSync(path.join(repo, 'scripts', 'out'), { recursive: true });
-  fs.writeFileSync(path.join(repo, 'scripts', 'out', `ausencias-sin-objetivo-${empresaId}.json`), JSON.stringify({ resumen, dryRun: true, rows }, null, 2));
-  return { resumen, ambiguas: rows.filter((r) => r.confianza !== 'ALTA').map((r) => ({ id: r.id, employee: r.employee, type: r.type, status: r.status, start: r.start, end: r.end, confianza: r.confianza, fuente: r.fuente, propuesta: r.propuestaNombre, candidatos: r.candidatos.map((c: any) => `${c.nombre}: rango ${c.enRango} [${c.codigos.join(',')}] antes ${c.antes} después ${c.despues}`) })) };
+  fs.writeFileSync(path.join(repo, 'scripts', 'out', `ausencias-sin-objetivo-${empresaId}.json`), JSON.stringify({ resumen, dryRun: !apply, rows }, null, 2));
+  const humana = rows.filter((r) => r.accion !== 'APLICAR').map((r) => ({
+    id: r.id, employee: r.employee, type: r.type, start: r.start, end: r.end, confianza: r.confianza, fuente: r.fuente, propuesta: r.propuestaNombre,
+  }));
+  return { resumen, decisionHumana: humana, rows };
+}
+
+async function applyEmpresa(empresaId: string, rows: any[]) {
+  const patches = rows.filter((r) => r.accion === 'APLICAR' && r.objetivoAplicar);
+  const empresa = await db.collection('empresas').doc(empresaId).get();
+  const coreOn = empresa.data()?.hoursCoreEnabled === true;
+  const CHUNK = 400;
+  let written = 0;
+  const dirtyIds = new Set<string>();
+  for (let i = 0; i < patches.length; i += CHUNK) {
+    const slice = patches.slice(i, i + CHUNK);
+    const batch = db.batch();
+    for (const p of slice) {
+      const patch: Record<string, string> = {
+        objectiveId: p.objetivoAplicar,
+        objectiveIdAssignedBy: AUSENCIA_OBJETIVO_ASSIGNED_BY,
+        objectiveIdEvidence: String(p.evidenceCorta || '').slice(0, 240),
+      };
+      if (p.objectiveName) patch.objectiveName = p.objectiveName;
+      batch.update(db.collection('ausencias').doc(p.id), patch);
+    }
+    await batch.commit();
+    await db.collection('audit_logs').add({
+      action: 'AUSENCIA_OBJETIVO_ASIGNADO',
+      actorName: AUSENCIA_OBJETIVO_ASSIGNED_BY,
+      actorUid: 'SCRIPT',
+      module: 'RRHH',
+      empresaId,
+      count: slice.length,
+      ausenciaIds: slice.map((p) => p.id),
+      details: `objectiveId en ${slice.length} ausencias (ALTA o MEDIA con objetivo en clients). Sin borrar campos.`,
+      timestamp: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    written += slice.length;
+    if (coreOn) {
+      const due = admin.firestore.Timestamp.fromMillis(Date.now() + 2 * 60 * 1000);
+      const dirtyBatch = db.batch();
+      let n = 0;
+      for (const p of slice) {
+        for (const m of dirtyMarksForAbsence({ empresaId, objectiveId: p.objetivoAplicar, startDate: p.start, endDate: p.end || p.start })) {
+          const id = ledgerDirtyDocId(m.empresaId, m.objectiveId, m.periodKey);
+          if (dirtyIds.has(id)) continue;
+          dirtyIds.add(id);
+          dirtyBatch.set(db.collection('hours_ledger_dirty').doc(id), {
+            empresaId: m.empresaId,
+            objectiveId: m.objectiveId,
+            periodKey: m.periodKey,
+            reason: 'ausencia',
+            dueAt: due,
+            touchAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+          n += 1;
+        }
+      }
+      if (n) await dirtyBatch.commit();
+    }
+  }
+  return { written, dirty: dirtyIds.size, hoursCoreEnabled: coreOn };
 }
 
 const out: any[] = [];
-for (const e of empresas) out.push(await proposeEmpresa(e));
+for (const e of empresas) {
+  const proposed = await proposeEmpresa(e);
+  let applied = null;
+  if (apply) applied = await applyEmpresa(e, proposed.rows);
+  out.push({ resumen: proposed.resumen, decisionHumana: proposed.decisionHumana, applied });
+}
 console.log(JSON.stringify(out, null, 2));
 process.exit(0);

@@ -62,6 +62,11 @@ if (plan.length !== 1 || plan[0].periodKey !== '2026-09') fail('despublicar marc
 
 const aus = dirtyMarksForAbsence({ empresaId: 'e', objectiveId: 'OBJ1', fecha: '2026-09-04' });
 if (aus.length !== 1 || aus[0].periodKey !== '2026-09') fail('la ausencia marca el mes de la fecha');
+const ausStart = dirtyMarksForAbsence({ empresaId: 'e', objectiveId: 'OBJ1', startDate: '2026-09-04' });
+if (ausStart.length !== 1 || ausStart[0].periodKey !== '2026-09') fail('startDate (el campo real de ausencias) marca el mes');
+const ausSpan = dirtyMarksForAbsence({ empresaId: 'e', objectiveId: 'OBJ1', startDate: '2026-08-26', endDate: '2026-09-09' });
+if (ausSpan.map((m) => m.periodKey).join(',') !== '2026-08,2026-09') fail(`ausencia que cruza mes ${ausSpan.map((m) => m.periodKey)}`);
+if (dirtyMarksForAbsence({ empresaId: 'e', startDate: '2026-09-04' }).length !== 0) fail('sin objectiveId no ensucia');
 
 const rows = [
   { level: 'objetivo', objectiveId: 'VIEJO', engineVersion: 0, periodKey: '2026-09' },
