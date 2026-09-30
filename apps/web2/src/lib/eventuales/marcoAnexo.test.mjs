@@ -3,7 +3,7 @@ import { describe, it } from 'node:test';
 import { evaluarCandidato } from './planificacion.mjs';
 import {
   canalCodigo, CUENTA_DRIVE_EVENTUALES, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
-  MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, pdfDeTexto, planConfirmarAnexo, planMarco,
+  MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, pdfDeTexto, planCarpetaEventuales, planConfirmarAnexo, planMarco,
   planRenombre, sha256, textoMarco,
 } from './marcoAnexo.mjs';
 
@@ -55,6 +55,9 @@ describe('contrato marco y anexo', () => {
     assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN' }), '20999999991 - PEREZ, JUAN');
     assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN', legajo: '1402' }), 'Legajo 1402 - PEREZ, JUAN - 20999999991');
     assert.equal(planRenombre('20999999991 - PEREZ, JUAN', 'Legajo 1402 - PEREZ, JUAN - 20999999991').renombrar, true);
+    assert.equal(planCarpetaEventuales('Eventuales').usarRaiz, true);
+    assert.equal(planCarpetaEventuales(' eventuales ').usarRaiz, true);
+    assert.equal(planCarpetaEventuales('Backups COSP').usarRaiz, false);
     assert.equal(nombreArchivo({ tipo: 'MARCO', fecha: '2026-10-01', empresa: 'Bacar' }), 'Bacar-Marco-2026-10-01.pdf');
     assert.equal(nombreArchivo({ tipo: 'ANEXO', fecha: '2026-10-05', lugar: 'Peaje', empresa: 'Bacar' }), 'Bacar-Anexo-2026-10-05-Peaje.pdf');
     assert.equal(nombreArchivo({ tipo: 'ARCA', fecha: '2026-10-05', empresa: 'Bacar' }), 'Bacar-ARCA-2026-10-05.pdf');

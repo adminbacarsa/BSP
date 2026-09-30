@@ -1,4 +1,4 @@
-import { RNOS_SUVICO } from './arcaTxt.mjs';
+import { RNOS_SUVICO } from './arcaConst.mjs';
 import { normalizeCuil } from './cuil.mjs';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from './grupo.mjs';
 import { sumarDias } from './jornadas.mjs';

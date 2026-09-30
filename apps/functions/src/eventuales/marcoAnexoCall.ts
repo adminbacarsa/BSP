@@ -39,6 +39,7 @@ async function lib() {
     nombreCarpetaPersona: (i: { cuil: string; nombre: string; legajo?: string }) => string;
     nombreArchivo: (i: { tipo: string; fecha: string; lugar?: string; empresa?: string }) => string;
     planRenombre: (actual: string, nuevo: string) => { renombrar: boolean; nombre: string };
+    planCarpetaEventuales: (nombreRaiz: string) => { usarRaiz: boolean; nombre: string };
     legajoDe: (bolsa: Record<string, unknown>) => string;
     DRIVE_ROOT_EVENTUALES_DEFAULT: string;
     CARPETA_EVENTUALES: string;
@@ -72,7 +73,9 @@ async function carpetaPersona(cuil: string, bolsa: Record<string, unknown>) {
   const { drive, resolveOrCreateDriveFolder } = await clienteDrive();
   let padre = eventualesFolderId;
   if (!padre) {
-    padre = await resolveOrCreateDriveFolder(drive, rootId, m.CARPETA_EVENTUALES);
+    const raiz = await drive.files.get({ fileId: rootId, supportsAllDrives: true, fields: 'id, name' });
+    const plan = m.planCarpetaEventuales(String(raiz.data.name || ''));
+    padre = plan.usarRaiz ? rootId : await resolveOrCreateDriveFolder(drive, rootId, plan.nombre);
     await db().collection('config').doc('eventuales').set({ driveRootFolderId: rootId, driveEventualesFolderId: padre }, { merge: true });
   }
   const nombre = m.nombreCarpetaPersona({ cuil, nombre: String(bolsa.nombre || ''), legajo: m.legajoDe(bolsa) });

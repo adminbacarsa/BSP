@@ -1,4 +1,5 @@
 import { calcularRemuneracionContrato } from './remuneracion.mjs';
+import { CATEGORIA_VIGILADOR, EMPRESAS_CATEGORIA_VIGILADOR, RNOS_SUVICO } from './arcaConst.mjs';
 
 /**
  * Registro de posiciones fijas, carga masiva ARCA (130 caracteres).
@@ -28,11 +29,7 @@ export const ARCA_EVENTUALES_DEFAULT = {
 
 export const LARGO_REGISTRO_ARCA = 130;
 
-/** Vigilador. Default de bacarsa, grupos_bacar_sa y pruebas_sa. Se pisa con arcaEventuales.categoria. */
-export const CATEGORIA_VIGILADOR = '033104';
-/** O.S. del personal de vigilancia de Córdoba (tabla ARCA tab 5). Default SUVICO. */
-export const RNOS_SUVICO = '122807';
-export const EMPRESAS_CATEGORIA_VIGILADOR = ['bacarsa', 'grupos_bacar_sa', 'pruebas_sa'];
+export { CATEGORIA_VIGILADOR, RNOS_SUVICO, EMPRESAS_CATEGORIA_VIGILADOR };
 
 export function arcaEventualesDe(empresa) {
   const cfg = { ...ARCA_EVENTUALES_DEFAULT, ...(empresa?.arcaEventuales || {}) };

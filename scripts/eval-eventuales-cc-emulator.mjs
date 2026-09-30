@@ -41,6 +41,9 @@ function bolsa(cuil, extra) {
     confiabilidad: extra.confiabilidad,
     uid: extra.uid,
     status: 'ACTIVE',
+    marcos: extra.marcos === undefined
+      ? { ev_emp: { firmado: true, fechaFirma: '2026-01-15', vigenciaDias: 365, vencimiento: '2027-01-15', estado: 'MARCO_VIGENTE' } }
+      : extra.marcos,
   };
 }
 
@@ -62,6 +65,14 @@ async function main() {
     geo: { lat: -31.40, lng: -64.18 },
     confiabilidad: 9,
     uid: 'uid-eventual-cruce',
+  }));
+  const cuilSinMarco = '20333333337';
+  await db.collection('eventuales_bolsa').doc(cuilSinMarco).set(bolsa(cuilSinMarco, {
+    nombre: 'Gomez, Sol',
+    geo: { lat: -31.41, lng: -64.19 },
+    confiabilidad: 10,
+    uid: 'uid-eventual-sin-marco',
+    marcos: {},
   }));
   await db.collection('turnos').doc('ev_cruce_prev').set({
     empresaId: 'ev_otra',
@@ -115,6 +126,19 @@ async function main() {
     `n=${convSnap.size} type=${convData.type} cuil=${convData.bolsaCuil}`,
   );
   report('cruce 12 h fuera', convData.bolsaCuil !== cuilCruce, convData.candidateEmployeeName || '');
+  const { eventualesParaHueco } = requireFn('./lib/eventos/eventoCoverage.js');
+  const bolsaSnap = await db.collection('eventuales_bolsa').get();
+  const lista = eventualesParaHueco({
+    bolsa: bolsaSnap.docs.map((d) => ({ cuil: d.id, ...d.data() })),
+    hueco: { empresaId, startMs: start, endMs: end, lat: -31.41, lng: -64.19, hoyYmd: new Date().toISOString().slice(0, 10) },
+    otrasJornadas: [],
+  });
+  const sinMarco = lista.find((r) => r.cuil === cuilSinMarco);
+  report(
+    'sin marco no se convoca',
+    convData.bolsaCuil !== cuilSinMarco && sinMarco?.elegible === false && sinMarco?.motivo === 'Sin contrato marco',
+    `elegible=${sinMarco?.elegible} motivo=${sinMarco?.motivo}`,
+  );
 
   if (conv) {
     const resolved = await resolverCobertura(db, { id: conv.id, ...convData });

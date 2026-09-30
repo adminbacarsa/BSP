@@ -1,10 +1,14 @@
 import { createHash, randomInt } from 'node:crypto';
 import { sumarDias } from './jornadas.mjs';
+import {
+  AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
+  DRIVE_ROOT_EVENTUALES_DEFAULT, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
+} from './marcoAnexoConst.mjs';
 
-export const VIGENCIA_MARCO_DIAS = 365;
-export const AVISO_MARCO_DIAS = 30;
-export const CODIGO_ANEXO_MINUTOS = 15;
-export const MOTIVO_SIN_MARCO = 'Sin contrato marco';
+export {
+  AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
+  DRIVE_ROOT_EVENTUALES_DEFAULT, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
+};
 
 export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -123,10 +127,6 @@ export function pdfDeTexto(texto) {
   return Buffer.from(body, 'latin1');
 }
 
-export const DRIVE_ROOT_EVENTUALES_DEFAULT = '1zjzDGcAbavPaJJS5jObA0syu1SsDCakq';
-export const CARPETA_EVENTUALES = 'Eventuales';
-export const CUENTA_DRIVE_EVENTUALES = 'comtroldata@appspot.gserviceaccount.com';
-
 function limpio(value) {
   return String(value ?? '').replace(/[\\/]/g, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -145,6 +145,12 @@ export function nombreCarpetaPersona({ cuil, nombre, legajo }) {
   const nro = limpio(legajo);
   if (nro) return `Legajo ${nro} - ${quien} - ${id}`;
   return `${id} - ${quien}`;
+}
+
+/** Si la raíz ya se llama Eventuales se usa directa. No se arma Eventuales/Eventuales. */
+export function planCarpetaEventuales(nombreRaiz) {
+  const raiz = limpio(nombreRaiz).toLowerCase();
+  return { usarRaiz: raiz === CARPETA_EVENTUALES.toLowerCase(), nombre: CARPETA_EVENTUALES };
 }
 
 export function planRenombre(nombreActual, nombreNuevo) {

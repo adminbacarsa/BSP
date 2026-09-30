@@ -3,7 +3,7 @@ import { httpsCallable } from 'firebase/functions';
 import { FolderOpen, Save } from 'lucide-react';
 import { toast } from 'sonner';
 import { functions } from '@/lib/firebase';
-import { DRIVE_ROOT_EVENTUALES_DEFAULT } from '@/lib/eventuales/marcoAnexo.mjs';
+import { DRIVE_ROOT_EVENTUALES_DEFAULT } from '@/lib/eventuales/marcoAnexoConst.mjs';
 
 export default function EventualesDriveConfig() {
   const [folderId, setFolderId] = useState(DRIVE_ROOT_EVENTUALES_DEFAULT);
