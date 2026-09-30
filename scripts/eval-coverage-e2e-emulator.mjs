@@ -59,6 +59,8 @@ const { processEarlyWithdrawal } = requireFn('./lib/coverage/earlyWithdrawalCore
 const { escalarVacanteSinCobertura } = requireFn('./lib/coverage/escalarVacanteSinCobertura.js');
 const { handlePublishedShiftModifiedWithin12h } = requireFn('./lib/coverage/shiftModificationWithin12h.js');
 const { advanceSlaUnplannedGap } = requireFn('./lib/coverage/slaUnplannedGapPass.js');
+const { isAutoAbsenceSpanPlausible } = requireFn('./lib/attendance/autoAbsenceEligibility.js');
+const { shouldAdvanceOnReject, cascadeLockHeld, CASCADE_LOCK_MS } = requireFn('./lib/coverage/cascadeGuards.js');
 
 const results = [];
 
@@ -2994,6 +2996,164 @@ async function run() {
         && n?.retentionAbsenceShiftId === `${prefix}_m1`;
       report(78, ok, ok ? 'faltan los dos M: N retenido + 1 vacante'
         : `r1=${r1.applied} r2=${r2.applied}/${r2.skippedReason} nRet=${n?.isRetention}`);
+    }
+
+    // ── Auditoría CC 29/09/2026 ─────────────────────────────────────────────
+
+    // Caso 79 — una cascada por hueco: trigger + callable en el mismo segundo → 1 sola convocatoria
+    {
+      const prefix = `${runId}_c79`;
+      const s = await seedBase(prefix);
+      const shiftForCascade = {
+        id: s.titularId, empresaId: s.empresaId, objectiveId: s.objectiveId, objectiveName: 'Obj',
+        positionName: 'Puesto 1', clientId: s.clientId, code: 'M',
+        startTime: s.titular.startTime, endTime: s.titular.endTime,
+      };
+      await Promise.all([
+        iniciarCascadaCobertura(db, shiftForCascade, 'AUTO'),
+        iniciarCascadaCobertura(db, shiftForCascade, 'AUTO'),
+        iniciarCascadaCobertura(db, shiftForCascade, 'AUTO'),
+      ]);
+      const convs = await db.collection('convocatorias_cobertura').where('shiftId', '==', s.titularId).get();
+      const tit = (await db.collection('turnos').doc(s.titularId).get()).data();
+      const ok = convs.size === 1 && !!tit?.cascadeLockAt;
+      report(79, ok, ok ? 'tres arranques simultáneos → 1 convocatoria (candado cascadeLockAt)'
+        : `convs=${convs.size} lock=${!!tit?.cascadeLockAt}`);
+    }
+
+    // Caso 80 — rechazo tardío sobre ESCALATED no vuelve a avanzar; sobre PENDING sí
+    {
+      const runReject = async (prefix, status) => {
+        const s = await seedBase(prefix);
+        const convRef = db.collection('convocatorias_cobertura').doc(`${prefix}_conv`);
+        const conv = {
+          ...baseConvFields(s), type: 'RET', cascadeStep: 0, status,
+          candidateEmployeeId: s.empTitular, candidateEmployeeName: 'El ausente',
+          candidateShiftId: s.retSourceId,
+        };
+        await convRef.set(conv);
+        await resolverCobertura(db, { id: convRef.id, ...conv });
+        const after = (await convRef.get()).data();
+        const convs = await db.collection('convocatorias_cobertura').where('shiftId', '==', s.titularId).get();
+        const esc = await db.collection('novedades').where('shiftId', '==', s.titularId)
+          .where('type', 'in', ['CONVOCATORIA_ESCALADA', 'VACANTE_SIN_COBERTURA']).get();
+        return { status: after?.status, convs: convs.size, advanced: convs.size > 1 || esc.size > 0 };
+      };
+      const escalated = await runReject(`${runId}_c80a`, 'ESCALATED');
+      const pending = await runReject(`${runId}_c80b`, 'PENDING');
+      const ok = escalated.status === 'REJECTED' && !escalated.advanced
+        && pending.status === 'REJECTED' && pending.advanced;
+      report(80, ok, ok ? 'ESCALATED+REJECTED no avanza (el timeout ya avanzó); PENDING+REJECTED sí'
+        : `esc=${JSON.stringify(escalated)} pend=${JSON.stringify(pending)}`);
+    }
+
+    // Caso 81 — retenido por un hueco que terminó sin franja siguiente: cierra al fin del hueco
+    {
+      const prefix = `${runId}_c81`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await db.collection('servicios_sla').doc(`${objectiveId}_sla`).set({
+        objectiveId, clientId: `${prefix}_cli`, status: 'active',
+        startDate: '2026-01-01', endDate: '2027-12-31',
+        positions: [{
+          name: 'Puesto 1', quantity: 1, coverageType: 'custom',
+          activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+          allowedShiftTypes: [
+            { code: 'M3', startTime: '12:00', endTime: '16:00', hours: 4 },
+            { code: 'T3', startTime: '16:00', endTime: '17:00', hours: 1 },
+          ],
+        }],
+      });
+      const salId = `${prefix}_farias`;
+      const gapId = `${prefix}_venencia`;
+      await db.batch()
+        .set(db.collection('turnos').doc(gapId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eV`,
+          employeeName: 'Venencia', code: 'T3', status: 'ABSENT', isAbsent: true, absenceType: 'AA',
+          startTime: tsAt(2026, 9, 29, 16, 0), endTime: tsAt(2026, 9, 29, 17, 0),
+        })
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eF`,
+          employeeName: 'Farias', code: 'M3', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 29, 12, 0), endTime: tsAt(2026, 9, 29, 16, 0),
+          checkInTime: tsAt(2026, 9, 29, 11, 47), realStartTime: tsAt(2026, 9, 29, 12, 0),
+          isRetention: true, retentionAbsenceShiftId: gapId,
+          retentionReason: 'RELEVO_NO_PRESENTADO: Venencia no se presentó',
+          retentionStartedAt: tsAt(2026, 9, 29, 16, 0), autoRetentionAt: tsAt(2026, 9, 29, 16, 0),
+        })
+        .commit();
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 29, 16, 30), { onlyOutgoingShiftId: salId });
+      const mid = (await db.collection('turnos').doc(salId).get()).data();
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 29, 17, 5), { onlyOutgoingShiftId: salId });
+      const end = (await db.collection('turnos').doc(salId).get()).data();
+      const ok = mid?.isCompleted !== true && mid?.isRetention === true
+        && end?.isCompleted === true
+        && end?.completionReason === 'FIN_HUECO_SIN_CONTINUIDAD'
+        && end?.realEndTime?.toMillis?.() === tsAt(2026, 9, 29, 17, 0).toMillis()
+        && Number(end?.retentionMinutes) === 60;
+      report(81, ok, ok ? 'retenido sigue a las 16:30; a las 17:05 cierra 17:00 (fin del hueco, sin franja siguiente)'
+        : `mid=${mid?.isCompleted}/${mid?.isRetention} end=${end?.completionReason}/${end?.realEndTime?.toDate?.()}/${end?.retentionMinutes}`);
+    }
+
+    // Caso 82 — retenido por un hueco que terminó pero con franja siguiente: sigue retenido
+    {
+      const prefix = `${runId}_c82`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      await db.collection('servicios_sla').doc(`${objectiveId}_sla`).set({
+        objectiveId, clientId: `${prefix}_cli`, status: 'active',
+        startDate: '2026-01-01', endDate: '2027-12-31',
+        positions: [{
+          name: 'Puesto 1', quantity: 1, coverageType: 'custom',
+          activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+          allowedShiftTypes: [
+            { code: 'M', startTime: '11:00', endTime: '15:00', hours: 4 },
+            { code: 'T', startTime: '15:00', endTime: '17:00', hours: 2 },
+            { code: 'N', startTime: '17:00', endTime: '23:00', hours: 6 },
+          ],
+        }],
+      });
+      const salId = `${prefix}_m`;
+      const gapId = `${prefix}_t`;
+      await db.batch()
+        .set(db.collection('turnos').doc(gapId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eT`,
+          employeeName: 'T ausente', code: 'T', status: 'ABSENT', isAbsent: true,
+          startTime: tsAt(2026, 9, 29, 15, 0), endTime: tsAt(2026, 9, 29, 17, 0),
+        })
+        .set(db.collection('turnos').doc(salId), {
+          empresaId, objectiveId, positionName: 'Puesto 1', employeeId: `${prefix}_eM`,
+          employeeName: 'M retenido', code: 'M', status: 'PRESENT', isPresent: true, isCompleted: false,
+          startTime: tsAt(2026, 9, 29, 11, 0), endTime: tsAt(2026, 9, 29, 15, 0),
+          checkInTime: tsAt(2026, 9, 29, 10, 55), realStartTime: tsAt(2026, 9, 29, 11, 0),
+          isRetention: true, retentionAbsenceShiftId: gapId,
+          retentionStartedAt: tsAt(2026, 9, 29, 15, 0), autoRetentionAt: tsAt(2026, 9, 29, 15, 0),
+        })
+        .commit();
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 9, 29, 17, 20), { onlyOutgoingShiftId: salId });
+      const d = (await db.collection('turnos').doc(salId).get()).data();
+      const ok = d?.isCompleted !== true && d?.isRetention === true;
+      report(82, ok, ok ? 'hueco terminado con franja N siguiente: sigue retenido hasta relevo o tope'
+        : `completed=${d?.isCompleted} reason=${d?.completionReason} ret=${d?.isRetention}`);
+    }
+
+    // Caso 83 — guardas puras: jornada plausible para AUTO_T30 y rechazo tardío
+    {
+      const h = 3600000;
+      const t0 = tsAt(2026, 9, 29, 16, 0).toMillis();
+      const ok =
+        isAutoAbsenceSpanPlausible(t0, t0 + 8 * h) === true
+        && isAutoAbsenceSpanPlausible(t0, t0 + 12 * h) === true
+        && isAutoAbsenceSpanPlausible(t0, t0 + 24 * h - 60000) === false
+        && isAutoAbsenceSpanPlausible(t0, 0) === true
+        && shouldAdvanceOnReject('ESCALATED') === false
+        && shouldAdvanceOnReject('escalated') === false
+        && shouldAdvanceOnReject('PENDING') === true
+        && cascadeLockHeld(t0, t0 + 30000) === true
+        && cascadeLockHeld(t0, t0 + CASCADE_LOCK_MS) === false
+        && cascadeLockHeld(0, t0) === false;
+      report(83, ok, ok ? 'T 16–00 a T+30 sí es AA; doc 24 h no; ESCALATED no re-avanza; candado 90 s'
+        : 'alguna guarda pura devolvió lo contrario');
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

@@ -17,6 +17,7 @@ import {
 import { escalarVacanteSinCobertura } from './escalarVacanteSinCobertura';
 import { ObjectiveOperationCache, simulableShiftSkipReasonResolved } from '../common/simulableShift';
 import { canalOrigenConvocatoria, logConvocatoriaEvento } from './convocatoriaEventos';
+import { CASCADE_LOCK_MS, cascadeLockHeld, shouldAdvanceOnReject, toMillisLoose } from './cascadeGuards';
 import {
   EVENT_COVERAGE_CASCADE_ORDER,
   eventoTieneFranjasEncadenadas,
@@ -484,6 +485,11 @@ async function avanzarCascadaOrPartialVacante(
   conv: ConvocatoriaCoberturaDoc & { id: string },
   reason: 'REJECTED' | 'TIMEOUT',
 ): Promise<void> {
+  if (reason === 'REJECTED' && !shouldAdvanceOnReject(conv.status)) {
+    // El timeout ya escaló este paso; el rechazo tardío no dispara la cascada otra vez.
+    console.log(`[avanzarCascada] skip ${conv.id}: ya ESCALATED, rechazo tardío no avanza`);
+    return;
+  }
   if (String(conv.createdBy || '').toUpperCase() === 'MODO_DEMO') {
     const inOp = await new ObjectiveOperationCache().isShiftInOperation(db, {
       empresaId: conv.empresaId,
@@ -1189,11 +1195,27 @@ export async function iniciarCascadaCobertura(
   const { isTitularAlreadyCovered, isActiveOpsCoverageDoc } = await import('./syncAusenciaCobertura');
 
   // Idempotencia: si el titular ya está cubierto, no reabrir cascada (modo demo incluido).
-  const titularSnap = await db.collection('turnos').doc(shift.id).get();
+  const titularRef = db.collection('turnos').doc(shift.id);
+  const titularSnap = await titularRef.get();
   const titularData = (titularSnap.data() || {}) as Record<string, unknown>;
   if (isTitularAlreadyCovered(titularData)) {
     console.log(`[iniciarCascadaCobertura] skip ${shift.id}: ya cubierta`);
     return;
+  }
+
+  // Una cascada por hueco: trigger, callable y cron pueden llegar en el mismo segundo.
+  if (titularSnap.exists) {
+    const locked = await db.runTransaction(async (tx) => {
+      const cur = (await tx.get(titularRef)).data() || {};
+      const nowMs = Date.now();
+      if (cascadeLockHeld(toMillisLoose(cur.cascadeLockAt), nowMs)) return false;
+      tx.update(titularRef, { cascadeLockAt: Timestamp.fromMillis(nowMs), cascadeLockBy: createdBy });
+      return true;
+    });
+    if (!locked) {
+      console.log(`[iniciarCascadaCobertura] skip ${shift.id}: cascada ya iniciada hace < ${CASCADE_LOCK_MS / 1000}s`);
+      return;
+    }
   }
 
   const priorCov = await db.collection('turnos')
