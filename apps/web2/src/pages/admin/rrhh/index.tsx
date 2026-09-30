@@ -1145,6 +1145,32 @@ export default function EmployeesPage() {
       }
   };
 
+  const [locatingHome, setLocatingHome] = useState(false);
+  const handleUbicarDomicilio = async () => {
+      if (!selectedEmp?.id) return;
+      const address = String(selectedEmp.address || '').trim();
+      if (!address) return addToast('El legajo no tiene dirección para ubicar', 'warning');
+      setLocatingHome(true);
+      try {
+          const result = await geocodeAddress(address);
+          if (!result) return addToast('No se encontró la dirección. Completala en Editar (calle, número, localidad).', 'warning');
+          const patch = {
+              lat: result.lat,
+              lng: result.lon,
+              geoSource: 'nominatim',
+              geocodedAt: new Date().toISOString(),
+          };
+          await updateDoc(doc(db, 'empleados', selectedEmp.id), patch);
+          setSelectedEmp({ ...selectedEmp, ...patch });
+          addToast('Domicilio ubicado', 'success');
+      } catch (e) {
+          console.error(e);
+          addToast('Error conectando el servicio de mapas', 'error');
+      } finally {
+          setLocatingHome(false);
+      }
+  };
+
   const [isBulkGeocoding, setIsBulkGeocoding] = useState(false);
   const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
 
@@ -2609,6 +2635,23 @@ export default function EmployeesPage() {
                                             : <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold text-slate-400 bg-slate-50 border border-slate-100"><Home size={8}/> {selectedEmp.address}</span>)}
                                         {selectedEmp.motivoBaja && <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-600"><UserX size={8}/> {selectedEmp.motivoBaja}</span>}
                                     </div>
+                                    {!(Number(selectedEmp.lat) && Number(selectedEmp.lng)) && (
+                                        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2">
+                                            <p className="text-[11px] font-bold text-amber-800">
+                                                Sin domicilio geocodificado. El protocolo de cobertura no calcula distancia ni ETA.
+                                            </p>
+                                            <button
+                                                type="button"
+                                                onClick={() => void handleUbicarDomicilio()}
+                                                disabled={locatingHome || !String(selectedEmp.address || '').trim()}
+                                                title={String(selectedEmp.address || '').trim() ? 'Geocodificar el domicilio' : 'Cargá la dirección en Editar'}
+                                                className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-600 text-white text-[10px] font-black uppercase disabled:opacity-50"
+                                            >
+                                                {locatingHome ? <Loader2 size={12} className="animate-spin"/> : <MapPin size={12}/>}
+                                                Ubicar domicilio
+                                            </button>
+                                        </div>
+                                    )}
                                     {selectedEmp.uid && guardDeviceBinding && (guardDeviceBinding.deviceId || guardDeviceBinding.verified) && (
                                         <div className="mt-3 p-3 rounded-xl border border-slate-200 dark:border-slate-600 bg-slate-50 dark:bg-slate-900/40 flex flex-col sm:flex-row sm:items-center gap-3">
                                             <div className="flex items-start gap-2 flex-1 min-w-0">
