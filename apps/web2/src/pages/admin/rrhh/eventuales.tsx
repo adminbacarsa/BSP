@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { db } from '@/lib/firebase';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 
-type Ficha = { id: string; nombre: string; disponibilidad: string; legajoPlanilla: string };
+type Ficha = { id: string; nombre: string; disponibilidad: string; legajoPlanilla: string; empresasHabilitadas: string[] };
 type Contrato = { id: string; empresaId: string; estado: string; fechaAlta: string; fechaBaja: string };
 
 const fmt = (iso?: string) => {
@@ -30,6 +30,7 @@ export default function EventualesPage() {
           nombre: String(data.nombre || ''),
           disponibilidad: String(data.disponibilidad || ''),
           legajoPlanilla: String(data.legajoPlanilla || ''),
+          empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
         };
       }));
     });
@@ -87,6 +88,7 @@ export default function EventualesPage() {
           {elegida && (
             <>
               <p className="font-black text-slate-800">{elegida.nombre}</p>
+              <p className="text-[11px] text-slate-500 mb-3">Puede trabajar en: {elegida.empresasHabilitadas.join(', ') || 'ninguna empresa'}</p>
               <p className="text-[11px] text-slate-400 mb-3">Historial de contratos</p>
               <div className="space-y-2">
                 {contratos.map((c) => (

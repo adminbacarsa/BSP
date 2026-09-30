@@ -421,7 +421,7 @@ service cloud.firestore {
       allow create, delete: if isSuperAdmin();
       allow update: if isSuperAdmin() || (
         isAdmin() && empresaId == userEmpresaId()
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos', 'arcaTandas'])
       );
     }
 

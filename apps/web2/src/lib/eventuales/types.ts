@@ -3,6 +3,9 @@ export type ModalidadLaboral = 'INDETERMINADO' | 'EVENTUAL' | 'PLAZO_FIJO';
 /** En la bolsa. No es un alta ARCA vigente: la persona está disponible sin alta. */
 export type BolsaDisponibilidad = 'DISPONIBLE' | 'NO_DISPONIBLE';
 
+/** Empresas del grupo en las que este eventual puede ser convocado. Vacío = ninguna. */
+export type EmpresasHabilitadas = string[];
+
 export type EstadoArcaMovimiento = 'ALTA' | 'BAJA';
 
 export interface ArcaHistorialItem {

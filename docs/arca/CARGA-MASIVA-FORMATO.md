@@ -43,7 +43,7 @@ Fuente pública: https://serviciossegsoc.afip.gob.ar/tramites_con_clave_fiscal/M
 
 Datos clave para eventuales:
 - Modalidad de contrato **012 = Trabajo eventual** (código 12 de la tabla, 3 posiciones). 102 = Empleado Servicio Eventual en Usuaria (Dto 762) solo si contrata una Empresa de Servicios Eventuales. El 14 que dijo el contador es Nuevo período de prueba: no se usa.
-- Movimientos: AT = alta, BT = baja. La baja lleva situación de revista **30** (Vencimiento de plazo / ART. 250 LCT). El alta lleva **01** (Activo).
+- Movimientos: AT = alta, BT = baja (revista **30**, vencimiento art. 250). El alta lleva revista **01**. Si el alta ya se subió y la persona no trabajó, el flujo usa **NA** como anulación de alta, solo dentro de las 24 h del inicio (el rechazo BTU impide anular después). NA/NB figuran en el registro pero la tabla no define su significado: **confirmar con el contador** antes de enviarlos. MR es modificación, no este caso.
 - Modalidad de liquidación: **5 = HORA**.
 - Actividad CIIU **801000**. Sucursal / domicilio de explotación = principal de la empresa, código **00000**. Puesto **5414** (verificar en la tabla de puestos). Categoría: Vigilador General; el código numérico de 6 posiciones sigue pendiente. CCT 422/05: el código de 10 posiciones de la tabla de convenios sigue pendiente. Obra social: RNOS del legajo.
 - Esos defaults viven en `empresas/{id}.arcaEventuales`. El generador es `lineasCargaMasiva`. Retribución pactada: 15 dígitos, centavos implícitos (bruto × 100). Una línea mide 130. Si faltan CCT, categoría u obra social, la línea se arma igual y `enviable` queda en false.

@@ -23,9 +23,17 @@ Hoy la plataforma tiene tres puertas por las que entra un eventual. En las tres 
 | **Cobertura del CC (P8)** | `eventualesParaHueco` (`packages/ops-core/src/eventoCoverage.ts:31`, hoy devuelve `[]`; el CC la consulta antes de REF → ESC → EXT → ADV → FT) | `ops_cov` del hueco |
 | **Planificación mensual** | Malla del puesto en `planificacion/index.tsx` (M/T/N como cualquier guardia) | turno del puesto |
 
-**Propuesta.** El contrato **nace al asignar**: la primera asignación de un eventual en una empresa abre un `contratos_eventuales` en `BORRADOR` con `jornadas[]` = esos turnos, y cada asignación nueva dentro del mismo período agrega su jornada. Así la malla no queda esperando que RRHH cargue el contrato a mano, y las jornadas nunca se inventan dos veces.
+**Decisión de Mauro.** Lo convoca el planificador, desde la malla del objetivo o desde el evento. Al asignar, `planAsignacion` (`lib/eventuales/flujo.mjs`) crea el contrato **ya confirmado** para la empresa convocante, con esas jornadas en un solo contrato (viernes + domingo = alta el viernes, baja el domingo o el lunes si cruza medianoche). RRHH ve y audita; no hay un paso de confirmación. El AT entra al lote de esa empresa.
 
-Se **confirma** en dos lugares, con el mismo callable: RRHH → Eventuales (el lugar natural, con el papel y el acuse) o desde el evento (el que arma el evento cierra ahí mismo). Confirmar = `DOCUMENTADO` → genera el envío AT (§2.9). Hasta que ese AT esté `CONFIRMADO`, las jornadas existen pero no se pueden fichar (§0.4b).
+En la ficha, `empresasHabilitadas` dice en qué empresas del grupo puede trabajar. Si la empresa no está, no aparece como candidato.
+
+No se asigna si se superpone con otra empresa o si no quedan 12 h (art. 197). El selector muestra el mensaje de `bloqueoCruce`.
+
+La liquidación ya es por empresa: `payroll-api/calc.ts` arma el snapshot con el `empresaId` pedido y descarta el turno de otra. `turnoLiquidaEnEmpresa` es el mismo corte.
+
+**Lotes.** `empresas.arcaTandas`: altas 18:00 (lo que empieza al día siguiente o el fin de semana; el viernes cubre sábado y domingo) y bajas 09:00 de lo terminado el día anterior. Si la jornada empieza antes del próximo lote, el AT es urgente. Un lote = un TXT de la empresa (una línea por persona) y un `nroTransaccion` para todos sus envíos.
+
+**Sustitución.** El planificador elige otro de la bolsa. Si el AT todavía no se subió, sale del lote. Si ya se subió y no trabajó, dentro de las 24 h el movimiento es **NA** (anulación de alta, hipótesis: confirmar con el contador). Después de 24 h ARCA no deja anular (rechazo BTU) y queda una BT marcada para el contador, no el motivo 30. El sustituto recibe su contrato y su AT. Queda en el historial del contrato.
 
 ### 0.2 Contrato, ARCA y vuelta a la bolsa
 
