@@ -25,6 +25,7 @@ const simulableShift_1 = require("../common/simulableShift");
 const coverageExtAdvSegments_1 = require("./coverageExtAdvSegments");
 const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
+const partialSegment_1 = require("./partialSegment");
 function coverageServerTime() {
     if (process.env.FIRESTORE_EMULATOR_HOST) {
         return admin.firestore.Timestamp.now();
@@ -289,17 +290,28 @@ async function applyCoverage(db, batch, params) {
     const covDocId = buildOpsCoverageDocId(titularId, params.candidateEmployeeId);
     const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
     const existingCovId = String(titular.coverageDocId || '').trim();
+    const titularPartial = String(titular.coverageStatus || '').toUpperCase() === 'PARTIAL';
+    let remainder = null;
     if (existingCovId && !params.allowReplace && existingCovId !== covDocId) {
         const exSnap = await db.collection('turnos').doc(existingCovId).get();
         if (exSnap.exists && isActiveOpsCoverageDoc(exSnap.data())) {
-            const exCt = String(exSnap.data()?.coverageType || '').toUpperCase();
-            if (!isDualSiblingOpsCoverage(exCt, ctEarly)) {
+            const ex = exSnap.data();
+            const exCt = String(ex.coverageType || '').toUpperCase();
+            const completes = titularPartial && (0, partialSegment_1.completesPartialSegment)(exCt, ctEarly);
+            if (completes) {
+                const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
+                remainder = gap
+                    ? (0, partialSegment_1.uncoveredRemainderMs)(gap.startMs, gap.endMs, (0, coverageSourceShiftForGap_1.shiftStartMs)(ex), (0, coverageSourceShiftForGap_1.shiftEndMs)(ex))
+                    : null;
+            }
+            const fillsRemainder = completes && !!remainder;
+            if (!isDualSiblingOpsCoverage(exCt, ctEarly) && !fillsRemainder) {
                 throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
             }
         }
     }
     const dualLeg = ctEarly === 'EXTEND' || ctEarly === 'ADVANCE';
-    const onlySupersedeCoverageType = params.preserveSiblingOpsCov || dualLeg ? ctEarly : null;
+    const onlySupersedeCoverageType = params.preserveSiblingOpsCov || dualLeg || remainder ? ctEarly : null;
     await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
         keepDocId: covDocId,
         supersededBy: params.convocatoriaId || params.resolvedBy,
@@ -317,10 +329,12 @@ async function applyCoverage(db, batch, params) {
         throw new CoverageApplyError('INVALID_CODE', 'Falta código de banda del titular');
     }
     const startTs = params.covSegmentStart
+        ?? (remainder ? admin.firestore.Timestamp.fromMillis(remainder.startMs) : null)
         ?? params.startTime
         ?? titular.startTime
         ?? null;
     const endTs = params.covSegmentEnd
+        ?? (remainder ? admin.firestore.Timestamp.fromMillis(remainder.endMs) : null)
         ?? params.endTime
         ?? titular.endTime
         ?? null;
@@ -340,7 +354,10 @@ async function applyCoverage(db, batch, params) {
         const sameCovOnSource = linkedToThis && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
         if (['REF', 'ESC', 'RET'].includes(ct) && !linkedToThis) {
             const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
-            if (!gap || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, gap)) {
+            const window = gap && remainder
+                ? { ...gap, startMs: remainder.startMs, endMs: remainder.endMs }
+                : gap;
+            if (!window || !(0, coverageSourceShiftForGap_1.sourceShiftEligibleForCoverageGap)(srcData, window)) {
                 throw new CoverageApplyError('INVALID_SOURCE', 'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.');
             }
         }

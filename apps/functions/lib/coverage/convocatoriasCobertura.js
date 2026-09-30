@@ -22,6 +22,8 @@ const escalarVacanteSinCobertura_1 = require("./escalarVacanteSinCobertura");
 const simulableShift_1 = require("../common/simulableShift");
 const convocatoriaEventos_1 = require("./convocatoriaEventos");
 const cascadeGuards_1 = require("./cascadeGuards");
+const coverageSourceShiftForGap_1 = require("./coverageSourceShiftForGap");
+const partialSegment_1 = require("./partialSegment");
 const eventoCoverage_1 = require("../eventos/eventoCoverage");
 const TIMEOUT_MINUTES = 3;
 async function crearNotifConvocatoria(db, conv) {
@@ -279,6 +281,70 @@ async function hasActiveConvocatoriaForType(db, shiftId, convType) {
     ]);
     return !pending.empty || !escalated.empty;
 }
+async function offerRemainderAfterPartial(db, conv, skipType) {
+    const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
+    const titular = (titularSnap.data() || {});
+    if (String(titular.coverageStatus || '').toUpperCase() !== 'PARTIAL')
+        return false;
+    const covId = String(titular.coverageDocId || '').trim();
+    if (!covId)
+        return false;
+    const cov = (await db.collection('turnos').doc(covId).get()).data();
+    const gap = (0, coverageSourceShiftForGap_1.gapWindowFromTitularShift)(titular);
+    if (!cov || !gap)
+        return false;
+    const rem = (0, partialSegment_1.uncoveredRemainderMs)(gap.startMs, gap.endMs, (0, coverageSourceShiftForGap_1.shiftStartMs)(cov), (0, coverageSourceShiftForGap_1.shiftEndMs)(cov));
+    if (!rem)
+        return false;
+    const skip = String(skipType || '').toUpperCase();
+    const { extendShiftId: _extendShiftId, advanceShiftId: _advanceShiftId, candidateShiftId: _candidateShiftId, ftShiftId: _ftShiftId, id: _id, ...base } = conv;
+    const createdBy = conv.createdBy === 'MODO_DEMO' ? 'MODO_DEMO' : 'AUTO';
+    for (const type of ['RET', 'REF', 'ESC']) {
+        if (type === skip)
+            continue;
+        if (await hasActiveConvocatoriaForType(db, conv.shiftId, type))
+            return true;
+        const candidate = await findBestCandidate(db, {
+            ...conv,
+            startTime: firestore_1.Timestamp.fromMillis(rem.startMs),
+            endTime: firestore_1.Timestamp.fromMillis(rem.endMs),
+        }, type);
+        if (!candidate)
+            continue;
+        await crearConvocatoriaDoc(db, {
+            ...base,
+            startTime: firestore_1.Timestamp.fromMillis(rem.startMs),
+            endTime: firestore_1.Timestamp.fromMillis(rem.endMs),
+            type,
+            cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf(type),
+            candidateEmployeeId: candidate.id,
+            candidateEmployeeName: candidate.name,
+            ...(candidate.uid ? { candidateUid: candidate.uid } : {}),
+            ...(candidate.candidateShiftId ? { candidateShiftId: candidate.candidateShiftId } : {}),
+            createdBy,
+        });
+        return true;
+    }
+    if (skip === 'FT')
+        return false;
+    if (await hasActiveConvocatoriaForType(db, conv.shiftId, 'FT'))
+        return true;
+    const { listFtCandidates } = await Promise.resolve().then(() => require('./coverageCandidatesServer'));
+    const rows = await listFtCandidates(db, conv, 5);
+    if (!rows.length)
+        return false;
+    await Promise.all(rows.map(({ row, uid }) => crearConvocatoriaDoc(db, {
+        ...base,
+        type: 'FT',
+        cascadeStep: eligibilityFilter_1.CASCADE_ORDER.indexOf('FT'),
+        candidateEmployeeId: row.employeeId,
+        candidateEmployeeName: row.employeeName,
+        ...(uid ? { candidateUid: uid } : {}),
+        ftShiftId: row.sourceShiftId,
+        createdBy,
+    })));
+    return true;
+}
 async function ensureMissingDualLegConvocatoria(db, conv) {
     const missing = dualSiblingConvType(conv.type);
     if (!missing)
@@ -294,13 +360,16 @@ async function ensureMissingDualLegConvocatoria(db, conv) {
         return;
     const candidate = await findBestCandidate(db, conv, missing);
     if (!candidate) {
+        const offered = await offerRemainderAfterPartial(db, conv, missing);
+        if (offered)
+            return;
         await db.collection('novedades').add({
             type: 'VACANTE_PARCIAL',
             shiftId: conv.shiftId,
             objectiveId: conv.objectiveId,
             objectiveName: conv.objectiveName || '',
             empresaId: conv.empresaId,
-            message: `Cobertura parcial: falta pata ${missing} y no hay candidato disponible en ${conv.objectiveName || 'objetivo'}.`,
+            message: `Cobertura parcial: falta el tramo restante (${missing} / FT / RET) y no hay candidato en ${conv.objectiveName || 'objetivo'}.`,
             coverageType: missing,
             resolved: false,
             createdAt: firestore_1.FieldValue.serverTimestamp(),
@@ -341,21 +410,24 @@ async function avanzarCascadaOrPartialVacante(db, conv, reason) {
         const titularSnap = await db.collection('turnos').doc(conv.shiftId).get();
         const st = String(titularSnap.data()?.coverageStatus || '').toUpperCase();
         if (st === 'PARTIAL') {
-            await db.collection('novedades').add({
-                type: 'VACANTE_PARCIAL',
-                shiftId: conv.shiftId,
-                objectiveId: conv.objectiveId,
-                objectiveName: conv.objectiveName || '',
-                empresaId: conv.empresaId,
-                title: 'Cobertura parcial incompleta',
-                message: `${conv.candidateEmployeeName} ${reason === 'REJECTED' ? 'rechazó' : 'no respondió'} la pata ${conv.type}. El titular sigue PARTIAL — falta completar EXT+ADV.`,
-                coverageType: conv.type,
-                candidateEmployeeId: conv.candidateEmployeeId,
-                candidateEmployeeName: conv.candidateEmployeeName,
-                status: 'unread',
-                resolved: false,
-                createdAt: firestore_1.FieldValue.serverTimestamp(),
-            });
+            const offered = await offerRemainderAfterPartial(db, conv, conv.type);
+            if (!offered) {
+                await db.collection('novedades').add({
+                    type: 'VACANTE_PARCIAL',
+                    shiftId: conv.shiftId,
+                    objectiveId: conv.objectiveId,
+                    objectiveName: conv.objectiveName || '',
+                    empresaId: conv.empresaId,
+                    title: 'Cobertura parcial incompleta',
+                    message: `${conv.candidateEmployeeName} ${reason === 'REJECTED' ? 'rechazó' : 'no respondió'} la pata ${conv.type}. El tramo que falta no tiene RET, FT ni ADV.`,
+                    coverageType: conv.type,
+                    candidateEmployeeId: conv.candidateEmployeeId,
+                    candidateEmployeeName: conv.candidateEmployeeName,
+                    status: 'unread',
+                    resolved: false,
+                    createdAt: firestore_1.FieldValue.serverTimestamp(),
+                });
+            }
             return;
         }
     }

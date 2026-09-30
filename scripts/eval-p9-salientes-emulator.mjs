@@ -115,13 +115,17 @@ async function main() {
   await runAutoCompletarTurnosPass(db, ctx, NOW);
 
   const retained = ['ferrero', 'bosio', 'cardo', 'garcia', 'fantini'];
+  const waiting = new Set(['cardo', 'garcia']);
   for (const id of retained) {
     const d = (await db.collection('turnos').doc(`p9_${id}`).get()).data() || {};
     const reason = String(d.retentionReason || '');
+    const textOk = waiting.has(id)
+      ? reason.startsWith('Esperando relevo de las 15:30')
+      : reason.endsWith('no se presentó');
     const ok = d.isRetention === true
       && d.isCompleted !== true
       && !d.realEndTime
-      && reason.startsWith('RELEVO_NO_PRESENTADO')
+      && textOk
       && d.retentionStartedAt?.toMillis?.() === END.toMillis();
     report(id, ok, ok ? reason : `ret=${d.isRetention} reason=${reason} end=${d.completionReason || '-'} started=${d.retentionStartedAt?.toMillis?.()}`);
   }
@@ -242,11 +246,17 @@ async function casoRelevoProgramadoLegacy() {
   const bosio = (await db.collection('turnos').doc('p9b_bosio').get()).data() || {};
   const garcia = (await db.collection('turnos').doc('p9b_garcia').get()).data() || {};
   const okB = bosio.isCompleted !== true && bosio.isRetention === true
-    && String(bosio.retentionReason || '').startsWith('RELEVO_NO_PRESENTADO')
+    && bosio.retentionReason === 'LOPEZ no se presentó'
+    && garcia.retentionReason === 'Esperando relevo de las 15:30 (GONZALEZ)'
     && !bosio.relievedBy && !bosio.relieveScheduledAt && bosio.staleReliefPrevious?.relievedBy === 'e_garcia'
     && garcia.isCompleted !== true && garcia.isRetention === true;
   report('B legacy: relieveScheduledAt contra compañero se ignora; Bosio y Garcia retenidos', okB,
-    okB ? `bosio=${bosio.retentionReason}` : `bosio=${bosio.completionReason}/ret=${bosio.isRetention}/by=${bosio.relievedBy} garcia=${garcia.completionReason}/ret=${garcia.isRetention}`);
+    okB ? `bosio=${bosio.retentionReason} garcia=${garcia.retentionReason}` : `bosio=${bosio.completionReason}/ret=${bosio.isRetention}/by=${bosio.relievedBy}/why=${bosio.retentionReason} garcia=${garcia.completionReason}/ret=${garcia.isRetention}/why=${garcia.retentionReason}`);
+
+  await runAutoCompletarTurnosPass(db, ctx, ar(15, 31));
+  const garciaLate = (await db.collection('turnos').doc('p9b_garcia').get()).data() || {};
+  const okLate = garciaLate.isRetention === true && garciaLate.retentionReason === 'GONZALEZ no se presentó';
+  report('B garcia 15:31: el relevo ya era debido', okLate, String(garciaLate.retentionReason || garciaLate.completionReason));
 }
 
 main().catch((err) => {

@@ -3217,6 +3217,68 @@ async function run() {
       report(86, ok, ok ? 'mañana antes de las 19 AR → Planificación; hoy o después de las 19 AR → Operaciones (22:00 AR no es "mañana")'
         : `22h→${vacancyActionTargetAr('2026-09-30', at22)} 10h→${vacancyActionTargetAr('2026-09-30', at10)}`);
     }
+
+    // Caso 87 — N 23–07 queda PARTIAL (EXT 23–03) y el tramo 03–07 se cubre con FT
+    {
+      const prefix = `${runId}_c87`;
+      const objectiveId = `${prefix}_obj`;
+      const empresaId = `${prefix}_emp`;
+      const titularId = `${prefix}_tit`;
+      const extId = `${prefix}_ext`;
+      const ftId = `${prefix}_ft`;
+      const nightStart = tsAt(2026, 9, 29, 23, 0);
+      const nightEnd = tsAt(2026, 9, 30, 7, 0);
+      const mid = tsAt(2026, 9, 30, 3, 0);
+      await db.batch()
+        .set(db.collection('turnos').doc(titularId), {
+          empresaId, objectiveId, clientId: `${prefix}_cli`, positionName: 'Puesto 1',
+          employeeId: `${prefix}_eT`, employeeName: 'Gauna', code: 'N', status: 'ABSENT', isAbsent: true,
+          startTime: nightStart, endTime: nightEnd,
+        })
+        .set(db.collection('turnos').doc(extId), {
+          empresaId, objectiveId, positionName: 'Puesto 1',
+          employeeId: `${prefix}_eE`, employeeName: 'Extiende', code: 'T', status: 'PRESENT', isPresent: true,
+          startTime: tsAt(2026, 9, 29, 15, 0), endTime: nightStart,
+        })
+        .set(db.collection('turnos').doc(ftId), {
+          empresaId, objectiveId, positionName: 'Puesto 1',
+          employeeId: `${prefix}_eF`, employeeName: 'Franco', code: 'F', isFranco: true,
+          startTime: tsAt(2026, 9, 29, 0, 0), endTime: tsAt(2026, 9, 29, 23, 59),
+        })
+        .commit();
+      await writeConvAndResolve({
+        empresaId, shiftId: titularId, objectiveId, objectiveName: 'NEC Playa',
+        clientId: `${prefix}_cli`, shiftCode: 'N',
+        startTime: nightStart, endTime: nightEnd,
+        urgency: 'NORMAL', cascadeStep: 3, createdBy: 'AUTO',
+        timeoutAt: Timestamp.now(), createdAt: Timestamp.now(),
+        type: 'EXTEND', candidateEmployeeId: `${prefix}_eE`, candidateEmployeeName: 'Extiende',
+        extendShiftId: extId,
+      });
+      const partial = (await db.collection('turnos').doc(titularId).get()).data();
+      const ftConvs = await db.collection('convocatorias_cobertura').where('shiftId', '==', titularId).where('type', '==', 'FT').get();
+      const ftConv = ftConvs.docs[0];
+      let covered = null;
+      let ftOps = null;
+      let extOps = null;
+      if (ftConv) {
+        await resolverCobertura(db, { id: ftConv.id, ...ftConv.data(), status: 'ACCEPTED' });
+        covered = (await db.collection('turnos').doc(titularId).get()).data();
+        ftOps = (await db.collection('turnos').doc(`ops_cov_${titularId}_${prefix}_eF`).get()).data();
+        extOps = (await db.collection('turnos').doc(`ops_cov_${titularId}_${prefix}_eE`).get()).data();
+      }
+      const ok = partial?.coverageStatus === 'PARTIAL'
+        && ftConvs.size >= 1
+        && covered?.coverageStatus === 'COVERED'
+        && ftOps?.coverageSuperseded !== true
+        && ftOps?.startTime?.toMillis?.() === mid.toMillis()
+        && ftOps?.endTime?.toMillis?.() === nightEnd.toMillis()
+        && extOps?.coverageSuperseded !== true
+        && extOps?.endTime?.toMillis?.() === mid.toMillis();
+      report(87, ok, ok
+        ? 'EXT 23–03 deja PARTIAL; la cascada ofrece FT y applyCoverage cubre 03–07'
+        : `partial=${partial?.coverageStatus} ftConv=${ftConvs.size} covered=${covered?.coverageStatus} ft=${ftOps?.startTime?.toDate?.()?.toISOString?.()}/${ftOps?.endTime?.toDate?.()?.toISOString?.()} extEnd=${extOps?.endTime?.toDate?.()?.toISOString?.()} supExt=${extOps?.coverageSuperseded}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;

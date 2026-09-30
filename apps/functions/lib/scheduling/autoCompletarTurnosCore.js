@@ -15,6 +15,7 @@ const simulableShift_1 = require("../common/simulableShift");
 const reliefEligibility_1 = require("../common/reliefEligibility");
 const shiftSeries_1 = require("../common/shiftSeries");
 const escalarVacanteSinCobertura_1 = require("../coverage/escalarVacanteSinCobertura");
+const retentionPendingReason_1 = require("./retentionPendingReason");
 const pushGreeting_1 = require("../common/pushGreeting");
 const relevoNotifications_1 = require("../fichajes/relevoNotifications");
 const shiftClose_1 = require("./shiftClose");
@@ -459,6 +460,17 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
                 close(docSnap, shift, gapEnded.gapEndMs, 'FIN_HUECO_SIN_CONTINUIDAD', undefined, gapEnded.gapId);
                 continue;
             }
+            if (relievePending) {
+                const pendingData = relievePending.data();
+                const nextReason = (0, retentionPendingReason_1.retentionPendingReason)({
+                    nowMs,
+                    reliefStartMs: shiftStartMs(pendingData),
+                    employeeName: String(pendingData.employeeName || 'relevo'),
+                });
+                if (String(shift.retentionReason || '') !== nextReason) {
+                    update(docSnap.ref, { retentionReason: nextReason });
+                }
+            }
             const linkTarget = relieveAbsent ?? relievePending;
             if (!shift.retentionAbsenceShiftId && linkTarget) {
                 update(docSnap.ref, { retentionAbsenceShiftId: linkTarget.id });
@@ -510,7 +522,11 @@ async function runAutoCompletarTurnosPass(db, ctx, now = firestore_1.Timestamp.n
                 const pendingData = relievePending.data();
                 update(docSnap.ref, {
                     isRetention: true,
-                    retentionReason: `RELEVO_NO_PRESENTADO: ${pendingData.employeeName || 'relevo'} no se presentó`,
+                    retentionReason: (0, retentionPendingReason_1.retentionPendingReason)({
+                        nowMs,
+                        reliefStartMs: shiftStartMs(pendingData),
+                        employeeName: String(pendingData.employeeName || 'relevo'),
+                    }),
                     retentionAbsenceShiftId: relievePending.id,
                     retentionStartedAt: firestore_1.Timestamp.fromMillis(endTimeMs),
                     autoRetentionAt: firestore_1.Timestamp.fromMillis(endTimeMs),

@@ -34,6 +34,23 @@ export function formatHmAR(ms: number): string {
   });
 }
 
+/**
+ * Texto del retenido. Antes de la hora del relevo: «Esperando relevo de las HH:MM (nombre)».
+ * Pasada esa hora sin fichar: «nombre no se presentó».
+ * Espejo: `apps/functions/src/scheduling/retentionPendingReason.ts`.
+ */
+export function retentionPendingReason(opts: {
+  nowMs: number;
+  reliefStartMs: number;
+  employeeName: string;
+}): string {
+  const name = String(opts.employeeName || 'relevo').trim() || 'relevo';
+  if (opts.reliefStartMs > 0 && opts.nowMs < opts.reliefStartMs) {
+    return `Esperando relevo de las ${formatHmAR(opts.reliefStartMs)} (${name})`;
+  }
+  return `${name} no se presentó`;
+}
+
 /** `12 min` hasta 59; después `1 h 05 min`. Nunca negativo. */
 export function formatRetentionDuration(minutes: number): string {
   const m = Math.max(0, Math.floor(Number(minutes) || 0));
@@ -144,7 +161,11 @@ export function buildRetentionWaitInfo(
       ? `Relevo ausente: ${who} → espera cubridor`
       : reliever.status === 'PRESENTE'
         ? `Relevo ${who} ya fichó · cierre en curso`
-        : `Espera a ${who}`;
+        : retentionPendingReason({
+          nowMs,
+          reliefStartMs: reliever.startMs,
+          employeeName: reliever.employeeName,
+        });
   }
 
   return { sinceMs, elapsedMinutes, capAtMs, capRemainingMinutes, reliever, waitLabel };

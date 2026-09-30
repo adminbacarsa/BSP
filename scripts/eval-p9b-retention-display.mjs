@@ -10,7 +10,8 @@ await register(new URL('./ts-ext-hook.mjs', import.meta.url).href);
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const load = (rel) => import(pathToFileURL(path.join(root, rel)).href);
-const { formatRetentionDuration, buildRetentionWaitInfo, formatRetentionLine } = await load('packages/ops-core/src/retentionDisplay.ts');
+const { formatRetentionDuration, buildRetentionWaitInfo, formatRetentionLine, retentionPendingReason: uiReason } = await load('packages/ops-core/src/retentionDisplay.ts');
+const { retentionPendingReason: srvReason } = await load('apps/functions/src/scheduling/retentionPendingReason.ts');
 const { classifyOpsShift } = await load('packages/ops-core/src/classifyOpsShift.ts');
 const { shiftMatchesOpsViewTab } = await load('packages/ops-core/src/shiftMatchesOpsViewTab.ts');
 
@@ -48,11 +49,11 @@ const all = [ferrero, cardo, fantini, farias, lopez, brizuela, fontana, bazan, g
 const now = at(15, 12);
 
 const wf = buildRetentionWaitInfo(ferrero, all, now);
-report('ferrero espera T 15:00', wf?.reliever?.code === 'T' && wf.elapsedMinutes === 12 && wf.waitLabel.startsWith('Espera a '), `${wf?.waitLabel} · ${wf?.elapsedMinutes} min`);
+report('ferrero espera T 15:00', wf?.reliever?.code === 'T' && wf.elapsedMinutes === 12 && /no se presentó$/.test(wf?.waitLabel || ''), `${wf?.waitLabel} · ${wf?.elapsedMinutes} min`);
 report('ferrero tope 12:59 desde 11:30', wf?.capAtMs === ms(at(11, 30)) + (12 * 60 + 59) * 60000 && wf.capRemainingMinutes === (12 * 60 + 59) - (3 * 60 + 42), `restan ${wf?.capRemainingMinutes} min`);
 
 const wc = buildRetentionWaitInfo(cardo, all, now);
-report('cardo espera T2 15:30 (no T)', wc?.reliever?.code === 'T2' && wc.reliever.startMs === ms(at(15, 30)), wc?.waitLabel);
+report('cardo espera T2 15:30 (no T)', wc?.reliever?.code === 'T2' && wc.reliever.startMs === ms(at(15, 30)) && wc.waitLabel === `Esperando relevo de las 15:30 (${wc.reliever.employeeName})`, wc?.waitLabel);
 
 const wfa = buildRetentionWaitInfo(fantini, all, now);
 report('fantini espera a FONTANA, no a FARIAS', wfa?.reliever?.employeeName === 'FONTANA', wfa?.waitLabel);
@@ -68,7 +69,11 @@ const wAbsSolo = buildRetentionWaitInfo(ferrero, [ferrero, lopezAbs], now);
 report('único relevo ausente → espera cubridor', wAbsSolo?.reliever?.status === 'AUSENTE' && /cubridor/.test(wAbsSolo.waitLabel), wAbsSolo?.waitLabel);
 
 const line = formatRetentionLine(wf);
-report('línea completa', /^Retenido desde 15:00 · 12 min · Espera a LOPEZ \(T 15:00\)|BRIZUELA/.test(line) && /tope 00:29/.test(line), line);
+report('línea completa', /^Retenido desde 15:00 · 12 min · /.test(line || '') && /no se presentó/.test(line || '') && /tope 00:29/.test(line || ''), line);
+const early = { nowMs: ms(at(15, 9)), reliefStartMs: ms(at(15, 30)), employeeName: 'GARCIA' };
+const late = { nowMs: ms(at(15, 31)), reliefStartMs: ms(at(15, 30)), employeeName: 'GARCIA' };
+report('paridad texto antes de la hora', uiReason(early) === srvReason(early) && uiReason(early) === 'Esperando relevo de las 15:30 (GARCIA)', uiReason(early));
+report('paridad texto hora pasada', uiReason(late) === srvReason(late) && uiReason(late) === 'GARCIA no se presentó', uiReason(late));
 
 // Pestañas: el saliente vencido cuenta en RET y sigue en ACT; el retenido también.
 const classify = (shift, flags) => classifyOpsShift({
