@@ -171,7 +171,8 @@ function runDeploy(projectRoot, args = []) {
   if (withFunctions) {
     // Functions tiene que cargar sola (sin ../web2 ni ../packages): se compila y se prueba aislada antes de subir.
     run('npm --prefix apps/functions run build', projectRoot);
-    run(`node "${path.join(__dirname, 'check-functions-standalone.mjs')}"`, projectRoot);
+    // La guarda tiene que revisar el lib/ del proyecto que se despliega (worktree), no el de la carpeta del lab.
+    run(`node "${path.join(projectRoot, 'scripts', 'check-functions-standalone.mjs')}"`, projectRoot);
     deployFunctions(projectRoot, functionsDeployEnv);
   }
   if (rulesTargets.length) {
