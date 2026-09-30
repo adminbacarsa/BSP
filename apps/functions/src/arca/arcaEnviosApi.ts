@@ -161,6 +161,18 @@ export const arcaEnviosApi = onRequest(
         return;
       }
 
+      if (action === 'config-avisos' && req.method === 'GET') {
+        const empresaId = String(req.query.empresaId || '');
+        if (!empresaId) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const resuelto = await resolverAvisosEmpresa(empresaId);
+        const tipo = String(req.query.tipo || '');
+        res.status(200).json(tipo ? { empresaId, tipo, ...(resuelto[tipo] || vacioAviso()) } : { empresaId, avisos: resuelto });
+        return;
+      }
+
       if (action === 'pendientes' && req.method === 'GET') {
         const empresaId = String(req.query.empresaId || '');
         let q = db().collection(COLL).where('estado', 'in', ['PENDIENTE', 'ERROR']);
@@ -204,11 +216,15 @@ export const arcaEnviosApi = onRequest(
           envioId,
         });
         const base = String(process.env.ARCA_LINK_BASE_URL || 'https://comtroldata.web.app/arca-envio/');
+        const linkUrl = `${base}?token=${t.token}`;
+        const tipoAviso = snap.data()?.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE';
+        const pushes = await enviarPushAviso(String(snap.data()?.empresaId || ''), tipoAviso, linkUrl);
         res.status(200).json({
           envioId,
           tipo: snap.data()?.tipo || null,
-          linkUrl: `${base}?token=${t.token}`,
+          linkUrl,
           venceAt: t.tokenExpiraAt,
+          pushes,
         });
         return;
       }
@@ -240,3 +256,55 @@ export const arcaEnviosApi = onRequest(
     }
   },
 );
+
+type AvisoResuelto = { pushes: { uid: string; token: string }[]; mails: string[]; whatsapps: string[] };
+
+function vacioAviso(): AvisoResuelto {
+  return { pushes: [], mails: [], whatsapps: [] };
+}
+
+async function resolverAvisosEmpresa(empresaId: string): Promise<Record<string, AvisoResuelto>> {
+  const { resolverAvisos, TIPOS_AVISO } = await import('../../../web2/src/lib/eventuales/avisos.mjs') as {
+    resolverAvisos: (input: Record<string, unknown>) => AvisoResuelto;
+    TIPOS_AVISO: string[];
+  };
+  const empresa = await db().collection('empresas').doc(empresaId).get();
+  const avisos = (empresa.data()?.avisos || {}) as Record<string, unknown>;
+  const usersSnap = await db().collection('system_users').where('empresaId', '==', empresaId).get();
+  const usuarios = usersSnap.docs.map((d) => ({ uid: d.id, ...d.data() }));
+  const roleIds = [...new Set(usuarios.map((u) => String((u as { role?: string }).role || '')).filter(Boolean))];
+  const roleSnaps = roleIds.length
+    ? await db().getAll(...roleIds.map((id) => db().collection('roles').doc(id)))
+    : [];
+  const roles = roleSnaps.filter((s) => s.exists).map((s) => ({ id: s.id, ...s.data() }));
+  const uids = usuarios.map((u) => u.uid);
+  const tokens: { uid: string; token: string }[] = [];
+  for (let i = 0; i < uids.length; i += 10) {
+    const slice = uids.slice(i, i + 10);
+    if (!slice.length) continue;
+    const snap = await db().collection('device_tokens').where('uid', 'in', slice).get();
+    snap.forEach((d) => {
+      const data = d.data();
+      tokens.push({ uid: String(data.uid || ''), token: String(data.token || d.id) });
+    });
+  }
+  const out: Record<string, AvisoResuelto> = {};
+  for (const tipo of TIPOS_AVISO) {
+    out[tipo] = resolverAvisos({ avisos, tipo, usuarios, roles, tokens });
+  }
+  return out;
+}
+
+async function enviarPushAviso(empresaId: string, tipo: string, linkUrl: string): Promise<number> {
+  if (!empresaId) return 0;
+  const avisos = await resolverAvisosEmpresa(empresaId);
+  const tokens = (avisos[tipo]?.pushes || []).map((p) => p.token).filter(Boolean);
+  if (!tokens.length) return 0;
+  const titulo = tipo === 'ARCA_BAJA_PENDIENTE' ? 'Baja ARCA pendiente' : 'Alta ARCA pendiente';
+  const result = await admin.messaging().sendEachForMulticast({
+    tokens: tokens.slice(0, 500),
+    data: { title: titulo, body: 'Hay un envío de carga masiva esperando.', url: linkUrl, tipo },
+    webpush: { fcmOptions: { link: linkUrl } },
+  });
+  return result.successCount;
+}

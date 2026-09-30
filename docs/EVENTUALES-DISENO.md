@@ -196,6 +196,12 @@ arca_envios/{envioId}: {
 
 Sin desplegar: falta que Mauro cree `ARCA_ROBOT_KEY` (`firebase functions:secrets:set ARCA_ROBOT_KEY`) y publique reglas e índices.
 
+### 2.11 Avisos por empresa
+
+`empresas/{id}.avisos` lista destinatarios por tipo: `ARCA_ALTA_PENDIENTE`, `ARCA_BAJA_PENDIENTE`, `ARCA_ERROR`. Cada uno es una persona (mail, WhatsApp, push) o un `rolDestino` (`OPERADOR` → módulo OPERATIONS, `PLANIFICACION` → PLANNING, `RRHH`, `SUPERVISION`). El rol se cruza con `roles` que tengan lectura de ese módulo y con `system_users` de la empresa. Si el rol no existe o no tiene nadie, la lista queda vacía.
+
+El push usa `device_tokens` (uid + token, el mismo doc del panel y de la app). Si no hay token, esa persona cae a mail y WhatsApp. `GET ?action=config-avisos&empresaId=&tipo=` (misma clave) devuelve mails y WhatsApp ya resueltos; el FCM lo manda la función al emitir el link, con la URL del envío. Lo edita el admin de la empresa (solo el campo `avisos`) o SuperAdmin, y queda en `audit_logs` (`AVISOS_EMPRESA`). Pantalla: Configuración → Empresas → Avisos.
+
 ---
 
 ## 3. Datos, reglas y pantallas

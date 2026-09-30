@@ -418,7 +418,11 @@ service cloud.firestore {
 
     match /empresas/{empresaId} {
       allow read: if isAdmin() || isEmployeeClaim();
-      allow write: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (
+        isAdmin() && empresaId == userEmpresaId()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos'])
+      );
     }
 
     // PEM AFIP: solo Cloud Functions (Admin SDK). Metadatos públicos en empresas.{afipConfigured,...}

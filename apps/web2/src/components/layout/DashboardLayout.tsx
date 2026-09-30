@@ -741,6 +741,15 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
+          {canReadModule('RRHH') && (
+            <Link href="/admin/rrhh/eventuales" prefetch={false} title="Eventuales"
+              className={getLinkHoverClass('/admin/rrhh/eventuales')}
+              style={getLinkStyle('/admin/rrhh/eventuales')}>
+              <Users size={18} className="shrink-0" />
+              {sidebarOpen && <span className="animate-in fade-in whitespace-nowrap">Eventuales</span>}
+            </Link>
+          )}
+
           {canReadModule('HOURS_BANK') && (
             <Link href="/admin/banco-horas" prefetch={false} title="Banco de Horas"
               className={getLinkHoverClass('/admin/banco-horas')}

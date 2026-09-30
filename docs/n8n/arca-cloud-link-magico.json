@@ -1,6 +1,6 @@
 {
   "name": "COSP — ARCA link mágico + resumen (CLOUD)",
-  "_nota": "n8n Cloud. Avisa por WhatsApp/mail cuando un envío queda pendiente >15 min, da ERROR, o hay un turno en <2 h sin alta confirmada. El link lo emite COSP (token de un solo uso, 48 h). Este flujo también sube el TXT a Drive si la función no lo hizo. Credenciales y destinatarios son placeholders.",
+  "_nota": "n8n Cloud. Los destinatarios NO están fijos: GET config-avisos los resuelve por empresa (persona o rol, con fallback a mail/WhatsApp si no hay push). El push FCM lo manda COSP al emitir el link. Credenciales son placeholders.",
   "nodes": [
     {
       "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] } },
@@ -74,7 +74,7 @@
     },
     {
       "parameters": {
-        "url": "={{ $env.COSP_LINK_MAGICO_URL }}",
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=link-emitir",
         "method": "POST",
         "sendHeaders": true,
         "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
@@ -88,6 +88,31 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=config-avisos&empresaId={{ $('Hay motivo').item.json.empresaId }}&tipo={{ $('Hay motivo').item.json.estado === 'ERROR' ? 'ARCA_ERROR' : ($('Hay motivo').item.json.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE') }}",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "options": {}
+      },
+      "id": "config-avisos",
+      "name": "GET config-avisos",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 40]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "const cfg = $json;\nconst prev = $('Hay motivo').item.json;\nconst link = $('Pedir link de un solo uso').item.json;\nconst filas = [];\nfor (const whatsapp of cfg.whatsapps || []) filas.push({ json: { ...prev, linkUrl: link.linkUrl, whatsapp, mail: '' } });\nfor (const mail of cfg.mails || []) filas.push({ json: { ...prev, linkUrl: link.linkUrl, whatsapp: '', mail } });\nif (!filas.length) filas.push({ json: { ...prev, linkUrl: link.linkUrl, whatsapp: '', mail: '', sinDestinatario: true } });\nreturn filas;"
+      },
+      "id": "armar-destinatarios",
+      "name": "Armar destinatarios",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [860, 40]
     },
     {
       "parameters": {
@@ -109,7 +134,7 @@
         "resource": "message",
         "operation": "send",
         "phoneNumberId": "={{ $env.WHATSAPP_PHONE_ID }}",
-        "recipientPhoneNumber": "={{ $env.ARCA_AVISO_WHATSAPP }}",
+        "recipientPhoneNumber": "={{ $json.whatsapp }}",
         "textBody": "=ARCA {{ $json.tipo }} — {{ $json.motivo }}. Cargá el envío acá: {{ $json.linkUrl }} (vence en 48 h, un solo uso)."
       },
       "id": "whatsapp",
@@ -120,7 +145,7 @@
     },
     {
       "parameters": {
-        "sendTo": "={{ $env.ARCA_AVISO_MAIL }}",
+        "sendTo": "={{ $json.mail }}",
         "subject": "=ARCA {{ $json.tipo }} pendiente — {{ $json.motivo }}",
         "message": "=Hay un envío de carga masiva esperando.\n\nMotivo: {{ $json.motivo }}\nLink (un solo uso, 48 h): {{ $json.linkUrl }}\n",
         "options": {}
@@ -173,15 +198,9 @@
     "Un envío por item": { "main": [[{ "node": "¿Por qué avisamos?", "type": "main", "index": 0 }]] },
     "¿Por qué avisamos?": { "main": [[{ "node": "Hay motivo", "type": "main", "index": 0 }]] },
     "Hay motivo": { "main": [[{ "node": "Pedir link de un solo uso", "type": "main", "index": 0 }]] },
-    "Pedir link de un solo uso": {
-      "main": [
-        [
-          { "node": "Drive — respaldo del TXT", "type": "main", "index": 0 },
-          { "node": "WhatsApp al responsable", "type": "main", "index": 0 },
-          { "node": "Mail de respaldo", "type": "main", "index": 0 }
-        ]
-      ]
-    },
+    "Pedir link de un solo uso": { "main": [[{ "node": "GET config-avisos", "type": "main", "index": 0 }, { "node": "Drive — respaldo del TXT", "type": "main", "index": 0 }]] },
+    "GET config-avisos": { "main": [[{ "node": "Armar destinatarios", "type": "main", "index": 0 }]] },
+    "Armar destinatarios": { "main": [[{ "node": "WhatsApp al responsable", "type": "main", "index": 0 }, { "node": "Mail de respaldo", "type": "main", "index": 0 }]] },
     "Resumen 09:00 AR": { "main": [[{ "node": "GET para el resumen", "type": "main", "index": 0 }]] },
     "GET para el resumen": { "main": [[{ "node": "Mail resumen diario", "type": "main", "index": 0 }]] }
   },
