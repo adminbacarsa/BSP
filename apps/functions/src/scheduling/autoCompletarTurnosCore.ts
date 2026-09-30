@@ -17,6 +17,7 @@ import {
   seriesHandoffKind,
 } from '../common/shiftSeries';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
+import { retentionPendingReason } from './retentionPendingReason';
 import { guardFirstName } from '../common/pushGreeting';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 import {
@@ -618,6 +619,17 @@ export async function runAutoCompletarTurnosPass(
         close(docSnap, shift, gapEnded.gapEndMs, 'FIN_HUECO_SIN_CONTINUIDAD', undefined, gapEnded.gapId);
         continue;
       }
+      if (relievePending) {
+        const pendingData = relievePending.data();
+        const nextReason = retentionPendingReason({
+          nowMs,
+          reliefStartMs: shiftStartMs(pendingData),
+          employeeName: String(pendingData.employeeName || 'relevo'),
+        });
+        if (String(shift.retentionReason || '') !== nextReason) {
+          update(docSnap.ref, { retentionReason: nextReason });
+        }
+      }
       // Retenido dentro del tope y sin relevo presente: sigue retenido.
       const linkTarget = relieveAbsent ?? relievePending;
       if (!shift.retentionAbsenceShiftId && linkTarget) {
@@ -676,7 +688,11 @@ export async function runAutoCompletarTurnosPass(
         const pendingData = relievePending.data();
         update(docSnap.ref, {
           isRetention: true,
-          retentionReason: `RELEVO_NO_PRESENTADO: ${pendingData.employeeName || 'relevo'} no se presentó`,
+          retentionReason: retentionPendingReason({
+            nowMs,
+            reliefStartMs: shiftStartMs(pendingData),
+            employeeName: String(pendingData.employeeName || 'relevo'),
+          }),
           retentionAbsenceShiftId: relievePending.id,
           retentionStartedAt: Timestamp.fromMillis(endTimeMs),
           autoRetentionAt: Timestamp.fromMillis(endTimeMs),
