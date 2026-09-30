@@ -61,6 +61,9 @@ const { handlePublishedShiftModifiedWithin12h } = requireFn('./lib/coverage/shif
 const { advanceSlaUnplannedGap } = requireFn('./lib/coverage/slaUnplannedGapPass.js');
 const { isAutoAbsenceSpanPlausible } = requireFn('./lib/attendance/autoAbsenceEligibility.js');
 const { shouldAdvanceOnReject, cascadeLockHeld, CASCADE_LOCK_MS } = requireFn('./lib/coverage/cascadeGuards.js');
+const { buildCoverageCandidates, dualSegmentBounds } = requireFn('./lib/coverage/coverageCandidates.js');
+const { dualExtAdvSegmentTimestamps, splitTimesForGap } = requireFn('./lib/coverage/coverageExtAdvSegments.js');
+const { vacancyActionTargetAr } = requireFn('./lib/common/arClock.js');
 
 const results = [];
 
@@ -3154,6 +3157,65 @@ async function run() {
         && cascadeLockHeld(0, t0) === false;
       report(83, ok, ok ? 'T 16–00 a T+30 sí es AA; doc 24 h no; ESCALATED no re-avanza; candado 90 s'
         : 'alguna guarda pura devolvió lo contrario');
+    }
+
+    // Caso 84 — EXT: el saliente retenido por el hueco va primero, aunque el otro M cierre a la misma hora
+    {
+      const gapStart = tsAt(2026, 9, 29, 15, 0).toMillis();
+      const gapEnd = tsAt(2026, 9, 29, 23, 0).toMillis();
+      const m0 = tsAt(2026, 9, 29, 7, 0).toMillis();
+      const gap = {
+        titularShiftId: 'c84_tit', absentEmployeeId: 'c84_eT', objectiveId: 'c84_obj',
+        positionName: 'Puesto 1', startMs: gapStart, endMs: gapEnd, band: 'T',
+      };
+      const base = { objectiveId: 'c84_obj', positionName: 'Puesto 1', code: 'M', startMs: m0, endMs: gapStart, isPresent: true, realStartMs: m0 };
+      const shifts = [
+        { id: 'c84_tit', employeeId: 'c84_eT', employeeName: 'Ausente', objectiveId: 'c84_obj', positionName: 'Puesto 1', code: 'T', startMs: gapStart, endMs: gapEnd, isAbsent: true },
+        { ...base, id: 'c84_a', employeeId: 'c84_eA', employeeName: 'Alvarez' },
+        { ...base, id: 'c84_z', employeeId: 'c84_eZ', employeeName: 'Zapata', isRetention: true, retentionAbsenceShiftId: 'c84_tit' },
+      ];
+      const set = buildCoverageCandidates({ nowMs: gapStart + 10 * 60000, gap, shifts, purpose: 'select' });
+      const ext = set.byType.EXTEND.filter((r) => r.eligible).map((r) => r.employeeId);
+      const ok = ext[0] === 'c84_eZ' && ext.includes('c84_eA')
+        && set.byType.EXTEND.find((r) => r.employeeId === 'c84_eZ')?.retainedForGap === true;
+      report(84, ok, ok ? 'EXT prioriza al retenido (Zapata) sobre Alvarez, que también termina a las 15:00'
+        : `ext=${JSON.stringify(ext)}`);
+    }
+
+    // Caso 85 — segmentos Ext/Adel por horario real: N 23–07 corta 03:00; custom 12–16 corta 14:00; M y T igual que CCT
+    {
+      const n0 = tsAt(2026, 9, 29, 23, 0).toMillis();
+      const n1 = tsAt(2026, 9, 30, 7, 0).toMillis();
+      const bN = dualSegmentBounds({ titularShiftId: 'x', objectiveId: 'o', startMs: n0, endMs: n1, band: 'N' });
+      const bC = dualSegmentBounds({ titularShiftId: 'x', objectiveId: 'o', startMs: tsAt(2026, 9, 29, 12, 0).toMillis(), endMs: tsAt(2026, 9, 29, 16, 0).toMillis(), band: 'M3' });
+      const bM = dualSegmentBounds({ titularShiftId: 'x', objectiveId: 'o', startMs: tsAt(2026, 9, 29, 7, 0).toMillis(), endMs: tsAt(2026, 9, 29, 15, 0).toMillis(), band: 'M' });
+      const bT = dualSegmentBounds({ titularShiftId: 'x', objectiveId: 'o', startMs: tsAt(2026, 9, 29, 15, 0).toMillis(), endMs: tsAt(2026, 9, 29, 23, 0).toMillis(), band: 'T' });
+      const splitN = splitTimesForGap({ gapBand: 'N', gapStartMs: n0, gapEndMs: n1 });
+      const segN = dualExtAdvSegmentTimestamps({ titularAnchor: new Date(n0), gapBand: 'N', gapStartMs: n0, gapEndMs: n1 });
+      const splitFallback = splitTimesForGap({ gapBand: 'T' });
+      const ok = bN.extEndMs === tsAt(2026, 9, 30, 3, 0).toMillis()
+        && bC.extEndMs === tsAt(2026, 9, 29, 14, 0).toMillis()
+        && bM.extEndMs === tsAt(2026, 9, 29, 11, 0).toMillis()
+        && bT.extEndMs === tsAt(2026, 9, 29, 19, 0).toMillis()
+        && splitN.ext.from === '23:00' && splitN.ext.to === '03:00' && splitN.adel.from === '03:00' && splitN.adel.to === '07:00'
+        && segN.extCov.start.toMillis() === n0 && segN.extCov.end.toMillis() === tsAt(2026, 9, 30, 3, 0).toMillis()
+        && segN.advCov.start.toMillis() === tsAt(2026, 9, 30, 3, 0).toMillis() && segN.advCov.end.toMillis() === n1
+        && splitFallback.ext.to === '19:00';
+      report(85, ok, ok ? 'N 23–07 → Ext 23–03 + Adel 03–07; custom 12–16 → 14:00; M/T conservan 11:00/19:00'
+        : `bN=${new Date(bN.extEndMs).toISOString()} bC=${new Date(bC.extEndMs).toISOString()} splitN=${JSON.stringify(splitN)} segN=${segN.extCov.end.toDate().toISOString()}`);
+    }
+
+    // Caso 86 — destino de la vacante en calendario AR (antes: día UTC + hora del servidor)
+    {
+      const at22 = tsAt(2026, 9, 29, 22, 0).toMillis(); // 01:00 UTC del 30
+      const at10 = tsAt(2026, 9, 29, 10, 0).toMillis();
+      const ok = vacancyActionTargetAr('2026-09-30', at22) === 'OPERACIONES'
+        && vacancyActionTargetAr('2026-09-30', at10) === 'PLANIFICACION'
+        && vacancyActionTargetAr('2026-09-29', at10) === 'OPERACIONES'
+        && vacancyActionTargetAr('2026-10-01', at22) === 'OPERACIONES'
+        && vacancyActionTargetAr('', at10) === 'OPERACIONES';
+      report(86, ok, ok ? 'mañana antes de las 19 AR → Planificación; hoy o después de las 19 AR → Operaciones (22:00 AR no es "mañana")'
+        : `22h→${vacancyActionTargetAr('2026-09-30', at22)} 10h→${vacancyActionTargetAr('2026-09-30', at10)}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

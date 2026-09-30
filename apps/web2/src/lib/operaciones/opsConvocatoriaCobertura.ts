@@ -106,3 +106,23 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   }
   return { convocatoriaId, shiftId };
 }
+
+/**
+ * Cancela una convocatoria PENDING cuando el operador rechaza al candidato, confirma por
+ * teléfono o cierra el protocolo. Si el guardia ya respondió (no está PENDING) el servidor
+ * responde failed-precondition y acá se ignora: no hay nada que cancelar.
+ */
+export async function invokeCancelarConvocatoriaCobertura(convocatoriaId?: string | null): Promise<boolean> {
+  const id = String(convocatoriaId || '').trim();
+  if (!id) return false;
+  try {
+    await httpsCallable(functions, 'cancelarConvocatoriaCobertura')({ convocatoriaId: id });
+    return true;
+  } catch (e: unknown) {
+    const code = String((e as { code?: string })?.code || '');
+    if (!/failed-precondition|not-found/.test(code)) {
+      console.warn('[cancelarConvocatoriaCobertura]', id, e);
+    }
+    return false;
+  }
+}

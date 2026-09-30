@@ -4,6 +4,7 @@ exports.onGuardAbsenceDetected = void 0;
 exports.stampTitularAbsenceVacancyMark = stampTitularAbsenceVacancyMark;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const arClock_1 = require("../common/arClock");
 async function stampTitularAbsenceVacancyMark(db, turnoId) {
     const ref = db.collection('turnos').doc(turnoId);
     return db.runTransaction(async (tx) => {
@@ -52,11 +53,10 @@ exports.onGuardAbsenceDetected = functions
     const result = await stampTitularAbsenceVacancyMark(db, turnoId);
     if (result !== 'STAMPED')
         return;
-    const scheduleDate = typeof after.scheduleDate === 'string' ? after.scheduleDate : '';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const nowH = new Date().getHours();
-    const isTomorrow = scheduleDate > todayStr;
-    const actionTarget = (isTomorrow && nowH < 19) ? 'PLANIFICACION' : 'OPERACIONES';
+    const scheduleDate = typeof after.scheduleDate === 'string'
+        ? after.scheduleDate
+        : (typeof after.startTime?.toMillis === 'function' ? (0, arClock_1.arYmd)(after.startTime.toMillis()) : '');
+    const actionTarget = (0, arClock_1.vacancyActionTargetAr)(scheduleDate, Date.now());
     const sysSnap = await db.collection('system_users').where('empresaId', '==', empresaId).get();
     if (sysSnap.empty)
         return;

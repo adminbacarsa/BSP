@@ -99,6 +99,8 @@ function mapShift(id, t) {
         checkInMs: msOf(t.checkInTime) || msOf(t.presenciaAt) || undefined,
         deploymentBand: String(t.deploymentBand || t.coversBandCode || ''),
         absenceShiftId: String(t.absenceShiftId || ''),
+        isRetention: t.isRetention === true,
+        retentionAbsenceShiftId: String(t.retentionAbsenceShiftId || ''),
     };
 }
 async function fetchQuery(q) {

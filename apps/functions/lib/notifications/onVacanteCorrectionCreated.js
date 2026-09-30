@@ -3,24 +3,18 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.onVacanteCorrectionCreated = void 0;
 const functions = require("firebase-functions/v1");
 const admin = require("firebase-admin");
+const arClock_1 = require("../common/arClock");
 const HANDLED_ORIGINS = new Set(['VACANTE_CORRECCION', 'VACANTE_POR_EVENTO', 'VACANTE_POR_AUSENCIA', 'INTERRUPTION']);
 function resolveDateStr(data) {
     if (typeof data.scheduleDate === 'string' && data.scheduleDate)
         return data.scheduleDate;
     const st = data.startTime;
-    if (st && typeof st.toDate === 'function') {
-        const d = st.toDate();
-        return d.toISOString().slice(0, 10);
-    }
+    if (st && typeof st.toMillis === 'function')
+        return (0, arClock_1.arYmd)(st.toMillis());
     return '';
 }
 function resolveActionTarget(scheduleDate) {
-    if (!scheduleDate)
-        return 'OPERACIONES';
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const nowH = new Date().getHours();
-    const isTomorrow = scheduleDate > todayStr;
-    return (isTomorrow && nowH < 19) ? 'PLANIFICACION' : 'OPERACIONES';
+    return (0, arClock_1.vacancyActionTargetAr)(scheduleDate, Date.now());
 }
 exports.onVacanteCorrectionCreated = functions
     .runWith({ timeoutSeconds: 30, memory: '256MB' })

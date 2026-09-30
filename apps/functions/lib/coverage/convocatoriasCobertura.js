@@ -469,12 +469,12 @@ async function resolverCobertura(db, conv) {
     const empresaId = String(conv.empresaId || titularData.empresaId || '');
     let titularCloseMode = 'FULL';
     let rrhhCoverageType = convTypeToCoverageType(String(conv.type));
-    const { dualExtAdvSegmentTimestamps, titularAnchorFromShift, extensionEndTimestamp, adjustedStartTimestamp, resolveCoverageBandCode: resolveBand, } = await Promise.resolve().then(() => require('./coverageExtAdvSegments'));
+    const { dualExtAdvSegmentTimestamps, titularAnchorFromShift, resolveCoverageBandCode: resolveBand, gapSpanFromShift, } = await Promise.resolve().then(() => require('./coverageExtAdvSegments'));
     try {
         if (conv.type === 'EXTEND' && conv.extendShiftId) {
             const anchor = titularAnchorFromShift(titularData);
             const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
-            const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
+            const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand, ...gapSpanFromShift(titularData) });
             const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'EXTEND');
             titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
             rrhhCoverageType = dualOk ? 'RETENCION' : 'EXTEND';
@@ -496,13 +496,13 @@ async function resolverCobertura(db, conv) {
                 titularCloseMode,
                 covSegmentStart: seg.extCov.start,
                 covSegmentEnd: seg.extCov.end,
-                extensionEndTime: extensionEndTimestamp(anchor, seg.extCov.extensionEndHm),
+                extensionEndTime: seg.extCov.end,
             });
         }
         else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
             const anchor = titularAnchorFromShift(titularData);
             const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
-            const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
+            const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand, ...gapSpanFromShift(titularData) });
             const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'ADVANCE');
             titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
             rrhhCoverageType = dualOk ? 'RETENCION' : 'ADVANCE';
@@ -524,7 +524,7 @@ async function resolverCobertura(db, conv) {
                 titularCloseMode,
                 covSegmentStart: seg.advCov.start,
                 covSegmentEnd: seg.advCov.end,
-                adjustedStartTime: adjustedStartTimestamp(anchor, seg.advCov.adjustedStartHm),
+                adjustedStartTime: seg.advCov.start,
             });
         }
         else {

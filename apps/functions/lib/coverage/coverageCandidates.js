@@ -22,7 +22,7 @@ exports.COVERAGE_LEGACY_CANDIDATE_TYPES = [
 ];
 exports.COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 exports.COVERAGE_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
-const COVERAGE_MIN_REST_MS = 10 * 60 * 60 * 1000;
+const COVERAGE_MIN_REST_MS = 12 * 60 * 60 * 1000;
 const AR_OFFSET_MS = 3 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 exports.COVERAGE_LICENSE_CODES = new Set([
@@ -48,7 +48,7 @@ exports.COVERAGE_REJECT_LABEL = {
     FALTA_APTITUD: 'Le falta una aptitud del puesto',
     RESTRICCION: 'Tiene restricción de objetivo o cliente',
     EN_OTRA_SESION: 'Ya está propuesto en otra vacante del CC',
-    DESCANSO: 'No cumple el descanso entre turnos (10 h)',
+    DESCANSO: 'No cumple el descanso entre turnos (12 h)',
 };
 function coverageRejectMessage(reason) {
     switch (reason) {
@@ -64,7 +64,7 @@ function coverageRejectMessage(reason) {
         case 'TOPE_12_59':
             return 'No se puede tomar esta cobertura: superarías el tope de 12:59 h.';
         case 'DESCANSO':
-            return 'No se puede tomar esta cobertura: no cumplís las 10 h de descanso entre turnos.';
+            return 'No se puede tomar esta cobertura: no cumplís las 12 h de descanso entre turnos.';
         case 'ZOMBI':
             return 'No se puede tomar esta cobertura: el turno está vencido.';
         case 'HUECO_CUBIERTO':
@@ -102,19 +102,20 @@ function emptyByType() {
     return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], FT: [] };
 }
 function dualSegmentBounds(gap) {
+    if (gap.startMs && gap.endMs && gap.endMs > gap.startMs && gap.endMs - gap.startMs <= exports.COVERAGE_HARD_CAP_MS + 60_000) {
+        const mid = gap.startMs + Math.floor((gap.endMs - gap.startMs) / 2);
+        return { extEndMs: mid, advStartMs: mid };
+    }
     const band = norm(gap.band);
     let hm = 11;
     if (band === 'T')
         hm = 19;
     else if (band === 'N' || band === 'N12')
-        hm = 23;
+        hm = 3;
     else if (band === 'M' || band === 'D12')
         hm = 11;
-    else if (gap.startMs && gap.endMs && gap.endMs > gap.startMs) {
-        const mid = gap.startMs + Math.floor((gap.endMs - gap.startMs) / 2);
-        return { extEndMs: mid, advStartMs: mid };
-    }
-    const ms = gap.startMs ? arHmOnDay(gap.startMs, hm, 0) : 0;
+    const dayMs = band === 'N' || band === 'N12' ? gap.startMs + DAY_MS : gap.startMs;
+    const ms = gap.startMs ? arHmOnDay(dayMs, hm, 0) : 0;
     return { extEndMs: ms, advStartMs: ms };
 }
 function samePosition(gap, shift) {
@@ -236,6 +237,7 @@ function overlappingCoverage(employeeId, window, input) {
 }
 function rowFrom(type, shift, gap, reason) {
     const other = !samePosition(gap, shift);
+    const retained = type === 'EXTEND' && isRetainedForGap(shift, gap);
     return {
         type,
         employeeId: shift.employeeId,
@@ -245,7 +247,16 @@ function rowFrom(type, shift, gap, reason) {
         otherPosition: other,
         eligible: !reason,
         ...(reason ? { rejectReason: reason } : {}),
+        ...(retained ? { retainedForGap: true } : {}),
     };
+}
+function isRetainedForGap(shift, gap) {
+    if (shift.isRetention !== true)
+        return false;
+    const ref = String(shift.retentionAbsenceShiftId || '').trim();
+    if (ref)
+        return ref === String(gap.titularShiftId || '');
+    return samePosition(gap, shift) && String(shift.objectiveId || '') === String(gap.objectiveId || '');
 }
 function sameGapDay(shift, gap) {
     return !!shift?.startMs && !!gap.startMs && arMidnight(shift.startMs) === arMidnight(gap.startMs);
@@ -256,6 +267,8 @@ function collapseByEmployee(rows, shifts, gap) {
     const beats = (next, prev) => {
         if (next.eligible !== prev.eligible)
             return next.eligible;
+        if (!!next.retainedForGap !== !!prev.retainedForGap)
+            return !!next.retainedForGap;
         const nextDay = sameGapDay(byId.get(next.sourceShiftId), gap);
         const prevDay = sameGapDay(byId.get(prev.sourceShiftId), gap);
         if (nextDay !== prevDay)
@@ -500,6 +513,8 @@ function buildCoverageCandidates(input) {
         byType[type].sort((a, b) => {
             if (a.eligible !== b.eligible)
                 return a.eligible ? -1 : 1;
+            if (!!a.retainedForGap !== !!b.retainedForGap)
+                return a.retainedForGap ? -1 : 1;
             if (a.positionRank !== b.positionRank)
                 return a.positionRank - b.positionRank;
             return a.employeeName.localeCompare(b.employeeName, 'es');

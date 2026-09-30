@@ -652,16 +652,15 @@ export async function resolverCobertura(
   const {
     dualExtAdvSegmentTimestamps,
     titularAnchorFromShift,
-    extensionEndTimestamp,
-    adjustedStartTimestamp,
     resolveCoverageBandCode: resolveBand,
+    gapSpanFromShift,
   } = await import('./coverageExtAdvSegments');
 
   try {
     if (conv.type === 'EXTEND' && conv.extendShiftId) {
       const anchor = titularAnchorFromShift(titularData);
       const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
-      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
+      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand, ...gapSpanFromShift(titularData) });
       const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'EXTEND');
       titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
       rrhhCoverageType = dualOk ? 'RETENCION' : 'EXTEND';
@@ -683,12 +682,12 @@ export async function resolverCobertura(
         titularCloseMode,
         covSegmentStart: seg.extCov.start,
         covSegmentEnd: seg.extCov.end,
-        extensionEndTime: extensionEndTimestamp(anchor, seg.extCov.extensionEndHm),
+        extensionEndTime: seg.extCov.end,
       });
     } else if (conv.type === 'ADVANCE' && conv.advanceShiftId) {
       const anchor = titularAnchorFromShift(titularData);
       const gapBand = resolveBand({ code: conv.shiftCode, startTime: conv.startTime });
-      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand });
+      const seg = dualExtAdvSegmentTimestamps({ titularAnchor: anchor, gapBand, ...gapSpanFromShift(titularData) });
       const dualOk = await extAdvSiblingAccepted(db, conv.shiftId, 'ADVANCE');
       titularCloseMode = dualOk ? 'FULL' : 'PARTIAL';
       rrhhCoverageType = dualOk ? 'RETENCION' : 'ADVANCE';
@@ -710,7 +709,7 @@ export async function resolverCobertura(
         titularCloseMode,
         covSegmentStart: seg.advCov.start,
         covSegmentEnd: seg.advCov.end,
-        adjustedStartTime: adjustedStartTimestamp(anchor, seg.advCov.adjustedStartHm),
+        adjustedStartTime: seg.advCov.start,
       });
     } else {
       const sourceShiftId =
