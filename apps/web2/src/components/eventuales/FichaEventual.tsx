@@ -7,7 +7,7 @@ import { toast } from 'sonner';
 import { TabBar } from '@/components/ui';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
 import {
-  fmtFechaAr, humanizar, iniciales, opcionesVigenciaMarco, textoDisponibilidad, textoEstadoMarco, textoObraSocial, VIGENCIA_MARCO_DEFAULT,
+  fmtFechaAr, humanizar, iniciales, opcionesVigenciaMarco, textoDisponibilidad, textoEstadoMarco, textoLegajo, textoObraSocial, VIGENCIA_MARCO_DEFAULT,
 } from '@/lib/eventuales/fichaUx.mjs';
 
 export type EmpresaPlataforma = { id: string; nombre: string };
@@ -31,6 +31,10 @@ export type FichaEventualData = {
   obraSocialRnos: string;
   fechaNacimiento: string;
   observaciones: string;
+  localidad: string;
+  legajoPlanilla: string;
+  primerIngreso: string;
+  arcaHistorial: { estado?: string; fecha?: string; origen?: string }[];
   marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
 };
 
@@ -75,6 +79,7 @@ const HISTORIAL_LABEL: Record<string, string> = {
   EVENTUAL_MARCO: 'Contrato marco',
   EVENTUAL_EMPRESAS: 'Empresas habilitadas',
   EVENTUAL_CONTACTO: 'Datos de contacto importados',
+  EVENTUAL_NOMINA: 'Nómina importada',
   EVENTUAL_DOC: 'Documento',
 };
 
@@ -193,7 +198,11 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-indigo-600 text-base font-black text-white">{iniciales(ficha.nombre)}</div>
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-lg font-black text-slate-800">{ficha.nombre}</h2>
-          <p className="text-xs text-slate-500">CUIL {ficha.id}{ficha.dni ? ` · DNI ${ficha.dni}` : ''}</p>
+          <p className="text-xs text-slate-500">
+            CUIL {ficha.id}{ficha.dni ? ` · DNI ${ficha.dni}` : ''}
+            {textoLegajo(ficha.legajoPlanilla) ? ` · ${textoLegajo(ficha.legajoPlanilla)}` : ''}
+            {ficha.primerIngreso ? ` · 1º ingreso ${fmtFechaAr(ficha.primerIngreso)}` : ''}
+          </p>
           <div className="mt-1 flex flex-wrap gap-1">
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${noDisponible ? TONO.malo : TONO.ok}`}>{textoDisponibilidad(ficha.disponibilidad)}</span>
             {ficha.uid && <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-black text-indigo-700">Con acceso a la app</span>}
@@ -229,7 +238,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             { id: 'EMPRESAS', label: 'Empresas y marco', icon: Building2, count: habilitadas.length },
             { id: 'DOCUMENTOS', label: 'Documentos', icon: FolderOpen, count: documentos.length },
             { id: 'CONTRATOS', label: 'Contratos', icon: FileText, count: contratos.length },
-            { id: 'ARCA', label: 'ARCA', icon: Landmark, count: arca.length },
+            { id: 'ARCA', label: 'ARCA', icon: Landmark, count: arca.length + (ficha.arcaHistorial?.length || 0) },
             { id: 'HISTORIAL', label: 'Historial', icon: History },
           ]}
           active={solapa}
@@ -242,7 +251,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             <Dato icon={Mail} label="Mail" valor={ficha.mail} falta={!ficha.mail} />
             <Dato icon={Phone} label="Teléfono" valor={ficha.telefono} falta={!ficha.telefono} />
-            <Dato icon={Home} label="Domicilio" valor={ficha.domicilio} falta={!ficha.domicilio} />
+            <Dato icon={Home} label="Domicilio" valor={[ficha.domicilio, ficha.localidad].filter(Boolean).join(' · ')} falta={!ficha.domicilio} />
             <Dato label="Nacimiento" valor={fmtFechaAr(ficha.fechaNacimiento)} />
             <Dato label="Obra social" valor={textoObraSocial(ficha.obraSocialRnos, RNOS_DEFAULT_FICHA)} falta={!!rnos?.pendiente} />
             <Dato label="Habilitación 9236" valor={[ficha.habilitacionNumero, ficha.habilitacionVencimiento ? `vence ${fmtFechaAr(ficha.habilitacionVencimiento)}` : ''].filter(Boolean).join(' · ')} />
@@ -362,7 +371,18 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
 
         {solapa === 'ARCA' && (
           <div className="space-y-2">
-            {arca.length === 0 && <p className="text-xs text-slate-400">Sin altas ni bajas.</p>}
+            {(ficha.arcaHistorial || []).length > 0 && (
+              <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+                {(ficha.arcaHistorial || []).map((h, i) => (
+                  <li key={`${h.fecha || ''}_${h.estado || ''}_${i}`} className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-slate-600">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${h.estado === 'BAJA' ? TONO.malo : TONO.ok}`}>{h.estado === 'BAJA' ? 'Baja' : h.estado === 'ALTA' ? 'Alta' : humanizar(h.estado)}</span>
+                    <span className="font-bold text-slate-800">{fmtFechaAr(h.fecha) || '—'}</span>
+                    <span>{h.origen === 'IMPORT_PLANILLA' ? 'Planilla' : humanizar(h.origen)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {arca.length === 0 && (ficha.arcaHistorial || []).length === 0 && <p className="text-xs text-slate-400">Sin altas ni bajas.</p>}
             {arca.map((a) => (
               <p key={a.id} className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
                 <span className="font-bold text-slate-800">{humanizar(a.tipo)}</span> · {humanizar(a.estado)} · {fmtFechaAr(a.fechaAlta) || '—'} {a.nroTransaccion ? `· Nº ${a.nroTransaccion}` : ''}

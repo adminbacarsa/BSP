@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
   contadoresFiltros, empresasPlataformaDeDocs, esIncompleto, faltantesConvocable, filaContacto, filtrarFichas, humanizar, iniciales,
-  opcionesVigenciaMarco, planAsignarEmpresas, planHabilitarEmpresa, planImportContacto, siglaEmpresa, textoDisponibilidad, textoEstadoMarco, textoObraSocial,
+  opcionesVigenciaMarco, planAsignarEmpresas, planHabilitarEmpresa, planImportContacto, planImportNomina, plantillaNomina, siglaEmpresa, textoDisponibilidad, textoEstadoMarco, textoLegajo, textoObraSocial,
 } from './fichaUx.mjs';
 
 const hoy = '2026-10-01';
@@ -46,19 +46,63 @@ describe('ficha de eventuales', () => {
     const bolsa = new Map([[cuil, { mail: 'ana@bacar.com', telefono: '351', domicilio: 'Calle 1' }]]);
     const plan = planImportContacto([
       { CUIL: '20-11111111-2', Mail: 'ANA@nueva.com', Teléfono: '', Domicilio: 'Calle 9' },
-      { cuil, mail: 'ana@bacar.com', telefono: '351', domicilio: 'Calle 1' },
       { cuil: '20222222223', mail: 'x@y.com' },
       { cuil: '123', mail: 'a@b.com' },
-      filaContacto({ 'E-mail': 'mal', CUIT: cuil, Celular: '351', Dirección: '' }),
     ], bolsa);
-    assert.deepEqual(plan.aplicar.map((d) => d.cambios), [{ mail: 'ana@nueva.com', domicilio: 'Calle 9' }]);
-    assert.equal(plan.resumen.sinCambio, 1);
-    assert.equal(plan.resumen.noEnBolsa, 1);
+    assert.deepEqual(plan.aplicar.map((d) => d.doc), [{ mail: 'ana@nueva.com', domicilio: 'Calle 9' }]);
+    assert.equal(planImportContacto([{ cuil, mail: 'ana@bacar.com', telefono: '351', domicilio: 'Calle 1' }], bolsa).resumen.sinCambio, 1);
+    assert.equal(planImportContacto([filaContacto({ 'E-mail': 'mal', CUIT: cuil, Celular: '351', Dirección: '' })], bolsa).resumen.mailInvalido, 1);
+    assert.equal(plan.resumen.sinNombre, 1);
     assert.equal(plan.resumen.cuilInvalido, 1);
-    assert.equal(plan.resumen.mailInvalido, 1);
     assert.equal(plan.resumen.actualizar, 1);
     const soloTel = planImportContacto([filaContacto({ cuil, celular: '351555' })], bolsa);
-    assert.deepEqual(soloTel.aplicar[0].cambios, { telefono: '351555' });
+    assert.deepEqual(soloTel.aplicar[0].doc, { telefono: '351555' });
+  });
+
+  it('la plantilla de nómina se lee de vuelta: nuevo, actualiza sin pisar vacíos, y los errores', async () => {
+    const XLSX = await import('xlsx');
+    const plantilla = plantillaNomina();
+    assert.equal(plantilla.instrucciones[0][0], 'Columna');
+    assert.equal(plantilla.instrucciones.length, plantilla.encabezados.length + 2);
+    const aoa = [plantilla.encabezados, plantilla.encabezados.map((h) => plantilla.ejemplo[h] ?? '')];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), plantilla.hoja);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(plantilla.instrucciones), 'Instrucciones');
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+    const leido = XLSX.read(buf, { type: 'buffer' });
+    const hoja = leido.SheetNames.find((n) => n.toLowerCase() !== 'instrucciones');
+    const filas = XLSX.utils.sheet_to_json(leido.Sheets[hoja], { defval: '', raw: false });
+    const empresas = [{ id: 'bacarsa', nombre: 'Bacar SA' }, { id: 'grupos_bacar_sa', nombre: 'Grupo Bacar sa.' }];
+    const ctx = { empresas, plantaCuils: [] };
+    const nuevo = planImportNomina(filas, new Map(), ctx);
+    assert.equal(nuevo.detalle[0].codigo, 'NUEVO');
+    assert.equal(nuevo.detalle[0].doc.legajoPlanilla, '1001');
+    assert.equal(nuevo.detalle[0].doc.primerIngreso, '2024-02-15');
+    assert.equal(nuevo.detalle[0].doc.credencialVencimiento, '2027-03-01');
+    assert.equal(nuevo.detalle[0].doc.aptoPsicofisico.vencimiento, '2027-06-01');
+    assert.equal(nuevo.detalle[0].doc.localidad, 'Córdoba');
+    assert.equal(nuevo.detalle[0].doc.obraSocialRnos, undefined);
+    assert.deepEqual(nuevo.detalle[0].doc.empresasHabilitadas, ['bacarsa', 'grupos_bacar_sa']);
+
+    const cuil = nuevo.detalle[0].cuil;
+    const guardada = { ...nuevo.detalle[0].doc, aptoPsicofisico: { estado: 'APTO', vencimiento: '2027-06-01' } };
+    const vacia = { ...filas[0] };
+    for (const h of plantilla.encabezados) if (h !== 'CUIL' && h !== 'APELLIDO Y NOMBRE' && h !== 'LEGAJO') vacia[h] = '';
+    const otraVez = planImportNomina([vacia, { ...filas[0], CUIL: '20-11111111-2' }], new Map([[cuil, guardada]]), ctx);
+    assert.equal(otraVez.detalle[0].codigo, 'SIN_CAMBIO');
+    assert.equal(otraVez.detalle[1].codigo, 'DUPLICADO');
+    assert.equal('mail' in otraVez.detalle[0].doc, false);
+
+    const errores = planImportNomina([
+      { ...filas[0], CUIL: '123' },
+      { ...filas[0], CUIL: '20-33333333-4', 'EMPRESAS HABILITADAS (nombres separados por coma)': 'Empresa que no existe' },
+      filas[0],
+    ], new Map(), { empresas, plantaCuils: [cuil] });
+    assert.deepEqual(errores.detalle.map((d) => d.codigo), ['CUIL_INVALIDO', 'EMPRESA_DESCONOCIDA', 'PLANTA_PERMANENTE']);
+    assert.equal(errores.aplicar.length, 0);
+    assert.equal(textoLegajo('PENDIENTE'), 'Legajo pendiente');
+    assert.equal(textoLegajo('1001'), 'Legajo 1001');
+    assert.equal(textoLegajo(''), '');
   });
 
   it('asignar y habilitar empresas: las de la plataforma si se pasan, si no las del grupo', () => {

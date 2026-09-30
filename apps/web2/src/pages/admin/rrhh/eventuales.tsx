@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import {
-  AlertTriangle, ArrowLeft, Building2, CircleDashed, FileCheck2, FileSpreadsheet, FileX2, Home, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
+  AlertTriangle, ArrowLeft, Building2, CircleDashed, Download, FileCheck2, FileSpreadsheet, FileX2, Home, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
@@ -16,7 +16,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
 import {
-  contadoresFiltros, empresasPlataformaDeDocs, faltantesConvocable, FILTROS_LISTA, filtrarFichas, iniciales, siglaEmpresa, textoDisponibilidad,
+  contadoresFiltros, empresasPlataformaDeDocs, faltantesConvocable, FILTROS_LISTA, filtrarFichas, iniciales, plantillaNomina, siglaEmpresa, textoDisponibilidad, textoLegajo,
 } from '@/lib/eventuales/fichaUx.mjs';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
@@ -46,13 +46,33 @@ const formDe = (f: Ficha): Form => ({
 });
 
 const hoy = () => new Date().toISOString().slice(0, 10);
+const fmtFechaLista = (iso: string) => {
+  const [y, m, d] = String(iso || '').slice(0, 10).split('-');
+  return d && m && y ? `${d}/${m}/${y}` : '';
+};
 
 const ICONO_FILTRO: Record<string, React.ElementType> = {
   DISPONIBLE: UserCheck, NO_DISPONIBLE: UserX, VENCE: AlertTriangle, INCOMPLETOS: CircleDashed, TODOS: Users,
 };
 
-const CAMPO_CONTACTO: Record<string, string> = { mail: 'mail', telefono: 'teléfono', domicilio: 'domicilio' };
-const PROBLEMA_CONTACTO: Record<string, string> = { NO_EN_BOLSA: 'no está en la bolsa', CUIL_INVALIDO: 'CUIL inválido', MAIL_INVALIDO: 'mail inválido' };
+const VISTA_NOMINA: Record<string, { texto: string; tono: string }> = {
+  NUEVO: { texto: 'Nuevo', tono: 'bg-emerald-50 text-emerald-800' },
+  ACTUALIZAR: { texto: 'Actualiza', tono: 'bg-indigo-50 text-indigo-800' },
+  SIN_CAMBIO: { texto: 'Sin cambios', tono: 'bg-slate-100 text-slate-600' },
+  CUIL_INVALIDO: { texto: 'CUIL inválido', tono: 'bg-rose-50 text-rose-800' },
+  DUPLICADO: { texto: 'Duplicado', tono: 'bg-rose-50 text-rose-800' },
+  PLANTA_PERMANENTE: { texto: 'Planta permanente', tono: 'bg-rose-50 text-rose-800' },
+  EMPRESA_DESCONOCIDA: { texto: 'Empresa desconocida', tono: 'bg-rose-50 text-rose-800' },
+  MAIL_INVALIDO: { texto: 'Mail inválido', tono: 'bg-rose-50 text-rose-800' },
+  SIN_NOMBRE: { texto: 'Falta el nombre', tono: 'bg-rose-50 text-rose-800' },
+  FECHA_INVALIDA: { texto: 'Fecha inválida', tono: 'bg-rose-50 text-rose-800' },
+};
+
+type VistaNomina = { cuil: string; nombre: string; codigo: string; motivo: string };
+type ResumenNomina = {
+  nuevo: number; actualizar: number; sinCambio: number; cuilInvalido: number; duplicado: number;
+  planta: number; empresaDesconocida: number; mailInvalido: number; sinNombre?: number; fechaInvalida?: number;
+};
 
 function EstadoIcono({ icon: Icon, ok, title }: { icon: React.ElementType; ok: boolean; title: string }) {
   return <span title={title} aria-label={title} className={`inline-flex h-5 w-5 items-center justify-center rounded-md ${ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}><Icon size={11} /></span>;
@@ -81,11 +101,10 @@ export default function EventualesPage() {
   const [empresasAsignar, setEmpresasAsignar] = useState<string[]>([]);
   const [importando, setImportando] = useState(false);
   const [habilitando, setHabilitando] = useState('');
-  const [reporteContacto, setReporteContacto] = useState<{
+  const [reporteNomina, setReporteNomina] = useState<{
     dryRun: boolean;
-    resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
-    muestra: { cuil: string; campos: string[] }[];
-    problemas: { cuil: string; codigo: string }[];
+    resumen: ResumenNomina;
+    vista: VistaNomina[];
     filas: Record<string, unknown>[];
   } | null>(null);
 
@@ -124,6 +143,10 @@ export default function EventualesPage() {
           obraSocialRnos: String(data.obraSocialRnos || ''),
           fechaNacimiento: String(data.fechaNacimiento || ''),
           observaciones: String(data.observaciones || ''),
+          localidad: String(data.localidad || ''),
+          legajoPlanilla: String(data.legajoPlanilla || ''),
+          primerIngreso: String(data.primerIngreso || ''),
+          arcaHistorial: Array.isArray(data.arcaHistorial) ? data.arcaHistorial : [],
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
         };
       }));
@@ -225,22 +248,32 @@ export default function EventualesPage() {
     }
   };
 
-  const importarContactos = async (file: File | null, dryRun: boolean, filasYaLeidas?: Record<string, unknown>[]) => {
+  const descargarPlantillaNomina = async () => {
+    const XLSX = await import('xlsx');
+    const plantilla = plantillaNomina();
+    const wb = XLSX.utils.book_new();
+    const datos = [plantilla.encabezados, plantilla.encabezados.map((h) => plantilla.ejemplo[h] ?? '')];
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(datos), plantilla.hoja);
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(plantilla.instrucciones), 'Instrucciones');
+    XLSX.writeFile(wb, 'nomina-eventuales.xlsx');
+  };
+
+  const importarNomina = async (file: File | null, dryRun: boolean, filasYaLeidas?: Record<string, unknown>[]) => {
     setImportando(true);
     try {
       let filas = filasYaLeidas;
       if (!filas && file) {
         const XLSX = await import('xlsx');
         const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-        filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
+        const nombre = wb.SheetNames.find((n) => n.toLowerCase() !== 'instrucciones') || wb.SheetNames[0];
+        filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[nombre], { defval: '', raw: false });
       }
       const res = await llamar('gestionarEventual', { accion: 'importarContacto', dryRun, filas: filas || [] }) as {
-        resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
-        muestra: { cuil: string; campos: string[] }[];
-        problemas: { cuil: string; codigo: string }[];
+        resumen: ResumenNomina;
+        vista: VistaNomina[];
       };
-      setReporteContacto({ dryRun, resumen: res.resumen, muestra: res.muestra || [], problemas: res.problemas || [], filas: filas || [] });
-      if (!dryRun) toast.success(`${res.resumen.actualizar} fichas actualizadas.`);
+      setReporteNomina({ dryRun, resumen: res.resumen, vista: res.vista || [], filas: filas || [] });
+      if (!dryRun) toast.success(`${res.resumen.nuevo || 0} nuevos y ${res.resumen.actualizar || 0} actualizados.`);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo leer el Excel.');
     } finally {
@@ -285,10 +318,10 @@ export default function EventualesPage() {
                   </button>
                 )}
                 {puede('update') && (
-                  <label title="Importar mail, teléfono y domicilio desde Excel (CUIL + columnas). Primero muestra qué cambia." className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50">
+                  <button type="button" title="Importar nómina de eventuales" aria-label="Importar nómina de eventuales" onClick={() => setReporteNomina({ dryRun: true, resumen: { nuevo: 0, actualizar: 0, sinCambio: 0, cuilInvalido: 0, duplicado: 0, planta: 0, empresaDesconocida: 0, mailInvalido: 0 }, vista: [], filas: [] })}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50">
                     <FileSpreadsheet size={16} />
-                    <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={importando} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importarContactos(f, true); }} />
-                  </label>
+                  </button>
                 )}
                 <MarcosLotePanel compacto empresaId={empresaActivaId} nombreEmpresa={nombreEmpresaActiva} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
               </div>
@@ -349,8 +382,10 @@ export default function EventualesPage() {
                       <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-black ${f.disponibilidad === 'NO_DISPONIBLE' ? 'bg-slate-200 text-slate-500' : 'bg-indigo-100 text-indigo-700'}`}>{iniciales(f.nombre)}</span>
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
-                        <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                        <span className="flex flex-wrap items-center gap-1 text-[10px] text-slate-400">
                           <span className="tabular-nums">{f.id}</span>
+                          {textoLegajo(f.legajoPlanilla) && <span className="font-bold text-slate-500">{textoLegajo(f.legajoPlanilla)}</span>}
+                          {f.primerIngreso && <span>1º {fmtFechaLista(f.primerIngreso)}</span>}
                           {f.disponibilidad === 'NO_DISPONIBLE' && <span className="rounded-full bg-slate-200 px-1.5 font-black text-slate-600">{textoDisponibilidad(f.disponibilidad)}</span>}
                         </span>
                         <span className="mt-1 flex flex-wrap items-center gap-1">
@@ -430,31 +465,45 @@ export default function EventualesPage() {
           </div>
         )}
 
-        {reporteContacto && (
+        {reporteNomina && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
             <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-lg">
-              <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><FileSpreadsheet size={18} /> {reporteContacto.dryRun ? 'Vista previa del Excel' : 'Contactos importados'}</h2>
-              <ul className="mt-3 grid grid-cols-2 gap-1 text-sm text-slate-700 sm:grid-cols-3">
-                <li className="rounded-xl bg-emerald-50 p-2 text-center"><b className="block text-lg text-emerald-700">{reporteContacto.resumen.actualizar}</b>se actualizan</li>
-                <li className="rounded-xl bg-slate-50 p-2 text-center"><b className="block text-lg">{reporteContacto.resumen.sinCambio}</b>sin cambios</li>
-                <li className="rounded-xl bg-amber-50 p-2 text-center"><b className="block text-lg text-amber-700">{reporteContacto.resumen.noEnBolsa}</b>no están en la bolsa</li>
-                <li className="rounded-xl bg-rose-50 p-2 text-center"><b className="block text-lg text-rose-700">{reporteContacto.resumen.cuilInvalido}</b>CUIL inválido</li>
-                <li className="rounded-xl bg-rose-50 p-2 text-center"><b className="block text-lg text-rose-700">{reporteContacto.resumen.mailInvalido}</b>mail inválido</li>
-              </ul>
-              {reporteContacto.muestra.length > 0 && (
-                <ul className="mt-3 max-h-40 overflow-auto rounded-xl bg-slate-50 p-2 text-xs text-slate-600">
-                  {reporteContacto.muestra.map((row) => <li key={row.cuil}>{fichas.find((f) => f.id === row.cuil)?.nombre || row.cuil}: {row.campos.map((c) => CAMPO_CONTACTO[c] || c).join(', ')}</li>)}
-                </ul>
-              )}
-              {reporteContacto.problemas.length > 0 && (
-                <ul className="mt-3 max-h-32 overflow-auto text-xs text-rose-700">
-                  {reporteContacto.problemas.map((row, i) => <li key={`${row.cuil}_${i}`}>{row.cuil || '—'} · {PROBLEMA_CONTACTO[row.codigo] || row.codigo}</li>)}
-                </ul>
+              <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><FileSpreadsheet size={18} /> Importar nómina de eventuales</h2>
+              <p className="mt-1 text-xs text-slate-500">Nada se escribe hasta Aplicar. Una celda vacía no borra el dato que ya está.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button type="button" onClick={() => void descargarPlantillaNomina()} className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50">
+                  <Download size={14} /> Descargar plantilla
+                </button>
+                <label className="inline-flex cursor-pointer items-center gap-1 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:bg-indigo-700">
+                  <FileSpreadsheet size={14} /> {importando ? 'Leyendo…' : 'Elegir archivo'}
+                  <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={importando} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importarNomina(f, true); }} />
+                </label>
+              </div>
+              {reporteNomina.filas.length > 0 && (
+                <>
+                  <ul className="mt-3 grid grid-cols-2 gap-1 text-sm text-slate-700 sm:grid-cols-4">
+                    <li className="rounded-xl bg-emerald-50 p-2 text-center"><b className="block text-lg text-emerald-700">{reporteNomina.resumen.nuevo || 0}</b>nuevos</li>
+                    <li className="rounded-xl bg-indigo-50 p-2 text-center"><b className="block text-lg text-indigo-700">{reporteNomina.resumen.actualizar || 0}</b>actualizan</li>
+                    <li className="rounded-xl bg-slate-50 p-2 text-center"><b className="block text-lg">{reporteNomina.resumen.sinCambio || 0}</b>sin cambios</li>
+                    <li className="rounded-xl bg-rose-50 p-2 text-center"><b className="block text-lg text-rose-700">{(reporteNomina.resumen.cuilInvalido || 0) + (reporteNomina.resumen.duplicado || 0) + (reporteNomina.resumen.planta || 0) + (reporteNomina.resumen.empresaDesconocida || 0) + (reporteNomina.resumen.mailInvalido || 0) + (reporteNomina.resumen.sinNombre || 0) + (reporteNomina.resumen.fechaInvalida || 0)}</b>con error</li>
+                  </ul>
+                  <ul className="mt-3 max-h-52 overflow-auto divide-y divide-slate-100 rounded-xl border border-slate-100 text-xs">
+                    {reporteNomina.vista.map((row, i) => {
+                      const vista = VISTA_NOMINA[row.codigo] || { texto: row.codigo, tono: 'bg-slate-100 text-slate-600' };
+                      return (
+                        <li key={`${row.cuil}_${i}`} className="flex items-center gap-2 px-2 py-1.5">
+                          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${vista.tono}`}>{vista.texto}</span>
+                          <span className="min-w-0 flex-1 truncate text-slate-700">{row.nombre || row.cuil || '—'}{row.motivo ? ` · ${row.motivo}` : ''}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               )}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setReporteContacto(null)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cerrar</button>
-                {reporteContacto.dryRun && reporteContacto.resumen.actualizar > 0 && (
-                  <button type="button" disabled={importando} onClick={() => importarContactos(null, false, reporteContacto.filas)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Aplicar</button>
+                <button type="button" onClick={() => setReporteNomina(null)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cerrar</button>
+                {reporteNomina.dryRun && ((reporteNomina.resumen.nuevo || 0) + (reporteNomina.resumen.actualizar || 0)) > 0 && (
+                  <button type="button" disabled={importando} onClick={() => importarNomina(null, false, reporteNomina.filas)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Aplicar</button>
                 )}
               </div>
             </div>

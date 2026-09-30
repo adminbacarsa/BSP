@@ -43,10 +43,20 @@ async function auditar(action: string, actorUid: string, cuil: string, details: 
   });
 }
 
+/** Empresas activas de la plataforma, con el nombre que se muestra. */
+async function empresasPlataformaDetalle(): Promise<{ id: string; nombre: string }[]> {
+  const snap = await db().collection('empresas').get();
+  return snap.docs
+    .filter((d) => d.data().active !== false && d.data().status !== 'INACTIVE')
+    .map((d) => ({
+      id: d.id,
+      nombre: String(d.data().name || d.data().razonSocial || d.data().nombre || d.id),
+    }));
+}
+
 /** Ids de las empresas de la plataforma (activas). Son las que se pueden habilitar en la ficha. */
 async function empresasPlataforma(): Promise<string[]> {
-  const snap = await db().collection('empresas').get();
-  return snap.docs.filter((d) => d.data().active !== false && d.data().status !== 'INACTIVE').map((d) => d.id);
+  return (await empresasPlataformaDetalle()).map((e) => e.id);
 }
 
 async function plantaTieneCuil(cuil: string): Promise<boolean> {
@@ -139,36 +149,54 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   }
 
   if (accion === 'importarContacto') {
-    const { planImportContacto } = await import('../eventuales-shared/fichaUx.mjs') as {
-      planImportContacto: (filas: unknown[], bolsa: Map<string, { mail?: string; telefono?: string; domicilio?: string }>) => {
-        detalle: { cuil: string; codigo: string; mailInvalido?: boolean; cambios: Record<string, string> }[];
-        aplicar: { cuil: string; cambios: { mail?: string; telefono?: string; domicilio?: string } }[];
-        resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
+    const { planImportNomina, filaNomina } = await import('../eventuales-shared/fichaUx.mjs') as {
+      filaNomina: (row: unknown) => { cuil: string };
+      planImportNomina: (filas: unknown[], bolsa: Map<string, Record<string, unknown>>, ctx: { empresas: { id: string; nombre: string }[]; plantaCuils: string[] }) => {
+        detalle: { cuil: string; nombre?: string; codigo: string; motivo?: string; doc: Record<string, unknown> }[];
+        aplicar: { cuil: string; codigo: string; doc: Record<string, unknown> }[];
+        resumen: Record<string, number>;
       };
+    };
+    const { normalizeCuil } = await import('../eventuales-shared/cuil.mjs') as { normalizeCuil: (raw: unknown) => string | null };
+    const { COTEJO_EMPRESA_IDS } = await import('../eventuales-shared/grupo.mjs') as { COTEJO_EMPRESA_IDS: string[] };
+    const { esPlantaPermanente } = await import('../eventuales-shared/planilla.mjs') as {
+      esPlantaPermanente: (e: Record<string, unknown>) => boolean;
     };
     const filas = Array.isArray(data?.filas) ? data.filas.slice(0, 500) : [];
     if (!filas.length) throw new functions.https.HttpsError('invalid-argument', 'El archivo no tiene filas.');
-    const snap = await db().collection('eventuales_bolsa').select('mail', 'telefono', 'domicilio').get();
-    const bolsa = new Map(snap.docs.map((d) => [d.id, { mail: d.data().mail, telefono: d.data().telefono, domicilio: d.data().domicilio }]));
-    const plan = planImportContacto(filas, bolsa);
+    const cuils = [...new Set(filas.map((f) => normalizeCuil(filaNomina(f).cuil)).filter((c): c is string => !!c))];
+    const plantaCuils: string[] = [];
+    for (let i = 0; i < cuils.length; i += 10) {
+      const chunk = cuils.slice(i, i + 10);
+      const emp = await db().collection('empleados').where('cuil', 'in', chunk).get();
+      for (const doc of emp.docs) {
+        const row = doc.data();
+        const cuil = normalizeCuil(row.cuil);
+        if (cuil && COTEJO_EMPRESA_IDS.includes(String(row.empresaId || '')) && esPlantaPermanente(row)) plantaCuils.push(cuil);
+      }
+    }
+    const snap = await db().collection('eventuales_bolsa').select(
+      'nombre', 'mail', 'telefono', 'domicilio', 'localidad', 'dni', 'legajoPlanilla', 'primerIngreso',
+      'obraSocialRnos', 'empresasHabilitadas', 'credencialVencimiento', 'aptoPsicofisico', 'observaciones',
+    ).get();
+    const bolsa = new Map(snap.docs.map((d) => [d.id, d.data() as Record<string, unknown>]));
+    const plan = planImportNomina(filas, bolsa, { empresas: await empresasPlataformaDetalle(), plantaCuils });
     const dryRun = data?.dryRun !== false;
     if (!dryRun) {
       for (const row of plan.aplicar) {
-        await db().collection('eventuales_bolsa').doc(row.cuil).set({ ...row.cambios, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+        const alta = row.codigo === 'NUEVO' ? { uid: null, legajos: [], createdAt: admin.firestore.FieldValue.serverTimestamp() } : {};
+        await db().collection('eventuales_bolsa').doc(row.cuil).set({
+          ...row.doc, ...alta, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
       }
-      await auditar('EVENTUAL_CONTACTO', auth.uid, plan.aplicar[0]?.cuil || '', `${plan.aplicar.length} fichas con mail, teléfono o domicilio`);
+      await auditar('EVENTUAL_NOMINA', auth.uid, plan.aplicar[0]?.cuil || '', `${plan.resumen.nuevo || 0} nuevos, ${plan.resumen.actualizar || 0} actualizados`);
     }
-    const problemas = plan.detalle
-      .filter((d) => d.codigo === 'NO_EN_BOLSA' || d.codigo === 'CUIL_INVALIDO' || d.mailInvalido)
-      .slice(0, 40)
-      .map((d) => ({ cuil: d.cuil, codigo: d.mailInvalido && d.codigo === 'ACTUALIZAR' ? 'MAIL_INVALIDO' : d.codigo }));
     return {
       ok: true,
       dryRun,
       resumen: plan.resumen,
       aplicar: plan.aplicar.length,
-      muestra: plan.aplicar.slice(0, 40).map((d) => ({ cuil: d.cuil, campos: Object.keys(d.cambios) })),
-      problemas,
+      vista: plan.detalle.slice(0, 80).map((d) => ({ cuil: d.cuil, nombre: d.nombre || '', codigo: d.codigo, motivo: d.motivo || '' })),
     };
   }
 
