@@ -496,6 +496,15 @@
       ]
     },
     {
+      "collectionGroup": "arca_envios",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "estado", "order": "ASCENDING" },
+        { "fieldPath": "empresaId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "escalas_salariales",
       "queryScope": "COLLECTION",
       "fields": [

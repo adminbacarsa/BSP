@@ -13,6 +13,20 @@
 
 Hay una **bolsa de eventuales**, módulo aparte de la nómina. Hoy el grupo es **Bacar S.A. y Grupo Bacar**; la lista es configurable (`grupos_eventuales`). La persona existe **una vez**, por CUIL, en `eventuales_bolsa/{cuil}`. Puede no trabajar para nadie, o para una o varias empresas del grupo.
 
+### 0.1b Dónde se asigna un eventual y desde dónde se confirma el contrato
+
+Hoy la plataforma tiene tres puertas por las que entra un eventual. En las tres el turno ya existe: lo que falta es el contrato.
+
+| Flujo | Dónde | Qué turno crea |
+|-------|-------|----------------|
+| **Eventos** | `EventosPanel.tsx` → `assignGuardToEvent` (`services/eventoAssignService.ts:64`, `code: 'EV'`). La grilla lo muestra con `planningEventosExtras` (`planificacion/index.tsx:186`) | `EV` del evento |
+| **Cobertura del CC (P8)** | `eventualesParaHueco` (`packages/ops-core/src/eventoCoverage.ts:31`, hoy devuelve `[]`; el CC la consulta antes de REF → ESC → EXT → ADV → FT) | `ops_cov` del hueco |
+| **Planificación mensual** | Malla del puesto en `planificacion/index.tsx` (M/T/N como cualquier guardia) | turno del puesto |
+
+**Propuesta.** El contrato **nace al asignar**: la primera asignación de un eventual en una empresa abre un `contratos_eventuales` en `BORRADOR` con `jornadas[]` = esos turnos, y cada asignación nueva dentro del mismo período agrega su jornada. Así la malla no queda esperando que RRHH cargue el contrato a mano, y las jornadas nunca se inventan dos veces.
+
+Se **confirma** en dos lugares, con el mismo callable: RRHH → Eventuales (el lugar natural, con el papel y el acuse) o desde el evento (el que arma el evento cierra ahí mismo). Confirmar = `DOCUMENTADO` → genera el envío AT (§2.9). Hasta que ese AT esté `CONFIRMADO`, las jornadas existen pero no se pueden fichar (§0.4b).
+
 ### 0.2 Contrato, ARCA y vuelta a la bolsa
 
 La bolsa **no tiene un alta ARCA vigente**. El eventual está disponible sin alta. Cada vez que una empresa lo necesita: contrato → alta en ARCA antes de la primera jornada → trabaja esas jornadas → baja al terminar → vuelve a la bolsa. La próxima vez es un alta nueva, en la misma empresa o en otra. El legajo (`empleados`) se crea en ese alta, no al importar. Si se efectiviza, sale de la bolsa y queda en la planta de esa empresa.
@@ -118,6 +132,12 @@ El alta del TXT sale de contratos `DOCUMENTADO` (papel o firma certificada adjun
 
 - No hay firma electrónica. El bloque «FIRMAS» de RRHH es un placeholder impreso: `rrhh/index.tsx:3435-3444`. El acuse de la app se apoya en el patrón de callable con uid y timestamp de servidor (`respondEventoConvocatoria`), y **no** cambia el estado legal del contrato.
 
+### 0.4b Bloqueo de fichada sin alta ARCA
+
+`isAltaArcaConfirmada` (`apps/functions/src/arca/altaArcaGate.ts`, espejo en `lib/eventuales/arcaEnvios.mjs`) es lo primero que mira `evaluateServerCheckInWindow`: un turno con `esEventual: true` y `eventualAltaArcaConfirmada !== true` devuelve `ALTA_ARCA_PENDIENTE` y `registrarPresencia` lo rechaza. Va **antes** de las ventanas y del bypass del CC: es un bloqueo legal, no una tolerancia horaria. El turno lleva el estado denormalizado para que la fichada no tenga que leer contratos.
+
+Desde **T−2 h** el CC ve la alerta (`altaArcaPendienteAlerta`, novedad `ALTA_ARCA_PENDIENTE`, prioridad alta). Antes de esa ventana no molesta. Ese mismo disparador es el que usa n8n Cloud para mandar el link manual (§2.10).
+
 ### 2.8 Remuneración
 
 No hay sueldo fijo. `calcularRemuneracionContrato` (`apps/web2/src/lib/eventuales/remuneracion.mjs`) arma el bruto para la cláusula del contrato y las mismas líneas se reusan al cerrar la liquidación.
@@ -135,6 +155,46 @@ Colección `escalas_salariales/{convenio}_{categoria}_{vigenciaDesde}`: convenio
 El job de escala (`planJobEscalaSuvico`) no está exportado en Functions: no se publica. Recorre fuentes (suvico.org.ar, Boletín Oficial de Córdoba, InfoLEG, prensa). Si el texto no trae una tabla `ESCALA_SUVICO_TABLA` con básico por categoría, no inventa importes: deja un aviso para carga asistida. Si parsea, crea una propuesta `PENDIENTE_APROBACION` con URL de fuente. `aprobarEscala` la pasa a `ACTIVE` (un clic de SuperAdmin). Nunca se aplica sola. El 29/09/2026 la home de SUVICO nombra «Escala Salarial Vigente» pero `/escala` y `/escala-salarial` responden 404. La prensa cita un conformado inicial de $1.644.650 del 1er semestre 2026: no es el básico de Vigilador General y no se cargó.
 
 Cláusula que se imprime: bruto, categoría, valor hora, desglose por concepto y la frase de que no es un monto fijo. Al cierre se agregan SAC y vacaciones.
+
+### 2.9 Envíos ARCA (`arca_envios`)
+
+Un envío = un TXT que alguien tiene que subir a Simplificación Registral. Al **confirmar** el contrato se crea el AT (`planEnvioAlta`); al **cerrarlo**, el BT (`planEnvioBaja`, que exige el AT ya `CONFIRMADO`). Núcleo puro en `lib/eventuales/arcaEnvios.mjs`, espejo servidor en `functions/src/arca/arcaEnviosCore.ts`.
+
+```ts
+arca_envios/{envioId}: {
+  empresaId, contratoIds[], bolsaCuil, tipo: 'AT' | 'BT',
+  txt, enviable, advertencias[],
+  estado: 'PENDIENTE' | 'SUBIENDO' | 'CONFIRMADO' | 'ERROR' | 'MANUAL',
+  origen: 'ROBOT' | 'MANUAL' | 'LINK' | null,
+  nroTransaccion, constanciaUrl, driveFileId, driveLink, driveSkipReason,
+  intentos: Array<{ estado, origen, at, actor, error }>,
+  token, tokenExpiraAt, tokenUsadoAt,
+  cargaManual?: { ip, userAgent, at },
+  fechaAlta, fechaBaja
+}
+```
+
+`CONFIRMADO` es terminal y exige `nroTransaccion`. Un envío con `enviable: false` (falta el código de CCT, la categoría o el RNOS) no se le entrega al robot. Reglas: lectura solo SuperAdmin, escritura solo servidor — el TXT y el token nunca salen por el cliente de Firestore.
+
+**Drive.** El proyecto ya tiene `googleapis` y la carpeta de backups, así que la función copia el TXT al confirmar (`arcaEnvioDrive.ts`, `DRIVE_ARCA_FOLDER_ID` o subcarpeta `arca-envios` del backup root). Si no hay carpeta configurada no falla el envío: deja `driveSkipReason` y lo sube el nodo Drive de n8n Cloud.
+
+### 2.10 Endpoint para n8n y link manual
+
+`arcaEnviosApi` (HTTPS v2, `us-central1`, secreto **`ARCA_ROBOT_KEY`**, rate limit por IP, un `audit_logs` por movimiento). No es callable: n8n no tiene SDK de Firebase.
+
+| Acción | Auth | Para qué |
+|--------|------|----------|
+| `GET ?action=pendientes` | header `x-arca-key` | envíos `PENDIENTE`/`ERROR` con su TXT |
+| `POST ?action=resultado` | header `x-arca-key` | `{ envioId, estado, nroTransaccion?, constanciaUrl?, error? }` |
+| `POST ?action=link-emitir` | header `x-arca-key` | devuelve el link de un solo uso para WhatsApp/mail |
+| `GET ?action=link&token=` | token | resumen público + TXT |
+| `POST ?action=link-resultado&token=` | token | nro. de transacción + constancia |
+
+**Link mágico.** Token aleatorio de 32 caracteres (`randomBytes`), vence a las **48 h** o al confirmar, y es de un solo uso (`tokenUsadoAt`). Página pública `/arca-envio/?token=…` (`pages/arca-envio/index.tsx`; export estático, por eso query y no ruta dinámica). Sin login. Muestra empresa, movimiento, cantidad de registros y fechas: **no** muestra CUIL, nombre ni importes (`vistaPublicaEnvio`). Deja `ip` y `userAgent` de quien cargó.
+
+**Flujos n8n** (`docs/n8n/`, sin credenciales): `arca-local-playwright.json` (cada 5 min: pendientes → `SUBIENDO` → Playwright con la Clave Fiscal delegada, placeholder → resultado) y `arca-cloud-link-magico.json` (pendiente >15 min, `ERROR` o jornada en <2 h sin alta → link por WhatsApp/mail; respaldo Drive; resumen 09:00 AR).
+
+Sin desplegar: falta que Mauro cree `ARCA_ROBOT_KEY` (`firebase functions:secrets:set ARCA_ROBOT_KEY`) y publique reglas e índices.
 
 ---
 

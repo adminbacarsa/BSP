@@ -1,10 +1,11 @@
 import { Timestamp } from 'firebase-admin/firestore';
 import { isReversibleLateAbsence, lateAbsenceDeadlineMs } from '../attendance/lateAbsenceWindow';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
+import { isAltaArcaConfirmada } from '../arca/altaArcaGate';
 
 export type CheckInWindowResult = {
   allowed: boolean;
-  rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED' | 'EXT_NO_CHECKIN';
+  rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED' | 'EXT_NO_CHECKIN' | 'ALTA_ARCA_PENDIENTE';
   usePlannedStart?: boolean;
   /** Fichada en ventana de adelanto (isEarlyStart) → realStartTime = adjustedStartTime si a tiempo */
   useAdjustedStart?: boolean;
@@ -96,6 +97,10 @@ export function evaluateServerCheckInWindow(
   nowMs: number,
   opts?: { source?: string },
 ): CheckInWindowResult {
+  // Bloqueo legal, antes que cualquier ventana ni bypass del CC: sin alta AT confirmada no se ficha.
+  if (!isAltaArcaConfirmada(shift)) {
+    return { allowed: false, rejectCode: 'ALTA_ARCA_PENDIENTE' };
+  }
   const plannedStartEarly = startMs(shift);
   if (
     (shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')

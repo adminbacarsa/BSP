@@ -3772,6 +3772,9 @@ export const lookupClientByCuit = functionsEmulator
 export const saveEmpresaAfipCredentials = functions.https.onCall(saveEmpresaAfipCredentialsHandler);
 export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigHandler);
 
+// Endpoint del n8n local y del link manual. Requiere el secreto ARCA_ROBOT_KEY: no desplegar antes de crearlo.
+export { arcaEnviosApi } from './arca/arcaEnviosApi';
+
 export const getMobileAppConfig = functions.https.onCall(getMobileAppConfigHandler);
 export const saveMobileAppConfig = functions.https.onCall(saveMobileAppConfigHandler);
 export const syncMobileAppEasEnv = functions.https.onCall(syncMobileAppEasEnvHandler);

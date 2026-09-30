@@ -905,6 +905,13 @@ service cloud.firestore {
       allow write: if isSuperAdmin();
     }
 
+    // Envíos de carga masiva ARCA. El TXT y el token no se leen desde el cliente:
+    // el robot y la página del link pasan por la función `arcaEnviosApi` (Admin SDK).
+    match /arca_envios/{envioId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
     // Escala CCT por vigencia. Historial = un doc por vigenciaDesde. Escritura: SuperAdmin. Las publica Claude.
     match /escalas_salariales/{escalaId} {
       allow read: if isSuperAdmin() || isAdmin();

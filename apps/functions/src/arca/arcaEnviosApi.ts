@@ -1,0 +1,242 @@
+/**
+ * Endpoint HTTPS (no callable) para el n8n local y para el link manual.
+ *
+ *  Robot (header `x-arca-key` = secreto ARCA_ROBOT_KEY):
+ *    GET  ?action=pendientes[&empresaId=]     → envíos PENDIENTE/ERROR con su TXT
+ *    POST ?action=resultado                   → { envioId, estado, nroTransaccion?, constanciaUrl?, error? }
+ *
+ *  Link mágico (sin login, token de un solo uso):
+ *    GET  ?action=link&token=                 → resumen + TXT
+ *    POST ?action=link-resultado&token=       → { nroTransaccion, constanciaUrl? }
+ *
+ * No se despliega hasta que Mauro cree el secreto.
+ */
+import * as admin from 'firebase-admin';
+import { FieldValue } from 'firebase-admin/firestore';
+import { onRequest } from 'firebase-functions/v2/https';
+import { defineSecret } from 'firebase-functions/params';
+import {
+  ESTADOS_ENVIO,
+  type EstadoEnvio,
+  nuevoToken,
+  rateLimitHit,
+  transicionEnvio,
+  validarToken,
+  vistaPublicaEnvio,
+} from './arcaEnviosCore';
+import { subirTxtADrive } from './arcaEnvioDrive';
+
+const ARCA_ROBOT_KEY = defineSecret('ARCA_ROBOT_KEY');
+
+const COLL = 'arca_envios';
+const MAX_PENDIENTES = 25;
+
+function db() {
+  return admin.firestore();
+}
+
+function clientIp(req: { headers: Record<string, unknown>; ip?: string }): string {
+  const fwd = String(req.headers['x-forwarded-for'] || '');
+  return fwd.split(',')[0].trim() || req.ip || 'desconocida';
+}
+
+async function auditar(action: string, details: string, extra: Record<string, unknown> = {}) {
+  await db().collection('audit_logs').add({
+    action,
+    actorName: 'ARCA envíos (endpoint)',
+    actorUid: 'SYSTEM',
+    module: 'RRHH',
+    details,
+    timestamp: FieldValue.serverTimestamp(),
+    ...extra,
+  });
+}
+
+async function aplicarTransicion(
+  envioId: string,
+  input: {
+    estado: EstadoEnvio;
+    origen: 'ROBOT' | 'LINK';
+    nroTransaccion?: string;
+    constanciaUrl?: string;
+    error?: string;
+    actor: string;
+    marcarTokenUsado?: boolean;
+  },
+): Promise<{ status: number; body: Record<string, unknown> }> {
+  const ref = db().collection(COLL).doc(envioId);
+  const snap = await ref.get();
+  if (!snap.exists) return { status: 404, body: { error: 'NO_EXISTE' } };
+  const envio = snap.data() || {};
+
+  const out = transicionEnvio(envio, input);
+  if (!out.ok) return { status: 409, body: { error: out.codigo } };
+
+  const patch: Record<string, unknown> = { ...out.patch, updatedAt: FieldValue.serverTimestamp() };
+  if (input.marcarTokenUsado) patch.tokenUsadoAt = FieldValue.serverTimestamp();
+  await ref.update(patch);
+
+  if (input.estado === 'CONFIRMADO' && !envio.driveFileId && envio.txt) {
+    try {
+      const drive = await subirTxtADrive({
+        envioId,
+        empresaId: String(envio.empresaId || ''),
+        tipo: envio.tipo === 'BT' ? 'BT' : 'AT',
+        txt: String(envio.txt),
+      });
+      if (drive.ok) await ref.update({ driveFileId: drive.driveFileId, driveLink: drive.driveLink });
+      else await ref.update({ driveSkipReason: drive.reason });
+    } catch (e) {
+      await ref.update({ driveSkipReason: (e as Error)?.message || 'DRIVE_ERROR' });
+    }
+  }
+
+  await auditar(`ARCA_ENVIO_${input.estado}`, `Envío ${envioId} (${envio.tipo}) por ${input.origen}`, {
+    empresaId: envio.empresaId || null,
+    envioId,
+  });
+  return { status: 200, body: { ok: true, estado: input.estado } };
+}
+
+export const arcaEnviosApi = onRequest(
+  { region: 'us-central1', secrets: [ARCA_ROBOT_KEY], timeoutSeconds: 60, memory: '256MiB', cors: true },
+  async (req, res) => {
+    const nowMs = Date.now();
+    const action = String(req.query.action || '');
+    const token = String(req.query.token || '');
+    const ip = clientIp(req as never);
+
+    try {
+      if (action === 'link' || action === 'link-resultado') {
+        if (!rateLimitHit(`link:${ip}`, nowMs, 20)) {
+          res.status(429).json({ error: 'RATE_LIMIT' });
+          return;
+        }
+        const snap = await db().collection(COLL).where('token', '==', token).limit(1).get();
+        const doc = token ? snap.docs[0] : undefined;
+        const envio = doc?.data();
+        const check = validarToken(envio ? (envio as never) : null, token, nowMs);
+        if (!check.ok) {
+          res.status(403).json({ error: check.codigo });
+          return;
+        }
+
+        if (action === 'link') {
+          res.status(200).json({ envio: vistaPublicaEnvio(envio as never), txt: String(envio!.txt || '') });
+          return;
+        }
+
+        const nroTransaccion = String((req.body as Record<string, unknown>)?.nroTransaccion || '').trim();
+        if (!nroTransaccion) {
+          res.status(400).json({ error: 'FALTA_NRO_TRANSACCION' });
+          return;
+        }
+        await doc!.ref.update({
+          cargaManual: {
+            ip,
+            userAgent: String(req.headers['user-agent'] || '').slice(0, 300),
+            at: FieldValue.serverTimestamp(),
+          },
+        });
+        const out = await aplicarTransicion(doc!.id, {
+          estado: 'CONFIRMADO',
+          origen: 'LINK',
+          nroTransaccion,
+          constanciaUrl: String((req.body as Record<string, unknown>)?.constanciaUrl || '') || undefined,
+          actor: `link ${ip}`,
+          marcarTokenUsado: true,
+        });
+        res.status(out.status).json(out.body);
+        return;
+      }
+
+      const key = String(req.headers['x-arca-key'] || '');
+      if (!key || key !== ARCA_ROBOT_KEY.value()) {
+        await auditar('ARCA_ENVIO_AUTH_FALLIDA', `Clave inválida desde ${ip}`);
+        res.status(401).json({ error: 'NO_AUTORIZADO' });
+        return;
+      }
+      if (!rateLimitHit(`robot:${ip}`, nowMs, 30)) {
+        res.status(429).json({ error: 'RATE_LIMIT' });
+        return;
+      }
+
+      if (action === 'pendientes' && req.method === 'GET') {
+        const empresaId = String(req.query.empresaId || '');
+        let q = db().collection(COLL).where('estado', 'in', ['PENDIENTE', 'ERROR']);
+        if (empresaId) q = q.where('empresaId', '==', empresaId);
+        const snap = await q.limit(MAX_PENDIENTES).get();
+        res.status(200).json({
+          envios: snap.docs
+            .filter((d) => d.data().enviable !== false)
+            .map((d) => ({
+              envioId: d.id,
+              empresaId: d.data().empresaId,
+              tipo: d.data().tipo,
+              estado: d.data().estado,
+              txt: d.data().txt,
+            })),
+        });
+        return;
+      }
+
+      // n8n Cloud pide el link para mandarlo por WhatsApp/mail. El token lo emite COSP, no n8n.
+      if (action === 'link-emitir' && req.method === 'POST') {
+        const envioId = String((req.body as Record<string, unknown>)?.envioId || '');
+        if (!envioId) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const ref = db().collection(COLL).doc(envioId);
+        const snap = await ref.get();
+        if (!snap.exists) {
+          res.status(404).json({ error: 'NO_EXISTE' });
+          return;
+        }
+        if (snap.data()?.estado === 'CONFIRMADO') {
+          res.status(409).json({ error: 'YA_CONFIRMADO' });
+          return;
+        }
+        const t = nuevoToken(nowMs);
+        await ref.update({ ...t, updatedAt: FieldValue.serverTimestamp() });
+        await auditar('ARCA_ENVIO_LINK_EMITIDO', `Link de un solo uso para el envío ${envioId}`, {
+          empresaId: snap.data()?.empresaId || null,
+          envioId,
+        });
+        const base = String(process.env.ARCA_LINK_BASE_URL || 'https://comtroldata.web.app/arca-envio/');
+        res.status(200).json({
+          envioId,
+          tipo: snap.data()?.tipo || null,
+          linkUrl: `${base}?token=${t.token}`,
+          venceAt: t.tokenExpiraAt,
+        });
+        return;
+      }
+
+      if (action === 'resultado' && req.method === 'POST') {
+        const body = (req.body || {}) as Record<string, unknown>;
+        const envioId = String(body.envioId || '');
+        const estado = String(body.estado || '') as EstadoEnvio;
+        if (!envioId || !ESTADOS_ENVIO.includes(estado)) {
+          res.status(400).json({ error: 'PARAMETROS' });
+          return;
+        }
+        const out = await aplicarTransicion(envioId, {
+          estado,
+          origen: 'ROBOT',
+          nroTransaccion: String(body.nroTransaccion || '') || undefined,
+          constanciaUrl: String(body.constanciaUrl || '') || undefined,
+          error: String(body.error || '') || undefined,
+          actor: 'n8n-local',
+        });
+        res.status(out.status).json(out.body);
+        return;
+      }
+
+      res.status(400).json({ error: 'ACCION_DESCONOCIDA' });
+    } catch (e) {
+      console.error('[arcaEnviosApi]', e);
+      res.status(500).json({ error: 'ERROR_INTERNO' });
+    }
+  },
+);

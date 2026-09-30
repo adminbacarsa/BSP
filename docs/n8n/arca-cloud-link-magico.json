@@ -1,0 +1,189 @@
+{
+  "name": "COSP — ARCA link mágico + resumen (CLOUD)",
+  "_nota": "n8n Cloud. Avisa por WhatsApp/mail cuando un envío queda pendiente >15 min, da ERROR, o hay un turno en <2 h sin alta confirmada. El link lo emite COSP (token de un solo uso, 48 h). Este flujo también sube el TXT a Drive si la función no lo hizo. Credenciales y destinatarios son placeholders.",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 15 }] } },
+      "id": "cron-15",
+      "name": "Cada 15 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, -120]
+    },
+    {
+      "parameters": { "httpMethod": "POST", "path": "cosp-arca-alerta", "options": {} },
+      "id": "webhook",
+      "name": "Webhook COSP",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-460, 100]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=pendientes",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "options": { "timeout": 20000 }
+      },
+      "id": "get-pendientes",
+      "name": "GET pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, -120]
+    },
+    {
+      "parameters": { "fieldToSplitOut": "envios", "options": {} },
+      "id": "split",
+      "name": "Un envío por item",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [-20, -120]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// Motivos de aviso: pendiente hace más de 15 min, ERROR, o primera jornada en menos de 2 h.\nconst nowMs = Date.now();\nconst creado = Date.parse($json.createdAt || '') || nowMs;\nconst inicio = Date.parse(($json.fechaAlta || '') + 'T00:00:00-03:00');\nconst minutos = Math.round((nowMs - creado) / 60000);\nconst horasAlInicio = Number.isFinite(inicio) ? (inicio - nowMs) / 3600000 : null;\nlet motivo = null;\nif ($json.estado === 'ERROR') motivo = 'ERROR_ROBOT';\nelse if (horasAlInicio !== null && horasAlInicio <= 2) motivo = 'TURNO_EN_2H_SIN_ALTA';\nelse if (minutos >= 15) motivo = 'PENDIENTE_15_MIN';\nreturn { json: { ...$json, motivo, minutos, urgente: motivo === 'TURNO_EN_2H_SIN_ALTA' } };"
+      },
+      "id": "motivo",
+      "name": "¿Por qué avisamos?",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [200, -120]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.motivo }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filtro",
+      "name": "Hay motivo",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [420, -120]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.COSP_LINK_MAGICO_URL }}",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ envioId: $json.envioId }) }}",
+        "options": {}
+      },
+      "id": "pedir-link",
+      "name": "Pedir link de un solo uso",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, -120]
+    },
+    {
+      "parameters": {
+        "operation": "upload",
+        "name": "={{ $json.envioId }}.txt",
+        "driveId": { "__rl": true, "mode": "list", "value": "={{ $env.DRIVE_ID }}" },
+        "folderId": { "__rl": true, "mode": "list", "value": "={{ $env.DRIVE_ARCA_FOLDER_ID }}" },
+        "options": { "simplifyOutput": true }
+      },
+      "id": "drive",
+      "name": "Drive — respaldo del TXT",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [860, -220],
+      "_nota": "Solo si la función no pudo subirlo (driveSkipReason). Credencial Drive del n8n Cloud."
+    },
+    {
+      "parameters": {
+        "resource": "message",
+        "operation": "send",
+        "phoneNumberId": "={{ $env.WHATSAPP_PHONE_ID }}",
+        "recipientPhoneNumber": "={{ $env.ARCA_AVISO_WHATSAPP }}",
+        "textBody": "=ARCA {{ $json.tipo }} — {{ $json.motivo }}. Cargá el envío acá: {{ $json.linkUrl }} (vence en 48 h, un solo uso)."
+      },
+      "id": "whatsapp",
+      "name": "WhatsApp al responsable",
+      "type": "n8n-nodes-base.whatsApp",
+      "typeVersion": 1,
+      "position": [860, -120]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.ARCA_AVISO_MAIL }}",
+        "subject": "=ARCA {{ $json.tipo }} pendiente — {{ $json.motivo }}",
+        "message": "=Hay un envío de carga masiva esperando.\n\nMotivo: {{ $json.motivo }}\nLink (un solo uso, 48 h): {{ $json.linkUrl }}\n",
+        "options": {}
+      },
+      "id": "mail",
+      "name": "Mail de respaldo",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [860, -20]
+    },
+    {
+      "parameters": { "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * *" }] } },
+      "id": "cron-diario",
+      "name": "Resumen 09:00 AR",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 300]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=pendientes",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "options": {}
+      },
+      "id": "get-resumen",
+      "name": "GET para el resumen",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 300]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $env.ARCA_AVISO_MAIL }}",
+        "subject": "COSP — resumen diario de envíos ARCA",
+        "message": "=Envíos sin confirmar: {{ $json.envios.length }}\n\n{{ $json.envios.map(e => `${e.tipo} ${e.empresaId} ${e.estado}`).join('\\n') }}",
+        "options": {}
+      },
+      "id": "mail-resumen",
+      "name": "Mail resumen diario",
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [-20, 300]
+    }
+  ],
+  "connections": {
+    "Cada 15 min": { "main": [[{ "node": "GET pendientes", "type": "main", "index": 0 }]] },
+    "Webhook COSP": { "main": [[{ "node": "Un envío por item", "type": "main", "index": 0 }]] },
+    "GET pendientes": { "main": [[{ "node": "Un envío por item", "type": "main", "index": 0 }]] },
+    "Un envío por item": { "main": [[{ "node": "¿Por qué avisamos?", "type": "main", "index": 0 }]] },
+    "¿Por qué avisamos?": { "main": [[{ "node": "Hay motivo", "type": "main", "index": 0 }]] },
+    "Hay motivo": { "main": [[{ "node": "Pedir link de un solo uso", "type": "main", "index": 0 }]] },
+    "Pedir link de un solo uso": {
+      "main": [
+        [
+          { "node": "Drive — respaldo del TXT", "type": "main", "index": 0 },
+          { "node": "WhatsApp al responsable", "type": "main", "index": 0 },
+          { "node": "Mail de respaldo", "type": "main", "index": 0 }
+        ]
+      ]
+    },
+    "Resumen 09:00 AR": { "main": [[{ "node": "GET para el resumen", "type": "main", "index": 0 }]] },
+    "GET para el resumen": { "main": [[{ "node": "Mail resumen diario", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}
