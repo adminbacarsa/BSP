@@ -355,3 +355,14 @@ Se simplifica respecto del diseño anterior: no hay remuneración fija, no hay f
 ---
 
 *Fase A, solo diseño. Fuentes ARCA consultadas el 29/09/2026. Dictamen del abogado y alcance de bolsa aplicados en §0 el mismo día.*
+
+---
+
+## 7. Contrato para la app de guardias
+
+El eventual entra a la misma app (`mobile-guardia` / `/app`). No hay un login aparte.
+
+1. RRHH, con permiso `EVENTUALES` `update`, llama **`crearAccesoEventual`** `{ cuil }`. El servidor crea (o reutiliza) el usuario Auth del mail de la ficha, pone el claim `{ role: 'EVENTUAL', type: 'eventual', bolsaCuil }` y guarda `eventuales_bolsa.uid`. Devuelve un link de activación de 48 h, el mismo `device_activations` del portal del legajo (`tipo: 'EVENTUAL'`).
+2. Al iniciar sesión, la app mira el claim. Si `role` es `EVENTUAL`, no busca un legajo: llama **`listarTurnosEventual`** (sin argumentos; el uid de Auth alcanza). La respuesta es `{ bolsaCuil, empresas, turnos }`. Los turnos salen de `turnos.bolsaCuil` y de `eventuales_bolsa.legajos[].employeeId`, de **todas** las empresas, no de la empresa de la sesión.
+3. Si el claim es `employee`, el flujo de legajo no cambia.
+4. Un eventual `NO_DISPONIBLE` no recibe acceso. La baja de la bolsa no borra la cuenta: deja de poder fichar cuando el contrato y el alta ARCA ya no están vigentes.

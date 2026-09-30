@@ -37,6 +37,7 @@ function getTitleByPath(pathname: string): string | null {
   if (pathname.startsWith('/admin/servicios'))       return 'Servicios';
   if (pathname.startsWith('/admin/reportes/marcaciones')) return 'Marcaciones';
   if (pathname.startsWith('/admin/reportes'))        return 'Reportes';
+  if (pathname.startsWith('/admin/rrhh/eventuales')) return 'Eventuales';
   if (pathname.startsWith('/admin/rrhh'))            return 'RRHH';
   if (pathname.startsWith('/admin/guia'))            return 'Guía';
   if (pathname.startsWith('/admin/liquidaciones'))    return 'Liquidaciones';
@@ -741,7 +742,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
             </Link>
           )}
 
-          {canReadModule('RRHH') && (
+          {canReadModule('EVENTUALES') && (
             <Link href="/admin/rrhh/eventuales" prefetch={false} title="Eventuales"
               className={getLinkHoverClass('/admin/rrhh/eventuales')}
               style={getLinkStyle('/admin/rrhh/eventuales')}>

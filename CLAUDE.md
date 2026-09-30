@@ -178,6 +178,7 @@ Definidos en `apps/web2/src/config/modules.ts`:
 | `OPERATIONS` | Operaciones | `/admin/operaciones` |
 | `PLANNING` | Planificación y Turnos | `/admin/planificacion` |
 | `RRHH` | RRHH y Legajos | `/admin/rrhh` |
+| `EVENTUALES` | Bolsa de eventuales | `/admin/rrhh/eventuales` |
 | `CLIENTS` | Clientes y Objetivos | `/admin/crm` |
 | `SERVICES` | Servicios y SLA | `/admin/servicios` |
 | `REPORTS` | Reportes y Liquidación | `/admin/reportes` |
@@ -188,6 +189,7 @@ Definidos en `apps/web2/src/config/modules.ts`:
 Acciones por módulo: `read`, `create`, `update`, `delete`.
 `PLANNING` además: `publish`, `correct`, `auto_lab`, `assign_ft` (Franco Trabajado).
 `RRHH` además: `adjust`.
+`EVENTUALES` además: `convocar` (asignar desde Planificación o un evento). La ficha se escribe por callable (`gestionarEventual`); las reglas dejan la escritura de `eventuales_bolsa` en el servidor o SuperAdmin. `isSuperAdmin` bypasea el módulo. El acceso a la app es `crearAccesoEventual`: claim `role: EVENTUAL` y `eventuales_bolsa.uid`.
 `HOURS_BANK` además: `rebuild` ya no muestra el botón. **Recalcular** queda solo para SuperAdmin (forzado manual). El libro se recalcula solo: cambios de datos marcan `hours_ledger_dirty` y un scheduler cada **5 min** encola esos objetivos-mes en el job H2c (debounce `dueAt` +2 min). Nadie recalcula al abrir una pantalla. Cada doc del libro guarda `engineVersion`. Constante `LEDGER_ENGINE_VERSION` en `apps/functions/src/hoursLedger/ledgerDirtyPlan.ts`: **al cambiar reglas de horas, subirla** (plan sin cobertura ya está en 1; el próximo cambio, por ejemplo EV, pasa a 2). El scheduler de 5 min recalcula la ventana hot (mes en curso + 2 cerrados) si la versión es vieja; un mes hot **sin libro** se encola completo una sola vez por versión (el job guarda `engineVersion`; `staleEnginePlan`). El nocturno **03:40** sigue como red de seguridad. Verificación read-only en prod: `npx tsx scripts/hours-ledger/verify-h2f-prod.mts bacarsa grupos_bacar_sa 2026-09`. Con `hoursCoreEnabled` en false no se marca ni se recalcula. Los roles existentes con REPORTS/ANALYSIS **no** reciben HOURS_BANK solos: lo asigna Mauro en Configuración → Roles. Las reglas Firestore no leen permisos por módulo: `hours_ledger*` se lee con `tenantAdminRead()`.
 `isSuperAdmin` bypasea todos los permisos.
 

@@ -3776,6 +3776,7 @@ export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigH
 
 // Endpoint del n8n local y del link manual. Requiere el secreto ARCA_ROBOT_KEY: no desplegar antes de crearlo.
 export { arcaEnviosApi } from './arca/arcaEnviosApi';
+export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './eventuales/gestionarEventual';
 
 export const getMobileAppConfig = functions.https.onCall(getMobileAppConfigHandler);
 export const saveMobileAppConfig = functions.https.onCall(saveMobileAppConfigHandler);

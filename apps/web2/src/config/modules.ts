@@ -4,6 +4,7 @@ export const SYSTEM_MODULES = [
     { key: 'PLANNING', label: '📅 Planificación y Turnos' },
     { key: 'PLANNING_AI', label: '🤖 IA — Optimización de Planificación' },
     { key: 'RRHH', label: '👥 RRHH y Legajos' },
+    { key: 'EVENTUALES', label: '🦺 Eventuales' },
     { key: 'CLIENTS', label: '🏢 Clientes y Objetivos' },
     { key: 'SERVICES', label: '📋 Servicios y SLA' },
     { key: 'REPORTS', label: '📈 Reportes y Liquidación' },
@@ -25,5 +26,6 @@ export const PERMISSION_ACTIONS: { key: string; label: string; onlyModules?: str
     { key: 'auto_lab', label: 'Auto Lab', onlyModules: ['PLANNING'] },
     { key: 'assign_ft', label: 'Franco FT', onlyModules: ['PLANNING'] },
     { key: 'adjust', label: 'Ajustar', onlyModules: ['RRHH'] },
+    { key: 'convocar', label: 'Convocar', onlyModules: ['EVENTUALES'] },
     { key: 'rebuild', label: 'Recalcular', onlyModules: ['HOURS_BANK'] },
 ];
