@@ -148,6 +148,13 @@ export default function ArcaEnvioPublico() {
                 </div>
               </div>
 
+              {(envio.advertencias || []).includes('RETRIBUCION_PENDIENTE') && (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  <p className="font-black">RETRIBUCION_PENDIENTE</p>
+                  <p>No hay escala salarial aprobada. Este envío no se puede mandar a ARCA hasta que Sistemas apruebe la escala.</p>
+                </div>
+              )}
+
               <button
                 type="button"
                 onClick={descargar}
@@ -184,7 +191,7 @@ export default function ArcaEnvioPublico() {
               <button
                 type="button"
                 onClick={confirmar}
-                disabled={!nro.trim() || enviando}
+                disabled={!nro.trim() || enviando || (envio.advertencias || []).includes('RETRIBUCION_PENDIENTE')}
                 className="w-full rounded-2xl bg-emerald-600 text-white font-bold py-3 flex items-center justify-center gap-2 hover:bg-emerald-700 active:scale-95 transition disabled:opacity-40"
               >
                 {enviando ? <Loader2 className="animate-spin" size={18} /> : <Upload size={18} />} Confirmar el envío

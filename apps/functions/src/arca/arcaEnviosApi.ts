@@ -24,7 +24,7 @@ import {
   validarToken,
   vistaPublicaEnvio,
 } from './arcaEnviosCore';
-import { subirTxtADrive } from './arcaEnvioDrive';
+import { propagarAltaEnTurnos } from './altaArcaDenorm';
 
 const ARCA_ROBOT_KEY = defineSecret('ARCA_ROBOT_KEY');
 
@@ -52,7 +52,7 @@ async function auditar(action: string, details: string, extra: Record<string, un
   });
 }
 
-async function aplicarTransicion(
+export async function aplicarTransicion(
   envioId: string,
   input: {
     estado: EstadoEnvio;
@@ -71,13 +71,47 @@ async function aplicarTransicion(
 
   const out = transicionEnvio(envio, input);
   if (!out.ok) return { status: 409, body: { error: out.codigo } };
+  if (input.estado === 'CONFIRMADO' && envio.enviable === false) {
+    return { status: 409, body: { error: 'NO_ENVIABLE' } };
+  }
 
   const patch: Record<string, unknown> = { ...out.patch, updatedAt: FieldValue.serverTimestamp() };
   if (input.marcarTokenUsado) patch.tokenUsadoAt = FieldValue.serverTimestamp();
   await ref.update(patch);
 
+  if (input.estado === 'CONFIRMADO') {
+    const contratoIds = Array.isArray(envio.contratoIds) ? envio.contratoIds.map(String) : [];
+    const encender = envio.tipo === 'AT';
+    if (envio.tipo === 'AT' || envio.tipo === 'BT' || envio.tipo === 'NA') {
+      await propagarAltaEnTurnos(db(), {
+        contratoIds,
+        nroTransaccion: input.nroTransaccion || envio.nroTransaccion,
+        encender,
+      });
+    }
+    if (envio.loteId) {
+      const hermanos = await db().collection(COLL).where('loteId', '==', envio.loteId).get();
+      for (const doc of hermanos.docs) {
+        if (doc.id === envioId || doc.data().estado === 'CONFIRMADO' || doc.data().enviable === false) continue;
+        const data = doc.data();
+        await doc.ref.update({
+          estado: 'CONFIRMADO',
+          nroTransaccion: String(input.nroTransaccion || '').trim(),
+          origen: input.origen,
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        await propagarAltaEnTurnos(db(), {
+          contratoIds: Array.isArray(data.contratoIds) ? data.contratoIds.map(String) : [],
+          nroTransaccion: input.nroTransaccion,
+          encender: data.tipo === 'AT',
+        });
+      }
+    }
+  }
+
   if (input.estado === 'CONFIRMADO' && !envio.driveFileId && envio.txt) {
     try {
+      const { subirTxtADrive } = await import('./arcaEnvioDrive');
       const drive = await subirTxtADrive({
         envioId,
         empresaId: String(envio.empresaId || ''),
@@ -218,7 +252,8 @@ export const arcaEnviosApi = onRequest(
         const base = String(process.env.ARCA_LINK_BASE_URL || 'https://comtroldata.web.app/arca-envio/');
         const linkUrl = `${base}?token=${t.token}`;
         const tipoAviso = snap.data()?.tipo === 'BT' ? 'ARCA_BAJA_PENDIENTE' : 'ARCA_ALTA_PENDIENTE';
-        const pushes = await enviarPushAviso(String(snap.data()?.empresaId || ''), tipoAviso, linkUrl);
+        const sinEscala = Array.isArray(snap.data()?.advertencias) && snap.data()!.advertencias.includes('RETRIBUCION_PENDIENTE');
+        const pushes = await enviarPushAviso(String(snap.data()?.empresaId || ''), tipoAviso, linkUrl, sinEscala);
         res.status(200).json({
           envioId,
           tipo: snap.data()?.tipo || null,
@@ -295,15 +330,18 @@ async function resolverAvisosEmpresa(empresaId: string): Promise<Record<string, 
   return out;
 }
 
-async function enviarPushAviso(empresaId: string, tipo: string, linkUrl: string): Promise<number> {
+async function enviarPushAviso(empresaId: string, tipo: string, linkUrl: string, sinEscala = false): Promise<number> {
   if (!empresaId) return 0;
   const avisos = await resolverAvisosEmpresa(empresaId);
   const tokens = (avisos[tipo]?.pushes || []).map((p) => p.token).filter(Boolean);
   if (!tokens.length) return 0;
   const titulo = tipo === 'ARCA_BAJA_PENDIENTE' ? 'Baja ARCA pendiente' : 'Alta ARCA pendiente';
+  const body = sinEscala
+    ? 'RETRIBUCION_PENDIENTE: no se puede enviar hasta aprobar la escala salarial.'
+    : 'Hay un envío de carga masiva esperando.';
   const result = await admin.messaging().sendEachForMulticast({
     tokens: tokens.slice(0, 500),
-    data: { title: titulo, body: 'Hay un envío de carga masiva esperando.', url: linkUrl, tipo },
+    data: { title: titulo, body, url: linkUrl, tipo },
     webpush: { fcmOptions: { link: linkUrl } },
   });
   return result.successCount;

@@ -168,7 +168,7 @@ export default function EventualesPage() {
 
   const ficha = fichas.find((f) => f.id === elegida) || null;
   const contratos = (detalle?.contratos as { id: string; empresaId?: string; estado?: string; fechaAlta?: string; fechaBaja?: string; jornadas?: { fecha: string; horaInicio: string; horaFin: string; horas: number }[] }[]) || [];
-  const arca = (detalle?.arca as { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string }[]) || [];
+  const arca = (detalle?.arca as { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string; advertencias?: string[]; enviable?: boolean }[]) || [];
   const historial = (detalle?.historial as { id: string; action?: string; details?: string; at?: string }[]) || [];
 
   if (!puede('read')) {
@@ -243,7 +243,14 @@ export default function EventualesPage() {
                 <div>
                   <h3 className="text-sm font-black text-slate-700">ARCA</h3>
                   {arca.length === 0 && <p className="text-xs text-slate-400">Sin altas ni bajas.</p>}
-                  {arca.map((a) => <p key={a.id} className="text-xs text-slate-600">{a.tipo} · {a.estado} · {fmt(a.fechaAlta)} {a.nroTransaccion ? `· ${a.nroTransaccion}` : ''}</p>)}
+                  {arca.map((a) => (
+                    <p key={a.id} className="text-xs text-slate-600">
+                      {a.tipo} · {a.estado} · {fmt(a.fechaAlta)} {a.nroTransaccion ? `· ${a.nroTransaccion}` : ''}
+                      {(a.advertencias || []).includes('RETRIBUCION_PENDIENTE') && (
+                        <span className="ml-1 font-bold text-amber-700">RETRIBUCION_PENDIENTE — no enviable hasta aprobar la escala</span>
+                      )}
+                    </p>
+                  ))}
                 </div>
                 <div>
                   <h3 className="text-sm font-black text-slate-700">Historial</h3>

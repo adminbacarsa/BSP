@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { LARGO_REGISTRO_ARCA, lineasCargaMasiva } from './arcaTxt.mjs';
+import { LARGO_REGISTRO_ARCA, brutoParaTxt, lineasCargaMasiva } from './arcaTxt.mjs';
 import { calcularRemuneracionContrato, escalaVigente } from './remuneracion.mjs';
 import { aprobarEscala, parsearEscalaSuvico, planJobEscalaSuvico } from './escalaPropuesta.mjs';
 
@@ -70,5 +70,18 @@ describe('propuesta de escala', () => {
       incluirCierre: false,
     });
     assert.equal(r.jornadas[0].valorHora, 4500);
+    const contrato = { categoria: 'VIGILADOR_GENERAL', jornadas: [{ fecha: '2026-10-02', horaInicio: '08:00', horaFin: '16:00', horas: 8 }] };
+    assert.equal(brutoParaTxt({ contrato, escalas: job.propuestas }).codigo, 'RETRIBUCION_PENDIENTE');
+    const conEscala = brutoParaTxt({ contrato, escalas: [aprobada.escala] });
+    assert.equal(conEscala.ok, true);
+    assert.equal(conEscala.bruto, 8 * 4500);
+    const linea = lineasCargaMasiva({
+      contrato: { fechaAlta: '2026-10-02', fechaBaja: '2026-10-02' },
+      cuil,
+      bruto: conEscala.bruto,
+      obraSocial: '123456',
+      empresa: { arcaEventuales: { cctCodigo: '42205', categoriaProfesional: '000001' } },
+    });
+    assert.equal(linea.lineas[0].slice(57, 72), String(Math.round(conEscala.bruto * 100)).padStart(15, '0'));
   });
 });

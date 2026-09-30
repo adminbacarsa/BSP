@@ -4,6 +4,7 @@ exports.loadEventualesParaHueco = loadEventualesParaHueco;
 exports.registrarAsignacionEventualEnBatch = registrarAsignacionEventualEnBatch;
 const firestore_1 = require("firebase-admin/firestore");
 const arClock_1 = require("../common/arClock");
+const altaArcaDenorm_1 = require("../arca/altaArcaDenorm");
 const eventoCoverage_1 = require("./eventoCoverage");
 function msOf(value) {
     if (value instanceof firestore_1.Timestamp)
@@ -127,23 +128,28 @@ async function registrarAsignacionEventualEnBatch(db, batch, opts) {
             createdAt: firestore_1.FieldValue.serverTimestamp(),
         });
     }
+    const altaPrevia = abierto ? await (0, altaArcaDenorm_1.altaConfirmadaDelContrato)(db, contratoId) : { confirmada: false, nroTransaccion: null };
     const envioRef = db.collection('arca_envios').doc();
-    batch.set(envioRef, {
-        empresaId: opts.empresaId,
-        contratoId,
-        bolsaCuil: cuil,
-        tipo: 'AT',
-        estado: 'PENDIENTE',
-        canal: 'URGENTE',
-        shiftId: opts.shiftId,
-        createdAt: firestore_1.FieldValue.serverTimestamp(),
-    });
+    if (!altaPrevia.confirmada) {
+        batch.set(envioRef, {
+            empresaId: opts.empresaId,
+            contratoId,
+            contratoIds: [contratoId],
+            bolsaCuil: cuil,
+            tipo: 'AT',
+            estado: 'PENDIENTE',
+            canal: 'URGENTE',
+            shiftId: opts.shiftId,
+            createdAt: firestore_1.FieldValue.serverTimestamp(),
+        });
+    }
     batch.update(db.collection('turnos').doc(opts.covDocId), {
         esEventual: true,
-        eventualAltaArcaConfirmada: false,
+        eventualAltaArcaConfirmada: altaPrevia.confirmada,
         eventualContratoId: contratoId,
         bolsaCuil: cuil,
-        arcaEnvioId: envioRef.id,
+        ...(altaPrevia.confirmada && altaPrevia.nroTransaccion ? { nroTransaccion: altaPrevia.nroTransaccion } : {}),
+        ...(!altaPrevia.confirmada ? { arcaEnvioId: envioRef.id } : {}),
     });
 }
 //# sourceMappingURL=eventualesParaHuecoServer.js.map

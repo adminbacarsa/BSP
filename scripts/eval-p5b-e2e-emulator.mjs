@@ -129,7 +129,7 @@ async function main() {
   const conv = await db.collection('convocatorias_cobertura').where('empresaId', '==', EMP).where('type', '==', 'LLEGADA_TARDE').get();
   const body = conv.empty ? '' : '';
   const notifVenis = await db.collection('user_notifications').where('empresaId', '==', EMP).where('shiftId', '==', 'shift_on').get();
-  const venisBody = notifVenis.docs.map((d) => String(d.data().body || '')).find((b) => b.includes('¿Venís?')) || '';
+  const venisBody = notifVenis.docs.map((d) => String(d.data().body || '')).find((b) => /¿venís\?/i.test(b)) || '';
   report('venis en T', v1 === 1 && v2 === 0 && conv.size === 1, `v1=${v1} v2=${v2} conv=${conv.size}`);
   report('venis lugar', venisBody.includes('Obrador Malagueño') && venisBody.includes('Puesto 1') && !venisBody.includes('objetivo / puesto'), venisBody);
   void body;

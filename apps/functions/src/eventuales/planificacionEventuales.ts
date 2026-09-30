@@ -192,16 +192,24 @@ async function auditar(action: string, actorUid: string, empresaId: string, cuil
 
 async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, tipo: 'AT' | 'BT') {
   try {
-    const { lineasCargaMasiva } = await import('../../../web2/src/lib/eventuales/arcaTxt.mjs') as {
+    const { lineasCargaMasiva, brutoParaTxt } = await import('../../../web2/src/lib/eventuales/arcaTxt.mjs') as {
       lineasCargaMasiva: (i: Record<string, unknown>) => { lineas: string[]; advertencias: string[]; enviable: boolean };
+      brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; codigo?: string; bruto: number };
     };
     const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
-    const out = lineasCargaMasiva({ contrato, cuil, bruto: Number(contrato.brutoEstimado || 0), obraSocial: bolsa.obraSocialRnos || '', empresa });
+    const escalasSnap = await db().collection('escalas_salariales').where('status', '==', 'ACTIVE').get();
+    const bruto = brutoParaTxt({ contrato, escalas: escalasSnap.docs.map((d) => d.data()) });
+    const out = lineasCargaMasiva({ contrato, cuil, bruto: bruto.bruto, obraSocial: bolsa.obraSocialRnos || '', empresa });
     const advertencias = [...out.advertencias];
-    if (!(Number(contrato.brutoEstimado) > 0)) advertencias.push('RETRIBUCION_PENDIENTE');
-    return { txt: tipo === 'AT' ? out.lineas[0] : out.lineas[1], advertencias, enviable: out.enviable && Number(contrato.brutoEstimado) > 0 };
+    if (!bruto.ok) advertencias.push('RETRIBUCION_PENDIENTE');
+    return {
+      txt: tipo === 'AT' ? out.lineas[0] : out.lineas[1],
+      advertencias,
+      enviable: out.enviable && bruto.ok,
+      bruto: bruto.bruto,
+    };
   } catch (e) {
-    return { txt: null, advertencias: ['TXT_NO_GENERADO', (e as Error)?.message || ''], enviable: false };
+    return { txt: null, advertencias: ['TXT_NO_GENERADO', (e as Error)?.message || ''], enviable: false, bruto: 0 };
   }
 }
 
@@ -246,7 +254,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
   }, { merge: true });
   for (const envio of plan.envios) {
     const tipo = String(envio.tipo);
-    const txt = tipo === 'AT' || tipo === 'BT' ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo) : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false };
+    const txt = tipo === 'AT' || tipo === 'BT' ? await txtDe(empresaId, plan.contrato || {}, cuil, bolsa, tipo) : { txt: null, advertencias: ['MOVIMIENTO_A_CONFIRMAR_CON_CONTADOR'], enviable: false, bruto: 0 };
     batch.set(db().collection('arca_envios').doc(), {
       ...envio,
       contratoIds: [contratoId],
@@ -254,6 +262,7 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
       txt: txt.txt,
       advertencias: txt.advertencias,
       enviable: txt.enviable,
+      bruto: txt.bruto,
       origen: null,
       nroTransaccion: null,
       constanciaUrl: null,
@@ -270,19 +279,32 @@ export async function sincronizarContratoEventual(empresaId: string, cuil: strin
     batch.update(db().collection('arca_envios').doc(id), { ...resto, ...extra, updatedAt: admin.firestore.FieldValue.serverTimestamp() });
   }
   await batch.commit();
-  await marcarTurnosConContrato(turnos, contratoId, enviosActuales);
+  const enviosLuego = (await db().collection('arca_envios').where('contratoIds', 'array-contains', contratoId).get()).docs.map((d) => ({ id: d.id, ...d.data() }));
+  await marcarTurnosConContrato(turnos, contratoId, enviosLuego);
+  if (estado === 'ANULADO') {
+    const { propagarAltaEnTurnos } = await import('../arca/altaArcaDenorm');
+    await propagarAltaEnTurnos(db(), { contratoIds: [contratoId], encender: false });
+  }
   await auditar('EVENTUAL_CONTRATO_' + plan.accion, actorUid, empresaId, cuil, `Contrato ${contratoId} → ${estado}. Envíos: ${plan.envios.map((e) => e.tipo).join(', ') || 'ninguno'}.`, { contratoId });
   return { accion: plan.accion, contratoId, estado };
 }
 
 /** Denormaliza en los turnos el contrato y si el alta ARCA ya está confirmada (gate de fichada). Solo escribe si cambia. */
 async function marcarTurnosConContrato(turnos: (Record<string, unknown> & { id: string })[], contratoId: string, envios: Record<string, unknown>[]) {
-  const altaOk = envios.some((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO' && !e.quitadoDelLote);
+  const alta = envios.find((e) => e.tipo === 'AT' && e.estado === 'CONFIRMADO' && !e.quitadoDelLote);
+  const altaOk = !!alta;
+  const nro = String(alta?.nroTransaccion || '').trim();
   const batch = db().batch();
   let n = 0;
   for (const t of turnos) {
-    if (t.eventualContratoId === contratoId && (t.eventualAltaArcaConfirmada === true) === altaOk) continue;
-    batch.update(db().collection('turnos').doc(t.id), { eventualContratoId: contratoId, eventualAltaArcaConfirmada: altaOk });
+    const mismoFlag = (t.eventualAltaArcaConfirmada === true) === altaOk;
+    const mismoNro = !altaOk || String(t.nroTransaccion || '') === nro;
+    if (t.eventualContratoId === contratoId && mismoFlag && mismoNro) continue;
+    batch.update(db().collection('turnos').doc(t.id), {
+      eventualContratoId: contratoId,
+      eventualAltaArcaConfirmada: altaOk,
+      ...(altaOk && nro ? { nroTransaccion: nro } : {}),
+    });
     n += 1;
   }
   if (n) await batch.commit();

@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import { AR_OFFSET_MS, arYmd } from '../common/arClock';
+import { altaConfirmadaDelContrato } from '../arca/altaArcaDenorm';
 import {
   eventualesParaHueco,
   type EventualBolsaRow,
@@ -159,22 +160,27 @@ export async function registrarAsignacionEventualEnBatch(
     });
   }
 
+  const altaPrevia = abierto ? await altaConfirmadaDelContrato(db, contratoId) : { confirmada: false, nroTransaccion: null as string | null };
   const envioRef = db.collection('arca_envios').doc();
-  batch.set(envioRef, {
-    empresaId: opts.empresaId,
-    contratoId,
-    bolsaCuil: cuil,
-    tipo: 'AT',
-    estado: 'PENDIENTE',
-    canal: 'URGENTE',
-    shiftId: opts.shiftId,
-    createdAt: FieldValue.serverTimestamp(),
-  });
+  if (!altaPrevia.confirmada) {
+    batch.set(envioRef, {
+      empresaId: opts.empresaId,
+      contratoId,
+      contratoIds: [contratoId],
+      bolsaCuil: cuil,
+      tipo: 'AT',
+      estado: 'PENDIENTE',
+      canal: 'URGENTE',
+      shiftId: opts.shiftId,
+      createdAt: FieldValue.serverTimestamp(),
+    });
+  }
   batch.update(db.collection('turnos').doc(opts.covDocId), {
     esEventual: true,
-    eventualAltaArcaConfirmada: false,
+    eventualAltaArcaConfirmada: altaPrevia.confirmada,
     eventualContratoId: contratoId,
     bolsaCuil: cuil,
-    arcaEnvioId: envioRef.id,
+    ...(altaPrevia.confirmada && altaPrevia.nroTransaccion ? { nroTransaccion: altaPrevia.nroTransaccion } : {}),
+    ...(!altaPrevia.confirmada ? { arcaEnvioId: envioRef.id } : {}),
   });
 }

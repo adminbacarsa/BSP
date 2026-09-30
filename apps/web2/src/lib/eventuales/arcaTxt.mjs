@@ -1,3 +1,5 @@
+import { calcularRemuneracionContrato } from './remuneracion.mjs';
+
 /**
  * Registro de posiciones fijas, carga masiva ARCA (130 caracteres).
  * Fuente: docs/arca/CARGA-MASIVA-FORMATO.md y tablas descargadas el 29/09/2026.
@@ -84,6 +86,23 @@ function armarLinea({ movimiento, revista, cuil, fechaAlta, fechaBaja, bruto, ob
     num(cfg.marcaCovid, 1),
   ].join('');
   return { linea, faltaObraSocial: os.falta, faltaCct: cct.trim() === '', faltaCategoria: categoria.trim() === '' };
+}
+
+/**
+ * Retribución pactada del TXT (posiciones 58-72). Solo entra una escala ACTIVE.
+ * Sin escala aprobada el envío no se manda.
+ */
+export function brutoParaTxt({ contrato, escalas }) {
+  const activas = (escalas || []).filter((e) => e && e.status === 'ACTIVE');
+  if (!activas.length) return { ok: false, codigo: 'RETRIBUCION_PENDIENTE', bruto: 0 };
+  const r = calcularRemuneracionContrato({
+    jornadas: contrato?.jornadas || [],
+    categoria: contrato?.categoria || 'VIGILADOR_GENERAL',
+    escalas: activas,
+    incluirCierre: false,
+  });
+  if (!r.ok || !(Number(r.bruto) > 0)) return { ok: false, codigo: 'RETRIBUCION_PENDIENTE', bruto: 0 };
+  return { ok: true, bruto: r.bruto };
 }
 
 /**
