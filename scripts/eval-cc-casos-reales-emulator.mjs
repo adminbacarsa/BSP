@@ -12,7 +12,12 @@
 import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { register } from 'node:module';
 import { loadCaseIntoDb, caseFileExists } from './cc-caso-real-snapshot.mjs';
+
+// gapVacancy.ts (y otros módulos de ops-core) importan sin extensión: con
+// --experimental-strip-types Node no resuelve el relativo sin este hook.
+await register(new URL('./ts-ext-hook.mjs', import.meta.url).href);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const requireFn = createRequire(path.join(__dirname, '../apps/functions/package.json'));
