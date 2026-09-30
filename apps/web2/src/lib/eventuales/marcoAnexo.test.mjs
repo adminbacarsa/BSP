@@ -2,8 +2,9 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { evaluarCandidato } from './planificacion.mjs';
 import {
-  canalCodigo, destinoGuardado, hashCodigo, MOTIVO_SIN_MARCO, nombreArchivo, pdfDeTexto,
-  planConfirmarAnexo, planMarco, segmentosDrive, sha256, textoMarco,
+  canalCodigo, CUENTA_DRIVE_EVENTUALES, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
+  MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, pdfDeTexto, planConfirmarAnexo, planMarco,
+  planRenombre, sha256, textoMarco,
 } from './marcoAnexo.mjs';
 
 const hoy = '2026-10-01';
@@ -49,11 +50,14 @@ describe('contrato marco y anexo', () => {
     const pdf = pdfDeTexto(texto);
     assert.equal(pdf.subarray(0, 8).toString(), '%PDF-1.4');
     assert.equal(sha256(pdf).length, 64);
-    assert.deepEqual(segmentosDrive({ cuil: '20999999991', nombre: 'PEREZ, JUAN', empresa: 'bacarsa' }), [
-      'Eventuales', '20999999991 - PEREZ, JUAN', 'bacarsa',
-    ]);
-    assert.equal(nombreArchivo({ tipo: 'MARCO', fecha: '2026-10-01' }), 'Marco-2026-10-01.pdf');
-    assert.equal(nombreArchivo({ tipo: 'ANEXO', fecha: '2026-10-05', lugar: 'Peaje' }), 'Anexo-2026-10-05-Peaje.pdf');
+    assert.equal(DRIVE_ROOT_EVENTUALES_DEFAULT, '1zjzDGcAbavPaJJS5jObA0syu1SsDCakq');
+    assert.equal(CUENTA_DRIVE_EVENTUALES, 'comtroldata@appspot.gserviceaccount.com');
+    assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN' }), '20999999991 - PEREZ, JUAN');
+    assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN', legajo: '1402' }), 'Legajo 1402 - PEREZ, JUAN - 20999999991');
+    assert.equal(planRenombre('20999999991 - PEREZ, JUAN', 'Legajo 1402 - PEREZ, JUAN - 20999999991').renombrar, true);
+    assert.equal(nombreArchivo({ tipo: 'MARCO', fecha: '2026-10-01', empresa: 'Bacar' }), 'Bacar-Marco-2026-10-01.pdf');
+    assert.equal(nombreArchivo({ tipo: 'ANEXO', fecha: '2026-10-05', lugar: 'Peaje', empresa: 'Bacar' }), 'Bacar-Anexo-2026-10-05-Peaje.pdf');
+    assert.equal(nombreArchivo({ tipo: 'ARCA', fecha: '2026-10-05', empresa: 'Bacar' }), 'Bacar-ARCA-2026-10-05.pdf');
     assert.equal(destinoGuardado(''), 'STORAGE');
     assert.equal(destinoGuardado('folder-1'), 'DRIVE');
   });

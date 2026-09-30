@@ -32,7 +32,6 @@ export default function EmpresaAvisosSection({ empresaId }: { empresaId: string 
   const [avisos, setAvisos] = useState<Record<string, Destinatario[]>>(vacio);
   const [altaHora, setAltaHora] = useState('18:00');
   const [bajaHora, setBajaHora] = useState('09:00');
-  const [driveEventualesFolderId, setDriveEventualesFolderId] = useState('');
   const [guardando, setGuardando] = useState(false);
 
   useEffect(() => {
@@ -44,7 +43,6 @@ export default function EmpresaAvisosSection({ empresaId }: { empresaId: string 
         setAvisos({ ...vacio(), ...guardado });
         setAltaHora(String(data.arcaTandas?.altaHora || '18:00'));
         setBajaHora(String(data.arcaTandas?.bajaHora || '09:00'));
-        setDriveEventualesFolderId(String(data.driveEventualesFolderId || ''));
     }).catch(() => {});
     return () => { vivo = false; };
   }, [empresaId]);
@@ -54,7 +52,7 @@ export default function EmpresaAvisosSection({ empresaId }: { empresaId: string 
   const guardar = async () => {
     setGuardando(true);
     try {
-      await updateDoc(doc(db, 'empresas', empresaId), { avisos, arcaTandas: { altaHora, bajaHora }, driveEventualesFolderId });
+      await updateDoc(doc(db, 'empresas', empresaId), { avisos, arcaTandas: { altaHora, bajaHora } });
       await addDoc(collection(db, 'audit_logs'), {
         action: 'AVISOS_EMPRESA',
         module: 'CONFIG',
@@ -87,7 +85,6 @@ export default function EmpresaAvisosSection({ empresaId }: { empresaId: string 
       <div className="flex gap-3 text-xs">
         <label className="flex items-center gap-2">Lote de altas <input type="time" value={altaHora} onChange={(e) => setAltaHora(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1" /></label>
         <label className="flex items-center gap-2">Lote de bajas <input type="time" value={bajaHora} onChange={(e) => setBajaHora(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1" /></label>
-        <label className="flex items-center gap-2">Carpeta Drive eventuales <input value={driveEventualesFolderId} onChange={(e) => setDriveEventualesFolderId(e.target.value)} placeholder="driveEventualesFolderId" className="rounded-lg border border-slate-200 px-2 py-1 w-56" /></label>
       </div>
       <p className="text-xs text-slate-500">
         Por tipo de aviso. Una persona o un rol. Si el rol todavía no tiene usuarios, el envío sigue y esa lista queda vacía.

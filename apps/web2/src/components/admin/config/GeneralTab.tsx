@@ -13,6 +13,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { SuperAdminGuardPreviewPicker } from '@/components/empleado/SuperAdminGuardPreviewPicker';
 import { EMPLOYEE_APP_HOME, employeeAppPath } from '@/lib/employeeAppPaths';
+import EventualesDriveConfig from '@/components/admin/config/EventualesDriveConfig';
 
 const PHRASE_DELETE_ALL_SHIFTS = 'BORRAR TODOS LOS TURNOS';
 
@@ -161,7 +162,7 @@ export default function GeneralTab() {
 
     return (
         <div className="space-y-8 animate-in fade-in pb-10">
-            
+            <EventualesDriveConfig />
             {/* 1. SELECTOR DE TEMAS (5 OPCIONES REALES) */}
             <div className="rounded-xl border p-8" style={{ backgroundColor: 'var(--surf)', borderColor: 'var(--border)' }}>
                 <h3 className="text-xl font-black mb-6 flex items-center gap-2" style={{ color: 'var(--txt)' }}>

@@ -123,20 +123,42 @@ export function pdfDeTexto(texto) {
   return Buffer.from(body, 'latin1');
 }
 
-export function carpetaPersona(cuil, nombre) {
-  return `${cuil} - ${String(nombre || '').replace(/[\\/]/g, ' ').trim()}`;
+export const DRIVE_ROOT_EVENTUALES_DEFAULT = '1zjzDGcAbavPaJJS5jObA0syu1SsDCakq';
+export const CARPETA_EVENTUALES = 'Eventuales';
+export const CUENTA_DRIVE_EVENTUALES = 'comtroldata@appspot.gserviceaccount.com';
+
+function limpio(value) {
+  return String(value ?? '').replace(/[\\/]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-export function nombreArchivo({ tipo, fecha, lugar }) {
+export function legajoDe(bolsa) {
+  const directo = limpio(bolsa?.legajo || bolsa?.legajoPlanilla);
+  if (directo) return directo;
+  const item = (bolsa?.legajos || []).find((l) => limpio(l?.fileNumber || l?.legajo || l?.nro));
+  return limpio(item?.fileNumber || item?.legajo || item?.nro);
+}
+
+/** Con legajo: `Legajo {nro} - {APELLIDO, Nombre} - {CUIL}`. Sin legajo: `{CUIL} - {Nombre}`. */
+export function nombreCarpetaPersona({ cuil, nombre, legajo }) {
+  const quien = limpio(nombre) || 'SIN NOMBRE';
+  const id = limpio(cuil);
+  const nro = limpio(legajo);
+  if (nro) return `Legajo ${nro} - ${quien} - ${id}`;
+  return `${id} - ${quien}`;
+}
+
+export function planRenombre(nombreActual, nombreNuevo) {
+  if (!nombreActual || nombreActual === nombreNuevo) return { renombrar: false, nombre: nombreNuevo };
+  return { renombrar: true, nombre: nombreNuevo };
+}
+
+export function nombreArchivo({ tipo, fecha, lugar, empresa }) {
+  const emp = limpio(empresa) || 'Empresa';
   const dia = String(fecha || '').slice(0, 10);
-  if (tipo === 'MARCO') return `Marco-${dia}.pdf`;
-  if (tipo === 'ARCA') return `Constancia-ARCA-${dia}.pdf`;
-  const slug = String(lugar || 'convocatoria').replace(/[\\/]/g, ' ').trim().slice(0, 60);
-  return `Anexo-${dia}-${slug}.pdf`;
-}
-
-export function segmentosDrive({ cuil, nombre, empresa }) {
-  return ['Eventuales', carpetaPersona(cuil, nombre), String(empresa || 'empresa')];
+  if (tipo === 'MARCO') return `${emp}-Marco-${dia}.pdf`;
+  if (tipo === 'ARCA') return `${emp}-ARCA-${dia}.pdf`;
+  const slug = limpio(lugar || 'convocatoria').slice(0, 40);
+  return `${emp}-Anexo-${dia}-${slug}.pdf`;
 }
 
 export function destinoGuardado(folderId) {

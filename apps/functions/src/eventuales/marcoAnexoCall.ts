@@ -6,6 +6,9 @@ import { Readable } from 'stream';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
 
+const CUENTA_DRIVE = 'comtroldata@appspot.gserviceaccount.com';
+const callable = functions.runWith({ serviceAccount: CUENTA_DRIVE }).https;
+
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 
 function db() {
@@ -33,8 +36,12 @@ async function lib() {
     pdfDeTexto: (t: string) => Buffer;
     sha256: (v: Buffer | string) => string;
     planMarco: (i: Record<string, unknown>) => { estado: string; vencimiento: string | null; avisar: boolean };
-    segmentosDrive: (i: { cuil: string; nombre: string; empresa: string }) => string[];
-    nombreArchivo: (i: { tipo: string; fecha: string; lugar?: string }) => string;
+    nombreCarpetaPersona: (i: { cuil: string; nombre: string; legajo?: string }) => string;
+    nombreArchivo: (i: { tipo: string; fecha: string; lugar?: string; empresa?: string }) => string;
+    planRenombre: (actual: string, nuevo: string) => { renombrar: boolean; nombre: string };
+    legajoDe: (bolsa: Record<string, unknown>) => string;
+    DRIVE_ROOT_EVENTUALES_DEFAULT: string;
+    CARPETA_EVENTUALES: string;
     destinoGuardado: (folderId: string) => string;
     nuevoCodigoAnexo: () => string;
     hashCodigo: (codigo: string, salt: string) => string;
@@ -45,47 +52,95 @@ async function lib() {
   }>;
 }
 
-async function guardarPdf(empresaId: string, segmentos: string[], nombre: string, bytes: Buffer) {
-  const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
-  const folderId = String(empresa.driveEventualesFolderId || process.env.DRIVE_EVENTUALES_FOLDER_ID || '');
+async function raizDrive() {
   const m = await lib();
-  if (m.destinoGuardado(folderId) === 'DRIVE') {
-    try {
-      const { google } = await import('googleapis');
-      const { resolveOrCreateDriveFolder } = await import('../backup/backup.service');
-      const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
-      const drive = google.drive({ version: 'v3', auth });
-      let parent = folderId;
-      for (const seg of segmentos) parent = await resolveOrCreateDriveFolder(drive, parent, seg);
-      const res = await drive.files.create({
-        supportsAllDrives: true,
-        requestBody: { name: nombre, parents: [parent] },
-        media: { mimeType: 'application/pdf', body: Readable.from(bytes) },
-        fields: 'id, webViewLink',
-      });
-      const driveFileId = String(res.data.id || '');
-      return {
-        destino: 'DRIVE',
-        driveFileId,
-        link: res.data.webViewLink || `https://drive.google.com/file/d/${driveFileId}/view`,
-        drivePendiente: false,
-        storagePath: null as string | null,
-      };
-    } catch (e) {
-      console.warn('[marcoAnexo] Drive falló, queda en Storage', e);
-    }
-  }
-  const storagePath = [...segmentos, nombre].join('/');
-  await admin.storage().bucket().file(storagePath).save(bytes, { contentType: 'application/pdf' });
-  return { destino: 'STORAGE', driveFileId: null as string | null, link: null as string | null, drivePendiente: true, storagePath };
+  const snap = await db().collection('config').doc('eventuales').get();
+  const guardado = String(snap.data()?.driveRootFolderId || '').trim();
+  return { rootId: guardado || m.DRIVE_ROOT_EVENTUALES_DEFAULT, eventualesFolderId: String(snap.data()?.driveEventualesFolderId || '') };
 }
 
-export const gestionarMarcoEventual = functions.https.onCall(async (data, context) => {
+async function clienteDrive() {
+  const { google } = await import('googleapis');
+  const { resolveOrCreateDriveFolder } = await import('../backup/backup.service');
+  const auth = new google.auth.GoogleAuth({ scopes: ['https://www.googleapis.com/auth/drive'] });
+  return { drive: google.drive({ version: 'v3', auth }), resolveOrCreateDriveFolder };
+}
+
+async function carpetaPersona(cuil: string, bolsa: Record<string, unknown>) {
+  const m = await lib();
+  const { rootId, eventualesFolderId } = await raizDrive();
+  const { drive, resolveOrCreateDriveFolder } = await clienteDrive();
+  let padre = eventualesFolderId;
+  if (!padre) {
+    padre = await resolveOrCreateDriveFolder(drive, rootId, m.CARPETA_EVENTUALES);
+    await db().collection('config').doc('eventuales').set({ driveRootFolderId: rootId, driveEventualesFolderId: padre }, { merge: true });
+  }
+  const nombre = m.nombreCarpetaPersona({ cuil, nombre: String(bolsa.nombre || ''), legajo: m.legajoDe(bolsa) });
+  const actualId = String(bolsa.driveFolderId || '');
+  const plan = m.planRenombre(String(bolsa.driveFolderName || ''), nombre);
+  if (actualId) {
+    if (plan.renombrar) {
+      await drive.files.update({ fileId: actualId, supportsAllDrives: true, requestBody: { name: plan.nombre } });
+    }
+    await db().collection('eventuales_bolsa').doc(cuil).set({ driveFolderId: actualId, driveFolderName: plan.nombre }, { merge: true });
+    return { folderId: actualId, nombre: plan.nombre };
+  }
+  const folderId = await resolveOrCreateDriveFolder(drive, padre, nombre);
+  await db().collection('eventuales_bolsa').doc(cuil).set({ driveFolderId: folderId, driveFolderName: nombre }, { merge: true });
+  return { folderId, nombre };
+}
+
+async function guardarPdf(cuil: string, bolsa: Record<string, unknown>, nombre: string, bytes: Buffer) {
+  const storagePath = `eventuales/${cuil}/${nombre}`;
+  try {
+    const { drive } = await clienteDrive();
+    const carpeta = await carpetaPersona(cuil, bolsa);
+    const res = await drive.files.create({
+      supportsAllDrives: true,
+      requestBody: { name: nombre, parents: [carpeta.folderId] },
+      media: { mimeType: 'application/pdf', body: Readable.from(bytes) },
+      fields: 'id, webViewLink',
+    });
+    const driveFileId = String(res.data.id || '');
+    return {
+      destino: 'DRIVE',
+      driveFileId,
+      driveFolderId: carpeta.folderId,
+      link: res.data.webViewLink || (driveFileId ? `https://drive.google.com/file/d/${driveFileId}/view` : null),
+      drivePendiente: false,
+      storagePath: null as string | null,
+    };
+  } catch (e) {
+    console.warn('[marcoAnexo] Sin permiso de Drive, queda en Storage', e);
+    await admin.storage().bucket().file(storagePath).save(bytes, { contentType: 'application/pdf' });
+    return { destino: 'STORAGE', driveFileId: null as string | null, driveFolderId: null as string | null, link: null as string | null, drivePendiente: true, storagePath };
+  }
+}
+
+async function registrarDoc(cuil: string, empresaId: string, tipo: string, nombre: string, hash: string, guardado: { link: string | null; driveFileId: string | null; drivePendiente: boolean; storagePath: string | null }) {
+  await db().collection('eventuales_documentos').add({
+    bolsaCuil: cuil, empresaId, tipo, nombre, hash, link: guardado.link, driveFileId: guardado.driveFileId,
+    drivePendiente: guardado.drivePendiente, storagePath: guardado.storagePath,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+}
+
+export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   const auth = await exigirRrhh(context);
   const m = await lib();
   const accion = String(data?.accion || '');
   const cuil = String(data?.cuil || '');
   const empresaId = String(data?.empresaId || '');
+  if (accion === 'config') {
+    const { rootId } = await raizDrive();
+    if (data?.guardar === true) {
+      const id = String(data?.driveRootFolderId || '').trim();
+      if (!id) throw new functions.https.HttpsError('invalid-argument', 'Falta el id de la carpeta.');
+      await db().collection('config').doc('eventuales').set({ driveRootFolderId: id }, { merge: true });
+      return { ok: true, driveRootFolderId: id };
+    }
+    return { driveRootFolderId: rootId };
+  }
   if (!cuil) throw new functions.https.HttpsError('invalid-argument', 'Falta el CUIL.');
 
   if (accion === 'listar') {
@@ -97,16 +152,52 @@ export const gestionarMarcoEventual = functions.https.onCall(async (data, contex
         const plan = m.planMarco({ firmado: row.firmado === true, fechaFirma: row.fechaFirma, vigenciaDias: row.vigenciaDias, hoy });
         return { id: d.id, empresaId: row.empresaId, ...plan, link: row.link || null, hash: row.hash || null };
       }),
+      documentos: (await db().collection('eventuales_documentos').where('bolsaCuil', '==', cuil).get()).docs.map((d) => {
+        const row = d.data();
+        return { id: d.id, tipo: row.tipo, nombre: row.nombre, empresaId: row.empresaId, link: row.link || null, drivePendiente: row.drivePendiente === true };
+      }),
+      driveFolderId: (await db().collection('eventuales_bolsa').doc(cuil).get()).data()?.driveFolderId || null,
     };
   }
 
-  if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+  if (!empresaId && accion !== 'reintentar') throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
   const bolsaSnap = await db().collection('eventuales_bolsa').doc(cuil).get();
   if (!bolsaSnap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
   const bolsa = bolsaSnap.data() || {};
   const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
   const nombre = String(bolsa.nombre || cuil);
-  const segmentos = m.segmentosDrive({ cuil, nombre, empresa: String(empresa.nombre || empresa.razonSocial || empresaId) });
+  const empresaNombre = String(empresa.razonSocial || empresa.nombre || empresaId);
+
+  if (accion === 'reintentar') {
+    const pend = await db().collection('eventuales_documentos').where('bolsaCuil', '==', cuil).get();
+    const pendientes = pend.docs.filter((d) => d.data().drivePendiente === true);
+    let subidos = 0;
+    for (const d of pendientes) {
+      const row = d.data();
+      if (!row.storagePath) continue;
+      const [buf] = await admin.storage().bucket().file(String(row.storagePath)).download();
+      const guardado = await guardarPdf(cuil, bolsa, String(row.nombre), buf);
+      if (!guardado.drivePendiente) {
+        await d.ref.set({ link: guardado.link, driveFileId: guardado.driveFileId, drivePendiente: false, storagePath: null }, { merge: true });
+        subidos += 1;
+      }
+    }
+    return { ok: true, subidos };
+  }
+
+  if (accion === 'subir') {
+    const tipo = String(data?.tipo || '');
+    if (tipo !== 'ANEXO' && tipo !== 'ARCA') throw new functions.https.HttpsError('invalid-argument', 'Tipo de documento inválido.');
+    const raw = String(data?.pdfBase64 || '');
+    if (!raw) throw new functions.https.HttpsError('invalid-argument', 'Falta el archivo.');
+    const bytes = Buffer.from(raw, 'base64');
+    const fecha = String(data?.fecha || new Date().toISOString().slice(0, 10));
+    const nombrePdf = m.nombreArchivo({ tipo, fecha, lugar: data?.lugar, empresa: empresaNombre });
+    const hash = m.sha256(bytes);
+    const guardado = await guardarPdf(cuil, bolsa, nombrePdf, bytes);
+    await registrarDoc(cuil, empresaId, tipo, nombrePdf, hash, guardado);
+    return { ok: true, nombre: nombrePdf, ...guardado };
+  }
 
   if (accion === 'generar') {
     const texto = m.textoMarco({
@@ -120,8 +211,9 @@ export const gestionarMarcoEventual = functions.https.onCall(async (data, contex
     });
     const pdf = m.pdfDeTexto(texto);
     const hash = m.sha256(pdf);
-    const nombreArchivo = m.nombreArchivo({ tipo: 'MARCO', fecha: new Date().toISOString().slice(0, 10) });
-    const guardado = await guardarPdf(empresaId, segmentos, nombreArchivo, pdf);
+    const nombreArchivo = m.nombreArchivo({ tipo: 'MARCO', fecha: new Date().toISOString().slice(0, 10), empresa: empresaNombre });
+    const guardado = await guardarPdf(cuil, bolsa, nombreArchivo, pdf);
+    await registrarDoc(cuil, empresaId, 'MARCO', nombreArchivo, hash, guardado);
     await db().collection('contratos_marco').doc(`${cuil}_${empresaId}`).set({
       bolsaCuil: cuil, empresaId, firmado: false, hashBorrador: hash, linkBorrador: guardado.link, updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     }, { merge: true });
@@ -138,7 +230,9 @@ export const gestionarMarcoEventual = functions.https.onCall(async (data, contex
     if (!raw) throw new functions.https.HttpsError('invalid-argument', 'Falta el escaneo firmado.');
     const bytes = Buffer.from(raw, 'base64');
     const hash = m.sha256(bytes);
-    const guardado = await guardarPdf(empresaId, segmentos, m.nombreArchivo({ tipo: 'MARCO', fecha: fechaFirma }), bytes);
+    const nombrePdf = m.nombreArchivo({ tipo: 'MARCO', fecha: fechaFirma, empresa: empresaNombre });
+    const guardado = await guardarPdf(cuil, bolsa, nombrePdf, bytes);
+    await registrarDoc(cuil, empresaId, 'MARCO', nombrePdf, hash, guardado);
     const ficha = { firmado: true, fechaFirma, vigenciaDias, vencimiento: plan.vencimiento, estado: plan.estado, hash, link: guardado.link };
     await db().collection('contratos_marco').doc(`${cuil}_${empresaId}`).set({
       bolsaCuil: cuil, empresaId, ...ficha, storagePath: guardado.storagePath, driveFileId: guardado.driveFileId, drivePendiente: guardado.drivePendiente,
@@ -161,7 +255,7 @@ async function refCodigo(contratoId: string, convocatoriaId: string) {
   return db().collection('anexo_codigos').doc(id);
 }
 
-export const pedirCodigoAnexoEventual = functions.https.onCall(async (data, context) => {
+export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
   const m = await lib();
   const contratoId = String(data?.contratoId || '');
@@ -192,7 +286,7 @@ export const pedirCodigoAnexoEventual = functions.https.onCall(async (data, cont
   return { ok: true, canales: canal.canales, venceMs, pendienteEnvio: true };
 });
 
-export const confirmarAnexoEventual = functions.https.onCall(async (data, context) => {
+export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Tenés que iniciar sesión.');
   const m = await lib();
   const contratoId = String(data?.contratoId || '');
@@ -216,24 +310,26 @@ export const confirmarAnexoEventual = functions.https.onCall(async (data, contex
     marcoFecha: marco.fechaFirma, causa: contrato.causa || data?.causa, jornadas: contrato.jornadas || data?.jornadas || [],
     lugar, bruto: contrato.brutoEstimado ?? data?.bruto, empresaNombre: empresaId,
   });
-  const anexoPdf = m.pdfDeTexto(anexoTexto);
-  const hashAnexo = m.sha256(anexoPdf);
   const ahora = new Date().toISOString();
+  const fecha = ahora.slice(0, 10);
+  const empresaDoc = empresaId ? (await db().collection('empresas').doc(empresaId).get()).data() || {} : {};
+  const empresaNombre = String(empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
+  const borrador = m.pdfDeTexto(anexoTexto);
+  const hashAnexo = m.sha256(borrador);
   const constancia = m.textoConstancia({
     uid: context.auth.uid, codigoVerificado: true, fechaHora: ahora, hashAnexo,
     dispositivo: data?.dispositivo, ip: context.rawRequest?.ip, ubicacion: data?.ubicacion,
   });
-  const constanciaPdf = m.pdfDeTexto(constancia);
-  const fecha = ahora.slice(0, 10);
-  const segmentos = m.segmentosDrive({ cuil, nombre: String(bolsa.nombre || cuil), empresa: empresaId || 'empresa' });
-  const anexoGuardado = await guardarPdf(empresaId || 'empresa', segmentos, m.nombreArchivo({ tipo: 'ANEXO', fecha, lugar }), anexoPdf);
-  const constanciaGuardada = await guardarPdf(empresaId || 'empresa', segmentos, `Constancia-${fecha}-${lugar}.pdf`.replace(/[\\/]/g, ' '), constanciaPdf);
+  const anexoPdf = m.pdfDeTexto(`${anexoTexto}\n\n${constancia}`);
+  const nombreAnexo = m.nombreArchivo({ tipo: 'ANEXO', fecha, lugar, empresa: empresaNombre });
+  const anexoGuardado = await guardarPdf(cuil, bolsa, nombreAnexo, anexoPdf);
+  await registrarDoc(cuil, empresaId, 'ANEXO', nombreAnexo, hashAnexo, anexoGuardado);
   await ref.set({ usado: true, usadoAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
   const anexoId = ref.id;
   await db().collection('anexos_eventuales').doc(anexoId).set({
     bolsaCuil: cuil, empresaId, contratoId: contratoId || null, convocatoriaId: convocatoriaId || null,
     hashAnexo, uid: context.auth.uid, fechaHora: ahora, link: anexoGuardado.link, storagePath: anexoGuardado.storagePath,
-    constanciaHash: m.sha256(constanciaPdf), constanciaLink: constanciaGuardada.link, drivePendiente: anexoGuardado.drivePendiente,
+    constanciaHash: hashAnexo, constanciaLink: anexoGuardado.link, drivePendiente: anexoGuardado.drivePendiente,
   });
   return { ok: true, hashAnexo, link: anexoGuardado.link, constanciaLink: constanciaGuardada.link };
 });

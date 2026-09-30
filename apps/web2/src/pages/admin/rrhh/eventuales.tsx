@@ -66,6 +66,9 @@ export default function EventualesPage() {
   const [marcos, setMarcos] = useState<Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }>>({});
   const [firmaFecha, setFirmaFecha] = useState(hoy());
   const [vigenciaDias, setVigenciaDias] = useState('365');
+  const [solapa, setSolapa] = useState<'FICHA' | 'DOCUMENTOS'>('FICHA');
+  const [empresaMarco, setEmpresaMarco] = useState(GRUPO_EVENTUALES_EMPRESA_IDS[0]);
+  const [documentos, setDocumentos] = useState<{ id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'eventuales_bolsa'), where('grupoId', '==', GRUPO_EVENTUALES_ID));
@@ -121,6 +124,7 @@ export default function EventualesPage() {
       const map: Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }> = {};
       (lista.marcos || []).forEach((row) => { map[row.empresaId] = row; });
       setMarcos(map);
+      setDocumentos((lista as { documentos?: { id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[] }).documentos || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo abrir la ficha.');
     }
@@ -238,6 +242,40 @@ export default function EventualesPage() {
                     {puede('update') && <button type="button" className="ml-2 underline" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, mail: ficha.mail, telefono: ficha.telefono, dni: ficha.dni, domicilio: ficha.domicilio, empresasHabilitadas: ficha.empresasHabilitadas, obraSocialRnos: (detalle?.rnos as { sugerencia: string }).sugerencia }); }}>Usar esa</button>}
                   </p>
                 )}
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setSolapa('FICHA')} className={`rounded-xl px-3 py-1 text-xs font-bold ${solapa === 'FICHA' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Ficha</button>
+                  <button type="button" onClick={() => setSolapa('DOCUMENTOS')} className={`rounded-xl px-3 py-1 text-xs font-bold ${solapa === 'DOCUMENTOS' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Documentos</button>
+                </div>
+                {solapa === 'DOCUMENTOS' && (
+                  <div className="rounded-2xl border border-slate-100 p-3">
+                    <h3 className="text-sm font-black text-slate-700">Documentos en Drive</h3>
+                    {documentos.length === 0 && <p className="text-xs text-slate-400">Todavía no hay archivos.</p>}
+                    {documentos.map((docu) => (
+                      <p key={docu.id} className="text-xs text-slate-600">
+                        {docu.tipo} · {docu.nombre}{' '}
+                        {docu.link ? <a className="font-bold text-indigo-700" href={docu.link} target="_blank" rel="noreferrer">Abrir en Drive</a> : null}
+                        {docu.drivePendiente ? <span className="ml-1 font-bold text-amber-700">pendiente de Drive</span> : null}
+                      </p>
+                    ))}
+                    {puede('update') && (
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <button type="button" className="rounded-xl bg-slate-100 px-2 py-1 text-xs font-bold" onClick={async () => { await llamar('gestionarMarcoEventual', { accion: 'reintentar', cuil: ficha.id }); toast.success('Reintento de Drive pedido.'); abrirDetalle(ficha.id); }}>Reintentar pendientes</button>
+                        <label className="rounded-xl bg-slate-800 px-2 py-1 text-xs font-bold text-white">Subir constancia ARCA
+                          <input type="file" accept="application/pdf" className="hidden" onChange={async (e) => {
+                            const file = e.target.files?.[0];
+                            if (!file) return;
+                            const bytes = new Uint8Array(await file.arrayBuffer());
+                            let bin = '';
+                            bytes.forEach((b) => { bin += String.fromCharCode(b); });
+                            await llamar('gestionarMarcoEventual', { accion: 'subir', tipo: 'ARCA', cuil: ficha.id, empresaId: empresaMarco, fecha: firmaFecha, pdfBase64: btoa(bin) });
+                            toast.success('Constancia ARCA cargada.');
+                            abrirDetalle(ficha.id);
+                          }} />
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="rounded-2xl border border-slate-100 p-3">
                   <h3 className="text-sm font-black text-slate-700">Contrato marco</h3>
                   <p className="text-[11px] text-slate-500">Una vez por empresa, en papel. Cada aceptación en la app es un anexo. La firma en la app (CiDi) queda para más adelante.</p>
@@ -265,10 +303,13 @@ export default function EventualesPage() {
                     <div className="mt-2 flex flex-wrap gap-2">
                       <input type="date" value={firmaFecha} onChange={(e) => setFirmaFecha(e.target.value)} className="rounded-xl border px-2 py-1 text-xs" />
                       <input value={vigenciaDias} onChange={(e) => setVigenciaDias(e.target.value)} className="w-16 rounded-xl border px-2 py-1 text-xs" title="Días de vigencia" />
-                      <label className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white">Subir marco firmado
+                      <select value={empresaMarco} onChange={(e) => setEmpresaMarco(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
+                        {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+                      </select>
+                      <label className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white">Subir contrato marco
                         <input type="file" accept="application/pdf,image/*" className="hidden" onChange={async (e) => {
                           const file = e.target.files?.[0];
-                          const emp = ficha.empresasHabilitadas[0] || GRUPO_EVENTUALES_EMPRESA_IDS[0];
+                          const emp = empresaMarco;
                           if (!file) return;
                           const buf = await file.arrayBuffer();
                           const bytes = new Uint8Array(buf);
