@@ -331,5 +331,5 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
     hashAnexo, uid: context.auth.uid, fechaHora: ahora, link: anexoGuardado.link, storagePath: anexoGuardado.storagePath,
     constanciaHash: hashAnexo, constanciaLink: anexoGuardado.link, drivePendiente: anexoGuardado.drivePendiente,
   });
-  return { ok: true, hashAnexo, link: anexoGuardado.link, constanciaLink: constanciaGuardada.link };
+  return { ok: true, hashAnexo, link: anexoGuardado.link, constanciaLink: anexoGuardado.link };
 });
