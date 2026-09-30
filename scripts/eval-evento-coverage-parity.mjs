@@ -28,7 +28,7 @@ report('es evento', core.isEventoShift({ code: 'EV' }) && fn.isEventoShift({ ori
 report('sin continuidad', core.eventoTieneFranjasEncadenadas({}) === false && fn.eventoTieneFranjasEncadenadas({ eventoFranjasEncadenadas: true }) === true, '');
 report('bolsa vacia', core.eventualesParaHueco().length === 0 && fn.eventualesParaHueco().length === 0, '');
 report('orden evento', core.EVENT_COVERAGE_CASCADE_ORDER.join(',') === 'EVENTUAL,REF,ESC,EXTEND,ADVANCE,FT', core.EVENT_COVERAGE_CASCADE_ORDER.join(','));
-report('orden objetivo', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(',') === 'RET,REF,ESC,EVENTUAL,EXTEND,ADVANCE,FT', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(','));
+report('orden objetivo', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(',') === 'RET,REF,ESC,EXTEND,ADVANCE,EVENTUAL,FT', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(','));
 const hueco = { empresaId: 'e1', startMs: Date.parse('2026-10-02T10:00:00-03:00'), endMs: Date.parse('2026-10-02T18:00:00-03:00'), lat: -31.4, lng: -64.2, hoyYmd: '2026-10-02' };
 const base = { disponibilidad: 'DISPONIBLE', empresasHabilitadas: ['e1'], credencialVencimiento: '2027-01-01', aptoPsicofisico: { estado: 'APTO', vencimiento: '2027-01-01' }, uid: 'u' };
 const cerca = { ...base, cuil: '20111111111', nombre: 'Cerca', confiabilidad: 1, domicilioGeo: { lat: -31.41, lng: -64.21 } };

@@ -7,7 +7,7 @@ exports.bloqueoCruceEventual = bloqueoCruceEventual;
 exports.eventualesParaHueco = eventualesParaHueco;
 exports.planEventualAusente = planEventualAusente;
 exports.EVENT_COVERAGE_CASCADE_ORDER = ['EVENTUAL', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'FT'];
-exports.OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'REF', 'ESC', 'EVENTUAL', 'EXTEND', 'ADVANCE', 'FT'];
+exports.OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'EVENTUAL', 'FT'];
 function isEventoShift(shift) {
     if (!shift)
         return false;

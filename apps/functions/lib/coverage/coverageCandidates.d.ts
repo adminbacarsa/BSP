@@ -1,4 +1,4 @@
-export declare const COVERAGE_CASCADE_ORDER: readonly ["RET", "REF", "ESC", "EXTEND", "ADVANCE", "FT"];
+export declare const COVERAGE_CASCADE_ORDER: readonly ["RET", "REF", "ESC", "EXTEND", "ADVANCE", "EVENTUAL", "FT"];
 export declare const COVERAGE_LEGACY_CANDIDATE_TYPES: readonly ["VOLANTE", "SIN_TURNO_CON_EXP", "SIN_TURNO"];
 export type CoverageCascadeType = (typeof COVERAGE_CASCADE_ORDER)[number];
 export type CoverageWizardStepKey = 'INTERNO' | 'EVENTUAL' | 'RETENCION' | 'FT';

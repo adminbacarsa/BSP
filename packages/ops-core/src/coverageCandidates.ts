@@ -12,6 +12,7 @@ export const COVERAGE_CASCADE_ORDER = [
   'ESC',
   'EXTEND',
   'ADVANCE',
+  'EVENTUAL',
   'FT',
 ] as const;
 
@@ -254,7 +255,7 @@ function rangesOverlap(a0: number, a1: number, b0: number, b1: number): boolean 
 }
 
 function emptyByType(): Record<CoverageCascadeType, CoverageCandidateRow[]> {
-  return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], FT: [] };
+  return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], EVENTUAL: [], FT: [] };
 }
 
 /**
@@ -605,6 +606,7 @@ function plausible(type: CoverageCascadeType, shift: CoverageShiftView, gap: Cov
   if (shift.id === gap.titularShiftId) return false;
   const sameObj = String(shift.objectiveId || '') === String(gap.objectiveId || '');
   const code = norm(shift.code);
+  if (type === 'EVENTUAL') return false;
   if (type === 'FT') {
     if (norm(shift.origin) === 'OPERATIONS_COVERAGE') return false;
     return FRANCO_CODES.has(code) || code === 'FT';
@@ -631,6 +633,7 @@ function decide(
   input: BuildCoverageCandidatesInput,
 ): CoverageRejectReason | null {
   const accept = input.purpose === 'accept';
+  if (type === 'EVENTUAL') return 'NO_CONTIGUO';
   if (type === 'EXTEND') return considerExt(shift, input, accept);
   if (type === 'ADVANCE') return considerAdv(shift, input, accept);
   if (type === 'FT') return considerFt(shift, input, accept);
@@ -658,6 +661,7 @@ export function buildCoverageCandidates(input: BuildCoverageCandidatesInput): Co
   for (const employeeId of leaveIds) {
     if (input.gap.absentEmployeeId && employeeId === input.gap.absentEmployeeId) continue;
     for (const type of types) {
+      if (type === 'EVENTUAL') continue;
       const already = byType[type].some((r) => r.employeeId === employeeId);
       if (already) continue;
       pushUnique(byType[type], seen, {
@@ -701,7 +705,7 @@ export function acceptanceStillValid(
   employeeId: string,
   sourceShiftId?: string,
 ): AcceptanceCheck {
-  if (!(COVERAGE_CASCADE_ORDER as readonly string[]).includes(type)) {
+  if (type === 'EVENTUAL' || !(COVERAGE_CASCADE_ORDER as readonly string[]).includes(type)) {
     return { ok: true };
   }
   if (input.gap.alreadyCovered) {

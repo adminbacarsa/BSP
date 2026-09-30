@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { getUrgency } from './eligibilityFilter';
 import { COVERAGE_CASCADE_ORDER } from './coverageCandidates';
 import {
+  convocarEventual,
   crearConvocatoriaDoc,
   dispararBroadcastFT,
   findBestCandidate,
@@ -59,6 +60,11 @@ export async function iniciarEarlyWithdrawCascade(
   };
 
   for (const type of EARLY_WITHDRAW_CASCADE) {
+    if (type === 'EVENTUAL') {
+      const ok = await convocarEventual(db, baseConvData as any, createdBy);
+      if (ok) return;
+      continue;
+    }
     if (type === 'FT') {
       await dispararBroadcastFT(db, baseConvData as any);
       return;

@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.responderRecordatorioConvocado = exports.checkConvocatoriaTimeouts = exports.cancelarConvocatoriaCobertura = exports.responderConvocatoriaCobertura = exports.crearConvocatoriaCobertura = void 0;
+exports.convocarEventual = convocarEventual;
 exports.crearConvocatoriaDoc = crearConvocatoriaDoc;
 exports.findBestCandidate = findBestCandidate;
 exports.dispararBroadcastFT = dispararBroadcastFT;

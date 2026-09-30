@@ -13,6 +13,7 @@ exports.COVERAGE_CASCADE_ORDER = [
     'ESC',
     'EXTEND',
     'ADVANCE',
+    'EVENTUAL',
     'FT',
 ];
 exports.COVERAGE_LEGACY_CANDIDATE_TYPES = [
@@ -102,7 +103,7 @@ function rangesOverlap(a0, a1, b0, b1) {
     return a0 < b1 && b0 < a1;
 }
 function emptyByType() {
-    return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], FT: [] };
+    return { RET: [], REF: [], ESC: [], EXTEND: [], ADVANCE: [], EVENTUAL: [], FT: [] };
 }
 function dualSegmentBounds(gap) {
     if (gap.startMs && gap.endMs && gap.endMs > gap.startMs && gap.endMs - gap.startMs <= exports.COVERAGE_HARD_CAP_MS + 60_000) {
@@ -439,6 +440,8 @@ function plausible(type, shift, gap) {
         return false;
     const sameObj = String(shift.objectiveId || '') === String(gap.objectiveId || '');
     const code = norm(shift.code);
+    if (type === 'EVENTUAL')
+        return false;
     if (type === 'FT') {
         if (norm(shift.origin) === 'OPERATIONS_COVERAGE')
             return false;
@@ -465,6 +468,8 @@ function plausible(type, shift, gap) {
 }
 function decide(type, shift, input) {
     const accept = input.purpose === 'accept';
+    if (type === 'EVENTUAL')
+        return 'NO_CONTIGUO';
     if (type === 'EXTEND')
         return considerExt(shift, input, accept);
     if (type === 'ADVANCE')
@@ -496,6 +501,8 @@ function buildCoverageCandidates(input) {
         if (input.gap.absentEmployeeId && employeeId === input.gap.absentEmployeeId)
             continue;
         for (const type of types) {
+            if (type === 'EVENTUAL')
+                continue;
             const already = byType[type].some((r) => r.employeeId === employeeId);
             if (already)
                 continue;
@@ -531,7 +538,7 @@ function pickBestCandidate(set, type) {
     return set.byType[type].find((r) => r.eligible) || null;
 }
 function acceptanceStillValid(input, type, employeeId, sourceShiftId) {
-    if (!exports.COVERAGE_CASCADE_ORDER.includes(type)) {
+    if (type === 'EVENTUAL' || !exports.COVERAGE_CASCADE_ORDER.includes(type)) {
         return { ok: true };
     }
     if (input.gap.alreadyCovered) {

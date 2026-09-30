@@ -153,7 +153,7 @@ function nextInCoverageOrder(conv: { type: string; shiftCode?: string }): Candid
   return nextCascadeStep(conv.type as CandidateType);
 }
 
-async function convocarEventual(
+export async function convocarEventual(
   db: admin.firestore.Firestore,
   base: ConvocatoriaCoberturaDoc,
   createdBy: string,

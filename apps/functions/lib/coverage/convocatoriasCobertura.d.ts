@@ -36,6 +36,7 @@ export interface ConvocatoriaCoberturaDoc {
     rejectionReason?: string;
     resolvedAt?: Timestamp;
 }
+export declare function convocarEventual(db: admin.firestore.Firestore, base: ConvocatoriaCoberturaDoc, createdBy: string): Promise<boolean>;
 export declare function crearConvocatoriaDoc(db: admin.firestore.Firestore, data: Omit<ConvocatoriaCoberturaDoc, 'createdAt' | 'status' | 'timeoutAt' | 'urgency'> & {
     createdBy: string;
     createdByName?: string;

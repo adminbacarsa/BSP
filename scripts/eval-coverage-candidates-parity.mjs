@@ -23,7 +23,7 @@ function report(id, ok, detail) {
 
 report('archivo', a === b, a === b ? 'ops-core y functions/src son el mismo archivo' : 'las copias difieren');
 
-const order = ['RET', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'FT'];
+const order = ['RET', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'EVENTUAL', 'FT'];
 report('orden', JSON.stringify(core.COVERAGE_CASCADE_ORDER) === JSON.stringify(order)
   && JSON.stringify(fn.COVERAGE_CASCADE_ORDER) === JSON.stringify(order),
   core.COVERAGE_CASCADE_ORDER.join('→'));

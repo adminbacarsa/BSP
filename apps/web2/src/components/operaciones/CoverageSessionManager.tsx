@@ -37,10 +37,10 @@ import {
 import { buildOpsCandidateView } from '@/lib/operaciones/coverageCandidateView';
 import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
 import {
+  COVERAGE_CASCADE_ORDER,
   COVERAGE_REJECT_LABEL,
   coverageWizardStepKeys,
   EVENT_COVERAGE_CASCADE_ORDER,
-  OBJECTIVE_COVERAGE_WITH_EVENTUAL,
   eventualesParaHueco,
   isEventoShift,
   type CoverageWizardStepKey,
@@ -127,9 +127,9 @@ const STEP_META: Record<CoverageWizardStepKey, { label: string; mandatory: boole
   FT: { label: 'Franco Trabajado', mandatory: false, timeoutSec: 180, desc: 'Último recurso' },
 };
 
-/** Evento: eventual primero. Objetivo: después de RET/REF/ESC y antes de Ext/Adel/FT. */
+/** Evento: eventual primero. Objetivo: RET, REF, ESC, Ext + Adel, eventuales y después FT. */
 function stepsForShift(shift: unknown) {
-  const order = isEventoShift(shift as object) ? EVENT_COVERAGE_CASCADE_ORDER : OBJECTIVE_COVERAGE_WITH_EVENTUAL;
+  const order = isEventoShift(shift as object) ? EVENT_COVERAGE_CASCADE_ORDER : COVERAGE_CASCADE_ORDER;
   return coverageWizardStepKeys(order).map((key, i) => ({ key, icon: String(i + 1), ...STEP_META[key] }));
 }
 

@@ -1,5 +1,5 @@
 export declare const EVENT_COVERAGE_CASCADE_ORDER: readonly ["EVENTUAL", "REF", "ESC", "EXTEND", "ADVANCE", "FT"];
-export declare const OBJECTIVE_COVERAGE_WITH_EVENTUAL: readonly ["RET", "REF", "ESC", "EVENTUAL", "EXTEND", "ADVANCE", "FT"];
+export declare const OBJECTIVE_COVERAGE_WITH_EVENTUAL: readonly ["RET", "REF", "ESC", "EXTEND", "ADVANCE", "EVENTUAL", "FT"];
 export type EventualCandidato = {
     employeeId: string;
     employeeName: string;

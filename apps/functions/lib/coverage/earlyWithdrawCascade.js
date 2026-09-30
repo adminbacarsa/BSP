@@ -47,6 +47,12 @@ async function iniciarEarlyWithdrawCascade(db, shift, createdBy = 'AUTO') {
         createdBy,
     };
     for (const type of EARLY_WITHDRAW_CASCADE) {
+        if (type === 'EVENTUAL') {
+            const ok = await (0, convocatoriasCobertura_1.convocarEventual)(db, baseConvData, createdBy);
+            if (ok)
+                return;
+            continue;
+        }
         if (type === 'FT') {
             await (0, convocatoriasCobertura_1.dispararBroadcastFT)(db, baseConvData);
             return;

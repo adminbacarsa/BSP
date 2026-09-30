@@ -5,12 +5,12 @@
 
 /**
  * Hueco de evento: el eventual va primero (no genera recargo de FT).
- * Hueco de objetivo: después de RET/REF/ESC y antes de EXT/ADV/FT.
+ * Hueco de objetivo: RET, REF, ESC, Ext + Adel, eventuales y después FT.
  * Son constantes para poder invertirlas si Mauro confirma otro orden.
  */
 export const EVENT_COVERAGE_CASCADE_ORDER = ['EVENTUAL', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'FT'] as const;
 
-export const OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'REF', 'ESC', 'EVENTUAL', 'EXTEND', 'ADVANCE', 'FT'] as const;
+export const OBJECTIVE_COVERAGE_WITH_EVENTUAL = ['RET', 'REF', 'ESC', 'EXTEND', 'ADVANCE', 'EVENTUAL', 'FT'] as const;
 
 export type EventualCandidato = {
   employeeId: string;
