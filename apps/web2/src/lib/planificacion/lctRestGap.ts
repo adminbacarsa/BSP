@@ -1,11 +1,11 @@
 /**
  * Art. 197 LCT: entre dos jornadas del mismo legajo tienen que quedar 12 h.
- * El fin de la jornada es el tope de cierre (inicio + 12:59), no el fin planificado:
- * un T 15:00 que cierra por tope a las 03:59 y el T siguiente a las 15:00 deja 11 h 01 min.
+ * El fin es el endTime planificado. Si el turno ya cerró, manda realEndTime
+ * (un cierre por tope 03:59 deja 11 h 01 min hasta un T de las 15:00).
+ * El tope 12:59 no se supone: solo cuenta cuando el cierre real lo refleja.
  * Mismo objetivo o distintos. Solo aviso: no bloquea guardar ni publicar.
  */
 export const LCT_MIN_REST_HOURS = 12;
-export const LCT_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
 const CONTINUOUS_MS = 30 * 60 * 1000;
 const AR = 'America/Argentina/Buenos_Aires';
 
@@ -19,6 +19,8 @@ export type LctShiftInput = {
   code?: string;
   startTime?: unknown;
   endTime?: unknown;
+  /** Si el turno ya cerró. Pisa al fin planificado (cierre por tope incluido). */
+  realEndTime?: unknown;
   hours?: number;
   objectiveId?: string;
   objectiveName?: string;
@@ -96,12 +98,21 @@ type Item = {
   employeeName: string;
   start: number;
   end: number;
+  realClose: boolean;
   code: string;
   objectiveId: string;
   objectiveName: string;
   dateStr: string;
   cellKey: string;
 };
+
+function clockEnd(value: unknown, start: number, dateHint: string, fallback: number): number {
+  let end = instantMs(value, dateHint);
+  if (end == null) return fallback;
+  const hm = typeof value === 'string' && /^\d{1,2}:\d{2}$/.test(value.trim());
+  if ((hm || end <= start) && end <= start) end += 24 * 3600000;
+  return end;
+}
 
 function toItem(sh: LctShiftInput): Item | null {
   const employeeId = String(sh.employeeId || '').trim();
@@ -114,9 +125,10 @@ function toItem(sh: LctShiftInput): Item | null {
   if (start == null && dateHint && START_HM[code]) start = instantMs(START_HM[code], dateHint);
   if (start == null) return null;
   const hours = Number(sh.hours) > 0 ? Number(sh.hours) : (HOURS_BY_CODE[code] ?? 8);
-  let end = instantMs(sh.endTime, dateHint);
-  if (end == null) end = start + hours * 3600000;
-  if (end <= start) end += 24 * 3600000;
+  const planned = clockEnd(sh.endTime, start, dateHint, start + hours * 3600000);
+  const real = sh.realEndTime != null && sh.realEndTime !== '' ? clockEnd(sh.realEndTime, start, dateHint, 0) : 0;
+  const realClose = real > start;
+  const end = realClose ? real : planned;
   const dateStr = arDateStr(start);
   const objectiveId = String(sh.objectiveId || '').trim();
   return {
@@ -124,6 +136,7 @@ function toItem(sh: LctShiftInput): Item | null {
     employeeName: String(sh.employeeName || '').trim(),
     start,
     end,
+    realClose,
     code,
     objectiveId,
     objectiveName: String(sh.objectiveName || objectiveId),
@@ -132,7 +145,7 @@ function toItem(sh: LctShiftInput): Item | null {
   };
 }
 
-/** Pares de jornadas del mismo legajo con menos de 12 h entre el tope de cierre y el próximo inicio. */
+/** Pares de jornadas del mismo legajo con menos de 12 h entre el fin (planificado o real) y el próximo inicio. */
 export function findLctRestGaps(shifts: LctShiftInput[]): LctRestGap[] {
   const byEmp = new Map<string, Item[]>();
   for (const sh of shifts) {
@@ -145,30 +158,33 @@ export function findLctRestGaps(shifts: LctShiftInput[]): LctRestGap[] {
   const out: LctRestGap[] = [];
   for (const items of byEmp.values()) {
     items.sort((a, b) => a.start - b.start || a.end - b.end);
-    const jornadas: Array<{ start: number; end: number; shifts: Item[] }> = [];
+    const jornadas: Array<{ start: number; end: number; realClose: boolean; shifts: Item[] }> = [];
     for (const item of items) {
       const last = jornadas[jornadas.length - 1];
       if (last && item.start <= last.end + CONTINUOUS_MS) {
-        if (item.end > last.end) last.end = item.end;
+        if (item.end > last.end) {
+          last.end = item.end;
+          last.realClose = item.realClose;
+        }
         last.shifts.push(item);
       } else {
-        jornadas.push({ start: item.start, end: item.end, shifts: [item] });
+        jornadas.push({ start: item.start, end: item.end, realClose: item.realClose, shifts: [item] });
       }
     }
     for (let i = 0; i < jornadas.length - 1; i += 1) {
       const prev = jornadas[i];
       const next = jornadas[i + 1];
-      const capEnd = prev.start + LCT_HARD_CAP_MS;
-      const gapHours = (next.start - capEnd) / 3600000;
+      const gapHours = (next.start - prev.end) / 3600000;
       if (gapHours + 1e-6 >= LCT_MIN_REST_HOURS) continue;
       const from = prev.shifts[prev.shifts.length - 1];
       const to = next.shifts[0];
-      const closeAtLabel = arHm(capEnd);
+      const closeAtLabel = arHm(prev.end);
       const nextStartLabel = arHm(to.start);
       const label = gapLabel(gapHours);
       const where = from.objectiveId && to.objectiveId && from.objectiveId !== to.objectiveId
         ? ` · ${from.objectiveName} → ${to.objectiveName}`
         : '';
+      const how = prev.realClose ? 'cierre real' : 'fin';
       out.push({
         employeeId: from.employeeId,
         employeeName: from.employeeName || to.employeeName,
@@ -186,7 +202,7 @@ export function findLctRestGaps(shifts: LctShiftInput[]): LctRestGap[] {
         gapHours,
         gapLabel: label,
         cellKeys: [...new Set([from.cellKey, to.cellKey])],
-        message: `Art. 197 LCT: cierre por tope ${closeAtLabel} → ${to.code} ${nextStartLabel} = ${label} (mín. 12 h)${where}`,
+        message: `Art. 197 LCT: ${how} ${closeAtLabel} → ${to.code} ${nextStartLabel} = ${label} (mín. 12 h)${where}`,
       });
     }
   }

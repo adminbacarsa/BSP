@@ -226,6 +226,7 @@ export async function loadCronogramaOverview(params: {
       code: String(data.code || data.type || ''),
       startTime: data.startTime,
       endTime: data.endTime,
+      realEndTime: data.realEndTime,
       hours: Number(data.hours) || undefined,
       objectiveId: objId,
       objectiveName: String(data.objectiveName || ''),

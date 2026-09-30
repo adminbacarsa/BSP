@@ -318,7 +318,7 @@ export default function PlanningCronogramasOverviewModal({
                     <th className="text-left text-[9px] font-black uppercase tracking-wider text-slate-500 px-4 py-3 border-r border-slate-200 w-[12%] bg-slate-100">
                       Modificado por
                     </th>
-                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el cierre por tope (12:59) y el turno siguiente, también en otro objetivo. No bloquea.">
+                    <th className="text-center text-[9px] font-black uppercase tracking-wider text-amber-700 px-2 py-3 border-r border-slate-200 w-[8%] bg-amber-50/70" title="Art. 197 LCT: menos de 12 h entre el fin del turno (planificado, o el real si ya cerró) y el siguiente, también en otro objetivo. No bloquea.">
                       Desc. &lt;12h
                     </th>
                     <th className="text-center text-[9px] font-black uppercase tracking-wider text-slate-500 px-2 py-3 w-[4%] bg-slate-100">

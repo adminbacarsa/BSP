@@ -2680,6 +2680,7 @@ export default function PlanificacionPage() {
                 code: sh.code || sh.type,
                 startTime: sh.startTime,
                 endTime: sh.endTime,
+                realEndTime: sh.realEndTime,
                 hours: sh.hours,
                 objectiveId: sh.objectiveId,
                 objectiveName: sh.objectiveName,
