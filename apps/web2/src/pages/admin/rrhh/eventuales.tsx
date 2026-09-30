@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, onSnapshot, query, where } from 'firebase/firestore';
+import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { ArrowLeft, MapPin, Plus, Users } from 'lucide-react';
 import Link from 'next/link';
@@ -8,6 +8,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { db, functions } from '@/lib/firebase';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
+import { esIncompleto, faltantesConvocable, opcionesVigenciaMarco, textoEstadoMarco, VIGENCIA_MARCO_DEFAULT } from '@/lib/eventuales/fichaUx.mjs';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { RNOS_DEFAULT_FICHA, vencePronto } from '@/lib/eventuales/ficha.mjs';
 
@@ -51,6 +52,19 @@ const fmt = (iso?: string) => {
 
 const hoy = () => new Date().toISOString().slice(0, 10);
 
+const TONO_MARCO: Record<string, string> = {
+  ok: 'bg-emerald-50 text-emerald-800',
+  pendiente: 'bg-amber-50 text-amber-800',
+  malo: 'bg-rose-50 text-rose-800',
+};
+
+const CAMPO_CONTACTO: Record<string, string> = { mail: 'mail', telefono: 'teléfono', domicilio: 'domicilio' };
+const PROBLEMA_CONTACTO: Record<string, string> = {
+  NO_EN_BOLSA: 'no está en la bolsa',
+  CUIL_INVALIDO: 'CUIL inválido',
+  MAIL_INVALIDO: 'mail inválido',
+};
+
 export default function EventualesPage() {
   const { isSuperAdmin, rolePermissions } = useAuth();
   const acciones = rolePermissions?.EVENTUALES || [];
@@ -67,11 +81,40 @@ export default function EventualesPage() {
   const [guardando, setGuardando] = useState(false);
   const [marcos, setMarcos] = useState<Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }>>({});
   const [firmaFecha, setFirmaFecha] = useState(hoy());
-  const [vigenciaDias, setVigenciaDias] = useState('365');
+  const [vigenciaDias, setVigenciaDias] = useState(String(VIGENCIA_MARCO_DEFAULT));
+  const [archivoMarco, setArchivoMarco] = useState<File | null>(null);
   const [solapa, setSolapa] = useState<'FICHA' | 'DOCUMENTOS'>('FICHA');
   const [empresaMarco, setEmpresaMarco] = useState(GRUPO_EVENTUALES_EMPRESA_IDS[0]);
   const [documentos, setDocumentos] = useState<{ id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[]>([]);
   const [seleccion, setSeleccion] = useState<string[]>([]);
+  const [nombresEmpresa, setNombresEmpresa] = useState<Record<string, string>>({});
+  const [asignarAbierto, setAsignarAbierto] = useState(false);
+  const [importando, setImportando] = useState(false);
+  const [empresasAsignar, setEmpresasAsignar] = useState<string[]>([]);
+  const [reporteContacto, setReporteContacto] = useState<{
+    dryRun: boolean;
+    resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
+    muestra: { cuil: string; campos: string[] }[];
+    problemas: { cuil: string; codigo: string }[];
+    filas: Record<string, unknown>[];
+  } | null>(null);
+
+  const nombreEmpresa = (id: string) => nombresEmpresa[id] || 'Empresa';
+
+  useEffect(() => {
+    let vivo = true;
+    Promise.all(GRUPO_EVENTUALES_EMPRESA_IDS.map(async (id) => {
+      const snap = await getDoc(doc(db, 'empresas', id));
+      const data = snap.data() || {};
+      return [id, String(data.razonSocial || data.nombre || '')] as const;
+    })).then((pares) => {
+      if (!vivo) return;
+      const map: Record<string, string> = {};
+      pares.forEach(([id, nombre]) => { if (nombre) map[id] = nombre; });
+      setNombresEmpresa(map);
+    }).catch(() => { /* sin nombre no se muestra el id */ });
+    return () => { vivo = false; };
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, 'eventuales_bolsa'), where('grupoId', '==', GRUPO_EVENTUALES_ID));
@@ -107,6 +150,7 @@ export default function EventualesPage() {
       if (filtro === 'DISPONIBLE' && f.disponibilidad !== 'DISPONIBLE') return false;
       if (filtro === 'NO_DISPONIBLE' && f.disponibilidad !== 'NO_DISPONIBLE') return false;
       if (filtro === 'VENCE' && ![f.habilitacionVencimiento, f.credencialVencimiento, f.aptoVencimiento].some((fecha) => vencePronto(fecha, hoy()))) return false;
+      if (filtro === 'INCOMPLETOS' && !esIncompleto(f, hoy(), empresa)) return false;
       if (empresa && !f.empresasHabilitadas.includes(empresa)) return false;
       if (q && !`${f.nombre} ${f.id} ${f.dni}`.toLowerCase().includes(q)) return false;
       return true;
@@ -121,6 +165,9 @@ export default function EventualesPage() {
 
   const abrirDetalle = async (id: string) => {
     setElegida(id);
+    setArchivoMarco(null);
+    const hab = fichas.find((f) => f.id === id)?.empresasHabilitadas || [];
+    if (hab.length) setEmpresaMarco(hab[0]);
     setDetalle(null);
     try {
       setDetalle(await llamar('gestionarEventual', { accion: 'detalle', cuil: id }));
@@ -177,6 +224,56 @@ export default function EventualesPage() {
     abrirDetalle(elegida);
   };
 
+  const subirMarco = async (cuil: string) => {
+    if (!archivoMarco) { toast.error('Elegí el PDF o la foto firmada.'); return; }
+    if (!empresaMarco) { toast.error('Sin empresa habilitada.'); return; }
+    try {
+      const bytes = new Uint8Array(await archivoMarco.arrayBuffer());
+      let bin = '';
+      bytes.forEach((b) => { bin += String.fromCharCode(b); });
+      await llamar('gestionarMarcoEventual', { accion: 'firmar', cuil, empresaId: empresaMarco, fechaFirma: firmaFecha, vigenciaDias: Number(vigenciaDias) || VIGENCIA_MARCO_DEFAULT, pdfBase64: btoa(bin) });
+      toast.success(`Marco de ${nombreEmpresa(empresaMarco)} cargado.`);
+      setArchivoMarco(null);
+      abrirDetalle(cuil);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo subir el marco.');
+    }
+  };
+
+  const importarContactos = async (file: File, dryRun: boolean, filasYaLeidas?: Record<string, unknown>[]) => {
+    setImportando(true);
+    try {
+      let filas = filasYaLeidas;
+      if (!filas) {
+        const XLSX = await import('xlsx');
+        const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
+      }
+      const res = await llamar('gestionarEventual', { accion: 'importarContacto', dryRun, filas }) as {
+        resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
+        muestra: { cuil: string; campos: string[] }[];
+        problemas: { cuil: string; codigo: string }[];
+      };
+      setReporteContacto({ dryRun, resumen: res.resumen, muestra: res.muestra || [], problemas: res.problemas || [], filas: filas || [] });
+      if (!dryRun) toast.success(`${res.resumen.actualizar} fichas actualizadas.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo leer el Excel.');
+    } finally {
+      setImportando(false);
+    }
+  };
+
+  const confirmarAsignar = async () => {
+    try {
+      const res = await llamar('gestionarEventual', { accion: 'asignarEmpresas', cuils: seleccion, empresasHabilitadas: empresasAsignar }) as { asignados?: number };
+      toast.success(`${res.asignados || 0} fichas con empresas habilitadas.`);
+      setAsignarAbierto(false);
+      setSeleccion([]);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudieron asignar las empresas.');
+    }
+  };
+
   const acceso = async () => {
     if (!elegida) return;
     const res = await llamar('crearAccesoEventual', { cuil: elegida });
@@ -203,17 +300,28 @@ export default function EventualesPage() {
         </div>
         <div className="mb-4 flex flex-wrap gap-2">
           <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre, CUIL o DNI" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm shadow-sm" />
-          {['DISPONIBLE', 'NO_DISPONIBLE', 'VENCE', 'TODOS'].map((op) => (
-            <button key={op} type="button" onClick={() => setFiltro(op)} className={`rounded-2xl px-3 py-2 text-xs font-bold ${filtro === op ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 shadow-sm'}`}>{op === 'VENCE' ? 'Vencen en 30 días' : op}</button>
+          {['DISPONIBLE', 'NO_DISPONIBLE', 'VENCE', 'INCOMPLETOS', 'TODOS'].map((op) => (
+            <button key={op} type="button" onClick={() => setFiltro(op)} className={`rounded-2xl px-3 py-2 text-xs font-bold ${filtro === op ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 shadow-sm'}`}>{op === 'VENCE' ? 'Vencen en 30 días' : op === 'INCOMPLETOS' ? 'Incompletos' : op}</button>
           ))}
           <select value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm shadow-sm">
             <option value="">Todas las empresas</option>
-            {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
+            {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{nombreEmpresa(id)}</option>)}
           </select>
-          <MarcosLotePanel empresaId={empresa} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
+          {puede('update') && (
+            <label className="cursor-pointer rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50">
+              Importar contactos
+              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importarContactos(file, true); }} />
+            </label>
+          )}
+          <MarcosLotePanel empresaId={empresa} nombreEmpresa={empresa ? nombreEmpresa(empresa) : ''} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
+          {seleccion.length > 0 && puede('update') && (
+            <button type="button" onClick={() => { setEmpresasAsignar([]); setAsignarAbierto(true); }} className="rounded-2xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm">
+              Asignar empresas habilitadas ({seleccion.length})
+            </button>
+          )}
           {seleccion.length > 0 && <button type="button" onClick={() => setSeleccion([])} className="rounded-2xl px-2 py-2 text-xs font-bold text-slate-500 underline">Quitar selección</button>}
         </div>
-        <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
+        <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
           <ul className="max-h-[70vh] overflow-auto rounded-3xl bg-white p-2 shadow-sm">
             {visibles.map((f) => (
               <li key={f.id} className="flex items-center gap-1">
@@ -224,7 +332,12 @@ export default function EventualesPage() {
                 )}
                 <button type="button" onClick={() => abrirDetalle(f.id)} className={`w-full rounded-2xl px-3 py-2 text-left hover:bg-slate-50 ${elegida === f.id ? 'bg-indigo-50' : ''}`}>
                   <span className="block text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
-                  <span className="text-[11px] text-slate-500">{f.disponibilidad} · {f.empresasHabilitadas.join(', ') || 'sin empresa'}</span>
+                  <span className="text-[11px] text-slate-500">{f.disponibilidad}{f.empresasHabilitadas.length ? ` · ${f.empresasHabilitadas.map(nombreEmpresa).join(', ')}` : ''}</span>
+                  <span className="mt-1 flex flex-wrap gap-1">
+                    {faltantesConvocable(f, hoy(), empresa).map((chip) => (
+                      <span key={chip.id} className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">{chip.texto}</span>
+                    ))}
+                  </span>
                 </button>
               </li>
             ))}
@@ -249,7 +362,7 @@ export default function EventualesPage() {
                 {!ficha.obraSocialRnos && !(detalle?.rnos as { pendiente?: boolean } | undefined)?.pendiente && <p className="text-sm text-slate-500">Sin RNOS propio: se usa el de SUVICO {RNOS_DEFAULT_FICHA}.</p>}
                 {(detalle?.rnos as { pendiente?: boolean } | undefined)?.pendiente && <p className="text-sm font-bold text-rose-600">RNOS pendiente. El alta ARCA no se puede enviar.</p>}
                 {!!(detalle?.rnos as { sugerido?: boolean; sugerencia?: string; empresaId?: string } | undefined)?.sugerido && (
-                  <p className="text-sm text-slate-600">En {(detalle?.rnos as { empresaId: string }).empresaId} tiene RNOS {(detalle?.rnos as { sugerencia: string }).sugerencia}.
+                  <p className="text-sm text-slate-600">En {nombreEmpresa((detalle?.rnos as { empresaId: string }).empresaId)} tiene RNOS {(detalle?.rnos as { sugerencia: string }).sugerencia}.
                     {puede('update') && <button type="button" className="ml-2 underline" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, mail: ficha.mail, telefono: ficha.telefono, dni: ficha.dni, domicilio: ficha.domicilio, empresasHabilitadas: ficha.empresasHabilitadas, obraSocialRnos: (detalle?.rnos as { sugerencia: string }).sugerencia }); }}>Usar esa</button>}
                   </p>
                 )}
@@ -290,13 +403,15 @@ export default function EventualesPage() {
                 <div className="rounded-2xl border border-slate-100 p-3">
                   <h3 className="text-sm font-black text-slate-700">Contrato marco</h3>
                   <p className="text-[11px] text-slate-500">Una vez por empresa, en papel. Cada aceptación en la app es un anexo. La firma en la app (CiDi) queda para más adelante.</p>
-                  {GRUPO_EVENTUALES_EMPRESA_IDS.map((emp) => {
+                  {ficha.empresasHabilitadas.length === 0 && <p className="mt-2 text-xs font-bold text-amber-800">Sin empresa habilitada</p>}
+                  {ficha.empresasHabilitadas.map((emp) => {
                     const marco = marcos[emp];
-                    const estado = marco?.estado || 'SIN_MARCO';
+                    const vista = textoEstadoMarco(marco?.estado, marco?.vencimiento);
                     return (
                       <div key={emp} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                        <span className={`font-bold ${estado === 'MARCO_VIGENTE' ? 'text-emerald-700' : 'text-rose-600'}`}>{emp}: {estado}{marco?.vencimiento ? ` · vence ${fmt(marco.vencimiento)}` : ''}</span>
-                        {marco?.avisar && <span className="font-bold text-amber-700">Aviso RRHH: vence en menos de 30 días</span>}
+                        <span className="font-bold text-slate-700">{nombreEmpresa(emp)}</span>
+                        <span className={`rounded-full px-2 py-0.5 font-bold ${TONO_MARCO[vista.tono] || TONO_MARCO.pendiente}`}>{vista.texto}</span>
+                        {marco?.avisar && <span className="font-bold text-amber-700">Vence en menos de 30 días</span>}
                         {puede('update') && <button type="button" className="rounded-xl bg-slate-100 px-2 py-1 font-bold" onClick={async () => {
                           const res = await llamar('gestionarMarcoEventual', { accion: 'generar', cuil: ficha.id, empresaId: emp, fecha: firmaFecha });
                           const bin = atob(String(res.pdfBase64 || ''));
@@ -304,33 +419,33 @@ export default function EventualesPage() {
                           for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
                           const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
                           const a = document.createElement('a');
-                          a.href = url; a.download = `Marco-${emp}.pdf`; a.click();
+                          a.href = url; a.download = `Marco-${nombreEmpresa(emp)}.pdf`; a.click();
                           toast.success('PDF del marco generado.');
                         }}>Generar PDF</button>}
                       </div>
                     );
                   })}
                   {puede('update') && (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <input type="date" value={firmaFecha} onChange={(e) => setFirmaFecha(e.target.value)} className="rounded-xl border px-2 py-1 text-xs" />
-                      <input value={vigenciaDias} onChange={(e) => setVigenciaDias(e.target.value)} className="w-16 rounded-xl border px-2 py-1 text-xs" title="Días de vigencia" />
-                      <select value={empresaMarco} onChange={(e) => setEmpresaMarco(e.target.value)} className="rounded-xl border px-2 py-1 text-xs">
-                        {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
-                      </select>
-                      <label className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white">Subir contrato marco
-                        <input type="file" accept="application/pdf,image/*" className="hidden" onChange={async (e) => {
-                          const file = e.target.files?.[0];
-                          const emp = empresaMarco;
-                          if (!file) return;
-                          const buf = await file.arrayBuffer();
-                          const bytes = new Uint8Array(buf);
-                          let bin = '';
-                          bytes.forEach((b) => { bin += String.fromCharCode(b); });
-                          await llamar('gestionarMarcoEventual', { accion: 'firmar', cuil: ficha.id, empresaId: emp, fechaFirma: firmaFecha, vigenciaDias: Number(vigenciaDias) || 365, pdfBase64: btoa(bin) });
-                          toast.success('Marco firmado cargado.');
-                          abrirDetalle(ficha.id);
-                        }} />
+                    <div className="mt-3 flex flex-wrap items-end gap-2">
+                      <label className="text-xs font-bold text-slate-600">Empresa
+                        <select value={ficha.empresasHabilitadas.includes(empresaMarco) ? empresaMarco : (ficha.empresasHabilitadas[0] || '')} onChange={(e) => setEmpresaMarco(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal">
+                          {ficha.empresasHabilitadas.length === 0 && <option value="">Sin empresa habilitada</option>}
+                          {ficha.empresasHabilitadas.map((id) => <option key={id} value={id}>{nombreEmpresa(id)}</option>)}
+                        </select>
                       </label>
+                      <label className="text-xs font-bold text-slate-600">Fecha de firma
+                        <input type="date" value={firmaFecha} onChange={(e) => setFirmaFecha(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal" />
+                      </label>
+                      <label className="text-xs font-bold text-slate-600">Vigencia
+                        <select value={vigenciaDias} onChange={(e) => setVigenciaDias(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal">
+                          {opcionesVigenciaMarco().map((op) => <option key={op.dias} value={String(op.dias)}>{op.label}</option>)}
+                        </select>
+                      </label>
+                      <label className="cursor-pointer rounded-xl bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">Elegir archivo
+                        <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { setArchivoMarco(e.target.files?.[0] || null); e.target.value = ''; }} />
+                      </label>
+                      {archivoMarco && <span className="text-[11px] text-slate-500">{archivoMarco.name}</span>}
+                      <button type="button" className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white disabled:opacity-50" disabled={!archivoMarco || !ficha.empresasHabilitadas.includes(empresaMarco)} onClick={() => subirMarco(ficha.id)}>Subir contrato marco</button>
                     </div>
                   )}
                 </div>
@@ -347,7 +462,7 @@ export default function EventualesPage() {
                   {contratos.length === 0 && <p className="text-xs text-slate-400">Sin contratos.</p>}
                   {contratos.map((c) => (
                     <div key={c.id} className="mt-2 rounded-2xl border border-slate-100 p-3 text-xs text-slate-600">
-                      <p className="font-bold">{c.empresaId} · {c.estado} · {fmt(c.fechaAlta)} → {fmt(c.fechaBaja)}</p>
+                      <p className="font-bold">{c.empresaId ? nombreEmpresa(c.empresaId) : 'Sin empresa'} · {c.estado} · {fmt(c.fechaAlta)} → {fmt(c.fechaBaja)}</p>
                       {(c.jornadas || []).map((j, i) => <p key={i}>{fmt(j.fecha)} {j.horaInicio}–{j.horaFin} ({j.horas} h)</p>)}
                     </div>
                   ))}
@@ -372,6 +487,56 @@ export default function EventualesPage() {
             )}
           </section>
         </div>
+        {asignarAbierto && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-lg">
+              <h2 className="text-lg font-black text-slate-800">Asignar empresas habilitadas</h2>
+              <p className="mt-1 text-xs text-slate-500">{seleccion.length} personas. Reemplaza las empresas que tenían habilitadas.</p>
+              <div className="mt-3 flex flex-col gap-2 text-sm">
+                {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => (
+                  <label key={id} className="flex items-center gap-2">
+                    <input type="checkbox" checked={empresasAsignar.includes(id)} onChange={(e) => setEmpresasAsignar(e.target.checked ? [...empresasAsignar, id] : empresasAsignar.filter((x) => x !== id))} />
+                    {nombreEmpresa(id)}
+                  </label>
+                ))}
+              </div>
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={() => setAsignarAbierto(false)} className="rounded-2xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
+                <button type="button" onClick={confirmarAsignar} className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Asignar</button>
+              </div>
+            </div>
+          </div>
+        )}
+        {reporteContacto && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
+            <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-3xl bg-white p-5 shadow-lg">
+              <h2 className="text-lg font-black text-slate-800">{reporteContacto.dryRun ? 'Vista previa del Excel' : 'Contactos importados'}</h2>
+              <ul className="mt-3 space-y-1 text-sm text-slate-700">
+                <li>{reporteContacto.resumen.actualizar} se actualizan</li>
+                <li>{reporteContacto.resumen.sinCambio} sin cambios</li>
+                <li>{reporteContacto.resumen.noEnBolsa} no están en la bolsa</li>
+                <li>{reporteContacto.resumen.cuilInvalido} con CUIL inválido</li>
+                <li>{reporteContacto.resumen.mailInvalido} con mail inválido</li>
+              </ul>
+              {reporteContacto.muestra.length > 0 && (
+                <ul className="mt-3 max-h-40 overflow-auto rounded-2xl bg-slate-50 p-2 text-xs text-slate-600">
+                  {reporteContacto.muestra.map((row) => <li key={row.cuil}>CUIL {row.cuil}: {row.campos.map((c) => CAMPO_CONTACTO[c] || c).join(', ')}</li>)}
+                </ul>
+              )}
+              {reporteContacto.problemas.length > 0 && (
+                <ul className="mt-3 max-h-32 overflow-auto text-xs text-rose-700">
+                  {reporteContacto.problemas.map((row, i) => <li key={`${row.cuil}_${i}`}>{row.cuil || '—'} · {PROBLEMA_CONTACTO[row.codigo] || row.codigo}</li>)}
+                </ul>
+              )}
+              <div className="mt-4 flex justify-end gap-2">
+                <button type="button" onClick={() => setReporteContacto(null)} className="rounded-2xl px-3 py-2 text-sm text-slate-500">Cerrar</button>
+                {reporteContacto.dryRun && reporteContacto.resumen.actualizar > 0 && (
+                  <button type="button" disabled={importando} onClick={() => importarContactos(new File([], 'lote'), false, reporteContacto.filas)} className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Aplicar</button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
         {form && (
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
             <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white p-5 shadow-lg">
@@ -398,7 +563,7 @@ export default function EventualesPage() {
                 {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => (
                   <label key={id} className="flex items-center gap-1">
                     <input type="checkbox" checked={form.empresasHabilitadas.includes(id)} onChange={(e) => setForm({ ...form, empresasHabilitadas: e.target.checked ? [...form.empresasHabilitadas, id] : form.empresasHabilitadas.filter((x) => x !== id) })} />
-                    {id}
+                    {nombreEmpresa(id)}
                   </label>
                 ))}
               </div>

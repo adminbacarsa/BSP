@@ -54,7 +54,10 @@ async function plantaTieneCuil(cuil: string): Promise<boolean> {
 
 export const gestionarEventual = functions.https.onCall(async (data, context) => {
   const accion = String(data?.accion || '');
-  const mapa: Record<string, string> = { crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read' };
+  const mapa: Record<string, string> = {
+    crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
+    asignarEmpresas: 'update', importarContacto: 'update',
+  };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
   const auth = await exigir(context, permiso);
@@ -90,6 +93,61 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         empresaId: String(d.data().empresaId || ''),
         obraSocialRnos: String(d.data().obraSocialRnos || ''),
       }))),
+    };
+  }
+
+  if (accion === 'asignarEmpresas') {
+    const { planAsignarEmpresas } = await import('../eventuales-shared/fichaUx.mjs') as {
+      planAsignarEmpresas: (empresas: unknown) => { ok: boolean; codigo?: string; empresasHabilitadas?: string[] };
+    };
+    const plan = planAsignarEmpresas(data?.empresasHabilitadas);
+    if (!plan.ok || !plan.empresasHabilitadas) throw new functions.https.HttpsError('invalid-argument', plan.codigo || 'SIN_EMPRESA');
+    const crudos: unknown[] = Array.isArray(data?.cuils) ? data.cuils : [];
+    const cuils: string[] = [...new Set(crudos.map((c) => String(c || '').replace(/\D/g, '')))].filter((c) => c.length === 11);
+    if (!cuils.length) throw new functions.https.HttpsError('invalid-argument', 'Elegí al menos una persona.');
+    let asignados = 0;
+    const ausentes: string[] = [];
+    for (const cuil of cuils) {
+      const ref = db().collection('eventuales_bolsa').doc(cuil);
+      if (!(await ref.get()).exists) { ausentes.push(cuil); continue; }
+      await ref.set({ empresasHabilitadas: plan.empresasHabilitadas, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      asignados += 1;
+    }
+    await auditar('EVENTUAL_EMPRESAS', auth.uid, cuils[0], `${asignados} fichas → ${plan.empresasHabilitadas.join(', ')}`);
+    return { ok: true, asignados, ausentes, empresasHabilitadas: plan.empresasHabilitadas };
+  }
+
+  if (accion === 'importarContacto') {
+    const { planImportContacto } = await import('../eventuales-shared/fichaUx.mjs') as {
+      planImportContacto: (filas: unknown[], bolsa: Map<string, { mail?: string; telefono?: string; domicilio?: string }>) => {
+        detalle: { cuil: string; codigo: string; mailInvalido?: boolean; cambios: Record<string, string> }[];
+        aplicar: { cuil: string; cambios: { mail?: string; telefono?: string; domicilio?: string } }[];
+        resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
+      };
+    };
+    const filas = Array.isArray(data?.filas) ? data.filas.slice(0, 500) : [];
+    if (!filas.length) throw new functions.https.HttpsError('invalid-argument', 'El archivo no tiene filas.');
+    const snap = await db().collection('eventuales_bolsa').select('mail', 'telefono', 'domicilio').get();
+    const bolsa = new Map(snap.docs.map((d) => [d.id, { mail: d.data().mail, telefono: d.data().telefono, domicilio: d.data().domicilio }]));
+    const plan = planImportContacto(filas, bolsa);
+    const dryRun = data?.dryRun !== false;
+    if (!dryRun) {
+      for (const row of plan.aplicar) {
+        await db().collection('eventuales_bolsa').doc(row.cuil).set({ ...row.cambios, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+      }
+      await auditar('EVENTUAL_CONTACTO', auth.uid, plan.aplicar[0]?.cuil || '', `${plan.aplicar.length} fichas con mail, teléfono o domicilio`);
+    }
+    const problemas = plan.detalle
+      .filter((d) => d.codigo === 'NO_EN_BOLSA' || d.codigo === 'CUIL_INVALIDO' || d.mailInvalido)
+      .slice(0, 40)
+      .map((d) => ({ cuil: d.cuil, codigo: d.mailInvalido && d.codigo === 'ACTUALIZAR' ? 'MAIL_INVALIDO' : d.codigo }));
+    return {
+      ok: true,
+      dryRun,
+      resumen: plan.resumen,
+      aplicar: plan.aplicar.length,
+      muestra: plan.aplicar.slice(0, 40).map((d) => ({ cuil: d.cuil, campos: Object.keys(d.cambios) })),
+      problemas,
     };
   }
 

@@ -27,6 +27,7 @@ type ResultadoPersona = { cuil: string; ok: boolean; hojas: number; estado?: str
 
 type Props = {
   empresaId: string;
+  nombreEmpresa?: string;
   fichas: PersonaMarco[];
   seleccionados: string[];
   puedeEditar: boolean;
@@ -55,7 +56,7 @@ function descargar(bytes: Uint8Array, nombre: string) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-export default function MarcosLotePanel({ empresaId, fichas, seleccionados, puedeEditar, llamar }: Props) {
+export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, seleccionados, puedeEditar, llamar }: Props) {
   const [imprimiendo, setImprimiendo] = useState(false);
   const [abierto, setAbierto] = useState(false);
   const [archivos, setArchivos] = useState<File[]>([]);
@@ -93,7 +94,7 @@ export default function MarcosLotePanel({ empresaId, fichas, seleccionados, pued
         fecha: hoy(),
         marcoVersion: MARCO_VERSION,
       }) as { bytes: Uint8Array; paginas: number };
-      descargar(out.bytes, `Marcos-${empresaId}-${hoy()}.pdf`);
+      descargar(out.bytes, `Marcos-${(nombreEmpresa || 'empresa').replace(/[^\wÁÉÍÓÚáéíóúÑñ]+/g, '-')}-${hoy()}.pdf`);
       toast.success(`${elegidas.length} marco${elegidas.length === 1 ? '' : 's'} × 2 ejemplares · ${out.paginas} hojas.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo armar el PDF.');
@@ -199,7 +200,7 @@ export default function MarcosLotePanel({ empresaId, fichas, seleccionados, pued
           <div className="max-h-[90vh] w-full max-w-3xl overflow-auto rounded-3xl bg-white p-6 shadow-lg">
             <div className="mb-4 flex items-start justify-between gap-2">
               <div>
-                <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><FileCheck2 size={18} /> Subir marcos firmados · {empresaId}</h2>
+                <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><FileCheck2 size={18} /> Subir marcos firmados · {nombreEmpresa || 'empresa'}</h2>
                 <p className="text-xs text-slate-500">Un PDF con muchas hojas o varios archivos/fotos. Se lee el QR de cada hoja de firmas; si no se puede, vale el CUIL en el nombre del archivo.</p>
               </div>
               <button type="button" onClick={descartar} className="rounded-xl p-1 text-slate-500 hover:bg-slate-100" aria-label="Cerrar"><X size={18} /></button>
