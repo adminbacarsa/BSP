@@ -269,6 +269,8 @@ function AlertasScreenContent() {
         solicitudId: n.solicitudId,
         eventoId: n.eventoId,
         shiftId: n.shiftId,
+        contratoId: n.contratoId,
+        convocatoriaId: n.convocatoriaId,
       });
       if (route) {
         router.push(hrefFromRoute(route));

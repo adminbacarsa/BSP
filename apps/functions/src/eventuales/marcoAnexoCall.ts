@@ -1,6 +1,6 @@
 /**
  * Contrato marco (papel) y anexo por convocatoria (aceptación en la app).
- * No hay OTP de teléfono en el proyecto: el código sale por mail o WhatsApp.
+ * El código de un solo uso sale por push (FCM + bandeja de Alertas) y por mail SMTP (Gmail). WhatsApp no se usa.
  */
 import { Readable } from 'stream';
 import * as admin from 'firebase-admin';
@@ -47,7 +47,9 @@ async function lib() {
     nuevoCodigoAnexo: () => string;
     hashCodigo: (codigo: string, salt: string) => string;
     planConfirmarAnexo: (i: Record<string, unknown>) => { ok: boolean; codigo?: string };
-    canalCodigo: (i: { mail?: string; telefono?: string }) => { ok: boolean; codigo?: string; canales?: string[] };
+    canalCodigo: (i: { mail?: string; tienePush?: boolean }) => { ok: boolean; codigo?: string; canales?: string[]; mensaje?: string };
+    mensajeEnvioCodigo: (i: { canales?: string[]; mail?: string }) => string;
+    MENSAJE_SIN_CANAL: string;
     CODIGO_ANEXO_MINUTOS: number;
     VIGENCIA_MARCO_DIAS: number;
   }>;
@@ -252,6 +254,38 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
 });
 
+async function tieneTokenPush(uid: string): Promise<boolean> {
+  if (!uid) return false;
+  const [porUid, directo] = await Promise.all([
+    db().collection('device_tokens').where('uid', '==', uid).limit(5).get(),
+    db().collection('device_tokens').doc(uid).get(),
+  ]);
+  const sirve = (data: FirebaseFirestore.DocumentData | undefined) => String(data?.token || '').length > 10;
+  if (porUid.docs.some((d) => sirve(d.data()))) return true;
+  return sirve(directo.data());
+}
+
+async function enviarMailCodigo(destino: string, codigo: string): Promise<void> {
+  const gmailUser = (process.env.GMAIL_USER || '').trim();
+  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
+  if (!gmailUser || !gmailPass) {
+    throw new functions.https.HttpsError('failed-precondition', 'El mail no está configurado. Contactá a RRHH.');
+  }
+  const nodemailer = await import('nodemailer');
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 465,
+    secure: true,
+    auth: { user: gmailUser, pass: gmailPass },
+  });
+  await transporter.sendMail({
+    from: `"COSP" <${gmailUser}>`,
+    to: destino,
+    subject: 'Código para aceptar el anexo',
+    text: `Tu código de 6 dígitos para aceptar el anexo es ${codigo}. Vence en 15 minutos. Si no lo pediste, avisá a RRHH.`,
+  });
+}
+
 async function refCodigo(contratoId: string, convocatoriaId: string) {
   const id = contratoId || convocatoriaId;
   if (!id) throw new functions.https.HttpsError('invalid-argument', 'Falta el contrato o la convocatoria.');
@@ -269,11 +303,40 @@ export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) =>
   if (bolsa.uid && bolsa.uid !== context.auth.uid && String(context.auth.token.role) !== 'EVENTUAL') {
     throw new functions.https.HttpsError('permission-denied', 'El código es del eventual.');
   }
-  const canal = m.canalCodigo({ mail: bolsa.mail, telefono: bolsa.telefono });
-  if (!canal.ok) throw new functions.https.HttpsError('failed-precondition', 'SIN_CANAL');
+  const uid = String(bolsa.uid || context.auth.uid || '');
+  const mail = String(bolsa.mail || '');
+  const canal = m.canalCodigo({ mail, tienePush: await tieneTokenPush(uid) });
+  if (!canal.ok) throw new functions.https.HttpsError('failed-precondition', canal.mensaje || m.MENSAJE_SIN_CANAL);
   const codigo = m.nuevoCodigoAnexo();
   const salt = admin.firestore().collection('_').doc().id;
   const venceMs = Date.now() + m.CODIGO_ANEXO_MINUTOS * 60 * 1000;
+  const entregados: string[] = [];
+  if (canal.canales?.includes('PUSH')) {
+    await db().collection('user_notifications').add({
+      uid,
+      title: 'Código para aceptar el anexo',
+      body: `Tu código es ${codigo}. Vence en 15 minutos.`,
+      type: 'CODIGO_ANEXO',
+      target: 'employee',
+      read: false,
+      contratoId: contratoId || null,
+      convocatoriaId: convocatoriaId || null,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    entregados.push('PUSH');
+  }
+  if (canal.canales?.includes('MAIL')) {
+    try {
+      await enviarMailCodigo(mail, codigo);
+      entregados.push('MAIL');
+    } catch (err) {
+      if (!entregados.length) {
+        const mensaje = err instanceof functions.https.HttpsError ? err.message : 'No pudimos enviar el mail. Contactá a RRHH.';
+        throw new functions.https.HttpsError('failed-precondition', mensaje);
+      }
+    }
+  }
+  if (!entregados.length) throw new functions.https.HttpsError('failed-precondition', m.MENSAJE_SIN_CANAL);
   await ref.set({
     contratoId: contratoId || null,
     convocatoriaId: convocatoriaId || null,
@@ -282,11 +345,11 @@ export const pedirCodigoAnexoEventual = callable.onCall(async (data, context) =>
     hash: m.hashCodigo(codigo, salt),
     usado: false,
     venceMs,
-    canales: canal.canales,
-    pendienteEnvio: true,
+    canales: entregados,
+    pendienteEnvio: false,
     createdAt: admin.firestore.FieldValue.serverTimestamp(),
   });
-  return { ok: true, canales: canal.canales, venceMs, pendienteEnvio: true };
+  return { ok: true, canales: entregados, venceMs, mensaje: m.mensajeEnvioCodigo({ canales: entregados, mail }) };
 });
 
 export const confirmarAnexoEventual = callable.onCall(async (data, context) => {

@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   acuseRecibido,
@@ -33,6 +33,7 @@ export default function ContratosScreen() {
 function ContratosScreenContent() {
   const { isEventual, eventualLegajos, empresasNombres, employee } = usePortalAuth();
   const { palette } = useTheme();
+  const router = useRouter();
   const { vigentes, pasados, loading, error, hoyKey } = useContratosEventuales(eventualLegajos);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [acusadosLocal, setAcusadosLocal] = useState<Set<string>>(new Set());
@@ -127,6 +128,14 @@ function ContratosScreenContent() {
               loading={busyId === c.id}
               disabled={busyId === c.id}
               onPress={() => onAcusar(c)}
+              style={styles.acuseBtn}
+            />
+          ) : null}
+          {bucket === 'VIGENTE' ? (
+            <CommandButton
+              label="Confirmar anexo"
+              variant="secondary"
+              onPress={() => router.push({ pathname: '/codigo-anexo', params: { contratoId: c.id } })}
               style={styles.acuseBtn}
             />
           ) : null}

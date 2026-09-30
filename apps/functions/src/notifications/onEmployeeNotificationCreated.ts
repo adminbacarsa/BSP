@@ -27,6 +27,7 @@ const INBOX_NEEDS_FCM = new Set([
   'AVISO_ENTRANTE_SIN_FICHAR',  // T: el entrante no fichó — saliente espera
   'DEVICE_REGISTRATION_REJECTED',
   'DEVICE_REGISTRATION_APPROVED',
+  'CODIGO_ANEXO',
 ]);
 
 async function collectTokens(
@@ -129,6 +130,8 @@ export const onEmployeeNotificationCreated = functions
           eventoId: data.eventoId ? String(data.eventoId) : '',
           solicitudId: data.solicitudId ? String(data.solicitudId) : '',
           servicioId: data.servicioId ? String(data.servicioId) : '',
+          contratoId: data.contratoId ? String(data.contratoId) : '',
+          convocatoriaId: data.convocatoriaId ? String(data.convocatoriaId) : '',
         },
         android: platform?.android ?? {
           priority: 'high',

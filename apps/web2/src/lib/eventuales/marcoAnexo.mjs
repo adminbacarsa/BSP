@@ -186,11 +186,34 @@ export function planConfirmarAnexo({ codigo, salt, hash, usado, venceMs, ahoraMs
   return { ok: true };
 }
 
-/** No hay OTP de teléfono en COSP. El código sale por mail o WhatsApp, el mismo canal de los avisos. */
-export function canalCodigo({ mail, telefono }) {
+export const MENSAJE_SIN_CANAL = 'No pudimos enviarte el código. Contactá a RRHH.';
+
+/** Lo que se muestra después del @. «terminado en gmail.com». */
+export function sufijoMail(mail) {
+  const texto = String(mail || '').trim().toLowerCase();
+  const at = texto.lastIndexOf('@');
+  if (at < 1 || at === texto.length - 1) return '';
+  return texto.slice(at + 1);
+}
+
+/** PUSH si hay token FCM. MAIL si hay casilla. WhatsApp no está integrado. */
+export function canalCodigo({ mail, tienePush }) {
   const canales = [];
+  if (tienePush === true) canales.push('PUSH');
   if (String(mail || '').includes('@')) canales.push('MAIL');
-  if (String(telefono || '').replace(/\D/g, '').length >= 8) canales.push('WHATSAPP');
-  if (!canales.length) return { ok: false, codigo: 'SIN_CANAL' };
-  return { ok: true, canales };
+  if (!canales.length) return { ok: false, codigo: 'SIN_CANAL', mensaje: MENSAJE_SIN_CANAL, canales };
+  return { ok: true, canales, mensaje: mensajeEnvioCodigo({ canales, mail }) };
+}
+
+export function mensajeEnvioCodigo({ canales, mail }) {
+  const lista = canales || [];
+  const push = lista.includes('PUSH');
+  const porMail = lista.includes('MAIL');
+  const sufijo = sufijoMail(mail);
+  if (push && porMail) {
+    return `Te enviamos un código de 6 dígitos a tu app y a tu mail terminado en ${sufijo}.`;
+  }
+  if (push) return 'Te enviamos un código de 6 dígitos a tu app.';
+  if (porMail) return `Te enviamos un código de 6 dígitos a tu mail terminado en ${sufijo}.`;
+  return MENSAJE_SIN_CANAL;
 }

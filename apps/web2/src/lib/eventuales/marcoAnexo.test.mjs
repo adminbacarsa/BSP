@@ -3,6 +3,7 @@ import { describe, it } from 'node:test';
 import { evaluarCandidato } from './planificacion.mjs';
 import {
   canalCodigo, CUENTA_DRIVE_EVENTUALES, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
+  MENSAJE_SIN_CANAL, mensajeEnvioCodigo,
   MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, pdfDeTexto, planCarpetaEventuales, planConfirmarAnexo, planMarco,
   planRenombre, sha256, textoMarco,
 } from './marcoAnexo.mjs';
@@ -73,7 +74,15 @@ describe('contrato marco y anexo', () => {
     assert.equal(planConfirmarAnexo({ codigo: '000000', salt, hash, usado: false, venceMs: 2_000, ahoraMs: ahora }).codigo, 'CODIGO_INVALIDO');
     assert.equal(planConfirmarAnexo({ codigo: '123456', salt, hash, usado: true, venceMs: 2_000, ahoraMs: ahora }).codigo, 'CODIGO_USADO');
     assert.equal(planConfirmarAnexo({ codigo: '123456', salt, hash, usado: false, venceMs: 500, ahoraMs: ahora }).codigo, 'CODIGO_VENCIDO');
-    assert.deepEqual(canalCodigo({ mail: 'a@b.com', telefono: '3515551234' }).canales, ['MAIL', 'WHATSAPP']);
-    assert.equal(canalCodigo({ mail: '', telefono: '' }).codigo, 'SIN_CANAL');
+    const ambos = canalCodigo({ mail: 'ana.perez@bacar.com.ar', tienePush: true });
+    assert.deepEqual(ambos.canales, ['PUSH', 'MAIL']);
+    assert.equal(ambos.mensaje, 'Te enviamos un código de 6 dígitos a tu app y a tu mail terminado en bacar.com.ar.');
+    assert.equal(canalCodigo({ mail: 'ana.perez@bacar.com.ar', tienePush: false }).canales.join(','), 'MAIL');
+    assert.equal(canalCodigo({ mail: '', tienePush: true }).mensaje, 'Te enviamos un código de 6 dígitos a tu app.');
+    const vacio = canalCodigo({ mail: '', tienePush: false });
+    assert.equal(vacio.codigo, 'SIN_CANAL');
+    assert.equal(vacio.mensaje, MENSAJE_SIN_CANAL);
+    assert.equal(mensajeEnvioCodigo({ canales: [], mail: '' }), MENSAJE_SIN_CANAL);
+    assert.equal(JSON.stringify(ambos).includes('WHATSAPP'), false);
   });
 });

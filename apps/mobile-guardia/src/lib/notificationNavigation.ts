@@ -28,6 +28,7 @@ export const EMPLOYEE_ALERT_TYPES = new Set([
   'RETENCION',
   'ADELANTO',
   'CONVOCADO_RECORDATORIO',
+  'CODIGO_ANEXO',
 ]);
 
 /** Tipos de cobertura que requieren respuesta Aceptar / Rechazar. */
@@ -124,6 +125,16 @@ export function routeFromNotificationData(data: Record<string, unknown> | undefi
   const recordatorio = parseConvocadoRecordatorioPush(data);
   if (recordatorio) return convocadoRecordatorioRoute(recordatorio);
 
+  if (type === 'CODIGO_ANEXO') {
+    const contratoId = String(data.contratoId ?? '').trim();
+    const convocatoriaId = String(data.convocatoriaId ?? '').trim();
+    const q = contratoId
+      ? `contratoId=${encodeURIComponent(contratoId)}`
+      : convocatoriaId
+        ? `convocatoriaId=${encodeURIComponent(convocatoriaId)}`
+        : '';
+    return q ? `/codigo-anexo?${q}` : '/codigo-anexo';
+  }
   if (COBERTURA_TYPES.has(type)) {
     const convId = String(data.convocatoriaId ?? data.convId ?? data.id ?? '').trim();
     if (convId) return `/(tabs)?focus=cobertura&convocatoriaId=${encodeURIComponent(convId)}`;
@@ -182,6 +193,7 @@ export function notificationActionLabel(type: string | undefined): string {
   const t = String(type ?? '')
     .trim()
     .toUpperCase();
+  if (t === 'CODIGO_ANEXO') return 'Ingresar código';
   if (t === 'CONVOCADO_RECORDATORIO') return 'Responder llegada';
   if (COBERTURA_TYPES.has(t)) return 'Ver convocatoria';
   if (EVENTOS_TYPES.has(t)) return 'Ver convocatoria';
