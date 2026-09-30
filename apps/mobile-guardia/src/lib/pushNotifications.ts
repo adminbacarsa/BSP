@@ -11,6 +11,7 @@ import {
   ALERTAS_TURNO_CHANNEL_ID,
   ALERTAS_TURNO_CHANNEL_ID_LEGACY,
   ALERTAS_TURNO_CHANNEL_LEGACY,
+  binaryHasAlertasTurnoSound,
 } from './alertasTurnoChannel';
 
 export { buildDeviceTokenDoc } from './deviceTokenDoc';
@@ -19,8 +20,8 @@ export { ALERTAS_TURNO_CHANNEL_ID } from './alertasTurnoChannel';
 let alertasTurnoChannelReady: Promise<void> | null = null;
 
 /**
- * Crea `alertas_turno_v2` (sonido propio) y el canal legado `alertas_turno`.
- * Idempotente. No pide permiso. En iOS solo deja el handler con sonido.
+ * Crea el canal legado `alertas_turno` y, solo si el binario trae el wav,
+ * `alertas_turno_v2`. Idempotente. No pide permiso. En iOS solo deja el handler.
  */
 export function ensureAlertasTurnoChannel(): Promise<void> {
   if (Platform.OS === 'web') return Promise.resolve();
@@ -37,6 +38,15 @@ export function ensureAlertasTurnoChannel(): Promise<void> {
         }),
       });
       if (Platform.OS !== 'android') return;
+      await Notifications.setNotificationChannelAsync(ALERTAS_TURNO_CHANNEL_ID_LEGACY, {
+        name: ALERTAS_TURNO_CHANNEL_LEGACY.name,
+        description: ALERTAS_TURNO_CHANNEL_LEGACY.description,
+        importance: Notifications.AndroidImportance.MAX,
+        sound: ALERTAS_TURNO_CHANNEL_LEGACY.sound,
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        enableVibrate: true,
+      });
+      if (!binaryHasAlertasTurnoSound(Constants.nativeAppVersion)) return;
       await Notifications.setNotificationChannelAsync(ALERTAS_TURNO_CHANNEL_ID, {
         name: ALERTAS_TURNO_CHANNEL.name,
         description: ALERTAS_TURNO_CHANNEL.description,
@@ -56,14 +66,6 @@ export function ensureAlertasTurnoChannel(): Promise<void> {
             requestHardwareAudioVideoSynchronization: false,
           },
         },
-      });
-      await Notifications.setNotificationChannelAsync(ALERTAS_TURNO_CHANNEL_ID_LEGACY, {
-        name: ALERTAS_TURNO_CHANNEL_LEGACY.name,
-        description: ALERTAS_TURNO_CHANNEL_LEGACY.description,
-        importance: Notifications.AndroidImportance.MAX,
-        sound: ALERTAS_TURNO_CHANNEL_LEGACY.sound,
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        enableVibrate: true,
       });
     })().catch((err) => {
       alertasTurnoChannelReady = null;
@@ -186,6 +188,7 @@ async function persistTokenDoc(params: {
     token,
     platform,
     previewOf,
+    nativeVersion: platform === 'web' ? null : Constants.nativeAppVersion,
   });
 
   await setDoc(

@@ -7,6 +7,8 @@ export function buildDeviceTokenDoc(params: {
   token: string;
   platform: 'web' | 'ios' | 'android';
   previewOf?: boolean;
+  /** `Constants.nativeAppVersion`: el servidor elige el canal de alertas con esto. */
+  nativeVersion?: string | null;
 }): Record<string, unknown> {
   const docData: Record<string, unknown> = {
     uid: params.uid,
@@ -18,6 +20,10 @@ export function buildDeviceTokenDoc(params: {
   };
   if (params.previewOf === true) {
     docData.previewOf = true;
+  }
+  const nativeVersion = String(params.nativeVersion ?? '').trim();
+  if (nativeVersion) {
+    docData.nativeVersion = nativeVersion;
   }
   return docData;
 }

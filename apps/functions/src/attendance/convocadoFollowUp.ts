@@ -4,7 +4,7 @@ import { CONVOCADO_DELAY_GRACE_MIN } from '../common/convocadoEta';
 import { logConvocatoriaEvento } from '../coverage/convocatoriaEventos';
 import { buildOpsCoverageDocId } from '../coverage/syncAusenciaCobertura';
 import { guardFirstName, guardLead } from '../common/pushGreeting';
-import { shiftAlertPlatformConfig } from '../notifications/shiftAlertFcm';
+import { groupTokensByShiftAlertChannel, shiftAlertPlatformConfig, type DeviceTokenRow } from '../notifications/shiftAlertFcm';
 
 const PAGE = 50;
 const MAX_PAGES = 20;
@@ -15,13 +15,15 @@ function ms(v: unknown): number {
   return (v as Timestamp | undefined)?.toMillis?.() ?? 0;
 }
 
-async function tokensOf(db: Firestore, employeeId: string): Promise<string[]> {
+async function tokensOf(db: Firestore, employeeId: string): Promise<DeviceTokenRow[]> {
   if (!employeeId) return [];
   const emp = await db.collection('empleados').doc(employeeId).get();
   const uid = String(emp.data()?.uid || '').trim();
   if (!uid) return [];
   const snap = await db.collection('device_tokens').where('uid', '==', uid).get();
-  return snap.docs.map((d) => d.data()?.token).filter((t): t is string => typeof t === 'string' && t.length > 10);
+  return snap.docs
+    .map((d) => ({ token: String(d.data()?.token || ''), data: d.data() || {} }))
+    .filter((r) => r.token.length > 10);
 }
 
 function covIdOf(conv: Conv): string {
@@ -99,9 +101,9 @@ async function sendReminder(db: Firestore, doc: FirebaseFirestore.QueryDocumentS
   const eta = Number(conv.etaMinutes) || 0;
   const name = guardFirstName({ employeeName: conv.candidateEmployeeName });
   const body = guardLead(name, '¿Seguís en camino? Si te demorás, avisanos en cuánto llegás.');
-  const tokens = await tokensOf(db, String(conv.candidateEmployeeId || ''));
-  if (tokens.length) {
-    const platform = shiftAlertPlatformConfig();
+  const rows = await tokensOf(db, String(conv.candidateEmployeeId || ''));
+  for (const [channel, tokens] of groupTokensByShiftAlertChannel(rows)) {
+    const platform = shiftAlertPlatformConfig(channel);
     await admin.messaging().sendEachForMulticast({
       tokens,
       notification: { title: '¿Venís en camino?', body },

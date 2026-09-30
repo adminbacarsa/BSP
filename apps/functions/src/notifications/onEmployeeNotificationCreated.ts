@@ -4,7 +4,12 @@
  */
 import * as functions from 'firebase-functions/v1';
 import * as admin from 'firebase-admin';
-import { isShiftAlertFcmType, shiftAlertPlatformConfig } from './shiftAlertFcm';
+import {
+  groupTokensByShiftAlertChannel,
+  isShiftAlertFcmType,
+  shiftAlertPlatformConfig,
+  type DeviceTokenRow,
+} from './shiftAlertFcm';
 import { logConvocatoriaEvento } from '../coverage/convocatoriaEventos';
 
 /** Tipos que NO envían FCM en el mismo flujo que crean la notificación. */
@@ -34,8 +39,8 @@ async function collectTokens(
   db: admin.firestore.Firestore,
   uid: string | null | undefined,
   employeeId: string | null | undefined,
-): Promise<string[]> {
-  const tokenSet = new Set<string>();
+): Promise<DeviceTokenRow[]> {
+  const byToken = new Map<string, DeviceTokenRow>();
   const queries: Promise<admin.firestore.QuerySnapshot>[] = [];
   if (employeeId) {
     queries.push(db.collection('device_tokens').where('employeeId', '==', employeeId).get());
@@ -48,11 +53,12 @@ async function collectTokens(
   const snaps = await Promise.all(queries);
   for (const snap of snaps) {
     for (const d of snap.docs) {
-      const t = d.data()?.token;
-      if (typeof t === 'string' && t.length > 10) tokenSet.add(t);
+      const data = d.data() || {};
+      const t = data.token;
+      if (typeof t === 'string' && t.length > 10 && !byToken.has(t)) byToken.set(t, { token: t, data });
     }
   }
-  return [...tokenSet];
+  return [...byToken.values()];
 }
 
 export const onEmployeeNotificationCreated = functions
@@ -73,16 +79,17 @@ export const onEmployeeNotificationCreated = functions
       typeof data.employeeId === 'string' && data.employeeId ? data.employeeId : null;
 
     const db = admin.firestore();
-    let tokens = await collectTokens(db, uid, employeeId);
+    let tokenRows = await collectTokens(db, uid, employeeId);
 
     // Si no hay uid en la notif, intentar desde el legajo
-    if (tokens.length === 0 && employeeId) {
+    if (tokenRows.length === 0 && employeeId) {
       const empSnap = await db.collection('empleados').doc(employeeId).get();
       const empUid = empSnap.exists ? (empSnap.data()?.uid as string | undefined) : undefined;
       if (empUid) {
-        tokens = await collectTokens(db, empUid, employeeId);
+        tokenRows = await collectTokens(db, empUid, employeeId);
       }
     }
+    const tokens = tokenRows.map((r) => r.token);
 
     const convocatoriaId = String(data.convocatoriaId || '').trim();
     const auditPush = type === 'CONVOCATORIA_COBERTURA' && !!convocatoriaId;
@@ -117,34 +124,49 @@ export const onEmployeeNotificationCreated = functions
                   : '/app/'; // SOLICITUD_ESTADO_LLEGADA, SOLICITUD_ESTADO_RELEVO, RELEVO, TURNO_FINALIZADO
 
     const shiftAlert = isShiftAlertFcmType(type);
-    const platform = shiftAlert ? shiftAlertPlatformConfig() : null;
+    // Alertas de turno: un envío por canal (v2 solo a binarios que lo tienen).
+    const groups: Array<{ channel: string | null; tokens: string[] }> = shiftAlert
+      ? [...groupTokensByShiftAlertChannel(tokenRows).entries()].map(([channel, list]) => ({ channel, tokens: list }))
+      : [{ channel: null, tokens }];
     try {
-      const result = await admin.messaging().sendEachForMulticast({
-        notification: { title, body },
-        data: {
-          type,
-          title,
-          body,
-          link,
-          notificationId: snap.id,
-          eventoId: data.eventoId ? String(data.eventoId) : '',
-          solicitudId: data.solicitudId ? String(data.solicitudId) : '',
-          servicioId: data.servicioId ? String(data.servicioId) : '',
-          contratoId: data.contratoId ? String(data.contratoId) : '',
-          convocatoriaId: data.convocatoriaId ? String(data.convocatoriaId) : '',
-        },
-        android: platform?.android ?? {
-          priority: 'high',
-          notification: { channelId: 'default' },
-        },
-        ...(platform ? { apns: platform.apns } : {}),
-        webpush: {
-          headers: shiftAlert ? { Urgency: 'high' } : undefined,
-          notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: true },
-          fcmOptions: { link },
-        },
-        tokens,
-      });
+      const sentTokens: string[] = [];
+      const responses: Array<{ success: boolean; error?: { code?: string } }> = [];
+      let successCount = 0;
+      let failureCount = 0;
+      for (const group of groups) {
+        const platform = group.channel ? shiftAlertPlatformConfig(group.channel) : null;
+        const partial = await admin.messaging().sendEachForMulticast({
+          notification: { title, body },
+          data: {
+            type,
+            title,
+            body,
+            link,
+            notificationId: snap.id,
+            eventoId: data.eventoId ? String(data.eventoId) : '',
+            solicitudId: data.solicitudId ? String(data.solicitudId) : '',
+            servicioId: data.servicioId ? String(data.servicioId) : '',
+            contratoId: data.contratoId ? String(data.contratoId) : '',
+            convocatoriaId: data.convocatoriaId ? String(data.convocatoriaId) : '',
+          },
+          android: platform?.android ?? {
+            priority: 'high',
+            notification: { channelId: 'default' },
+          },
+          ...(platform ? { apns: platform.apns } : {}),
+          webpush: {
+            headers: shiftAlert ? { Urgency: 'high' } : undefined,
+            notification: { title, body, icon: '/icons/icon-192x192.png', requireInteraction: true },
+            fcmOptions: { link },
+          },
+          tokens: group.tokens,
+        });
+        sentTokens.push(...group.tokens);
+        responses.push(...partial.responses);
+        successCount += partial.successCount;
+        failureCount += partial.failureCount;
+      }
+      const result = { successCount, failureCount, responses };
 
       console.log(
         `[onEmployeeNotificationCreated] ${type} success=${result.successCount} fail=${result.failureCount}`,
@@ -157,13 +179,13 @@ export const onEmployeeNotificationCreated = functions
           (r.error?.code === 'messaging/registration-token-not-registered' ||
             r.error?.code === 'messaging/invalid-registration-token')
         ) {
-          invalid.push(tokens[i]);
+          invalid.push(sentTokens[i]);
         }
       });
       if (auditPush) {
         for (let i = 0; i < result.responses.length; i++) {
           const r = result.responses[i];
-          const token = tokens[i] || '';
+          const token = sentTokens[i] || '';
           await logConvocatoriaEvento(db, convocatoriaId, {
             type: 'PUSH',
             tokenSuffix: token.slice(-6),

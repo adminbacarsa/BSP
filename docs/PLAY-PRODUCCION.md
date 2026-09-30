@@ -14,7 +14,7 @@ npx eas-cli build --platform android --profile production
 
 Eso genera el **AAB** (`buildType: app-bundle`), con `EXPO_PUBLIC_USE_EMULATOR=false` y `autoIncrement`. No usa `eas submit`.
 
-Cuando el AAB esté en Play y quieras que el servidor pida el sonido nuevo (canal `alertas_turno_v2`), desplegá Functions. Hasta ese deploy el server sigue mandando `alertas_turno` (sonido default). El binario crea los dos canales.
+Functions se puede desplegar antes o después del AAB: el servidor elige el canal por dispositivo (`device_tokens.nativeVersion` >= 1.2.0 → `alertas_turno_v2`; si no, `alertas_turno`). Los celulares con el binario anterior siguen recibiendo en su canal MAX de siempre.
 
 ```text
 firebase deploy --only functions:onEmployeeNotificationCreated,functions:scheduledArrivalNotices
@@ -31,10 +31,11 @@ npx eas-cli submit --platform android --profile production --latest
 ## Sonido de alertas (va en el binario, no en un OTA)
 
 - Archivo: `apps/mobile-guardia/assets/sounds/alertas_turno.wav` (lo copia el plugin `expo-notifications`).
-- Canal nuevo: `alertas_turno_v2`, importancia MAX, usage ALARM, sonido `alertas_turno`.
+- Canal nuevo: `alertas_turno_v2`, importancia MAX, usage ALARM, sonido `alertas_turno`. El JS lo crea **solo** si `Constants.nativeAppVersion` >= 1.2.0 (binario con el wav). Un OTA sobre un binario viejo no lo crea: el canal quedaría fijado sin el sonido.
 - Canal viejo `alertas_turno`: se sigue creando con sonido default. Android no cambia el sonido de un canal ya instalado.
+- Al registrar el token, la app guarda `nativeVersion` en `device_tokens`. Sin ese campo (binarios anteriores) el servidor manda `alertas_turno`.
 - iOS (sin build hoy): entitlement `time-sensitive` ya está en `app.config.ts`; el payload APNs manda `sound: alertas_turno.wav` e `interruption-level: time-sensitive`. Hay que tener el entitlement aprobado en la cuenta de Apple el día que haya build iOS.
-- Teléfonos con el binario anterior: FCM, si no encuentra `alertas_turno_v2`, muestra el aviso en el canal `default`. No se pierden. El sonido propio aparece al instalar este AAB y desplegar Functions.
+- Teléfonos con el binario anterior: reciben en `alertas_turno` (importancia MAX, sonido default). El sonido propio aparece al instalar el AAB 1.2.0 y abrir la app (re-registra el token con `nativeVersion`).
 
 ## Permisos del manifest
 
