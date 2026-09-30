@@ -6,6 +6,7 @@ import { onDocumentWritten as onDocumentWrittenV2, onDocumentUpdated as onDocume
 import * as admin from 'firebase-admin';
 import { FieldValue } from 'firebase-admin/firestore';
 import { bindGuardDevice, rethrowBindGuardDeviceError } from './auth/bindGuardDevice';
+import { activateAndSetPasswordHandler } from './eventuales/activarAccesoEventual';
 import { runBackup, resolveDriveBackupFolderId, syncDriveBackups, deleteDriveBackup, getBackupDb } from './backup/backup.service';
 import { shouldScopeQueriesToEmpresa } from './assistant/assistantEmpresaScope';
 import { runRestore, runRestoreFromStorage, RestoreMode } from './backup/restore.service';
@@ -1985,92 +1986,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
 // 15. ACTIVACIÓN COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
 // =========================================================
 
-export const activateAndSetPassword = functions.https.onCall(async (data, _context) => {
-  const { token, password, deviceId, deviceInfo, platform } = data as {
-    token: string;
-    password: string;
-    deviceId?: string;
-    deviceInfo?: Record<string, string>;
-    platform?: 'web' | 'ios' | 'android';
-  };
-
-  if (!token) throw new functions.https.HttpsError('invalid-argument', 'Token requerido.');
-  if (!password || password.length < 6) {
-    throw new functions.https.HttpsError('invalid-argument', 'La contraseÃ±a debe tener al menos 6 caracteres.');
-  }
-  const trimmedDeviceId = String(deviceId ?? '').trim();
-  if (trimmedDeviceId.length < 8) {
-    throw new functions.https.HttpsError('invalid-argument', 'deviceId inválido.');
-  }
-
-  const db = admin.firestore();
-  const tokenRef = db.collection('device_activations').doc(token);
-  const tokenDoc = await tokenRef.get();
-
-  if (!tokenDoc.exists) {
-    throw new functions.https.HttpsError('not-found', 'Enlace invÃ¡lido o ya utilizado.');
-  }
-
-  const td = tokenDoc.data()!;
-
-  if (td.used) {
-    throw new functions.https.HttpsError('already-exists', 'Este enlace ya fue utilizado. Tu dispositivo puede estar activo.');
-  }
-
-  if (td.expiresAt.toDate() < new Date()) {
-    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace expirÃ³. Pedile al administrador que te reenvÃ­e el mail de acceso.');
-  }
-
-  const { uid, employeeId } = td;
-
-  const userRecord = await admin.auth().getUser(uid);
-  const email = userRecord.email;
-  if (!email) throw new functions.https.HttpsError('internal', 'El usuario no tiene email configurado.');
-
-  const resolvedPlatform =
-    platform === 'ios' || platform === 'android' || platform === 'web'
-      ? platform
-      : deviceInfo?.platform === 'ios' || deviceInfo?.platform === 'android'
-        ? deviceInfo.platform
-        : 'web';
-
-  const empSnapForBind = await db.collection('empleados').doc(employeeId).get();
-  const empresaIdForBind = (empSnapForBind.data()?.empresaId as string) || null;
-
-  try {
-    await bindGuardDevice(db, {
-      uid,
-      employeeId,
-      empresaId: empresaIdForBind,
-      deviceId: trimmedDeviceId,
-      source: 'email_link',
-      deviceInfo: deviceInfo || {},
-      platform: resolvedPlatform,
-      tokenExtras: {
-        activatedAt: admin.firestore.FieldValue.serverTimestamp(),
-      },
-    });
-  } catch (err) {
-    rethrowBindGuardDeviceError(err);
-  }
-
-  await admin.auth().updateUser(uid, { password });
-
-  try {
-    const empEmpresaId = (empSnapForBind.data()?.empresaId || '').toString();
-    await admin.auth().setCustomUserClaims(uid, {
-      role: 'employee',
-      type: 'employee',
-      ...(empEmpresaId ? { empresaId: empEmpresaId } : {}),
-    });
-  } catch (e) {
-    console.warn('[activateAndSetPassword] no se pudo setear claim empresaId', e);
-  }
-
-  await tokenRef.update({ used: true, usedAt: admin.firestore.FieldValue.serverTimestamp() });
-
-  return { email, employeeId };
-});
+export const activateAndSetPassword = functions.https.onCall(activateAndSetPasswordHandler);
 
 export {
   requestGuardDeviceRegistration,
@@ -3777,6 +3693,7 @@ export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigH
 // Endpoint del n8n local y del link manual. Requiere el secreto ARCA_ROBOT_KEY: no desplegar antes de crearlo.
 export { arcaEnviosApi } from './arca/arcaEnviosApi';
 export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './eventuales/gestionarEventual';
+export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
 export {
   listarCandidatosEventuales,
