@@ -45,3 +45,18 @@ export function arDayBoundsMs(ms: number): { startMs: number; endMs: number } {
   const startMs = arMidnightMs(ms);
   return { startMs, endMs: startMs + DAY_MS - 1000 };
 }
+
+/**
+ * A quién va una vacante: si el turno es de mañana (calendario AR) y todavía no son las 19 AR,
+ * la resuelve Planificación; si es de hoy, ya pasó o son más de las 19, Operaciones.
+ * Antes se comparaba con el día UTC y la hora del servidor: de 21 a 24 AR "hoy" ya era mañana.
+ */
+export function vacancyActionTargetAr(
+  scheduleDateYmd: string,
+  nowMs: number,
+): 'PLANIFICACION' | 'OPERACIONES' {
+  const ymd = String(scheduleDateYmd || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return 'OPERACIONES';
+  const isTomorrowOrLater = ymd > arYmd(nowMs);
+  return isTomorrowOrLater && arHour(nowMs) < 19 ? 'PLANIFICACION' : 'OPERACIONES';
+}

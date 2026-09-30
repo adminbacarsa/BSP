@@ -494,6 +494,26 @@ async function main() {
     }
   }
 
+  // Comparación por legajo motor viejo (F0) vs hours-core: la suma total puede coincidir con compensaciones entre legajos.
+  const idsLegacy = new Set([...legacyMap.keys(), ...coreMap.keys()]);
+  const porLegajo = [];
+  let legajosLegacyVsCoreDistintos = 0;
+  for (const id of idsLegacy) {
+    const legacy = round2(legacyMap.get(id) || 0);
+    const core = round2(coreMap.get(id) || 0);
+    const payrollH = round2(payrollMap.get(id) || 0);
+    if (legacy === 0 && core === 0 && payrollH === 0) continue;
+    if (legacy !== core) legajosLegacyVsCoreDistintos++;
+    porLegajo.push({ legajo: maskFromId(id, legajoById), nombre: empNameById[id] || '', legacy, core, payrollApi: payrollH, deltaCoreMenosLegacy: round2(core - legacy) });
+  }
+  porLegajo.sort((a, b) => Math.abs(b.deltaCoreMenosLegacy) - Math.abs(a.deltaCoreMenosLegacy) || b.core - a.core);
+  const codigosConHoras = {};
+  for (const t of turnos) {
+    if (t.draft === true) continue;
+    const code = String(t.shiftCode || t.code || t.shiftType || '').toUpperCase() || '(sin código)';
+    codigosConHoras[code] = (codigosConHoras[code] || 0) + 1;
+  }
+
   const classified = classifyDecisions(turnos, empNameById);
   const decisiones = {
     real: {
@@ -528,6 +548,12 @@ async function main() {
     reportesCoreVsPayrollApi: {
       legajosConDiferencia: legajosDistintos,
       ejemplos: ejemplosDiff,
+    },
+    legacyVsCore: {
+      legajosConHoras: porLegajo.length,
+      legajosConDiferencia: legajosLegacyVsCoreDistintos,
+      turnosNoBorradorPorCodigo: codigosConHoras,
+      porLegajo,
     },
     decisiones,
     flagOff: {

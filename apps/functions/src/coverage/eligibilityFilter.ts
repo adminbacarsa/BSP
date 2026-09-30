@@ -1,6 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { COVERAGE_CASCADE_ORDER } from './coverageCandidates';
+import { arYmd } from '../common/arClock';
 
 export type CandidateType =
   | 'RET'                // RET pasivo en objetivo (obligación)
@@ -36,8 +37,10 @@ export function checkEligibility(
   ctx: EligibilityContext,
   candidateType: CandidateType,
   distanceKm?: number,
+  nowMs: number = Date.now(),
 ): EligibilityResult {
-  const today = new Date().toISOString().slice(0, 10);
+  // Vigencia de aptitudes en calendario AR: a las 22 AR todavía es "hoy", no el día UTC siguiente.
+  const today = arYmd(nowMs);
 
   // 1. Restricciones de objetivo
   const restricObjs: { objectiveId?: string }[] = employee.restriccionesObjetivo || [];

@@ -3,7 +3,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.defaultSplitTimesCct = defaultSplitTimesCct;
 exports.hhmmPairToTimestamps = hhmmPairToTimestamps;
 exports.resolveCoverageBandCode = resolveCoverageBandCode;
+exports.splitTimesForGap = splitTimesForGap;
 exports.dualExtAdvSegmentTimestamps = dualExtAdvSegmentTimestamps;
+exports.gapSpanFromShift = gapSpanFromShift;
 exports.titularAnchorFromShift = titularAnchorFromShift;
 exports.extensionEndTimestamp = extensionEndTimestamp;
 exports.adjustedStartTimestamp = adjustedStartTimestamp;
@@ -77,14 +79,46 @@ function resolveCoverageBandCode(opts) {
         return 'T';
     return 'N';
 }
+const MAX_GAP_SPAN_MS = 13 * 60 * 60 * 1000;
+function arHm(ms) {
+    const d = new Date(ms - arClock_1.AR_OFFSET_MS);
+    return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+function splitTimesForGap(opts) {
+    const s = opts.gapStartMs || 0;
+    const e = opts.gapEndMs || 0;
+    if (s && e && e > s && e - s <= MAX_GAP_SPAN_MS) {
+        const mid = s + Math.floor((e - s) / 2);
+        return {
+            gap: { from: arHm(s), to: arHm(e) },
+            ext: { from: arHm(s), to: arHm(mid) },
+            adel: { from: arHm(mid), to: arHm(e) },
+        };
+    }
+    return defaultSplitTimesCct(opts.gapBand);
+}
 function dualExtAdvSegmentTimestamps(opts) {
-    const split = defaultSplitTimesCct(opts.gapBand);
+    const split = splitTimesForGap(opts);
+    const s = opts.gapStartMs || 0;
+    const e = opts.gapEndMs || 0;
+    if (s && e && e > s && e - s <= MAX_GAP_SPAN_MS) {
+        const mid = s + Math.floor((e - s) / 2);
+        return {
+            extCov: { start: firestore_1.Timestamp.fromMillis(s), end: firestore_1.Timestamp.fromMillis(mid), extensionEndHm: split.ext.to },
+            advCov: { start: firestore_1.Timestamp.fromMillis(mid), end: firestore_1.Timestamp.fromMillis(e), adjustedStartHm: split.adel.from },
+        };
+    }
     const extCov = hhmmPairToTimestamps(opts.titularAnchor, split.ext.from, split.ext.to);
     const advCov = hhmmPairToTimestamps(opts.titularAnchor, split.adel.from, split.adel.to);
     return {
         extCov: { ...extCov, extensionEndHm: split.ext.to },
         advCov: { ...advCov, adjustedStartHm: split.adel.from },
     };
+}
+function gapSpanFromShift(titular) {
+    const s = tsToDate(titular.startTime)?.getTime() || 0;
+    const e = tsToDate(titular.endTime)?.getTime() || 0;
+    return { gapStartMs: s, gapEndMs: e };
 }
 function titularAnchorFromShift(titular) {
     const d = tsToDate(titular.startTime) || tsToDate(titular.endTime);

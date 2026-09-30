@@ -22,9 +22,16 @@ export declare function resolveCoverageBandCode(opts: {
     code?: string | null;
     startTime?: unknown;
 }): string;
+export declare function splitTimesForGap(opts: {
+    gapBand: string;
+    gapStartMs?: number;
+    gapEndMs?: number;
+}): VacancySplitTimes;
 export declare function dualExtAdvSegmentTimestamps(opts: {
     titularAnchor: Date;
     gapBand: string;
+    gapStartMs?: number;
+    gapEndMs?: number;
 }): {
     extCov: {
         start: Timestamp;
@@ -36,6 +43,10 @@ export declare function dualExtAdvSegmentTimestamps(opts: {
         end: Timestamp;
         adjustedStartHm: string;
     };
+};
+export declare function gapSpanFromShift(titular: Record<string, unknown>): {
+    gapStartMs: number;
+    gapEndMs: number;
 };
 export declare function titularAnchorFromShift(titular: Record<string, unknown>): Date;
 export declare function extensionEndTimestamp(anchor: Date, hm: string): Timestamp;

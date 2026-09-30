@@ -35,6 +35,7 @@ import { guardFirstName } from './common/pushGreeting';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { clampLateEtaMinutes, isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
+import { isAutoAbsenceSpanPlausible } from './attendance/autoAbsenceEligibility';
 import { openLateAbsenceVacancy } from './attendance/openLateAbsenceVacancy';
 import { cancelLlegadaTardeConvocatorias } from './attendance/cancelLlegadaTardeConvocatorias';
 import { applyLateReliefNoticeToOutgoing } from './fichajes/relevoNotifications';
@@ -2679,7 +2680,7 @@ export const detectarAusencias = functions
           if (shift.notifiedAbsent === true) continue;
           if (shift.isReten === true || shift.origin === 'RETEN') continue;
           const endMsCheck = shift.endTime?.toMillis?.() ?? 0;
-          if (endMsCheck > 0 && endMsCheck > nowMs + 6 * 60 * 60 * 1000) continue;
+          if (!isAutoAbsenceSpanPlausible(startMs, endMsCheck)) continue;
           await tryMarkAbsent('ETA_VENCIDA');
         }
         continue;
@@ -2722,7 +2723,8 @@ export const detectarAusencias = functions
         if (shift.notifiedAbsent === true) continue;
         if (shift.isReten === true || shift.origin === 'RETEN') continue;
         const endMs = shift.endTime?.toMillis?.() ?? 0;
-        if (endMs > 0 && endMs > nowMs + 6 * 60 * 60 * 1000) continue;
+        // Solo se descarta el doc de 24 h (franco/licencia/registro); un turno de 8 h a T+30 sí es AA.
+        if (!isAutoAbsenceSpanPlausible(startMs, endMs)) continue;
 
         await tryMarkAbsent('AUTO_T30');
       }

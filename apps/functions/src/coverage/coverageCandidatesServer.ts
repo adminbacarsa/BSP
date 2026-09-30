@@ -109,6 +109,8 @@ function mapShift(id: string, t: Record<string, unknown>): CoverageShiftView {
     checkInMs: msOf(t.checkInTime) || msOf(t.presenciaAt) || undefined,
     deploymentBand: String(t.deploymentBand || t.coversBandCode || ''),
     absenceShiftId: String(t.absenceShiftId || ''),
+    isRetention: t.isRetention === true,
+    retentionAbsenceShiftId: String(t.retentionAbsenceShiftId || ''),
   };
 }
 
