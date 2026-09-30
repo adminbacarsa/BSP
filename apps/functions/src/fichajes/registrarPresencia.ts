@@ -11,7 +11,7 @@ import { notifyTurnoFinalizadoRelevo } from './relevoNotifications';
 import { findPresentOutgoingAlignedToGapStart } from './relevoOutgoingMatch';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { seriesCodeOf, seriesHandoffKind } from '../common/shiftSeries';
-import { buildAutoClosePatch } from '../scheduling/shiftClose';
+import { buildAutoClosePatch, clearRetentionOnReliefClose } from '../scheduling/shiftClose';
 
 export type PresenciaSource =
   | 'PORTAL_GPS'
@@ -415,8 +415,7 @@ export async function registrarPresencia(
               by: 'RELEVO',
             });
             await outDoc.ref.update({
-              ...outClose,
-              ...(outData.isRetention === true ? { isRetention: false } : {}),
+              ...clearRetentionOnReliefClose(outClose),
               relievedBy: empId || null,
               relievedByName: incomingName,
               relievedAt: FieldValue.serverTimestamp(),

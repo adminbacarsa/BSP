@@ -1,6 +1,10 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { ymCordobaParts } from '../assistant/planificacionEstadoKeys';
+import { seriesCodeOf } from '../common/shiftSeries';
 import { buildSlaUnplannedGapDocId } from './slaGapId';
+
+/** Misma ventana que plannedShiftCoversSlaBand (ops-core): ±30 min, misma serie. */
+const SLA_BAND_COVER_ALIGN_MS = 30 * 60 * 1000;
 
 const TZ = 'America/Argentina/Cordoba';
 
@@ -85,7 +89,6 @@ export async function detectPublishedSlaGapsForEmpresa(
       if (pos?.status === 'INACTIVE') continue;
       const posName = String(pos.name || '').trim();
       if (!posName) continue;
-      const qty = Math.max(1, Number(pos.quantity) || 1);
       const activeDays: string[] = Array.isArray(pos.activeDays)
         ? pos.activeDays
         : ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -102,12 +105,15 @@ export async function detectPublishedSlaGapsForEmpresa(
           const hm = String(band.startTime || '07:00').slice(0, 5);
           const gapStartMs = bandStartMsOnDay(dayStr, hm);
           if (gapStartMs < nowMs || gapStartMs > horizonMs) continue;
+          const bandQty = Number(band.quantity);
+          const qty = Math.max(1, bandQty > 0 ? bandQty : (Number(pos.quantity) || 1));
 
           const count = planned.filter((t) => {
+            if (t.isAbsent === true || t.isFranco === true) return false;
             const st = (t.startTime as { toMillis?: () => number })?.toMillis?.() ?? 0;
             if (!st) return false;
-            if (ymdAr(new Date(st)) !== dayStr) return false;
-            if (String(t.code || '').toUpperCase() !== code) return false;
+            if (Math.abs(st - gapStartMs) > SLA_BAND_COVER_ALIGN_MS) return false;
+            if (seriesCodeOf(t) !== code) return false;
             return normPos(t.positionName) === normPos(posName)
               || normPos(t.positionName).endsWith(normPos(posName));
           }).length;

@@ -22,6 +22,8 @@ export {
   isActionableOpsVacancy,
 } from './vacancyOps';
 export {
+  SLA_BAND_COVER_ALIGN_MS,
+  plannedShiftCoversSlaBand,
   isGapSiblingVacancyDoc,
   isCanonicalGapTitular,
   buildSlaUnplannedGapDocId,

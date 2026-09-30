@@ -25,6 +25,7 @@ import {
   isGapSiblingVacancyDoc,
   isCanonicalGapTitular,
   buildSlaUnplannedGapDocId,
+  plannedShiftCoversSlaBand,
   buildRetentionWaitInfo,
 } from '@cosp/ops-core';
 
@@ -209,6 +210,15 @@ const shiftCoversVacancySlot = (s: any, slotStart: Date, slotEnd: Date, vacancyP
     const proxy = seg ? { shiftDateObj: seg.start, endDateObj: seg.end } : s;
     return checkSlotCoverage(slotStart, slotEnd, [proxy]);
 };
+
+/** 90% de solape, o planificado del mismo puesto/serie que arranca a ±30 min de la franja. */
+const shiftCoversSlaBand = (s: any, slotStart: Date, slotEnd: Date, vacancyPos: string, bandCode: unknown) =>
+    shiftCoversVacancySlot(s, slotStart, slotEnd, vacancyPos)
+    || plannedShiftCoversSlaBand(s, {
+        positionName: vacancyPos,
+        code: bandCode,
+        startMs: slotStart?.getTime?.() ?? 0,
+    });
 
 const assessPlannedPackageStatus = (rows: any[]): 'COVERED' | 'PARTIAL' | 'NONE' => {
     if (!rows.length) return 'NONE';
@@ -695,12 +705,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                             if (end <= start) end = new Date(end.getTime() + 86400000);
 
                             // Contar cuántos turnos realmente cubren este slot (≥90% overlap)
-                            const coveredCount = posShifts.filter((s: any) => shiftCoversVacancySlot(s, start, end, pos.name)).length;
+                            const coveredCount = posShifts.filter((s: any) => shiftCoversSlaBand(s, start, end, pos.name, slot.code)).length;
                             const titularOnSlot = allPosShifts.filter((s: any) => {
                                 if (!isCanonicalGapTitular(s) || !s.shiftDateObj || !s.endDateObj) return false;
                                 return Math.min(s.endDateObj.getTime(), end.getTime()) > Math.max(s.shiftDateObj.getTime(), start.getTime());
                             }).length;
-                            const requiredCount = pos.quantity || 1;
+                            const requiredCount = Math.max(1, Number(slot.quantity) || Number(pos.quantity) || 1);
                             const missing = Math.max(0, requiredCount - coveredCount - titularOnSlot);
 
                             // Generar una tarjeta de vacante por cada puesto faltante
@@ -917,7 +927,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 !cover.isUnassigned && !shiftOpensCoverageVacancy(cover) && !cover.isCompleted &&
                 !cover.isFranco &&
                 cover.objectiveId === s.objectiveId &&
-                shiftCoversVacancySlot(cover, s.shiftDateObj, s.endDateObj, s.positionName)
+                shiftCoversSlaBand(cover, s.shiftDateObj, s.endDateObj, s.positionName, s.code)
             ).length;
             if (coveringCount >= cap) suppressedDevuelto.add(s.id);
         });
@@ -953,7 +963,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
                 !cover.isUnassigned && !shiftOpensCoverageVacancy(cover) && !cover.isCompleted &&
                 !cover.isFranco &&
                 cover.objectiveId === v.objectiveId &&
-                shiftCoversVacancySlot(cover, v.shiftDateObj, v.endDateObj, v.positionName)
+                shiftCoversSlaBand(cover, v.shiftDateObj, v.endDateObj, v.positionName, v.code)
             ).length;
             if (coveringCount >= cap) return false;
             return true;

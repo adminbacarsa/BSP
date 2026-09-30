@@ -1,3 +1,27 @@
+import { reliefPositionsMatch, seriesBoundMs, seriesCodeOf } from './shiftSeries';
+
+/** Un planificado cubre la franja SLA si arranca a ±30 min, mismo puesto y misma serie. */
+export const SLA_BAND_COVER_ALIGN_MS = 30 * 60 * 1000;
+
+export function plannedShiftCoversSlaBand(
+  shift: Record<string, unknown> | null | undefined,
+  band: { positionName?: unknown; code?: unknown; startMs: number },
+): boolean {
+  if (!shift) return false;
+  if (shift.draft === true || shift.isFranco === true) return false;
+  if (shift.isAbsent === true || shift.isUnassigned === true) return false;
+  const eid = String(shift.employeeId || '').trim();
+  if (!eid || eid === 'VACANTE') return false;
+  const pos = shift.coversPositionName || shift.positionName;
+  if (!reliefPositionsMatch(pos, band.positionName)) return false;
+  const shiftSeries = seriesCodeOf(shift);
+  const bandSeries = seriesCodeOf({ code: band.code });
+  if (!shiftSeries || !bandSeries || shiftSeries !== bandSeries) return false;
+  const start = seriesBoundMs(shift, 'start');
+  if (!start || !band.startMs) return false;
+  return Math.abs(start - band.startMs) <= SLA_BAND_COVER_ALIGN_MS;
+}
+
 /** Docs hermanos de un hueco (no son la representación canónica). */
 const SIBLING_ORIGINS = new Set([
   'VACANTE_POR_AUSENCIA',

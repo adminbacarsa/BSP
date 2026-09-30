@@ -5,6 +5,9 @@ import {
   buildRestoreSourceShiftAfterCoveragePatch,
   findOpenAbsenceVacancyDocs,
 } from '../coverage/syncAusenciaCobertura';
+import { isReliefEligibleShift } from '../common/reliefEligibility';
+import { findPresentOutgoingAlignedToGapStart } from '../fichajes/relevoOutgoingMatch';
+import { buildAutoClosePatch, clearRetentionOnReliefClose } from '../scheduling/shiftClose';
 
 export const REVERT_ABSENCE_WINDOW_MS = 60 * 60 * 1000;
 
@@ -63,6 +66,38 @@ export async function revertirAusenciaShift(
     absenceRevertedBy: input.operatorUid || 'OPERACIONES',
     presenciaSource: 'OPERATIONS',
   });
+
+  // Misma serie que una fichada: el saliente cierra ya, en max(inicio planificado, ahora).
+  if (isReliefEligibleShift(shift) && startMs > 0 && shift.objectiveId && shift.positionName) {
+    const pick = await findPresentOutgoingAlignedToGapStart(db, {
+      objectiveId: String(shift.objectiveId),
+      positionName: shift.positionName,
+      gapStartMs: startMs,
+      excludeShiftIds: [shiftId],
+      excludeEmployeeId: String(shift.employeeId || ''),
+      absenceShiftId: shiftId,
+      incoming: shift,
+    });
+    if (pick) {
+      const realEndMs = Math.max(startMs, nowMs);
+      const patch = clearRetentionOnReliefClose(buildAutoClosePatch(pick.data, {
+        realEndMs,
+        reason: 'RELEVO_PRESENTE',
+        now: Timestamp.fromMillis(nowMs),
+        by: 'REVERTIR_AUSENCIA',
+      }));
+      await db.collection('turnos').doc(pick.id).update({
+        ...patch,
+        relievedBy: String(shift.employeeId || '') || null,
+        relievedByName: String(shift.employeeName || 'relevo'),
+        relievedAt: FieldValue.serverTimestamp(),
+        autoRelevo: true,
+        relievedEarly: false,
+        relievedSource: 'OPERATIONS',
+      });
+      await ref.update({ relievedOutgoingShiftId: pick.id });
+    }
+  }
 
   const ausSnap = await db.collection('ausencias').where('shiftId', '==', shiftId).limit(5).get();
   for (const a of ausSnap.docs) {

@@ -1,4 +1,4 @@
-import { Timestamp } from 'firebase-admin/firestore';
+import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 
 /** Tope de jornada CCT: nadie supera 12 h; tolerancia de relevo hasta 12:59, nunca 13 h. */
 export const SHIFT_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
@@ -59,5 +59,12 @@ export function buildAutoClosePatch(
       patch.retentionMinutes = Math.round((endMs - plannedEnd) / 60000);
     }
   }
+  return patch;
+}
+
+/** Cierre por relevo: la jornada retenida queda en minutos y fin; el flag ya no sigue activo. */
+export function clearRetentionOnReliefClose(patch: Record<string, unknown>): Record<string, unknown> {
+  patch.isRetention = false;
+  patch.retentionReason = FieldValue.delete();
   return patch;
 }

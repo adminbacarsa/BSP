@@ -22,6 +22,7 @@ import { guardFirstName } from '../common/pushGreeting';
 import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
 import {
   buildAutoClosePatch,
+  clearRetentionOnReliefClose,
   shiftHardCapAtMs,
   shiftWorkStartMs,
   STALE_CAP_GRACE_MS,
@@ -270,6 +271,9 @@ export async function runAutoCompletarTurnosPass(
     gapShiftId?: string | null,
   ) => {
     const patch = buildAutoClosePatch(shift as Record<string, unknown>, { realEndMs, reason, now, extra });
+    if (reason === 'RELEVO_PRESENTE' || reason === 'RELEVO_PROGRAMADO') {
+      clearRetentionOnReliefClose(patch);
+    }
     update(docSnap.ref, patch);
     actions.push(describe(docSnap.id, shift, 'CLOSE', reason, {
       realEndMs: (patch.realEndTime as Timestamp).toMillis(),
