@@ -42,6 +42,7 @@ function RootNavigator() {
         }}
       >
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(staff)" options={{ headerShown: false }} />
         <Stack.Screen name="index" options={{ headerShown: false }} />
         <Stack.Screen name="login" options={{ headerShown: false, title: 'Ingreso' }} />
         <Stack.Screen name="preview" options={{ title: 'Preview SuperAdmin' }} />

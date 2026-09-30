@@ -13,4 +13,8 @@ export const appRoutes = {
   novedad: '/novedad' as Href,
   credencial: '/credencial' as Href,
   contratos: '/contratos' as Href,
+  operacion: '/(staff)/operacion' as Href,
+  supervision: '/(staff)/supervision' as Href,
+  rrhh: '/(staff)/rrhh' as Href,
+  planificacion: '/(staff)/planificacion' as Href,
 } as const;

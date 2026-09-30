@@ -3,11 +3,13 @@ import type { ReactNode } from 'react';
 import { usePortalAuth } from '../context/PortalAuthContext';
 import { LoadingScreen } from '../components/LoadingScreen';
 
+/** Auth para pantallas del modo Guardia (tabs). */
 export function useRequireAuth(): {
   ready: boolean;
   user: ReturnType<typeof usePortalAuth>['user'];
 } {
-  const { user, initializing, deviceVerified, isSuperAdmin, isPreviewMode } = usePortalAuth();
+  const { user, initializing, deviceVerified, isSuperAdmin, isPreviewMode, staffProfile, activeMode } =
+    usePortalAuth();
 
   if (initializing) {
     return { ready: false, user: null };
@@ -17,12 +19,15 @@ export function useRequireAuth(): {
     return { ready: false, user: null };
   }
 
-  // null = verificación en curso → no listo (sin datos ni tabs).
+  if (activeMode && activeMode !== 'guardia' && !isPreviewMode) {
+    return { ready: false, user };
+  }
+
   if (deviceVerified !== true && !(isSuperAdmin && isPreviewMode)) {
     return { ready: false, user };
   }
 
-  if (isSuperAdmin && !isPreviewMode) {
+  if (isSuperAdmin && !isPreviewMode && !staffProfile?.isGuard) {
     return { ready: false, user };
   }
 
@@ -30,21 +35,25 @@ export function useRequireAuth(): {
 }
 
 export function RequireAuth({ children }: { children: ReactNode }) {
-  const { user, initializing, deviceVerified, isSuperAdmin, isPreviewMode } = usePortalAuth();
+  const { user, initializing, deviceVerified, isSuperAdmin, isPreviewMode, staffProfile, activeMode } =
+    usePortalAuth();
 
   if (initializing) {
-    return <LoadingScreen label="Iniciando COSP Guardia…" />;
+    return <LoadingScreen label="Iniciando COSP…" />;
   }
 
   if (!user) {
     return <Redirect href="/login" />;
   }
 
-  if (isSuperAdmin && !isPreviewMode) {
+  if (activeMode && activeMode !== 'guardia' && !isPreviewMode) {
+    return <Redirect href="/" />;
+  }
+
+  if (isSuperAdmin && !isPreviewMode && !staffProfile?.isGuard && activeMode !== 'guardia') {
     return <Redirect href="/preview" />;
   }
 
-  // Gate estricto: null → carga; false → bloqueo; solo true renderiza la app.
   if (deviceVerified === null) {
     return <LoadingScreen label="Validando dispositivo…" />;
   }

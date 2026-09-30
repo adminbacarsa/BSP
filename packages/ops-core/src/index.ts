@@ -115,3 +115,22 @@ export type {
   CoverageCandidateSet,
   AcceptanceCheck,
 } from './coverageCandidates';
+export {
+  APP_MODE_DEFS,
+  STAFF_APP_MODULE_KEYS,
+  canAccessMode,
+  fullSuperAdminModules,
+  normalizeStaffProfile,
+  pickDefaultMode,
+  resolveVisibleModes,
+} from './staffAppModes';
+export type {
+  AppModeDef,
+  AppModeId,
+  SesionOperadorAction,
+  SesionOperadorRequest,
+  SesionOperadorResponse,
+  StaffEmpresa,
+  StaffProfile,
+  WriteOrigin,
+} from './staffAppModes';
