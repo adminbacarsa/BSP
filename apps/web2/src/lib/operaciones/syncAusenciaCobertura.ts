@@ -23,8 +23,10 @@ import {
   sourceShiftEligibleForCoverageGap,
 } from '@/lib/operaciones/coverageSourceShiftForGap';
 import {
+  completesPartialSegment,
   isDualSiblingOpsCoverage,
   isTitularAlreadyCovered,
+  uncoveredRemainderMs,
 } from '@/lib/operaciones/coverageTitularState';
 
 export { isDualSiblingOpsCoverage, isTitularAlreadyCovered } from '@/lib/operaciones/coverageTitularState';
@@ -304,11 +306,27 @@ export async function applyCoverage(
 
   const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
   const existingCovId = String(titular.coverageDocId || '').trim();
+  const titularPartial = String(titular.coverageStatus || '').toUpperCase() === 'PARTIAL';
+  let remainder: { startMs: number; endMs: number } | null = null;
+  const tsMs = (v: unknown): number => {
+    if (!v || typeof v !== 'object') return 0;
+    const o = v as { toMillis?: () => number; seconds?: number };
+    if (typeof o.toMillis === 'function') return o.toMillis() || 0;
+    if (typeof o.seconds === 'number') return o.seconds * 1000;
+    return 0;
+  };
   if (existingCovId && !params.allowReplace && existingCovId !== covDocId) {
     const exSnap = await getDoc(doc(db, 'turnos', existingCovId));
     if (exSnap.exists() && isActiveOpsCoverageDoc(exSnap.data() as Record<string, unknown>)) {
-      const exCt = String((exSnap.data() as Record<string, unknown>).coverageType || '').toUpperCase();
-      if (!isDualSiblingOpsCoverage(exCt, ctEarly)) {
+      const ex = exSnap.data() as Record<string, unknown>;
+      const exCt = String(ex.coverageType || '').toUpperCase();
+      const completes = titularPartial && completesPartialSegment(exCt, ctEarly);
+      if (completes) {
+        const gapStart = tsMs(titular.startTime) || tsMs(titular.shiftDateObj);
+        const gapEnd = tsMs(titular.endTime) || tsMs(titular.endDateObj);
+        remainder = uncoveredRemainderMs(gapStart, gapEnd, tsMs(ex.startTime), tsMs(ex.endTime));
+      }
+      if (!isDualSiblingOpsCoverage(exCt, ctEarly) && !(completes && remainder)) {
         throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
       }
     }
@@ -318,7 +336,7 @@ export async function applyCoverage(
   await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
     keepDocId: covDocId,
     supersededBy: params.convocatoriaId || params.resolvedBy,
-    onlySupersedeCoverageType: dualLeg ? ctEarly : null,
+    onlySupersedeCoverageType: dualLeg || remainder ? ctEarly : null,
   });
 
   const linkFields = opsCoverageLinkFields(titular, titularId);
@@ -333,11 +351,13 @@ export async function applyCoverage(
   }
   const startTs =
     params.covSegmentStart
+    ?? (remainder ? Timestamp.fromMillis(remainder.startMs) : null)
     ?? params.startTime
     ?? toTimestamp(titular.startTime)
     ?? (titular.shiftDateObj instanceof Date ? Timestamp.fromDate(titular.shiftDateObj) : null);
   const endTs =
     params.covSegmentEnd
+    ?? (remainder ? Timestamp.fromMillis(remainder.endMs) : null)
     ?? params.endTime
     ?? toTimestamp(titular.endTime)
     ?? (titular.endDateObj instanceof Date ? Timestamp.fromDate(titular.endDateObj) : null);
@@ -358,7 +378,10 @@ export async function applyCoverage(
       && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
     if (['REF', 'ESC', 'RET'].includes(ct) && !sameCovOnSource) {
       const gap = gapFromAbsenceLikeShift(titular as Record<string, unknown>);
-      if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
+      const window = gap && remainder
+        ? { ...gap, startMs: remainder.startMs, endMs: remainder.endMs }
+        : gap;
+      if (!window || !sourceShiftEligibleForCoverageGap(srcData, window)) {
         throw new CoverageApplyError(
           'INVALID_SOURCE',
           'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET.',

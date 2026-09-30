@@ -5,8 +5,11 @@ import { resolveCoverageBandCode } from './coverageExtAdvSegments';
 import { isEventoShift } from '../eventos/eventoCoverage';
 import {
   gapWindowFromTitularShift,
+  shiftEndMs,
+  shiftStartMs,
   sourceShiftEligibleForCoverageGap,
 } from './coverageSourceShiftForGap';
+import { completesPartialSegment, uncoveredRemainderMs } from './partialSegment';
 
 function coverageServerTime(): admin.firestore.Timestamp | admin.firestore.FieldValue {
   if (process.env.FIRESTORE_EMULATOR_HOST) {
@@ -388,18 +391,29 @@ export async function applyCoverage(
 
   const ctEarly = String(params.coverageType || 'COBERTURA').toUpperCase();
   const existingCovId = String(titular.coverageDocId || '').trim();
+  const titularPartial = String(titular.coverageStatus || '').toUpperCase() === 'PARTIAL';
+  let remainder: { startMs: number; endMs: number } | null = null;
   if (existingCovId && !params.allowReplace && existingCovId !== covDocId) {
     const exSnap = await db.collection('turnos').doc(existingCovId).get();
     if (exSnap.exists && isActiveOpsCoverageDoc(exSnap.data())) {
-      const exCt = String(exSnap.data()?.coverageType || '').toUpperCase();
-      if (!isDualSiblingOpsCoverage(exCt, ctEarly)) {
+      const ex = exSnap.data() as Record<string, unknown>;
+      const exCt = String(ex.coverageType || '').toUpperCase();
+      const completes = titularPartial && completesPartialSegment(exCt, ctEarly);
+      if (completes) {
+        const gap = gapWindowFromTitularShift(titular);
+        remainder = gap
+          ? uncoveredRemainderMs(gap.startMs, gap.endMs, shiftStartMs(ex), shiftEndMs(ex))
+          : null;
+      }
+      const fillsRemainder = completes && !!remainder;
+      if (!isDualSiblingOpsCoverage(exCt, ctEarly) && !fillsRemainder) {
         throw new CoverageApplyError('ALREADY_COVERED', 'El titular ya tiene cobertura activa');
       }
     }
   }
 
   const dualLeg = ctEarly === 'EXTEND' || ctEarly === 'ADVANCE';
-  const onlySupersedeCoverageType = params.preserveSiblingOpsCov || dualLeg ? ctEarly : null;
+  const onlySupersedeCoverageType = params.preserveSiblingOpsCov || dualLeg || remainder ? ctEarly : null;
   await supersedeOpsCoveragesForAbsence(db, titularId, batch, {
     keepDocId: covDocId,
     supersededBy: params.convocatoriaId || params.resolvedBy,
@@ -418,11 +432,13 @@ export async function applyCoverage(
   }
   const startTs =
     params.covSegmentStart
+    ?? (remainder ? admin.firestore.Timestamp.fromMillis(remainder.startMs) : null)
     ?? params.startTime
     ?? (titular.startTime as admin.firestore.Timestamp)
     ?? null;
   const endTs =
     params.covSegmentEnd
+    ?? (remainder ? admin.firestore.Timestamp.fromMillis(remainder.endMs) : null)
     ?? params.endTime
     ?? (titular.endTime as admin.firestore.Timestamp)
     ?? null;
@@ -444,7 +460,10 @@ export async function applyCoverage(
       linkedToThis && (srcData.coverageUsed === true || ct === 'EXTEND' || ct === 'ADVANCE');
     if (['REF', 'ESC', 'RET'].includes(ct) && !linkedToThis) {
       const gap = gapWindowFromTitularShift(titular);
-      if (!gap || !sourceShiftEligibleForCoverageGap(srcData, gap)) {
+      const window = gap && remainder
+        ? { ...gap, startMs: remainder.startMs, endMs: remainder.endMs }
+        : gap;
+      if (!window || !sourceShiftEligibleForCoverageGap(srcData, window)) {
         throw new CoverageApplyError(
           'INVALID_SOURCE',
           'El turno de origen no solapa el hueco (banda/horario). Elegí otro REF/ESC/RET o desvinculá el conflicto.',
