@@ -3,6 +3,7 @@ import { Timestamp } from 'firebase-admin/firestore';
 import { buildChunks, claimChunks, markChunk, processedOf, type LedgerChunk } from './jobPlan';
 import { applyBillableOnRows, assignWorkedShares } from './bundledEngine';
 import { parsePeriod, personaOfMonth, rebuildObjectives, rollupStoredMonth } from './rebuildHoursLedger';
+import { LEDGER_ENGINE_VERSION } from './ledgerDirtyPlan';
 
 const JOBS = 'hours_ledger_jobs';
 const LOCK_MS = 4 * 60 * 1000;
@@ -85,6 +86,7 @@ export async function enqueueHoursLedgerJob(opts: {
     error: null,
     createdBy: opts.createdBy || '',
     createdByUid: opts.uid || '',
+    engineVersion: LEDGER_ENGINE_VERSION,
     objectiveIds: asked,
     objectiveNames: {},
     chunks: asked ? buildChunks(asked.length) : [],
