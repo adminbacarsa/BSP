@@ -133,7 +133,7 @@ export function planAsignacion({ bolsa, empresaId, turnos, otrasJornadas = [], a
 }
 
 export function armarLote({ empresaId, tipo, envios }) {
-  const incluidos = (envios || []).filter((e) => e.empresaId === empresaId && e.tipo === tipo && e.estado === 'PENDIENTE' && e.canal !== 'URGENTE');
+  const incluidos = (envios || []).filter((e) => e.empresaId === empresaId && e.tipo === tipo && e.estado === 'PENDIENTE' && e.canal !== 'URGENTE' && !e.quitadoDelLote);
   return {
     empresaId,
     tipo,
