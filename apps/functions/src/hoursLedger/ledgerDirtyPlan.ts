@@ -140,6 +140,25 @@ export function dirtyMarksForObjectives(
   return out;
 }
 
+/**
+ * Qué encolar para un mes hot. Con libro: solo los objetivos de versión vieja. Sin libro:
+ * el mes entero, salvo que ya haya un job de esta versión (encolado, corriendo o terminado).
+ */
+export function staleEnginePlan(
+  rows: Array<{ level?: string; objectiveId?: string; engineVersion?: unknown }>,
+  job: Record<string, unknown> | undefined,
+  version = LEDGER_ENGINE_VERSION,
+): { objectiveIds?: string[] } | null {
+  if (rows.length > 0) {
+    const stale = objectivesNeedingEngine(rows, version);
+    return stale.length ? { objectiveIds: stale } : null;
+  }
+  const jobVersion = Number(job?.engineVersion || 0);
+  const status = String(job?.status || '');
+  if (jobVersion >= version && (status === 'QUEUED' || status === 'RUNNING' || status === 'DONE')) return null;
+  return {};
+}
+
 export function objectivesNeedingEngine(
   rows: Array<{ level?: string; objectiveId?: string; engineVersion?: unknown }>,
   version = LEDGER_ENGINE_VERSION,

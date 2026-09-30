@@ -11,6 +11,7 @@ import {
   hotPeriodKeys,
   ledgerDirtyDocId,
   objectivesNeedingEngine,
+  staleEnginePlan,
 } from '../../apps/functions/src/hoursLedger/ledgerDirtyPlan.ts';
 
 function fail(msg: string): never {
@@ -73,5 +74,16 @@ if (hotNow.length !== 3 || hotNow[2] !== '2026-09') fail(`ventana hot ${hotNow.j
 const stale = objectivesNeedingEngine(rows.filter((r) => hotNow.includes(r.periodKey)));
 if (stale.join(',') !== 'VIEJO') fail(`versión vieja: ${stale.join(',')}`);
 if (stale.includes('FRIO') || stale.includes('OK')) fail('la ventana hot no recalcula el mes frío ni la versión actual');
+
+// Mes hot sin libro (bacarsa julio/agosto): se encola entero una sola vez por versión.
+const sinLibro = staleEnginePlan([], undefined);
+if (!sinLibro || sinLibro.objectiveIds !== undefined) fail('un mes hot sin libro se encola entero');
+if (staleEnginePlan([], { status: 'DONE', engineVersion: LEDGER_ENGINE_VERSION }) !== null) fail('job DONE de esta versión no se repite');
+if (staleEnginePlan([], { status: 'RUNNING', engineVersion: LEDGER_ENGINE_VERSION }) !== null) fail('job corriendo no se repite');
+if (staleEnginePlan([], { status: 'DONE' }) === null) fail('job viejo sin engineVersion no alcanza');
+if (staleEnginePlan([], { status: 'ERROR', engineVersion: LEDGER_ENGINE_VERSION }) === null) fail('job con error se reintenta');
+const conLibro = staleEnginePlan(rows.filter((r) => r.periodKey === '2026-09'), { status: 'DONE', engineVersion: LEDGER_ENGINE_VERSION });
+if (!conLibro || conLibro.objectiveIds?.join(',') !== 'VIEJO') fail('con libro solo van los objetivos de versión vieja');
+if (staleEnginePlan([{ level: 'objetivo', objectiveId: 'OK', engineVersion: LEDGER_ENGINE_VERSION }], undefined) !== null) fail('libro al día no se encola');
 
 console.log('H2F_DIRTY_OK');

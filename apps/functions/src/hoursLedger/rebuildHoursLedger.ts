@@ -1,7 +1,7 @@
 import * as admin from 'firebase-admin';
 import { Timestamp } from 'firebase-admin/firestore';
 import { buildLedgerMonth, personaMonthWorked } from './bundledEngine';
-import { LEDGER_ENGINE_VERSION, ledgerDirtyDocId, hotPeriodKeys, objectivesNeedingEngine } from './ledgerDirtyPlan';
+import { LEDGER_ENGINE_VERSION, ledgerDirtyDocId, hotPeriodKeys, staleEnginePlan } from './ledgerDirtyPlan';
 
 const DAY_COL = 'hours_ledger';
 const MONTH_COL = 'hours_ledger_monthly';
@@ -423,9 +423,12 @@ export async function rebuildOpenMonthAllEmpresas() {
   return enqueueOpenMonthAllEmpresas();
 }
 
-/** Meses hot cuyo libro tiene engineVersion vieja: el job H2c los reescribe en tandas. */
+/**
+ * Meses hot cuyo libro tiene engineVersion vieja, o que no tienen libro: el job H2c los
+ * reescribe en tandas. Un mes sin libro se encola una sola vez por versión (queda en el job).
+ */
 export async function enqueueStaleEngineMonths(limitEmpresas = 6) {
-  const { enqueueHoursLedgerJob } = await import('./hoursLedgerJob');
+  const { enqueueHoursLedgerJob, hoursLedgerJobDocId } = await import('./hoursLedgerJob');
   const empresas = await admin.firestore().collection('empresas').where('hoursCoreEnabled', '==', true).limit(limitEmpresas).get();
   const periods = hotPeriodKeys();
   let enqueued = 0;
@@ -436,14 +439,16 @@ export async function enqueueStaleEngineMonths(limitEmpresas = 6) {
         .where('periodKey', '==', period)
         .select('level', 'objectiveId', 'engineVersion')
         .get();
-      const stale = objectivesNeedingEngine(snap.docs.map((d) => d.data() as { level?: string; objectiveId?: string; engineVersion?: unknown }));
-      if (!stale.length) continue;
+      const rows = snap.docs.map((d) => d.data() as { level?: string; objectiveId?: string; engineVersion?: unknown });
+      const jobSnap = await admin.firestore().collection('hours_ledger_jobs').doc(hoursLedgerJobDocId(e.id, period, false)).get();
+      const plan = staleEnginePlan(rows, jobSnap.exists ? jobSnap.data() : undefined);
+      if (!plan) continue;
       await enqueueHoursLedgerJob({
         empresaId: e.id,
         period,
         dryRun: false,
         createdBy: 'engine',
-        objectiveIds: stale,
+        objectiveIds: plan.objectiveIds,
       });
       enqueued += 1;
     }

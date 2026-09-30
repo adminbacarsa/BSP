@@ -317,6 +317,14 @@ export function sumPlannedHoursForClient(
   return sumPublishedPlanHours(list).hours;
 }
 
+/**
+ * Plan publicado como lo cuenta el libro: solo objetivos con cronograma publicado en el mes.
+ * Un turno no borrador de un objetivo sin publicar no es plan oficial.
+ */
+export function onlyPublishedObjectiveTurnos(turnos: any[], publishedObjectiveIds: Set<string>): any[] {
+  return turnos.filter((t) => publishedObjectiveIds.has(String(t?.objectiveId || '').trim()));
+}
+
 export function sumPlannedHoursForTurnos(turnos: any[], range: PlannedHoursRange, _slaCodeHoursHint?: Record<string, number>): number {
   const list = turnos.filter((t) => {
     const start = toDateSafe(t.startTime);

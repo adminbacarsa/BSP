@@ -159,6 +159,7 @@ import {
   isCrmPlannedEligibleShift,
   resolveClientIdForTurno,
   resolveCrmPlannedShiftHours,
+  onlyPublishedObjectiveTurnos,
   sumPlannedHoursForClient,
   groupTurnosByClient,
   buildSlaCodeHoursHintFromServices,
@@ -184,8 +185,8 @@ import {
 
 const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
 
-/** Incrementar cuando cambia la fórmula de KPIs. v10: primer pintado = extracto + SLA vivo. */
-const CRM_DASHBOARD_METRICS_VERSION = 11;
+/** Incrementar cuando cambia la fórmula de KPIs. v12: plan publicado solo de cronogramas publicados. */
+const CRM_DASHBOARD_METRICS_VERSION = 12;
 
 function latestBalanceUpdatedAt(rows: Array<{ updatedAt?: unknown }>): Date | null {
   let latest: Date | null = null;
@@ -964,7 +965,7 @@ export default function CRMPage() {
               : official.planPublished;
           if (planMode === 'published' && start && end) {
             const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
-            const turnosPlan = await fetchCrmDashboardTurnos(
+            const turnosPlanRaw = await fetchCrmDashboardTurnos(
               empresaId,
               scopeEmpresa,
               start,
@@ -972,6 +973,21 @@ export default function CRMPage() {
               clientRefsPlan,
               migracionCompleta,
             );
+            // Mismo universo que el libro: el plan oficial es el de cronogramas publicados.
+            const publishedIdsPlan = new Set<string>();
+            const planObjectiveIds = new Set<string>();
+            for (const c of clientRefsPlan) {
+              for (const o of c.objetivos || []) {
+                const id = String((o as { id?: unknown }).id ?? '').trim();
+                if (id) planObjectiveIds.add(id);
+              }
+            }
+            await Promise.all([...planObjectiveIds].map(async (oid) => {
+              const estado = await fetchPlanificacionEstadoDoc(empresaId, oid, rangeYear, rangeMonth + 1);
+              if (!estado || estado.data.publishedAt == null || estado.data.publishedAt === '') return;
+              publishedIdsPlan.add(oid);
+            }));
+            const turnosPlan = onlyPublishedObjectiveTurnos(turnosPlanRaw, publishedIdsPlan);
             totalPlanned = 0;
             for (const c of clientRefsPlan) {
               const planned = Math.round(sumPlannedHoursForClient(turnosPlan, c, { start, end }));
