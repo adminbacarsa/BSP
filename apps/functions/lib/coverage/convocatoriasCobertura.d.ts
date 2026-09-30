@@ -22,6 +22,7 @@ export interface ConvocatoriaCoberturaDoc {
     candidateEmployeeId: string;
     candidateEmployeeName: string;
     candidateUid?: string;
+    bolsaCuil?: string;
     extendShiftId?: string;
     advanceShiftId?: string;
     ftShiftId?: string;

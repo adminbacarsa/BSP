@@ -78,7 +78,10 @@ function coverageRejectMessage(reason) {
 function coverageWizardStepKeys(order = exports.COVERAGE_CASCADE_ORDER) {
     const steps = [];
     for (const t of order) {
-        const key = t === 'FT' ? 'FT' : t === 'EXTEND' || t === 'ADVANCE' ? 'RETENCION' : 'INTERNO';
+        const key = t === 'FT' ? 'FT'
+            : t === 'EVENTUAL' ? 'EVENTUAL'
+                : t === 'EXTEND' || t === 'ADVANCE' ? 'RETENCION'
+                    : 'INTERNO';
         if (steps[steps.length - 1] !== key)
             steps.push(key);
     }

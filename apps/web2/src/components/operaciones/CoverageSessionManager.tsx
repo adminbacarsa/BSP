@@ -36,7 +36,16 @@ import {
 } from '@/lib/operaciones/coverageInternalCandidates';
 import { buildOpsCandidateView } from '@/lib/operaciones/coverageCandidateView';
 import { collectFrancoShiftRowsToday } from '@/lib/operaciones/coverageAssignedToday';
-import { COVERAGE_REJECT_LABEL, coverageWizardStepKeys, type CoverageWizardStepKey } from '@cosp/ops-core';
+import {
+  COVERAGE_REJECT_LABEL,
+  coverageWizardStepKeys,
+  EVENT_COVERAGE_CASCADE_ORDER,
+  OBJECTIVE_COVERAGE_WITH_EVENTUAL,
+  eventualesParaHueco,
+  isEventoShift,
+  type CoverageWizardStepKey,
+  type EventualCandidato,
+} from '@cosp/ops-core';
 import { pickRetentionShiftForGap } from '@/lib/operaciones/coverageRetention';
 import {
   convocatoriaTypeForInternalKind,
@@ -59,7 +68,7 @@ import {
 
 // ─── Tipos públicos ───────────────────────────────────────────────────────────
 
-export type StepKey = 'INTERNO' | 'RETENCION' | 'FT';
+export type StepKey = CoverageWizardStepKey;
 
 export interface PendingSlot {
   notifId: string;
@@ -113,11 +122,16 @@ export type SessionAction =
 
 const STEP_META: Record<CoverageWizardStepKey, { label: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }> = {
   INTERNO: { label: 'RET · REF · ESC', mandatory: true, timeoutSec: 180, desc: 'Plantel del objetivo — prioridad RET, luego REF y ESC' },
+  EVENTUAL: { label: 'Eventuales', mandatory: false, timeoutSec: 180, desc: 'Bolsa del grupo. No genera recargo de franco trabajado. El servidor vuelve a chequear el cruce de 12 h.' },
   RETENCION: { label: 'Ext + Adel', mandatory: false, timeoutSec: 60, isDual: true, desc: 'Extensión + adelanto (costo extra). Primero el mismo puesto, después el resto del objetivo' },
   FT: { label: 'Franco Trabajado', mandatory: false, timeoutSec: 180, desc: 'Último recurso' },
 };
-const STEPS: { key: StepKey; label: string; icon: string; mandatory: boolean; timeoutSec: number; isDual?: boolean; desc: string }[] =
-  coverageWizardStepKeys().map((key, i) => ({ key, icon: String(i + 1), ...STEP_META[key] }));
+
+/** Evento: eventual primero. Objetivo: después de RET/REF/ESC y antes de Ext/Adel/FT. */
+function stepsForShift(shift: unknown) {
+  const order = isEventoShift(shift as object) ? EVENT_COVERAGE_CASCADE_ORDER : OBJECTIVE_COVERAGE_WITH_EVENTUAL;
+  return coverageWizardStepKeys(order).map((key, i) => ({ key, icon: String(i + 1), ...STEP_META[key] }));
+}
 
 const BAND_LABEL: Record<string, string> = {
   M: 'Mañana', T: 'Tarde', N: 'Noche', D12: '12h diurno', N12: '12h nocturno',
@@ -381,7 +395,7 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
       <div className="fixed bottom-0 left-0 right-0 z-[8900] flex items-end gap-1 px-3 pb-0 pointer-events-none">
         <div className="flex items-end gap-1 pointer-events-auto overflow-x-auto pb-0 max-w-full">
           {sessions.map(s => {
-            const step = STEPS[s.currentStep];
+            const step = stepsForShift(s.absentShift)[s.currentStep];
             const isActive = s.id === activeId;
             const isPending = s.status === 'PENDING' || s.status === 'PENDING_DUAL';
             const isConfirmed = s.status === 'CONFIRMED';
@@ -469,7 +483,43 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
     if (!obj) return base;
     return { ...base, lat: obj.lat ?? obj.latitude, lng: obj.lng ?? obj.longitude };
   }, [absenceShift, logic.objectives]);
-  const step = STEPS[s.currentStep];
+  const steps = stepsForShift(absenceShift);
+  const step = steps[s.currentStep];
+  const [eventualRows, setEventualRows] = React.useState<EventualCandidato[]>([]);
+  React.useEffect(() => {
+    if (step?.key !== 'EVENTUAL' || !tid) return undefined;
+    let cancel = false;
+    (async () => {
+      try {
+        const snap = await getDocs(query(
+          collection(db, 'eventuales_bolsa'),
+          where('disponibilidad', '==', 'DISPONIBLE'),
+          limit(200),
+        ));
+        const bolsa = snap.docs.map((d) => ({ cuil: d.id, ...(d.data() as Record<string, unknown>) }));
+        const start = toDate(absenceShift.shiftDateObj).getTime();
+        const end = toDate(absenceShift.endDateObj).getTime();
+        const coords = resolveObjectiveCoords(absenceForGeo as Record<string, unknown>);
+        const hoy = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const rows = eventualesParaHueco({
+          bolsa,
+          hueco: {
+            empresaId: String(tid),
+            startMs: start,
+            endMs: end,
+            lat: coords.lat,
+            lng: coords.lng,
+            hoyYmd: hoy,
+          },
+          otrasJornadas: [],
+        });
+        if (!cancel) setEventualRows(rows);
+      } catch {
+        if (!cancel) setEventualRows([]);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [step?.key, tid, absenceShift, absenceForGeo]);
   const now = new Date();
   const absenceEnd = toDate(absenceShift.endDateObj);
   const hiStart = fmtTime(absenceShift.shiftDateObj);
@@ -750,7 +800,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
           )?.id;
 
       let callableType: OpsConvocatoriaCallableType = 'RET';
-      if (step.key === 'FT') callableType = 'FT';
+      if (step.key === 'EVENTUAL') callableType = 'EVENTUAL';
+      else if (step.key === 'FT') callableType = 'FT';
       else if (step.key === 'INTERNO' && coverageKind) {
         callableType = convocatoriaTypeForInternalKind(coverageKind);
       }
@@ -761,7 +812,8 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         type: callableType,
         empresaId: tid,
         ...(callableType === 'FT' && turnoId ? { ftShiftId: turnoId } : {}),
-        ...(callableType !== 'FT' && turnoId ? { candidateShiftId: turnoId } : {}),
+        ...(callableType !== 'FT' && callableType !== 'EVENTUAL' && turnoId ? { candidateShiftId: turnoId } : {}),
+        ...(callableType === 'EVENTUAL' ? { bolsaCuil: String((cand as { cuil?: string }).cuil || empId) } : {}),
       });
 
       onUpd({
@@ -969,7 +1021,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
   const skipStep = () => {
     rejectCandidate();
     const next = s.currentStep + 1;
-    if (next < STEPS.length) onUpd({ currentStep: next, status: 'SELECTING', pending: null, awaitingPhone: false });
+    if (next < steps.length) onUpd({ currentStep: next, status: 'SELECTING', pending: null, awaitingPhone: false });
     else onUpd({ status: 'FAILED' });
   };
 
@@ -1486,7 +1538,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
       {/* Steps progress */}
       <div className="px-3 py-2 bg-rose-50 border-b border-rose-100 shrink-0 overflow-x-auto">
         <div className="flex items-center gap-0.5 min-w-max">
-          {STEPS.map((st, i) => {
+          {steps.map((st, i) => {
             const done = i < s.currentStep || s.status === 'CONFIRMED';
             const active = i === s.currentStep && s.status !== 'CONFIRMED' && s.status !== 'FAILED';
             const sec = active && s.status === 'PENDING' ? s.pending?.sec : null;
@@ -1496,7 +1548,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   {done ? '✓' : st.icon} {st.label}
                   {sec != null && <span className="font-mono ml-0.5 text-[8px]">{fmtCd(sec)}</span>}
                 </div>
-                {i < STEPS.length - 1 && <ChevronRight size={8} className="text-slate-300 flex-shrink-0" />}
+                {i < steps.length - 1 && <ChevronRight size={8} className="text-slate-300 flex-shrink-0" />}
               </React.Fragment>
             );
           })}
@@ -1535,7 +1587,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
             {/* Encabezado del paso */}
             <div className="flex items-start justify-between mb-3">
               <div>
-                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Paso {s.currentStep + 1} de {STEPS.length}</div>
+                <div className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Paso {s.currentStep + 1} de {steps.length}</div>
                 <div className="text-base font-black text-slate-800 leading-tight mt-0.5">{step.label}</div>
                 <div className="text-[11px] text-slate-500 mt-0.5 leading-snug">{step.desc}</div>
                 {step.key === 'RETENCION' && (
@@ -1549,7 +1601,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                   </div>
                 )}
               </div>
-              {s.status === 'SELECTING' && s.currentStep < STEPS.length - 1 && (
+              {s.status === 'SELECTING' && s.currentStep < steps.length - 1 && (
                 <button onClick={skipStep} className="flex items-center gap-1 text-[11px] text-slate-400 hover:text-slate-600 font-semibold shrink-0 ml-2 mt-1">
                   <SkipForward size={12} /> Saltear
                 </button>
@@ -1560,13 +1612,42 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
               ? renderPending()
               : step.isDual
                 ? renderDual()
+                : step.key === 'EVENTUAL'
+                  ? eventualRows.length === 0
+                    ? (
+                      <div className="flex flex-col items-center gap-3 py-8 text-center">
+                        <Users size={36} className="text-slate-200" />
+                        <div className="text-sm font-bold text-slate-400">Sin eventuales habilitados para este hueco</div>
+                      </div>
+                    )
+                    : (
+                      <div className="flex flex-col gap-2">
+                        {eventualRows.map((row) => (
+                          <button
+                            key={row.cuil}
+                            type="button"
+                            disabled={!!loading}
+                            onClick={() => sendNotification(row)}
+                            className="flex items-center justify-between gap-2 px-3 py-2.5 rounded-2xl border border-slate-200 bg-white shadow-sm hover:bg-slate-50 text-left"
+                          >
+                            <span className="min-w-0">
+                              <span className="block text-sm font-black text-slate-800 truncate">{row.employeeName}</span>
+                              <span className="block text-[10px] text-slate-500">
+                                {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
+                              </span>
+                            </span>
+                            <span className="text-[10px] font-black text-indigo-700 shrink-0">Convocar</span>
+                          </button>
+                        ))}
+                      </div>
+                    )
                 : step.key === 'INTERNO'
                   ? internalCountAllGeo === 0
                     ? (
                       <div className="flex flex-col items-center gap-3 py-8 text-center">
                         <Users size={36} className="text-slate-200" />
                         <div className="text-sm font-bold text-slate-400">Sin RET / REF / ESC en el objetivo</div>
-                        {s.currentStep < STEPS.length - 1 && (
+                        {s.currentStep < steps.length - 1 && (
                           <button onClick={skipStep} className="px-4 py-2.5 bg-slate-700 hover:bg-slate-800 text-white font-bold rounded-xl text-sm flex items-center gap-1.5 transition-colors">
                             <SkipForward size={13} /> Ext + Adel
                           </button>

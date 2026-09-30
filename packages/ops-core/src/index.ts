@@ -77,12 +77,14 @@ export { shiftMatchesOpsViewTab } from './shiftMatchesOpsViewTab';
 export type { OpsViewTabShift } from './shiftMatchesOpsViewTab';
 export {
   EVENT_COVERAGE_CASCADE_ORDER,
+  OBJECTIVE_COVERAGE_WITH_EVENTUAL,
   isEventoShift,
   eventoTieneFranjasEncadenadas,
   eventualesParaHueco,
+  bloqueoCruceEventual,
   planEventualAusente,
 } from './eventoCoverage';
-export type { EventualCandidato, EventualAusentePlan } from './eventoCoverage';
+export type { EventualCandidato, EventualAusentePlan, EventualesHuecoInput, EventualBolsaRow } from './eventoCoverage';
 export {
   COVERAGE_CASCADE_ORDER,
   COVERAGE_LEGACY_CANDIDATE_TYPES,

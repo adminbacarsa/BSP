@@ -1328,6 +1328,9 @@ export default function TacticalMapView() {
                                                     </span>
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
+                                                {s.esEventual === true && s.eventualAltaArcaConfirmada !== true && s.shiftDateObj instanceof Date && Date.now() >= s.shiftDateObj.getTime() - 2 * 60 * 60 * 1000 && (
+                                                    <p className="text-[10px] font-black text-amber-700">ALTA_ARCA_PENDIENTE</p>
+                                                )}
                                                 {s.isPresent && s.retentionWait ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
                                                 {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                             </div>

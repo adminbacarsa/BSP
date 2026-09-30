@@ -22,10 +22,11 @@ import { gapWindowFromTitularShift, shiftEndMs, shiftStartMs } from './coverageS
 import { uncoveredRemainderMs } from './partialSegment';
 import {
   EVENT_COVERAGE_CASCADE_ORDER,
+  OBJECTIVE_COVERAGE_WITH_EVENTUAL,
   eventoTieneFranjasEncadenadas,
-  eventualesParaHueco,
   isEventoShift,
 } from '../eventos/eventoCoverage';
+import { loadEventualesParaHueco, registrarAsignacionEventualEnBatch } from '../eventos/eventualesParaHuecoServer';
 
 // ─── Tipos ───────────────────────────────────────────────────────────────────
 
@@ -52,6 +53,8 @@ export interface ConvocatoriaCoberturaDoc {
   candidateEmployeeId: string;
   candidateEmployeeName: string;
   candidateUid?: string;
+  /** CUIL de la bolsa cuando type es EVENTUAL. */
+  bolsaCuil?: string;
 
   // Para EXTEND: el turno a extender (ya presente en obj)
   extendShiftId?: string;
@@ -141,6 +144,56 @@ async function crearNotifConvocatoria(
   });
 }
 
+function nextInCoverageOrder(conv: { type: string; shiftCode?: string }): CandidateType | null {
+  const order = isEventoShift({ code: conv.shiftCode })
+    ? EVENT_COVERAGE_CASCADE_ORDER
+    : OBJECTIVE_COVERAGE_WITH_EVENTUAL;
+  const idx = (order as readonly string[]).indexOf(conv.type);
+  if (idx >= 0) return (order[idx + 1] as CandidateType) || null;
+  return nextCascadeStep(conv.type as CandidateType);
+}
+
+async function convocarEventual(
+  db: admin.firestore.Firestore,
+  base: ConvocatoriaCoberturaDoc,
+  createdBy: string,
+): Promise<boolean> {
+  const titularGeo = (await db.collection('turnos').doc(base.shiftId).get()).data() || {};
+  const pool = await loadEventualesParaHueco(db, {
+    empresaId: base.empresaId,
+    startTime: base.startTime,
+    endTime: base.endTime,
+    lat: titularGeo.lat ?? titularGeo.latitude,
+    lng: titularGeo.lng ?? titularGeo.longitude,
+  });
+  const first = pool[0];
+  if (!first?.employeeId) return false;
+  const order = isEventoShift({ code: base.shiftCode })
+    ? EVENT_COVERAGE_CASCADE_ORDER
+    : OBJECTIVE_COVERAGE_WITH_EVENTUAL;
+  await crearConvocatoriaDoc(db, {
+    empresaId: base.empresaId,
+    shiftId: base.shiftId,
+    objectiveId: base.objectiveId,
+    objectiveName: base.objectiveName,
+    positionName: base.positionName,
+    clientId: base.clientId,
+    clientName: base.clientName,
+    shiftCode: base.shiftCode,
+    startTime: base.startTime,
+    endTime: base.endTime,
+    aptitudesRequeridas: base.aptitudesRequeridas || [],
+    type: 'EVENTUAL',
+    cascadeStep: (order as readonly string[]).indexOf('EVENTUAL'),
+    candidateEmployeeId: first.employeeId,
+    candidateEmployeeName: first.employeeName,
+    ...(first.uid ? { candidateUid: first.uid } : {}),
+    bolsaCuil: first.cuil,
+    createdBy,
+  });
+  return true;
+}
+
 // ─── Helper: avanzar cascada ──────────────────────────────────────────────────
 
 async function avanzarCascada(
@@ -150,7 +203,7 @@ async function avanzarCascada(
 ): Promise<void> {
   // LLEGADA_TARDE no participa en la cascada de cobertura
   if (conv.type === 'LLEGADA_TARDE') return;
-  const nextType = nextCascadeStep(conv.type as CandidateType);
+  const nextType = nextInCoverageOrder(conv);
   if (!nextType) {
     await escalarVacanteSinCobertura(db, {
       shiftId: conv.shiftId,
@@ -168,6 +221,12 @@ async function avanzarCascada(
   // FT: broadcast — buscar múltiples candidatos de franco en objetivo
   if (nextType === 'FT') {
     await dispararBroadcastFT(db, conv);
+    return;
+  }
+
+  if (nextType === 'EVENTUAL') {
+    const ok = await convocarEventual(db, conv, 'AUTO');
+    if (!ok) await avanzarCascada(db, { ...conv, type: 'EVENTUAL' }, reason);
     return;
   }
 
@@ -805,7 +864,7 @@ export async function resolverCobertura(
           ? conv.ftShiftId
           : conv.candidateShiftId;
       rrhhCoverageType = convTypeToCoverageType(String(conv.type));
-      await applyCoverage(db, batch, {
+      const covDocId = await applyCoverage(db, batch, {
         titularShiftId: conv.shiftId,
         titularShift: titularData,
         candidateEmployeeId: conv.candidateEmployeeId,
@@ -824,6 +883,20 @@ export async function resolverCobertura(
         acceptedAt,
         titularCloseMode: 'FULL',
       });
+      if (conv.type === 'EVENTUAL') {
+        const startMs = conv.startTime instanceof Timestamp ? conv.startTime.toMillis() : 0;
+        const endMs = conv.endTime instanceof Timestamp ? conv.endTime.toMillis() : 0;
+        await registrarAsignacionEventualEnBatch(db, batch, {
+          empresaId: conv.empresaId,
+          cuil: String(conv.bolsaCuil || conv.candidateEmployeeId),
+          employeeId: conv.candidateEmployeeId,
+          employeeName: conv.candidateEmployeeName,
+          startMs,
+          endMs,
+          shiftId: conv.shiftId,
+          covDocId,
+        });
+      }
     }
 
     if (titularCloseMode === 'FULL') {
@@ -868,6 +941,7 @@ export async function resolverCobertura(
     EXTEND: 'Jornada extendida',
     ADVANCE: 'Turno adelantado',
     FT: 'Franco Trabajado',
+    EVENTUAL: 'Eventual',
     VOLANTE: 'Cobertura volante',
     SIN_TURNO: 'Guardia disponible',
     SIN_TURNO_CON_EXP: 'Guardia con experiencia',
@@ -977,6 +1051,59 @@ export const crearConvocatoriaCobertura = functions
       throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
     }
     const shift = shiftSnap.data()!;
+
+    if (type === 'EVENTUAL') {
+      const cuil = String((data as { bolsaCuil?: string }).bolsaCuil || candidateEmployeeId).trim();
+      const bolsaSnap = await db.collection('eventuales_bolsa').doc(cuil).get();
+      if (!bolsaSnap.exists) {
+        throw new functions.https.HttpsError('not-found', 'Eventual no encontrado en la bolsa.');
+      }
+      const pool = await loadEventualesParaHueco(db, {
+        empresaId,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        lat: shift.lat,
+        lng: shift.lng,
+      });
+      const hit = pool.find((p) => p.cuil === cuil || p.employeeId === candidateEmployeeId);
+      if (!hit) {
+        throw new functions.https.HttpsError('failed-precondition', 'El eventual no está disponible para este hueco (cruce, vigencia o empresa).');
+      }
+      const existingEv = await db.collection('convocatorias_cobertura')
+        .where('shiftId', '==', shiftId)
+        .where('candidateEmployeeId', '==', hit.employeeId)
+        .where('status', '==', 'PENDING')
+        .limit(1)
+        .get();
+      if (!existingEv.empty) {
+        throw new functions.https.HttpsError('already-exists', 'Ya hay una convocatoria pendiente para este eventual y turno.');
+      }
+      const callerEv = await db.collection('system_users').doc(context.auth.uid).get();
+      const callerEvName = callerEv.exists ? String(callerEv.data()?.displayName || callerEv.data()?.name || '') : '';
+      const orderEv = isEventoShift(shift) ? EVENT_COVERAGE_CASCADE_ORDER : OBJECTIVE_COVERAGE_WITH_EVENTUAL;
+      const convEv = await crearConvocatoriaDoc(db, {
+        empresaId,
+        shiftId,
+        objectiveId: String(shift.objectiveId || ''),
+        objectiveName: String(shift.objectiveName || ''),
+        positionName: String(shift.positionName || ''),
+        clientId: String(shift.clientId || ''),
+        clientName: String(shift.clientName || ''),
+        shiftCode: String(shift.code || ''),
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        aptitudesRequeridas: [],
+        type: 'EVENTUAL',
+        cascadeStep: (orderEv as readonly string[]).indexOf('EVENTUAL'),
+        candidateEmployeeId: hit.employeeId,
+        candidateEmployeeName: hit.employeeName,
+        ...(hit.uid ? { candidateUid: hit.uid } : {}),
+        bolsaCuil: hit.cuil,
+        createdBy: context.auth.uid,
+        createdByName: callerEvName,
+      });
+      return { success: true, convocatoriaId: convEv };
+    }
 
     // Cargar candidato
     const empSnap = await db.collection('empleados').doc(candidateEmployeeId).get();
@@ -1346,25 +1473,15 @@ export async function iniciarCascadaCobertura(
   };
 
   const eventGap = isEventoShift(titularData);
-  const order: readonly CandidateType[] = eventGap ? EVENT_COVERAGE_CASCADE_ORDER : CASCADE_ORDER;
-  if (eventGap) {
-    const pool = eventualesParaHueco();
-    const first = pool[0];
-    if (first?.employeeId) {
-      await crearConvocatoriaDoc(db, {
-        ...baseConvData,
-        type: 'EVENTUAL',
-        cascadeStep: 0,
-        candidateEmployeeId: first.employeeId,
-        candidateEmployeeName: first.employeeName,
-        createdBy,
-      });
-      return;
-    }
-  }
+  const order = (eventGap ? EVENT_COVERAGE_CASCADE_ORDER : OBJECTIVE_COVERAGE_WITH_EVENTUAL) as readonly CandidateType[];
 
   // Iterar la cascada desde el primer paso hasta encontrar candidato
   for (const type of order) {
+    if (type === 'EVENTUAL') {
+      const ok = await convocarEventual(db, { ...baseConvData, shiftCode: String(shift.code || titularData.code || '') }, createdBy);
+      if (ok) return;
+      continue;
+    }
     if (type === 'FT') {
       await dispararBroadcastFT(db, baseConvData);
       return;

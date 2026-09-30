@@ -1088,6 +1088,14 @@ const shiftPostLabel = (shift: any): string => {
     return String(shift?.positionName || '—').trim();
 };
 
+const ALTA_ARCA_ALERTA_MS = 2 * 60 * 60 * 1000;
+function altaArcaPendienteVisible(shift: { esEventual?: boolean; eventualAltaArcaConfirmada?: boolean; shiftDateObj?: Date }, now: Date): boolean {
+    if (shift?.esEventual !== true || shift?.eventualAltaArcaConfirmada === true) return false;
+    const start = shift.shiftDateObj instanceof Date ? shift.shiftDateObj.getTime() : NaN;
+    if (!Number.isFinite(start)) return false;
+    return now.getTime() >= start - ALTA_ARCA_ALERTA_MS;
+}
+
 const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHandover, onOpenInterrupt, onOpenCoverage, onReportPlanning, onOpenWorkedFranco, onNovedadAbsence, onOpenWA, onOpenAbsenceDecision, onOpenRRHH, onOpenManualRetention, isCompact, isAutoMode, onRevertAbsence }: any) => {
     let accentColor = 'bg-slate-400'; let rowBg = 'bg-white';
 
@@ -1213,6 +1221,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                     <ShiftCodeBadge shift={shift} />
                     {dayTagEl}
                     {badge}
+                    {altaArcaPendienteVisible(shift, now) && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0" title="Sin número de transacción: no puede fichar">ALTA_ARCA_PENDIENTE</span>
+                    )}
                 </div>
                 <div className="flex items-center gap-1.5 text-[9px] text-slate-400 leading-tight mt-0.5">
                     <span className="truncate">{shift.objectiveName} · <span className="text-indigo-500">{shiftPostLabel(shift)}</span></span>
@@ -1288,7 +1299,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                             <span className="text-[10px] text-slate-400">{shift.clientName || shift.objectiveName}</span>
                         </div>
                     </div>
-                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}</div>
+                    <div className="flex items-center gap-1.5 shrink-0">{dayTagEl}{badge}{altaArcaPendienteVisible(shift, now) && (
+                        <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0" title="Sin número de transacción: no puede fichar">ALTA_ARCA_PENDIENTE</span>
+                    )}</div>
                 </div>
                 {/* Fila 2: objetivo · posición */}
                 <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-1.5 pl-10">

@@ -24,7 +24,7 @@ export const COVERAGE_LEGACY_CANDIDATE_TYPES = [
 
 export type CoverageCascadeType = (typeof COVERAGE_CASCADE_ORDER)[number];
 
-export type CoverageWizardStepKey = 'INTERNO' | 'RETENCION' | 'FT';
+export type CoverageWizardStepKey = 'INTERNO' | 'EVENTUAL' | 'RETENCION' | 'FT';
 
 export const COVERAGE_JOIN_TOLERANCE_MS = 30 * 60 * 1000;
 
@@ -117,7 +117,10 @@ export function coverageWizardStepKeys(
   const steps: CoverageWizardStepKey[] = [];
   for (const t of order) {
     const key: CoverageWizardStepKey =
-      t === 'FT' ? 'FT' : t === 'EXTEND' || t === 'ADVANCE' ? 'RETENCION' : 'INTERNO';
+      t === 'FT' ? 'FT'
+        : t === 'EVENTUAL' ? 'EVENTUAL'
+          : t === 'EXTEND' || t === 'ADVANCE' ? 'RETENCION'
+            : 'INTERNO';
     if (steps[steps.length - 1] !== key) steps.push(key);
   }
   return steps;

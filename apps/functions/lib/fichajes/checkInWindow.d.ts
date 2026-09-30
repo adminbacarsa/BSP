@@ -1,6 +1,6 @@
 export type CheckInWindowResult = {
     allowed: boolean;
-    rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED' | 'EXT_NO_CHECKIN';
+    rejectCode?: 'ABSENT' | 'TRACE_REGISTRATION' | 'TOO_EARLY' | 'TOO_LATE' | 'SHIFT_ENDED' | 'EXT_NO_CHECKIN' | 'ALTA_ARCA_PENDIENTE';
     usePlannedStart?: boolean;
     useAdjustedStart?: boolean;
     lateMinutes?: number;

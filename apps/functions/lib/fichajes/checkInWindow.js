@@ -5,6 +5,7 @@ exports.convocadoPunchCapMs = convocadoPunchCapMs;
 exports.evaluateServerCheckInWindow = evaluateServerCheckInWindow;
 const lateAbsenceWindow_1 = require("../attendance/lateAbsenceWindow");
 const coverageTraceShift_1 = require("../coverage/coverageTraceShift");
+const altaArcaGate_1 = require("../arca/altaArcaGate");
 function startMs(shift) {
     return shift.startTime?.toMillis?.() ?? 0;
 }
@@ -62,6 +63,9 @@ function finishAllowed(anchorStartMs, nowMs, useAdjustedStart, lateNoNoticeEligi
     };
 }
 function evaluateServerCheckInWindow(shift, nowMs, opts) {
+    if (!(0, altaArcaGate_1.isAltaArcaConfirmada)(shift)) {
+        return { allowed: false, rejectCode: 'ALTA_ARCA_PENDIENTE' };
+    }
     const plannedStartEarly = startMs(shift);
     if ((shift.isAbsent === true || String(shift.status || '').toUpperCase() === 'ABSENT')
         && (0, lateAbsenceWindow_1.isReversibleLateAbsence)(shift, nowMs)

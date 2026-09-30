@@ -1,7 +1,7 @@
 export declare const COVERAGE_CASCADE_ORDER: readonly ["RET", "REF", "ESC", "EXTEND", "ADVANCE", "FT"];
 export declare const COVERAGE_LEGACY_CANDIDATE_TYPES: readonly ["VOLANTE", "SIN_TURNO_CON_EXP", "SIN_TURNO"];
 export type CoverageCascadeType = (typeof COVERAGE_CASCADE_ORDER)[number];
-export type CoverageWizardStepKey = 'INTERNO' | 'RETENCION' | 'FT';
+export type CoverageWizardStepKey = 'INTERNO' | 'EVENTUAL' | 'RETENCION' | 'FT';
 export declare const COVERAGE_JOIN_TOLERANCE_MS: number;
 export declare const COVERAGE_HARD_CAP_MS: number;
 export declare const COVERAGE_LICENSE_CODES: ReadonlySet<string>;

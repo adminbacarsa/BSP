@@ -9,7 +9,7 @@ import { db, functions } from '@/lib/firebase';
 import { stampEmpresaId } from '@/lib/multiempresa';
 import type { InternalCoverageKind } from '@/lib/operaciones/coverageInternalCandidates';
 
-export type OpsConvocatoriaCallableType = 'RET' | 'REF' | 'ESC' | 'EXTEND' | 'ADVANCE' | 'FT';
+export type OpsConvocatoriaCallableType = 'RET' | 'REF' | 'ESC' | 'EXTEND' | 'ADVANCE' | 'FT' | 'EVENTUAL';
 
 const toDate = (d: unknown): Date => {
   if (!d) return new Date();
@@ -85,6 +85,7 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   extendShiftId?: string;
   advanceShiftId?: string;
   ftShiftId?: string;
+  bolsaCuil?: string;
 }): Promise<{ convocatoriaId: string; shiftId: string }> {
   const empresaId = String(params.empresaId || '').trim();
   const shiftId = await ensureRealAbsenceShiftId(params.absenceShift, empresaId);
@@ -99,6 +100,7 @@ export async function invokeCrearConvocatoriaCobertura(params: {
   if (params.extendShiftId) payload.extendShiftId = params.extendShiftId;
   if (params.advanceShiftId) payload.advanceShiftId = params.advanceShiftId;
   if (params.ftShiftId) payload.ftShiftId = params.ftShiftId;
+  if (params.bolsaCuil) payload.bolsaCuil = params.bolsaCuil;
   const res = await fn(payload);
   const convocatoriaId = String((res.data as { convocatoriaId?: string })?.convocatoriaId || '').trim();
   if (!convocatoriaId) {

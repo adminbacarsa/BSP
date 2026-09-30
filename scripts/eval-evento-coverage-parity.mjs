@@ -27,7 +27,20 @@ report('archivo', a === b, a === b ? 'mismo archivo' : 'copias distintas');
 report('es evento', core.isEventoShift({ code: 'EV' }) && fn.isEventoShift({ origin: 'EVENTO' }) && !core.isEventoShift({ code: 'M', eventoId: 'x' }), '');
 report('sin continuidad', core.eventoTieneFranjasEncadenadas({}) === false && fn.eventoTieneFranjasEncadenadas({ eventoFranjasEncadenadas: true }) === true, '');
 report('bolsa vacia', core.eventualesParaHueco().length === 0 && fn.eventualesParaHueco().length === 0, '');
-report('orden', core.EVENT_COVERAGE_CASCADE_ORDER.join(',') === 'REF,ESC,EXTEND,ADVANCE,FT' && !core.EVENT_COVERAGE_CASCADE_ORDER.includes('RET'), core.EVENT_COVERAGE_CASCADE_ORDER.join(','));
+report('orden evento', core.EVENT_COVERAGE_CASCADE_ORDER.join(',') === 'EVENTUAL,REF,ESC,EXTEND,ADVANCE,FT', core.EVENT_COVERAGE_CASCADE_ORDER.join(','));
+report('orden objetivo', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(',') === 'RET,REF,ESC,EVENTUAL,EXTEND,ADVANCE,FT', core.OBJECTIVE_COVERAGE_WITH_EVENTUAL.join(','));
+const hueco = { empresaId: 'e1', startMs: Date.parse('2026-10-02T10:00:00-03:00'), endMs: Date.parse('2026-10-02T18:00:00-03:00'), lat: -31.4, lng: -64.2, hoyYmd: '2026-10-02' };
+const base = { disponibilidad: 'DISPONIBLE', empresasHabilitadas: ['e1'], credencialVencimiento: '2027-01-01', aptoPsicofisico: { estado: 'APTO', vencimiento: '2027-01-01' }, uid: 'u' };
+const cerca = { ...base, cuil: '20111111111', nombre: 'Cerca', confiabilidad: 1, domicilioGeo: { lat: -31.41, lng: -64.21 } };
+const lejos = { ...base, cuil: '20222222222', nombre: 'Lejos', confiabilidad: 9, domicilioGeo: { lat: -32.9, lng: -68.8 } };
+const cruce = { ...base, cuil: '20333333333', nombre: 'Cruce', confiabilidad: 5, domicilioGeo: { lat: -31.4, lng: -64.2 } };
+const lista = core.eventualesParaHueco({
+  bolsa: [lejos, cruce, cerca],
+  hueco,
+  otrasJornadas: [{ cuil: '20333333333', empresaId: 'e2', startMs: hueco.startMs - 8 * 3600000, endMs: hueco.startMs - 6 * 3600000 }],
+});
+report('orden distancia', lista.map((r) => r.cuil).join(',') === '20111111111,20222222222' && !lista.some((r) => r.cuil === '20333333333'), lista.map((r) => r.nombre).join(','));
+report('cruce espejo', fn.eventualesParaHueco({ bolsa: [cruce], hueco, otrasJornadas: [{ cuil: cruce.cuil, empresaId: 'e2', startMs: hueco.startMs - 8 * 3600000, endMs: hueco.startMs - 6 * 3600000 }] }).length === 0, '');
 const plan = core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', eventoId: 'ev', shiftId: 's', isEventual: true, punched: false });
 report('eventual sin fichar', plan?.arcaBajaPendiente === true && plan.descuentaLiquidacion === true && plan.confiabilidadDelta === -1, JSON.stringify(plan));
 report('no eventual', core.planEventualAusente({ employeeId: 'e', empresaAltaId: 'emp', isEventual: false }) === null, '');
