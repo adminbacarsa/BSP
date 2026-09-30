@@ -418,7 +418,11 @@ service cloud.firestore {
 
     match /empresas/{empresaId} {
       allow read: if isAdmin() || isEmployeeClaim();
-      allow write: if isSuperAdmin();
+      allow create, delete: if isSuperAdmin();
+      allow update: if isSuperAdmin() || (
+        isAdmin() && empresaId == userEmpresaId()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['avisos'])
+      );
     }
 
     // PEM AFIP: solo Cloud Functions (Admin SDK). Metadatos públicos en empresas.{afipConfigured,...}
@@ -886,6 +890,51 @@ service cloud.firestore {
         allow read: if tenantAdminRead();
         allow write: if false;
       }
+    }
+
+    function contratoEventualCausaOk(data) {
+      return data.get('causa', '') is string && data.get('causa', '').size() > 0;
+    }
+
+    // Bolsa del grupo (una persona por CUIL). Lectura: admin del panel.
+    // Escritura: SuperAdmin o Admin SDK. No se borra desde el cliente. Las publica Claude.
+    match /eventuales_bolsa/{cuil} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create, update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    match /grupos_eventuales/{grupoId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if isSuperAdmin();
+    }
+
+    // Envíos de carga masiva ARCA. El TXT y el token no se leen desde el cliente:
+    // el robot y la página del link pasan por la función `arcaEnviosApi` (Admin SDK).
+    match /arca_envios/{envioId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
+    }
+
+    // Escala CCT por vigencia. Historial = un doc por vigenciaDesde. Escritura: SuperAdmin. Las publica Claude.
+    match /escalas_salariales/{escalaId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow create, update: if isSuperAdmin();
+      allow delete: if false;
+    }
+
+    match /contratos_eventuales/{contratoId} {
+      allow read: if tenantAdminRead() || empleadoDocOwnedByAuth(resource.data.employeeId);
+      allow create: if tenantAdminCreate()
+        && contratoEventualCausaOk(request.resource.data)
+        && request.resource.data.estado == 'BORRADOR';
+      allow update: if tenantAdminUpdate()
+        && contratoEventualCausaOk(request.resource.data)
+        && request.resource.data.estado == resource.data.estado
+        && request.resource.data.get('documento', null) == resource.data.get('documento', null)
+        && request.resource.data.get('acuse', null) == resource.data.get('acuse', null)
+        && request.resource.data.get('arca', null) == resource.data.get('arca', null);
+      allow delete: if tenantAdminDelete();
     }
 
     // Sesiones de capacitación sandbox (training_sessions).

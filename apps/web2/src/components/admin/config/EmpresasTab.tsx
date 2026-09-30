@@ -10,6 +10,7 @@ import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage
 import { FirebaseError } from 'firebase/app';
 import { httpsCallable } from 'firebase/functions';
 import EmpresaAfipSection from '@/components/admin/config/EmpresaAfipSection';
+import EmpresaAvisosSection from '@/components/admin/config/EmpresaAvisosSection';
 import { persistGoogleMapsApiKey } from '@/lib/googleMapsConfig';
 
 function empresaWriteErrorMessage(err: unknown, isSuperAdmin: boolean): string {
@@ -897,6 +898,8 @@ export default function EmpresasTab() {
           )}
         </div>
       )}
+
+      {empresa && <EmpresaAvisosSection empresaId={empresa.id} />}
 
       {empresa && isSuperAdmin && (
         <EmpresaAfipSection

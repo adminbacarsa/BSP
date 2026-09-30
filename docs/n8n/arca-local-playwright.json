@@ -1,0 +1,111 @@
+{
+  "name": "COSP — ARCA carga masiva (LOCAL, Playwright)",
+  "_nota": "Importar en el n8n local. Sin credenciales reales: ARCA_ENVIOS_URL, ARCA_ROBOT_KEY y la credencial delegada son placeholders de entorno. La subida real la hace el nodo Playwright contra Simplificación Registral con Clave Fiscal del CUIT de la empresa.",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] } },
+      "id": "cron-5min",
+      "name": "Cada 5 min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-420, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=pendientes",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "options": { "timeout": 20000 }
+      },
+      "id": "get-pendientes",
+      "name": "GET pendientes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-200, 0]
+    },
+    {
+      "parameters": { "fieldToSplitOut": "envios", "options": {} },
+      "id": "split",
+      "name": "Un envío por item",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [20, 0]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.txt }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "notEmpty" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "tiene-txt",
+      "name": "Tiene TXT",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=resultado",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ envioId: $json.envioId, estado: 'SUBIENDO' }) }}",
+        "options": {}
+      },
+      "id": "marcar-subiendo",
+      "name": "POST SUBIENDO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [460, 0]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "language": "javaScript",
+        "jsCode": "// PLACEHOLDER. Acá va Playwright: login con Clave Fiscal delegada del CUIT de la empresa,\n// Simplificación Registral → Relaciones Laborales → Carga Masiva → Nuevo → subir el .txt → Enviar,\n// y leer el número de transacción de la pantalla de acuse.\n// Guardar el TXT en disco antes de subirlo: fs.writeFileSync(`${$env.ARCA_TXT_DIR}/${$json.envioId}.txt`, $json.txt + '\\n')\n// Devolver { envioId, estado: 'CONFIRMADO', nroTransaccion } o { envioId, estado: 'ERROR', error }.\nreturn { json: { envioId: $json.envioId, estado: 'ERROR', error: 'PLAYWRIGHT_NO_IMPLEMENTADO' } };"
+      },
+      "id": "playwright",
+      "name": "Playwright — subir a ARCA (placeholder)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 0]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.ARCA_ENVIOS_URL }}?action=resultado",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "x-arca-key", "value": "={{ $env.ARCA_ROBOT_KEY }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {}
+      },
+      "id": "post-resultado",
+      "name": "POST resultado",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [900, 0]
+    }
+  ],
+  "connections": {
+    "Cada 5 min": { "main": [[{ "node": "GET pendientes", "type": "main", "index": 0 }]] },
+    "GET pendientes": { "main": [[{ "node": "Un envío por item", "type": "main", "index": 0 }]] },
+    "Un envío por item": { "main": [[{ "node": "Tiene TXT", "type": "main", "index": 0 }]] },
+    "Tiene TXT": { "main": [[{ "node": "POST SUBIENDO", "type": "main", "index": 0 }]] },
+    "POST SUBIENDO": { "main": [[{ "node": "Playwright — subir a ARCA (placeholder)", "type": "main", "index": 0 }]] },
+    "Playwright — subir a ARCA (placeholder)": { "main": [[{ "node": "POST resultado", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" }
+}

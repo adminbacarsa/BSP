@@ -1,0 +1,10 @@
+Descripción | Código
+A COMISIÓN | 7
+DÍA | 4
+HORA | 5
+JORNAL | 8
+MES | 1
+PIEZA | 6
+QUINCENA | 2
+SEMANA | 3
+SIN INFORM | 9

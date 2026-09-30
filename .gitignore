@@ -50,6 +50,8 @@ apps/mobile-guardia/GoogleService-Info.plist
 
 # --- Logs y Debug ---
 logs/
+# Dry-run de eventuales: el JSON trae nombres y CUIL. No commitear.
+scripts/out/
 *.log
 npm-debug.log*
 yarn-debug.log*
