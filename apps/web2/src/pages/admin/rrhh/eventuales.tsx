@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { useAuth } from '@/context/AuthContext';
 import { db, functions } from '@/lib/firebase';
+import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { RNOS_DEFAULT_FICHA, vencePronto } from '@/lib/eventuales/ficha.mjs';
 
@@ -25,6 +26,7 @@ type Ficha = {
   riesgoEncadenamiento: string;
   uid: string;
   obraSocialRnos: string;
+  marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
 };
 
 type Form = {
@@ -69,6 +71,7 @@ export default function EventualesPage() {
   const [solapa, setSolapa] = useState<'FICHA' | 'DOCUMENTOS'>('FICHA');
   const [empresaMarco, setEmpresaMarco] = useState(GRUPO_EVENTUALES_EMPRESA_IDS[0]);
   const [documentos, setDocumentos] = useState<{ id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[]>([]);
+  const [seleccion, setSeleccion] = useState<string[]>([]);
 
   useEffect(() => {
     const q = query(collection(db, 'eventuales_bolsa'), where('grupoId', '==', GRUPO_EVENTUALES_ID));
@@ -92,6 +95,7 @@ export default function EventualesPage() {
           riesgoEncadenamiento: String(data.riesgoEncadenamiento || ''),
           uid: String(data.uid || ''),
           obraSocialRnos: String(data.obraSocialRnos || ''),
+          marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
         };
       }));
     });
@@ -206,11 +210,18 @@ export default function EventualesPage() {
             <option value="">Todas las empresas</option>
             {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{id}</option>)}
           </select>
+          <MarcosLotePanel empresaId={empresa} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
+          {seleccion.length > 0 && <button type="button" onClick={() => setSeleccion([])} className="rounded-2xl px-2 py-2 text-xs font-bold text-slate-500 underline">Quitar selección</button>}
         </div>
         <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
           <ul className="max-h-[70vh] overflow-auto rounded-3xl bg-white p-2 shadow-sm">
             {visibles.map((f) => (
-              <li key={f.id}>
+              <li key={f.id} className="flex items-center gap-1">
+                {puede('update') && (
+                  <input type="checkbox" checked={seleccion.includes(f.id)} title="Seleccionar para imprimir su marco"
+                    onChange={(e) => setSeleccion(e.target.checked ? [...seleccion, f.id] : seleccion.filter((id) => id !== f.id))}
+                    className="ml-2 h-4 w-4 rounded border-slate-300 accent-indigo-600" />
+                )}
                 <button type="button" onClick={() => abrirDetalle(f.id)} className={`w-full rounded-2xl px-3 py-2 text-left hover:bg-slate-50 ${elegida === f.id ? 'bg-indigo-50' : ''}`}>
                   <span className="block text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
                   <span className="text-[11px] text-slate-500">{f.disponibilidad} · {f.empresasHabilitadas.join(', ') || 'sin empresa'}</span>

@@ -3706,6 +3706,7 @@ export const getEmpresaAfipConfig = functions.https.onCall(getEmpresaAfipConfigH
 export { arcaEnviosApi } from './arca/arcaEnviosApi';
 export { gestionarEventual, crearAccesoEventual, listarTurnosEventual } from './eventuales/gestionarEventual';
 export { gestionarMarcoEventual, pedirCodigoAnexoEventual, confirmarAnexoEventual } from './eventuales/marcoAnexoCall';
+export { subirMarcosLote } from './marcosLote/subirMarcosLote';
 export { acusarReciboContrato } from './eventuales/acusarReciboContrato';
 // Eventuales en Planificación/Eventos: candidatos de la bolsa, asignación, sustitución y contrato por turnos.
 export {

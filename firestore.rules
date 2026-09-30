@@ -938,6 +938,12 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    // Lotes de escaneos de marcos (subirMarcosLote). Solo escribe el servidor.
+    match /eventuales_lotes/{loteId} {
+      allow read: if isSuperAdmin() || isAdmin();
+      allow write: if false;
+    }
+
     match /anexos_eventuales/{anexoId} {
       allow read: if isSuperAdmin() || isAdmin();
       allow write: if false;
