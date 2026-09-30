@@ -251,7 +251,7 @@ function vacioAviso() {
     return { pushes: [], mails: [], whatsapps: [] };
 }
 async function resolverAvisosEmpresa(empresaId) {
-    const { resolverAvisos, TIPOS_AVISO } = await Promise.resolve().then(() => require('../../../web2/src/lib/eventuales/avisos.mjs'));
+    const { resolverAvisos, TIPOS_AVISO } = await Promise.resolve().then(() => require('../eventuales-shared/avisos.mjs'));
     const empresa = await db().collection('empresas').doc(empresaId).get();
     const avisos = (empresa.data()?.avisos || {});
     const usersSnap = await db().collection('system_users').where('empresaId', '==', empresaId).get();

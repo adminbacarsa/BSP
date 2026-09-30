@@ -29,7 +29,7 @@ async function exigirRrhh(context: functions.https.CallableContext) {
 }
 
 async function lib() {
-  return import('../../../web2/src/lib/eventuales/marcoAnexo.mjs') as Promise<{
+  return import('../eventuales-shared/marcoAnexo.mjs') as Promise<{
     textoMarco: (i: Record<string, string>) => string;
     textoAnexo: (i: Record<string, unknown>) => string;
     textoConstancia: (i: Record<string, unknown>) => string;

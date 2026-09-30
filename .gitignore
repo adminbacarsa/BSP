@@ -88,6 +88,9 @@ apps/functions/scripts/test-*.mjs
 
 # @cosp/hours-core dentro de functions: lo genera prebuild (scripts/sync-hours-core-to-functions.mjs)
 apps/functions/vendor/
+# Copia de apps/web2/src/lib/eventuales/*.mjs para Functions: la genera scripts/sync-eventuales-to-functions.mjs
+apps/functions/src/eventuales-shared/
+apps/functions/lib/eventuales-shared/
 apps/functions/scripts/fix-*.js
 apps/web2/deploy-prod.bat
 apps/web2/cap

@@ -7,7 +7,27 @@ import { createRequire } from 'node:module';
 import { cruzaMedianoche, sumarDias } from './jornadas.mjs';
 
 const require = createRequire(import.meta.url);
-const { getNightDuration, dateKeyAR } = require('../../../../../packages/hours-core/src/motors/server/payrollTurnoAccumulator.ts');
+
+/**
+ * En el repo (web2, tests) se lee la fuente .ts del paquete. En Functions esa ruta
+ * no existe: la copia de eventuales-shared usa el vendor JS `@cosp/hours-core`
+ * (sync-hours-core-to-functions). Nunca se requiere un .ts en Functions.
+ */
+function cargarHoursCore() {
+  try {
+    return require('../../../../../packages/hours-core/src/motors/server/payrollTurnoAccumulator.ts');
+  } catch (e) {
+    if (e?.code !== 'MODULE_NOT_FOUND' && e?.code !== 'ERR_UNKNOWN_FILE_EXTENSION') throw e;
+    return require('@cosp/hours-core');
+  }
+}
+
+const hoursCore = cargarHoursCore();
+const getNightDuration = hoursCore.getNightDuration || hoursCore.payrollGetNightDuration;
+const { dateKeyAR } = hoursCore;
+if (typeof getNightDuration !== 'function' || typeof dateKeyAR !== 'function') {
+  throw new Error('remuneracion.mjs: hours-core sin getNightDuration/dateKeyAR');
+}
 
 export const DIVISOR_HORAS_COSP = 200;
 export const JORNADA_ORDINARIA_HORAS = 8;

@@ -299,7 +299,7 @@ function vacioAviso(): AvisoResuelto {
 }
 
 async function resolverAvisosEmpresa(empresaId: string): Promise<Record<string, AvisoResuelto>> {
-  const { resolverAvisos, TIPOS_AVISO } = await import('../../../web2/src/lib/eventuales/avisos.mjs') as {
+  const { resolverAvisos, TIPOS_AVISO } = await import('../eventuales-shared/avisos.mjs') as {
     resolverAvisos: (input: Record<string, unknown>) => AvisoResuelto;
     TIPOS_AVISO: string[];
   };

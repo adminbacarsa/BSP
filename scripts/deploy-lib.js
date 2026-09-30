@@ -168,7 +168,12 @@ function runDeploy(projectRoot, args = []) {
       ? { FUNCTIONS_DISCOVERY_TIMEOUT: '120' }
       : {};
   const rulesTargets = nonHosting.filter((target) => target !== 'functions');
-  if (withFunctions) deployFunctions(projectRoot, functionsDeployEnv);
+  if (withFunctions) {
+    // Functions tiene que cargar sola (sin ../web2 ni ../packages): se compila y se prueba aislada antes de subir.
+    run('npm --prefix apps/functions run build', projectRoot);
+    run(`node "${path.join(__dirname, 'check-functions-standalone.mjs')}"`, projectRoot);
+    deployFunctions(projectRoot, functionsDeployEnv);
+  }
   if (rulesTargets.length) {
     run(`firebase deploy --only "${rulesTargets.join(',')}" --force`, projectRoot);
   }

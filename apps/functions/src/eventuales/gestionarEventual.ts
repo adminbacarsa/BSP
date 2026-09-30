@@ -44,8 +44,8 @@ async function auditar(action: string, actorUid: string, cuil: string, details: 
 }
 
 async function plantaTieneCuil(cuil: string): Promise<boolean> {
-  const { COTEJO_EMPRESA_IDS } = await import('../../../web2/src/lib/eventuales/grupo.mjs') as { COTEJO_EMPRESA_IDS: string[] };
-  const { esPlantaPermanente } = await import('../../../web2/src/lib/eventuales/planilla.mjs') as {
+  const { COTEJO_EMPRESA_IDS } = await import('../eventuales-shared/grupo.mjs') as { COTEJO_EMPRESA_IDS: string[] };
+  const { esPlantaPermanente } = await import('../eventuales-shared/planilla.mjs') as {
     esPlantaPermanente: (e: Record<string, unknown>) => boolean;
   };
   const snap = await db().collection('empleados').where('cuil', '==', cuil).limit(20).get();
@@ -58,7 +58,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
   const auth = await exigir(context, permiso);
-  const { validarFicha, planBaja, planReactivar, sugerirObraSocial } = await import('../../../web2/src/lib/eventuales/ficha.mjs') as {
+  const { validarFicha, planBaja, planReactivar, sugerirObraSocial } = await import('../eventuales-shared/ficha.mjs') as {
     validarFicha: (input: unknown, ctx: unknown) => { ok: boolean; codigo?: string; doc?: Record<string, unknown> };
     planBaja: (motivo: string, fecha: string) => { ok: boolean; codigo?: string; patch?: Record<string, unknown> };
     planReactivar: () => Record<string, unknown>;
@@ -143,7 +143,7 @@ export const crearAccesoEventual = functions.https.onCall(async (data, context) 
   const ref = db().collection('eventuales_bolsa').doc(cuil);
   const snap = await ref.get();
   if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
-  const { planAccesoEventual } = await import('../../../web2/src/lib/eventuales/ficha.mjs') as {
+  const { planAccesoEventual } = await import('../eventuales-shared/ficha.mjs') as {
     planAccesoEventual: (b: Record<string, unknown>) => { ok: boolean; codigo?: string; mail?: string; claims?: Record<string, string> };
   };
   const plan = planAccesoEventual({ cuil, ...snap.data() });

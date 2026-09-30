@@ -37,7 +37,7 @@ function db() {
 }
 
 async function lib(): Promise<LibPlanificacion> {
-  return await import('../../../web2/src/lib/eventuales/planificacion.mjs') as unknown as LibPlanificacion;
+  return await import('../eventuales-shared/planificacion.mjs') as unknown as LibPlanificacion;
 }
 
 async function permisosDe(uid: string, claimRole: string): Promise<{ super: boolean; acciones: string[] }> {
@@ -192,7 +192,7 @@ async function auditar(action: string, actorUid: string, empresaId: string, cuil
 
 async function txtDe(empresaId: string, contrato: Record<string, unknown>, cuil: string, bolsa: Record<string, unknown>, tipo: 'AT' | 'BT') {
   try {
-    const { lineasCargaMasiva, brutoParaTxt } = await import('../../../web2/src/lib/eventuales/arcaTxt.mjs') as {
+    const { lineasCargaMasiva, brutoParaTxt } = await import('../eventuales-shared/arcaTxt.mjs') as {
       lineasCargaMasiva: (i: Record<string, unknown>) => { lineas: string[]; advertencias: string[]; enviable: boolean };
       brutoParaTxt: (i: Record<string, unknown>) => { ok: boolean; codigo?: string; bruto: number };
     };

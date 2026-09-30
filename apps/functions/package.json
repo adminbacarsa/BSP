@@ -2,8 +2,9 @@
   "name": "functions",
   "scripts": {
     "lint": "eslint --ext .ts,.js src/",
-    "prebuild": "node ../../scripts/build-hours-core.mjs && node ../../scripts/sync-hours-core-to-functions.mjs && node ../../scripts/bundle-hours-ledger.mjs",
-    "build": "tsc && node ../../scripts/copy-hours-ledger-bundle.mjs",
+    "prebuild": "node ../../scripts/build-hours-core.mjs && node ../../scripts/sync-hours-core-to-functions.mjs && node ../../scripts/bundle-hours-ledger.mjs && node ../../scripts/sync-eventuales-to-functions.mjs",
+    "build": "tsc && node ../../scripts/copy-hours-ledger-bundle.mjs && node ../../scripts/sync-eventuales-to-functions.mjs --lib",
+    "check:standalone": "node ../../scripts/check-functions-standalone.mjs",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions",
     "shell": "npm run build && firebase functions:shell",
