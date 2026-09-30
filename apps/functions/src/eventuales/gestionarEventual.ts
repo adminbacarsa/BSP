@@ -43,6 +43,12 @@ async function auditar(action: string, actorUid: string, cuil: string, details: 
   });
 }
 
+/** Ids de las empresas de la plataforma (activas). Son las que se pueden habilitar en la ficha. */
+async function empresasPlataforma(): Promise<string[]> {
+  const snap = await db().collection('empresas').get();
+  return snap.docs.filter((d) => d.data().active !== false && d.data().status !== 'INACTIVE').map((d) => d.id);
+}
+
 async function plantaTieneCuil(cuil: string): Promise<boolean> {
   const { COTEJO_EMPRESA_IDS } = await import('../eventuales-shared/grupo.mjs') as { COTEJO_EMPRESA_IDS: string[] };
   const { esPlantaPermanente } = await import('../eventuales-shared/planilla.mjs') as {
@@ -56,7 +62,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const accion = String(data?.accion || '');
   const mapa: Record<string, string> = {
     crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
-    asignarEmpresas: 'update', importarContacto: 'update',
+    asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -96,11 +102,26 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     };
   }
 
+  if (accion === 'habilitarEmpresa') {
+    const { planHabilitarEmpresa } = await import('../eventuales-shared/fichaUx.mjs') as {
+      planHabilitarEmpresa: (actuales: unknown, empresaId: string, habilitar: boolean, plataforma: string[]) => { ok: boolean; codigo?: string; empresasHabilitadas?: string[] };
+    };
+    const cuil = String(data?.cuil || '').replace(/\D/g, '');
+    const ref = db().collection('eventuales_bolsa').doc(cuil);
+    const snap = await ref.get();
+    if (!snap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
+    const plan = planHabilitarEmpresa(snap.data()?.empresasHabilitadas, String(data?.empresaId || ''), data?.habilitar !== false, await empresasPlataforma());
+    if (!plan.ok || !plan.empresasHabilitadas) throw new functions.https.HttpsError('invalid-argument', plan.codigo || 'EMPRESA_INVALIDA');
+    await ref.set({ empresasHabilitadas: plan.empresasHabilitadas, updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
+    await auditar('EVENTUAL_EMPRESAS', auth.uid, cuil, `${data?.habilitar !== false ? 'habilitado en' : 'quitado de'} ${String(data?.empresaId || '')}`);
+    return { ok: true, empresasHabilitadas: plan.empresasHabilitadas };
+  }
+
   if (accion === 'asignarEmpresas') {
     const { planAsignarEmpresas } = await import('../eventuales-shared/fichaUx.mjs') as {
-      planAsignarEmpresas: (empresas: unknown) => { ok: boolean; codigo?: string; empresasHabilitadas?: string[] };
+      planAsignarEmpresas: (empresas: unknown, plataforma: string[]) => { ok: boolean; codigo?: string; empresasHabilitadas?: string[] };
     };
-    const plan = planAsignarEmpresas(data?.empresasHabilitadas);
+    const plan = planAsignarEmpresas(data?.empresasHabilitadas, await empresasPlataforma());
     if (!plan.ok || !plan.empresasHabilitadas) throw new functions.https.HttpsError('invalid-argument', plan.codigo || 'SIN_EMPRESA');
     const crudos: unknown[] = Array.isArray(data?.cuils) ? data.cuils : [];
     const cuils: string[] = [...new Set(crudos.map((c) => String(c || '').replace(/\D/g, '')))].filter((c) => c.length === 11);
@@ -166,6 +187,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const validado = validarFicha(data, {
     bolsaCuils: (await db().collection('eventuales_bolsa').select('nombre').get()).docs.map((d) => d.id),
     plantaCuils: [],
+    empresasPlataforma: await empresasPlataforma(),
   });
   if (!validado.ok || !validado.doc) throw new functions.https.HttpsError('invalid-argument', validado.codigo || 'DATOS');
   if (await plantaTieneCuil(String(validado.doc.cuil))) {

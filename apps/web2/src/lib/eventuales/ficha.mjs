@@ -51,8 +51,9 @@ export function validarFicha(input, ctx = {}) {
   if ((ctx.plantaCuils || []).includes(cuil)) return { ok: false, codigo: 'DUPLICADO_PLANTA' };
   const mail = texto(input?.mail).toLowerCase();
   if (mail && !mail.includes('@')) return { ok: false, codigo: 'MAIL_INVALIDO' };
+  const validas = Array.isArray(ctx.empresasPlataforma) && ctx.empresasPlataforma.length ? ctx.empresasPlataforma.map(String) : GRUPO_EVENTUALES_EMPRESA_IDS;
   const empresas = [...new Set((input?.empresasHabilitadas || []).map(String))]
-    .filter((id) => GRUPO_EVENTUALES_EMPRESA_IDS.includes(id));
+    .filter((id) => validas.includes(id));
   return {
     ok: true,
     doc: {

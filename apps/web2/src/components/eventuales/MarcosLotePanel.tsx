@@ -31,6 +31,8 @@ type Props = {
   fichas: PersonaMarco[];
   seleccionados: string[];
   puedeEditar: boolean;
+  /** Botones solo con ícono y tooltip (barra superior compacta). */
+  compacto?: boolean;
   llamar: (nombre: string, data: Record<string, unknown>) => Promise<Record<string, unknown>>;
 };
 
@@ -56,7 +58,7 @@ function descargar(bytes: Uint8Array, nombre: string) {
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
-export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, seleccionados, puedeEditar, llamar }: Props) {
+export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, seleccionados, puedeEditar, compacto = false, llamar }: Props) {
   const [imprimiendo, setImprimiendo] = useState(false);
   const [abierto, setAbierto] = useState(false);
   const [archivos, setArchivos] = useState<File[]>([]);
@@ -89,7 +91,7 @@ export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, sele
       const e = snap.data() || {};
       const { pdfMarcosLote } = await import('@/lib/eventuales/marcosLotePdf.mjs');
       const out = pdfMarcosLote({
-        empresa: { id: empresaId, nombre: String(e.razonSocial || e.nombre || empresaId), cuit: String(e.cuit || ''), domicilio: String(e.domicilio || '') },
+        empresa: { id: empresaId, nombre: String(e.name || e.razonSocial || e.nombre || nombreEmpresa || empresaId), cuit: String(e.cuit || ''), domicilio: String(e.direccion || e.domicilio || '') },
         personas: elegidas.map((f) => ({ cuil: f.id, nombre: f.nombre, dni: f.dni, domicilio: f.domicilio })),
         fecha: hoy(),
         marcoVersion: MARCO_VERSION,
@@ -187,13 +189,30 @@ export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, sele
 
   return (
     <>
-      <button type="button" onClick={imprimir} disabled={imprimiendo} title="Un PDF con el marco de cada persona sin marco o vencido en la empresa elegida (o de las seleccionadas), dos ejemplares por persona, con QR en la hoja de firmas"
-        className="inline-flex items-center gap-2 rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
-        <Printer size={14} /> Imprimir marcos {seleccionados.length ? `(${seleccionados.length} seleccionados)` : `pendientes${empresaId ? ` (${pendientes.length})` : ''}`}
-      </button>
-      <button type="button" onClick={abrir} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700">
-        <Upload size={14} /> Subir escaneos en lote
-      </button>
+      {compacto ? (
+        <>
+          <button type="button" onClick={imprimir} disabled={imprimiendo} aria-label="Imprimir marcos"
+            title={seleccionados.length ? `Imprimir marcos de ${seleccionados.length} seleccionados (2 ejemplares c/u, con QR)` : `Imprimir marcos pendientes en ${nombreEmpresa || 'la empresa'} (${pendientes.length})`}
+            className="relative inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50 disabled:opacity-50">
+            <Printer size={16} />
+            {(seleccionados.length || pendientes.length) > 0 && <span className="absolute -right-1 -top-1 rounded-full bg-indigo-600 px-1.5 text-[9px] font-black text-white">{seleccionados.length || pendientes.length}</span>}
+          </button>
+          <button type="button" onClick={abrir} aria-label="Subir escaneos en lote" title={`Subir escaneos de marcos firmados (PDF o fotos) para ${nombreEmpresa || 'la empresa'}`}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm hover:bg-emerald-700">
+            <Upload size={16} />
+          </button>
+        </>
+      ) : (
+        <>
+          <button type="button" onClick={imprimir} disabled={imprimiendo} title="Un PDF con el marco de cada persona sin marco o vencido en la empresa elegida (o de las seleccionadas), dos ejemplares por persona, con QR en la hoja de firmas"
+            className="inline-flex items-center gap-2 rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50">
+            <Printer size={14} /> Imprimir marcos {seleccionados.length ? `(${seleccionados.length} seleccionados)` : `pendientes${empresaId ? ` (${pendientes.length})` : ''}`}
+          </button>
+          <button type="button" onClick={abrir} className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white shadow-sm hover:bg-emerald-700">
+            <Upload size={14} /> Subir escaneos en lote
+          </button>
+        </>
+      )}
 
       {abierto && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true">

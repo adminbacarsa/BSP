@@ -146,7 +146,7 @@ export async function firmarMarco(params: {
   if (!bolsaSnap.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
   const bolsa = bolsaSnap.data() || {};
   const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
-  const empresaNombre = String(empresa.razonSocial || empresa.nombre || empresaId);
+  const empresaNombre = String(empresa.name || empresa.razonSocial || empresa.nombre || empresaId);
   const hash = m.sha256(bytes);
   const nombrePdf = m.nombreArchivo({ tipo: 'MARCO', fecha: fechaFirma, empresa: empresaNombre });
   const guardado = await guardarPdf(cuil, bolsa, nombrePdf, bytes);
@@ -207,7 +207,7 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   const bolsa = bolsaSnap.data() || {};
   const empresa = (await db().collection('empresas').doc(empresaId).get()).data() || {};
   const nombre = String(bolsa.nombre || cuil);
-  const empresaNombre = String(empresa.razonSocial || empresa.nombre || empresaId);
+  const empresaNombre = String(empresa.name || empresa.razonSocial || empresa.nombre || empresaId);
 
   if (accion === 'reintentar') {
     const pend = await db().collection('eventuales_documentos').where('bolsaCuil', '==', cuil).get();
@@ -242,7 +242,7 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
 
   if (accion === 'generar') {
     const texto = m.textoMarco({
-      empresaNombre: String(empresa.razonSocial || empresa.nombre || empresaId),
+      empresaNombre: String(empresa.name || empresa.razonSocial || empresa.nombre || empresaId),
       empresaCuit: String(empresa.cuit || ''),
       empresaDomicilio: String(empresa.domicilio || ''),
       trabajadorNombre: nombre,
@@ -398,7 +398,7 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   const ahora = new Date().toISOString();
   const fecha = ahora.slice(0, 10);
   const empresaDoc = empresaId ? (await db().collection('empresas').doc(empresaId).get()).data() || {} : {};
-  const empresaNombre = String(empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
+  const empresaNombre = String(empresaDoc.name || empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
   const borrador = m.pdfDeTexto(anexoTexto);
   const hashAnexo = m.sha256(borrador);
   const constancia = m.textoConstancia({

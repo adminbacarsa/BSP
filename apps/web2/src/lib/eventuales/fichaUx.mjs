@@ -127,9 +127,109 @@ export function planImportContacto(filas, bolsaPorCuil) {
   };
 }
 
-/** Empresas a dejar habilitadas. Reemplaza la lista; solo ids del grupo. */
-export function planAsignarEmpresas(empresas) {
-  const empresasHabilitadas = [...new Set((empresas || []).map(String))].filter((id) => GRUPO_EVENTUALES_EMPRESA_IDS.includes(id));
+/** Ids válidos para habilitar: las empresas de la plataforma si se pasan; si no, las del grupo. */
+export function empresasValidas(empresasPlataforma) {
+  const ids = (empresasPlataforma || []).map((e) => (typeof e === 'string' ? e : e?.id)).filter(Boolean);
+  return ids.length ? ids : GRUPO_EVENTUALES_EMPRESA_IDS;
+}
+
+/** Empresas a dejar habilitadas. Reemplaza la lista. */
+export function planAsignarEmpresas(empresas, empresasPlataforma) {
+  const validas = empresasValidas(empresasPlataforma);
+  const empresasHabilitadas = [...new Set((empresas || []).map(String))].filter((id) => validas.includes(id));
   if (!empresasHabilitadas.length) return { ok: false, codigo: 'SIN_EMPRESA' };
   return { ok: true, empresasHabilitadas };
+}
+
+/** Habilitar o quitar una empresa de la ficha (guardado inmediato desde la ficha o la lista). */
+export function planHabilitarEmpresa(actuales, empresaId, habilitar, empresasPlataforma) {
+  const id = String(empresaId || '');
+  if (!empresasValidas(empresasPlataforma).includes(id)) return { ok: false, codigo: 'EMPRESA_INVALIDA' };
+  const set = new Set((actuales || []).map(String));
+  if (habilitar) set.add(id); else set.delete(id);
+  return { ok: true, empresasHabilitadas: [...set] };
+}
+
+/** Nombre visible de un doc de `empresas`. Nunca el id salvo que no haya nada. */
+export function nombreEmpresaDoc(id, data) {
+  return String(data?.name || data?.razonSocial || data?.nombre || id || '');
+}
+
+/** Empresas de la plataforma para listar: activas, con nombre, ordenadas. */
+export function empresasPlataformaDeDocs(docs) {
+  return (docs || [])
+    .filter((d) => d && d.data?.active !== false && d.data?.status !== 'INACTIVE')
+    .map((d) => ({ id: d.id, nombre: nombreEmpresaDoc(d.id, d.data) }))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+}
+
+/** Sigla corta para el mini-badge de empresa: «Bacar SA» → BA, «Grupo Bacar sa.» → GB. */
+export function siglaEmpresa(nombre) {
+  const palabras = String(nombre || '').replace(/[.,]/g, ' ').split(/\s+/).filter((p) => p && !/^(sa|srl|s\.a\.?|s\.r\.l\.?|de|del|la|el|y)$/i.test(p));
+  if (!palabras.length) return '??';
+  if (palabras.length === 1) return palabras[0].slice(0, 2).toUpperCase();
+  return (palabras[0][0] + palabras[1][0]).toUpperCase();
+}
+
+export function iniciales(nombre) {
+  const limpio = String(nombre || '').trim();
+  if (!limpio) return '?';
+  const partes = limpio.includes(',') ? limpio.split(',').map((p) => p.trim()).reverse() : limpio.split(/\s+/);
+  const letras = partes.filter(Boolean).map((p) => p[0]);
+  return (letras.length >= 2 ? letras[0] + letras[letras.length - 1] : letras[0] || '?').toUpperCase();
+}
+
+const DISPONIBILIDAD = { DISPONIBLE: 'Disponible', NO_DISPONIBLE: 'No disponible' };
+
+export function textoDisponibilidad(codigo) {
+  return DISPONIBILIDAD[codigo] || humanizar(codigo);
+}
+
+/** ALTA_ARCA_PENDIENTE → «Alta arca pendiente». Para estados que no tienen texto propio. */
+export function humanizar(codigo) {
+  const txt = String(codigo || '').replace(/_/g, ' ').toLowerCase().trim();
+  return txt ? txt[0].toUpperCase() + txt.slice(1) : '—';
+}
+
+export const FILTROS_LISTA = [
+  { id: 'DISPONIBLE', label: 'Disponibles' },
+  { id: 'NO_DISPONIBLE', label: 'No disponibles' },
+  { id: 'VENCE', label: 'Vencen pronto' },
+  { id: 'INCOMPLETOS', label: 'Incompletos' },
+  { id: 'TODOS', label: 'Todos' },
+];
+
+function venceProntoFicha(f, hoy) {
+  return vencimientosDe(f, hoy).some((v) => v.estado === 'PRONTO');
+}
+
+/**
+ * Alcance + filtro + búsqueda de la lista.
+ * `todaLaBolsa=false` → solo habilitados en `empresaId`. Incompletos mira lo que falta para esa empresa.
+ */
+export function filtrarFichas({ fichas, empresaId = '', todaLaBolsa = false, filtro = 'DISPONIBLE', buscar = '', hoy }) {
+  const q = String(buscar || '').trim().toLowerCase();
+  const alcance = (fichas || []).filter((f) => todaLaBolsa || !empresaId || (f.empresasHabilitadas || []).includes(empresaId));
+  const porFiltro = alcance.filter((f) => {
+    if (filtro === 'DISPONIBLE') return f.disponibilidad !== 'NO_DISPONIBLE';
+    if (filtro === 'NO_DISPONIBLE') return f.disponibilidad === 'NO_DISPONIBLE';
+    if (filtro === 'VENCE') return venceProntoFicha(f, hoy);
+    if (filtro === 'INCOMPLETOS') return esIncompleto(f, hoy, todaLaBolsa ? '' : empresaId);
+    return true;
+  });
+  if (!q) return porFiltro;
+  return porFiltro.filter((f) => `${f.nombre || ''} ${f.id || ''} ${f.cuil || ''} ${f.dni || ''}`.toLowerCase().includes(q));
+}
+
+export function contadoresFiltros({ fichas, empresaId = '', todaLaBolsa = false, hoy }) {
+  const out = {};
+  for (const f of FILTROS_LISTA) out[f.id] = filtrarFichas({ fichas, empresaId, todaLaBolsa, filtro: f.id, hoy }).length;
+  return out;
+}
+
+/** Obra social para mostrar en Datos: propia o la SUVICO por defecto. */
+export function textoObraSocial(rnosPropio, rnosDefault) {
+  const propio = String(rnosPropio || '').replace(/\D/g, '');
+  if (propio) return `${propio}`;
+  return `${rnosDefault} SUVICO (por defecto)`;
 }

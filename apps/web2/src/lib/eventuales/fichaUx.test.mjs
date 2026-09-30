@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
-  esIncompleto, faltantesConvocable, filaContacto, opcionesVigenciaMarco, planAsignarEmpresas, planImportContacto, textoEstadoMarco,
+  contadoresFiltros, empresasPlataformaDeDocs, esIncompleto, faltantesConvocable, filaContacto, filtrarFichas, humanizar, iniciales,
+  opcionesVigenciaMarco, planAsignarEmpresas, planHabilitarEmpresa, planImportContacto, siglaEmpresa, textoDisponibilidad, textoEstadoMarco, textoObraSocial,
 } from './fichaUx.mjs';
 
 const hoy = '2026-10-01';
@@ -60,9 +61,63 @@ describe('ficha de eventuales', () => {
     assert.deepEqual(soloTel.aplicar[0].cambios, { telefono: '351555' });
   });
 
-  it('asignar empresas solo acepta las del grupo', () => {
+  it('asignar y habilitar empresas: las de la plataforma si se pasan, si no las del grupo', () => {
     assert.deepEqual(planAsignarEmpresas(['bacarsa', 'bacarsa', 'pruebas_sa']), { ok: true, empresasHabilitadas: ['bacarsa'] });
     assert.equal(planAsignarEmpresas(['pruebas_sa']).ok, false);
     assert.equal(planAsignarEmpresas([]).codigo, 'SIN_EMPRESA');
+    const plataforma = ['bacarsa', 'grupos_bacar_sa', 'pruebas_sa', 'capacitacion'];
+    assert.deepEqual(planAsignarEmpresas(['pruebas_sa', 'otra'], plataforma).empresasHabilitadas, ['pruebas_sa']);
+    assert.deepEqual(planHabilitarEmpresa(['bacarsa'], 'pruebas_sa', true, plataforma).empresasHabilitadas, ['bacarsa', 'pruebas_sa']);
+    assert.deepEqual(planHabilitarEmpresa(['bacarsa', 'pruebas_sa'], 'bacarsa', false, plataforma).empresasHabilitadas, ['pruebas_sa']);
+    assert.equal(planHabilitarEmpresa([], 'otra', true, plataforma).codigo, 'EMPRESA_INVALIDA');
+  });
+
+  it('la lista sigue a la empresa activa; Incompletos encuentra al que no tiene mail, teléfono, domicilio ni empresa', () => {
+    const peralta = { id: '20222222223', nombre: 'PERALTA, JUAN', disponibilidad: 'DISPONIBLE', mail: '', telefono: '', domicilio: '', empresasHabilitadas: [], marcos: {} };
+    const completa = base;
+    const pruebas = { ...base, id: '20333333334', nombre: 'GOMEZ, LUIS', empresasHabilitadas: ['pruebas_sa'], marcos: {} };
+    const noDisp = { ...base, id: '20444444445', nombre: 'DIAZ, ANA', disponibilidad: 'NO_DISPONIBLE' };
+    const fichas = [peralta, completa, pruebas, noDisp];
+
+    // Empresa activa bacarsa, sin el switch: solo habilitados ahí.
+    const ids = (r) => r.map((f) => f.id).sort();
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', filtro: 'TODOS', hoy })), [base.id, noDisp.id].sort());
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', filtro: 'DISPONIBLE', hoy })), [base.id]);
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', filtro: 'NO_DISPONIBLE', hoy })), [noDisp.id]);
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', filtro: 'INCOMPLETOS', hoy })), []);
+
+    // Toda la bolsa: Peralta aparece en Incompletos (y Gómez, sin marco en pruebas_sa).
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', todaLaBolsa: true, filtro: 'INCOMPLETOS', hoy })), [peralta.id, pruebas.id].sort());
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', todaLaBolsa: true, filtro: 'TODOS', hoy })), ids(fichas));
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', todaLaBolsa: true, filtro: 'DISPONIBLE', buscar: 'peral', hoy })), [peralta.id]);
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'bacarsa', todaLaBolsa: true, filtro: 'TODOS', buscar: '20333333334', hoy })), [pruebas.id]);
+    // Otra empresa activa: Gómez es el habilitado.
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'pruebas_sa', filtro: 'TODOS', hoy })), [pruebas.id]);
+    assert.deepEqual(ids(filtrarFichas({ fichas, empresaId: 'pruebas_sa', filtro: 'INCOMPLETOS', hoy })), [pruebas.id]);
+    // Sin empresa activa (SuperAdmin sin selección): todos.
+    assert.equal(filtrarFichas({ fichas, empresaId: '', filtro: 'TODOS', hoy }).length, 4);
+
+    const contadores = contadoresFiltros({ fichas, empresaId: 'bacarsa', todaLaBolsa: true, hoy });
+    assert.deepEqual(contadores, { DISPONIBLE: 3, NO_DISPONIBLE: 1, VENCE: 0, INCOMPLETOS: 2, TODOS: 4 });
+  });
+
+  it('textos de pantalla sin ids ni códigos', () => {
+    assert.equal(textoDisponibilidad('NO_DISPONIBLE'), 'No disponible');
+    assert.equal(textoDisponibilidad('DISPONIBLE'), 'Disponible');
+    assert.equal(humanizar('ALTA_ARCA_PENDIENTE'), 'Alta arca pendiente');
+    assert.equal(iniciales('PERALTA, JUAN'), 'JP');
+    assert.equal(iniciales('Ana Maria Lopez'), 'AL');
+    assert.equal(siglaEmpresa('Bacar SA'), 'BA');
+    assert.equal(siglaEmpresa('Grupo Bacar sa.'), 'GB');
+    assert.equal(siglaEmpresa('Capacitación COSP'), 'CC');
+    assert.equal(textoObraSocial('', '122807'), '122807 SUVICO (por defecto)');
+    assert.equal(textoObraSocial('111-222', '122807'), '111222');
+    const empresas = empresasPlataformaDeDocs([
+      { id: 'pruebas_sa', data: { name: 'Pruebas sa.' } },
+      { id: 'bacarsa', data: { name: 'Bacar SA', active: true } },
+      { id: 'vieja', data: { name: 'Vieja', active: false } },
+      { id: 'sin_nombre', data: {} },
+    ]);
+    assert.deepEqual(empresas, [{ id: 'bacarsa', nombre: 'Bacar SA' }, { id: 'pruebas_sa', nombre: 'Pruebas sa.' }, { id: 'sin_nombre', nombre: 'sin_nombre' }]);
   });
 });

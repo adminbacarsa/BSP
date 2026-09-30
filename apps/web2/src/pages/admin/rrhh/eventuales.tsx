@@ -1,34 +1,27 @@
 import { useEffect, useMemo, useState } from 'react';
-import { collection, doc, getDoc, onSnapshot, query, where } from 'firebase/firestore';
-import { httpsCallable } from 'firebase/functions';
-import { ArrowLeft, MapPin, Plus, Users } from 'lucide-react';
+import Head from 'next/head';
 import Link from 'next/link';
+import { collection, getDocs, onSnapshot, query, where } from 'firebase/firestore';
+import { httpsCallable } from 'firebase/functions';
+import {
+  AlertTriangle, ArrowLeft, Building2, CircleDashed, FileCheck2, FileSpreadsheet, FileX2, Home, Mail, MapPin, Phone, Plus, Search, UserCheck, UserPlus, UserX, Users, X,
+} from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { useAuth } from '@/context/AuthContext';
-import { db, functions } from '@/lib/firebase';
+import { PageHeader, PageShell } from '@/components/ui';
+import FichaEventual, { type DocumentoVista, type EmpresaPlataforma, type FichaEventualData, type MarcoVista } from '@/components/eventuales/FichaEventual';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
-import { esIncompleto, faltantesConvocable, opcionesVigenciaMarco, textoEstadoMarco, VIGENCIA_MARCO_DEFAULT } from '@/lib/eventuales/fichaUx.mjs';
-import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
-import { RNOS_DEFAULT_FICHA, vencePronto } from '@/lib/eventuales/ficha.mjs';
+import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { db, functions } from '@/lib/firebase';
+import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
+import {
+  contadoresFiltros, empresasPlataformaDeDocs, faltantesConvocable, FILTROS_LISTA, filtrarFichas, iniciales, siglaEmpresa, textoDisponibilidad,
+} from '@/lib/eventuales/fichaUx.mjs';
+import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
+import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 
-type Ficha = {
-  id: string;
-  nombre: string;
-  disponibilidad: string;
-  mail: string;
-  telefono: string;
-  dni: string;
-  domicilio: string;
-  empresasHabilitadas: string[];
-  habilitacionVencimiento: string;
-  credencialVencimiento: string;
-  aptoVencimiento: string;
-  riesgoEncadenamiento: string;
-  uid: string;
-  obraSocialRnos: string;
-  marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
-};
+type Ficha = FichaEventualData;
 
 type Form = {
   nombre: string; cuil: string; dni: string; fechaNacimiento: string; domicilio: string;
@@ -44,53 +37,50 @@ const vacio = (): Form => ({
   credencialVencimiento: '', aptoEstado: '', aptoVencimiento: '', observaciones: '', domicilioGeo: null,
 });
 
-const fmt = (iso?: string) => {
-  if (!iso) return '—';
-  const [y, m, d] = String(iso).slice(0, 10).split('-');
-  return d && m && y ? `${d}/${m}/${y}` : iso;
-};
+const formDe = (f: Ficha): Form => ({
+  ...vacio(),
+  nombre: f.nombre, cuil: f.id, dni: f.dni, fechaNacimiento: f.fechaNacimiento, domicilio: f.domicilio, telefono: f.telefono, mail: f.mail,
+  obraSocialRnos: f.obraSocialRnos || RNOS_DEFAULT_FICHA, empresasHabilitadas: f.empresasHabilitadas,
+  habilitacionNumero: f.habilitacionNumero, habilitacionVencimiento: f.habilitacionVencimiento, credencialVencimiento: f.credencialVencimiento,
+  aptoEstado: f.aptoEstado, aptoVencimiento: f.aptoVencimiento, observaciones: f.observaciones,
+});
 
 const hoy = () => new Date().toISOString().slice(0, 10);
 
-const TONO_MARCO: Record<string, string> = {
-  ok: 'bg-emerald-50 text-emerald-800',
-  pendiente: 'bg-amber-50 text-amber-800',
-  malo: 'bg-rose-50 text-rose-800',
+const ICONO_FILTRO: Record<string, React.ElementType> = {
+  DISPONIBLE: UserCheck, NO_DISPONIBLE: UserX, VENCE: AlertTriangle, INCOMPLETOS: CircleDashed, TODOS: Users,
 };
 
 const CAMPO_CONTACTO: Record<string, string> = { mail: 'mail', telefono: 'teléfono', domicilio: 'domicilio' };
-const PROBLEMA_CONTACTO: Record<string, string> = {
-  NO_EN_BOLSA: 'no está en la bolsa',
-  CUIL_INVALIDO: 'CUIL inválido',
-  MAIL_INVALIDO: 'mail inválido',
-};
+const PROBLEMA_CONTACTO: Record<string, string> = { NO_EN_BOLSA: 'no está en la bolsa', CUIL_INVALIDO: 'CUIL inválido', MAIL_INVALIDO: 'mail inválido' };
+
+function EstadoIcono({ icon: Icon, ok, title }: { icon: React.ElementType; ok: boolean; title: string }) {
+  return <span title={title} aria-label={title} className={`inline-flex h-5 w-5 items-center justify-center rounded-md ${ok ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}><Icon size={11} /></span>;
+}
 
 export default function EventualesPage() {
   const { isSuperAdmin, rolePermissions } = useAuth();
+  const { empresaId: empresaActivaId, empresa: empresaActiva } = useEmpresa();
   const acciones = rolePermissions?.EVENTUALES || [];
   const puede = (accion: string) => isSuperAdmin || acciones.includes(accion);
+
   const [filtro, setFiltro] = useState('DISPONIBLE');
-  const [empresa, setEmpresa] = useState('');
   const [buscar, setBuscar] = useState('');
+  const [todaLaBolsa, setTodaLaBolsa] = useState(false);
   const [fichas, setFichas] = useState<Ficha[]>([]);
+  const [empresas, setEmpresas] = useState<EmpresaPlataforma[]>([]);
   const [elegida, setElegida] = useState<string | null>(null);
   const [detalle, setDetalle] = useState<Record<string, unknown> | null>(null);
+  const [marcos, setMarcos] = useState<Record<string, MarcoVista>>({});
+  const [documentos, setDocumentos] = useState<DocumentoVista[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [editando, setEditando] = useState('');
-  const [baja, setBaja] = useState({ motivo: '', fecha: hoy() });
   const [guardando, setGuardando] = useState(false);
-  const [marcos, setMarcos] = useState<Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }>>({});
-  const [firmaFecha, setFirmaFecha] = useState(hoy());
-  const [vigenciaDias, setVigenciaDias] = useState(String(VIGENCIA_MARCO_DEFAULT));
-  const [archivoMarco, setArchivoMarco] = useState<File | null>(null);
-  const [solapa, setSolapa] = useState<'FICHA' | 'DOCUMENTOS'>('FICHA');
-  const [empresaMarco, setEmpresaMarco] = useState(GRUPO_EVENTUALES_EMPRESA_IDS[0]);
-  const [documentos, setDocumentos] = useState<{ id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[]>([]);
   const [seleccion, setSeleccion] = useState<string[]>([]);
-  const [nombresEmpresa, setNombresEmpresa] = useState<Record<string, string>>({});
   const [asignarAbierto, setAsignarAbierto] = useState(false);
-  const [importando, setImportando] = useState(false);
   const [empresasAsignar, setEmpresasAsignar] = useState<string[]>([]);
+  const [importando, setImportando] = useState(false);
+  const [habilitando, setHabilitando] = useState('');
   const [reporteContacto, setReporteContacto] = useState<{
     dryRun: boolean;
     resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
@@ -99,21 +89,13 @@ export default function EventualesPage() {
     filas: Record<string, unknown>[];
   } | null>(null);
 
-  const nombreEmpresa = (id: string) => nombresEmpresa[id] || 'Empresa';
+  const nombreEmpresaActiva = empresaActiva?.name || empresas.find((e) => e.id === empresaActivaId)?.nombre || 'la empresa';
+  const nombreEmpresa = (id: string) => empresas.find((e) => e.id === id)?.nombre || (id === empresaActivaId ? nombreEmpresaActiva : 'Empresa');
 
   useEffect(() => {
-    let vivo = true;
-    Promise.all(GRUPO_EVENTUALES_EMPRESA_IDS.map(async (id) => {
-      const snap = await getDoc(doc(db, 'empresas', id));
-      const data = snap.data() || {};
-      return [id, String(data.razonSocial || data.nombre || '')] as const;
-    })).then((pares) => {
-      if (!vivo) return;
-      const map: Record<string, string> = {};
-      pares.forEach(([id, nombre]) => { if (nombre) map[id] = nombre; });
-      setNombresEmpresa(map);
-    }).catch(() => { /* sin nombre no se muestra el id */ });
-    return () => { vivo = false; };
+    getDocs(collection(db, 'empresas'))
+      .then((snap) => setEmpresas(empresasPlataformaDeDocs(snap.docs.map((d) => ({ id: d.id, data: d.data() }))) as EmpresaPlataforma[]))
+      .catch(() => toast.error('No se pudieron cargar las empresas de la plataforma.'));
   }, []);
 
   useEffect(() => {
@@ -126,36 +108,33 @@ export default function EventualesPage() {
         return {
           id: d.id,
           nombre: String(data.nombre || ''),
-          disponibilidad: String(data.disponibilidad || ''),
+          disponibilidad: String(data.disponibilidad || 'DISPONIBLE'),
           mail: String(data.mail || ''),
           telefono: String(data.telefono || ''),
           dni: String(data.dni || ''),
           domicilio: String(data.domicilio || ''),
           empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
+          habilitacionNumero: String(hab.numero || ''),
           habilitacionVencimiento: String(hab.vencimiento || ''),
           credencialVencimiento: String(data.credencialVencimiento || ''),
+          aptoEstado: String(apto.estado || ''),
           aptoVencimiento: String(apto.vencimiento || ''),
           riesgoEncadenamiento: String(data.riesgoEncadenamiento || ''),
           uid: String(data.uid || ''),
           obraSocialRnos: String(data.obraSocialRnos || ''),
+          fechaNacimiento: String(data.fechaNacimiento || ''),
+          observaciones: String(data.observaciones || ''),
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
         };
       }));
     });
   }, []);
 
-  const visibles = useMemo(() => {
-    const q = buscar.trim().toLowerCase();
-    return fichas.filter((f) => {
-      if (filtro === 'DISPONIBLE' && f.disponibilidad !== 'DISPONIBLE') return false;
-      if (filtro === 'NO_DISPONIBLE' && f.disponibilidad !== 'NO_DISPONIBLE') return false;
-      if (filtro === 'VENCE' && ![f.habilitacionVencimiento, f.credencialVencimiento, f.aptoVencimiento].some((fecha) => vencePronto(fecha, hoy()))) return false;
-      if (filtro === 'INCOMPLETOS' && !esIncompleto(f, hoy(), empresa)) return false;
-      if (empresa && !f.empresasHabilitadas.includes(empresa)) return false;
-      if (q && !`${f.nombre} ${f.id} ${f.dni}`.toLowerCase().includes(q)) return false;
-      return true;
-    });
-  }, [fichas, filtro, empresa, buscar]);
+  const visibles = useMemo(
+    () => (filtrarFichas({ fichas, empresaId: empresaActivaId, todaLaBolsa, filtro, buscar, hoy: hoy() }) as Ficha[]).sort((a, b) => a.nombre.localeCompare(b.nombre)),
+    [fichas, empresaActivaId, todaLaBolsa, filtro, buscar],
+  );
+  const contadores = useMemo(() => contadoresFiltros({ fichas, empresaId: empresaActivaId, todaLaBolsa, hoy: hoy() }) as Record<string, number>, [fichas, empresaActivaId, todaLaBolsa]);
 
   const llamar = async (nombre: string, data: Record<string, unknown>) => {
     const fn = httpsCallable(functions, nombre);
@@ -165,17 +144,14 @@ export default function EventualesPage() {
 
   const abrirDetalle = async (id: string) => {
     setElegida(id);
-    setArchivoMarco(null);
-    const hab = fichas.find((f) => f.id === id)?.empresasHabilitadas || [];
-    if (hab.length) setEmpresaMarco(hab[0]);
     setDetalle(null);
     try {
       setDetalle(await llamar('gestionarEventual', { accion: 'detalle', cuil: id }));
-      const lista = await llamar('gestionarMarcoEventual', { accion: 'listar', cuil: id }) as { marcos?: { empresaId: string; estado?: string; vencimiento?: string; avisar?: boolean }[] };
-      const map: Record<string, { estado?: string; vencimiento?: string; avisar?: boolean }> = {};
+      const lista = await llamar('gestionarMarcoEventual', { accion: 'listar', cuil: id }) as { marcos?: (MarcoVista & { empresaId: string })[]; documentos?: DocumentoVista[] };
+      const map: Record<string, MarcoVista> = {};
       (lista.marcos || []).forEach((row) => { map[row.empresaId] = row; });
       setMarcos(map);
-      setDocumentos((lista as { documentos?: { id: string; tipo?: string; nombre?: string; link?: string | null; drivePendiente?: boolean }[] }).documentos || []);
+      setDocumentos(lista.documentos || []);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo abrir la ficha.');
     }
@@ -205,12 +181,11 @@ export default function EventualesPage() {
     toast.success('Domicilio ubicado.');
   };
 
-  const confirmarBaja = async () => {
+  const darBaja = async (motivo: string, fecha: string) => {
     if (!elegida) return;
     try {
-      await llamar('gestionarEventual', { accion: 'baja', cuil: elegida, motivo: baja.motivo, fecha: baja.fecha });
-      toast.success('Baja de la bolsa. El documento queda.');
-      setBaja({ motivo: '', fecha: hoy() });
+      await llamar('gestionarEventual', { accion: 'baja', cuil: elegida, motivo, fecha });
+      toast.success('Baja de la bolsa. Los documentos quedan.');
       abrirDetalle(elegida);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'No se pudo dar de baja.');
@@ -219,37 +194,47 @@ export default function EventualesPage() {
 
   const reactivar = async () => {
     if (!elegida) return;
-    await llamar('gestionarEventual', { accion: 'reactivar', cuil: elegida });
-    toast.success('Volvió a la bolsa.');
-    abrirDetalle(elegida);
-  };
-
-  const subirMarco = async (cuil: string) => {
-    if (!archivoMarco) { toast.error('Elegí el PDF o la foto firmada.'); return; }
-    if (!empresaMarco) { toast.error('Sin empresa habilitada.'); return; }
     try {
-      const bytes = new Uint8Array(await archivoMarco.arrayBuffer());
-      let bin = '';
-      bytes.forEach((b) => { bin += String.fromCharCode(b); });
-      await llamar('gestionarMarcoEventual', { accion: 'firmar', cuil, empresaId: empresaMarco, fechaFirma: firmaFecha, vigenciaDias: Number(vigenciaDias) || VIGENCIA_MARCO_DEFAULT, pdfBase64: btoa(bin) });
-      toast.success(`Marco de ${nombreEmpresa(empresaMarco)} cargado.`);
-      setArchivoMarco(null);
-      abrirDetalle(cuil);
+      await llamar('gestionarEventual', { accion: 'reactivar', cuil: elegida });
+      toast.success('Volvió a la bolsa.');
+      abrirDetalle(elegida);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'No se pudo subir el marco.');
+      toast.error(e instanceof Error ? e.message : 'No se pudo reactivar.');
     }
   };
 
-  const importarContactos = async (file: File, dryRun: boolean, filasYaLeidas?: Record<string, unknown>[]) => {
+  const acceso = async () => {
+    if (!elegida) return;
+    try {
+      const res = await llamar('crearAccesoEventual', { cuil: elegida });
+      toast.success(`Acceso creado. Link de activación: ${String(res.activacion || '')}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo crear el acceso.');
+    }
+  };
+
+  const habilitarEnActiva = async (cuil: string) => {
+    setHabilitando(cuil);
+    try {
+      await llamar('gestionarEventual', { accion: 'habilitarEmpresa', cuil, empresaId: empresaActivaId, habilitar: true });
+      toast.success(`Habilitado en ${nombreEmpresaActiva}.`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'No se pudo habilitar.');
+    } finally {
+      setHabilitando('');
+    }
+  };
+
+  const importarContactos = async (file: File | null, dryRun: boolean, filasYaLeidas?: Record<string, unknown>[]) => {
     setImportando(true);
     try {
       let filas = filasYaLeidas;
-      if (!filas) {
+      if (!filas && file) {
         const XLSX = await import('xlsx');
         const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
         filas = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: false });
       }
-      const res = await llamar('gestionarEventual', { accion: 'importarContacto', dryRun, filas }) as {
+      const res = await llamar('gestionarEventual', { accion: 'importarContacto', dryRun, filas: filas || [] }) as {
         resumen: { actualizar: number; sinCambio: number; noEnBolsa: number; cuilInvalido: number; mailInvalido: number };
         muestra: { cuil: string; campos: string[] }[];
         problemas: { cuil: string; codigo: string }[];
@@ -274,16 +259,7 @@ export default function EventualesPage() {
     }
   };
 
-  const acceso = async () => {
-    if (!elegida) return;
-    const res = await llamar('crearAccesoEventual', { cuil: elegida });
-    toast.success(`Acceso creado. ${String(res.activacion || '')}`);
-  };
-
   const ficha = fichas.find((f) => f.id === elegida) || null;
-  const contratos = (detalle?.contratos as { id: string; empresaId?: string; estado?: string; fechaAlta?: string; fechaBaja?: string; jornadas?: { fecha: string; horaInicio: string; horaFin: string; horas: number }[] }[]) || [];
-  const arca = (detalle?.arca as { id: string; tipo?: string; estado?: string; fechaAlta?: string; nroTransaccion?: string; advertencias?: string[]; enviable?: boolean }[]) || [];
-  const historial = (detalle?.historial as { id: string; action?: string; details?: string; at?: string }[]) || [];
 
   if (!puede('read')) {
     return <DashboardLayout><p className="p-8 text-slate-600">No tenés permiso para ver Eventuales. Lo asigna Configuración → Roles.</p></DashboardLayout>;
@@ -291,236 +267,183 @@ export default function EventualesPage() {
 
   return (
     <DashboardLayout>
-    <div className="min-h-screen bg-slate-50 p-6">
-      <div className="mx-auto max-w-6xl">
-        <Link href="/admin/rrhh" className="mb-4 inline-flex items-center gap-2 text-sm text-slate-500"><ArrowLeft size={16} /> RRHH</Link>
-        <div className="mb-4 flex items-center justify-between">
-          <h1 className="flex items-center gap-2 text-2xl font-black text-slate-800"><Users /> Eventuales</h1>
-          {puede('create') && <button type="button" onClick={() => { setEditando(''); setForm(vacio()); }} className="inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white shadow-sm"><Plus size={16} /> Alta</button>}
-        </div>
-        <div className="mb-4 flex flex-wrap gap-2">
-          <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre, CUIL o DNI" className="rounded-2xl border border-slate-200 px-3 py-2 text-sm shadow-sm" />
-          {['DISPONIBLE', 'NO_DISPONIBLE', 'VENCE', 'INCOMPLETOS', 'TODOS'].map((op) => (
-            <button key={op} type="button" onClick={() => setFiltro(op)} className={`rounded-2xl px-3 py-2 text-xs font-bold ${filtro === op ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600 shadow-sm'}`}>{op === 'VENCE' ? 'Vencen en 30 días' : op === 'INCOMPLETOS' ? 'Incompletos' : op}</button>
-          ))}
-          <select value={empresa} onChange={(e) => setEmpresa(e.target.value)} className="rounded-2xl border border-slate-200 px-3 py-2 text-sm shadow-sm">
-            <option value="">Todas las empresas</option>
-            {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => <option key={id} value={id}>{nombreEmpresa(id)}</option>)}
-          </select>
-          {puede('update') && (
-            <label className="cursor-pointer rounded-2xl bg-white px-3 py-2 text-xs font-bold text-slate-700 shadow-sm hover:bg-slate-50">
-              Importar contactos
-              <input type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importarContactos(file, true); }} />
-            </label>
-          )}
-          <MarcosLotePanel empresaId={empresa} nombreEmpresa={empresa ? nombreEmpresa(empresa) : ''} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
-          {seleccion.length > 0 && puede('update') && (
-            <button type="button" onClick={() => { setEmpresasAsignar([]); setAsignarAbierto(true); }} className="rounded-2xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white shadow-sm">
-              Asignar empresas habilitadas ({seleccion.length})
-            </button>
-          )}
-          {seleccion.length > 0 && <button type="button" onClick={() => setSeleccion([])} className="rounded-2xl px-2 py-2 text-xs font-bold text-slate-500 underline">Quitar selección</button>}
-        </div>
-        <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
-          <ul className="max-h-[70vh] overflow-auto rounded-3xl bg-white p-2 shadow-sm">
-            {visibles.map((f) => (
-              <li key={f.id} className="flex items-center gap-1">
+      <Head><title>Eventuales | COSP V1.0</title></Head>
+      <PageShell className="!pb-10">
+        <div className="mx-auto max-w-7xl space-y-4">
+          <Link href="/admin/rrhh" className="inline-flex items-center gap-1 text-xs font-bold text-slate-500 hover:text-slate-700"><ArrowLeft size={14} /> RRHH</Link>
+          <PageHeader
+            title="Eventuales"
+            subtitle={todaLaBolsa ? 'Toda la bolsa del grupo' : `Habilitados para ${nombreEmpresaActiva}`}
+            icon={Users}
+            className="!mb-2"
+            actions={(
+              <div className="flex flex-wrap items-center gap-2">
+                {puede('create') && (
+                  <button type="button" onClick={() => { setEditando(''); setForm({ ...vacio(), empresasHabilitadas: empresaActivaId ? [empresaActivaId] : [] }); }} title="Alta en la bolsa" aria-label="Alta en la bolsa"
+                    className="inline-flex h-9 items-center gap-1 rounded-xl bg-indigo-600 px-3 text-xs font-bold text-white shadow-sm hover:bg-indigo-700 active:scale-95">
+                    <Plus size={16} /> Alta
+                  </button>
+                )}
                 {puede('update') && (
-                  <input type="checkbox" checked={seleccion.includes(f.id)} title="Seleccionar para imprimir su marco"
-                    onChange={(e) => setSeleccion(e.target.checked ? [...seleccion, f.id] : seleccion.filter((id) => id !== f.id))}
-                    className="ml-2 h-4 w-4 rounded border-slate-300 accent-indigo-600" />
+                  <label title="Importar mail, teléfono y domicilio desde Excel (CUIL + columnas). Primero muestra qué cambia." className="inline-flex h-9 w-9 cursor-pointer items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm hover:bg-slate-50">
+                    <FileSpreadsheet size={16} />
+                    <input type="file" accept=".xlsx,.xls,.csv" className="hidden" disabled={importando} onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importarContactos(f, true); }} />
+                  </label>
                 )}
-                <button type="button" onClick={() => abrirDetalle(f.id)} className={`w-full rounded-2xl px-3 py-2 text-left hover:bg-slate-50 ${elegida === f.id ? 'bg-indigo-50' : ''}`}>
-                  <span className="block text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
-                  <span className="text-[11px] text-slate-500">{f.disponibilidad}{f.empresasHabilitadas.length ? ` · ${f.empresasHabilitadas.map(nombreEmpresa).join(', ')}` : ''}</span>
-                  <span className="mt-1 flex flex-wrap gap-1">
-                    {faltantesConvocable(f, hoy(), empresa).map((chip) => (
-                      <span key={chip.id} className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">{chip.texto}</span>
-                    ))}
-                  </span>
-                </button>
-              </li>
-            ))}
-            {visibles.length === 0 && <li className="p-4 text-sm text-slate-400">Sin resultados.</li>}
-          </ul>
-          <section className="rounded-3xl bg-white p-5 shadow-sm">
-            {!ficha && <p className="text-sm text-slate-400">Elegí una persona de la bolsa.</p>}
-            {ficha && (
-              <div className="space-y-4">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <div>
-                    <h2 className="text-lg font-black text-slate-800">{ficha.nombre}</h2>
-                    <p className="text-xs text-slate-500">CUIL {ficha.id} · DNI {ficha.dni || '—'} · {ficha.disponibilidad}{ficha.uid ? ' · con acceso a la app' : ''}</p>
-                    <p className="text-xs text-slate-500">{ficha.domicilio || 'Sin domicilio'} · {ficha.telefono || 'sin teléfono'} · {ficha.mail || 'sin mail'}</p>
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {puede('update') && <button type="button" className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-bold" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, dni: ficha.dni, domicilio: ficha.domicilio, telefono: ficha.telefono, mail: ficha.mail, obraSocialRnos: ficha.obraSocialRnos || RNOS_DEFAULT_FICHA, empresasHabilitadas: ficha.empresasHabilitadas, habilitacionVencimiento: ficha.habilitacionVencimiento, credencialVencimiento: ficha.credencialVencimiento, aptoVencimiento: ficha.aptoVencimiento }); }}>Editar</button>}
-                    {puede('update') && <button type="button" className="rounded-2xl bg-indigo-600 px-3 py-2 text-xs font-bold text-white" onClick={acceso}>Crear acceso a la app</button>}
-                    {puede('update') && ficha.disponibilidad === 'NO_DISPONIBLE' && <button type="button" className="rounded-2xl bg-emerald-600 px-3 py-2 text-xs font-bold text-white" onClick={reactivar}>Reactivar</button>}
-                  </div>
-                </div>
-                {!ficha.obraSocialRnos && !(detalle?.rnos as { pendiente?: boolean } | undefined)?.pendiente && <p className="text-sm text-slate-500">Sin RNOS propio: se usa el de SUVICO {RNOS_DEFAULT_FICHA}.</p>}
-                {(detalle?.rnos as { pendiente?: boolean } | undefined)?.pendiente && <p className="text-sm font-bold text-rose-600">RNOS pendiente. El alta ARCA no se puede enviar.</p>}
-                {!!(detalle?.rnos as { sugerido?: boolean; sugerencia?: string; empresaId?: string } | undefined)?.sugerido && (
-                  <p className="text-sm text-slate-600">En {nombreEmpresa((detalle?.rnos as { empresaId: string }).empresaId)} tiene RNOS {(detalle?.rnos as { sugerencia: string }).sugerencia}.
-                    {puede('update') && <button type="button" className="ml-2 underline" onClick={() => { setEditando(ficha.id); setForm({ ...vacio(), nombre: ficha.nombre, cuil: ficha.id, mail: ficha.mail, telefono: ficha.telefono, dni: ficha.dni, domicilio: ficha.domicilio, empresasHabilitadas: ficha.empresasHabilitadas, obraSocialRnos: (detalle?.rnos as { sugerencia: string }).sugerencia }); }}>Usar esa</button>}
-                  </p>
-                )}
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setSolapa('FICHA')} className={`rounded-xl px-3 py-1 text-xs font-bold ${solapa === 'FICHA' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Ficha</button>
-                  <button type="button" onClick={() => setSolapa('DOCUMENTOS')} className={`rounded-xl px-3 py-1 text-xs font-bold ${solapa === 'DOCUMENTOS' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>Documentos</button>
-                </div>
-                {solapa === 'DOCUMENTOS' && (
-                  <div className="rounded-2xl border border-slate-100 p-3">
-                    <h3 className="text-sm font-black text-slate-700">Documentos en Drive</h3>
-                    {documentos.length === 0 && <p className="text-xs text-slate-400">Todavía no hay archivos.</p>}
-                    {documentos.map((docu) => (
-                      <p key={docu.id} className="text-xs text-slate-600">
-                        {docu.tipo} · {docu.nombre}{' '}
-                        {docu.link ? <a className="font-bold text-indigo-700" href={docu.link} target="_blank" rel="noreferrer">Abrir en Drive</a> : null}
-                        {docu.drivePendiente ? <span className="ml-1 font-bold text-amber-700">pendiente de Drive</span> : null}
-                      </p>
-                    ))}
-                    {puede('update') && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        <button type="button" className="rounded-xl bg-slate-100 px-2 py-1 text-xs font-bold" onClick={async () => { await llamar('gestionarMarcoEventual', { accion: 'reintentar', cuil: ficha.id }); toast.success('Reintento de Drive pedido.'); abrirDetalle(ficha.id); }}>Reintentar pendientes</button>
-                        <label className="rounded-xl bg-slate-800 px-2 py-1 text-xs font-bold text-white">Subir constancia ARCA
-                          <input type="file" accept="application/pdf" className="hidden" onChange={async (e) => {
-                            const file = e.target.files?.[0];
-                            if (!file) return;
-                            const bytes = new Uint8Array(await file.arrayBuffer());
-                            let bin = '';
-                            bytes.forEach((b) => { bin += String.fromCharCode(b); });
-                            await llamar('gestionarMarcoEventual', { accion: 'subir', tipo: 'ARCA', cuil: ficha.id, empresaId: empresaMarco, fecha: firmaFecha, pdfBase64: btoa(bin) });
-                            toast.success('Constancia ARCA cargada.');
-                            abrirDetalle(ficha.id);
-                          }} />
-                        </label>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="rounded-2xl border border-slate-100 p-3">
-                  <h3 className="text-sm font-black text-slate-700">Contrato marco</h3>
-                  <p className="text-[11px] text-slate-500">Una vez por empresa, en papel. Cada aceptación en la app es un anexo. La firma en la app (CiDi) queda para más adelante.</p>
-                  {ficha.empresasHabilitadas.length === 0 && <p className="mt-2 text-xs font-bold text-amber-800">Sin empresa habilitada</p>}
-                  {ficha.empresasHabilitadas.map((emp) => {
-                    const marco = marcos[emp];
-                    const vista = textoEstadoMarco(marco?.estado, marco?.vencimiento);
-                    return (
-                      <div key={emp} className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                        <span className="font-bold text-slate-700">{nombreEmpresa(emp)}</span>
-                        <span className={`rounded-full px-2 py-0.5 font-bold ${TONO_MARCO[vista.tono] || TONO_MARCO.pendiente}`}>{vista.texto}</span>
-                        {marco?.avisar && <span className="font-bold text-amber-700">Vence en menos de 30 días</span>}
-                        {puede('update') && <button type="button" className="rounded-xl bg-slate-100 px-2 py-1 font-bold" onClick={async () => {
-                          const res = await llamar('gestionarMarcoEventual', { accion: 'generar', cuil: ficha.id, empresaId: emp, fecha: firmaFecha });
-                          const bin = atob(String(res.pdfBase64 || ''));
-                          const bytes = new Uint8Array(bin.length);
-                          for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
-                          const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
-                          const a = document.createElement('a');
-                          a.href = url; a.download = `Marco-${nombreEmpresa(emp)}.pdf`; a.click();
-                          toast.success('PDF del marco generado.');
-                        }}>Generar PDF</button>}
-                      </div>
-                    );
-                  })}
-                  {puede('update') && (
-                    <div className="mt-3 flex flex-wrap items-end gap-2">
-                      <label className="text-xs font-bold text-slate-600">Empresa
-                        <select value={ficha.empresasHabilitadas.includes(empresaMarco) ? empresaMarco : (ficha.empresasHabilitadas[0] || '')} onChange={(e) => setEmpresaMarco(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal">
-                          {ficha.empresasHabilitadas.length === 0 && <option value="">Sin empresa habilitada</option>}
-                          {ficha.empresasHabilitadas.map((id) => <option key={id} value={id}>{nombreEmpresa(id)}</option>)}
-                        </select>
-                      </label>
-                      <label className="text-xs font-bold text-slate-600">Fecha de firma
-                        <input type="date" value={firmaFecha} onChange={(e) => setFirmaFecha(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal" />
-                      </label>
-                      <label className="text-xs font-bold text-slate-600">Vigencia
-                        <select value={vigenciaDias} onChange={(e) => setVigenciaDias(e.target.value)} className="mt-1 block rounded-xl border border-slate-200 px-2 py-1 text-xs font-normal">
-                          {opcionesVigenciaMarco().map((op) => <option key={op.dias} value={String(op.dias)}>{op.label}</option>)}
-                        </select>
-                      </label>
-                      <label className="cursor-pointer rounded-xl bg-slate-100 px-2 py-1 text-xs font-bold text-slate-700">Elegir archivo
-                        <input type="file" accept="application/pdf,image/*" className="hidden" onChange={(e) => { setArchivoMarco(e.target.files?.[0] || null); e.target.value = ''; }} />
-                      </label>
-                      {archivoMarco && <span className="text-[11px] text-slate-500">{archivoMarco.name}</span>}
-                      <button type="button" className="rounded-xl bg-indigo-600 px-2 py-1 text-xs font-bold text-white disabled:opacity-50" disabled={!archivoMarco || !ficha.empresasHabilitadas.includes(empresaMarco)} onClick={() => subirMarco(ficha.id)}>Subir contrato marco</button>
-                    </div>
-                  )}
-                </div>
-                <p className="text-sm text-slate-700">Encadenamiento: {ficha.riesgoEncadenamiento || 'sin alerta'}. Habilitación {fmt(ficha.habilitacionVencimiento)} · credencial {fmt(ficha.credencialVencimiento)} · apto {fmt(ficha.aptoVencimiento)}.</p>
-                {puede('delete') && ficha.disponibilidad !== 'NO_DISPONIBLE' && (
-                  <div className="flex flex-wrap gap-2 rounded-2xl bg-slate-50 p-3">
-                    <input value={baja.motivo} onChange={(e) => setBaja({ ...baja, motivo: e.target.value })} placeholder="Motivo de baja" className="rounded-xl border px-2 py-1 text-sm" />
-                    <input type="date" value={baja.fecha} onChange={(e) => setBaja({ ...baja, fecha: e.target.value })} className="rounded-xl border px-2 py-1 text-sm" />
-                    <button type="button" onClick={confirmarBaja} className="rounded-xl bg-rose-600 px-3 py-1 text-xs font-bold text-white">Dar de baja de la bolsa</button>
-                  </div>
-                )}
-                <div>
-                  <h3 className="text-sm font-black text-slate-700">Contratos y jornadas</h3>
-                  {contratos.length === 0 && <p className="text-xs text-slate-400">Sin contratos.</p>}
-                  {contratos.map((c) => (
-                    <div key={c.id} className="mt-2 rounded-2xl border border-slate-100 p-3 text-xs text-slate-600">
-                      <p className="font-bold">{c.empresaId ? nombreEmpresa(c.empresaId) : 'Sin empresa'} · {c.estado} · {fmt(c.fechaAlta)} → {fmt(c.fechaBaja)}</p>
-                      {(c.jornadas || []).map((j, i) => <p key={i}>{fmt(j.fecha)} {j.horaInicio}–{j.horaFin} ({j.horas} h)</p>)}
-                    </div>
-                  ))}
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-700">ARCA</h3>
-                  {arca.length === 0 && <p className="text-xs text-slate-400">Sin altas ni bajas.</p>}
-                  {arca.map((a) => (
-                    <p key={a.id} className="text-xs text-slate-600">
-                      {a.tipo} · {a.estado} · {fmt(a.fechaAlta)} {a.nroTransaccion ? `· ${a.nroTransaccion}` : ''}
-                      {(a.advertencias || []).includes('RETRIBUCION_PENDIENTE') && (
-                        <span className="ml-1 font-bold text-amber-700">RETRIBUCION_PENDIENTE — no enviable hasta aprobar la escala</span>
-                      )}
-                    </p>
-                  ))}
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-slate-700">Historial</h3>
-                  {historial.map((h) => <p key={h.id} className="text-xs text-slate-500">{h.action} · {h.details} · {h.at ? fmt(h.at) : ''}</p>)}
-                </div>
+                <MarcosLotePanel compacto empresaId={empresaActivaId} nombreEmpresa={nombreEmpresaActiva} fichas={fichas} seleccionados={seleccion} puedeEditar={puede('update')} llamar={llamar} />
               </div>
             )}
-          </section>
+          />
+
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-white p-2 shadow-sm">
+            <label className="flex min-w-[200px] flex-1 items-center gap-2 rounded-xl bg-slate-50 px-3 py-2">
+              <Search size={14} className="text-slate-400" />
+              <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre, CUIL o DNI" className="w-full bg-transparent text-sm outline-none" />
+              {buscar && <button type="button" onClick={() => setBuscar('')} aria-label="Limpiar búsqueda" className="text-slate-400"><X size={14} /></button>}
+            </label>
+            <div className="flex flex-wrap gap-1">
+              {FILTROS_LISTA.map((f) => {
+                const Icon = ICONO_FILTRO[f.id] || Users;
+                const on = filtro === f.id;
+                return (
+                  <button key={f.id} type="button" onClick={() => setFiltro(f.id)} title={f.label}
+                    className={`inline-flex items-center gap-1 rounded-xl px-2.5 py-1.5 text-[11px] font-bold transition ${on ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}>
+                    <Icon size={12} /> <span className="hidden sm:inline">{f.label}</span>
+                    <span className={`rounded-full px-1.5 text-[9px] font-black ${on ? 'bg-white/20' : 'bg-slate-100 text-slate-500'}`}>{contadores[f.id] ?? 0}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-xl px-2 py-1.5 text-[11px] font-bold text-slate-600" title="Ver a todos los eventuales del grupo, aunque no estén habilitados en esta empresa">
+              <span className={`relative h-5 w-9 rounded-full transition ${todaLaBolsa ? 'bg-indigo-600' : 'bg-slate-300'}`}>
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${todaLaBolsa ? 'left-[18px]' : 'left-0.5'}`} />
+              </span>
+              <input type="checkbox" className="hidden" checked={todaLaBolsa} onChange={(e) => setTodaLaBolsa(e.target.checked)} />
+              Toda la bolsa del grupo
+            </label>
+          </div>
+
+          {seleccion.length > 0 && puede('update') && (
+            <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs font-bold text-indigo-800">
+              {seleccion.length} seleccionados
+              <button type="button" onClick={() => { setEmpresasAsignar([empresaActivaId].filter(Boolean)); setAsignarAbierto(true); }} className="inline-flex items-center gap-1 rounded-xl bg-indigo-600 px-3 py-1.5 text-white shadow-sm"><Building2 size={13} /> Asignar empresas habilitadas</button>
+              <button type="button" onClick={() => setSeleccion([])} className="ml-auto inline-flex items-center gap-1 text-indigo-600"><X size={13} /> Quitar selección</button>
+            </div>
+          )}
+
+          <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
+            <ul className={`max-h-[72vh] overflow-auto rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm ${elegida ? 'hidden lg:block' : ''}`}>
+              {visibles.map((f) => {
+                const faltan = faltantesConvocable(f, hoy(), todaLaBolsa ? '' : empresaActivaId) as { id: string; texto: string }[];
+                const marcoActiva = marcoDeBolsa(f, empresaActivaId, hoy());
+                const habilitadaAca = f.empresasHabilitadas.includes(empresaActivaId);
+                const activo = elegida === f.id;
+                return (
+                  <li key={f.id} className={`flex items-center gap-2 rounded-xl px-2 py-1.5 transition ${activo ? 'bg-indigo-50' : 'hover:bg-slate-50'}`}>
+                    {puede('update') && (
+                      <input type="checkbox" checked={seleccion.includes(f.id)} title="Seleccionar" aria-label={`Seleccionar a ${f.nombre}`}
+                        onChange={(e) => setSeleccion(e.target.checked ? [...seleccion, f.id] : seleccion.filter((id) => id !== f.id))}
+                        className="h-4 w-4 shrink-0 rounded border-slate-300 accent-indigo-600" />
+                    )}
+                    <button type="button" onClick={() => abrirDetalle(f.id)} className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                      <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-xs font-black ${f.disponibilidad === 'NO_DISPONIBLE' ? 'bg-slate-200 text-slate-500' : 'bg-indigo-100 text-indigo-700'}`}>{iniciales(f.nombre)}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-bold text-slate-800">{f.nombre || f.id}</span>
+                        <span className="flex items-center gap-1 text-[10px] text-slate-400">
+                          <span className="tabular-nums">{f.id}</span>
+                          {f.disponibilidad === 'NO_DISPONIBLE' && <span className="rounded-full bg-slate-200 px-1.5 font-black text-slate-600">{textoDisponibilidad(f.disponibilidad)}</span>}
+                        </span>
+                        <span className="mt-1 flex flex-wrap items-center gap-1">
+                          <EstadoIcono icon={Mail} ok={!!f.mail} title={f.mail ? `Mail: ${f.mail}` : 'Falta mail'} />
+                          <EstadoIcono icon={Phone} ok={!!f.telefono} title={f.telefono ? `Teléfono: ${f.telefono}` : 'Falta teléfono'} />
+                          <EstadoIcono icon={Home} ok={!!f.domicilio} title={f.domicilio ? `Domicilio: ${f.domicilio}` : 'Falta domicilio'} />
+                          {habilitadaAca && (marcoActiva.estado === 'MARCO_VIGENTE'
+                            ? <EstadoIcono icon={FileCheck2} ok title={`Marco vigente en ${nombreEmpresaActiva}`} />
+                            : <EstadoIcono icon={FileX2} ok={false} title={marcoActiva.estado === 'VENCIDO' ? `Marco vencido en ${nombreEmpresaActiva}` : `Sin contrato marco en ${nombreEmpresaActiva}`} />)}
+                          {f.empresasHabilitadas.map((id) => (
+                            <span key={id} title={`Habilitado en ${nombreEmpresa(id)}`} className={`rounded-md px-1.5 py-0.5 text-[9px] font-black ${id === empresaActivaId ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-600'}`}>{siglaEmpresa(nombreEmpresa(id))}</span>
+                          ))}
+                          {f.empresasHabilitadas.length === 0 && <span className="rounded-md bg-amber-50 px-1.5 py-0.5 text-[9px] font-black text-amber-700" title="Sin empresa habilitada">Sin empresa</span>}
+                          {faltan.some((c) => c.id === 'CREDENCIAL' || c.id === 'APTO') && <span title={faltan.filter((c) => c.id === 'CREDENCIAL' || c.id === 'APTO').map((c) => c.texto).join(', ')} className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-rose-50 text-rose-600"><AlertTriangle size={11} /></span>}
+                        </span>
+                      </span>
+                    </button>
+                    {todaLaBolsa && !habilitadaAca && puede('update') && (
+                      <button type="button" onClick={() => habilitarEnActiva(f.id)} disabled={habilitando === f.id} title={`Habilitar en ${nombreEmpresaActiva}`} aria-label={`Habilitar en ${nombreEmpresaActiva}`}
+                        className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-indigo-200 bg-white text-indigo-600 shadow-sm hover:bg-indigo-50 disabled:opacity-50">
+                        <UserPlus size={14} />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+              {visibles.length === 0 && (
+                <li className="p-6 text-center text-xs text-slate-400">
+                  {todaLaBolsa ? 'Nadie en la bolsa cumple ese filtro.' : `Nadie habilitado en ${nombreEmpresaActiva} cumple ese filtro. Probá «Toda la bolsa del grupo».`}
+                </li>
+              )}
+            </ul>
+
+            <div className={!elegida ? 'hidden lg:block' : ''}>
+              {!ficha && <div className="flex h-40 items-center justify-center rounded-2xl border border-dashed border-slate-200 text-sm text-slate-400">Elegí una persona de la lista.</div>}
+              {ficha && (
+                <FichaEventual
+                  ficha={ficha}
+                  detalle={detalle}
+                  marcos={marcos}
+                  documentos={documentos}
+                  empresas={empresas}
+                  empresaActivaId={empresaActivaId}
+                  puede={puede}
+                  llamar={llamar}
+                  recargar={() => abrirDetalle(ficha.id)}
+                  onEditar={() => { setEditando(ficha.id); setForm(formDe(ficha)); }}
+                  onAcceso={acceso}
+                  onBaja={darBaja}
+                  onReactivar={reactivar}
+                  onVolver={() => setElegida(null)}
+                />
+              )}
+            </div>
+          </div>
         </div>
+
         {asignarAbierto && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-            <div className="w-full max-w-md rounded-3xl bg-white p-5 shadow-lg">
-              <h2 className="text-lg font-black text-slate-800">Asignar empresas habilitadas</h2>
+            <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-lg">
+              <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><Building2 size={18} /> Empresas habilitadas</h2>
               <p className="mt-1 text-xs text-slate-500">{seleccion.length} personas. Reemplaza las empresas que tenían habilitadas.</p>
-              <div className="mt-3 flex flex-col gap-2 text-sm">
-                {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => (
-                  <label key={id} className="flex items-center gap-2">
-                    <input type="checkbox" checked={empresasAsignar.includes(id)} onChange={(e) => setEmpresasAsignar(e.target.checked ? [...empresasAsignar, id] : empresasAsignar.filter((x) => x !== id))} />
-                    {nombreEmpresa(id)}
-                  </label>
-                ))}
+              <div className="mt-3 flex flex-wrap gap-2">
+                {empresas.map((e) => {
+                  const on = empresasAsignar.includes(e.id);
+                  return (
+                    <button key={e.id} type="button" onClick={() => setEmpresasAsignar(on ? empresasAsignar.filter((x) => x !== e.id) : [...empresasAsignar, e.id])}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-bold ${on ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{e.nombre}</button>
+                  );
+                })}
               </div>
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setAsignarAbierto(false)} className="rounded-2xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
-                <button type="button" onClick={confirmarAsignar} className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white">Asignar</button>
+                <button type="button" onClick={() => setAsignarAbierto(false)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
+                <button type="button" onClick={confirmarAsignar} disabled={!empresasAsignar.length} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Asignar</button>
               </div>
             </div>
           </div>
         )}
+
         {reporteContacto && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4">
-            <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-3xl bg-white p-5 shadow-lg">
-              <h2 className="text-lg font-black text-slate-800">{reporteContacto.dryRun ? 'Vista previa del Excel' : 'Contactos importados'}</h2>
-              <ul className="mt-3 space-y-1 text-sm text-slate-700">
-                <li>{reporteContacto.resumen.actualizar} se actualizan</li>
-                <li>{reporteContacto.resumen.sinCambio} sin cambios</li>
-                <li>{reporteContacto.resumen.noEnBolsa} no están en la bolsa</li>
-                <li>{reporteContacto.resumen.cuilInvalido} con CUIL inválido</li>
-                <li>{reporteContacto.resumen.mailInvalido} con mail inválido</li>
+            <div className="max-h-[90vh] w-full max-w-lg overflow-auto rounded-2xl bg-white p-5 shadow-lg">
+              <h2 className="flex items-center gap-2 text-lg font-black text-slate-800"><FileSpreadsheet size={18} /> {reporteContacto.dryRun ? 'Vista previa del Excel' : 'Contactos importados'}</h2>
+              <ul className="mt-3 grid grid-cols-2 gap-1 text-sm text-slate-700 sm:grid-cols-3">
+                <li className="rounded-xl bg-emerald-50 p-2 text-center"><b className="block text-lg text-emerald-700">{reporteContacto.resumen.actualizar}</b>se actualizan</li>
+                <li className="rounded-xl bg-slate-50 p-2 text-center"><b className="block text-lg">{reporteContacto.resumen.sinCambio}</b>sin cambios</li>
+                <li className="rounded-xl bg-amber-50 p-2 text-center"><b className="block text-lg text-amber-700">{reporteContacto.resumen.noEnBolsa}</b>no están en la bolsa</li>
+                <li className="rounded-xl bg-rose-50 p-2 text-center"><b className="block text-lg text-rose-700">{reporteContacto.resumen.cuilInvalido}</b>CUIL inválido</li>
+                <li className="rounded-xl bg-rose-50 p-2 text-center"><b className="block text-lg text-rose-700">{reporteContacto.resumen.mailInvalido}</b>mail inválido</li>
               </ul>
               {reporteContacto.muestra.length > 0 && (
-                <ul className="mt-3 max-h-40 overflow-auto rounded-2xl bg-slate-50 p-2 text-xs text-slate-600">
-                  {reporteContacto.muestra.map((row) => <li key={row.cuil}>CUIL {row.cuil}: {row.campos.map((c) => CAMPO_CONTACTO[c] || c).join(', ')}</li>)}
+                <ul className="mt-3 max-h-40 overflow-auto rounded-xl bg-slate-50 p-2 text-xs text-slate-600">
+                  {reporteContacto.muestra.map((row) => <li key={row.cuil}>{fichas.find((f) => f.id === row.cuil)?.nombre || row.cuil}: {row.campos.map((c) => CAMPO_CONTACTO[c] || c).join(', ')}</li>)}
                 </ul>
               )}
               {reporteContacto.problemas.length > 0 && (
@@ -529,56 +452,58 @@ export default function EventualesPage() {
                 </ul>
               )}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setReporteContacto(null)} className="rounded-2xl px-3 py-2 text-sm text-slate-500">Cerrar</button>
+                <button type="button" onClick={() => setReporteContacto(null)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cerrar</button>
                 {reporteContacto.dryRun && reporteContacto.resumen.actualizar > 0 && (
-                  <button type="button" disabled={importando} onClick={() => importarContactos(new File([], 'lote'), false, reporteContacto.filas)} className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Aplicar</button>
+                  <button type="button" disabled={importando} onClick={() => importarContactos(null, false, reporteContacto.filas)} className="rounded-xl bg-emerald-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">Aplicar</button>
                 )}
               </div>
             </div>
           </div>
         )}
+
         {form && (
           <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-900/40 p-4">
-            <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-3xl bg-white p-5 shadow-lg">
-              <h2 className="mb-3 text-lg font-black">{editando ? 'Editar ficha' : 'Alta en la bolsa'}</h2>
+            <div className="max-h-[90vh] w-full max-w-xl overflow-auto rounded-2xl bg-white p-5 shadow-lg">
+              <h2 className="mb-3 flex items-center gap-2 text-lg font-black text-slate-800"><UserPlus size={18} /> {editando ? 'Editar ficha' : 'Alta en la bolsa'}</h2>
               <div className="grid gap-2 sm:grid-cols-2">
                 {([
                   ['nombre', 'Nombre'], ['cuil', 'CUIL'], ['dni', 'DNI'], ['fechaNacimiento', 'Nacimiento'],
-                  ['telefono', 'Teléfono'], ['mail', 'Mail'], ['obraSocialRnos', 'Obra social RNOS'],
+                  ['telefono', 'Teléfono'], ['mail', 'Mail'], ['obraSocialRnos', 'Obra social (RNOS)'],
                   ['habilitacionNumero', 'Habilitación 9236'], ['habilitacionVencimiento', 'Vence habilitación'],
                   ['credencialVencimiento', 'Vence credencial'], ['aptoEstado', 'Apto'], ['aptoVencimiento', 'Vence apto'],
                 ] as const).map(([key, label]) => (
-                  <label key={key} className="text-xs font-bold text-slate-500">{label}
-                    <input value={String(form[key] || '')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className="mt-1 w-full rounded-xl border px-2 py-1 text-sm font-normal text-slate-800" />
+                  <label key={key} className="text-[10px] font-black uppercase tracking-wider text-slate-400">{label}
+                    <input type={key.toLowerCase().includes('vencimiento') || key === 'fechaNacimiento' ? 'date' : 'text'} value={String(form[key] || '')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-sm font-normal normal-case text-slate-800" />
                   </label>
                 ))}
               </div>
-              <label className="mt-2 block text-xs font-bold text-slate-500">Domicilio
+              <label className="mt-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Domicilio
                 <div className="mt-1 flex gap-2">
-                  <input value={form.domicilio} onChange={(e) => setForm({ ...form, domicilio: e.target.value })} className="w-full rounded-xl border px-2 py-1 text-sm font-normal" />
-                  <button type="button" onClick={ubicar} className="inline-flex items-center gap-1 rounded-xl bg-slate-100 px-2 text-xs"><MapPin size={14} /> Ubicar</button>
+                  <input value={form.domicilio} onChange={(e) => setForm({ ...form, domicilio: e.target.value })} className="w-full rounded-xl border border-slate-200 px-2 py-1.5 text-sm font-normal normal-case text-slate-800" />
+                  <button type="button" onClick={ubicar} title="Ubicar en el mapa" className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white px-2 text-xs font-bold text-slate-600"><MapPin size={14} /></button>
                 </div>
               </label>
-              <div className="mt-2 flex gap-3 text-xs">
-                {GRUPO_EVENTUALES_EMPRESA_IDS.map((id) => (
-                  <label key={id} className="flex items-center gap-1">
-                    <input type="checkbox" checked={form.empresasHabilitadas.includes(id)} onChange={(e) => setForm({ ...form, empresasHabilitadas: e.target.checked ? [...form.empresasHabilitadas, id] : form.empresasHabilitadas.filter((x) => x !== id) })} />
-                    {nombreEmpresa(id)}
-                  </label>
-                ))}
+              <p className="mt-3 text-[10px] font-black uppercase tracking-wider text-slate-400">Empresas habilitadas</p>
+              <div className="mt-1 flex flex-wrap gap-2">
+                {empresas.map((e) => {
+                  const on = form.empresasHabilitadas.includes(e.id);
+                  return (
+                    <button key={e.id} type="button" onClick={() => setForm({ ...form, empresasHabilitadas: on ? form.empresasHabilitadas.filter((x) => x !== e.id) : [...form.empresasHabilitadas, e.id] })}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-bold ${on ? 'border-indigo-600 bg-indigo-600 text-white' : 'border-slate-200 bg-white text-slate-600'}`}>{e.nombre}</button>
+                  );
+                })}
               </div>
-              <label className="mt-2 block text-xs font-bold text-slate-500">Observaciones
-                <textarea value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })} className="mt-1 w-full rounded-xl border px-2 py-1 text-sm font-normal" rows={2} />
+              <label className="mt-3 block text-[10px] font-black uppercase tracking-wider text-slate-400">Observaciones
+                <textarea value={form.observaciones} onChange={(e) => setForm({ ...form, observaciones: e.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-sm font-normal normal-case text-slate-800" rows={2} />
               </label>
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setForm(null)} className="rounded-2xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
-                <button type="button" disabled={guardando} onClick={guardar} className="rounded-2xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white">{guardando ? 'Guardando…' : 'Guardar'}</button>
+                <button type="button" onClick={() => setForm(null)} className="rounded-xl px-3 py-2 text-sm text-slate-500">Cancelar</button>
+                <button type="button" disabled={guardando} onClick={guardar} className="rounded-xl bg-indigo-600 px-4 py-2 text-sm font-bold text-white disabled:opacity-50">{guardando ? 'Guardando…' : 'Guardar'}</button>
               </div>
             </div>
           </div>
         )}
-      </div>
-    </div>
+      </PageShell>
     </DashboardLayout>
   );
 }
