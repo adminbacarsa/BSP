@@ -1,4 +1,5 @@
-import { relieverFor, seriesBoundMs, type SeriesShift } from './shiftSeries';
+import { isReliefEligibleShift } from './reliefEligibility';
+import { SHIFT_SERIES_ALIGN_MS, relieverFor, reliefPositionsMatch, seriesBoundMs, type SeriesShift } from './shiftSeries';
 
 /** Espejo de `SHIFT_HARD_CAP_MS` (apps/functions/src/scheduling/shiftClose.ts). */
 export const RETENTION_HARD_CAP_MS = (12 * 60 + 59) * 60 * 1000;
@@ -138,9 +139,18 @@ export function buildRetentionWaitInfo(
 
   const linkedId = String(shift.retentionAbsenceShiftId || '').trim();
   const linked = linkedId ? pool.find((row) => String(row.id || '') === linkedId) : undefined;
+  // Los otros salientes de la misma franja (presentes, mismo puesto, fin ±30 min): el
+  // emparejamiento es FIFO entre todos ellos, así la tarjeta muestra lo que va a pasar.
+  const peers = pool.filter((row) =>
+    relieverStatus(row) === 'PRESENTE'
+    && !readMs(row.realEndTime)
+    && isReliefEligibleShift(row)
+    && reliefPositionsMatch(row.positionName, shift.positionName)
+    && Math.abs(seriesBoundMs(row, 'end') - sinceMs) <= SHIFT_SERIES_ALIGN_MS);
+  const incomings = pool.filter((row) => !peers.includes(row));
   // Primero quien todavía puede venir; el ausente solo si no hay otro de la serie.
-  const alive = pool.filter((row) => relieverStatus(row) !== 'AUSENTE');
-  const picked = linked ?? relieverFor(shift, alive) ?? relieverFor(shift, pool);
+  const alive = incomings.filter((row) => relieverStatus(row) !== 'AUSENTE');
+  const picked = relieverFor(shift, alive, { peers }) ?? relieverFor(shift, incomings, { peers }) ?? linked ?? null;
 
   const reliever = picked
     ? {

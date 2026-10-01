@@ -101,35 +101,46 @@ export function isValidReliefForOutgoing(
   return true;
 }
 
+/**
+ * Relevo de la serie para este saliente. `peers` = los otros salientes de la misma franja
+ * (FIFO: el que más tiempo lleva en el puesto se lleva al primer entrante que fichó).
+ */
 function pickSeriesRelief(
   outgoingId: string,
   outgoing: FirebaseFirestore.DocumentData,
   endTimeMs: number,
   docs: QueryDocumentSnapshot[],
   pred: (d: QueryDocumentSnapshot) => boolean,
+  peers: readonly Record<string, unknown>[] = [],
 ): QueryDocumentSnapshot | undefined {
-  const hits = docs.filter(
-    (d) => pred(d) && isValidReliefForOutgoing(d.data(), endTimeMs, outgoing),
-  );
+  const valid = docs.filter((d) => isValidReliefForOutgoing(d.data(), endTimeMs, outgoing));
+  if (!valid.length) return undefined;
+  const self = {
+    id: outgoingId,
+    ...(outgoing as Record<string, unknown>),
+    startMs: shiftStartMs(outgoing),
+    endMs: endTimeMs,
+  };
+  const opts = {
+    earliestIncomingMs: endTimeMs - RELEVO_ALIGN_MS,
+    latestIncomingMs: endTimeMs + RELEVO_WINDOW_AFTER_MS,
+    peers: peers.filter((p) => String(p.id || '') !== outgoingId),
+  };
+  const asRows = (list: QueryDocumentSnapshot[]) => list.map((d) => ({
+    id: d.id,
+    ...(d.data() as Record<string, unknown>),
+    startMs: shiftStartMs(d.data()),
+    endMs: shiftEndMs(d.data()),
+  }));
+  // El emparejamiento se hace sobre todos los entrantes válidos (presentes, pendientes y
+  // ausentes) para que cada saliente vea al que realmente le toca; `pred` dice qué estado
+  // se está consultando. Si el que le toca no lo cumple, se busca solo entre los que sí.
+  const paired = relieverFor(self, asRows(valid), opts);
+  const pairedDoc = paired?.id ? valid.find((d) => d.id === String(paired.id)) : undefined;
+  if (pairedDoc && pred(pairedDoc)) return pairedDoc;
+  const hits = valid.filter(pred);
   if (!hits.length) return undefined;
-  const winner = relieverFor(
-    {
-      id: outgoingId,
-      ...(outgoing as Record<string, unknown>),
-      startMs: shiftStartMs(outgoing),
-      endMs: endTimeMs,
-    },
-    hits.map((d) => ({
-      id: d.id,
-      ...(d.data() as Record<string, unknown>),
-      startMs: shiftStartMs(d.data()),
-      endMs: shiftEndMs(d.data()),
-    })),
-    {
-      earliestIncomingMs: endTimeMs - RELEVO_ALIGN_MS,
-      latestIncomingMs: endTimeMs + RELEVO_WINDOW_AFTER_MS,
-    },
-  );
+  const winner = relieverFor(self, asRows(hits), opts);
   if (!winner?.id) return undefined;
   return hits.find((d) => d.id === String(winner.id));
 }
@@ -530,12 +541,18 @@ export async function runAutoCompletarTurnosPass(
       continue;
     }
 
+    // Salientes de la misma franja (FIFO del relevo y cupo de la franja siguiente).
+    const siblings = shift.objectiveId && shift.positionName
+      ? await handoffSiblings(docSnap.id, shift, endTimeMs)
+      : [];
+    // Los que ya cerraron (relevados antes) no compiten por los entrantes que quedan.
+    const peers = siblings.filter((s) => String(s.id || '') !== docSnap.id && s.isCompleted !== true && !s.realEndTime);
+
     // Franja siguiente con menos lugares: se quedan los de menos tiempo en el puesto;
     // el resto se va a su horario, sin retención y sin tomar el relevo de otro.
     if (!shift.manualRetentionType && shift.objectiveId && shift.positionName) {
       const slots = await nextBandSlots(shift);
       if (slots != null) {
-        const siblings = await handoffSiblings(docSnap.id, shift, endTimeMs);
         const self = {
           id: docSnap.id,
           ...(shift as Record<string, unknown>),
@@ -553,16 +570,16 @@ export async function runAutoCompletarTurnosPass(
       if (reliefIncomingClaimed.has(d.id)) return false;
       if (reliefBusyForOther(d.data(), docSnap.id)) return false;
       return isReliefPresent(d.data());
-    });
+    }, peers);
 
     const relievePending =
       pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
-        !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()))
-      ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()));
+        !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()), peers)
+      ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()), peers);
     if (relievePending) reliefPendingClaimed.add(relievePending.id);
 
     const relieveAbsent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
-      isReliefAbsent(d.data()));
+      isReliefAbsent(d.data()), peers);
 
     if (relievePresent) {
       reliefIncomingClaimed.add(relievePresent.id);

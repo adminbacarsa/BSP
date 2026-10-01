@@ -209,10 +209,12 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     : String(shift.employeeName || 'Sin nombre').trim();
 
   const pool = siblings.filter((row) => row && row.id !== shift.id && !row.isUnassigned && !row.isCompleted);
+  // FIFO: los otros presentes del puesto son pares del saliente; los que entran, pares del entrante.
+  const presentes = pool.filter((row) => row.isPresent && !row.realEndTime);
   const quienLoReleva = tone === 'ret' && shift.retentionWait
     ? null
-    : relieverFor(shift, pool);
-  const aQuienReleva = isVacante ? null : outgoingFor(shift, pool);
+    : relieverFor(shift, pool, { peers: presentes });
+  const aQuienReleva = isVacante ? null : outgoingFor(shift, pool, { peers: pool });
 
   let loReleva: string | null = null;
   if (tone === 'ret' && shift.retentionWait) {

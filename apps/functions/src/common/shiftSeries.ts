@@ -23,6 +23,12 @@ export type SeriesPickOpts = {
   alignMs?: number;
   earliestIncomingMs?: number;
   latestIncomingMs?: number;
+  /**
+   * FIFO. En `relieverFor`: los otros salientes de la misma franja (mismo puesto, fin ±30 min);
+   * el que más tiempo lleva en el puesto se lleva al primer entrante que ficha.
+   * En `outgoingFor`: los otros entrantes de la franja (fichados o no).
+   */
+  peers?: readonly SeriesShift[];
 };
 
 type ParsedSeries =
@@ -168,32 +174,147 @@ function incomingStartsInWindow(start: number, outgoingEnd: number, opts?: Serie
   return Math.abs(start - outgoingEnd) <= align;
 }
 
-function rankRows<T extends SeriesShift>(
-  rows: readonly T[],
-  anchor: SeriesShift,
-  anchorIsOutgoing: boolean,
-  targetMs: number,
-): T | null {
-  if (!rows.length || !targetMs) return null;
-  const scored = rows.map((row) => {
-    const outCode = anchorIsOutgoing ? seriesCodeOf(anchor) : seriesCodeOf(row);
-    const inCode = anchorIsOutgoing ? seriesCodeOf(row) : seriesCodeOf(anchor);
-    const kind = seriesHandoffKind(outCode, inCode);
-    const bound = anchorIsOutgoing ? seriesBoundMs(row, 'start') : seriesBoundMs(row, 'end');
-    return { row, kind, dist: Math.abs(bound - targetMs), fichaje: fichajeMs(row) };
-  }).filter((row) => row.kind !== 'REJECT');
-  if (!scored.length) return null;
-  scored.sort((a, b) => {
-    const ka = a.kind === 'SERIES' ? 0 : 1;
-    const kb = b.kind === 'SERIES' ? 0 : 1;
-    if (ka !== kb) return ka - kb;
-    if (a.dist !== b.dist) return a.dist - b.dist;
-    return b.fichaje - a.fichaje;
-  });
-  return scored[0].row;
+const idOf = (shift: SeriesShift | null | undefined): string => String(shift?.id ?? '');
+
+const sameShift = (a: SeriesShift, b: SeriesShift): boolean => a === b || (!!idOf(a) && idOf(a) === idOf(b));
+
+/** Inicio real (fichada) o, si no fichó, el planificado: cuánto lleva en el puesto. */
+export function workStartMsOf(shift: SeriesShift): number {
+  return fichajeMs(shift) || seriesBoundMs(shift, 'start');
 }
 
-/** Quién releva a este saliente: misma serie gana; si el código no es serie, queda el horario. */
+/** FIFO salientes: primero el que más tiempo lleva en el puesto (inicio real más antiguo), después por id. */
+export function sortOutgoingsFifo<T extends SeriesShift>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => (workStartMsOf(a) - workStartMsOf(b)) || idOf(a).localeCompare(idOf(b)));
+}
+
+/** Entrante que no va a venir: su hueco se lo queda el saliente que nadie releva. */
+export function isAbsentIncoming(shift: SeriesShift): boolean {
+  return shift.isAbsent === true || String(shift.status ?? '').toUpperCase() === 'ABSENT';
+}
+
+/**
+ * Clave FIFO del entrante: los que ficharon por orden de fichada; los que todavía no ficharon
+ * por inicio planificado; los ausentes al final (se emparejan con el saliente que sobra).
+ */
+function incomingFifoKey(shift: SeriesShift): [number, number] {
+  if (isAbsentIncoming(shift)) return [2, seriesBoundMs(shift, 'start')];
+  const fichaje = fichajeMs(shift);
+  return fichaje > 0 ? [0, fichaje] : [1, seriesBoundMs(shift, 'start')];
+}
+
+/** FIFO entrantes: fichados por orden de llegada; sin fichar por inicio planificado y luego id. */
+export function sortIncomingsFifo<T extends SeriesShift>(rows: readonly T[]): T[] {
+  return [...rows].sort((a, b) => {
+    const [ga, ta] = incomingFifoKey(a);
+    const [gb, tb] = incomingFifoKey(b);
+    return (ga - gb) || (ta - tb) || idOf(a).localeCompare(idOf(b));
+  });
+}
+
+export type ReliefPairKind = SeriesHandoffKind | 'FORCED';
+
+export type ReliefPair<T extends SeriesShift> = {
+  outgoing: T;
+  incoming: T | null;
+  /** FORCED = vínculo ya escrito por el servidor (`relievedBy` / `relievedOutgoingShiftId`). */
+  kind: ReliefPairKind | null;
+};
+
+/**
+ * Emparejamiento único del relevo de franja (FIFO). Salientes ordenados por inicio real
+ * ascendente; entrantes por orden de fichada (los que no ficharon, por inicio planificado y
+ * luego id). Primero se respetan los vínculos que ya escribió el servidor, después la serie
+ * (M→T, M2→T2, D12→N12) y por último el horario para códigos que no son serie. El
+ * emparejamiento es dinámico: si ficha primero el que la tarjeta no esperaba, igual releva al
+ * que más tiempo lleva en el puesto y la tarjeta se actualiza. Con nadie fichado y mismo
+ * inicio, gana el vínculo de la retención (`retentionAbsenceShiftId`).
+ */
+export function pairReliefs<T extends SeriesShift>(
+  outgoings: readonly T[],
+  incomings: readonly T[],
+  opts?: SeriesPickOpts,
+): ReliefPair<T>[] {
+  const outs = sortOutgoingsFifo(outgoings.filter((row) => !!row));
+  const ins = sortIncomingsFifo(incomings.filter((row) => !!row && isReliefEligibleShift(row)));
+  const claimed = new Set<T>();
+  const picked = new Map<T, { incoming: T; kind: ReliefPairKind }>();
+
+  const compatible = (out: T, inc: T): boolean => {
+    if (sameShift(out, inc)) return false;
+    if (!reliefPositionsMatch(inc.positionName, out.positionName)) return false;
+    // Un entrante que ya relevó a otro saliente (lo escribió el servidor) no vuelve a emparejarse.
+    const linkedOut = String(inc.relievedOutgoingShiftId ?? '').trim();
+    if (linkedOut && idOf(out) && linkedOut !== idOf(out)) return false;
+    return incomingStartsInWindow(seriesBoundMs(inc, 'start'), seriesBoundMs(out, 'end'), opts);
+  };
+  const claim = (out: T, inc: T, kind: ReliefPairKind) => {
+    claimed.add(inc);
+    picked.set(out, { incoming: inc, kind });
+  };
+
+  for (const out of outs) {
+    const relievedBy = String(out.relievedBy ?? '').trim();
+    const forced = ins.find((inc) => {
+      if (claimed.has(inc) || !compatible(out, inc)) return false;
+      if (relievedBy && String(inc.employeeId ?? '').trim() === relievedBy) return true;
+      const linkedOut = String(inc.relievedOutgoingShiftId ?? '').trim();
+      return !!linkedOut && linkedOut === idOf(out);
+    });
+    if (forced) claim(out, forced, 'FORCED');
+  }
+
+  const pairStage = (outOrder: readonly T[], absent: boolean) => {
+    for (const wanted of ['SERIES', 'FALLBACK'] as const) {
+      for (const out of outOrder) {
+        if (picked.has(out)) continue;
+        const cands = ins.filter((inc) =>
+          !claimed.has(inc)
+          && isAbsentIncoming(inc) === absent
+          && compatible(out, inc)
+          && seriesHandoffKind(seriesCodeOf(out), seriesCodeOf(inc)) === wanted);
+        if (!cands.length) continue;
+        const first = cands[0];
+        const [g0, t0] = incomingFifoKey(first);
+        const linkedId = String(out.retentionAbsenceShiftId ?? '').trim();
+        const tied = cands.filter((inc) => {
+          const [g, t] = incomingFifoKey(inc);
+          return g === g0 && t === t0;
+        });
+        const pick = (linkedId && tied.find((inc) => idOf(inc) === linkedId)) || first;
+        claim(out, pick, wanted);
+      }
+    }
+  };
+  // Los que vienen (fichados o pendientes) relevan por FIFO: el más antiguo primero.
+  pairStage(outs, false);
+  // El ausente deja su hueco al saliente que sobra: el más nuevo (mismo criterio que el cupo por franja).
+  pairStage([...outs].reverse(), true);
+
+  return outs.map((out) => {
+    const hit = picked.get(out);
+    return { outgoing: out, incoming: hit?.incoming ?? null, kind: hit?.kind ?? null };
+  });
+}
+
+/** Los otros salientes de la misma franja: mismo puesto, fin a ±align del fin del ancla. */
+function outgoingPeersOf<T extends SeriesShift>(outgoing: T, peers: readonly SeriesShift[] | undefined, opts?: SeriesPickOpts): T[] {
+  const outgoingEnd = seriesBoundMs(outgoing, 'end');
+  const align = opts?.alignMs ?? SHIFT_SERIES_ALIGN_MS;
+  return ((peers || []) as T[]).filter((peer) => {
+    if (!peer || sameShift(peer, outgoing)) return false;
+    if (!isReliefEligibleShift(peer)) return false;
+    if (!reliefPositionsMatch(peer.positionName, outgoing.positionName)) return false;
+    const end = seriesBoundMs(peer, 'end');
+    return !!end && Math.abs(end - outgoingEnd) <= align;
+  });
+}
+
+/**
+ * Quién releva a este saliente: misma serie gana; si el código no es serie, queda el horario.
+ * Con `opts.peers` (los otros salientes de la franja) el emparejamiento es FIFO: el que más
+ * tiempo lleva en el puesto se lleva al primer entrante que fichó.
+ */
 export function relieverFor<T extends SeriesShift>(
   outgoing: T,
   candidates: readonly T[],
@@ -203,13 +324,16 @@ export function relieverFor<T extends SeriesShift>(
   if (!outgoingEnd) return null;
   const pool = candidates.filter((candidate) => {
     if (!candidate) return false;
-    if (candidate.id && outgoing.id && candidate.id === outgoing.id) return false;
+    if (sameShift(candidate, outgoing)) return false;
     if (!isReliefEligibleShift(candidate)) return false;
     if (!reliefPositionsMatch(candidate.positionName, outgoing.positionName)) return false;
     const start = seriesBoundMs(candidate, 'start');
     return incomingStartsInWindow(start, outgoingEnd, opts);
   });
-  return rankRows(pool, outgoing, true, outgoingEnd);
+  if (!pool.length) return null;
+  const outs = [outgoing, ...outgoingPeersOf(outgoing, opts?.peers, opts)];
+  const pair = pairReliefs(outs, pool, opts).find((row) => row.outgoing === outgoing);
+  return pair?.incoming ?? null;
 }
 
 /**
@@ -231,7 +355,12 @@ export function keepsNextBandSlot<T extends SeriesShift>(
   return ranked.slice(0, slots).some((r) => r.id === String(outgoing.id || ''));
 }
 
-/** A quién releva este entrante. Quien arranca con el hueco no es saliente. */
+/**
+ * A quién releva este entrante. Quien arranca con el hueco no es saliente; un saliente que ya
+ * tiene relevo de otro (`relievedBy`) tampoco. Misma serie gana; entre iguales, el que más
+ * tiempo lleva en el puesto (FIFO). Con `opts.peers` (los otros entrantes de la franja) se usa
+ * el emparejamiento completo, así la tarjeta de quien todavía no fichó muestra lo que va a pasar.
+ */
 export function outgoingFor<T extends SeriesShift>(
   incoming: T,
   candidates: readonly T[],
@@ -240,16 +369,63 @@ export function outgoingFor<T extends SeriesShift>(
   const gapStart = seriesBoundMs(incoming, 'start');
   if (!gapStart) return null;
   const align = opts?.alignMs ?? SHIFT_SERIES_ALIGN_MS;
+  const incomingEmp = String(incoming.employeeId ?? '').trim();
   const pool = candidates.filter((candidate) => {
     if (!candidate) return false;
-    if (candidate.id && incoming.id && candidate.id === incoming.id) return false;
+    if (sameShift(candidate, incoming)) return false;
     if (!isReliefEligibleShift(candidate)) return false;
     if (!reliefPositionsMatch(candidate.positionName, incoming.positionName)) return false;
     const start = seriesBoundMs(candidate, 'start');
     const end = seriesBoundMs(candidate, 'end');
     if (start <= 0 || start >= gapStart - 60_000) return false;
     if (!end || Math.abs(end - gapStart) > align) return false;
+    const relievedBy = String(candidate.relievedBy ?? '').trim();
+    if (relievedBy && (!incomingEmp || relievedBy !== incomingEmp)) return false;
     return true;
   });
-  return rankRows(pool, incoming, false, gapStart);
+  if (!pool.length) return null;
+
+  if (opts?.peers?.length) {
+    // Un entrante que ya relevó a otro saliente (relievedBy en el saliente o relievedOutgoingShiftId en él) no compite por este hueco.
+    const takenEmps = new Set(
+      candidates
+        .map((candidate) => String(candidate?.relievedBy ?? '').trim())
+        .filter((emp) => emp && emp !== incomingEmp),
+    );
+    const ins = [
+      incoming,
+      ...(opts.peers as T[]).filter((peer) => {
+        if (!peer || sameShift(peer, incoming)) return false;
+        if (pool.some((out) => sameShift(out, peer))) return false;
+        const peerEmp = String(peer.employeeId ?? '').trim();
+        if (peerEmp && takenEmps.has(peerEmp)) return false;
+        const relieved = String(peer.relievedOutgoingShiftId ?? '').trim();
+        if (relieved && !pool.some((out) => idOf(out) === relieved)) return false;
+        return true;
+      }),
+    ];
+    const pair = pairReliefs(pool, ins, { ...opts, alignMs: align }).find((row) => row.incoming === incoming);
+    return pair?.outgoing ?? null;
+  }
+
+  const scored = pool
+    .map((row) => ({
+      row,
+      kind: seriesHandoffKind(seriesCodeOf(row), seriesCodeOf(incoming)),
+      dist: Math.abs(seriesBoundMs(row, 'end') - gapStart),
+      since: workStartMsOf(row),
+    }))
+    .filter((row) => row.kind !== 'REJECT');
+  if (!scored.length) return null;
+  // El que ficha releva al más antiguo (FIFO); el ausente retiene al más nuevo (el que sobra).
+  const newestFirst = isAbsentIncoming(incoming);
+  scored.sort((a, b) => {
+    const ka = a.kind === 'SERIES' ? 0 : 1;
+    const kb = b.kind === 'SERIES' ? 0 : 1;
+    if (ka !== kb) return ka - kb;
+    if (a.dist !== b.dist) return a.dist - b.dist;
+    if (a.since !== b.since) return newestFirst ? b.since - a.since : a.since - b.since;
+    return idOf(a.row).localeCompare(idOf(b.row));
+  });
+  return scored[0].row;
 }
