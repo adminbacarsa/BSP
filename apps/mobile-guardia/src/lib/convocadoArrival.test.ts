@@ -30,14 +30,23 @@ describe('getCheckInTiming convocado', () => {
     createdAt: acceptedAt,
   };
 
-  it('ficha desde la aceptación hasta el fin del hueco y no marca tarde', () => {
-    const t = getCheckInTiming(shift as never, new Date('2026-09-14T21:30:00-03:00'));
+  it('ficha desde la aceptación hasta min(+60, fin) y no marca tarde', () => {
+    const t = getCheckInTiming(shift as never, new Date('2026-09-14T18:00:00-03:00'));
     assert.equal(t.convocado, true);
     assert.equal(t.canCheckIn, true);
     assert.equal(t.canNotifyLate, false);
     assert.equal(t.lateNoNotice, false);
     assert.equal(t.lateMinutes, 0);
-    assert.equal(t.checkInDeadline?.getTime(), end.getTime());
+    assert.equal(t.checkInDeadline?.getTime(), acceptedAt.getTime() + 60 * 60_000);
+  });
+
+  it('EXT no ficha', () => {
+    const ext = getCheckInTiming(
+      { ...shift, id: 'ext-1', coverageType: 'EXTEND' } as never,
+      new Date('2026-09-14T18:00:00-03:00'),
+    );
+    assert.equal(ext.canCheckIn, false);
+    assert.equal(ext.rejectCode, 'EXT_NO_CHECKIN');
   });
 
   it('antes de aceptar no ficha; después del fin tampoco', () => {
@@ -60,7 +69,7 @@ describe('getCheckInTiming convocado', () => {
   });
 
   it('listo para fichar: botón Marcar ingreso, sin tarde', () => {
-    const timing = getCheckInTiming(shift as never, new Date('2026-09-14T21:30:00-03:00'));
+    const timing = getCheckInTiming(shift as never, new Date('2026-09-14T18:00:00-03:00'));
     const view = resolveCheckInUiStatus(shift as never, timing);
     assert.equal(view.actionLabel, 'Marcar ingreso al llegar');
     assert.equal(`${view.title} ${view.subtitle || ''}`.includes('tarde'), false);

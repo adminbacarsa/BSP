@@ -37,10 +37,16 @@ export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
   return createdMs(shift);
 }
 
-/** Tope de fichada del convocado: el fin del hueco. Sin fin, no hay tope corto. */
+const CONVOKED_WINDOW_MS = 60 * 60 * 1000;
+
+/** Tope del convocado: min(ancla + 60 min, fin del hueco). Sin fin, ancla + 60 min. */
 export function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+  const anchor = convocadoPunchAnchorMs(shift);
   const end = endMs(shift);
-  return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
+  const plus = anchor > 0 ? anchor + CONVOKED_WINDOW_MS : 0;
+  if (end > 0 && plus > 0) return Math.min(end, plus);
+  if (plus > 0) return plus;
+  return end > 0 ? end : 0;
 }
 
 function adjustedStartMs(shift: Record<string, unknown>): number {
@@ -89,7 +95,7 @@ function finishAllowed(
 /**
  * Ventanas servidor (espejo portal-core): normal T−15…T+30 (T+5…T+30 sin aviso = llegada tarde);
  * con aviso hasta max(T+30, min(ETA, T+60)); AA provisoria fichable hasta T+60;
- * convocado (no EXT): desde la aceptación hasta el fin del hueco, sin tarde;
+ * convocado (no EXT): desde la aceptación hasta min(ancla+60 min, fin del hueco), sin tarde;
  * isEarlyStart = adelanto OR turno propio.
  */
 /** Día calendario en Argentina (YYYY-MM-DD). */

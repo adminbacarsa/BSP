@@ -70,12 +70,13 @@ type LocalReply = { kind: AlertaLocalKind; atMs: number };
 
 function cardInput(
   n: PortalInboxItem,
-  coberturaById: Record<string, { status?: string; timeoutAt?: unknown; endTime?: unknown; cancelReason?: string; respondedAt?: unknown; cancelledAt?: unknown }>,
+  coberturaById: Record<string, { status?: string; type?: string; timeoutAt?: unknown; endTime?: unknown; cancelReason?: string; respondedAt?: unknown; cancelledAt?: unknown }>,
   local: LocalReply | undefined,
   nowMs: number,
 ) {
   return {
     type: n.type,
+    title: n.title,
     read: n.read,
     needsAck: alertNeedsAck(n),
     ackedAt: n.ackedAt,
@@ -266,6 +267,8 @@ function AlertasScreenContent() {
       if (!n.read) void markRead(n.id);
       const route = routeFromNotificationData({
         type: n.type,
+        title: n.title,
+        convType: n.convocatoriaId ? coberturaById[n.convocatoriaId]?.type : undefined,
         solicitudId: n.solicitudId,
         eventoId: n.eventoId,
         shiftId: n.shiftId,
@@ -276,7 +279,7 @@ function AlertasScreenContent() {
         router.push(hrefFromRoute(route));
       }
     },
-    [markRead, router],
+    [coberturaById, markRead, router],
   );
 
   const onAck = useCallback(
@@ -559,7 +562,12 @@ function AlertasScreenContent() {
           const needsAck = alertNeedsAck(n);
           const isCoverage = COVERAGE_RESPONSE_TYPES.has(String(n.type ?? '').toUpperCase());
           const busy = busyId === n.id;
-          const route = routeFromNotificationData({ type: n.type });
+          const route = routeFromNotificationData({
+            type: n.type,
+            title: n.title,
+            convType: n.convocatoriaId ? coberturaById[n.convocatoriaId]?.type : undefined,
+            convocatoriaId: n.convocatoriaId,
+          });
           const card = resolveAlertaCard(cardInput(n, coberturaById, localReply[n.id], now.getTime()));
           const settled = card.closed || (!needsAck && !isCoverage && (n.read || !!n.ackedAt));
           const receivedAt = n.createdAt ? formatDateTimeAr(n.createdAt as never) : '';
@@ -682,6 +690,14 @@ function AlertasScreenContent() {
                       style={styles.btnFlex}
                     />
                   </>
+                ) : card.showVenisButton ? (
+                  <CommandButton
+                    label="Responder"
+                    variant="success"
+                    onPress={() => openInboxItem(n)}
+                    disabled={busy}
+                    style={styles.btnFlex}
+                  />
                 ) : card.showAckButton ? (
                   <CommandButton
                     label={busy ? '…' : 'Me enteré'}

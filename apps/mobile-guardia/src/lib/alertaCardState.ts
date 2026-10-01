@@ -1,3 +1,5 @@
+import { isAvisoEntrante } from './avisosCc';
+
 /**
  * Estado de la tarjeta de alerta. Cierra Aceptar/Rechazar/Me enteré cuando
  * la convocatoria ya no está pendiente, venció el plazo o terminó el hueco.
@@ -22,6 +24,7 @@ export type AlertaLocalKind =
 
 export type AlertaConvocatoriaVista = {
   status?: string;
+  type?: string;
   timeoutAt?: unknown;
   endTime?: unknown;
   cancelReason?: string;
@@ -39,6 +42,7 @@ export type AlertaCardInput = {
   respondedAt?: unknown;
   endTime?: unknown;
   timeoutAt?: unknown;
+  title?: string;
   conv?: AlertaConvocatoriaVista | null;
   local?: { kind: AlertaLocalKind; atMs: number } | null;
   nowMs: number;
@@ -47,6 +51,8 @@ export type AlertaCardInput = {
 export type AlertaCardState = {
   closed: boolean;
   showCoverageButtons: boolean;
+  /** ENTRANTE / LLEGADA_TARDE: abre 10/15/30 y «Tengo un problema», no Aceptar/Rechazar. */
+  showVenisButton: boolean;
   showAckButton: boolean;
   /** Aceptada | Rechazada | Enterado | Vencida | Cancelada por Operaciones | Cubierta por otro */
   label: string | null;
@@ -87,6 +93,7 @@ function closed(
   return {
     closed: true,
     showCoverageButtons: false,
+    showVenisButton: false,
     showAckButton: false,
     label,
     atMs: atMs && atMs > 0 ? atMs : null,
@@ -120,6 +127,7 @@ export function resolveAlertaCard(input: AlertaCardInput): AlertaCardState {
   const open: AlertaCardState = {
     closed: false,
     showCoverageButtons: false,
+    showVenisButton: false,
     showAckButton: false,
     label: null,
     atMs: null,
@@ -147,6 +155,15 @@ export function resolveAlertaCard(input: AlertaCardInput): AlertaCardState {
     );
     if (clock) return clock;
 
+    if (
+      isAvisoEntrante({
+        type: input.type,
+        title: input.title,
+        convType: input.conv?.type,
+      })
+    ) {
+      return { ...open, showVenisButton: true };
+    }
     return { ...open, showCoverageButtons: true };
   }
 

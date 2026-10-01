@@ -3,6 +3,7 @@ import {
   convocadoRecordatorioRoute,
   parseConvocadoRecordatorioPush,
 } from '@cosp/portal-core';
+import { isAvisoEntrante, isRetencionAviso } from './avisosCc';
 
 /** Tipos que un vigilador debe ver en la app (whitelist). */
 export const EMPLOYEE_ALERT_TYPES = new Set([
@@ -25,6 +26,7 @@ export const EMPLOYEE_ALERT_TYPES = new Set([
   'SWAP_REQUEST',
   'SYSTEM_TEST',
   'CONVOCATORIA_COBERTURA',
+  'RETENCION_AVISO',
   'RETENCION',
   'ADELANTO',
   'CONVOCADO_RECORDATORIO',
@@ -68,7 +70,12 @@ const AGENDA_TYPES = new Set([
   'TURA',
 ]);
 
-const HOY_TYPES = new Set(['RETENCION_AUTO', 'RETENCION_DETECTADA', 'LLEGADA_TARDE']);
+const HOY_TYPES = new Set([
+  'RETENCION_AUTO',
+  'RETENCION_DETECTADA',
+  'RETENCION_AVISO',
+  'LLEGADA_TARDE',
+]);
 
 const COBERTURA_TYPES = new Set(['CONVOCATORIA_COBERTURA', 'RETENCION', 'ADELANTO']);
 
@@ -134,6 +141,14 @@ export function routeFromNotificationData(data: Record<string, unknown> | undefi
         ? `convocatoriaId=${encodeURIComponent(convocatoriaId)}`
         : '';
     return q ? `/codigo-anexo?${q}` : '/codigo-anexo';
+  }
+  if (isRetencionAviso(type)) {
+    return '/(tabs)';
+  }
+  if (isAvisoEntrante({ type, title: String(data.title ?? ''), convType: String(data.convType ?? '') })) {
+    const convId = String(data.convocatoriaId ?? data.convId ?? '').trim();
+    if (convId) return `/(tabs)?focus=venis&convocatoriaId=${encodeURIComponent(convId)}`;
+    return '/(tabs)?focus=venis';
   }
   if (COBERTURA_TYPES.has(type)) {
     const convId = String(data.convocatoriaId ?? data.convId ?? data.id ?? '').trim();
