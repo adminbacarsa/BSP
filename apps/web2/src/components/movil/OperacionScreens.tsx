@@ -1,6 +1,81 @@
 import { useEffect, useState } from 'react';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
+import { MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
+
+/** Hoja «Cliente → objetivos» con buscador. */
+export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
+  clientes: readonly OpsClienteMovil[];
+  filtro: OpsFiltroMovil;
+  onElegir: (clientId: string | null, objectiveId: string | null) => void;
+}) {
+  const [texto, setTexto] = useState('');
+  const [clienteAbierto, setClienteAbierto] = useState<string | null>(filtro.clientId);
+  const lista = buscarClientes(clientes, texto);
+  const abierto = lista.find((c) => c.id === clienteAbierto) || (lista.length === 1 ? lista[0] : null);
+  return (
+    <div data-movil-sheet="ambito">
+      <input
+        type="search"
+        value={texto}
+        onChange={(event) => setTexto(event.target.value)}
+        placeholder="Buscar cliente u objetivo"
+        aria-label="Buscar cliente u objetivo"
+        className="mb-3 min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 text-sm font-semibold"
+      />
+      <button
+        type="button"
+        onClick={() => onElegir(null, null)}
+        className={`mb-2 min-h-12 w-full rounded-2xl text-sm font-black ${!filtro.clientId && !filtro.objectiveId ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}
+      >
+        Todos los clientes
+      </button>
+      {!abierto && lista.map((c) => (
+        <button
+          key={c.id}
+          type="button"
+          data-movil-cliente={c.id}
+          onClick={() => setClienteAbierto(c.id)}
+          className="mb-1.5 flex min-h-12 w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 text-left"
+        >
+          <span className="truncate text-sm font-black text-slate-800">{c.name}</span>
+          <span className="shrink-0 text-[11px] font-bold text-slate-500">{c.objetivos.length} obj · {c.turnos}</span>
+        </button>
+      ))}
+      {abierto && (
+        <>
+          <div className="mb-1.5 flex items-center gap-2">
+            {lista.length > 1 && (
+              <button type="button" onClick={() => setClienteAbierto(null)} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-black">←</button>
+            )}
+            <p className="truncate text-sm font-black text-slate-800">{abierto.name}</p>
+          </div>
+          <button
+            type="button"
+            data-movil-cliente-todo={abierto.id}
+            onClick={() => onElegir(abierto.id, null)}
+            className={`mb-1.5 min-h-12 w-full rounded-2xl text-sm font-black ${filtro.clientId === abierto.id && !filtro.objectiveId ? 'bg-indigo-600 text-white' : 'border border-indigo-200 bg-indigo-50 text-indigo-800'}`}
+          >
+            Todo {abierto.name} · {abierto.turnos}
+          </button>
+          {abierto.objetivos.map((o) => (
+            <button
+              key={o.id}
+              type="button"
+              data-movil-objetivo={o.id}
+              onClick={() => onElegir(abierto.id, o.id)}
+              className={`mb-1.5 flex min-h-12 w-full items-center justify-between rounded-2xl px-3 text-left ${filtro.objectiveId === o.id ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-800'}`}
+            >
+              <span className="truncate text-sm font-bold">{o.name}</span>
+              <span className="shrink-0 text-[11px] font-bold opacity-70">{o.turnos}</span>
+            </button>
+          ))}
+        </>
+      )}
+      {lista.length === 0 && <p className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500">Nada coincide con «{texto}».</p>}
+    </div>
+  );
+}
 
 export interface MovilObjective {
   objectiveId: string;
@@ -195,21 +270,41 @@ export function OperacionScreens({
   onRetencion,
   onSala,
   now,
+  filtro = { estado: 'TODOS', clientId: null, objectiveId: null },
+  contadores,
+  ambitoLabel = null,
+  grupos = [],
+  vacioLabel = 'Sin guardias',
+  onAmbito,
+  onQuitarAmbito,
 }: {
   empresa: string;
   modeLabel: string;
   online: boolean;
   pendingLabel: string | null;
-  stats: MovilStats;
+  /** Compatibilidad: si no vienen `contadores`, se muestran estos números. */
+  stats?: MovilStats;
   notices?: string[];
   /** Supervisión: mismas pantallas sin botones de acción ni sala. */
   readOnly?: boolean;
   /** Instante de referencia (tests). Default `Date.now()`. */
   now?: number;
+  /** Resumen por objetivo dentro del ámbito (estado Todos). */
   objectives: MovilObjective[];
   objective: MovilObjective | null;
   alerts: GuardShift[];
   panel: 'home' | 'objetivo' | 'alertas';
+  /** Filtro activo: estado (contador) + cliente/objetivo. */
+  filtro?: OpsFiltroMovil;
+  /** Número de cada contador dentro del ámbito = tarjetas que aparecen al filtrar. */
+  contadores?: Partial<Record<OpsEstadoFiltro, number>>;
+  /** Chip del cliente/objetivo elegido. */
+  ambitoLabel?: string | null;
+  /** Tarjetas agrupadas por objetivo cuando hay un estado activo. */
+  grupos?: MovilObjective[];
+  vacioLabel?: string;
+  onAmbito?: () => void;
+  onQuitarAmbito?: () => void;
   onBack: () => void;
   onOpen: (id: string) => void;
   onCounter: (id: string) => void;
@@ -222,14 +317,18 @@ export function OperacionScreens({
 }) {
   const nowMs = now ?? Date.now();
   const siblingsOf = (shift: GuardShift): readonly GuardShift[] =>
-    objective?.shifts ?? objectives.find((item) => item.objectiveId === shift.objectiveId)?.shifts ?? [];
-  const counters = [
-    { id: 'ACTIVOS', label: 'Activos', value: stats.activos, cls: 'text-emerald-600' },
-    { id: 'RETENIDOS', label: 'Ret', value: stats.retenidos, cls: 'text-orange-600' },
-    { id: 'AUSENTES', label: 'Aus', value: stats.ausentes, cls: 'text-slate-800' },
-    { id: 'VACANTES', label: 'Vac', value: stats.vacantes, cls: 'text-rose-600' },
-    { id: 'PLAN', label: 'Plan', value: stats.plan, cls: 'text-indigo-600' },
-  ];
+    objective?.shifts
+    ?? grupos.find((item) => item.shifts.some((s) => s.id === shift.id))?.shifts
+    ?? objectives.find((item) => item.objectiveId === shift.objectiveId)?.shifts
+    ?? [];
+  const legacy: Partial<Record<OpsEstadoFiltro, number>> = stats
+    ? { ACTIVOS: stats.activos, RETENIDOS: stats.retenidos, AUSENTES: stats.ausentes, VACANTES: stats.vacantes, PLAN: stats.plan }
+    : {};
+  const counters = MOVIL_CONTADORES
+    .map((item) => ({ ...item, value: contadores?.[item.id] ?? legacy[item.id] }))
+    .filter((item) => item.value !== undefined);
+  const filtrando = filtro.estado !== 'TODOS';
+  const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion };
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-slate-100 pb-24" data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-2">
@@ -261,15 +360,65 @@ export function OperacionScreens({
             {notices.map((text) => (
               <p key={text} className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">{text}</p>
             ))}
-            <div className="mb-3 grid grid-cols-5 gap-1.5">
-              {counters.map((item) => (
-                <button key={item.id} type="button" onClick={() => onCounter(item.id)} className="rounded-2xl border border-slate-200 bg-white py-2 text-center shadow-sm">
-                  <b className={`block text-lg leading-none ${item.cls}`}>{item.value}</b>
-                  <small className="text-[9px] font-black uppercase text-slate-500">{item.label}</small>
+            {onAmbito && (
+              <div className="mb-2 flex items-center gap-1.5" data-movil-ambito={filtro.objectiveId ? 'objetivo' : filtro.clientId ? 'cliente' : 'todos'}>
+                <button
+                  type="button"
+                  onClick={onAmbito}
+                  aria-label="Filtrar por cliente u objetivo"
+                  className="flex min-h-11 flex-1 items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 text-left text-[12px] font-bold text-slate-600 shadow-sm"
+                >
+                  <span aria-hidden="true">⌕</span>
+                  <span className="truncate">{ambitoLabel ? 'Cambiar cliente u objetivo' : 'Todos los clientes y objetivos'}</span>
                 </button>
-              ))}
+                {ambitoLabel && (
+                  <span className="flex min-h-11 max-w-[55%] items-center gap-1 rounded-2xl bg-indigo-600 pl-3 pr-1 text-[11px] font-black text-white shadow-sm" data-movil-chip="ambito">
+                    <span className="truncate">{ambitoLabel}</span>
+                    <button type="button" onClick={onQuitarAmbito} aria-label={`Quitar filtro ${ambitoLabel}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-base font-black active:bg-indigo-500">×</button>
+                  </span>
+                )}
+              </div>
+            )}
+            <div className={`mb-3 grid gap-1.5 ${counters.length > 5 ? 'grid-cols-6' : 'grid-cols-5'}`} role="group" aria-label="Filtrar por estado">
+              {counters.map((item) => {
+                const activo = filtro.estado === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => onCounter(item.id)}
+                    aria-pressed={activo}
+                    data-movil-contador={item.id}
+                    data-movil-filtro-activo={activo ? '1' : undefined}
+                    className={`rounded-2xl border py-2 text-center shadow-sm ${activo ? `border-transparent ring-2 ${item.activo}` : 'border-slate-200 bg-white'}`}
+                  >
+                    <b className={`block text-lg leading-none ${item.cls}`}>{item.value}</b>
+                    <small className="text-[9px] font-black uppercase text-slate-500">{item.label}</small>
+                  </button>
+                );
+              })}
             </div>
-            {objectives.map((item) => {
+            {filtrando && (
+              <p className="mb-2 flex items-center justify-between text-[11px] font-bold text-slate-500">
+                <span>Mostrando <b className="text-slate-800">{etiquetaEstado(filtro.estado)}</b>{ambitoLabel ? ` · ${ambitoLabel}` : ''} · {grupos.reduce((acc, g) => acc + g.shifts.length, 0)}</span>
+                <button type="button" onClick={() => onCounter(filtro.estado)} className="min-h-9 rounded-xl px-2 font-black text-indigo-700">Ver todos</button>
+              </p>
+            )}
+            {filtrando && grupos.map((grupo) => (
+              <section key={grupo.objectiveId} className="mb-3" data-movil-grupo={grupo.objectiveId}>
+                <button type="button" onClick={() => onOpen(grupo.objectiveId)} className="mb-1.5 flex w-full items-baseline justify-between px-1 text-left">
+                  <span className="truncate text-[13px] font-black text-slate-800">{grupo.name}</span>
+                  <span className="shrink-0 text-[10px] font-bold text-slate-500">{grupo.client ? `${grupo.client} · ` : ''}{grupo.shifts.length}</span>
+                </button>
+                {grupo.shifts.map((shift) => (
+                  <GuardCard key={shift.id} shift={shift} siblings={siblingsOf(shift)} {...cardProps} />
+                ))}
+              </section>
+            ))}
+            {filtrando && grupos.length === 0 && (
+              <p className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500" data-movil-vacio="1">{vacioLabel}</p>
+            )}
+            {!filtrando && objectives.map((item) => {
               const pct = coveragePct(item);
               const relevo = proximoRelevo(item.shifts, nowMs);
               return (
@@ -291,7 +440,9 @@ export function OperacionScreens({
                 </button>
               );
             })}
-            {objectives.length === 0 && <p className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500">Sincronizando objetivos…</p>}
+            {!filtrando && objectives.length === 0 && (
+              <p className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500" data-movil-vacio="1">{ambitoLabel ? vacioLabel : 'Sincronizando objetivos…'}</p>
+            )}
           </>
         )}
         {panel === 'objetivo' && objective && (

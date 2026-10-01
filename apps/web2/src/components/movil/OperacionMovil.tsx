@@ -3,9 +3,26 @@ import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
-import { OperacionScreens, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
+import { AmbitoSheetBody, OperacionScreens, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
 import { COVERAGE_CASCADE_ORDER } from '@cosp/ops-core';
 import { guardTone } from '@/lib/movil/guardTone';
+import {
+  FILTRO_VACIO,
+  agruparPorObjetivo,
+  alternarEstado,
+  clientesParaFiltro,
+  contadoresMovil,
+  etiquetaAmbito,
+  guardarFiltro,
+  leerFiltroGuardado,
+  mensajeVacio,
+  turnosEnAmbito,
+  turnosFiltrados,
+  turnosVisiblesMovil,
+  type OpsEstadoFiltro,
+  type OpsFiltroMovil,
+  type OpsShiftMovil,
+} from '@/lib/movil/operacionFiltros';
 import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
 import { movilCallableGate, runCallableOnline } from '@/lib/movil/callableOnline';
 
@@ -21,15 +38,21 @@ const STEP_LABEL: Record<string, string> = {
 
 interface Props {
   empresa: string;
+  empresaId?: string;
   logic: {
-    stats: { activos: number; retenidos: number; ausentes: number; vacantes: number; plan: number };
     setViewTab: (tab: string) => void;
     handleAction: (action: string, shiftId: string, payload?: unknown) => Promise<unknown> | void;
   };
   notices?: string[];
   /** Supervisión: mismo Centro de Control sin acciones ni sala. */
   readOnly?: boolean;
-  objectives: Array<MovilObjective & Record<string, unknown>>;
+  /** Turnos de hoy (`isOpsShiftHoy`) del monitor; acá se aplica el mismo corte del encabezado del escritorio. */
+  shifts: OpsShiftMovil[];
+  publishStatusMap: Record<string, boolean>;
+  /** Catálogo de objetivos (clientId, clientName, id, name) para el selector. */
+  catalogo?: ReadonlyArray<{ id?: unknown; clientId?: unknown; name?: unknown; clientName?: unknown }>;
+  /** Instante de referencia (tests). */
+  now?: number;
   modeLabel: string;
   isPilot: boolean;
   pilotName?: string;
@@ -45,13 +68,26 @@ interface Props {
   onRetencion: (shift: GuardShift) => void;
 }
 
+export { AmbitoSheetBody };
+
 export function OperacionMovil(props: Props) {
   const router = useRouter();
   const online = useOnlineFlag();
   const readOnly = props.readOnly === true;
+  const empresaKey = props.empresaId || props.empresa;
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [salaOpen, setSalaOpen] = useState(false);
+  const [ambitoOpen, setAmbitoOpen] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
+  const [filtro, setFiltroState] = useState<OpsFiltroMovil>(FILTRO_VACIO);
+
+  // El último filtro de esta empresa se recuerda en la pestaña (sessionStorage).
+  useEffect(() => { setFiltroState(leerFiltroGuardado(empresaKey)); }, [empresaKey]);
+  const setFiltro = (next: OpsFiltroMovil) => {
+    setFiltroState(next);
+    guardarFiltro(empresaKey, next);
+    props.logic.setViewTab(next.estado);
+  };
 
   useEffect(() => movilWriteQueue.subscribe(() => {
     const labels = [...movilWriteQueue.pending(), ...movilCallableGate.pending()];
@@ -64,6 +100,23 @@ export function OperacionMovil(props: Props) {
     return () => window.removeEventListener('cosp-modulo-inicio', alInicio);
   }, []);
 
+  const nowMs = props.now ?? Date.now();
+  const now = useMemo(() => new Date(nowMs), [nowMs]);
+  const visibles = useMemo(() => turnosVisiblesMovil(props.shifts, props.publishStatusMap), [props.shifts, props.publishStatusMap]);
+  const clientes = useMemo(() => clientesParaFiltro(visibles, props.catalogo || []), [visibles, props.catalogo]);
+  const contadores = useMemo(() => contadoresMovil(visibles, filtro, now), [visibles, filtro, now]);
+  const enAmbitoList = useMemo(() => turnosEnAmbito(visibles, filtro), [visibles, filtro]);
+  const filtrados = useMemo(() => turnosFiltrados(visibles, filtro, now), [visibles, filtro, now]);
+  // Resumen por objetivo (estado Todos) y tarjetas agrupadas (estado activo).
+  const objectives = useMemo(
+    () => (agruparPorObjetivo(enAmbitoList, now) as MovilObjective[])
+      // Igual que el escritorio: objetivos sin actividad real no se listan.
+      .filter((o) => o.active + o.retention + o.absent + o.vacant + o.plan > 0),
+    [enAmbitoList, now],
+  );
+  const grupos = useMemo(() => agruparPorObjetivo(filtrados, now) as MovilObjective[], [filtrados, now]);
+  const ambitoLabel = etiquetaAmbito(filtro, clientes);
+
   const panelQuery = String(router.query.panel || '');
   // La barra del módulo abre la sala con ?panel=sala (contrato lib/movil/modulos.ts).
   const salaVisible = !readOnly && (salaOpen || panelQuery === 'sala');
@@ -71,14 +124,14 @@ export function OperacionMovil(props: Props) {
     setSalaOpen(false);
     if (panelQuery === 'sala') void router.push('/admin/operaciones/');
   };
-  const objective = props.objectives.find((item) => item.objectiveId === selectedId) || null;
+  const objective = (filtro.estado === 'TODOS' ? objectives : grupos).find((item) => item.objectiveId === selectedId) || null;
   const panel = panelQuery === 'alertas' ? 'alertas' : objective ? 'objetivo' : 'home';
   const alerts = useMemo(
-    () => props.objectives.flatMap((item) => item.shifts).filter((shift) => {
+    () => enAmbitoList.filter((shift) => {
       const tone = guardTone(shift);
       return tone === 'aus' || tone === 'vac' || tone === 'ret' || tone === 'late';
     }),
-    [props.objectives],
+    [enAmbitoList],
   );
   const steps = Array.from(new Set(COVERAGE_CASCADE_ORDER.map((step) => STEP_LABEL[step] || step)));
 
@@ -98,16 +151,23 @@ export function OperacionMovil(props: Props) {
         modeLabel={props.modeLabel}
         online={online}
         pendingLabel={pending}
-        stats={props.logic.stats}
         notices={props.notices}
         readOnly={readOnly}
-        objectives={props.objectives}
+        now={nowMs}
+        objectives={objectives}
         objective={objective}
         alerts={alerts}
         panel={panel === 'alertas' ? 'alertas' : panel}
+        filtro={filtro}
+        contadores={contadores}
+        ambitoLabel={ambitoLabel}
+        grupos={grupos}
+        vacioLabel={mensajeVacio(filtro, clientes)}
+        onAmbito={() => setAmbitoOpen(true)}
+        onQuitarAmbito={() => setFiltro({ ...filtro, clientId: null, objectiveId: null })}
         onBack={() => setSelectedId(null)}
         onOpen={setSelectedId}
-        onCounter={(id) => props.logic.setViewTab(id)}
+        onCounter={(id) => setFiltro(alternarEstado(filtro, id as OpsEstadoFiltro))}
         onLlego={readOnly ? noop : (shift) => { void call('Llegó?', () => props.onLlego(shift)); }}
         onRevertir={readOnly ? noop : (shift) => { void call('Revertir', () => props.onLlego(shift)); }}
         onSalida={readOnly ? noop : (shift) => {
@@ -123,6 +183,19 @@ export function OperacionMovil(props: Props) {
         onRetencion={readOnly ? noop : props.onRetencion}
         onSala={readOnly ? noop : () => setSalaOpen(true)}
       />
+      <BottomSheet open={ambitoOpen} title="Cliente y objetivo" onClose={() => setAmbitoOpen(false)}>
+        {ambitoOpen && (
+          <AmbitoSheetBody
+            clientes={clientes}
+            filtro={filtro}
+            onElegir={(clientId, objectiveId) => {
+              setFiltro({ ...filtro, clientId, objectiveId });
+              setSelectedId(null);
+              setAmbitoOpen(false);
+            }}
+          />
+        )}
+      </BottomSheet>
       {!readOnly && (
         <BottomSheet open={salaVisible} title={`Sala · ${props.modeLabel}`} onClose={cerrarSala}>
           <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">

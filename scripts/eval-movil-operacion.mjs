@@ -324,8 +324,104 @@ const supervisionDetalle = render(OperacionScreens, {
 });
 check('supervisión: mismo detalle y LLAMAR, sin acciones', supervisionDetalle.includes('Retenido desde 15:00') && supervisionDetalle.includes('>Llamar<') && !supervisionDetalle.includes('Llegó?') && !supervisionDetalle.includes('Protocolo'));
 
+// ── Contadores como filtros + cliente/objetivo (paridad con las solapas del escritorio) ──
+const F = await importFront('lib/movil/operacionFiltros.ts');
+const { shiftMatchesOpsViewTab } = await importFront('../../../packages/ops-core/src/index.ts');
+const { shiftCountsInOpsHeader } = await importFront('lib/operaciones/opsHeaderCounts.ts');
+const NOW_F = ar('15:20');
+const pruebasSaPublicado = { peaje_2026_10: true, obra_2026_10: true, cet_2026_10: true, viejo_2026_10: false };
+const fx = (over) => ({ positionName: 'Puesto 1', phone: '351', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), ...over });
+const ruta9 = { clientId: 'c1', clientName: 'Ruta 9' };
+const malag = { clientId: 'c2', clientName: 'Malagueño' };
+const fixture = [
+  // Peaje (Ruta 9): 2 activos (uno retenido), 1 ausente, 1 vacante, 1 plan, 1 tarde sin aviso
+  fx({ id: 'p1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e1', employeeName: 'Baez, Juan', code: 'M', shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 }),
+  fx({ id: 'p2', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e2', employeeName: 'Guerrero, Martín', code: 'T', isPresent: true, realStartTime: ar('15:02') }),
+  fx({ id: 'p3', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e3', employeeName: 'Sosa, Carla', code: 'T', positionName: 'Puesto 2', isAbsent: true }),
+  fx({ id: 'p4', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'T', code: 'T', positionName: 'Puesto 3' }),
+  fx({ id: 'p5', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e5', employeeName: 'Farias, Lucas', code: 'N', shiftDateObj: ar('23:00'), endDateObj: ar('07:00', '2026-10-02'), isFuture: true }),
+  fx({ id: 'p6', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e6', employeeName: 'Lopez, Ana', code: 'T', positionName: 'Puesto 4', isLateUnnotified: true }),
+  // CET (Ruta 9): 1 activo, 1 ausente
+  fx({ id: 'c1', ...ruta9, objectiveId: 'cet', objectiveName: 'CET Río Ceballos', employeeId: 'e7', employeeName: 'Perez, Hugo', code: 'T', isPresent: true, realStartTime: ar('15:00') }),
+  fx({ id: 'c2', ...ruta9, objectiveId: 'cet', objectiveName: 'CET Río Ceballos', employeeId: 'e8', employeeName: 'Diaz, Rosa', code: 'T', positionName: 'Puesto 2', isAbsent: true, operacionallyCovered: true, coveredByName: 'Perez, Hugo' }),
+  // Obrador (Malagueño): 2 activos, 1 vacante, 1 plan
+  fx({ id: 'o1', ...malag, objectiveId: 'obra', objectiveName: 'Obrador Malagueño', employeeId: 'e9', employeeName: 'Ruiz, Pablo', code: 'D12', shiftDateObj: ar('07:00'), endDateObj: ar('19:00'), isPresent: true, realStartTime: ar('07:00') }),
+  fx({ id: 'o2', ...malag, objectiveId: 'obra', objectiveName: 'Obrador Malagueño', employeeId: 'e10', employeeName: 'Vega, Luis', code: 'D12', positionName: 'Puesto 2', shiftDateObj: ar('07:00'), endDateObj: ar('19:00'), isPresent: true, realStartTime: ar('07:05') }),
+  fx({ id: 'o3', ...malag, objectiveId: 'obra', objectiveName: 'Obrador Malagueño', employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'N12', code: 'N12', positionName: 'Puesto 3', shiftDateObj: ar('19:00'), endDateObj: ar('07:00', '2026-10-02') }),
+  fx({ id: 'o4', ...malag, objectiveId: 'obra', objectiveName: 'Obrador Malagueño', employeeId: 'e11', employeeName: 'Mora, Iván', code: 'N12', shiftDateObj: ar('19:00'), endDateObj: ar('07:00', '2026-10-02'), isFuture: true }),
+  // Evento (Malagueño): un EV presente — en el escritorio va en el grupo de eventos, en el celular también es tarjeta
+  fx({ id: 'ev1', ...malag, objectiveId: 'obra', objectiveName: 'Obrador Malagueño', employeeId: 'e12', employeeName: 'Paz, Noé', code: 'EV', origin: 'EVENTO', eventoId: 'ev', eventoNombre: 'Fiesta patronal', isPresent: true, realStartTime: ar('15:00') }),
+  // Fuera del encabezado: mes sin publicar (no cuenta en el escritorio) y franco (no es tarjeta)
+  fx({ id: 'x1', ...ruta9, objectiveId: 'viejo', objectiveName: 'Depósito viejo', employeeId: 'e13', employeeName: 'Nadie', code: 'T', isFuture: true }),
+  fx({ id: 'f1', ...ruta9, objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', employeeId: 'e14', employeeName: 'Franco, Juan', code: 'F', isFranco: true }),
+];
+const visiblesF = F.turnosVisiblesMovil(fixture, pruebasSaPublicado);
+check('universo = encabezado del escritorio (sin mes sin publicar ni francos, con el evento)', visiblesF.length === 13 && !visiblesF.some((s) => s.id === 'x1' || s.id === 'f1') && visiblesF.some((s) => s.id === 'ev1'));
+// Paridad: el escritorio cuenta hoy ∧ shiftCountsInOpsHeader por solapa (useOperacionesMonitor.stats)
+const escritorio = fixture.filter((s) => shiftCountsInOpsHeader(s, pruebasSaPublicado));
+const statsEscritorio = Object.fromEntries(['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'NO_LLEGO'].map((tab) => [tab, escritorio.filter((s) => shiftMatchesOpsViewTab(s, tab, NOW_F)).length]));
+const contTodos = F.contadoresMovil(visiblesF, F.FILTRO_VACIO, NOW_F);
+if (process.env.MOVIL_DEBUG) console.log({ statsEscritorio, contTodos });
+// VAC: el titular ausente sin cobertura también representa el hueco (P3: p3), más p4 y o3.
+check('paridad de conteos con el escritorio', ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'NO_LLEGO'].every((tab) => contTodos[tab] === statsEscritorio[tab]) && contTodos.ACTIVOS === 6 && contTodos.RETENIDOS === 1 && contTodos.AUSENTES === 2 && contTodos.VACANTES === 3 && contTodos.PLAN === 2 && contTodos.NO_LLEGO === 1);
+for (const estado of ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'NO_LLEGO']) {
+  const tarjetas = F.turnosFiltrados(visiblesF, { ...F.FILTRO_VACIO, estado }, NOW_F);
+  check(`contador ${estado} = tarjetas al filtrar`, tarjetas.length === contTodos[estado]);
+}
+check('tocar el contador activo vuelve a Todos', F.alternarEstado(F.FILTRO_VACIO, 'AUSENTES').estado === 'AUSENTES' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'AUSENTES').estado === 'TODOS' && F.alternarEstado({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }, 'PLAN').estado === 'PLAN');
+const clientesF = F.clientesParaFiltro(visiblesF, [{ id: 'cet', clientId: 'c1', name: 'CET Río Ceballos', clientName: 'Ruta 9' }, { id: 'sinTurnos', clientId: 'c1', name: 'Sucursal Norte', clientName: 'Ruta 9' }]);
+check('clientes → objetivos con turnos (catálogo completa los sin turnos)', clientesF.map((c) => c.name).join(',') === 'Ruta 9,Malagueño' && clientesF[0].objetivos.map((o) => o.name).join(',') === 'Peaje 9 Norte,CET Río Ceballos,Sucursal Norte' && clientesF[0].turnos === 8 && clientesF[1].turnos === 5);
+check('buscador por objetivo recorta el cliente', F.buscarClientes(clientesF, 'ceballos').map((c) => `${c.name}:${c.objetivos.length}`).join(',') === 'Ruta 9:1' && F.buscarClientes(clientesF, 'malag')[0].objetivos.length === 1 && F.buscarClientes(clientesF, 'zzz').length === 0);
+const enRuta9 = F.contadoresMovil(visiblesF, { clientId: 'c1', objectiveId: null }, NOW_F);
+if (process.env.MOVIL_DEBUG) console.log({ enRuta9 });
+check('contadores dentro del cliente', enRuta9.ACTIVOS === 3 && enRuta9.AUSENTES === 2 && enRuta9.VACANTES === 2 && enRuta9.PLAN === 1);
+const ausRuta9 = F.turnosFiltrados(visiblesF, { estado: 'AUSENTES', clientId: 'c1', objectiveId: null }, NOW_F);
+check('combinación cliente + AUS', ausRuta9.map((s) => s.id).join(',') === 'p3,c2' && ausRuta9.length === enRuta9.AUSENTES);
+const vacObra = F.turnosFiltrados(visiblesF, { estado: 'VACANTES', clientId: 'c2', objectiveId: 'obra' }, NOW_F);
+check('combinación objetivo + VAC', vacObra.length === 1 && vacObra[0].id === 'o3' && F.contadoresMovil(visiblesF, { clientId: 'c2', objectiveId: 'obra' }, NOW_F).VACANTES === 1);
+check('etiqueta del chip', F.etiquetaAmbito({ clientId: 'c1', objectiveId: null }, clientesF) === 'Ruta 9' && F.etiquetaAmbito({ clientId: 'c1', objectiveId: 'cet' }, clientesF) === 'CET Río Ceballos' && F.etiquetaAmbito(F.FILTRO_VACIO, clientesF) === null);
+check('mensaje de lista vacía', F.mensajeVacio({ estado: 'AUSENTES', clientId: 'c2', objectiveId: null }, clientesF) === 'Sin guardias en AUS para Malagueño' && F.mensajeVacio({ estado: 'RETENIDOS', clientId: null, objectiveId: null }, clientesF) === 'Sin guardias en RET');
+const gruposF = F.agruparPorObjetivo(F.turnosFiltrados(visiblesF, F.FILTRO_VACIO, NOW_F), NOW_F);
+check('agrupado por objetivo, evento aparte y criticidad primero', gruposF.map((g) => g.name).join('|') === 'Peaje 9 Norte|CET Río Ceballos|Obrador Malagueño|Evento: Fiesta patronal' && gruposF[3].esEvento && gruposF[0].shifts.length === 6);
+const memoria = new Map();
+const storageF = { getItem: (k) => memoria.get(k) ?? null, setItem: (k, v) => memoria.set(k, v), removeItem: (k) => memoria.delete(k) };
+F.guardarFiltro('pruebas_sa', { estado: 'AUSENTES', clientId: 'c1', objectiveId: null }, storageF);
+check('último filtro en sessionStorage por empresa', F.leerFiltroGuardado('pruebas_sa', storageF).estado === 'AUSENTES' && F.leerFiltroGuardado('pruebas_sa', storageF).clientId === 'c1' && F.leerFiltroGuardado('otra', storageF).estado === 'TODOS');
+F.guardarFiltro('pruebas_sa', F.FILTRO_VACIO, storageF);
+check('Todos sin ámbito borra la memoria', memoria.size === 0 && F.leerFiltroGuardado('pruebas_sa', { getItem: () => '{"estado":"X"}' }).estado === 'TODOS');
+
+const baseFiltros = { empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: NOW_F.getTime(), panel: 'home', alerts: [], objective: null, onAmbito: () => {}, onQuitarAmbito: () => {}, ...noops };
+const renderFiltro = (filtro, extra = {}) => {
+  const cont = F.contadoresMovil(visiblesF, filtro, NOW_F);
+  const grp = F.agruparPorObjetivo(F.turnosFiltrados(visiblesF, filtro, NOW_F), NOW_F);
+  const objs = F.agruparPorObjetivo(F.turnosEnAmbito(visiblesF, filtro), NOW_F);
+  return { html: render(OperacionScreens, { ...baseFiltros, filtro, contadores: cont, grupos: grp, objectives: objs, ambitoLabel: F.etiquetaAmbito(filtro, clientesF), vacioLabel: F.mensajeVacio(filtro, clientesF), ...extra }), cont, grp };
+};
+const todosHtml = renderFiltro(F.FILTRO_VACIO).html;
+if (process.env.MOVIL_DEBUG) console.log('contadores en home', (todosHtml.match(/data-movil-contador=/g) || []).length, ['Peaje 9 Norte', 'Obrador Malagueño', 'Evento: Fiesta patronal', 'Todos los clientes y objetivos'].map((t) => todosHtml.includes(t)));
+check('home 390: seis contadores sin activo y resumen por objetivo', (todosHtml.match(/data-movil-contador=/g) || []).length === 6 && !todosHtml.includes('data-movil-filtro-activo') && todosHtml.includes('Peaje 9 Norte') && todosHtml.includes('Obrador Malagueño') && todosHtml.includes('Evento: Fiesta patronal') && todosHtml.includes('Todos los clientes y objetivos') && !todosHtml.includes('data-movil-chip'));
+for (const estado of ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'NO_LLEGO']) {
+  const { html, cont } = renderFiltro({ ...F.FILTRO_VACIO, estado });
+  const tarjetas = (html.match(/data-movil-detalle=/g) || []).length;
+  check(`filtro ${estado}: contador activo y ${cont[estado]} tarjetas agrupadas`, html.includes(`data-movil-contador="${estado}" data-movil-filtro-activo="1"`) && tarjetas === cont[estado] && html.includes('Ver todos'));
+}
+const ausHtml = renderFiltro({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }).html;
+check('AUS muestra Sosa y Diaz agrupadas por objetivo con detalle', ausHtml.includes('Sosa, Carla') && ausHtml.includes('Diaz, Rosa') && !ausHtml.includes('Guerrero, Martín') && ausHtml.includes('data-movil-grupo="peaje"') && ausHtml.includes('data-movil-grupo="cet"') && ausHtml.includes('No llegó desde 15:00 · ausente'));
+const comboHtml = renderFiltro({ estado: 'AUSENTES', clientId: 'c1', objectiveId: null }).html;
+check('cliente + AUS: chip con X, contadores del cliente y solo sus ausentes', comboHtml.includes('data-movil-chip="ambito"') && comboHtml.includes('>Ruta 9<') && comboHtml.includes('aria-label="Quitar filtro Ruta 9"') && comboHtml.includes('data-movil-ambito="cliente"') && (comboHtml.match(/data-movil-detalle=/g) || []).length === 2 && !comboHtml.includes('Obrador'));
+const vacioHtml = renderFiltro({ estado: 'AUSENTES', clientId: 'c2', objectiveId: null }).html;
+check('lista vacía con mensaje', vacioHtml.includes('data-movil-vacio="1"') && vacioHtml.includes('Sin guardias en AUS para Malagueño'));
+const objHtml = renderFiltro({ estado: 'TODOS', clientId: 'c2', objectiveId: 'obra' }).html;
+check('objetivo elegido en Todos: chip y resumen solo de ese objetivo', objHtml.includes('data-movil-ambito="objetivo"') && objHtml.includes('>Obrador Malagueño<') && !objHtml.includes('Peaje 9 Norte'));
+
+const { AmbitoSheetBody } = await importFront('components/movil/OperacionScreens.tsx');
+const sheetHtml = render(AmbitoSheetBody, { clientes: clientesF, filtro: F.FILTRO_VACIO, onElegir: () => {} });
+check('hoja cliente → objetivos con buscador', sheetHtml.includes('data-movil-sheet="ambito"') && sheetHtml.includes('placeholder="Buscar cliente u objetivo"') && sheetHtml.includes('data-movil-cliente="c1"') && sheetHtml.includes('data-movil-cliente="c2"') && sheetHtml.includes('Todos los clientes'));
+const sheetAbierto = render(AmbitoSheetBody, { clientes: clientesF, filtro: { estado: 'TODOS', clientId: 'c1', objectiveId: null }, onElegir: () => {} });
+check('hoja con cliente abierto lista sus objetivos y «Todo el cliente»', sheetAbierto.includes('data-movil-cliente-todo="c1"') && sheetAbierto.includes('data-movil-objetivo="peaje"') && sheetAbierto.includes('data-movil-objetivo="cet"') && !sheetAbierto.includes('data-movil-objetivo="obra"'));
+
 // ── Contadores igual que escritorio ──
-const { shiftCountsInOpsHeader, isFinServicioSinCronograma } = await importFront('lib/operaciones/opsHeaderCounts.ts');
+const { isFinServicioSinCronograma } = await importFront('lib/operaciones/opsHeaderCounts.ts');
 const enActivos = (s) => s.isPresent && !s.isCompleted;
 const enRetenidos = (s) => !!s.isRetention || (!!s.isPendingClose && !!s.isPresent && !s.isCompleted);
 const noche = {
@@ -337,9 +433,9 @@ const noche = {
   isRetention: true,
 };
 const publicado = { NK1_2026_9: true };
-const visibles = [noche, { ...noche }, { ...noche }].filter((s) => shiftCountsInOpsHeader(s, publicado));
-const activos = visibles.filter(enActivos).length;
-const retenidos = visibles.filter(enRetenidos).length;
+const visiblesNoche = [noche, { ...noche }, { ...noche }].filter((s) => shiftCountsInOpsHeader(s, publicado));
+const activos = visiblesNoche.filter(enActivos).length;
+const retenidos = visiblesNoche.filter(enRetenidos).length;
 check('contadores igual que escritorio con octubre sin publicar', activos === 3 && retenidos === 3);
 check('fin de servicio cruza de mes', isFinServicioSinCronograma(noche, publicado) === true);
 const headerHtml = render(OperacionScreens, {

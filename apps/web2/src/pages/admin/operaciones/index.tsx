@@ -3567,6 +3567,12 @@ export default function OperacionesPage() {
             .filter(o => (o.active + o.absent + o.vacant + o.retention + o.plan) > 0);
     }, [logic.processedData, logic.selectedClientId]);
 
+    // Celular: todos los turnos de hoy (objetivos y eventos); el corte del encabezado lo aplica OperacionMovil.
+    const movilShiftsHoy = useMemo(() => {
+        const now = new Date();
+        return logic.processedData.filter((s: any) => isOpsShiftHoy(s, now));
+    }, [logic.processedData]);
+
     const eventsWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
@@ -3745,16 +3751,18 @@ export default function OperacionesPage() {
                 <Head><title>{supervisionReadOnly ? 'COSP V1.0 | Supervisión' : 'COSP V1.0 | Operaciones'}</title></Head>
                 <OperacionMovil
                     empresa={empresa?.name || empresaId || 'Empresa'}
+                    empresaId={empresaId || undefined}
                     readOnly={supervisionReadOnly}
                     logic={{
-                        stats: logic.stats,
                         setViewTab: (tab: string) => logic.setViewTab(tab as never),
                         handleAction: (action: string, shiftId: string, payload?: unknown) => logic.handleAction(action, shiftId, payload),
                     }}
                     notices={filtrarAlertasDelModulo(moduloMovilDe('/admin/operaciones'), empNovedades as Array<{ type?: string; source?: string }>)
                         .filter((n: any) => n.type === 'CRONOGRAMA_SIN_PUBLICAR' && n.status !== 'ATENDIDA' && n.status !== 'atendida')
                         .map((n: any) => String(n.description || n.title || 'Cronograma sin publicar'))}
-                    objectives={objectivesWithAlerts}
+                    shifts={movilShiftsHoy}
+                    publishStatusMap={logic.publishStatusMap}
+                    catalogo={logic.objectives as Array<{ id?: unknown; clientId?: unknown; name?: unknown; clientName?: unknown }>}
                     modeLabel={ccManualOn ? 'Manual' : ccAutoOn ? 'Auto' : 'Demo'}
                     isPilot={session.isPilot}
                     pilotName={session.pilotSession?.operatorName}
