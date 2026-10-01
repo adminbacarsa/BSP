@@ -27,7 +27,7 @@ import {
 import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { MovilDesktopOnly } from '@/components/movil/MovilDesktopOnly';
-import { MovilSelector } from '@/components/movil/MovilSelector';
+import { MovilMenuModulos } from '@/components/movil/MovilMenuModulos';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
 
@@ -564,11 +564,11 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const _sbCls = 'fixed top-0 left-0 ' + _sbZ + ' h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden ' + _sbW + ' ' + _sbT;
 
   // Modo celular: el selector de módulos, y las páginas sin versión móvil no muestran el escritorio.
-  if (movil && (router.pathname === '/admin/movil' || router.pathname === '/admin/dashboard')) {
-    return <MovilSelector />;
+  if (movil && router.pathname === '/admin/dashboard') {
+    return <MovilMenuModulos entrada />;
   }
-  if (movil && !isSupervisionApp && !movilRouteHasMobileVersion(router.pathname)) {
-    const current = movilModuleForPath(router.pathname);
+  if (movil && !isSupervisionApp && !movilRouteHasMobileVersion(router.pathname, router.query as Record<string, string | string[] | undefined>)) {
+    const current = movilModuleForPath(router.pathname, router.query as Record<string, string | string[] | undefined>);
     return (
       <>
         <MovilDesktopOnly moduleLabel={current?.label || getTitleByPath(router.pathname) || 'Panel'} />

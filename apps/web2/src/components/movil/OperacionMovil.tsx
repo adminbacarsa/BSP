@@ -59,19 +59,18 @@ export function OperacionMovil(props: Props) {
   }), []);
 
   useEffect(() => {
-    if (readOnly) return;
-    const abrir = () => setSalaOpen(true);
-    window.addEventListener('cosp-sala-open', abrir);
-    return () => window.removeEventListener('cosp-sala-open', abrir);
-  }, [readOnly]);
-
-  useEffect(() => {
     const alInicio = () => setSelectedId(null);
     window.addEventListener('cosp-modulo-inicio', alInicio);
     return () => window.removeEventListener('cosp-modulo-inicio', alInicio);
   }, []);
 
   const panelQuery = String(router.query.panel || '');
+  // La barra del módulo abre la sala con ?panel=sala (contrato lib/movil/modulos.ts).
+  const salaVisible = !readOnly && (salaOpen || panelQuery === 'sala');
+  const cerrarSala = () => {
+    setSalaOpen(false);
+    if (panelQuery === 'sala') void router.push('/admin/operaciones/');
+  };
   const objective = props.objectives.find((item) => item.objectiveId === selectedId) || null;
   const panel = panelQuery === 'alertas' ? 'alertas' : objective ? 'objetivo' : 'home';
   const alerts = useMemo(
@@ -125,7 +124,7 @@ export function OperacionMovil(props: Props) {
         onSala={readOnly ? noop : () => setSalaOpen(true)}
       />
       {!readOnly && (
-        <BottomSheet open={salaOpen} title={`Sala · ${props.modeLabel}`} onClose={() => setSalaOpen(false)}>
+        <BottomSheet open={salaVisible} title={`Sala · ${props.modeLabel}`} onClose={cerrarSala}>
           <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
             <p className="text-[11px] font-black uppercase text-emerald-800">Modo {props.modeLabel}</p>
             <p className="text-sm font-bold">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>

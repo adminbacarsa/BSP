@@ -15,7 +15,7 @@ export function MovilDesktopOnly({ moduleLabel, onOpenFull = () => writeMovilCho
         </div>
         <h1 className="text-lg font-black text-slate-900">Disponible en la computadora</h1>
         <p className="mt-2 text-sm font-semibold text-slate-500">
-          {moduleLabel} todavía no tiene pantalla para el celular. Desde Más podés ir a Operación, Supervisión o Servicios.
+          {moduleLabel} todavía no tiene pantalla para el celular. Desde Menú podés ir a los módulos que sí la tienen.
         </p>
         <button
           type="button"

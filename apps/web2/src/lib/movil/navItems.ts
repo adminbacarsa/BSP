@@ -1,4 +1,11 @@
-import { barraDelModulo, moduloMovilDe, modulosMovil, type MovilNavItem } from './movilModulos';
+import {
+  barraDelModulo,
+  moduloMovilDe,
+  modulosMovil,
+  rutaTieneVersionMovil,
+  type MovilModulo,
+  type MovilNavItem,
+} from './movilModulos';
 
 export type { MovilNavItem } from './movilModulos';
 
@@ -18,4 +25,17 @@ export function movilNavForPermissions(
   const actual = moduloMovilDe(pathname, query);
   const modulo = actual && permitidos.some((m) => m.id === actual.id) ? actual : permitidos[0] || null;
   return barraDelModulo(modulo);
+}
+
+/** Grilla del selector según permisos (mismo registro que la barra). */
+export function movilModulesForPermissions(canRead: (moduleKey: string) => boolean, isSuperAdmin = false): MovilModulo[] {
+  return modulosMovil(canRead, isSuperAdmin);
+}
+
+export function movilModuleForPath(pathname: string, query?: Query): MovilModulo | null {
+  return moduloMovilDe(pathname, query);
+}
+
+export function movilRouteHasMobileVersion(pathname: string, query?: Query): boolean {
+  return rutaTieneVersionMovil(pathname, query);
 }

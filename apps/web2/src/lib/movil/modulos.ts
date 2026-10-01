@@ -28,8 +28,12 @@ export interface MovilModulo {
   href: string;
   /** Ruta base para saber si la pantalla actual pertenece al módulo. */
   path: string;
+  /** Otras rutas que también son este módulo (ej. la página de escritorio que en el celular monta la pantalla básica). */
+  alias?: string[];
   /** Query que distingue módulos que comparten ruta (ej. `modo=supervision`). */
   query?: Record<string, string>;
+  /** false = todavía sin pantalla celular: la ruta muestra «Disponible en la computadora». Default true. */
+  mobile?: boolean;
   /** Alcanza con permiso de lectura en uno de estos módulos. */
   moduleKeys: string[];
   secciones: MovilSeccion[];
@@ -75,9 +79,11 @@ function valor(query: Query | undefined, key: string): string {
 /** Módulo en el que está parada la pantalla. */
 export function moduloMovilDe(pathname: string, query?: Query): MovilModulo | null {
   const path = String(pathname || '').replace(/\/$/, '');
+  const matchea = (base: string) => path === base || path.startsWith(`${base}/`);
+  const largo = (m: MovilModulo) => Math.max(...[m.path, ...(m.alias || [])].filter(matchea).map((p) => p.length));
   const candidatos = modulosRegistrados()
-    .filter((m) => path === m.path || path.startsWith(`${m.path}/`))
-    .sort((a, b) => b.path.length - a.path.length);
+    .filter((m) => [m.path, ...(m.alias || [])].some(matchea))
+    .sort((a, b) => largo(b) - largo(a));
   const conQuery = candidatos.find((m) => m.query && Object.entries(m.query).every(([k, v]) => valor(query, k) === v));
   if (conQuery) return conQuery;
   return candidatos.find((m) => !m.query) || candidatos[0] || null;
@@ -105,6 +111,14 @@ export function filtrarAlertasDelModulo<T extends MovilAlerta>(modulo: MovilModu
 /** Un solo módulo permitido: se entra directo y el menú no muestra la grilla. */
 export function menuMovil(modulos: MovilModulo[]): { unico: MovilModulo | null; mostrarModulos: boolean } {
   return { unico: modulos.length === 1 ? modulos[0] : null, mostrarModulos: modulos.length > 1 };
+}
+
+/** Rutas /admin/* con pantalla celular. La app de Supervisión de campo tiene la suya. */
+export function rutaTieneVersionMovil(pathname: string, query?: Query): boolean {
+  const path = String(pathname || '').replace(/\/$/, '');
+  if (path.startsWith('/admin/supervision') || path === '/admin/movil' || path.startsWith('/admin/movil/')) return true;
+  const modulo = moduloMovilDe(path, query);
+  return !!modulo && modulo.mobile !== false;
 }
 
 export function tipoAlerta(alerta: MovilAlerta): string {

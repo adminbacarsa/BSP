@@ -41,10 +41,13 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
       {items.map((item) => {
         const Icon = ICONS[item.icono] || LayoutGrid;
         const active = item.id !== 'menu' && item.id === activa;
+        const esInicio = modulo?.secciones[0]?.id === item.id;
         return (
           <Link
             key={item.id}
             href={item.href}
+            // La primera sección vuelve a la pantalla principal del módulo aunque la URL no cambie.
+            onClick={esInicio ? () => window.dispatchEvent(new Event('cosp-modulo-inicio')) : undefined}
             className={`relative flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 text-[9px] font-black ${active ? 'text-indigo-600' : 'text-slate-400'}`}
           >
             <Icon size={18} strokeWidth={2.2} />

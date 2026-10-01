@@ -47,7 +47,7 @@ function loadModule(absPath) {
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022, verbatimModuleSyntax: false },
     fileName: absPath,
   }).outputText;
-  js = js.replace(/(from\s+|import\s*\()\s*(['"])([^'"]+)\2/g, (whole, lead, quote, spec) => {
+  js = js.replace(/(from\s+|import\s*\(|^import\s+)\s*(['"])([^'"]+)\2/gm, (whole, lead, quote, spec) => {
     const target = resolveSource(spec, dirname(absPath));
     if (!target) return whole;
     return `${lead}${quote}${pathToFileURL(loadModule(target)).href}${quote}`;
@@ -67,7 +67,8 @@ const render = (component, props) => renderToStaticMarkup(createElement(componen
 const { createWriteQueue } = await importFront('lib/movil/writeQueue.ts');
 const { createCallableGate } = await importFront('lib/movil/callableOnline.ts');
 const { movilNavForPermissions, movilModulesForPermissions, movilModuleForPath, movilRouteHasMobileVersion } = await importFront('lib/movil/navItems.ts');
-const { alertaDelModulo, movilDestinosVisibles } = await importFront('lib/movil/destinos.ts');
+const { filtrarAlertasDelModulo, moduloMovilDe, modulosRegistrados } = await importFront('lib/movil/movilModulos.ts');
+const alertaDelModulo = (moduloId, type) => filtrarAlertasDelModulo(modulosRegistrados().find((m) => m.id === moduloId), [{ type }]).length === 1;
 const { coveragePct, guardStatusLabel, guardTone } = await importFront('lib/movil/guardTone.ts');
 
 // ── Cola offline y callables ──
@@ -95,41 +96,41 @@ check('callable se reintenta', (await gate.retry()) === 1 && calls === 1);
 
 // ── Shell: barra corta y menú por permisos ──
 const barras = (canRead, path, query) => movilNavForPermissions(canRead, path, query).map((item) => item.label).join(',');
-check('barra de Operación', barras((key) => key === 'OPERATIONS', '/admin/operaciones') === 'Objetivos,Alertas de operación,Sala,Menú');
-check('Operación no mezcla otros módulos', !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Novedades') && !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Eventuales'));
+check('barra de Operación', barras((key) => key === 'OPERATIONS', '/admin/operaciones') === 'Objetivos,Alertas,Sala,Menú');
+check('Operación no mezcla otros módulos', !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Novedades') && !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Plan'));
 check('barra de Supervisión', barras((key) => key === 'SUPERVISION', '/admin/operaciones', { modo: 'supervision' }) === 'Objetivos,Alertas,Menú');
-check('barra de Planificación', barras((key) => key === 'PLANNING', '/admin/planificacion') === 'Próximos días,Huecos,Menú');
+check('barra de Planificación (ruta celular y de escritorio)', barras((key) => key === 'PLANNING', '/admin/movil/planificacion') === 'Próximos días,Huecos,Menú' && barras((key) => key === 'PLANNING', '/admin/planificacion') === 'Próximos días,Huecos,Menú');
 check('barra de RRHH', barras((key) => key === 'RRHH', '/admin/rrhh/movil') === 'Hoy,Cargar,Novedades,Menú');
-check('barra de Eventuales', barras((key) => key === 'EVENTUALES' || key === 'RRHH', '/admin/rrhh/eventuales') === 'Bolsa,ARCA pendientes,Alta,Menú');
+check('barra de Eventuales', barras((key) => key === 'EVENTUALES' || key === 'RRHH', '/admin/rrhh/eventuales') === 'Bolsa,ARCA,Alta,Menú');
 check('barra de Servicios', barras((key) => key === 'SERVICES', '/admin/servicios') === 'Lista,Menú');
 const opsNav = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones');
-check('Sala y Menú no navegan', opsNav.find((item) => item.label === 'Sala').href === '' && opsNav.find((item) => item.label === 'Menú').href === '');
-check('un operador sin RRHH no lo ve', !movilDestinosVisibles((key) => key === 'OPERATIONS').some((item) => item.id === 'rrhh' || item.id === 'eventuales'));
-check('ALTA_ARCA_PENDIENTE es de Operación', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && !alertaDelModulo('eventuales', 'ALTA_ARCA_PENDIENTE'));
-check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'BAJA_ARCA') && !alertaDelModulo('operacion', 'BAJA_ARCA') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
-check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'RRHH_NOVEDAD') && alertaDelModulo('rrhh', 'RRHH_NOVEDAD'));
-check('hueco de planificación no entra en Operación', !alertaDelModulo('operacion', 'VACANTE_A_PLANIFICACION') && alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR'));
+check('Sala abre con ?panel=sala y Menú va al selector', opsNav.find((item) => item.label === 'Sala').href === '/admin/operaciones/?panel=sala' && opsNav.find((item) => item.label === 'Menú').href === '/admin/movil/');
+check('un operador sin RRHH no lo ve', !movilModulesForPermissions((key) => key === 'OPERATIONS').some((item) => item.id === 'rrhh' || item.id === 'eventuales'));
+check('ALTA_ARCA_PENDIENTE es de Operación', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE'));
+check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
+check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'CERTIFICADO_VENCIDO') && alertaDelModulo('rrhh', 'CERTIFICADO_VENCIDO'));
+check('cronograma sin publicar es de Planificación y Operación lo ve como aviso', alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR') && alertaDelModulo('operacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('eventuales', 'CRONOGRAMA_SIN_PUBLICAR'));
 const saModules = movilModulesForPermissions(() => true);
 check('SuperAdmin ve los 6 módulos', saModules.map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 check('solo SUPERVISION ve Supervisión y nada más', movilModulesForPermissions((key) => key === 'SUPERVISION').map((item) => item.id).join(',') === 'supervision');
 check('RRHH ve Eventuales y RRHH', movilModulesForPermissions((key) => key === 'RRHH').map((item) => item.id).join(',') === 'eventuales,rrhh');
 check('Supervisión se reconoce por ?modo', movilModuleForPath('/admin/operaciones', { modo: 'supervision' })?.id === 'supervision');
 check('eventuales gana sobre rrhh en la ruta', movilModuleForPath('/admin/rrhh/eventuales')?.id === 'eventuales');
-check('planificación sin versión celular', movilRouteHasMobileVersion('/admin/planificacion') === false && movilRouteHasMobileVersion('/admin/rrhh') === false);
-check('operaciones, servicios y supervisión con versión celular', movilRouteHasMobileVersion('/admin/operaciones') && movilRouteHasMobileVersion('/admin/servicios') && movilRouteHasMobileVersion('/admin/supervision'));
+check('planificación apunta a /admin/movil/planificacion', moduloMovilDe('/admin/planificacion')?.href === '/admin/movil/planificacion/' && movilRouteHasMobileVersion('/admin/movil/planificacion') && movilRouteHasMobileVersion('/admin/planificacion'));
+check('configuración y reportes sin versión celular', movilRouteHasMobileVersion('/admin/configuracion') === false && movilRouteHasMobileVersion('/admin/reportes') === false);
+check('operaciones, servicios, rrhh y supervisión con versión celular', movilRouteHasMobileVersion('/admin/operaciones') && movilRouteHasMobileVersion('/admin/servicios') && movilRouteHasMobileVersion('/admin/rrhh') && movilRouteHasMobileVersion('/admin/supervision') && movilRouteHasMobileVersion('/admin/movil'));
 
-const { MovilMenuGrid } = await importFront('components/movil/MovilMenuGrid.tsx');
-const menuHtml = render(MovilMenuGrid, {
+const { MovilMenuScreens } = await importFront('components/movil/MovilMenuScreens.tsx');
+const menuHtml = render(MovilMenuScreens, {
   empresaId: 'pruebas_sa',
   empresaName: 'Pruebas S.A.',
   empresas: [{ id: 'pruebas_sa', name: 'Pruebas S.A.' }, { id: 'bacarsa', name: 'Bacar S.A.' }],
   canSwitchEmpresa: true,
-  modules: saModules,
-  currentModuleId: 'operacion',
-  onModule: () => {}, onSwitchEmpresa: () => {}, onAsistente: () => {}, onEscritorio: () => {}, onAvisos: () => {}, onLogout: () => {},
+  modulos: saModules,
+  unico: null,
+  onModulo: () => {}, onSwitchEmpresa: () => {}, onAsistente: () => {}, onEscritorio: () => {}, onLogout: () => {},
 });
 check('menú 390: 6 módulos, empresa activa y cerrar sesión', (menuHtml.match(/data-movil-module=/g) || []).length === 6 && menuHtml.includes('Empresa activa') && menuHtml.includes('Cambiar a Bacar S.A.') && menuHtml.includes('Cerrar sesión') && menuHtml.includes('Asistente'));
-check('módulo sin versión celular avisa', menuHtml.includes('En la computadora'));
 
 const { MovilDesktopOnly } = await importFront('components/movil/MovilDesktopOnly.tsx');
 const gateHtml = render(MovilDesktopOnly, { moduleLabel: 'Planificación', onOpenFull: () => {} });

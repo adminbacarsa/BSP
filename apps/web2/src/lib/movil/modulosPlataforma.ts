@@ -51,13 +51,15 @@ registrarModuloMovil({
 registrarModuloMovil({
   id: 'planificacion',
   label: 'Planificación',
-  desc: 'Cronogramas',
-  href: '/admin/planificacion/',
-  path: '/admin/planificacion',
+  desc: 'Próximos días y huecos',
+  href: '/admin/movil/planificacion/',
+  path: '/admin/movil/planificacion',
+  // En el celular /admin/planificacion también monta la pantalla básica.
+  alias: ['/admin/planificacion'],
   moduleKeys: ['PLANNING'],
   secciones: [
-    { id: 'dias', label: 'Próximos días', href: '/admin/planificacion/', icono: 'dias', panel: '' },
-    { id: 'huecos', label: 'Huecos', href: '/admin/planificacion/?panel=huecos', icono: 'huecos', panel: 'huecos' },
+    { id: 'dias', label: 'Próximos días', href: '/admin/movil/planificacion/', icono: 'dias', panel: '' },
+    { id: 'huecos', label: 'Huecos', href: '/admin/movil/planificacion/?panel=huecos', icono: 'huecos', panel: 'huecos' },
   ],
   esAlertaDelModulo: esAlertaDePlanificacion,
 });
@@ -68,7 +70,7 @@ registrarModuloMovil({
   desc: 'Contratos por objetivo',
   href: '/admin/servicios/',
   path: '/admin/servicios',
-  moduleKeys: ['SERVICES'],
+  moduleKeys: ['SERVICES', 'CLIENTS'],
   secciones: [
     { id: 'lista', label: 'Lista', href: '/admin/servicios/', icono: 'lista', panel: '' },
   ],
