@@ -92,7 +92,13 @@ const nextConfig = {
   },
   transpilePackages: ['onnxruntime-web', 'date-fns', '@cosp/ops-core', '@cosp/hours-core'],
   staticPageGenerationTimeout: 300,
-  webpack: (config, { dev }) => {
+  webpack: (config, { dev, isServer }) => {
+    // Con date-fns 4 en la raíz del monorepo, Next externaliza 'date-fns/format' y Node no puede importar la carpeta de la v2 de web2.
+    if (isServer && Array.isArray(config.externals)) {
+      config.externals = config.externals.map((ext) => (typeof ext !== 'function' ? ext : (ctx, cb) => (
+        /^date-fns(\/|$)/.test((ctx && ctx.request) || '') ? (cb ? cb() : Promise.resolve()) : ext(ctx, cb)
+      )));
+    }
     // Soporte WASM para @imgly/background-removal
     config.experiments = { ...config.experiments, asyncWebAssembly: true, layers: true };
     // Fix import.meta en .mjs de onnxruntime-web
