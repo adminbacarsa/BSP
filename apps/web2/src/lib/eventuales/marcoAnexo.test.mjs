@@ -2,11 +2,12 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { evaluarCandidato } from './planificacion.mjs';
 import {
-  canalCodigo, CUENTA_DRIVE_EVENTUALES, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
+  canalCodigo, CUENTA_DRIVE_EVENTUALES, datosTrabajador, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
   MENSAJE_SIN_CANAL, mensajeEnvioCodigo,
   MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, planCarpetaEventuales, planConfirmarAnexo, planMarco,
   planRenombre, sha256, textoMarco,
 } from './marcoAnexo.mjs';
+import { parsearQrMarco } from './marcosLote.mjs';
 import { pdfAnexo, pdfMarco } from './marcoPdf.mjs';
 
 async function extraerPdf(buf) {
@@ -58,7 +59,7 @@ describe('contrato marco y anexo', () => {
     const datos = {
       empresaId: 'nandu',
       empresaNombre: 'Transporte del Ñandú S.A.',
-      empresaCuit: '30-66813497-8',
+      empresaCuit: '30668134978',
       empresaDomicilio: 'Santiago del Estero 263, Córdoba',
       trabajadorNombre: 'PÉREZ, Juan',
       trabajadorDni: '30123456',
@@ -87,11 +88,17 @@ describe('contrato marco y anexo', () => {
     assert.match(extraido, /PÉREZ/);
     assert.match(extraido, /DUODÉCIMA/);
     assert.match(extraido, /30-66813497-8/);
+    assert.match(extraido, /20-30123456-7/);
+    assert.match(extraido, /teléfono\s+3515550000/);
+    assert.match(extraido, /correo electrónico\s+juan@ejemplo\.com/);
+    assert.doesNotMatch(extraido, /teléfono\s+—/);
+    assert.equal(parsearQrMarco(pdf.payload).bolsaCuil, '20301234567');
+    assert.equal(pdf.payload.includes('20-30123456-7'), false);
     assert.match(extraido, /Plantilla marco v/);
     const anexo = await pdfAnexo({
       numero: '000123',
       empresaNombre: 'Transporte del Ñandú S.A.',
-      empresaCuit: '30-66813497-8',
+      empresaCuit: '30668134978',
       trabajadorNombre: 'PÉREZ, Juan',
       trabajadorDni: '30123456',
       trabajadorCuil: '20301234567',
@@ -108,6 +115,13 @@ describe('contrato marco y anexo', () => {
     assert.match(anexoTexto, /Cárcano/);
     assert.match(anexoTexto, /CONSTANCIA DE ACEPTACIÓN ELECTRÓNICA/);
     assert.match(anexoTexto, /Modalidad\s+012/);
+    assert.match(anexoTexto, /30-66813497-8/);
+    assert.match(anexoTexto, /20-30123456-7/);
+    const deBolsa = datosTrabajador({ nombre: 'PÉREZ, Juan', dni: '30123456', domicilio: 'Calle 1', localidad: 'Córdoba', telefono: '3515550000', mail: 'juan@ejemplo.com' }, '20-30123456-7');
+    assert.equal(deBolsa.telefono, '3515550000');
+    assert.equal(deBolsa.mail, 'juan@ejemplo.com');
+    assert.equal(deBolsa.trabajadorCuil, '20301234567');
+    assert.match(textoMarco({ ...datos, ...deBolsa, trabajadorCuil: deBolsa.trabajadorCuil }), /teléfono 3515550000/);
     assert.equal(DRIVE_ROOT_EVENTUALES_DEFAULT, '1zjzDGcAbavPaJJS5jObA0syu1SsDCakq');
     assert.equal(CUENTA_DRIVE_EVENTUALES, 'comtroldata@appspot.gserviceaccount.com');
     assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN' }), '20999999991 - PEREZ, JUAN');

@@ -144,7 +144,10 @@ export function pdfMarcosLote({ empresa, personas, fecha, marcoVersion = MARCO_V
       empresaDomicilio: empresa?.domicilio,
       trabajadorNombre: persona.nombre,
       trabajadorDni: persona.dni,
+      trabajadorCuil: persona.cuil,
       trabajadorDomicilio: persona.domicilio,
+      telefono: persona.telefono,
+      mail: persona.mail,
       fecha,
     });
     const payload = payloadQrMarco({ bolsaCuil: persona.cuil, empresaId: empresa?.id, marcoVersion });

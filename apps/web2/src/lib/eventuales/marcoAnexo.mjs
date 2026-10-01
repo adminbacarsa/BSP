@@ -3,13 +3,13 @@ import {
   AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
   DRIVE_ROOT_EVENTUALES_DEFAULT, MARCO_VERSION, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
 } from './marcoAnexoConst.mjs';
-import { clausulasMarco, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco } from './marcoTexto.mjs';
+import { clausulasMarco, datosTrabajador, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco } from './marcoTexto.mjs';
 export { pdfAnexo, pdfMarco, pdfMarcosLote } from './marcoPdf.mjs';
 
 export {
   AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
   DRIVE_ROOT_EVENTUALES_DEFAULT, MARCO_VERSION, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
-  clausulasMarco, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco,
+  clausulasMarco, datosTrabajador, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco,
 };
 
 export function sha256(value) {

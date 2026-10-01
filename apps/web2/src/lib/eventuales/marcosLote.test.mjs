@@ -128,7 +128,7 @@ describe('marcos en lote', () => {
 
   it('el PDF trae dos ejemplares por persona, hoja de firmas con QR y CUIL impreso', async () => {
     const personas = [
-      { cuil: ana, nombre: 'PEREZ, ANA', dni: '11111111', domicilio: 'Calle 1' },
+      { cuil: ana, nombre: 'PEREZ, ANA', dni: '11111111', domicilio: 'Calle 1', telefono: '3515550000', mail: 'ana@ejemplo.com' },
       { cuil: luis, nombre: 'LOPEZ, LUIS', dni: '22222222', domicilio: 'Calle 2' },
     ];
     const empresa = { id: 'bacarsa', nombre: 'Bacar S.A.', cuit: '30-11111111-1', domicilio: 'Córdoba' };
@@ -151,6 +151,8 @@ describe('marcos en lote', () => {
     assert.ok(texto.includes('CUIL 20-22222222-8'));
     assert.equal((texto.match(/Ejemplar 1 de 2/g) || []).length, 2);
     assert.equal((texto.match(/Ejemplar 2 de 2/g) || []).length, 2);
+    assert.match(texto, /teléfono\s+3515550000/);
+    assert.match(texto, /ana@ejemplo\.com/);
     assert.ok(texto.includes('Por el EMPLEADOR'));
     assert.ok(texto.includes('El TRABAJADOR'));
     const q = streamQr({ size: 2, data: [1, 0, 0, 1] }, 10, 20, 3);

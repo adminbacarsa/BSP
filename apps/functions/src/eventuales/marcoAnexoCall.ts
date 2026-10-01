@@ -31,6 +31,9 @@ export async function exigirRrhh(context: functions.https.CallableContext) {
 export async function lib() {
   return import('../eventuales-shared/marcoAnexo.mjs') as Promise<{
     textoMarco: (i: Record<string, string>) => string;
+    datosTrabajador: (bolsa: Record<string, unknown>, cuil?: string) => {
+      trabajadorNombre: string; trabajadorDni: string; trabajadorCuil: string; trabajadorDomicilio: string; telefono: string; mail: string;
+    };
     textoAnexo: (i: Record<string, unknown>) => string;
     textoConstancia: (i: Record<string, unknown>) => string;
     pdfMarco: (i: Record<string, unknown>) => Promise<{ bytes: Buffer; paginas: number }>;
@@ -195,14 +198,14 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
     const personas = [];
     for (const id of cuils) {
       const bolsa = (await db().collection('eventuales_bolsa').doc(id).get()).data() || {};
-      const domicilio = [bolsa.domicilio, bolsa.localidad].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+      const trab = m.datosTrabajador(bolsa, id);
       personas.push({
-        cuil: id,
-        nombre: String(bolsa.nombre || ''),
-        dni: String(bolsa.dni || ''),
-        domicilio,
-        telefono: String(bolsa.telefono || ''),
-        mail: String(bolsa.mail || ''),
+        cuil: trab.trabajadorCuil || id,
+        nombre: trab.trabajadorNombre,
+        dni: trab.trabajadorDni,
+        domicilio: trab.trabajadorDomicilio,
+        telefono: trab.telefono,
+        mail: trab.mail,
       });
     }
     const out = await m.pdfMarcosLote({
@@ -277,18 +280,14 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   }
 
   if (accion === 'generar') {
-    const domicilioTrab = [bolsa.domicilio, bolsa.localidad].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+    const trab = m.datosTrabajador(bolsa, cuil);
     const pdf = (await m.pdfMarco({
       empresaId,
       empresaNombre: String(empresa.name || empresa.razonSocial || empresa.nombre || empresaId),
       empresaCuit: String(empresa.cuit || ''),
       empresaDomicilio: String(empresa.direccion || empresa.domicilio || ''),
-      trabajadorNombre: nombre,
-      trabajadorDni: String(bolsa.dni || ''),
-      trabajadorCuil: cuil,
-      trabajadorDomicilio: domicilioTrab,
-      telefono: String(bolsa.telefono || ''),
-      mail: String(bolsa.mail || ''),
+      ...trab,
+      trabajadorNombre: trab.trabajadorNombre || nombre,
       fecha: String(data?.fecha || new Date().toISOString().slice(0, 10)),
     })).bytes;
     const hash = m.sha256(pdf);

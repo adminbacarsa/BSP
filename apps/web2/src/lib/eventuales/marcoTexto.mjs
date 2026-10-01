@@ -30,6 +30,27 @@ function dato(value, vacio = '—') {
   return s || vacio;
 }
 
+/** CUIT y CUIL de 11 dígitos como XX-XXXXXXXX-X. Si no cierra, se deja el texto. */
+function idFiscal(value) {
+  const d = String(value ?? '').replace(/\D/g, '');
+  if (d.length !== 11) return dato(value);
+  return `${d.slice(0, 2)}-${d.slice(2, 10)}-${d.slice(10)}`;
+}
+
+/** Teléfono y mail de la bolsa, más el resto que el marco imprime del trabajador. */
+export function datosTrabajador(bolsa, cuil) {
+  const b = bolsa || {};
+  const domicilio = [b.domicilio, b.localidad].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+  return {
+    trabajadorNombre: String(b.nombre || '').trim(),
+    trabajadorDni: String(b.dni || '').trim(),
+    trabajadorCuil: String(cuil || b.cuil || '').replace(/\D/g, ''),
+    trabajadorDomicilio: domicilio,
+    telefono: String(b.telefono || '').trim(),
+    mail: String(b.mail || '').trim(),
+  };
+}
+
 /** ISO o dd/mm/aaaa → «1 de octubre de 2026». Si no se puede leer, se deja el texto. */
 export function fechaLarga(raw) {
   const s = String(raw ?? '').trim();
@@ -78,7 +99,7 @@ export function encabezadoMarco({
   fecha, empresaNombre, empresaCuit, empresaDomicilio,
   trabajadorNombre, trabajadorDni, trabajadorCuil, trabajadorDomicilio, telefono, mail,
 }) {
-  return `En la ciudad de Córdoba, a los ${fechaLarga(fecha)}, entre ${dato(empresaNombre, 'LA EMPRESA')}, CUIT ${dato(empresaCuit)}, con domicilio en ${dato(empresaDomicilio)}, en adelante «el EMPLEADOR»; y ${dato(trabajadorNombre, 'EL TRABAJADOR')}, DNI ${dato(trabajadorDni)}, CUIL ${dato(trabajadorCuil)}, con domicilio en ${dato(trabajadorDomicilio)}, teléfono ${dato(telefono)} y correo electrónico ${dato(mail)}, en adelante «el TRABAJADOR»; se celebra el presente contrato marco de trabajo eventual, sujeto a las siguientes cláusulas y condiciones:`;
+  return `En la ciudad de Córdoba, a los ${fechaLarga(fecha)}, entre ${dato(empresaNombre, 'LA EMPRESA')}, CUIT ${idFiscal(empresaCuit)}, con domicilio en ${dato(empresaDomicilio)}, en adelante «el EMPLEADOR»; y ${dato(trabajadorNombre, 'EL TRABAJADOR')}, DNI ${dato(trabajadorDni)}, CUIL ${idFiscal(trabajadorCuil)}, con domicilio en ${dato(trabajadorDomicilio)}, teléfono ${dato(telefono)} y correo electrónico ${dato(mail)}, en adelante «el TRABAJADOR»; se celebra el presente contrato marco de trabajo eventual, sujeto a las siguientes cláusulas y condiciones:`;
 }
 
 export function textoMarco(input = {}) {
@@ -111,7 +132,7 @@ export function modeloAnexo(input = {}) {
   const baja = fechaCorta(input.fechaBaja || fechas[fechas.length - 1]);
   const numero = dato(input.numero);
   const bloques = [
-    { titulo: 'Partes:', cuerpo: `${dato(input.empresaNombre, 'LA EMPRESA')}, CUIT ${dato(input.empresaCuit)} (EMPLEADOR), y ${dato(input.trabajadorNombre, 'EL TRABAJADOR')}, DNI ${dato(input.trabajadorDni)}, CUIL ${dato(input.trabajadorCuil)} (TRABAJADOR).` },
+    { titulo: 'Partes:', cuerpo: `${dato(input.empresaNombre, 'LA EMPRESA')}, CUIT ${idFiscal(input.empresaCuit)} (EMPLEADOR), y ${dato(input.trabajadorNombre, 'EL TRABAJADOR')}, DNI ${dato(input.trabajadorDni)}, CUIL ${idFiscal(input.trabajadorCuil)} (TRABAJADOR).` },
     { titulo: 'Contrato marco de referencia:', cuerpo: `firmado el ${fechaCorta(input.marcoFecha)}, vigente hasta el ${fechaCorta(input.marcoVencimiento)}.` },
     { titulo: 'Causa de la eventualidad:', cuerpo: `${dato(input.causa)}.` },
     { titulo: 'Lugar de prestación:', cuerpo: `${dato(input.lugar)}.` },
@@ -154,7 +175,7 @@ export function textoConstancia({
   const verificado = codigoVerificado ? 'verificado' : 'no verificado';
   return [
     `Documento: Anexo N.º ${dato(numero)} al contrato marco del ${fechaCorta(marcoFecha)}`,
-    `Trabajador: ${dato(trabajadorNombre)} · CUIL ${dato(cuil)}`,
+    `Trabajador: ${dato(trabajadorNombre)} · CUIL ${idFiscal(cuil)}`,
     `Usuario de la app: ${dato(mail || uid)} (cuenta EVENTUAL)`,
     `Convocatoria enviada: ${dato(convocatoriaEnviada)}`,
     `Aceptación: ${dato(fechaHora)} (hora del servidor)`,
