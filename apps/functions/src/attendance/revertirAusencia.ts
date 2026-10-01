@@ -75,8 +75,9 @@ export async function revertirAusenciaShift(
       gapStartMs: startMs,
       excludeShiftIds: [shiftId],
       excludeEmployeeId: String(shift.employeeId || ''),
-      absenceShiftId: shiftId,
-      incoming: shift,
+      // Ya no es ausente: releva como una fichada (FIFO, al que más tiempo lleva en el puesto,
+      // aunque la retención lo haya vinculado a otra ausencia de la misma franja).
+      incoming: { ...shift, isAbsent: false, status: 'PRESENT', isPresent: true, checkInTime: now, realStartTime: now },
     });
     if (pick) {
       const realEndMs = Math.max(startMs, nowMs);

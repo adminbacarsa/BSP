@@ -84,5 +84,35 @@ const cupo = core.keepsNextBandSlot(nuevo, [viejo, nuevo], 1) && !core.keepsNext
   && core.keepsNextBandSlot(viejo, [viejo, nuevo], 2);
 report('cupo', cupo, 'M×2 → T×1: se queda el de menos tiempo; con 2 lugares quedan los dos');
 
+// FIFO (Peaje 9 Norte, Puesto 2, 01/10): M×2 11:30–15:15, T×2 15:15. El primer T que ficha releva al M que más tiempo lleva.
+const p2 = 'Puesto 2';
+const fin = Date.parse('2026-10-01T15:15:00-03:00');
+const ini = Date.parse('2026-10-01T11:30:00-03:00');
+const ferrero = { id: 'ferrero', employeeId: 'e_ferrero', code: 'M', positionName: p2, startMs: ini, endMs: fin, checkInMs: Date.parse('2026-10-01T11:38:00-03:00'), isPresent: true };
+const bosio = { id: 'bosio', employeeId: 'e_bosio', code: 'M', positionName: p2, startMs: ini, endMs: fin, checkInMs: Date.parse('2026-10-01T12:05:00-03:00'), isPresent: true };
+const lopez = { id: 'lopez', employeeId: 'e_lopez', code: 'T', positionName: p2, startMs: fin, endMs: fin + 8 * 3600 * 1000 };
+const brizuela = { id: 'brizuela', employeeId: 'e_brizuela', code: 'T', positionName: p2, startMs: fin, endMs: fin + 8 * 3600 * 1000 };
+const lopezFicha = { ...lopez, checkInMs: Date.parse('2026-10-01T15:21:00-03:00'), isPresent: true };
+const brizuelaFicha = { ...brizuela, checkInMs: Date.parse('2026-10-01T15:25:00-03:00'), isPresent: true };
+for (const [tag, lib] of [['ops-core', core], ['functions', fn]]) {
+  const outs = lib.sortOutgoingsFifo([bosio, ferrero]).map((r) => r.id).join(',');
+  const ins = lib.sortIncomingsFifo([brizuela, lopezFicha]).map((r) => r.id).join(',');
+  const pares = lib.pairReliefs([bosio, ferrero], [lopezFicha, brizuela]).map((p) => `${p.outgoing.id}←${p.incoming?.id}`).join(' ');
+  const primero = lib.outgoingFor(lopezFicha, [bosio, ferrero, brizuela], { peers: [bosio, ferrero, brizuela] });
+  const segundo = lib.outgoingFor(brizuelaFicha, [{ ...ferrero, relievedBy: 'e_lopez' }, bosio, lopezFicha], { peers: [{ ...ferrero, relievedBy: 'e_lopez' }, bosio, lopezFicha] });
+  const invertido = lib.outgoingFor(brizuelaFicha, [bosio, ferrero, lopez], { peers: [bosio, ferrero, lopez] });
+  const tarjeta = lib.relieverFor(bosio, [lopezFicha, brizuela], { peers: [ferrero] });
+  const ok = outs === 'ferrero,bosio' && ins === 'lopez,brizuela' && pares === 'ferrero←lopez bosio←brizuela'
+    && primero?.id === 'ferrero' && segundo?.id === 'bosio' && invertido?.id === 'ferrero' && tarjeta?.id === 'brizuela';
+  report(`fifo-${tag}`, ok, `outs=${outs} ins=${ins} pares=${pares} 1º ${primero?.id} 2º ${segundo?.id} BRIZUELA primero→${invertido?.id} tarjeta BOSIO←${tarjeta?.id}`);
+
+  // Ausente: el hueco se lo queda el saliente que sobra (el más nuevo), el que ficha releva al más antiguo.
+  const lopezAa = { ...lopez, isAbsent: true, status: 'ABSENT' };
+  const soloAa = lib.outgoingFor(lopezAa, [ferrero, bosio]);
+  const mixto = lib.pairReliefs([ferrero, bosio], [lopezAa, brizuelaFicha]).map((p) => `${p.outgoing.id}←${p.incoming?.id}`).join(' ');
+  const okAa = soloAa?.id === 'bosio' && mixto === 'ferrero←brizuela bosio←lopez';
+  report(`fifo-ausente-${tag}`, okAa, `T ausente retiene a ${soloAa?.id}; con BRIZUELA fichada: ${mixto}`);
+}
+
 const failed = results.filter((r) => !r.ok).length;
 if (failed) process.exitCode = 1;

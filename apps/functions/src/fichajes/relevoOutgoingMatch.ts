@@ -96,7 +96,8 @@ export async function findPresentOutgoingAlignedToGapStart(
       if (Math.abs(en - gapStartMs) > RELEVO_GAP_ALIGN_MS) return false;
       return true;
     })
-    .sort((a, b) => checkInMs(b.data) - checkInMs(a.data));
+    // FIFO: el que más tiempo lleva en el puesto primero (`outgoingFor` aplica el mismo orden).
+    .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
 
   const absenceShiftId = String(params.absenceShiftId || '').trim();
   const incoming: Record<string, unknown> = {

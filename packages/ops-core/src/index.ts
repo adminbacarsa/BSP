@@ -49,8 +49,13 @@ export {
   relieverFor,
   outgoingFor,
   keepsNextBandSlot,
+  workStartMsOf,
+  sortOutgoingsFifo,
+  sortIncomingsFifo,
+  isAbsentIncoming,
+  pairReliefs,
 } from './shiftSeries';
-export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts } from './shiftSeries';
+export type { SeriesShift, SeriesHandoffKind, SeriesPickOpts, ReliefPair, ReliefPairKind } from './shiftSeries';
 export {
   CONVOCADO_ETA_SPEED_KMH,
   CONVOCADO_ETA_WAIT_MIN,
