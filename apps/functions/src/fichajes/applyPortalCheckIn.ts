@@ -39,8 +39,11 @@ export async function processPortalCheckIn(
   }
 
   const recordedMs = recordedAt ? new Date(recordedAt).getTime() : Date.now();
+  const empSnap = empId ? await db.collection('empleados').doc(empId).get() : null;
+  const fichadaRemota = empSnap?.data()?.fichadaRemota === true;
   const windowEval = evaluateServerCheckInWindow(shiftData as Record<string, unknown>, recordedMs, {
     source: 'PORTAL_GPS',
+    fichadaRemota,
   });
   if (!windowEval.allowed) {
     throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');
@@ -89,6 +92,7 @@ export async function processPortalCheckIn(
       coords: coords || null,
       recordedAt: recordedAt || null,
       source: source === 'OPERATIONS' ? 'OPERATIONS' : 'PORTAL_GPS',
+      fichadaRemota,
     });
 
     await fichajeRef.update({
