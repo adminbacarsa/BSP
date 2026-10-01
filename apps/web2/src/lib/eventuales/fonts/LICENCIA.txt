@@ -1,0 +1,2 @@
+Tinos (Regular y Bold), Copyright 2012 The Tinos Project Authors.
+Licencia Apache 2.0. https://github.com/google/fonts/tree/main/ofl/tinos

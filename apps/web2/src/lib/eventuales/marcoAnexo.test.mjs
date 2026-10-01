@@ -4,9 +4,22 @@ import { evaluarCandidato } from './planificacion.mjs';
 import {
   canalCodigo, CUENTA_DRIVE_EVENTUALES, destinoGuardado, DRIVE_ROOT_EVENTUALES_DEFAULT, hashCodigo,
   MENSAJE_SIN_CANAL, mensajeEnvioCodigo,
-  MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, pdfDeTexto, planCarpetaEventuales, planConfirmarAnexo, planMarco,
+  MOTIVO_SIN_MARCO, nombreArchivo, nombreCarpetaPersona, planCarpetaEventuales, planConfirmarAnexo, planMarco,
   planRenombre, sha256, textoMarco,
 } from './marcoAnexo.mjs';
+import { pdfAnexo, pdfMarco } from './marcoPdf.mjs';
+
+async function extraerPdf(buf) {
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const doc = await pdfjs.getDocument({ data: new Uint8Array(buf), disableWorker: true, isEvalSupported: false }).promise;
+  const partes = [];
+  for (let i = 1; i <= doc.numPages; i += 1) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    partes.push(content.items.map((item) => item.str).join(' '));
+  }
+  return partes.join('\n');
+}
 
 const hoy = '2026-10-01';
 const bolsa = {
@@ -41,16 +54,60 @@ describe('contrato marco y anexo', () => {
     assert.equal(vencido.motivo, MOTIVO_SIN_MARCO);
   });
 
-  it('el PDF del marco trae la cláusula del anexo y se guarda con hash', () => {
-    const texto = textoMarco({
-      empresaNombre: 'BACAR S.A.', trabajadorNombre: 'PEREZ, JUAN', trabajadorDni: '30111222', fecha: '01/10/2026',
-    });
-    assert.match(texto, /arts\. 99 y 100/);
-    assert.match(texto, /CCT 422\/05/);
+  it('el PDF del marco trae las 12 cláusulas, con acentos, y los datos de las partes', async () => {
+    const datos = {
+      empresaId: 'nandu',
+      empresaNombre: 'Transporte del Ñandú S.A.',
+      empresaCuit: '30-66813497-8',
+      empresaDomicilio: 'Santiago del Estero 263, Córdoba',
+      trabajadorNombre: 'PÉREZ, Juan',
+      trabajadorDni: '30123456',
+      trabajadorCuil: '20301234567',
+      trabajadorDomicilio: 'Calle Ñuñoa 12',
+      telefono: '3515550000',
+      mail: 'juan@ejemplo.com',
+      fecha: '2026-10-01',
+    };
+    const texto = textoMarco(datos);
+    for (const titulo of ['PRIMERA – Naturaleza.', 'SEGUNDA – Causa.', 'TERCERA – Jornadas.', 'CUARTA – Remuneración.', 'QUINTA – Obligaciones.', 'SEXTA – Instrucciones.', 'SÉPTIMA – Normas internas.', 'OCTAVA – Registración.', 'NOVENA – Anexos por convocatoria.', 'DÉCIMA – Medios digitales.', 'UNDÉCIMA – Vigencia.', 'DUODÉCIMA – Domicilios y jurisdicción.']) {
+      assert.ok(texto.includes(titulo), titulo);
+    }
+    assert.match(texto, /arts\. 99, 100/);
     assert.match(texto, /conformidad expresa/);
-    const pdf = pdfDeTexto(texto);
-    assert.equal(pdf.subarray(0, 8).toString(), '%PDF-1.4');
-    assert.equal(sha256(pdf).length, 64);
+    assert.match(texto, /Transporte del Ñandú S\.A\./);
+    assert.match(texto, /Calle Ñuñoa 12/);
+    assert.match(texto, /3515550000/);
+    const pdf = await pdfMarco(datos);
+    assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
+    assert.equal(sha256(pdf.bytes).length, 64);
+    const extraido = await extraerPdf(pdf.bytes);
+    assert.match(extraido, /Ñandú/);
+    assert.match(extraido, /Ñuñoa/);
+    assert.match(extraido, /jurisdicción/);
+    assert.match(extraido, /PÉREZ/);
+    assert.match(extraido, /DUODÉCIMA/);
+    assert.match(extraido, /30-66813497-8/);
+    assert.match(extraido, /Plantilla marco v/);
+    const anexo = await pdfAnexo({
+      numero: '000123',
+      empresaNombre: 'Transporte del Ñandú S.A.',
+      empresaCuit: '30-66813497-8',
+      trabajadorNombre: 'PÉREZ, Juan',
+      trabajadorDni: '30123456',
+      trabajadorCuil: '20301234567',
+      marcoFecha: '2026-10-01',
+      marcoVencimiento: '2027-10-01',
+      causa: 'evento extraordinario',
+      lugar: 'Estadio Mario A. Kempes, Av. Cárcano s/n',
+      jornadas: [{ fecha: '2026-10-10', horaInicio: '21:00', horaFin: '03:00', horas: 6, observacion: '6 h nocturnas' }],
+      bruto: '$ 120.000',
+      constancia: { numero: '000123', marcoFecha: '2026-10-01', trabajadorNombre: 'PÉREZ, Juan', cuil: '20301234567', hashAnexo: 'abc123', codigoVerificado: true, fechaHora: '2026-10-08T20:45:03.000Z' },
+    });
+    const anexoTexto = await extraerPdf(anexo.bytes);
+    assert.match(anexoTexto, /ANEXO N/);
+    assert.match(anexoTexto, /Cárcano/);
+    assert.match(anexoTexto, /CONSTANCIA DE ACEPTACIÓN ELECTRÓNICA/);
+    assert.match(anexoTexto, /Modalidad\s+012/);
     assert.equal(DRIVE_ROOT_EVENTUALES_DEFAULT, '1zjzDGcAbavPaJJS5jObA0syu1SsDCakq');
     assert.equal(CUENTA_DRIVE_EVENTUALES, 'comtroldata@appspot.gserviceaccount.com');
     assert.equal(nombreCarpetaPersona({ cuil: '20999999991', nombre: 'PEREZ, JUAN' }), '20999999991 - PEREZ, JUAN');

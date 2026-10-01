@@ -1,8 +1,6 @@
 import { useMemo, useState } from 'react';
-import { doc, getDoc } from 'firebase/firestore';
 import { FileCheck2, Printer, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { db } from '@/lib/firebase';
 import { MARCO_VERSION } from '@/lib/eventuales/marcoAnexoConst.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 import {
@@ -87,17 +85,12 @@ export default function MarcosLotePanel({ empresaId, nombreEmpresa, fichas, sele
     if (!elegidas.length) { toast.info('No hay marcos pendientes en esa empresa.'); return; }
     setImprimiendo(true);
     try {
-      const snap = await getDoc(doc(db, 'empresas', empresaId));
-      const e = snap.data() || {};
-      const { pdfMarcosLote } = await import('@/lib/eventuales/marcosLotePdf.mjs');
-      const out = pdfMarcosLote({
-        empresa: { id: empresaId, nombre: String(e.name || e.razonSocial || e.nombre || nombreEmpresa || empresaId), cuit: String(e.cuit || ''), domicilio: String(e.direccion || e.domicilio || '') },
-        personas: elegidas.map((f) => ({ cuil: f.id, nombre: f.nombre, dni: f.dni, domicilio: f.domicilio })),
-        fecha: hoy(),
-        marcoVersion: MARCO_VERSION,
-      }) as { bytes: Uint8Array; paginas: number };
-      descargar(out.bytes, `Marcos-${(nombreEmpresa || 'empresa').replace(/[^\wÁÉÍÓÚáéíóúÑñ]+/g, '-')}-${hoy()}.pdf`);
-      toast.success(`${elegidas.length} marco${elegidas.length === 1 ? '' : 's'} × 2 ejemplares · ${out.paginas} hojas.`);
+      const res = await llamar('gestionarMarcoEventual', { accion: 'imprimirLote', empresaId, cuils: elegidas.map((f) => f.id) }) as { pdfBase64?: string; paginas?: number };
+      const bin = atob(String(res.pdfBase64 || ''));
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+      descargar(bytes, `Marcos-${(nombreEmpresa || 'empresa').replace(/[^\wÁÉÍÓÚáéíóúÑñ]+/g, '-')}-${hoy()}.pdf`);
+      toast.success(`${elegidas.length} marco${elegidas.length === 1 ? '' : 's'} × 2 ejemplares · ${res.paginas || ''} hojas.`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'No se pudo armar el PDF.');
     } finally {

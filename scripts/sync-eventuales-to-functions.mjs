@@ -41,10 +41,22 @@ function contenidoProhibido(name, text) {
   return malos.filter((ruta) => !permitidos.some((re) => re.test(ruta)));
 }
 
+function copiarFuentes(dest) {
+  const fonts = path.join(srcDir, 'fonts');
+  if (!fs.existsSync(fonts)) return;
+  const out = path.join(dest, 'fonts');
+  fs.mkdirSync(out, { recursive: true });
+  for (const name of fs.readdirSync(fonts)) {
+    if (!name.endsWith('.ttf')) continue;
+    fs.copyFileSync(path.join(fonts, name), path.join(out, name));
+  }
+}
+
 function sincronizar(dest) {
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(dest, { recursive: true });
   const nombres = listarModulosCompartidos();
+  copiarFuentes(dest);
   for (const name of nombres) {
     const text = fs.readFileSync(path.join(srcDir, name), 'utf8');
     const malos = contenidoProhibido(name, text);

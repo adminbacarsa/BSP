@@ -3,42 +3,17 @@ import {
   AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
   DRIVE_ROOT_EVENTUALES_DEFAULT, MARCO_VERSION, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
 } from './marcoAnexoConst.mjs';
-import { clausulasMarco, marcoDeBolsa, planMarco, textoMarco } from './marcoTexto.mjs';
+import { clausulasMarco, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco } from './marcoTexto.mjs';
+export { pdfAnexo, pdfMarco, pdfMarcosLote } from './marcoPdf.mjs';
 
 export {
   AVISO_MARCO_DIAS, CARPETA_EVENTUALES, CODIGO_ANEXO_MINUTOS, CUENTA_DRIVE_EVENTUALES,
   DRIVE_ROOT_EVENTUALES_DEFAULT, MARCO_VERSION, MOTIVO_SIN_MARCO, VIGENCIA_MARCO_DIAS,
-  clausulasMarco, marcoDeBolsa, planMarco, textoMarco,
+  clausulasMarco, marcoDeBolsa, planMarco, textoAnexo, textoConstancia, textoMarco,
 };
 
 export function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
-}
-
-export function textoAnexo({ marcoFecha, causa, jornadas, lugar, bruto, empresaNombre }) {
-  const filas = (jornadas || []).map((j) => `${j.fecha} ${j.horaInicio}–${j.horaFin} (${j.horas} h)`).join('\n');
-  return [
-    'ANEXO POR CONVOCATORIA',
-    `Referencia: contrato marco de ${empresaNombre || 'la empresa'} firmado el ${marcoFecha || '—'}.`,
-    `Causa: ${causa || '—'}`,
-    `Lugar: ${lugar || '—'}`,
-    'Jornadas:',
-    filas || '—',
-    `Remuneración bruta de esta convocatoria, según escala CCT 422/05 vigente: ${bruto == null ? 'a liquidar' : bruto}`,
-  ].join('\n');
-}
-
-export function textoConstancia({ uid, codigoVerificado, fechaHora, hashAnexo, dispositivo, ip, ubicacion }) {
-  return [
-    'CONSTANCIA DE ACEPTACIÓN',
-    `Usuario: ${uid || '—'}`,
-    `Código verificado: ${codigoVerificado ? 'sí' : 'no'}`,
-    `Fecha y hora del servidor: ${fechaHora || '—'}`,
-    `Hash SHA-256 del anexo: ${hashAnexo || '—'}`,
-    `Dispositivo: ${dispositivo || '—'}`,
-    `IP: ${ip || '—'}`,
-    `Ubicación: ${ubicacion || 'no informada'}`,
-  ].join('\n');
 }
 
 function pdfEscape(text) {

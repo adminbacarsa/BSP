@@ -5,7 +5,8 @@ import {
   agruparPaginas, asignarHoja, cuilDeNombreArchivo, formatearCuil, MOTIVOS_SIN_ASIGNAR, parsearQrMarco,
   payloadQrMarco, pendientesDeMarco, resumenLote,
 } from './marcosLote.mjs';
-import { matrizQr, paginasDeTexto, pdfMarcosLote, streamQr } from './marcosLotePdf.mjs';
+import { matrizQr, streamQr } from './marcosLotePdf.mjs';
+import { pdfMarcosLote } from './marcoPdf.mjs';
 import { MARCO_VERSION } from './marcoAnexoConst.mjs';
 
 const requireFunctions = createRequire(new URL('../../../../functions/package.json', import.meta.url));
@@ -125,31 +126,36 @@ describe('marcos en lote', () => {
     assert.deepEqual(pendientesDeMarco({ fichas, empresaId: 'bacarsa', hoy: '2026-10-01' }).map((f) => f.id), [ana, luis]);
   });
 
-  it('el PDF trae dos ejemplares por persona, hoja de firmas con QR y CUIL impreso', () => {
+  it('el PDF trae dos ejemplares por persona, hoja de firmas con QR y CUIL impreso', async () => {
     const personas = [
       { cuil: ana, nombre: 'PEREZ, ANA', dni: '11111111', domicilio: 'Calle 1' },
       { cuil: luis, nombre: 'LOPEZ, LUIS', dni: '22222222', domicilio: 'Calle 2' },
     ];
     const empresa = { id: 'bacarsa', nombre: 'Bacar S.A.', cuit: '30-11111111-1', domicilio: 'Córdoba' };
-    const out = pdfMarcosLote({ empresa, personas, fecha: '2026-10-01' });
-    const texto = Buffer.from(out.bytes).toString('latin1');
-    const paginasTexto = paginasDeTexto('x').length;
-    assert.ok(paginasTexto >= 1);
+    const out = await pdfMarcosLote({ empresa, personas, fecha: '2026-10-01' });
     assert.equal(out.hojasQr.length, personas.length * 2);
     assert.equal(out.hojasQr.filter((h) => h.cuil === ana).map((h) => h.ejemplar).join(','), '1,2');
-    assert.equal(out.paginas, (texto.match(/\/Type \/Page\b/g) || []).length);
-    assert.ok(texto.startsWith('%PDF-1.4'));
-    assert.ok(texto.includes(`/Count ${out.paginas}`));
+    assert.ok(out.bytes.subarray(0, 5).toString() === '%PDF-');
+    assert.equal(out.hojasQr.every((h) => parsearQrMarco(h.payload).bolsaCuil === h.cuil), true);
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const doc = await pdfjs.getDocument({ data: new Uint8Array(out.bytes), disableWorker: true, isEvalSupported: false }).promise;
+    assert.equal(doc.numPages, out.paginas);
+    const trozos = [];
+    for (let i = 1; i <= doc.numPages; i += 1) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      trozos.push(content.items.map((item) => item.str).join(' '));
+    }
+    const texto = trozos.join('\n');
     assert.ok(texto.includes('CUIL 20-11111111-9'));
     assert.ok(texto.includes('CUIL 20-22222222-8'));
     assert.equal((texto.match(/Ejemplar 1 de 2/g) || []).length, 2);
     assert.equal((texto.match(/Ejemplar 2 de 2/g) || []).length, 2);
-    assert.ok(texto.includes('HOJA DE FIRMAS'));
-    assert.ok((texto.match(/ re f/g) || []).length > 400, 'módulos del QR dibujados como rectángulos');
-    assert.equal(out.hojasQr.every((h) => parsearQrMarco(h.payload).bolsaCuil === h.cuil), true);
+    assert.ok(texto.includes('Por el EMPLEADOR'));
+    assert.ok(texto.includes('El TRABAJADOR'));
     const q = streamQr({ size: 2, data: [1, 0, 0, 1] }, 10, 20, 3);
     assert.equal(q, 'q 0 g\n10 23 3 3 re f\n13 20 3 3 re f\nQ');
-    const vacio = pdfMarcosLote({ empresa, personas: [] });
+    const vacio = await pdfMarcosLote({ empresa, personas: [] });
     assert.equal(vacio.paginas, 1);
   });
 });

@@ -33,6 +33,9 @@ export async function lib() {
     textoMarco: (i: Record<string, string>) => string;
     textoAnexo: (i: Record<string, unknown>) => string;
     textoConstancia: (i: Record<string, unknown>) => string;
+    pdfMarco: (i: Record<string, unknown>) => Promise<{ bytes: Buffer; paginas: number }>;
+    pdfAnexo: (i: Record<string, unknown>) => Promise<{ bytes: Buffer; paginas: number }>;
+    pdfMarcosLote: (i: Record<string, unknown>) => Promise<{ bytes: Buffer; paginas: number }>;
     pdfDeTexto: (t: string) => Buffer;
     sha256: (v: Buffer | string) => string;
     planMarco: (i: Record<string, unknown>) => { estado: string; vencimiento: string | null; avisar: boolean };
@@ -182,6 +185,39 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
     }
     return { driveRootFolderId: rootId };
   }
+
+  if (accion === 'imprimirLote') {
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const crudos: unknown[] = Array.isArray(data?.cuils) ? data.cuils : [];
+    const cuils = [...new Set(crudos.map((c) => String(c || '').replace(/\D/g, '')).filter((c) => c.length === 11))].slice(0, 60);
+    if (!cuils.length) throw new functions.https.HttpsError('invalid-argument', 'No hay personas para imprimir.');
+    const empresaDoc = (await db().collection('empresas').doc(empresaId).get()).data() || {};
+    const personas = [];
+    for (const id of cuils) {
+      const bolsa = (await db().collection('eventuales_bolsa').doc(id).get()).data() || {};
+      const domicilio = [bolsa.domicilio, bolsa.localidad].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+      personas.push({
+        cuil: id,
+        nombre: String(bolsa.nombre || ''),
+        dni: String(bolsa.dni || ''),
+        domicilio,
+        telefono: String(bolsa.telefono || ''),
+        mail: String(bolsa.mail || ''),
+      });
+    }
+    const out = await m.pdfMarcosLote({
+      empresa: {
+        id: empresaId,
+        nombre: String(empresaDoc.name || empresaDoc.razonSocial || empresaDoc.nombre || empresaId),
+        cuit: String(empresaDoc.cuit || ''),
+        domicilio: String(empresaDoc.direccion || empresaDoc.domicilio || ''),
+      },
+      personas,
+      fecha: String(data?.fecha || new Date().toISOString().slice(0, 10)),
+    });
+    return { ok: true, paginas: out.paginas, pdfBase64: out.bytes.toString('base64') };
+  }
+
   if (!cuil) throw new functions.https.HttpsError('invalid-argument', 'Falta el CUIL.');
 
   if (accion === 'listar') {
@@ -241,16 +277,20 @@ export const gestionarMarcoEventual = callable.onCall(async (data, context) => {
   }
 
   if (accion === 'generar') {
-    const texto = m.textoMarco({
+    const domicilioTrab = [bolsa.domicilio, bolsa.localidad].map((v) => String(v || '').trim()).filter(Boolean).join(', ');
+    const pdf = (await m.pdfMarco({
+      empresaId,
       empresaNombre: String(empresa.name || empresa.razonSocial || empresa.nombre || empresaId),
       empresaCuit: String(empresa.cuit || ''),
-      empresaDomicilio: String(empresa.domicilio || ''),
+      empresaDomicilio: String(empresa.direccion || empresa.domicilio || ''),
       trabajadorNombre: nombre,
       trabajadorDni: String(bolsa.dni || ''),
-      trabajadorDomicilio: String(bolsa.domicilio || ''),
+      trabajadorCuil: cuil,
+      trabajadorDomicilio: domicilioTrab,
+      telefono: String(bolsa.telefono || ''),
+      mail: String(bolsa.mail || ''),
       fecha: String(data?.fecha || new Date().toISOString().slice(0, 10)),
-    });
-    const pdf = m.pdfDeTexto(texto);
+    })).bytes;
     const hash = m.sha256(pdf);
     const nombreArchivo = m.nombreArchivo({ tipo: 'MARCO', fecha: new Date().toISOString().slice(0, 10), empresa: empresaNombre });
     const guardado = await guardarPdf(cuil, bolsa, nombreArchivo, pdf);
@@ -391,21 +431,45 @@ export const confirmarAnexoEventual = callable.onCall(async (data, context) => {
   const empresaId = String(contrato.empresaId || data?.empresaId || '');
   const marco = (bolsa.marcos || {})[empresaId] || {};
   const lugar = String(data?.lugar || contrato.lugar || contrato.objectiveName || 'convocatoria');
-  const anexoTexto = m.textoAnexo({
-    marcoFecha: marco.fechaFirma, causa: contrato.causa || data?.causa, jornadas: contrato.jornadas || data?.jornadas || [],
-    lugar, bruto: contrato.brutoEstimado ?? data?.bruto, empresaNombre: empresaId,
-  });
   const ahora = new Date().toISOString();
   const fecha = ahora.slice(0, 10);
   const empresaDoc = empresaId ? (await db().collection('empresas').doc(empresaId).get()).data() || {} : {};
   const empresaNombre = String(empresaDoc.name || empresaDoc.razonSocial || empresaDoc.nombre || empresaId || 'Empresa');
-  const borrador = m.pdfDeTexto(anexoTexto);
-  const hashAnexo = m.sha256(borrador);
-  const constancia = m.textoConstancia({
-    uid: context.auth.uid, codigoVerificado: true, fechaHora: ahora, hashAnexo,
-    dispositivo: data?.dispositivo, ip: context.rawRequest?.ip, ubicacion: data?.ubicacion,
-  });
-  const anexoPdf = m.pdfDeTexto(`${anexoTexto}\n\n${constancia}`);
+  const jornadas = (contrato.jornadas || data?.jornadas || []) as { fecha?: string }[];
+  const planMarco = m.planMarco({ firmado: marco.firmado === true, fechaFirma: marco.fechaFirma, vigenciaDias: marco.vigenciaDias, hoy: fecha });
+  const datosAnexo = {
+    numero: String(contrato.numero || ref.id || '').slice(0, 24),
+    empresaNombre,
+    empresaCuit: String(empresaDoc.cuit || ''),
+    trabajadorNombre: String(bolsa.nombre || ''),
+    trabajadorDni: String(bolsa.dni || ''),
+    trabajadorCuil: cuil,
+    marcoFecha: marco.fechaFirma,
+    marcoVencimiento: planMarco.vencimiento,
+    causa: contrato.causa || data?.causa,
+    lugar,
+    jornadas,
+    bruto: contrato.brutoEstimado ?? data?.bruto,
+  };
+  const anexoTexto = m.textoAnexo(datosAnexo);
+  const hashAnexo = m.sha256(anexoTexto);
+  const anexoPdf = (await m.pdfAnexo({
+    ...datosAnexo,
+    constancia: {
+      numero: datosAnexo.numero,
+      marcoFecha: marco.fechaFirma,
+      trabajadorNombre: datosAnexo.trabajadorNombre,
+      cuil,
+      mail: String(bolsa.mail || ''),
+      uid: context.auth.uid,
+      fechaHora: ahora,
+      codigoVerificado: true,
+      dispositivo: data?.dispositivo,
+      ip: context.rawRequest?.ip,
+      ubicacion: data?.ubicacion,
+      hashAnexo,
+    },
+  })).bytes;
   const nombreAnexo = m.nombreArchivo({ tipo: 'ANEXO', fecha, lugar, empresa: empresaNombre });
   const anexoGuardado = await guardarPdf(cuil, bolsa, nombreAnexo, anexoPdf);
   await registrarDoc(cuil, empresaId, 'ANEXO', nombreAnexo, hashAnexo, anexoGuardado);
