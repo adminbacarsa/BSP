@@ -1,11 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, Bell, CalendarClock, Clock, Hourglass, MapPin, MoreHorizontal, Phone, Radio, Search, ShieldAlert, User, UserCheck, UserX, X,
+  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageCircle, MoreHorizontal, Phone, Radio, Search, ShieldAlert, User, UserCheck, UserX, X,
   type LucideIcon,
 } from 'lucide-react';
-import { MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilStat, MovilTopBar, toneForGuard, toneForPct, type MovilTone } from './ui';
+import { MOVIL_PILL, MOVIL_RING, MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct, type MovilTone } from './ui';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
+import { guardCompacto, type GuardEstadoCompacto } from '@/lib/movil/guardCompacto';
+import { normalizeArgPhone } from '@/lib/whatsapp';
 import { MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
 import { accionesParaTurno, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
 
@@ -97,6 +99,7 @@ export function GuardAccionesSheetBody({
           {!shift.isUnassigned && (
             <div className="mt-1 flex gap-2">
               <LlamarButton telefono={telefono} />
+              <WhatsAppButton telefono={telefono} />
             </div>
           )}
         </>
@@ -372,6 +375,29 @@ export function LlamarButton({ telefono, compact = false }: { telefono: string |
   );
 }
 
+/** Botón WhatsApp (wa.me) con el teléfono del legajo normalizado a +549. */
+export function WhatsAppButton({ telefono }: { telefono: string | null }) {
+  const numero = telefono ? normalizeArgPhone(telefono) : '';
+  const cls = numero
+    ? 'border-emerald-200 bg-emerald-600 text-white'
+    : 'border-slate-200 bg-slate-50 text-slate-400';
+  return (
+    <a
+      href={numero ? `https://wa.me/${numero}` : undefined}
+      target={numero ? '_blank' : undefined}
+      rel={numero ? 'noopener noreferrer' : undefined}
+      aria-disabled={numero ? undefined : 'true'}
+      aria-label={numero ? `WhatsApp a ${telefono}` : 'Sin teléfono en el legajo'}
+      data-movil-whatsapp={numero ? '1' : '0'}
+      className={`flex min-h-12 flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 text-[11px] font-black shadow-sm ${cls}`}
+      onClick={numero ? undefined : (event) => event.preventDefault()}
+    >
+      <MessageCircle size={16} strokeWidth={2.2} aria-hidden="true" />
+      WhatsApp
+    </a>
+  );
+}
+
 /**
  * Detalle compacto del guardia: horario planificado + código, puesto y objetivo,
  * ingreso real o estado con minutos, relevo, convocatoria/cobertura.
@@ -399,16 +425,64 @@ export function GuardDetalleLines({ shift, siblings = [], now, showObjective = t
   );
 }
 
+/** Barra de color del borde izquierdo de la tarjeta compacta, por estado. */
+const BAR_CLS: Record<string, string> = {
+  ok: 'bg-emerald-500',
+  ret: 'bg-orange-500',
+  aus: 'bg-slate-500',
+  late: 'bg-amber-500',
+  vac: 'bg-rose-500',
+  plan: 'bg-indigo-400',
+};
+
+/** Ícono del chip de estado (fila 1, derecha). */
+const ESTADO_ICON: Record<GuardEstadoCompacto, LucideIcon> = {
+  activo: Clock,
+  retenido: Hourglass,
+  tarde: Clock,
+  ausente: UserX,
+  cubierto: UserCheck,
+  vacante: AlertTriangle,
+  plan: CalendarClock,
+};
+
+/** Ítem de la fila 2: ícono lucide + texto corto. */
+function MiniItem({ icon: Icon, children, className = '', attr }: { icon: LucideIcon; children: ReactNode; className?: string; attr?: string }) {
+  return (
+    <span className={`flex shrink-0 items-center gap-0.5 ${className}`} data-movil-mini={attr}>
+      <Icon size={11} strokeWidth={2.4} aria-hidden="true" />
+      {children}
+    </span>
+  );
+}
+
+/** Teléfono: ícono solo (36 px). Sin teléfono queda deshabilitado. */
+function LlamarIcon({ telefono }: { telefono: string | null }) {
+  return (
+    <a
+      href={telefono ? `tel:${telefono.replace(/[^\d+]/g, '')}` : undefined}
+      aria-disabled={telefono ? undefined : 'true'}
+      aria-label={telefono ? `Llamar a ${telefono}` : 'Sin teléfono en el legajo'}
+      data-movil-llamar={telefono ? '1' : '0'}
+      onClick={(event) => { event.stopPropagation(); if (!telefono) event.preventDefault(); }}
+      className={`my-auto mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${telefono ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-300'}`}
+    >
+      <Phone size={15} strokeWidth={2.2} aria-hidden="true" />
+    </a>
+  );
+}
+
+/**
+ * Tarjeta compacta del guardia (2 filas, ~56 px): fila 1 nombre + código + chip de estado;
+ * fila 2 íconos (puesto, horario, ingreso, tope, relevo). Tocar la tarjeta abre la hoja de
+ * acciones; el detalle largo (retención, relevo, cobertura) vive en la hoja.
+ */
 export function GuardCard({
   shift,
   siblings = [],
   now,
   readOnly = false,
-  onLlego,
-  onRevertir,
-  onSalida,
   onProtocolo,
-  onRetencion,
   onAcciones,
 }: {
   shift: GuardShift;
@@ -416,50 +490,53 @@ export function GuardCard({
   siblings?: readonly GuardShift[];
   now?: number;
   readOnly?: boolean;
-  onLlego: (shift: GuardShift) => void;
-  onRevertir: (shift: GuardShift) => void;
-  onSalida: (shift: GuardShift) => void;
-  onProtocolo: (shift: GuardShift) => void;
-  onRetencion: (shift: GuardShift) => void;
-  /** Abre la hoja de acciones del turno (ingreso, salida, ausente, llegó, liberar, protocolo). */
+  onLlego?: (shift: GuardShift) => void;
+  onRevertir?: (shift: GuardShift) => void;
+  onSalida?: (shift: GuardShift) => void;
+  onProtocolo?: (shift: GuardShift) => void;
+  onRetencion?: (shift: GuardShift) => void;
+  /** Abre la hoja de acciones del turno (ingreso, salida, ausente, llegó, liberar, protocolo, llamar). */
   onAcciones?: (shift: GuardShift) => void;
 }) {
-  const tone = guardTone(shift);
-  const visual = toneForGuard(tone);
-  const telefono = String(shift.phone || '').trim() || null;
-  const nombre = shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre';
+  const c = guardCompacto(shift, siblings, now ?? Date.now());
+  const visual = toneForGuard(c.tone);
+  const EstadoIcon = ESTADO_ICON[c.estado.kind];
+  const abrir = readOnly ? null : (onAcciones ?? onProtocolo ?? null);
+  const Fila = abrir ? 'button' : 'div';
   return (
-    <MovilCard
-      className="mb-2"
-      ring={tone === 'vac' ? 'rose' : null}
-      attrs={{ 'data-movil-tone': tone }}
+    <article
+      className={`mb-1.5 flex items-stretch overflow-hidden rounded-2xl border bg-white shadow-sm ${c.tone === 'vac' ? 'border-rose-200' : 'border-slate-100'}`}
+      data-movil-tone={c.tone}
+      data-movil-card="compacta"
     >
-      <div className="flex items-start gap-2.5">
-        <MovilIconBox icon={shift.isUnassigned ? ShieldAlert : User} tone={visual} size="md" />
-        <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-1.5">
-            <strong className={`truncate text-[15px] leading-tight ${shift.isUnassigned ? 'text-rose-700' : 'text-slate-900'}`}>{nombre}</strong>
-            <MovilBadge tone={visual} className="ml-auto">{guardStatusLabel(shift)}</MovilBadge>
-            <span className="shrink-0 rounded-lg bg-slate-900 px-1.5 py-0.5 text-[11px] font-black text-white">{shift.code || '—'}</span>
-          </div>
-          <GuardDetalleLines shift={shift} siblings={siblings} now={now} showObjective={false} />
-        </div>
-      </div>
-      <div className="mt-2.5 flex gap-1.5">
-        {!shift.isUnassigned && <LlamarButton telefono={telefono} compact={!readOnly} />}
-        {!readOnly && (
-          <>
-            {tone === 'aus' && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
-            {tone === 'aus' && <BigButton label="Revertir" onClick={() => onRevertir(shift)} />}
-            {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
-            {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
-            {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
-            {(tone === 'plan' || tone === 'late') && onAcciones && <BigButton label="Ingreso" tone="go" onClick={() => onAcciones(shift)} />}
-            <MovilIconButton icon={MoreHorizontal} label="Más acciones" attrs={{ 'data-movil-mas-acciones': shift.id }} onClick={() => (onAcciones ? onAcciones(shift) : onProtocolo(shift))} />
-          </>
-        )}
-      </div>
-    </MovilCard>
+      <span aria-hidden="true" className={`w-1 shrink-0 ${BAR_CLS[c.tone]}`} />
+      <Fila
+        {...(abrir ? { type: 'button' as const, onClick: () => abrir(shift), 'aria-label': `Acciones de ${c.nombre}` } : {})}
+        data-movil-tap={abrir ? shift.id : undefined}
+        className={`flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 text-left ${abrir ? 'active:bg-slate-50' : ''}`}
+      >
+        <span className="flex items-center gap-1.5">
+          <strong className={`truncate text-[13px] leading-5 ${c.esVacante ? 'text-rose-700' : 'text-slate-900'}`}>{c.nombre}</strong>
+          <span className="shrink-0 rounded-md bg-slate-900 px-1 text-[10px] font-black leading-4 text-white">{c.code}</span>
+          <span className={`ml-auto flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[10px] font-black leading-4 tabular-nums ${MOVIL_PILL[visual]}`} data-movil-estado={c.estado.kind}>
+            <EstadoIcon size={11} strokeWidth={2.4} aria-hidden="true" />
+            {c.estado.texto}
+          </span>
+        </span>
+        <span className="flex items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] font-bold leading-4 tabular-nums text-slate-500" data-movil-detalle={shift.id}>
+          <MiniItem icon={MapPin} attr="puesto">{c.puesto}</MiniItem>
+          <MiniItem icon={Clock} attr="horario">{c.horario}</MiniItem>
+          {c.ingreso && (
+            <MiniItem icon={LogIn} attr="ingreso" className={c.ingreso.tardeMin > 0 ? 'text-amber-700' : 'text-emerald-700'}>
+              {c.ingreso.hhmm}{c.ingreso.tardeMin > 0 ? ` +${c.ingreso.tardeMin}′` : ''}
+            </MiniItem>
+          )}
+          {c.tope && <MiniItem icon={Hourglass} attr="tope" className="text-orange-700">{c.tope}</MiniItem>}
+          {c.relevo && <MiniItem icon={ArrowRightLeft} attr="relevo" className="text-slate-600">{c.relevo.apellido} {c.relevo.hhmm}</MiniItem>}
+        </span>
+      </Fila>
+      {!c.esVacante && <LlamarIcon telefono={c.telefono} />}
+    </article>
   );
 }
 
@@ -575,7 +652,15 @@ export function OperacionScreens({
           <MovilHeader icon={Radio} title="Centro de Control" subtitle={online ? `${movilFechaCorta(nowMs)} · ${modeLabel}` : movilFechaCorta(nowMs)} className="mb-3" />
         )}
         {panel === 'objetivo' && (
-          <MovilHeader icon={MapPin} title={objective?.name || 'Objetivo'} subtitle={objective?.client || moduloLabel} onBack={onBack} className="mb-3" />
+          <div className="mb-2 flex min-h-9 items-center gap-1.5" data-movil-objetivo-header="fino">
+            <button type="button" onClick={onBack} aria-label="Volver" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white text-slate-700 shadow-sm active:scale-95">
+              <ArrowLeft size={16} strokeWidth={2.4} aria-hidden="true" />
+            </button>
+            <MapPin size={13} className="shrink-0 text-indigo-600" aria-hidden="true" />
+            <h2 className="truncate text-[13px] font-black uppercase tracking-wide text-slate-900">{objective?.name || 'Objetivo'}</h2>
+            {objective?.client && <span className="hidden min-[360px]:inline truncate text-[10px] font-bold text-slate-400">· {objective.client}</span>}
+            <span className="ml-auto shrink-0 rounded-full bg-slate-900 px-2 text-[10px] font-black leading-5 text-white tabular-nums">{objective?.shifts.length ?? 0}</span>
+          </div>
         )}
         {panel === 'alertas' && (
           <MovilHeader
@@ -615,22 +700,28 @@ export function OperacionScreens({
                 )}
               </div>
             )}
-            <div className="mb-3 grid grid-cols-3 gap-1.5" role="group" aria-label="Filtrar por estado">
+            <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Filtrar por estado" data-movil-contadores="fila">
               {counters.map((item) => {
                 const activo = filtro.estado === item.id;
                 const ui = CONTADOR_UI[item.id];
+                const Icon = ui.icon;
                 return (
-                  <MovilStat
+                  <button
                     key={item.id}
-                    compact
-                    icon={ui.icon}
-                    tone={ui.tone}
-                    label={item.label}
-                    value={item.value}
-                    active={activo}
+                    type="button"
                     onClick={() => onCounter(item.id)}
-                    attrs={{ 'data-movil-contador': item.id, 'data-movil-filtro-activo': activo ? '1' : undefined }}
-                  />
+                    aria-pressed={activo}
+                    aria-label={`${item.label}: ${item.value}`}
+                    data-movil-contador={item.id}
+                    data-movil-filtro-activo={activo ? '1' : undefined}
+                    className={`flex h-9 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[11px] font-black tabular-nums shadow-sm active:scale-95 ${activo ? `border-transparent ring-2 ${MOVIL_RING[ui.tone]} text-slate-900` : 'border-slate-100 bg-white text-slate-600'}`}
+                  >
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full ${MOVIL_PILL[ui.tone]}`}>
+                      <Icon size={13} strokeWidth={2.4} aria-hidden="true" />
+                    </span>
+                    <span className="text-[10px] uppercase tracking-wide text-slate-500">{item.corto}</span>
+                    <b className="text-[13px]">{item.value}</b>
+                  </button>
                 );
               })}
             </div>
