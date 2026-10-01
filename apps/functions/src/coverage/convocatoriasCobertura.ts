@@ -85,9 +85,10 @@ const TIMEOUT_MINUTES = 3;
 
 // ─── Helper: crear notificación interna (dispara FCM via trigger) ─────────────
 
-async function crearNotifConvocatoria(
+export async function crearNotifConvocatoria(
   db: admin.firestore.Firestore,
   conv: ConvocatoriaCoberturaDoc & { id: string },
+  override?: { body?: string },
 ) {
   const tz = 'America/Argentina/Buenos_Aires';
   const startDate =
@@ -115,11 +116,13 @@ async function crearNotifConvocatoria(
   const name = guardFirstName({ employeeName: conv.candidateEmployeeName });
   const title = isLlegadaTarde ? '¿Venís?' : '¿Nos das una mano?';
   const rango = horaFin ? `${horaInicio} a ${horaFin}` : horaInicio;
-  const body = isLlegadaTarde
-    ? venisBody(codigo, lugar, horaInicio, name)
-    : name
-      ? `${name}, ¿nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`
-      : `¿Nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`;
+  const body = override?.body
+    ? override.body
+    : isLlegadaTarde
+      ? venisBody(codigo, lugar, horaInicio, name)
+      : name
+        ? `${name}, ¿nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`
+        : `¿Nos das una mano? Necesitamos cubrir ${lugar || lugarTxt} de ${rango}.`;
 
   await db.collection('user_notifications').add({
     uid: conv.candidateUid || null,
@@ -1670,7 +1673,15 @@ export async function crearConvocatoriaLlegadaTarde(
     employeeName: string;
     employeeUid?: string;
   },
-): Promise<void> {
+  opts?: {
+    /** Texto del push (el aviso manual del CC: «Te esperan en …, ¿venís?»). */
+    body?: string;
+    /** `AUTO` (cron) o uid del operador que lo manda a mano. */
+    createdBy?: string;
+    /** Si ya hay una LLEGADA_TARDE pendiente, vuelve a mandar el push en vez de no hacer nada. */
+    resendIfPending?: boolean;
+  },
+): Promise<{ convocatoriaId: string; resent: boolean } | null> {
   // Idempotencia: no crear segunda convocatoria LLEGADA_TARDE para el mismo turno
   const existing = await db.collection('convocatorias_cobertura')
     .where('shiftId', '==', shift.id)
@@ -1678,7 +1689,20 @@ export async function crearConvocatoriaLlegadaTarde(
     .where('status', 'in', ['PENDING', 'ESCALATED'])
     .limit(1)
     .get();
-  if (!existing.empty) return;
+  if (!existing.empty) {
+    if (!opts?.resendIfPending) return null;
+    const prev = existing.docs[0];
+    const prevData = prev.data() as ConvocatoriaCoberturaDoc;
+    await crearNotifConvocatoria(db, { ...prevData, id: prev.id }, { body: opts.body });
+    await logConvocatoriaEvento(db, prev.id, {
+      type: 'PUSH',
+      at: Timestamp.now(),
+      origin: 'CC',
+      createdBy: opts.createdBy || 'AUTO',
+      reason: 'AVISO_MANUAL_CC',
+    }).catch(() => {});
+    return { convocatoriaId: prev.id, resent: true };
+  }
 
   const now = Timestamp.now();
   const timeoutAt = Timestamp.fromMillis(now.toMillis() + TIMEOUT_MINUTES * 60 * 1000);
@@ -1705,12 +1729,13 @@ export async function crearConvocatoriaLlegadaTarde(
     status: 'PENDING',
     timeoutAt,
     createdAt: now,
-    createdBy: 'AUTO',
+    createdBy: opts?.createdBy || 'AUTO',
   };
 
   await convRef.set(convData);
-  await crearNotifConvocatoria(db, { ...convData, id: convRef.id });
+  await crearNotifConvocatoria(db, { ...convData, id: convRef.id }, { body: opts?.body });
   console.log(`[crearConvocatoriaLlegadaTarde] Enviada a ${shift.employeeName} para turno ${shift.id}`);
+  return { convocatoriaId: convRef.id, resent: false };
 }
 
 export const responderRecordatorioConvocado = functions.https.onCall(async (data, context) => {

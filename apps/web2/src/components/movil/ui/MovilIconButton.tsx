@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 
-/** Botón de ícono en cuadrado redondeado slate-50 (los del encabezado del escritorio). */
+/** Botón de ícono: blanco con borde gris, ícono en gris oscuro (en color solo si es estado). Sin sombra. */
 export function MovilIconButton({
   icon: Icon,
   label,
@@ -19,13 +19,11 @@ export function MovilIconButton({
   attrs?: Record<string, string | undefined>;
   className?: string;
 }) {
-  const cls = tone === 'indigo'
-    ? 'bg-indigo-50 text-indigo-700 border-indigo-100'
-    : tone === 'emerald'
-      ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-      : tone === 'rose'
-        ? 'bg-rose-50 text-rose-700 border-rose-100'
-        : 'bg-slate-50 text-slate-600 border-slate-100';
+  const cls = tone === 'emerald'
+    ? 'text-emerald-600'
+    : tone === 'rose'
+      ? 'text-rose-600'
+      : 'text-slate-700';
   return (
     <button
       type="button"
@@ -34,9 +32,9 @@ export function MovilIconButton({
       disabled={disabled}
       onClick={onClick}
       {...attrs}
-      className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl border shadow-sm transition-colors active:scale-95 disabled:opacity-40 ${cls} ${className}`}
+      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-slate-300 bg-white active:bg-slate-50 disabled:opacity-40 ${cls} ${className}`}
     >
-      <Icon size={18} strokeWidth={2.2} />
+      <Icon size={18} strokeWidth={1.75} />
     </button>
   );
 }

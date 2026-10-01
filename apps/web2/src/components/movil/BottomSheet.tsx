@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
+import { MOVIL_BORDER, MOVIL_FONT } from './ui/tones';
 
 export function BottomSheet({
   open,
@@ -26,12 +27,12 @@ export function BottomSheet({
       <div
         role="dialog"
         aria-label={title}
-        className="absolute inset-x-0 bottom-0 max-h-[78vh] overflow-y-auto rounded-t-3xl bg-white shadow-lg border border-slate-200 px-4 pt-3 pb-6"
+        className={`absolute inset-x-0 bottom-0 max-h-[78vh] overflow-y-auto rounded-t-lg border-t ${MOVIL_BORDER} bg-white px-4 pt-3 pb-6 ${MOVIL_FONT}`}
       >
-        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-300" />
+        <div className="mx-auto mb-3 h-1 w-10 rounded bg-slate-300" />
         <div className="mb-3 flex items-center justify-between gap-3">
-          <h2 className="text-base font-black text-slate-900">{title}</h2>
-          <button type="button" onClick={onClose} className="min-h-11 rounded-xl px-3 text-sm font-bold text-slate-500">
+          <h2 className="text-[15px] font-semibold text-slate-900">{title}</h2>
+          <button type="button" onClick={onClose} className="min-h-10 rounded-lg border border-slate-300 bg-white px-3 text-sm font-medium text-slate-700 active:bg-slate-50">
             Cerrar
           </button>
         </div>

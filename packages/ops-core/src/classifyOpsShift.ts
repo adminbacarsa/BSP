@@ -60,6 +60,7 @@ export type ClassifyOpsShiftResult = {
   minutesRemainingLate: number | null;
   lateArrivalEtaMinutes: number | null;
   lateArrivalEtaLabel: string | null;
+  lateArrivalRespondedLabel: string | null;
   isImminent: boolean;
   isFuture: boolean;
   countsForCoverage: boolean;
@@ -235,6 +236,7 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     minutesRemainingLate,
     lateArrivalEtaMinutes,
     lateArrivalEtaLabel,
+    lateArrivalRespondedLabel,
   } = lateMonitor;
   const vacancyAtMs = startMs > 0 ? startMs + 60 * 60_000 : 0;
   const absenceBy = String(shift.absenceDetectedBy || '').toUpperCase();
@@ -316,6 +318,7 @@ export function classifyOpsShift(input: ClassifyOpsShiftInput): ClassifyOpsShift
     minutesRemainingLate,
     lateArrivalEtaMinutes,
     lateArrivalEtaLabel,
+    lateArrivalRespondedLabel,
     isImminent,
     isFuture,
     countsForCoverage,

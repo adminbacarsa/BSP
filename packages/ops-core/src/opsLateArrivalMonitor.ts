@@ -18,6 +18,8 @@ export type OpsLateArrivalMonitorState = {
   minutesRemainingLate: number | null;
   lateArrivalEtaMinutes: number | null;
   lateArrivalEtaLabel: string | null;
+  /** HH:MM (AR) en que el guardia respondió el ¿Venís? o avisó desde el portal. */
+  lateArrivalRespondedLabel: string | null;
 };
 
 function toMs(v: unknown): number {
@@ -95,6 +97,7 @@ export function computeOpsLateArrivalMonitorState(
     minutesRemainingLate: null,
     lateArrivalEtaMinutes: null,
     lateArrivalEtaLabel: null,
+    lateArrivalRespondedLabel: null,
   };
   if (!input.eligible || input.startMs <= 0) return empty;
 
@@ -122,6 +125,9 @@ export function computeOpsLateArrivalMonitorState(
 
   const lateArrivalEtaLabel =
     isLateNotified && etaAtMs > 0 ? formatLateEtaLabelAR(etaAtMs) : null;
+  const respondedMs = lateArrivalRespondedAtMs(shift);
+  const lateArrivalRespondedLabel =
+    isLateNotified && respondedMs > 0 ? formatLateEtaLabelAR(respondedMs) : null;
 
   return {
     isLateNotified,
@@ -130,7 +136,13 @@ export function computeOpsLateArrivalMonitorState(
     minutesRemainingLate,
     lateArrivalEtaMinutes: isLateNotified ? etaMinutes : null,
     lateArrivalEtaLabel,
+    lateArrivalRespondedLabel,
   };
+}
+
+/** Instante de la respuesta del guardia: ¿Venís? (`lateArrivalConfirmedAt`) o aviso del portal (`lateArrivalAt`). */
+export function lateArrivalRespondedAtMs(shift: Record<string, unknown>): number {
+  return toMs(shift.lateArrivalConfirmedAt) || toMs(shift.lateArrivalAt);
 }
 
 export function opsLateArrivalBadgeLabel(shift: {
@@ -139,16 +151,18 @@ export function opsLateArrivalBadgeLabel(shift: {
   lateArrivalEtaLabel?: string | null;
   lateArrivalEtaMinutes?: number | null;
   minutesRemainingLate?: number | null;
+  lateArrivalRespondedLabel?: string | null;
 }): string | null {
   if (shift.isLateNotified) {
     const eta = shift.lateArrivalEtaLabel ? ` · llega ~${shift.lateArrivalEtaLabel}` : '';
     const delay =
       shift.lateArrivalEtaMinutes != null ? ` (+${shift.lateArrivalEtaMinutes}m)` : '';
+    const responded = shift.lateArrivalRespondedLabel ? ` · respondió ${shift.lateArrivalRespondedLabel}` : '';
     const remain =
       shift.minutesRemainingLate != null && shift.minutesRemainingLate > 0
         ? ` · ${shift.minutesRemainingLate}min`
         : '';
-    return `TARDE AVISADA${delay}${eta}${remain}`;
+    return `TARDE AVISADA${delay}${eta}${responded}${remain}`;
   }
   if (shift.isLateUnnotified) return 'TARDE SIN AVISO';
   return null;

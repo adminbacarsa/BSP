@@ -1,27 +1,38 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import {
-  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageCircle, MoreHorizontal, Phone, Radio, Search, ShieldAlert, User, UserCheck, UserX, X,
+  AlertTriangle, ArrowLeft, ArrowRightLeft, Bell, CalendarClock, Clock, Hourglass, LogIn, MapPin, MessageSquare, MoreHorizontal, Phone, Radio, Search, ShieldAlert, StickyNote, Timer, User, UserCheck, UserX, X,
   type LucideIcon,
 } from 'lucide-react';
-import { MOVIL_PILL, MOVIL_RING, MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct, type MovilTone } from './ui';
+import {
+  MOVIL_BORDER, MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_FONT, MOVIL_PRIMARY_BG, MOVIL_TEXT,
+  MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct, type MovilTone,
+} from './ui';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { guardCompacto, type GuardEstadoCompacto } from '@/lib/movil/guardCompacto';
-import { normalizeArgPhone } from '@/lib/whatsapp';
 import { MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
-import { accionesParaTurno, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
+import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
+import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
+import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
 
+/**
+ * Botones de la hoja de acciones: primario = color de la empresa (negro por defecto),
+ * el resto blancos con borde y el texto en el color del estado.
+ */
 const ACCION_CLS: Record<GuardAccion['tone'], string> = {
-  go: 'bg-emerald-600 text-white',
-  pri: 'bg-indigo-600 text-white',
-  warn: 'border border-orange-200 bg-orange-50 text-orange-800',
-  danger: 'border border-rose-200 bg-rose-50 text-rose-800',
-  neutral: 'border border-slate-200 bg-white text-slate-800',
+  go: `${MOVIL_BTN_SECONDARY} !text-emerald-700`,
+  pri: MOVIL_BTN_PRIMARY,
+  warn: `${MOVIL_BTN_SECONDARY} !text-orange-700`,
+  danger: `${MOVIL_BTN_SECONDARY} !text-rose-700`,
+  neutral: MOVIL_BTN_SECONDARY,
 };
+
+const BTN = 'min-h-12 rounded-lg text-sm font-semibold disabled:opacity-50 active:bg-slate-50';
 
 /**
  * Hoja inferior de la tarjeta: acciones que corresponden al estado del turno,
  * con confirmación dentro de la hoja. Mismas callables que el escritorio.
+ * Avisar por la app va primero; llamar es el último recurso.
  */
 export function GuardAccionesSheetBody({
   shift,
@@ -29,81 +40,191 @@ export function GuardAccionesSheetBody({
   now,
   onEjecutar,
   onCerrar,
+  onNota,
   confirmandoInicial = null,
 }: {
   shift: GuardShift;
   siblings?: readonly GuardShift[];
   now?: number;
-  onEjecutar: (id: GuardAccionId) => void | Promise<void>;
+  onEjecutar: (id: GuardAccionId, accion: GuardAccion) => void | Promise<void>;
   onCerrar: () => void;
+  /** Nota rápida del operador (se guarda en el turno y en la bitácora). */
+  onNota?: (texto: string) => void | Promise<void>;
   /** Tests: arrancar con una acción en confirmación. */
   confirmandoInicial?: GuardAccionId | null;
 }) {
   const nowMs = now ?? Date.now();
-  const acciones = accionesParaTurno(shift as never, nowMs);
+  const acciones = accionesParaTurno(shift as never, nowMs, siblings as never);
   const [confirmando, setConfirmando] = useState<GuardAccionId | null>(confirmandoInicial);
   const [ocupado, setOcupado] = useState(false);
+  const [nota, setNota] = useState('');
+  const [guardandoNota, setGuardandoNota] = useState(false);
   const telefono = String(shift.phone || '').trim() || null;
   const pendiente = acciones.find((a) => a.id === confirmando) || null;
+  const detalle = guardDetalle(shift, siblings, nowMs);
   const ejecutar = async (accion: GuardAccion) => {
     setOcupado(true);
     try {
-      await onEjecutar(accion.id);
+      await onEjecutar(accion.id, accion);
       onCerrar();
     } finally {
       setOcupado(false);
       setConfirmando(null);
     }
   };
+  const guardarNota = async () => {
+    const texto = nota.trim();
+    if (!texto || !onNota) return;
+    setGuardandoNota(true);
+    try {
+      await onNota(texto);
+      setNota('');
+    } finally {
+      setGuardandoNota(false);
+    }
+  };
+  const cooldownDe = (accion: GuardAccion): number => {
+    if (accion.id !== 'AVISAR_ENTRANTE' && accion.id !== 'AVISAR_RETENIDO') return 0;
+    const target = accion.targetShiftId === shift.id ? shift : siblings.find((s) => s.id === accion.targetShiftId) || null;
+    return target ? avisoManualRestanteSeg({ opsAvisoManualAt: target.opsAvisoManualAt }, nowMs) : 0;
+  };
+  const visual = toneForGuard(guardTone(shift));
   return (
     <div data-movil-sheet="acciones" data-movil-acciones-shift={shift.id}>
-      <div className="mb-3 rounded-2xl border border-slate-100 bg-slate-50 p-3">
+      <div className={`relative mb-3 ${MOVIL_CARD} p-3 pl-4`}>
+        <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${MOVIL_FILETE[visual]}`} />
         <div className="flex items-center gap-2">
-          <MovilIconBox icon={shift.isUnassigned ? ShieldAlert : User} tone={toneForGuard(guardTone(shift))} size="sm" />
-          <strong className={`truncate text-sm ${shift.isUnassigned ? 'text-rose-700' : 'text-slate-900'}`}>
+          <MovilIconBox icon={shift.isUnassigned ? ShieldAlert : User} tone={visual} size="sm" />
+          <strong className={`truncate text-sm font-semibold ${shift.isUnassigned ? 'text-rose-700' : 'text-slate-900'}`}>
             {shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre'}
           </strong>
-          <MovilBadge tone={toneForGuard(guardTone(shift))} className="ml-auto">{guardStatusLabel(shift)}</MovilBadge>
+          <MovilBadge tone={visual} className="ml-auto">{guardStatusLabel(shift)}</MovilBadge>
         </div>
         <GuardDetalleLines shift={shift} siblings={siblings} now={nowMs} />
       </div>
       {pendiente ? (
-        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3" data-movil-confirmar={pendiente.id}>
-          <p className="text-sm font-black text-slate-900">{pendiente.label}</p>
-          <p className="mt-1 text-[12px] font-semibold text-slate-700">{pendiente.confirm}</p>
+        <div className={`${MOVIL_CARD} p-3`} data-movil-confirmar={pendiente.id}>
+          <p className="text-sm font-semibold text-slate-900">{pendiente.label}</p>
+          <p className="mt-1 text-[12px] font-medium text-slate-700">{pendiente.confirm}</p>
           <div className="mt-3 flex gap-2">
-            <button type="button" disabled={ocupado} onClick={() => { void ejecutar(pendiente); }} className={`min-h-12 flex-1 rounded-2xl text-sm font-black ${ACCION_CLS[pendiente.tone]} disabled:opacity-50`} data-movil-confirmar-ok="1">
+            <button type="button" disabled={ocupado} onClick={() => { void ejecutar(pendiente); }} className={`${BTN} flex-1 ${MOVIL_BTN_PRIMARY}`} data-movil-confirmar-ok="1">
               {ocupado ? 'Enviando…' : 'Confirmar'}
             </button>
-            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black text-slate-700">Volver</button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className={`${BTN} flex-1 ${MOVIL_BTN_SECONDARY}`}>Volver</button>
           </div>
         </div>
       ) : (
         <>
-          {acciones.map((accion) => (
-            <button
-              key={accion.id}
-              type="button"
-              data-movil-accion={accion.id}
-              onClick={() => (accion.confirm ? setConfirmando(accion.id) : void ejecutar(accion))}
-              className={`mb-2 flex min-h-14 w-full items-center justify-between rounded-2xl px-3 text-left ${ACCION_CLS[accion.tone]}`}
-            >
-              <span>
-                <span className="block text-sm font-black">{accion.label}</span>
-                <span className="block text-[11px] font-semibold opacity-80">{accion.hint}</span>
-              </span>
-              <span aria-hidden="true" className="text-lg font-black">›</span>
-            </button>
-          ))}
-          {acciones.length === 0 && <p className="rounded-2xl bg-white p-3 text-sm font-semibold text-slate-500" data-movil-acciones-vacio="1">Sin acciones para este estado.</p>}
+          {acciones.map((accion, index) => {
+            const cooldown = cooldownDe(accion);
+            return (
+              <button
+                key={`${accion.id}-${accion.targetShiftId || index}`}
+                type="button"
+                data-movil-accion={accion.id}
+                data-movil-accion-target={accion.targetShiftId}
+                disabled={cooldown > 0}
+                onClick={() => (accion.confirm ? setConfirmando(accion.id) : void ejecutar(accion))}
+                className={`mb-2 flex min-h-14 w-full items-center justify-between rounded-lg px-3 text-left disabled:opacity-50 ${ACCION_CLS[accion.tone]}`}
+              >
+                <span className="min-w-0">
+                  <span className="block truncate text-sm font-semibold">{accion.label}</span>
+                  <span className="block truncate text-[11px] font-medium opacity-75" data-movil-accion-hint={accion.id}>
+                    {cooldown > 0 ? `Ya se le avisó · reintentá en ${Math.ceil(cooldown / 60)} min` : accion.hint}
+                  </span>
+                </span>
+                <span aria-hidden="true" className="ml-2 shrink-0 text-lg">›</span>
+              </button>
+            );
+          })}
+          {acciones.length === 0 && <p className={`${MOVIL_CARD} p-3 text-sm font-medium text-slate-500`} data-movil-acciones-vacio="1">Sin acciones para este estado.</p>}
+          {onNota && !shift.isUnassigned && (
+            <div className={`mt-1 ${MOVIL_CARD} p-3`} data-movil-nota="1">
+              <label className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-500" htmlFor={`nota-${shift.id}`}>
+                <StickyNote size={12} strokeWidth={1.75} aria-hidden="true" /> Nota rápida
+              </label>
+              {detalle.nota && <p className="mt-1 text-[12px] font-medium text-slate-700" data-movil-nota-actual="1">{detalle.nota}</p>}
+              <div className="mt-2 flex gap-2">
+                <input
+                  id={`nota-${shift.id}`}
+                  type="text"
+                  value={nota}
+                  maxLength={OPS_NOTA_MAX}
+                  onChange={(event) => setNota(event.target.value)}
+                  placeholder="Ej.: sin llaves del portón"
+                  data-movil-nota-input="1"
+                  className={`min-h-11 min-w-0 flex-1 rounded-lg border ${MOVIL_BORDER} bg-white px-3 text-sm text-slate-900 outline-none focus:border-[var(--movil-primary,#111827)]`}
+                />
+                <button type="button" disabled={guardandoNota || !nota.trim()} onClick={() => { void guardarNota(); }} className={`${BTN} px-3 ${MOVIL_BTN_PRIMARY}`} data-movil-nota-guardar="1">
+                  {guardandoNota ? '…' : 'Guardar'}
+                </button>
+              </div>
+              <p className="mt-1 text-[10px] font-medium text-slate-400">La ve el escritorio en la tarjeta y la bitácora, con tu nombre y la hora. Sin señal queda pendiente.</p>
+            </div>
+          )}
           {!shift.isUnassigned && (
-            <div className="mt-1 flex gap-2">
+            <div className="mt-3">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">Último recurso</p>
               <LlamarButton telefono={telefono} />
-              <WhatsAppButton telefono={telefono} />
             </div>
           )}
         </>
       )}
+    </div>
+  );
+}
+
+/** Hoja «Próximas 3 horas»: franjas que entran, confirmados / sin confirmar / sin nadie → Cubrir. */
+export function ProximasSheetBody({ franjas, readOnly = false, now, onCubrir, onAbrirObjetivo }: {
+  franjas: readonly ProximaFranja[];
+  readOnly?: boolean;
+  now?: number;
+  onCubrir?: (shift: GuardShift) => void;
+  onAbrirObjetivo?: (objectiveId: string) => void;
+}) {
+  void now;
+  const resumen = resumenProximas(franjas);
+  const ESTADO: Record<string, { cls: string; texto: string }> = {
+    CONFIRMADO: { cls: 'text-emerald-600', texto: 'confirmó' },
+    SIN_CONFIRMAR: { cls: 'text-amber-600', texto: 'sin confirmar' },
+    AUSENTE: { cls: 'text-rose-600', texto: 'ausente' },
+  };
+  return (
+    <div data-movil-sheet="proximas">
+      <p className="mb-2 text-[11px] font-medium text-slate-500" data-movil-proximas-resumen="1">{etiquetaProximas(resumen)}</p>
+      {franjas.map((f) => {
+        const tone: MovilTone = f.sinNadie ? 'rose' : f.sinConfirmar > 0 ? 'amber' : 'emerald';
+        return (
+          <article key={f.key} className={`relative mb-2 ${MOVIL_CARD} p-3 pl-4`} data-movil-franja={f.key} data-movil-franja-estado={f.sinNadie ? 'sin-nadie' : f.sinConfirmar > 0 ? 'sin-confirmar' : 'ok'}>
+            <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${MOVIL_FILETE[tone]}`} />
+            <div className="flex items-center gap-2">
+              <b className="text-[15px] font-semibold tabular-nums text-slate-900">{f.hora}</b>
+              {f.code && <span className="rounded border border-slate-300 px-1.5 text-[10px] font-bold leading-5 text-slate-700">{f.code}</span>}
+              <span className="ml-auto text-[11px] font-medium tabular-nums text-slate-500">en {f.enMin} min</span>
+            </div>
+            <button type="button" onClick={onAbrirObjetivo ? () => onAbrirObjetivo(f.objectiveId) : undefined} className="mt-0.5 block max-w-full truncate text-left text-[12px] font-medium text-slate-700">
+              {f.objetivo} · {f.puesto}
+            </button>
+            <ul className="mt-1.5 space-y-0.5">
+              {f.guardias.map((g) => (
+                <li key={g.shiftId} className="flex items-center justify-between gap-2 text-[12px]">
+                  <span className="truncate font-medium text-slate-800">{g.nombre}</span>
+                  <span className={`shrink-0 text-[11px] font-semibold tabular-nums ${ESTADO[g.estado].cls}`}>
+                    {ESTADO[g.estado].texto}{g.hora ? ` ${g.hora}` : ''}
+                  </span>
+                </li>
+              ))}
+              {f.guardias.length === 0 && <li className="text-[12px] font-semibold text-rose-600">Franja sin nadie asignado</li>}
+            </ul>
+            {f.sinNadie && !readOnly && f.cubrirShift && onCubrir && (
+              <button type="button" onClick={() => onCubrir(f.cubrirShift as GuardShift)} className={`${BTN} mt-2 w-full ${MOVIL_BTN_PRIMARY}`} data-movil-franja-cubrir={f.key}>
+                Cubrir · protocolo
+              </button>
+            )}
+          </article>
+        );
+      })}
+      {franjas.length === 0 && <p className={`${MOVIL_CARD} p-3 text-sm font-medium text-slate-500`} data-movil-proximas-vacio="1">No entra ninguna franja en las próximas 3 horas.</p>}
     </div>
   );
 }
@@ -140,76 +261,78 @@ export function SalaSheetBody(props: SalaSheetProps) {
     setOcupado(true);
     try { await fn(); } finally { setOcupado(false); setConfirmando(null); }
   };
-  const btn = 'mb-2 min-h-12 w-full rounded-2xl text-sm font-black disabled:opacity-50';
+  const btn = `mb-2 w-full ${BTN}`;
+  const estadoTone: MovilTone = props.pilotInactive ? 'rose' : 'emerald';
   return (
     <div data-movil-sheet="sala" data-movil-sala-rol={props.isPilot ? 'piloto' : props.inRoom ? 'copiloto' : 'fuera'}>
-      <div className={`mb-3 rounded-2xl border p-3 ${props.pilotInactive ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
+      <div className={`relative mb-3 ${MOVIL_CARD} p-3 pl-4`}>
+        <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${MOVIL_FILETE[estadoTone]}`} />
         <div className="flex items-center gap-2">
-          <MovilIconBox icon={Radio} tone={props.pilotInactive ? 'rose' : 'emerald'} size="sm" />
-          <p className={`text-[10px] font-black uppercase tracking-wide ${props.pilotInactive ? 'text-rose-800' : 'text-emerald-800'}`}>Modo {props.modeLabel}</p>
+          <MovilIconBox icon={Radio} tone={estadoTone} size="sm" />
+          <p className={`text-[10px] font-semibold uppercase tracking-wide ${MOVIL_TEXT[estadoTone]}`}>Modo {props.modeLabel}</p>
         </div>
-        <p className="mt-1 text-sm font-bold">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>
+        <p className="mt-1 text-sm font-semibold text-slate-900">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>
         {otroPiloto && props.pilotInactive && (
-          <p className="text-[12px] font-black text-rose-700" data-movil-piloto-inactivo="1">Sin actividad hace {props.pilotInactiveMin ?? 0} min · podés tomar el mando</p>
+          <p className="text-[12px] font-semibold text-rose-600" data-movil-piloto-inactivo="1">Sin actividad hace {props.pilotInactiveMin ?? 0} min · podés tomar el mando</p>
         )}
-        <p className="text-xs font-semibold text-slate-500">Apoyo: {props.apoyo || 'nadie'}</p>
+        <p className="text-xs font-medium text-slate-500">Apoyo: {props.apoyo || 'nadie'}</p>
       </div>
       {confirmando === 'AUTO' && (
-        <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-3" data-movil-confirmar="AUTO">
-          <p className="text-sm font-black text-slate-900">Pasar a Auto</p>
-          <p className="mt-1 text-[12px] font-semibold text-slate-700">Se cierra la sala para todos y el Centro de Control queda automático. ¿Confirmás?</p>
+        <div className={`mb-3 ${MOVIL_CARD} p-3`} data-movil-confirmar="AUTO">
+          <p className="text-sm font-semibold text-slate-900">Pasar a Auto</p>
+          <p className="mt-1 text-[12px] font-medium text-slate-700">Se cierra la sala para todos y el Centro de Control queda automático. ¿Confirmás?</p>
           <div className="mt-3 flex gap-2">
-            <button type="button" disabled={ocupado} onClick={() => { void run(props.onPasarAuto); }} className="min-h-12 flex-1 rounded-2xl bg-rose-600 text-sm font-black text-white disabled:opacity-50" data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, pasar a Auto'}</button>
-            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black">Volver</button>
+            <button type="button" disabled={ocupado} onClick={() => { void run(props.onPasarAuto); }} className={`${BTN} flex-1 ${MOVIL_BTN_SECONDARY} !text-rose-700`} data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, pasar a Auto'}</button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className={`${BTN} flex-1 ${MOVIL_BTN_SECONDARY}`}>Volver</button>
           </div>
         </div>
       )}
       {confirmando === 'TOMAR' && (
-        <div className="mb-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-3" data-movil-confirmar="TOMAR">
-          <p className="text-sm font-black text-slate-900">Tomar el mando</p>
-          <p className="mt-1 text-[12px] font-semibold text-slate-700">{props.pilotName || 'El piloto'} no da señales hace {props.pilotInactiveMin ?? 0} min. Tomás el mando desde este celular sin su aceptación; queda registrado en la bitácora (quién, dispositivo, motivo).</p>
+        <div className={`mb-3 ${MOVIL_CARD} p-3`} data-movil-confirmar="TOMAR">
+          <p className="text-sm font-semibold text-slate-900">Tomar el mando</p>
+          <p className="mt-1 text-[12px] font-medium text-slate-700">{props.pilotName || 'El piloto'} no da señales hace {props.pilotInactiveMin ?? 0} min. Tomás el mando desde este celular sin su aceptación; queda registrado en la bitácora (quién, dispositivo, motivo).</p>
           <div className="mt-3 flex gap-2">
-            <button type="button" disabled={ocupado} onClick={() => { void run(props.onTakeOver); }} className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white disabled:opacity-50" data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, tomar el mando'}</button>
-            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black">Volver</button>
+            <button type="button" disabled={ocupado} onClick={() => { void run(props.onTakeOver); }} className={`${BTN} flex-1 ${MOVIL_BTN_PRIMARY}`} data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, tomar el mando'}</button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className={`${BTN} flex-1 ${MOVIL_BTN_SECONDARY}`}>Volver</button>
           </div>
         </div>
       )}
       {!confirmando && (
         <>
           {props.isPilot && props.pendingPilotName && (
-            <div className="mb-3 rounded-2xl border border-indigo-200 p-3" data-movil-pedido-mando="1">
-              <p className="text-sm font-black">{props.pendingPilotName} pide el mando</p>
+            <div className={`mb-3 ${MOVIL_CARD} p-3`} data-movil-pedido-mando="1">
+              <p className="text-sm font-semibold text-slate-900">{props.pendingPilotName} pide el mando</p>
               <div className="mt-2 flex gap-2">
-                <button type="button" disabled={ocupado} className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white" onClick={() => { void run(props.onAcceptPilot); }}>Aceptar</button>
-                <button type="button" disabled={ocupado} className="min-h-12 flex-1 rounded-2xl bg-slate-100 text-sm font-black" onClick={() => { void run(props.onRejectPilot); }}>No</button>
+                <button type="button" disabled={ocupado} className={`${BTN} flex-1 ${MOVIL_BTN_PRIMARY}`} onClick={() => { void run(props.onAcceptPilot); }}>Aceptar</button>
+                <button type="button" disabled={ocupado} className={`${BTN} flex-1 ${MOVIL_BTN_SECONDARY}`} onClick={() => { void run(props.onRejectPilot); }}>No</button>
               </div>
             </div>
           )}
           {otroPiloto && props.pilotInactive && (
-            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR_INACTIVO" className={`${btn} bg-indigo-600 text-white`} onClick={() => setConfirmando('TOMAR')}>Tomar el mando ahora · piloto sin actividad</button>
+            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR_INACTIVO" className={`${btn} ${MOVIL_BTN_PRIMARY}`} onClick={() => setConfirmando('TOMAR')}>Tomar el mando ahora · piloto sin actividad</button>
           )}
           {otroPiloto && !props.pilotInactive && (
-            <button type="button" disabled={ocupado} data-movil-sala-accion="PEDIR" className={`${btn} bg-indigo-600 text-white`} onClick={() => { void run(props.inRoom ? props.onRequestPilot : props.onTomarMando); }}>
+            <button type="button" disabled={ocupado} data-movil-sala-accion="PEDIR" className={`${btn} ${MOVIL_BTN_PRIMARY}`} onClick={() => { void run(props.inRoom ? props.onRequestPilot : props.onTomarMando); }}>
               {props.inRoom ? 'Pedir mando' : 'Entrar como apoyo y pedir mando'}
             </button>
           )}
           {!hayPiloto && (
-            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR" className={`${btn} border border-emerald-300 bg-white text-emerald-800`} onClick={() => { void run(props.onTomarMando); }}>Tomar mando · pasar a Manual</button>
+            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR" className={`${btn} ${MOVIL_BTN_PRIMARY}`} onClick={() => { void run(props.onTomarMando); }}>Tomar mando · pasar a Manual</button>
           )}
           {props.isPilot && (
-            <button type="button" disabled={ocupado} data-movil-sala-accion="AUTO" className={`${btn} bg-rose-50 text-rose-700`} onClick={() => setConfirmando('AUTO')}>Pasar a Auto</button>
+            <button type="button" disabled={ocupado} data-movil-sala-accion="AUTO" className={`${btn} ${MOVIL_BTN_SECONDARY} !text-rose-700`} onClick={() => setConfirmando('AUTO')}>Pasar a Auto</button>
           )}
           {props.inRoom && !props.isPilot && (
-            <button type="button" disabled={ocupado} data-movil-sala-accion="SALIR" className={`${btn} border border-slate-200 bg-white text-slate-700`} onClick={() => { void run(props.onSalir); }}>Salir de la sala</button>
+            <button type="button" disabled={ocupado} data-movil-sala-accion="SALIR" className={`${btn} ${MOVIL_BTN_SECONDARY}`} onClick={() => { void run(props.onSalir); }}>Salir de la sala</button>
           )}
-          <p className="mt-2 text-[11px] font-bold text-slate-500">Protocolo vigente: {props.steps.join(' → ')}. Los candidatos y Convocar abren la hoja del protocolo.</p>
+          <p className="mt-2 text-[11px] font-medium text-slate-500">Protocolo vigente: {props.steps.join(' → ')}. Los candidatos y Convocar abren la hoja del protocolo.</p>
         </>
       )}
     </div>
   );
 }
 
-/** Hoja «Cliente → objetivos» con buscador. */
+/** Hoja «Cliente → objetivos» con buscador. El elegido se rellena con el color de la empresa. */
 export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
   clientes: readonly OpsClienteMovil[];
   filtro: OpsFiltroMovil;
@@ -219,24 +342,21 @@ export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
   const [clienteAbierto, setClienteAbierto] = useState<string | null>(filtro.clientId);
   const lista = buscarClientes(clientes, texto);
   const abierto = lista.find((c) => c.id === clienteAbierto) || (lista.length === 1 ? lista[0] : null);
+  const opcion = (activo: boolean) => `${BTN} w-full ${activo ? MOVIL_PRIMARY_BG : MOVIL_BTN_SECONDARY}`;
   return (
     <div data-movil-sheet="ambito">
       <div className="relative mb-3">
-        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
+        <Search size={16} strokeWidth={1.75} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" aria-hidden="true" />
         <input
           type="search"
           value={texto}
           onChange={(event) => setTexto(event.target.value)}
           placeholder="Buscar cliente u objetivo"
           aria-label="Buscar cliente u objetivo"
-          className="min-h-12 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-9 pr-3 text-sm font-semibold"
+          className={`min-h-12 w-full rounded-lg border ${MOVIL_BORDER} bg-white pl-9 pr-3 text-sm font-medium outline-none focus:border-[var(--movil-primary,#111827)]`}
         />
       </div>
-      <button
-        type="button"
-        onClick={() => onElegir(null, null)}
-        className={`mb-2 min-h-12 w-full rounded-2xl text-sm font-black ${!filtro.clientId && !filtro.objectiveId ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-700'}`}
-      >
+      <button type="button" onClick={() => onElegir(null, null)} className={`mb-2 ${opcion(!filtro.clientId && !filtro.objectiveId)}`}>
         Todos los clientes
       </button>
       {!abierto && lista.map((c) => (
@@ -245,43 +365,43 @@ export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
           type="button"
           data-movil-cliente={c.id}
           onClick={() => setClienteAbierto(c.id)}
-          className="mb-1.5 flex min-h-12 w-full items-center justify-between rounded-2xl border border-slate-200 bg-white px-3 text-left"
+          className={`mb-1.5 flex min-h-12 w-full items-center justify-between rounded-lg px-3 text-left ${MOVIL_BTN_SECONDARY}`}
         >
-          <span className="truncate text-sm font-black text-slate-800">{c.name}</span>
-          <span className="shrink-0 text-[11px] font-bold text-slate-500">{c.objetivos.length} obj · {c.turnos}</span>
+          <span className="truncate text-sm font-semibold text-slate-900">{c.name}</span>
+          <span className="shrink-0 text-[11px] font-medium tabular-nums text-slate-500">{c.objetivos.length} obj · {c.turnos}</span>
         </button>
       ))}
       {abierto && (
         <>
           <div className="mb-1.5 flex items-center gap-2">
             {lista.length > 1 && (
-              <button type="button" onClick={() => setClienteAbierto(null)} className="min-h-11 rounded-xl border border-slate-200 px-3 text-sm font-black">←</button>
+              <button type="button" onClick={() => setClienteAbierto(null)} aria-label="Volver a clientes" className={`flex h-10 w-10 items-center justify-center rounded-lg ${MOVIL_BTN_SECONDARY}`}>
+                <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+              </button>
             )}
-            <p className="truncate text-sm font-black text-slate-800">{abierto.name}</p>
+            <p className="truncate text-sm font-semibold text-slate-900">{abierto.name}</p>
           </div>
-          <button
-            type="button"
-            data-movil-cliente-todo={abierto.id}
-            onClick={() => onElegir(abierto.id, null)}
-            className={`mb-1.5 min-h-12 w-full rounded-2xl text-sm font-black ${filtro.clientId === abierto.id && !filtro.objectiveId ? 'bg-indigo-600 text-white' : 'border border-indigo-200 bg-indigo-50 text-indigo-800'}`}
-          >
+          <button type="button" data-movil-cliente-todo={abierto.id} onClick={() => onElegir(abierto.id, null)} className={`mb-1.5 ${opcion(filtro.clientId === abierto.id && !filtro.objectiveId)}`}>
             Todo {abierto.name} · {abierto.turnos}
           </button>
-          {abierto.objetivos.map((o) => (
-            <button
-              key={o.id}
-              type="button"
-              data-movil-objetivo={o.id}
-              onClick={() => onElegir(abierto.id, o.id)}
-              className={`mb-1.5 flex min-h-12 w-full items-center justify-between rounded-2xl px-3 text-left ${filtro.objectiveId === o.id ? 'bg-indigo-600 text-white' : 'border border-slate-200 bg-white text-slate-800'}`}
-            >
-              <span className="truncate text-sm font-bold">{o.name}</span>
-              <span className="shrink-0 text-[11px] font-bold opacity-70">{o.turnos}</span>
-            </button>
-          ))}
+          {abierto.objetivos.map((o) => {
+            const activo = filtro.objectiveId === o.id;
+            return (
+              <button
+                key={o.id}
+                type="button"
+                data-movil-objetivo={o.id}
+                onClick={() => onElegir(abierto.id, o.id)}
+                className={`mb-1.5 flex min-h-12 w-full items-center justify-between rounded-lg px-3 text-left ${activo ? MOVIL_PRIMARY_BG : MOVIL_BTN_SECONDARY}`}
+              >
+                <span className="truncate text-sm font-semibold">{o.name}</span>
+                <span className="shrink-0 text-[11px] font-medium tabular-nums opacity-70">{o.turnos}</span>
+              </button>
+            );
+          })}
         </>
       )}
-      {lista.length === 0 && <p className="rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500">Nada coincide con «{texto}».</p>}
+      {lista.length === 0 && <p className={`${MOVIL_CARD} p-4 text-sm font-medium text-slate-500`}>Nada coincide con «{texto}».</p>}
     </div>
   );
 }
@@ -308,13 +428,14 @@ export interface MovilStats {
   plan: number;
 }
 
+/** Texto del estado en color (solo el estado lleva color). */
 const TONE_TEXT: Record<string, string> = {
-  ok: 'text-emerald-700',
-  ret: 'text-orange-700',
-  aus: 'text-slate-800',
-  late: 'text-amber-800',
-  vac: 'text-rose-700',
-  plan: 'text-indigo-700',
+  ok: 'text-emerald-600',
+  ret: 'text-orange-600',
+  aus: 'text-rose-600',
+  late: 'text-amber-600',
+  vac: 'text-rose-600',
+  plan: 'text-slate-500',
 };
 
 /** «jueves 1 de octubre» para el subtítulo del encabezado. */
@@ -325,115 +446,67 @@ function movilFechaCorta(ms: number): string {
 /** Ícono y tono de cada contador del encabezado (mismo criterio que el escritorio). */
 const CONTADOR_UI: Record<Exclude<OpsEstadoFiltro, 'TODOS'>, { icon: LucideIcon; tone: MovilTone }> = {
   ACTIVOS: { icon: UserCheck, tone: 'emerald' },
-  PLAN: { icon: CalendarClock, tone: 'indigo' },
+  PLAN: { icon: CalendarClock, tone: 'slate' },
   NO_LLEGO: { icon: Clock, tone: 'amber' },
-  AUSENTES: { icon: UserX, tone: 'slate' },
+  AUSENTES: { icon: UserX, tone: 'rose' },
   VACANTES: { icon: AlertTriangle, tone: 'rose' },
   RETENIDOS: { icon: Hourglass, tone: 'orange' },
 };
 
-function BigButton({
-  label,
-  tone,
-  onClick,
-}: {
-  label: string;
-  tone?: 'go' | 'pri' | 'warn';
-  onClick: () => void;
-}) {
-  const cls = tone === 'go'
-    ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/20'
-    : tone === 'pri'
-      ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/20'
-      : tone === 'warn'
-        ? 'bg-orange-50 text-orange-800 border border-orange-100'
-        : 'bg-slate-50 text-slate-700 border border-slate-100';
+function BigButton({ label, tone, onClick }: { label: string; tone?: 'go' | 'pri' | 'warn'; onClick: () => void }) {
+  const cls = tone === 'pri' ? MOVIL_BTN_PRIMARY : tone === 'go' ? `${MOVIL_BTN_SECONDARY} !text-emerald-700` : tone === 'warn' ? `${MOVIL_BTN_SECONDARY} !text-orange-700` : MOVIL_BTN_SECONDARY;
   return (
-    <button type="button" onClick={onClick} className={`min-h-12 flex-1 rounded-xl text-[11px] font-black active:scale-95 ${cls}`}>
+    <button type="button" onClick={onClick} className={`min-h-11 flex-1 rounded-lg text-[12px] font-semibold active:bg-slate-50 ${cls}`}>
       {label}
     </button>
   );
 }
 
-/** Botón LLAMAR con el teléfono del legajo. Sin teléfono queda deshabilitado. */
+/** Botón LLAMAR con el teléfono del legajo (último recurso). Sin teléfono queda deshabilitado. */
 export function LlamarButton({ telefono, compact = false }: { telefono: string | null; compact?: boolean }) {
-  const cls = telefono
-    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-    : 'border-slate-200 bg-slate-50 text-slate-400';
+  const cls = telefono ? `${MOVIL_BTN_SECONDARY}` : 'border border-slate-200 bg-white text-slate-400';
   return (
     <a
       href={telefono ? `tel:${telefono.replace(/[^\d+]/g, '')}` : undefined}
       aria-disabled={telefono ? undefined : 'true'}
       aria-label={telefono ? `Llamar a ${telefono}` : 'Sin teléfono en el legajo'}
       data-movil-llamar={telefono ? '1' : '0'}
-      className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl border text-[11px] font-black shadow-sm ${compact ? 'w-12' : 'px-3'} ${cls}`}
+      className={`flex min-h-11 items-center justify-center gap-1.5 rounded-lg text-[12px] font-semibold ${compact ? 'w-11' : 'w-full px-3'} ${cls}`}
       onClick={telefono ? undefined : (event) => event.preventDefault()}
     >
-      <Phone size={16} strokeWidth={2.2} aria-hidden="true" />
-      {!compact && (telefono ? 'Llamar' : 'Sin tel.')}
-    </a>
-  );
-}
-
-/** Botón WhatsApp (wa.me) con el teléfono del legajo normalizado a +549. */
-export function WhatsAppButton({ telefono }: { telefono: string | null }) {
-  const numero = telefono ? normalizeArgPhone(telefono) : '';
-  const cls = numero
-    ? 'border-emerald-200 bg-emerald-600 text-white'
-    : 'border-slate-200 bg-slate-50 text-slate-400';
-  return (
-    <a
-      href={numero ? `https://wa.me/${numero}` : undefined}
-      target={numero ? '_blank' : undefined}
-      rel={numero ? 'noopener noreferrer' : undefined}
-      aria-disabled={numero ? undefined : 'true'}
-      aria-label={numero ? `WhatsApp a ${telefono}` : 'Sin teléfono en el legajo'}
-      data-movil-whatsapp={numero ? '1' : '0'}
-      className={`flex min-h-12 flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 text-[11px] font-black shadow-sm ${cls}`}
-      onClick={numero ? undefined : (event) => event.preventDefault()}
-    >
-      <MessageCircle size={16} strokeWidth={2.2} aria-hidden="true" />
-      WhatsApp
+      <Phone size={16} strokeWidth={1.75} aria-hidden="true" />
+      {!compact && (telefono ? `Llamar · ${telefono}` : 'Sin teléfono en el legajo')}
     </a>
   );
 }
 
 /**
- * Detalle compacto del guardia: horario planificado + código, puesto y objetivo,
- * ingreso real o estado con minutos, relevo, convocatoria/cobertura.
+ * Detalle del guardia: horario planificado + código, puesto y objetivo,
+ * ingreso real o estado con minutos, relevo, convocatoria/cobertura, nota.
  */
 export function GuardDetalleLines({ shift, siblings = [], now, showObjective = true }: { shift: GuardShift; siblings?: readonly GuardShift[]; now?: number; showObjective?: boolean }) {
   const tone = guardTone(shift);
   const d = guardDetalle(shift, siblings, now ?? Date.now());
   return (
     <div data-movil-detalle={shift.id} className="min-w-0">
-      <p className="truncate text-[11px] font-semibold text-slate-500">
-        <span className="font-black uppercase text-indigo-700">{d.puesto}</span>
+      <p className="truncate text-[11px] font-medium text-slate-500">
+        <span className="font-semibold uppercase text-slate-700">{d.puesto}</span>
         {showObjective && d.objetivo ? ` · ${d.objetivo}` : ''}
       </p>
-      <p className="text-[12px] font-black tabular-nums text-slate-800">
+      <p className="text-[12px] font-semibold tabular-nums text-slate-900">
         {d.horario}
-        <span className="ml-1 text-[10px] font-bold text-slate-500">· {d.code}</span>
+        <span className="ml-1 rounded border border-slate-300 px-1 text-[10px] font-bold text-slate-700">{d.code}</span>
       </p>
-      {d.ingreso && <p className="truncate text-[11px] font-bold text-emerald-700">{d.ingreso}</p>}
-      {d.estado && <p className={`truncate text-[11px] font-bold ${TONE_TEXT[tone]}`}>{d.estado}</p>}
-      {d.relevaA && <p className="truncate text-[11px] font-semibold text-slate-600">{d.relevaA}</p>}
-      {d.loReleva && <p className="truncate text-[11px] font-semibold text-slate-600">{d.loReleva}</p>}
-      {d.convocatoria && <p className="truncate text-[11px] font-bold text-indigo-700">{d.convocatoria}</p>}
-      {d.cobertura && <p className="truncate text-[11px] font-bold text-violet-700">{d.cobertura}</p>}
+      {d.ingreso && <p className="truncate text-[11px] font-semibold text-emerald-600">{d.ingreso}</p>}
+      {d.estado && <p className={`truncate text-[11px] font-semibold ${TONE_TEXT[tone]}`}>{d.estado}</p>}
+      {d.relevaA && <p className="truncate text-[11px] font-medium text-slate-600">{d.relevaA}</p>}
+      {d.loReleva && <p className="truncate text-[11px] font-medium text-slate-600">{d.loReleva}</p>}
+      {d.convocatoria && <p className="truncate text-[11px] font-semibold text-slate-700">{d.convocatoria}</p>}
+      {d.cobertura && <p className="truncate text-[11px] font-semibold text-slate-700">{d.cobertura}</p>}
+      {d.nota && <p className="truncate text-[11px] font-medium text-slate-600" data-movil-nota-linea="1">{d.nota}</p>}
     </div>
   );
 }
-
-/** Barra de color del borde izquierdo de la tarjeta compacta, por estado. */
-const BAR_CLS: Record<string, string> = {
-  ok: 'bg-emerald-500',
-  ret: 'bg-orange-500',
-  aus: 'bg-slate-500',
-  late: 'bg-amber-500',
-  vac: 'bg-rose-500',
-  plan: 'bg-indigo-400',
-};
 
 /** Ícono del chip de estado (fila 1, derecha). */
 const ESTADO_ICON: Record<GuardEstadoCompacto, LucideIcon> = {
@@ -450,13 +523,13 @@ const ESTADO_ICON: Record<GuardEstadoCompacto, LucideIcon> = {
 function MiniItem({ icon: Icon, children, className = '', attr }: { icon: LucideIcon; children: ReactNode; className?: string; attr?: string }) {
   return (
     <span className={`flex shrink-0 items-center gap-0.5 ${className}`} data-movil-mini={attr}>
-      <Icon size={11} strokeWidth={2.4} aria-hidden="true" />
+      <Icon size={11} strokeWidth={1.75} aria-hidden="true" />
       {children}
     </span>
   );
 }
 
-/** Teléfono: ícono solo (36 px). Sin teléfono queda deshabilitado. */
+/** Teléfono: ícono solo (36 px), blanco con borde. Sin teléfono queda deshabilitado. */
 function LlamarIcon({ telefono }: { telefono: string | null }) {
   return (
     <a
@@ -465,17 +538,17 @@ function LlamarIcon({ telefono }: { telefono: string | null }) {
       aria-label={telefono ? `Llamar a ${telefono}` : 'Sin teléfono en el legajo'}
       data-movil-llamar={telefono ? '1' : '0'}
       onClick={(event) => { event.stopPropagation(); if (!telefono) event.preventDefault(); }}
-      className={`my-auto mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border ${telefono ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-slate-200 bg-slate-50 text-slate-300'}`}
+      className={`my-auto mr-2 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border bg-white ${telefono ? 'border-slate-300 text-slate-700' : 'border-slate-200 text-slate-300'}`}
     >
-      <Phone size={15} strokeWidth={2.2} aria-hidden="true" />
+      <Phone size={15} strokeWidth={1.75} aria-hidden="true" />
     </a>
   );
 }
 
 /**
- * Tarjeta compacta del guardia (2 filas, ~56 px): fila 1 nombre + código + chip de estado;
- * fila 2 íconos (puesto, horario, ingreso, tope, relevo). Tocar la tarjeta abre la hoja de
- * acciones; el detalle largo (retención, relevo, cobertura) vive en la hoja.
+ * Tarjeta compacta del guardia (2 filas, ~56 px): fila 1 nombre + código + estado en texto;
+ * fila 2 íconos (puesto, horario, ingreso, tope, relevo, respuesta, nota). Tocar la tarjeta
+ * abre la hoja de acciones; el detalle largo vive en la hoja. Estado = filete de 3 px + texto en color.
  */
 export function GuardCard({
   shift,
@@ -495,7 +568,7 @@ export function GuardCard({
   onSalida?: (shift: GuardShift) => void;
   onProtocolo?: (shift: GuardShift) => void;
   onRetencion?: (shift: GuardShift) => void;
-  /** Abre la hoja de acciones del turno (ingreso, salida, ausente, llegó, liberar, protocolo, llamar). */
+  /** Abre la hoja de acciones del turno (avisar, ingreso, salida, ausente, llegó, liberar, protocolo, nota, llamar). */
   onAcciones?: (shift: GuardShift) => void;
 }) {
   const c = guardCompacto(shift, siblings, now ?? Date.now());
@@ -505,34 +578,36 @@ export function GuardCard({
   const Fila = abrir ? 'button' : 'div';
   return (
     <article
-      className={`mb-1.5 flex items-stretch overflow-hidden rounded-2xl border bg-white shadow-sm ${c.tone === 'vac' ? 'border-rose-200' : 'border-slate-100'}`}
+      className={`mb-1.5 flex items-stretch overflow-hidden ${MOVIL_CARD}`}
       data-movil-tone={c.tone}
       data-movil-card="compacta"
     >
-      <span aria-hidden="true" className={`w-1 shrink-0 ${BAR_CLS[c.tone]}`} />
+      <span aria-hidden="true" className={`w-[3px] shrink-0 ${MOVIL_FILETE[visual]}`} />
       <Fila
         {...(abrir ? { type: 'button' as const, onClick: () => abrir(shift), 'aria-label': `Acciones de ${c.nombre}` } : {})}
         data-movil-tap={abrir ? shift.id : undefined}
         className={`flex min-w-0 flex-1 flex-col gap-0.5 px-2.5 py-2 text-left ${abrir ? 'active:bg-slate-50' : ''}`}
       >
         <span className="flex items-center gap-1.5">
-          <strong className={`truncate text-[13px] leading-5 ${c.esVacante ? 'text-rose-700' : 'text-slate-900'}`}>{c.nombre}</strong>
-          <span className="shrink-0 rounded-md bg-slate-900 px-1 text-[10px] font-black leading-4 text-white">{c.code}</span>
-          <span className={`ml-auto flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[10px] font-black leading-4 tabular-nums ${MOVIL_PILL[visual]}`} data-movil-estado={c.estado.kind}>
-            <EstadoIcon size={11} strokeWidth={2.4} aria-hidden="true" />
+          <strong className={`truncate text-[13px] font-semibold leading-5 ${c.esVacante ? 'text-rose-600' : 'text-slate-900'}`}>{c.nombre}</strong>
+          <span className="shrink-0 rounded border border-slate-300 px-1 text-[10px] font-bold leading-4 text-slate-700" data-movil-code={c.code}>{c.code}</span>
+          <span className={`ml-auto flex shrink-0 items-center gap-1 text-[10px] font-bold leading-4 tabular-nums ${MOVIL_TEXT[visual]}`} data-movil-estado={c.estado.kind}>
+            <EstadoIcon size={11} strokeWidth={1.75} aria-hidden="true" />
             {c.estado.texto}
           </span>
         </span>
-        <span className="flex items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] font-bold leading-4 tabular-nums text-slate-500" data-movil-detalle={shift.id}>
+        <span className="flex items-center gap-2 overflow-hidden whitespace-nowrap text-[10px] font-medium leading-4 tabular-nums text-slate-500" data-movil-detalle={shift.id}>
           <MiniItem icon={MapPin} attr="puesto">{c.puesto}</MiniItem>
           <MiniItem icon={Clock} attr="horario">{c.horario}</MiniItem>
           {c.ingreso && (
-            <MiniItem icon={LogIn} attr="ingreso" className={c.ingreso.tardeMin > 0 ? 'text-amber-700' : 'text-emerald-700'}>
+            <MiniItem icon={LogIn} attr="ingreso" className={c.ingreso.tardeMin > 0 ? 'text-amber-600' : 'text-emerald-600'}>
               {c.ingreso.hhmm}{c.ingreso.tardeMin > 0 ? ` +${c.ingreso.tardeMin}′` : ''}
             </MiniItem>
           )}
-          {c.tope && <MiniItem icon={Hourglass} attr="tope" className="text-orange-700">{c.tope}</MiniItem>}
+          {c.tope && <MiniItem icon={Hourglass} attr="tope" className="text-orange-600">{c.tope}</MiniItem>}
           {c.relevo && <MiniItem icon={ArrowRightLeft} attr="relevo" className="text-slate-600">{c.relevo.apellido} {c.relevo.hhmm}</MiniItem>}
+          {c.respuesta && <MiniItem icon={MessageSquare} attr="respuesta" className="text-amber-600">resp. {c.respuesta.hhmm}{c.respuesta.eta ? ` ~${c.respuesta.eta}` : ''}</MiniItem>}
+          {c.nota && <MiniItem icon={StickyNote} attr="nota" className="text-slate-600">{c.nota}</MiniItem>}
         </span>
       </Fila>
       {!c.esVacante && <LlamarIcon telefono={c.telefono} />}
@@ -570,6 +645,9 @@ export function OperacionScreens({
   onAmbito,
   onQuitarAmbito,
   onAcciones,
+  proximas,
+  onProximas,
+  pieLabel = null,
 }: {
   empresa: string;
   modeLabel: string;
@@ -600,6 +678,11 @@ export function OperacionScreens({
   onQuitarAmbito?: () => void;
   /** Hoja de acciones de la tarjeta. */
   onAcciones?: (shift: GuardShift) => void;
+  /** Franjas que entran en las próximas 3 h (fila bajo los contadores → hoja). */
+  proximas?: readonly ProximaFranja[];
+  onProximas?: () => void;
+  /** «Actualizado hace N min · N pendientes de enviar» al pie de la lista. */
+  pieLabel?: string | null;
   onBack: () => void;
   onOpen: (id: string) => void;
   onCounter: (id: string) => void;
@@ -625,24 +708,32 @@ export function OperacionScreens({
   const filtrando = filtro.estado !== 'TODOS';
   const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion, onAcciones };
   const moduloLabel = readOnly ? 'Supervisión' : 'Operación';
-  const vacio = 'rounded-2xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-500 shadow-sm';
+  const vacio = `${MOVIL_CARD} p-4 text-sm font-medium text-slate-500`;
+  const resumenProx = proximas ? resumenProximas(proximas) : null;
+  const pie = pieLabel ? (
+    <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] font-medium tabular-nums text-slate-400" data-movil-pie="1">
+      <Timer size={12} strokeWidth={1.75} aria-hidden="true" />
+      {pieLabel}
+    </p>
+  ) : null;
+  const modoTone: MovilTone = modeLabel.toUpperCase().startsWith('MAN') ? 'emerald' : modeLabel.toUpperCase().startsWith('DEMO') ? 'amber' : 'slate';
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-slate-100 pb-24" data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
+    <div className={`mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24 ${MOVIL_FONT}`} data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <MovilTopBar
         modulo={moduloLabel}
         empresa={empresa}
         online={online}
         pendingLabel={pendingLabel}
         right={readOnly ? (
-          <MovilBadge tone="slate" size="md" className="bg-white/10 text-slate-200">Solo lectura</MovilBadge>
+          <MovilBadge tone="slate" size="md" outline className="!border-white/40 !text-white">Solo lectura</MovilBadge>
         ) : (
           <button
             type="button"
             onClick={onSala}
             aria-label={`Sala · ${modeLabel}`}
-            className="flex min-h-10 items-center gap-1.5 rounded-full bg-emerald-500 pl-2.5 pr-3 text-[11px] font-black uppercase text-white shadow-sm shadow-emerald-500/30 active:scale-95"
+            className="flex min-h-9 items-center gap-1.5 rounded-full border border-white/40 pl-2.5 pr-3 text-[11px] font-semibold uppercase tracking-wide text-white active:bg-white/10"
           >
-            <Radio size={14} strokeWidth={2.4} />
+            <span aria-hidden="true" className={`h-2 w-2 rounded-full ${MOVIL_FILETE[modoTone]}`} />
             {modeLabel}
           </button>
         )}
@@ -653,13 +744,13 @@ export function OperacionScreens({
         )}
         {panel === 'objetivo' && (
           <div className="mb-2 flex min-h-9 items-center gap-1.5" data-movil-objetivo-header="fino">
-            <button type="button" onClick={onBack} aria-label="Volver" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-100 bg-white text-slate-700 shadow-sm active:scale-95">
-              <ArrowLeft size={16} strokeWidth={2.4} aria-hidden="true" />
+            <button type="button" onClick={onBack} aria-label="Volver" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${MOVIL_BTN_SECONDARY}`}>
+              <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
             </button>
-            <MapPin size={13} className="shrink-0 text-indigo-600" aria-hidden="true" />
-            <h2 className="truncate text-[13px] font-black uppercase tracking-wide text-slate-900">{objective?.name || 'Objetivo'}</h2>
-            {objective?.client && <span className="hidden min-[360px]:inline truncate text-[10px] font-bold text-slate-400">· {objective.client}</span>}
-            <span className="ml-auto shrink-0 rounded-full bg-slate-900 px-2 text-[10px] font-black leading-5 text-white tabular-nums">{objective?.shifts.length ?? 0}</span>
+            <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-500" aria-hidden="true" />
+            <h2 className="truncate text-[13px] font-semibold uppercase tracking-wide text-slate-900">{objective?.name || 'Objetivo'}</h2>
+            {objective?.client && <span className="hidden min-[360px]:inline truncate text-[10px] font-medium text-slate-400">· {objective.client}</span>}
+            <span className="ml-auto shrink-0 rounded border border-slate-300 px-2 text-[10px] font-bold leading-5 tabular-nums text-slate-700">{objective?.shifts.length ?? 0}</span>
           </div>
         )}
         {panel === 'alertas' && (
@@ -667,15 +758,16 @@ export function OperacionScreens({
             icon={Bell}
             title="Alertas"
             subtitle={readOnly ? 'Prioridad primero · las acciones las toma el CC' : 'Prioridad primero · la acción grande bajo el pulgar'}
-            right={<MovilBadge tone={alerts.length > 0 ? 'rose' : 'emerald'} size="md">{alerts.length}</MovilBadge>}
+            right={<MovilBadge tone={alerts.length > 0 ? 'rose' : 'emerald'} size="md" outline>{alerts.length}</MovilBadge>}
             className="mb-3"
           />
         )}
         {panel === 'home' && (
           <>
             {notices.map((text) => (
-              <p key={text} className="mb-2 flex items-start gap-2 rounded-2xl border border-amber-100 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900 shadow-sm">
-                <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
+              <p key={text} className={`relative mb-2 flex items-start gap-2 ${MOVIL_CARD} px-3 py-2 pl-4 text-xs font-medium text-slate-800`}>
+                <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] rounded-l-lg bg-amber-500" />
+                <AlertTriangle size={14} strokeWidth={1.75} className="mt-0.5 shrink-0 text-amber-600" aria-hidden="true" />
                 <span>{text}</span>
               </p>
             ))}
@@ -685,16 +777,16 @@ export function OperacionScreens({
                   type="button"
                   onClick={onAmbito}
                   aria-label="Filtrar por cliente u objetivo"
-                  className="flex min-h-12 flex-1 items-center gap-2 rounded-2xl border border-slate-100 bg-white px-3 text-left text-[12px] font-bold text-slate-600 shadow-sm active:bg-slate-50"
+                  className={`flex min-h-11 flex-1 items-center gap-2 rounded-lg px-3 text-left text-[12px] font-medium ${MOVIL_BTN_SECONDARY} !text-slate-600`}
                 >
-                  <Search size={15} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  <Search size={15} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
                   <span className="truncate">{ambitoLabel ? 'Cambiar cliente u objetivo' : 'Todos los clientes y objetivos'}</span>
                 </button>
                 {ambitoLabel && (
-                  <span className="flex min-h-12 max-w-[55%] items-center gap-1 rounded-full bg-indigo-600 pl-3 pr-1 text-[11px] font-black text-white shadow-sm shadow-indigo-600/30" data-movil-chip="ambito">
+                  <span className={`flex min-h-11 max-w-[55%] items-center gap-1 rounded-lg pl-3 pr-1 text-[11px] font-semibold ${MOVIL_PRIMARY_BG}`} data-movil-chip="ambito">
                     <span className="truncate">{ambitoLabel}</span>
-                    <button type="button" onClick={onQuitarAmbito} aria-label={`Quitar filtro ${ambitoLabel}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full active:bg-indigo-500">
-                      <X size={15} strokeWidth={2.6} aria-hidden="true" />
+                    <button type="button" onClick={onQuitarAmbito} aria-label={`Quitar filtro ${ambitoLabel}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg active:bg-white/10">
+                      <X size={15} strokeWidth={1.75} aria-hidden="true" />
                     </button>
                   </span>
                 )}
@@ -714,29 +806,41 @@ export function OperacionScreens({
                     aria-label={`${item.label}: ${item.value}`}
                     data-movil-contador={item.id}
                     data-movil-filtro-activo={activo ? '1' : undefined}
-                    className={`flex h-9 shrink-0 items-center gap-1 rounded-full border px-2.5 text-[11px] font-black tabular-nums shadow-sm active:scale-95 ${activo ? `border-transparent ring-2 ${MOVIL_RING[ui.tone]} text-slate-900` : 'border-slate-100 bg-white text-slate-600'}`}
+                    className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold tabular-nums ${activo ? `border-transparent ${MOVIL_PRIMARY_BG}` : `${MOVIL_BORDER} bg-white text-slate-700`}`}
                   >
-                    <span className={`flex h-6 w-6 items-center justify-center rounded-full ${MOVIL_PILL[ui.tone]}`}>
-                      <Icon size={13} strokeWidth={2.4} aria-hidden="true" />
-                    </span>
-                    <span className="text-[10px] uppercase tracking-wide text-slate-500">{item.corto}</span>
+                    <Icon size={13} strokeWidth={1.75} aria-hidden="true" className={activo ? '' : MOVIL_TEXT[ui.tone]} />
+                    <span className={`text-[10px] uppercase tracking-wide ${activo ? 'opacity-80' : 'text-slate-500'}`}>{item.corto}</span>
                     <b className="text-[13px]">{item.value}</b>
                   </button>
                 );
               })}
             </div>
+            {proximas && resumenProx && (
+              <button
+                type="button"
+                onClick={onProximas}
+                data-movil-proximas="fila"
+                data-movil-proximas-sin-nadie={resumenProx.sinNadie > 0 ? '1' : undefined}
+                className={`relative mb-2 flex min-h-11 w-full items-center gap-2 ${MOVIL_CARD} px-3 pl-4 text-left text-[12px] font-medium text-slate-700 active:bg-slate-50`}
+              >
+                <span aria-hidden="true" className={`absolute inset-y-0 left-0 w-[3px] rounded-l-lg ${resumenProx.sinNadie > 0 ? 'bg-rose-500' : resumenProx.sinConfirmar > 0 ? 'bg-amber-500' : resumenProx.franjas > 0 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                <CalendarClock size={15} strokeWidth={1.75} className="shrink-0 text-slate-500" aria-hidden="true" />
+                <span className="truncate">{etiquetaProximas(resumenProx)}</span>
+                <span aria-hidden="true" className="ml-auto text-slate-400">›</span>
+              </button>
+            )}
             {filtrando && (
-              <p className="mb-2 flex items-center justify-between text-[11px] font-bold text-slate-500">
-                <span>Mostrando <b className="text-slate-800">{etiquetaEstado(filtro.estado)}</b>{ambitoLabel ? ` · ${ambitoLabel}` : ''} · {grupos.reduce((acc, g) => acc + g.shifts.length, 0)}</span>
-                <button type="button" onClick={() => onCounter(filtro.estado)} className="min-h-9 rounded-xl px-2 font-black text-indigo-700">Ver todos</button>
+              <p className="mb-2 flex items-center justify-between text-[11px] font-medium text-slate-500">
+                <span>Mostrando <b className="font-semibold text-slate-900">{etiquetaEstado(filtro.estado)}</b>{ambitoLabel ? ` · ${ambitoLabel}` : ''} · {grupos.reduce((acc, g) => acc + g.shifts.length, 0)}</span>
+                <button type="button" onClick={() => onCounter(filtro.estado)} className="min-h-9 rounded-lg px-2 font-semibold text-slate-900 underline-offset-2 active:underline">Ver todos</button>
               </p>
             )}
             {filtrando && grupos.map((grupo) => (
               <section key={grupo.objectiveId} className="mb-3" data-movil-grupo={grupo.objectiveId}>
                 <button type="button" onClick={() => onOpen(grupo.objectiveId)} className="mb-1.5 flex w-full items-center gap-2 px-1 text-left">
-                  <MapPin size={13} className="shrink-0 text-slate-400" aria-hidden="true" />
-                  <span className="truncate text-[11px] font-black uppercase tracking-wide text-slate-600">{grupo.name}</span>
-                  <span className="ml-auto shrink-0 text-[10px] font-bold text-slate-400">{grupo.client ? `${grupo.client} · ` : ''}{grupo.shifts.length}</span>
+                  <MapPin size={13} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
+                  <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-600">{grupo.name}</span>
+                  <span className="ml-auto shrink-0 text-[10px] font-medium tabular-nums text-slate-400">{grupo.client ? `${grupo.client} · ` : ''}{grupo.shifts.length}</span>
                 </button>
                 {grupo.shifts.map((shift) => (
                   <GuardCard key={shift.id} shift={shift} siblings={siblingsOf(shift)} {...cardProps} />
@@ -755,7 +859,7 @@ export function OperacionScreens({
                   key={item.objectiveId}
                   className="mb-2"
                   icon={MapPin}
-                  tone={pctTone}
+                  tone="slate"
                   title={item.name}
                   subtitle={item.client || 'Objetivo'}
                   badge={<MovilBadge tone={pctTone} size="md">{pct}%</MovilBadge>}
@@ -763,37 +867,42 @@ export function OperacionScreens({
                   attrs={{ 'data-movil-objetivo-card': item.objectiveId }}
                 >
                   <MovilProgress pct={pct} tone={pctTone} className="mt-2.5" />
-                  <div className="mt-2 flex flex-wrap items-center gap-1">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                     {item.active > 0 && <MovilBadge tone="emerald">ACT {item.active}</MovilBadge>}
                     {item.retention > 0 && <MovilBadge tone="orange">RET {item.retention}</MovilBadge>}
-                    {item.absent > 0 && <MovilBadge tone="slate" className="bg-slate-100 text-slate-700">AUS {item.absent}</MovilBadge>}
+                    {item.absent > 0 && <MovilBadge tone="rose">AUS {item.absent}</MovilBadge>}
                     {item.vacant > 0 && <MovilBadge tone="rose">VAC {item.vacant}</MovilBadge>}
+                    {item.plan > 0 && <MovilBadge tone="slate">PLA {item.plan}</MovilBadge>}
                   </div>
-                  {relevo && <p className="mt-1.5 text-[11px] font-bold text-indigo-700">{relevo}</p>}
+                  {relevo && <p className="mt-1.5 text-[11px] font-medium tabular-nums text-slate-600">{relevo}</p>}
                 </MovilCard>
               );
             })}
             {!filtrando && objectives.length === 0 && (
               <p className={vacio} data-movil-vacio="1">{ambitoLabel ? vacioLabel : 'Sincronizando objetivos…'}</p>
             )}
+            {pie}
           </>
         )}
         {panel === 'objetivo' && objective && (
-          objective.shifts.map((shift) => (
-            <GuardCard
-              key={shift.id}
-              shift={shift}
-              siblings={objective.shifts}
-              now={nowMs}
-              readOnly={readOnly}
-              onLlego={onLlego}
-              onRevertir={onRevertir}
-              onSalida={onSalida}
-              onProtocolo={onProtocolo}
-              onRetencion={onRetencion}
-              onAcciones={onAcciones}
-            />
-          ))
+          <>
+            {objective.shifts.map((shift) => (
+              <GuardCard
+                key={shift.id}
+                shift={shift}
+                siblings={objective.shifts}
+                now={nowMs}
+                readOnly={readOnly}
+                onLlego={onLlego}
+                onRevertir={onRevertir}
+                onSalida={onSalida}
+                onProtocolo={onProtocolo}
+                onRetencion={onRetencion}
+                onAcciones={onAcciones}
+              />
+            ))}
+            {pie}
+          </>
         )}
         {panel === 'alertas' && (
           <>
@@ -801,11 +910,11 @@ export function OperacionScreens({
               const tone = guardTone(shift);
               const visual = toneForGuard(tone);
               return (
-                <MovilCard key={shift.id} className="mb-2 overflow-hidden !p-0" ring={index === 0 ? visual : null} attrs={{ 'data-movil-alerta': shift.id }}>
+                <MovilCard key={shift.id} className="mb-2 overflow-hidden !p-0" ring={visual} attrs={{ 'data-movil-alerta': shift.id }}>
                   <div className="flex">
                     {index === 0 && !readOnly && (
-                      <button type="button" onClick={() => (tone === 'vac' ? onProtocolo(shift) : onLlego(shift))} className="flex w-[92px] shrink-0 flex-col items-center justify-center gap-1 bg-emerald-600 text-[11px] font-black text-white active:bg-emerald-700">
-                        <UserCheck size={20} strokeWidth={2.4} aria-hidden="true" />
+                      <button type="button" onClick={() => (tone === 'vac' ? onProtocolo(shift) : onLlego(shift))} className={`flex w-[88px] shrink-0 flex-col items-center justify-center gap-1 text-[11px] font-semibold ${MOVIL_PRIMARY_BG}`}>
+                        <UserCheck size={20} strokeWidth={1.75} aria-hidden="true" />
                         {tone === 'vac' ? 'Cubrir' : 'Llegó'}
                       </button>
                     )}
@@ -814,12 +923,11 @@ export function OperacionScreens({
                         <MovilIconBox icon={shift.isUnassigned ? ShieldAlert : UserX} tone={visual} size="sm" />
                         <div className="min-w-0 flex-1">
                           <MovilBadge tone={visual}>{guardStatusLabel(shift)}</MovilBadge>
-                          <h3 className="mt-0.5 truncate text-[15px] font-black leading-tight text-slate-900">{shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Vacante'}</h3>
+                          <h3 className="mt-0.5 truncate text-[15px] font-semibold leading-tight text-slate-900">{shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Vacante'}</h3>
                         </div>
                       </div>
                       <GuardDetalleLines shift={shift} siblings={siblingsOf(shift)} now={nowMs} />
                       <div className="mt-2 flex gap-1.5">
-                        {!shift.isUnassigned && <LlamarButton telefono={String(shift.phone || '').trim() || null} compact={!readOnly} />}
                         {!readOnly && (
                           <>
                             {!shift.isUnassigned && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
@@ -827,6 +935,7 @@ export function OperacionScreens({
                             {onAcciones && <MovilIconButton icon={MoreHorizontal} label="Más acciones" attrs={{ 'data-movil-mas-acciones': shift.id }} onClick={() => onAcciones(shift)} />}
                           </>
                         )}
+                        {!shift.isUnassigned && <LlamarButton telefono={String(shift.phone || '').trim() || null} compact={!readOnly} />}
                       </div>
                     </div>
                   </div>
@@ -836,6 +945,7 @@ export function OperacionScreens({
             {alerts.length === 0 && (
               <MovilCard icon={UserCheck} tone="emerald" title="Sin alertas en este momento." subtitle="Todo el plantel en orden." />
             )}
+            {pie}
           </>
         )}
       </div>

@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { MovilIconBox } from './MovilIconBox';
 import { MovilProgress } from './MovilProgress';
-import { MOVIL_NUMBER, MOVIL_RING, type MovilTone } from './tones';
+import { MOVIL_CARD, MOVIL_NUMBER, MOVIL_RING, type MovilTone } from './tones';
 
 export interface MovilStatProps {
   icon: LucideIcon;
@@ -10,13 +10,13 @@ export interface MovilStatProps {
   /** Etiqueta en MAYÚSCULAS (ej. «ACTIVOS»). */
   label: string;
   value: ReactNode;
-  /** Píldora arriba a la derecha (ej. «99%»). */
+  /** Etiqueta arriba a la derecha (ej. «99%»). */
   badge?: ReactNode;
   /** Línea chica debajo del número. */
   sub?: ReactNode;
   /** Barra de progreso 0–100. */
   pct?: number;
-  /** Con `onClick` funciona como filtro; `active` dibuja el anillo. */
+  /** Con `onClick` funciona como filtro; `active` lo rellena con el color de la empresa. */
   onClick?: () => void;
   active?: boolean;
   /** Versión apretada para grillas de 3 columnas en 390px. */
@@ -25,18 +25,20 @@ export interface MovilStatProps {
   className?: string;
 }
 
-/** KPI del escritorio: ícono pastel, etiqueta en mayúsculas, número grande con color de estado. */
+/** KPI: ícono gris, etiqueta en mayúsculas, número tabular (en color solo si es estado). Sin sombra. */
 export function MovilStat({ icon, tone, label, value, badge, sub, pct, onClick, active = false, compact = false, attrs, className = '' }: MovilStatProps) {
-  const shell = `flex w-full flex-col rounded-2xl border bg-white text-left shadow-sm ${compact ? 'gap-0.5 p-2.5' : 'gap-1 p-4'} ${active ? `border-transparent ring-2 ${MOVIL_RING[tone]}` : 'border-slate-100'} ${onClick ? 'active:scale-[0.98]' : ''} ${className}`;
+  const shell = `flex w-full flex-col text-left ${compact ? 'gap-0.5 p-2.5' : 'gap-1 p-4'} ${active ? `rounded-lg border border-transparent ${MOVIL_RING[tone]}` : MOVIL_CARD} ${className}`;
+  const number = active ? 'text-inherit' : MOVIL_NUMBER[tone];
+  const labelCls = active ? 'text-inherit opacity-80' : 'text-slate-500';
   const body = (
     <>
       <div className={`flex items-center justify-between ${compact ? '' : 'mb-1'}`}>
-        <MovilIconBox icon={icon} tone={tone} size="sm" />
+        <MovilIconBox icon={icon} tone={tone} size="sm" className={active ? 'text-inherit' : ''} />
         {badge}
       </div>
-      <p className={`font-black uppercase tracking-wide text-slate-600 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>{label}</p>
-      <b className={`block font-black leading-none ${compact ? 'text-2xl' : 'text-3xl'} ${MOVIL_NUMBER[tone]}`}>{value}</b>
-      {sub && <p className="mt-0.5 text-[10px] font-semibold text-slate-400">{sub}</p>}
+      <p className={`font-semibold uppercase tracking-wide ${compact ? 'text-[9px]' : 'text-[10px]'} ${labelCls}`}>{label}</p>
+      <b className={`block font-bold leading-none tabular-nums ${compact ? 'text-2xl' : 'text-3xl'} ${number}`}>{value}</b>
+      {sub && <p className={`mt-0.5 text-[10px] font-medium ${active ? 'text-inherit opacity-80' : 'text-slate-400'}`}>{sub}</p>}
       {typeof pct === 'number' && <MovilProgress pct={pct} tone={tone} className="mt-1" />}
     </>
   );

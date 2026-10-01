@@ -12,7 +12,34 @@ export const COMPANY_THEME_VARS = [
   '--company-primary-dark-card2','--company-primary-dark-border',
   '--company-primary-glow','--company-primary-active-bg',
   '--company-primary-tag-bg','--company-primary-tag-text',
+  '--movil-topbar','--movil-primary','--movil-primary-text',
 ];
+
+/**
+ * Luminosidad HSL (0–100) del color. Por encima de `MOVIL_LIGHT_L` el color es «claro»:
+ * el texto blanco encima no llega a AA y el celular usa el tono oscuro.
+ */
+export const MOVIL_LIGHT_L = 58;
+
+export function companyColorIsLight(hex: string): boolean {
+  return hexToHsl(hex)[2] > MOVIL_LIGHT_L;
+}
+
+/**
+ * Variables del celular (estilo minimalista): base neutra y el color de la empresa solo en
+ * barra superior, botón primario, contador seleccionado, pestaña activa, selector y foco.
+ * - `--movil-topbar`: barra superior (tono oscuro del color; siempre contrasta con texto blanco).
+ * - `--movil-primary`: el color, o `--company-primary-darker` si es claro (contraste AA).
+ * - `--movil-primary-text`: texto sobre el primario (blanco).
+ */
+export function buildMovilTheme(hex: string): { '--movil-topbar': string; '--movil-primary': string; '--movil-primary-text': string } {
+  const theme = buildCompanyTheme(hex);
+  return {
+    '--movil-topbar': theme['--topbar-bg'],
+    '--movil-primary': companyColorIsLight(hex) ? theme['--company-primary-darker'] : hex,
+    '--movil-primary-text': '#ffffff',
+  };
+}
 
 function hexToHsl(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16) / 255;
@@ -208,7 +235,7 @@ function buildBrandCSS(): string {
 export function applyCompanyTheme(hex: string): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
-  const theme = buildCompanyTheme(hex);
+  const theme = { ...buildCompanyTheme(hex), ...buildMovilTheme(hex) };
   Object.entries(theme).forEach(([k, v]) => root.style.setProperty(k, v));
   root.setAttribute('data-brand', '1');
   let styleEl = document.getElementById(BRAND_STYLE_ID) as HTMLStyleElement | null;

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { barraDelModulo, moduloMovilDe, modulosMovil, seccionActiva, type MovilIcono } from '@/lib/movil/movilModulos';
+import { MOVIL_BORDER, MOVIL_FONT, MOVIL_PRIMARY_BG, MOVIL_PRIMARY_TEXT } from './ui/tones';
 
 const ICONS: Record<MovilIcono, typeof Radio> = {
   objetivos: Radio,
@@ -34,7 +35,7 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
   const activa = seccionActiva(modulo, query);
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex border-t border-slate-100 bg-white shadow-[0_-6px_16px_rgba(15,23,42,0.06)] md:hidden"
+      className={`fixed bottom-0 left-0 right-0 z-50 flex border-t ${MOVIL_BORDER} bg-white md:hidden ${MOVIL_FONT}`}
       aria-label={modulo ? `Navegación ${modulo.label}` : 'Navegación celular'}
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
@@ -48,10 +49,13 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
             href={item.href}
             // La primera sección vuelve a la pantalla principal del módulo aunque la URL no cambie.
             onClick={esInicio ? () => window.dispatchEvent(new Event('cosp-modulo-inicio')) : undefined}
-            className={`relative flex min-h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[9px] font-black uppercase tracking-wide ${active ? 'text-indigo-600' : 'text-slate-400'}`}
+            aria-current={active ? 'page' : undefined}
+            className={`relative flex min-h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[9px] font-semibold uppercase tracking-wide ${active ? MOVIL_PRIMARY_TEXT : 'text-slate-500'}`}
           >
-            <span className={`flex h-8 w-11 items-center justify-center rounded-xl transition-colors ${active ? 'bg-indigo-50' : ''}`}>
-              <Icon size={18} strokeWidth={2.2} />
+            {/* Pestaña activa: línea de 2 px arriba con el color de la empresa, sin relleno. */}
+            {active && <span aria-hidden="true" className={`absolute inset-x-3 top-0 h-0.5 ${MOVIL_PRIMARY_BG}`} data-movil-nav-active="1" />}
+            <span className="flex h-8 w-11 items-center justify-center">
+              <Icon size={18} strokeWidth={1.75} />
             </span>
             {item.id === 'alertas' && alertCount > 0 && (
               <span className="absolute right-[calc(50%-18px)] top-1 min-w-[14px] rounded-full bg-rose-600 px-1 text-[8px] text-white">

@@ -1,6 +1,7 @@
 import { outgoingFor, relieverFor, seriesBoundMs } from '@cosp/ops-core';
 import { guardTone, type GuardTone } from '@/lib/movil/guardTone';
 import { hhmmAR, horarioPlanificado, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
+import { normalizarNota } from '@/lib/operaciones/opsNota';
 
 /**
  * Datos de la tarjeta compacta del guardia (celular): dos filas con íconos, sin textos
@@ -22,6 +23,10 @@ export interface GuardCompacto {
   tope: string | null;
   /** Apellido y hora de quien lo releva (saliente) o a quién releva (entrante). */
   relevo: { apellido: string; hhmm: string; sentido: 'lo_releva' | 'releva_a' } | null;
+  /** Respuesta del guardia al aviso (¿venís? / avisó demora): hora y ETA (MessageSquare). */
+  respuesta: { hhmm: string; eta: string | null } | null;
+  /** Última nota del operador (texto corto, StickyNote). */
+  nota: string | null;
   /** Chip de estado a la derecha de la fila 1. */
   estado: { kind: GuardEstadoCompacto; texto: string };
   tone: GuardTone;
@@ -158,6 +163,14 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
 
   const tope = tone === 'ret' && shift.retentionWait && shift.retentionWait.capAtMs > 0 ? `tope ${hhmmAR(shift.retentionWait.capAtMs)}` : null;
 
+  let respuesta: GuardCompacto['respuesta'] = null;
+  if (!esVacante && !shift.isPresent && shift.isLateNotified) {
+    const ms = toMs(shift.lateArrivalConfirmedAt as TsLike) || toMs(shift.lateArrivalAt as TsLike);
+    const hhmm = String(shift.lateArrivalRespondedLabel || '').trim() || (ms ? hhmmAR(ms) : '');
+    if (hhmm) respuesta = { hhmm, eta: shift.lateArrivalEtaLabel ? String(shift.lateArrivalEtaLabel) : null };
+  }
+  const notaRaw = shift.opsNota && typeof shift.opsNota === 'object' ? normalizarNota((shift.opsNota as { texto?: unknown }).texto) : null;
+
   return {
     nombre,
     code: String(shift.code || shift.vacancyBand || '').trim().toUpperCase() || '—',
@@ -166,6 +179,8 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     ingreso,
     tope,
     relevo,
+    respuesta,
+    nota: notaRaw,
     estado: estadoDe(shift, tone, nowMs),
     tone,
     telefono: String(shift.phone || '').trim() || null,

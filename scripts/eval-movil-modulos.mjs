@@ -65,7 +65,7 @@ const compile = (src, name) => {
   }).outputText);
   return out;
 };
-const sheet = compile(readFileSync(join(root, 'components/movil/BottomSheet.tsx'), 'utf8'), 'BottomSheet.tsx');
+const sheet = compile(readFileSync(join(root, 'components/movil/BottomSheet.tsx'), 'utf8').replace("from './ui/tones'", "from './ui/tones.mjs'"), 'BottomSheet.tsx');
 // components/movil/ui: piezas visuales compartidas (lucide-react se resuelve desde apps/web2/node_modules).
 const uiDir = join(root, 'components/movil/ui');
 const { readdirSync, mkdirSync } = await import('node:fs');

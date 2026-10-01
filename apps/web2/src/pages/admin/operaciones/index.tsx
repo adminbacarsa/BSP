@@ -75,6 +75,7 @@ import { isShiftOperativelyCovered } from '@/lib/cosp/coverageSemantics';
 import { opsLateArrivalBadgeLabel } from '@/lib/operaciones/opsLateArrivalMonitor';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
+import { formatOpsNotaLine } from '@/lib/operaciones/opsNota';
 import { ConvocatoriaTimeline } from '@/components/operaciones/ConvocatoriaTimeline';
 import { isExtraNonReliefShift, isReliefEligibleShift, formatRetentionDuration, formatRetentionLine } from '@cosp/ops-core';
 import { SeriesReliefPicker } from '@/components/operaciones/SeriesReliefPicker';
@@ -1241,6 +1242,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isPresent && shift.retentionWait && (
                     <p className="text-[9px] font-bold text-orange-700 truncate" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
+                {formatOpsNotaLine(shift.opsNota) && (
+                    <p className="text-[9px] font-bold text-slate-600 truncate" title={formatOpsNotaLine(shift.opsNota) || ''}>{formatOpsNotaLine(shift.opsNota)}</p>
+                )}
                 {coveringEmployeeName && !(viewTab === 'AUSENTES' && isAbsentOperativelyCovered) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate mt-0.5" title={`Cubierto por ${coveringEmployeeName}`}>
                         Cubre: {coveringEmployeeName}
@@ -1326,6 +1330,9 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 )}
                 {shift.isPresent && formatIngresoLine(shift) && (
                     <p className="text-[10px] font-bold text-emerald-700 mb-1.5 pl-10">{formatIngresoLine(shift)}</p>
+                )}
+                {formatOpsNotaLine(shift.opsNota) && (
+                    <p className="text-[10px] font-bold text-slate-600 mb-1.5 pl-10">{formatOpsNotaLine(shift.opsNota)}</p>
                 )}
                 {convocadoCuenta && (
                     <p className="text-[10px] font-bold text-indigo-700 mb-1.5 pl-10">{convocadoCuenta}</p>

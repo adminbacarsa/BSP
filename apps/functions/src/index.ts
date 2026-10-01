@@ -1416,6 +1416,40 @@ export const marcarAusenciaOperaciones = functions.https.onCall(async (data, con
   return { success: r.applied || r.alreadyAbsent === true || cur?.isAbsent === true, vacancyOpened, ...r };
 });
 
+/**
+ * Aviso manual por la app desde el CC: ENTRANTE (¿venís? — convocatoria LLEGADA_TARDE) o
+ * RETENIDO (seguís retenido, tu relevo llega ~HH:MM / no llegó). 1 aviso por guardia cada 5 min.
+ */
+export const avisarGuardiaOperaciones = functions.https.onCall(async (data, context) => {
+  if (!context.auth?.uid) {
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
+  }
+  const shiftId = String(data?.shiftId || '').trim();
+  const kind = String(data?.kind || '').toUpperCase();
+  if (!shiftId) throw new functions.https.HttpsError('invalid-argument', 'shiftId requerido.');
+  if (kind !== 'ENTRANTE' && kind !== 'RETENIDO') {
+    throw new functions.https.HttpsError('invalid-argument', 'kind debe ser ENTRANTE o RETENIDO.');
+  }
+  const { avisarGuardiaOperaciones: run } = await import('./ops/avisarGuardiaOperaciones');
+  const r = await run(admin.firestore(), {
+    shiftId,
+    kind: kind as 'ENTRANTE' | 'RETENIDO',
+    relatedShiftId: data?.relatedShiftId ? String(data.relatedShiftId) : null,
+    operatorUid: context.auth.uid,
+    actorName: context.auth.token.name || context.auth.token.email || 'Operador',
+    device: data?.device ? String(data.device) : undefined,
+  });
+  if (r.ok === false) {
+    if (r.reason === 'TURNO_NOT_FOUND') throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+    if (r.reason === 'AVISO_RECIENTE') {
+      throw new functions.https.HttpsError('resource-exhausted', `Ya se le avisó hace menos de 5 min. Reintentá en ${r.retryInSec ?? 60} s.`);
+    }
+    if (r.reason === 'SIN_EMPLEADO') throw new functions.https.HttpsError('failed-precondition', 'El turno no tiene guardia asignado.');
+    throw new functions.https.HttpsError('failed-precondition', 'El estado del turno no admite este aviso.');
+  }
+  return r;
+});
+
 export const revertirAusencia = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
     throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');

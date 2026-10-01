@@ -284,7 +284,7 @@ const tarjetasHtml = render(OperacionScreens, {
   panel: 'objetivo', alerts: [], objectives: [objetivoDetalle], objective: objetivoDetalle, ...noops,
 });
 check('tarjeta 390: horario planificado y código en cada guardia', tarjetasHtml.includes('07:00–15:00') && tarjetasHtml.includes('15:00–23:00') && tarjetasHtml.includes('23:00–07:00') && (tarjetasHtml.match(/data-movil-detalle=/g) || []).length === 3);
-check('tarjeta 390: ingreso con ícono (verde a tiempo, ámbar con +min)', (tarjetasHtml.match(/data-movil-mini="ingreso"/g) || []).length === 2 && tarjetasHtml.includes('</svg>07:00</span>') && tarjetasHtml.includes('15:12 +12′') && tarjetasHtml.includes('text-amber-700') && !tarjetasHtml.includes('Ingresó'));
+check('tarjeta 390: ingreso con ícono (verde a tiempo, ámbar con +min)', (tarjetasHtml.match(/data-movil-mini="ingreso"/g) || []).length === 2 && tarjetasHtml.includes('</svg>07:00</span>') && tarjetasHtml.includes('15:12 +12′') && tarjetasHtml.includes('text-amber-600') && !tarjetasHtml.includes('Ingresó'));
 check('tarjeta 390: relevo con apellido y hora; plan con chip de hora', tarjetasHtml.includes('GUERRERO 15:00') && tarjetasHtml.includes('GUERRERO 23:00') && tarjetasHtml.includes('data-movil-estado="plan"') && tarjetasHtml.includes('</svg>23:00</span>') && !tarjetasHtml.includes('Lo releva') && !tarjetasHtml.includes('Entra 23:00'));
 check('tarjeta 390: teléfono como ícono de 36 px, sin fila de botones; tocar abre la hoja', tarjetasHtml.includes('href="tel:3515550101"') && (tarjetasHtml.match(/data-movil-llamar="1"/g) || []).length === 3 && tarjetasHtml.includes('h-9 w-9') && !tarjetasHtml.includes('Salida') && !tarjetasHtml.includes('data-movil-mas-acciones') && (tarjetasHtml.match(/data-movil-tap="/g) || []).length === 3);
 const homeRelevo = render(OperacionScreens, {
@@ -519,14 +519,14 @@ const ids = (shift, now = NOW_A) => accionesParaTurno(shift, now).map((a) => a.i
 const turnoBase = { id: 'a1', employeeName: 'Baez, Juan', phone: '351', code: 'T', positionName: 'Puesto 1', objectiveName: 'Peaje', shiftDateObj: ar('15:00'), endDateObj: ar('23:00') };
 check('plan antes de T−60: sin acciones (ni ingreso ni ausente)', ids({ ...turnoBase, shiftDateObj: ar('17:00'), endDateObj: ar('01:00', '2026-10-02'), isFuture: true }) === '');
 check('plan en ventana (T−30): marcar ingreso, todavía no ausente', ids({ ...turnoBase, shiftDateObj: ar('15:45'), endDateObj: ar('23:45'), isFuture: true, isImminent: true }) === 'INGRESO');
-check('tarde sin aviso (T+20): ingreso + ausente', ids({ ...turnoBase, isLateUnnotified: true }) === 'INGRESO,AUSENTE');
-check('tarde avisada: ingreso + ausente', ids({ ...turnoBase, isLateNotified: true, lateArrivalEtaMinutes: 30 }) === 'INGRESO,AUSENTE');
+check('tarde sin aviso (T+20): avisar por la app + ingreso + ausente', ids({ ...turnoBase, isLateUnnotified: true }) === 'AVISAR_ENTRANTE,INGRESO,AUSENTE');
+check('tarde avisada: avisar + ingreso + ausente', ids({ ...turnoBase, isLateNotified: true, lateArrivalEtaMinutes: 30 }) === 'AVISAR_ENTRANTE,INGRESO,AUSENTE');
 check('activo: salida/relevo', ids({ ...turnoBase, isPresent: true, realStartTime: ar('15:01') }) === 'SALIDA');
-check('retenido: liberar (CHECKOUT) + extender retención, sin salida simple', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 }) === 'LIBERAR,RETENCION');
-check('esperando relevo (fin vencido, P9): liberar + retención', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isPendingClose: true }) === 'LIBERAR,RETENCION');
-check('ausente dentro de T+60: llegó/revertir + cubrir hueco', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }) === 'LLEGO,PROTOCOLO');
+check('retenido: liberar (CHECKOUT) + extender retención + avisar al retenido, sin salida simple', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 }) === 'LIBERAR,RETENCION,AVISAR_RETENIDO');
+check('esperando relevo (fin vencido, P9): liberar + retención + avisar', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isPendingClose: true }) === 'LIBERAR,RETENCION,AVISAR_RETENIDO');
+check('ausente dentro de T+60: avisar + llegó/revertir + cubrir hueco', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }) === 'AVISAR_ENTRANTE,LLEGO,PROTOCOLO');
 check('ausente pasado T+60: solo cubrir hueco (canRevertAbsenceNow)', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }, ar('16:05').getTime()) === 'PROTOCOLO');
-check('ausente ya cubierto: revertir sigue hasta T+60 (P5f) + ver protocolo', ids({ ...turnoBase, isAbsent: true, operacionallyCovered: true }) === 'LLEGO,PROTOCOLO');
+check('ausente ya cubierto: revertir sigue hasta T+60 (P5f) + ver protocolo', ids({ ...turnoBase, isAbsent: true, operacionallyCovered: true }) === 'AVISAR_ENTRANTE,LLEGO,PROTOCOLO');
 check('vacante: solo cubrir hueco', ids({ ...turnoBase, employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'T' }) === 'PROTOCOLO');
 check('franco: sin acciones', ids({ ...turnoBase, code: 'F', isFranco: true }) === '');
 check('completado: sin acciones', ids({ ...turnoBase, isPresent: false, isCompleted: true, realEndTime: ar('15:10') }) === '');
@@ -548,7 +548,70 @@ const hojaSin = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isComple
 check('hoja 390 sin acciones: aviso', hojaSin.includes('data-movil-acciones-vacio="1"'));
 const tarjetaTarde = render(GuardCard, { shift: { ...turnoBase, isLateUnnotified: true }, now: NOW_A, onLlego: () => {}, onRevertir: () => {}, onSalida: () => {}, onProtocolo: () => {}, onRetencion: () => {}, onAcciones: () => {} });
 check('tarjeta 390 tarde: tocar la tarjeta abre la hoja; sin botones Ingreso/⋯', tarjetaTarde.includes('data-movil-tap="a1"') && tarjetaTarde.includes('aria-label="Acciones de BAEZ Juan"') && tarjetaTarde.includes('data-movil-estado="tarde"') && tarjetaTarde.includes('TAR 20′') && !tarjetaTarde.includes('>Ingreso<') && !tarjetaTarde.includes('data-movil-mas-acciones'));
-check('hoja: Llamar y WhatsApp (wa.me +549)', hojaTarde.includes('data-movil-whatsapp="1"') && hojaTarde.includes('href="https://wa.me/549351"') && hojaTarde.includes('>Llamar<'));
+check('hoja: sin WhatsApp; Llamar es el último recurso (abajo, blanco con borde)', !hojaTarde.includes('data-movil-whatsapp') && !hojaTarde.includes('wa.me') && hojaTarde.includes('Último recurso') && hojaTarde.includes('Llamar · 351') && hojaTarde.lastIndexOf('data-movil-llamar="1"') > hojaTarde.lastIndexOf('data-movil-accion='));
+
+// ── Segunda vuelta: avisar por la app, nota rápida, próximas 3 h, pie ──
+check('tarde: Avisar por la app primero (ENTRANTE sobre el propio turno), después ingreso/ausente', ids({ ...turnoBase, isLateUnnotified: true }) === 'AVISAR_ENTRANTE,INGRESO,AUSENTE' && accionesParaTurno({ ...turnoBase, isLateUnnotified: true }, NOW_A)[0].targetShiftId === 'a1');
+check('ausente reversible: Avisar + Llegó + Cubrir; pasado T+60 solo Cubrir', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }) === 'AVISAR_ENTRANTE,LLEGO,PROTOCOLO' && ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }, ar('16:05').getTime()) === 'PROTOCOLO');
+const retBase = { ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 };
+const retConRelevo = { ...retBase, retentionWait: { sinceMs: ar('15:00').getTime(), elapsedMinutes: 20, capAtMs: ar('19:59').getTime(), capRemainingMinutes: 279, reliever: { id: 't2', employeeName: 'Guerrero, Martín', code: 'T', startMs: ar('15:00').getTime(), status: 'NO_FICHO' }, waitLabel: '' } };
+const accRet = accionesParaTurno(retConRelevo, NOW_A);
+check('retenido con relevo sin fichar: Avisar al entrante (push al relevo) + liberar + retención + Avisar al retenido', accRet.map((a) => a.id).join(',') === 'AVISAR_ENTRANTE,LIBERAR,RETENCION,AVISAR_RETENIDO' && accRet[0].label === 'Avisar a Guerrero, Martín por la app' && accRet[0].targetShiftId === 't2' && accRet[0].relatedShiftId === 'a1' && accRet[3].label === 'Avisar a Baez, Juan' && accRet[3].targetShiftId === 'a1' && accRet[3].relatedShiftId === 't2');
+check('retenido con relevo ya presente: no se avisa al entrante', ids({ ...retConRelevo, retentionWait: { ...retConRelevo.retentionWait, reliever: { ...retConRelevo.retentionWait.reliever, status: 'PRESENTE' } } }) === 'LIBERAR,RETENCION,AVISAR_RETENIDO');
+check('retenido sin retentionWait: el entrante sale de la serie (siblings)', accionesParaTurno({ ...retBase, code: 'M' }, NOW_A, [{ ...retBase, code: 'M' }, { id: 'tt', employeeName: 'Perez, Hugo', code: 'T', positionName: 'Puesto 1', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), startTime: ar('15:00'), endTime: ar('23:00') }])[0].label === 'Avisar a Perez, Hugo por la app');
+const { avisoManualRestanteSeg, AVISO_MANUAL_COOLDOWN_MS } = await importFront('lib/movil/guardAcciones.ts');
+check('cooldown 5 min del aviso manual (espejo del servidor)', AVISO_MANUAL_COOLDOWN_MS === 300000 && avisoManualRestanteSeg({ opsAvisoManualAt: new Date(NOW_A - 2 * 60000) }, NOW_A) === 180 && avisoManualRestanteSeg({ opsAvisoManualAt: new Date(NOW_A - 6 * 60000) }, NOW_A) === 0 && avisoManualRestanteSeg({}, NOW_A) === 0);
+const hojaAviso = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isLateUnnotified: true }, siblings: [], now: NOW_A, onNota: () => {}, ...hojaNoops });
+check('hoja 390: Avisar por la app arriba, nota rápida con input y Guardar, llamar al final', hojaAviso.includes('data-movil-accion="AVISAR_ENTRANTE"') && hojaAviso.indexOf('data-movil-accion="AVISAR_ENTRANTE"') < hojaAviso.indexOf('data-movil-accion="INGRESO"') && hojaAviso.includes('¿venís?') && hojaAviso.includes('data-movil-nota-input="1"') && hojaAviso.includes('data-movil-nota-guardar="1"') && hojaAviso.includes(`maxLength="140"`) && hojaAviso.lastIndexOf('data-movil-llamar') > hojaAviso.lastIndexOf('data-movil-nota-guardar'));
+const hojaCooldown = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isLateUnnotified: true, opsAvisoManualAt: new Date(NOW_A - 60000) }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390: aviso reciente → botón deshabilitado con «reintentá en N min»', /data-movil-accion="AVISAR_ENTRANTE"[^>]*disabled=""/.test(hojaCooldown) && hojaCooldown.includes('reintentá en 4 min'));
+const hojaConfAviso = render(GuardAccionesSheetBody, { shift: retConRelevo, siblings: [], now: NOW_A, confirmandoInicial: 'AVISAR_ENTRANTE', ...hojaNoops });
+check('hoja 390: confirmar aviso al entrante con el puesto', hojaConfAviso.includes('data-movil-confirmar="AVISAR_ENTRANTE"') && hojaConfAviso.includes('¿Avisar a Guerrero, Martín por la app que lo esperan en Puesto 1?'));
+const GCx = await importFront('lib/movil/guardCompacto.ts');
+const tardeRespondio = { ...tardeAvisada, lateArrivalConfirmedAt: ar('15:08'), lateArrivalRespondedLabel: '15:08' };
+check('respuesta del guardia con hora (hoja y tarjeta compacta)', guardDetalle(tardeRespondio, [], AHORA).estado === 'Tarde 20 min · avisó · llega ~15:30 · respondió 15:08' && GCx.guardCompacto(tardeRespondio, [], AHORA).respuesta.hhmm === '15:08' && GCx.guardCompacto(tardeRespondio, [], AHORA).respuesta.eta === '15:30' && render(GuardCard, { shift: tardeRespondio, now: AHORA, onAcciones: () => {} }).includes('data-movil-mini="respuesta"'));
+check('respuesta sin label usa lateArrivalAt', guardDetalle({ ...tardeAvisada, lateArrivalAt: ar('15:09') }, [], AHORA).estado.endsWith('respondió 15:09'));
+
+// Nota rápida: en el turno (opsNota) y como novedad NOTA_OPERADOR informativa.
+const N = await importFront('lib/operaciones/opsNota.ts');
+const notaDoc = { texto: 'Sin llaves del portón', autor: 'Lopez', autorUid: 'u1', at: ar('15:21') };
+check('nota: línea con hora y autor, normalización y tope 140', N.formatOpsNotaLine(notaDoc) === 'Nota 15:21 · Lopez: Sin llaves del portón' && N.normalizarNota('  hola   mundo ') === 'hola mundo' && N.normalizarNota('') === null && N.normalizarNota('x'.repeat(200)).length === 140 && N.OPS_NOTA_MAX === 140);
+const notaNov = N.buildNotaNovedad({ id: 'a1', employeeId: 'e1', employeeName: 'Baez, Juan', objectiveId: 'peaje', objectiveName: 'Peaje', empresaId: 'pruebas_sa' }, notaDoc, 'CC_MOVIL');
+check('nota → novedad NOTA_OPERADOR con turno, autor y origen', notaNov.type === 'NOTA_OPERADOR' && notaNov.shiftId === 'a1' && notaNov.description === 'Sin llaves del portón' && notaNov.createdByName === 'Lopez' && notaNov.source === 'CC_MOVIL' && notaNov.empresaId === 'pruebas_sa');
+// novedadAlertDisplay arrastra el hook del monitor (Firebase): se verifica por fuente.
+check('la nota es informativa en el escritorio (no exige acción)', /INFO_NOVEDAD_TYPES = new Set\(\[[^\]]*'NOTA_OPERADOR'/s.test(readFileSync(join(web2, 'src/lib/operaciones/novedadAlertDisplay.ts'), 'utf8')));
+const conNota = { ...baezM, opsNota: notaDoc };
+check('nota visible en tarjeta compacta, hoja y detalle', GCx.guardCompacto(conNota, peaje, AHORA).nota === 'Sin llaves del portón' && guardDetalle(conNota, peaje, AHORA).nota === 'Nota 15:21 · Lopez: Sin llaves del portón' && render(GuardCard, { shift: conNota, now: AHORA, onAcciones: () => {} }).includes('data-movil-mini="nota"') && render(GuardAccionesSheetBody, { shift: conNota, siblings: peaje, now: AHORA, onNota: () => {}, ...hojaNoops }).includes('data-movil-nota-actual="1"'));
+const indexSrc = readFileSync(join(web2, 'src/pages/admin/operaciones/index.tsx'), 'utf8');
+check('el escritorio muestra la nota en la tarjeta del CC', (indexSrc.match(/formatOpsNotaLine\(shift\.opsNota\)/g) || []).length >= 2);
+
+// Próximas 3 horas: franjas que entran, confirmados / sin confirmar / sin nadie → Cubrir.
+const PF = await importFront('lib/movil/proximasFranjas.ts');
+const { ProximasSheetBody } = await importFront('components/movil/OperacionScreens.tsx');
+const nocheN = base({ id: 'n', employeeId: 'e3', employeeName: 'Farias, Lucas', code: 'N', shiftDateObj: ar('23:00'), endDateObj: ar('07:00', '2026-10-02') });
+const prox = PF.proximasFranjas([
+  baezM, guerreroT,
+  base({ id: 'p1', employeeId: 'e5', employeeName: 'Sosa, Carla', code: 'T', positionName: 'Puesto 2', shiftDateObj: ar('16:00'), endDateObj: ar('00:00', '2026-10-02'), lateArrivalAt: ar('15:10'), isLateNotified: true }),
+  base({ id: 'p2', employeeId: 'e6', employeeName: 'Diaz, Rosa', code: 'T', positionName: 'Puesto 2', shiftDateObj: ar('16:00'), endDateObj: ar('00:00', '2026-10-02') }),
+  base({ id: 'p3', employeeId: 'e7', employeeName: 'Gomez, Ana', code: 'T', positionName: 'Puesto 3', objectiveId: 'cet', objectiveName: 'CET', shiftDateObj: ar('17:00'), endDateObj: ar('01:00', '2026-10-02'), isAbsent: true }),
+  base({ id: 'p4', employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'T', positionName: 'Puesto 4', shiftDateObj: ar('18:00'), endDateObj: ar('02:00', '2026-10-02') }),
+  nocheN,
+  base({ id: 'f', employeeId: 'e9', employeeName: 'Franco, Luis', code: 'F', isFranco: true, shiftDateObj: ar('16:00'), endDateObj: ar('00:00', '2026-10-02') }),
+], AHORA);
+check('próximas 3 h: 3 franjas (16, 17, 18), la de las 23 y el franco quedan afuera', prox.length === 3 && prox.every((f) => f.startMs > AHORA && f.startMs <= AHORA + 3 * 3600000) && !prox.some((f) => f.guardias.some((g) => g.nombre.startsWith('Franco')) || f.hora === '23:00'));
+const f16 = prox.find((f) => f.hora === '16:00');
+check('franja 16:00: Sosa confirmó (avisó 15:10), Diaz sin confirmar', f16.confirmados === 1 && f16.sinConfirmar === 1 && !f16.sinNadie && f16.guardias.find((g) => g.nombre === 'Sosa, Carla').estado === 'CONFIRMADO' && f16.guardias.find((g) => g.nombre === 'Sosa, Carla').hora === '15:10' && f16.guardias.find((g) => g.nombre === 'Diaz, Rosa').estado === 'SIN_CONFIRMAR');
+check('franja 17:00 con el único ausente y 18:00 vacante = sin nadie → Cubrir sobre ese turno; van primero', prox[0].sinNadie && prox[1].sinNadie && prox.find((f) => f.hora === '17:00').cubrirShift.id === 'p3' && prox.find((f) => f.hora === '18:00').cubrirShift.id === 'p4');
+check('etiqueta del resumen', PF.etiquetaProximas(PF.resumenProximas(prox)) === 'Próximas 3 h · 3 franjas · 1 ok · 1 sin confirmar · 2 sin nadie' && PF.etiquetaProximas(PF.resumenProximas([])) === 'Próximas 3 h · sin relevos');
+const proxHtml = render(ProximasSheetBody, { franjas: prox, now: AHORA, onCubrir: () => {}, onAbrirObjetivo: () => {} });
+check('hoja 390 próximas: franjas con filete, estados en texto con hora y botón Cubrir solo en las sin nadie', proxHtml.includes('data-movil-sheet="proximas"') && (proxHtml.match(/data-movil-franja=/g) || []).length === 3 && (proxHtml.match(/data-movil-franja-cubrir=/g) || []).length === 2 && proxHtml.includes('confirmó 15:10') && proxHtml.includes('sin confirmar') && proxHtml.includes('Franja sin nadie asignado') && proxHtml.includes('data-movil-franja-estado="sin-nadie"') && !proxHtml.includes('rounded-2xl'));
+check('hoja próximas en supervisión: sin Cubrir', !render(ProximasSheetBody, { franjas: prox, readOnly: true, now: AHORA, onCubrir: () => {} }).includes('data-movil-franja-cubrir'));
+const homeProx = render(OperacionScreens, { ...baseFiltros, filtro: F.FILTRO_VACIO, contadores: {}, grupos: [], objectives: [], proximas: prox, onProximas: () => {}, pieLabel: 'Actualizado hace 3 min · 2 pendientes de enviar' });
+check('home 390: fila «Próximas 3 h» bajo los contadores y pie con actualizado + pendientes', homeProx.includes('data-movil-proximas="fila"') && homeProx.includes('data-movil-proximas-sin-nadie="1"') && homeProx.includes('2 sin nadie') && homeProx.includes('data-movil-pie="1"') && homeProx.includes('Actualizado hace 3 min · 2 pendientes de enviar') && homeProx.indexOf('data-movil-contadores="fila"') < homeProx.indexOf('data-movil-proximas="fila"'));
+const EL = await importFront('lib/movil/estadoLista.ts');
+check('«Actualizado hace N min» y pendientes', EL.formatActualizadoHace(AHORA - 30000, AHORA) === 'Actualizado recién' && EL.formatActualizadoHace(AHORA - 7 * 60000, AHORA) === 'Actualizado hace 7 min' && EL.formatActualizadoHace(AHORA - 65 * 60000, AHORA) === 'Actualizado hace 1 h 05 min' && EL.formatActualizadoHace(0, AHORA) === 'Sin datos todavía' && EL.piePrincipal(AHORA - 60000, 1, AHORA) === 'Actualizado hace 1 min · 1 pendiente de enviar' && EL.piePrincipal(AHORA - 60000, 0, AHORA) === 'Actualizado hace 1 min');
+const movilSrc2 = readFileSync(join(web2, 'src/components/movil/OperacionMovil.tsx'), 'utf8');
+check('OperacionMovil: callable avisarGuardiaOperaciones, nota por cola offline, próximas y pie', movilSrc2.includes('invokeAvisarGuardiaOperaciones') && movilSrc2.includes('guardarNotaOperador') && movilSrc2.includes("enqueueFirestoreWrite(`Nota") && movilSrc2.includes('proximasFranjas(') && movilSrc2.includes('piePrincipal(') && movilSrc2.includes('ProximasSheetBody') && !movilSrc2.includes('WhatsApp'));
 
 // ── Tarjeta compacta 390x844: alto, cantidad visible, un solo botón ──
 const GC = await importFront('lib/movil/guardCompacto.ts');
@@ -570,7 +633,7 @@ check('8 tarjetas compactas en el objetivo, cada una con una sola zona de toque'
 const soloLectura = render(GuardCard, { shift: baezM, siblings: peaje, now: AHORA, readOnly: true, onAcciones: () => {} });
 check('solo lectura: la tarjeta no se toca y conserva el teléfono', !soloLectura.includes('<button') && !soloLectura.includes('data-movil-tap') && soloLectura.includes('data-movil-llamar="1"'));
 check('contadores: una fila horizontal de 6 chips ícono+número con scroll', todosHtml.includes('data-movil-contadores="fila"') && todosHtml.includes('overflow-x-auto') && !todosHtml.includes('grid-cols-3') && (todosHtml.match(/data-movil-contador=/g) || []).length === 6 && ['ACT', 'PLA', 'TAR', 'AUS', 'VAC', 'RET'].every((c) => todosHtml.includes(`>${c}<`)) && todosHtml.includes('h-9 shrink-0'));
-check('contador activo resaltado con anillo', ausHtml.includes('data-movil-contador="AUSENTES" data-movil-filtro-activo="1"') && ausHtml.includes('ring-2 ring-slate-600') && ausHtml.includes('aria-pressed="true"'));
+check('contador activo relleno con el color de la empresa (negro por defecto); los demás blancos con borde', ausHtml.includes('data-movil-contador="AUSENTES" data-movil-filtro-activo="1"') && ausHtml.includes('bg-[var(--movil-primary,#111827)]') && ausHtml.includes('aria-pressed="true"') && ausHtml.includes('border-[#eceef1] bg-white text-slate-700') && !ausHtml.includes('ring-2'));
 
 // ── Sala del celular: tomar mando con piloto inactivo, pedir mando, pasar a Auto con confirmación ──
 const sesionPiloto = (minAgo) => ({ startTime: new Date(NOW_A - 3 * 3600000), lastActivityAt: new Date(NOW_A - minAgo * 60000) });
@@ -620,13 +683,45 @@ check('OperacionMovil: ?shiftId abre el objetivo y la hoja de acciones del turno
 const UI = await importFront('components/movil/ui/index.ts');
 const RadioIcon = (p) => createElement('svg', { 'data-icon': 'radio', width: p.size, height: p.size });
 const headerHtmlUi = render(UI.MovilHeader, { icon: RadioIcon, title: 'Centro de Control', date: new Date(2026, 9, 1) });
-check('MovilHeader: ícono en cuadrado gris-azulado con sombra, título en MAYÚSCULAS negro y fecha con tracking', headerHtmlUi.includes('bg-slate-200/80') && headerHtmlUi.includes('shadow-md') && headerHtmlUi.includes('font-black uppercase') && headerHtmlUi.includes('text-slate-900') && headerHtmlUi.includes('tracking-widest text-slate-400') && /jueves,? 1 de octubre de 2026/.test(headerHtmlUi));
+check('MovilHeader: ícono gris sin cuadro ni sombra, título MAYÚSCULAS espaciadas y fecha en gris', !headerHtmlUi.includes('bg-slate-200') && !headerHtmlUi.includes('shadow') && headerHtmlUi.includes('font-semibold uppercase leading-none tracking-wider text-slate-900') && headerHtmlUi.includes('tracking-widest text-slate-500') && /jueves,? 1 de octubre de 2026/.test(headerHtmlUi));
 const statHtml = render(UI.MovilStat, { icon: RadioIcon, tone: 'emerald', label: 'Activos', value: 7, badge: createElement(UI.MovilBadge, { tone: 'emerald' }, '99%'), pct: 99, onClick: () => {}, active: true, attrs: { 'data-x': 'a' } });
-check('MovilStat: ícono pastel, etiqueta MAYÚSCULAS slate-600, número grande emerald, píldora, barra y anillo activo', statHtml.includes('bg-emerald-50 text-emerald-600') && statHtml.includes('uppercase tracking-wide text-slate-600') && statHtml.includes('text-emerald-600">7<') && statHtml.includes('>99%<') && statHtml.includes('role="progressbar"') && statHtml.includes('ring-2 ring-emerald-500') && statHtml.includes('aria-pressed="true"') && statHtml.includes('data-x="a"'));
+const statQuieto = render(UI.MovilStat, { icon: RadioIcon, tone: 'emerald', label: 'Activos', value: 7, pct: 99 });
+check('MovilStat: sin cuadro pastel ni sombra; número en color de estado; activo = relleno color empresa', !/\bbg-emerald-50\b/.test(statQuieto) && !statQuieto.includes('shadow') && statQuieto.includes('rounded-lg border border-[#eceef1] bg-white') && statQuieto.includes('text-emerald-600">7<') && statQuieto.includes('role="progressbar"') && statHtml.includes('bg-[var(--movil-primary,#111827)]') && !statHtml.includes('ring-2') && statHtml.includes('>99%<') && statHtml.includes('aria-pressed="true"') && statHtml.includes('data-x="a"'));
 const cardHtmlUi = render(UI.MovilCard, { icon: RadioIcon, tone: 'rose', title: 'Peaje', subtitle: 'Ruta 9', badge: createElement(UI.MovilBadge, { tone: 'rose', size: 'md' }, '50%'), onClick: () => {}, attrs: { 'data-c': '1' } }, null);
-check('MovilCard: blanca rounded-2xl borde slate-100 sombra suave, botón si tiene onClick', cardHtmlUi.startsWith('<button') && cardHtmlUi.includes('rounded-2xl border bg-white') && cardHtmlUi.includes('border-slate-100') && cardHtmlUi.includes('shadow-sm') && cardHtmlUi.includes('>Peaje<') && cardHtmlUi.includes('>50%<') && cardHtmlUi.includes('data-c="1"'));
+check('MovilCard: blanca, borde #eceef1, radio 8 px, sin sombra; botón si tiene onClick', cardHtmlUi.startsWith('<button') && cardHtmlUi.includes('rounded-lg border border-[#eceef1] bg-white') && !cardHtmlUi.includes('shadow') && !cardHtmlUi.includes('rounded-2xl') && cardHtmlUi.includes('>Peaje<') && cardHtmlUi.includes('>50%<') && cardHtmlUi.includes('data-c="1"'));
+const cardFilete = render(UI.MovilCard, { title: 'X', ring: 'rose' }, null);
+check('MovilCard: estado = filete de 3 px a la izquierda, no anillo', cardFilete.includes('w-[3px]') && cardFilete.includes('bg-rose-500') && !cardFilete.includes('ring-'));
+const badgeHtml = render(UI.MovilBadge, { tone: 'rose' }, 'AUS 2');
+const badgeOutline = render(UI.MovilBadge, { tone: 'slate', outline: true }, 'M');
+check('MovilBadge: texto en color sin relleno; outline = recuadro con borde', badgeHtml.includes('text-rose-600') && !badgeHtml.includes('bg-rose') && !badgeHtml.includes('rounded-full') && badgeOutline.includes('rounded border border-slate-300'));
 const topHtml = render(UI.MovilTopBar, { modulo: 'Operación', empresa: 'Pruebas S.A.', online: false, pendingLabel: '1 ingreso' });
-check('MovilTopBar: barra oscura con módulo, empresa en píldora, sin señal y pendiente', topHtml.includes('bg-slate-900') && topHtml.includes('>Operación<') && topHtml.includes('rounded-full bg-white/10') && topHtml.includes('>Pruebas S.A.<') && topHtml.includes('Sin señal') && topHtml.includes('Pendiente de enviar: 1 ingreso'));
+check('MovilTopBar: fondo con variable de empresa (negro por defecto), módulo en MAYÚSCULAS espaciadas, empresa en píldora con borde sin relleno, sin sombra', topHtml.includes('bg-[var(--movil-topbar,#111827)]') && !topHtml.includes('shadow') && topHtml.includes('tracking-[0.2em]') && topHtml.includes('>Operación<') && topHtml.includes('rounded-full border border-white/40 bg-transparent') && !topHtml.includes('bg-white/10 ') && topHtml.includes('>Pruebas S.A.<') && topHtml.includes('Sin señal') && topHtml.includes('Pendiente de enviar: 1 ingreso'));
+const iconBtn = render(UI.MovilIconButton, { icon: RadioIcon, label: 'Más', onClick: () => {} });
+check('MovilIconButton: blanco con borde, sin sombra, ícono gris', iconBtn.includes('border border-slate-300 bg-white') && !iconBtn.includes('shadow') && iconBtn.includes('text-slate-700'));
+check('tarjeta compacta: código en recuadro con borde (no relleno), estado solo texto en color, sin sombra ni rounded-2xl', soloTarjeta.includes('rounded border border-slate-300') && soloTarjeta.includes('data-movil-code="M"') && !soloTarjeta.includes('bg-slate-900') && !soloTarjeta.includes('shadow') && !soloTarjeta.includes('rounded-2xl') && !soloTarjeta.includes('rounded-full') && soloTarjeta.includes('w-[3px]') && soloTarjeta.includes('bg-emerald-500'));
+check('ningún componente del celular conserva pastel/sombras/indigo/rounded-2xl', ['OperacionScreens.tsx', 'OperacionMovil.tsx', 'MovilBottomNav.tsx', 'BottomSheet.tsx', 'MovilMenuScreens.tsx', 'RrhhScreens.tsx', 'EventualesScreens.tsx', 'PlanificacionMovilView.tsx', 'ServiciosMovilScreens.tsx', 'MovilDesktopOnly.tsx', 'ui/MovilCard.tsx', 'ui/MovilStat.tsx', 'ui/MovilTopBar.tsx', 'ui/MovilHeader.tsx', 'ui/MovilBadge.tsx', 'ui/MovilIconBox.tsx', 'ui/MovilIconButton.tsx', 'ui/tones.ts'].every((f) => {
+  const src = readFileSync(join(web2, 'src/components/movil', f), 'utf8');
+  return !/\b(bg-indigo-\d+|text-indigo-\d+|rounded-2xl|rounded-3xl|shadow-(sm|md|lg)\b|font-black|bg-(emerald|rose|amber|indigo|violet|orange)-50)\b/.test(src);
+}));
+const navSrc = readFileSync(join(web2, 'src/components/movil/MovilBottomNav.tsx'), 'utf8');
+check('barra inferior: pestaña activa = línea de 2 px + texto con el color de la empresa, sin relleno indigo', navSrc.includes('data-movil-nav-active') && navSrc.includes('MOVIL_PRIMARY_TEXT') && navSrc.includes('MOVIL_PRIMARY_BG') && navSrc.includes('h-0.5') && !navSrc.includes('bg-indigo-50'));
+
+// ── Colores de la empresa: solo variables CSS, nunca hex fijos; contraste AA si el color es claro ──
+const CT = await importFront('lib/companyTheme.ts');
+const azul = CT.buildMovilTheme('#1d4ed8');
+const amarillo = CT.buildMovilTheme('#fde047');
+check('empresa azul: primario = su color, barra = tono oscuro, texto blanco', azul['--movil-primary'] === '#1d4ed8' && azul['--movil-primary-text'] === '#ffffff' && azul['--movil-topbar'] === CT.buildCompanyTheme('#1d4ed8')['--topbar-bg'] && azul['--movil-topbar'] !== '#1d4ed8');
+check('empresa amarilla (clara): primario pasa al tono oscuro (--company-primary-darker) para AA', CT.companyColorIsLight('#fde047') && !CT.companyColorIsLight('#1d4ed8') && amarillo['--movil-primary'] === CT.buildCompanyTheme('#fde047')['--company-primary-darker'] && amarillo['--movil-primary'] !== '#fde047');
+check('las variables --movil-* se limpian con el tema', ['--movil-topbar', '--movil-primary', '--movil-primary-text'].every((v) => CT.COMPANY_THEME_VARS.includes(v)));
+const movilFiles = ['OperacionScreens.tsx', 'MovilBottomNav.tsx', 'MovilMenuScreens.tsx', 'ui/tones.ts', 'ui/MovilTopBar.tsx', 'ui/MovilStat.tsx'].map((f) => readFileSync(join(web2, 'src/components/movil', f), 'utf8')).join('\n');
+check('el celular usa var(--movil-*) con fallback negro, nunca el hex de una empresa', movilFiles.includes('var(--movil-primary,#111827)') && movilFiles.includes('var(--movil-topbar,#111827)') && !/#(1d4ed8|4f46e5|6366f1|059669)/i.test(movilFiles));
+// Render con dos empresas: el markup es el mismo (clases con variables); el color lo pone el tema en :root.
+const renderEmpresa = (nombre) => render(OperacionScreens, { ...baseFiltros, empresa: nombre, filtro: { ...F.FILTRO_VACIO, estado: 'AUSENTES' }, contadores: { AUSENTES: 1 }, grupos: [], objectives: [] });
+const htmlA = renderEmpresa('Bacar S.A.');
+const htmlB = renderEmpresa('Grupo Norte');
+check('dos empresas de colores distintos: mismo markup salvo el nombre (el color viene de las variables)', htmlA.replaceAll('Bacar S.A.', 'X') === htmlB.replaceAll('Grupo Norte', 'X') && htmlA.includes('bg-[var(--movil-topbar,#111827)]') && htmlA.includes('bg-[var(--movil-primary,#111827)]'));
+// Los estados nunca usan el color de la empresa.
+check('colores de estado semánticos (verde/ámbar/naranja/rojo) intactos', UI.MOVIL_TEXT.emerald === 'text-emerald-600' && UI.MOVIL_TEXT.amber === 'text-amber-600' && UI.MOVIL_TEXT.orange === 'text-orange-600' && UI.MOVIL_TEXT.rose === 'text-rose-600' && UI.MOVIL_FILETE.rose === 'bg-rose-500' && UI.toneForGuard('plan') === 'slate' && UI.toneForGuard('late') === 'amber');
 check('Operación usa la barra, el encabezado y los KPI compartidos', todosHtml.includes('data-movil-topbar="Operación"') && todosHtml.includes('>Centro de Control<') && (todosHtml.match(/role="progressbar"/g) || []).length >= 3 && todosHtml.includes('data-movil-objetivo-card="peaje"'));
 check('Supervisión: barra con «Supervisión» y Solo lectura en píldora', supervisionHtml.includes('data-movil-topbar="Supervisión"') && supervisionHtml.includes('Solo lectura'));
 check('Selector de módulos con barra oscura, encabezado y tarjetas con ícono', menuHtml.includes('data-movil-topbar="Menú"') && menuHtml.includes('>Módulos<') && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));

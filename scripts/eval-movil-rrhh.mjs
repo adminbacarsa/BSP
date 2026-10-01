@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -46,16 +46,19 @@ check('superadmin ve el menú', modulosMovil(() => false, true).map((item) => it
 const ops = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones').map((item) => item.label).join(',');
 check('barra de Operación sin RRHH', ops === 'Objetivos,Alertas,Sala,Menú');
 
-function compile(file, name) {
-  const js = ts.transpileModule(readFileSync(file, 'utf8'), {
+function compile(file, name, transform = (src) => src) {
+  const js = ts.transpileModule(transform(readFileSync(file, 'utf8')), {
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     fileName: name,
   }).outputText;
-  const out = join(outdir, name.replace(/\.tsx$/, '.mjs'));
+  const out = join(outdir, name.replace(/\.tsx?$/, '.mjs'));
   writeFileSync(out, js);
   return out;
 }
-compile(join(root, 'components/movil/BottomSheet.tsx'), 'BottomSheet.tsx');
+// BottomSheet toma los tokens de estilo de components/movil/ui/tones.
+mkdirSync(join(outdir, 'ui'), { recursive: true });
+compile(join(root, 'components/movil/ui/tones.ts'), 'ui/tones.ts');
+compile(join(root, 'components/movil/BottomSheet.tsx'), 'BottomSheet.tsx', (src) => src.replace("from './ui/tones'", "from './ui/tones.mjs'"));
 const eventualesSrc = readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8')
   .replace("from './BottomSheet'", `from ${JSON.stringify(pathToFileURL(join(outdir, 'BottomSheet.mjs')).href)}`);
 writeFileSync(join(outdir, 'EventualesScreens.mjs'), ts.transpileModule(eventualesSrc, {

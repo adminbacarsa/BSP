@@ -3,10 +3,14 @@ import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
-import { AmbitoSheetBody, GuardAccionesSheetBody, OperacionScreens, SalaSheetBody, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
+import { AmbitoSheetBody, GuardAccionesSheetBody, OperacionScreens, ProximasSheetBody, SalaSheetBody, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
 import { COVERAGE_CASCADE_ORDER } from '@cosp/ops-core';
+import { auth } from '@/lib/firebase';
 import { guardTone } from '@/lib/movil/guardTone';
-import type { GuardAccionId } from '@/lib/movil/guardAcciones';
+import type { GuardAccion, GuardAccionId } from '@/lib/movil/guardAcciones';
+import { proximasFranjas } from '@/lib/movil/proximasFranjas';
+import { piePrincipal } from '@/lib/movil/estadoLista';
+import { guardarNotaOperador, invokeAvisarGuardiaOperaciones } from '@/lib/operaciones/avisarGuardiaClient';
 import {
   FILTRO_VACIO,
   agruparPorObjetivo,
@@ -94,8 +98,19 @@ export function OperacionMovil(props: Props) {
   const [salaOpen, setSalaOpen] = useState(false);
   const [ambitoOpen, setAmbitoOpen] = useState(false);
   const [accionesShiftId, setAccionesShiftId] = useState<string | null>(null);
+  const [proximasOpen, setProximasOpen] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
+  const [pendingCount, setPendingCount] = useState(0);
   const [filtro, setFiltroState] = useState<OpsFiltroMovil>(FILTRO_VACIO);
+  // «Actualizado hace N min»: último snapshot del monitor que llegó; el reloj del pie se refresca cada 30 s.
+  const [lastUpdateMs, setLastUpdateMs] = useState(0);
+  const [tick, setTick] = useState(0);
+  useEffect(() => { setLastUpdateMs(Date.now()); }, [props.shifts]);
+  useEffect(() => {
+    if (props.now) return undefined;
+    const id = window.setInterval(() => setTick((t) => t + 1), 30000);
+    return () => window.clearInterval(id);
+  }, [props.now]);
 
   // El último filtro de esta empresa se recuerda en la pestaña (sessionStorage).
   useEffect(() => { setFiltroState(leerFiltroGuardado(empresaKey)); }, [empresaKey]);
@@ -105,10 +120,16 @@ export function OperacionMovil(props: Props) {
     props.logic.setViewTab(next.estado);
   };
 
-  useEffect(() => movilWriteQueue.subscribe(() => {
-    const labels = [...movilWriteQueue.pending(), ...movilCallableGate.pending()];
-    setPending(labels[0] || null);
-  }), []);
+  useEffect(() => {
+    const refresh = () => {
+      const labels = [...movilWriteQueue.pending(), ...movilCallableGate.pending()];
+      setPending(labels[0] || null);
+      setPendingCount(labels.length);
+    };
+    const offA = movilWriteQueue.subscribe(refresh);
+    const offB = movilCallableGate.subscribe(refresh);
+    return () => { offA(); offB(); };
+  }, []);
 
   useEffect(() => {
     const alInicio = () => setSelectedId(null);
@@ -132,6 +153,10 @@ export function OperacionMovil(props: Props) {
   );
   const grupos = useMemo(() => agruparPorObjetivo(filtrados, now) as MovilObjective[], [filtrados, now]);
   const ambitoLabel = etiquetaAmbito(filtro, clientes);
+  // Próximas 3 h dentro del ámbito elegido (sin consultas nuevas: mismos turnos del monitor).
+  const proximas = useMemo(() => proximasFranjas(enAmbitoList as GuardShift[], now), [enAmbitoList, now]);
+  // `tick` fuerza el recálculo del «hace N min» cada 30 s.
+  const pieLabel = useMemo(() => piePrincipal(lastUpdateMs, pendingCount, props.now ?? Date.now()), [lastUpdateMs, pendingCount, props.now, tick]);
 
   const panelQuery = String(router.query.panel || '');
   // La barra del módulo abre la sala con ?panel=sala (contrato lib/movil/modulos.ts).
@@ -171,9 +196,38 @@ export function OperacionMovil(props: Props) {
   // Hoja de acciones: el turno se busca en todo lo visible (también si cambió de grupo).
   const accionesShift = accionesShiftId ? visibles.find((s) => s.id === accionesShiftId) || props.shifts.find((s) => s.id === accionesShiftId) || null : null;
   const accionesSiblings = accionesShift ? visibles.filter((s) => s.objectiveId === accionesShift.objectiveId) : [];
-  const ejecutarAccion = async (shift: GuardShift, id: GuardAccionId) => {
+  const actorName = () => auth.currentUser?.displayName || auth.currentUser?.email?.split('@')[0] || 'Operador';
+  const avisar = async (accion: GuardAccion) => {
+    const kind = accion.id === 'AVISAR_RETENIDO' ? 'RETENIDO' : 'ENTRANTE';
+    const shiftId = accion.targetShiftId;
+    if (!shiftId) return;
+    await call(accion.label, async () => {
+      const r = await invokeAvisarGuardiaOperaciones({ shiftId, kind, relatedShiftId: accion.relatedShiftId || null, actorName: actorName(), device: 'celular' });
+      toast.success(r.resent ? 'Aviso reenviado por la app' : 'Aviso enviado por la app', { description: r.body });
+    });
+  };
+  const guardarNota = async (shift: GuardShift, texto: string) => {
+    if (readOnly) return;
+    const result = await enqueueFirestoreWrite(`Nota ${shift.employeeName || ''}`.trim(), async () => {
+      await guardarNotaOperador({
+        shift: shift as Record<string, unknown> & { id: string },
+        texto,
+        autor: actorName(),
+        autorUid: auth.currentUser?.uid || null,
+        empresaId: props.empresaId || null,
+        source: 'CC_MOVIL',
+      });
+    });
+    if (result === 'queued') toast.message('Nota pendiente de enviar');
+    else toast.success('Nota guardada');
+  };
+  const ejecutarAccion = async (shift: GuardShift, id: GuardAccionId, accion?: GuardAccion) => {
     if (readOnly) return;
     switch (id) {
+      case 'AVISAR_ENTRANTE':
+      case 'AVISAR_RETENIDO':
+        if (accion) await avisar(accion);
+        return;
       case 'LLEGO':
         await call('Llegó · revertir', () => props.onLlego(shift));
         return;
@@ -246,6 +300,9 @@ export function OperacionMovil(props: Props) {
         onRetencion={readOnly ? noop : props.onRetencion}
         onAcciones={readOnly ? undefined : (shift) => setAccionesShiftId(shift.id)}
         onSala={readOnly ? noop : () => setSalaOpen(true)}
+        proximas={proximas}
+        onProximas={() => setProximasOpen(true)}
+        pieLabel={pieLabel}
       />
       <BottomSheet open={!!accionesShift && !readOnly} title="Acciones del turno" onClose={() => setAccionesShiftId(null)}>
         {accionesShift && (
@@ -253,8 +310,20 @@ export function OperacionMovil(props: Props) {
             shift={accionesShift}
             siblings={accionesSiblings}
             now={nowMs}
-            onEjecutar={(id) => ejecutarAccion(accionesShift, id)}
+            onEjecutar={(id, accion) => ejecutarAccion(accionesShift, id, accion)}
             onCerrar={() => setAccionesShiftId(null)}
+            onNota={(texto) => guardarNota(accionesShift, texto)}
+          />
+        )}
+      </BottomSheet>
+      <BottomSheet open={proximasOpen} title="Próximas 3 horas" onClose={() => setProximasOpen(false)}>
+        {proximasOpen && (
+          <ProximasSheetBody
+            franjas={proximas}
+            readOnly={readOnly}
+            now={nowMs}
+            onCubrir={(shift) => { setProximasOpen(false); props.onProtocolo(shift); }}
+            onAbrirObjetivo={(objectiveId) => { setProximasOpen(false); setSelectedId(objectiveId); }}
           />
         )}
       </BottomSheet>

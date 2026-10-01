@@ -146,14 +146,14 @@ export function ServiciosMovil(props: Props) {
           onChange={(event) => setReopenMotivo(event.target.value)}
           rows={3}
           placeholder="Motivo de la reapertura"
-          className="w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-800 outline-none focus:border-indigo-400"
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-800 outline-none focus:border-[var(--movil-primary,#111827)]"
         />
         {reopenError && <p className="mt-2 text-[11px] font-bold text-amber-700">{reopenError}</p>}
         <button
           type="button"
           disabled={!!reopenError || busy}
           onClick={() => { void handleReabrir(); }}
-          className="mt-3 min-h-12 w-full rounded-2xl bg-indigo-600 text-sm font-black text-white shadow-lg disabled:opacity-40"
+          className="mt-3 min-h-12 w-full rounded-lg bg-[var(--movil-primary,#111827)] text-sm font-semibold text-white disabled:opacity-40"
         >
           {busy ? 'Reabriendo…' : 'Reabrir'}
         </button>

@@ -2,6 +2,7 @@ import { formatRetentionDuration, outgoingFor, relieverFor, seriesBoundMs } from
 import type { RetentionWaitInfo } from '@cosp/ops-core';
 import { formatIngresoLine } from '@/lib/operaciones/ingresoLabel';
 import { convocadoEnCaminoLabel } from '@/lib/operaciones/convocadoVentana';
+import { formatOpsNotaLine, type OpsNota } from '@/lib/operaciones/opsNota';
 import { guardTone, type GuardFlags } from '@/lib/movil/guardTone';
 
 type TsLike = { seconds?: number; toMillis?: () => number; toDate?: () => Date } | Date | string | number | null | undefined;
@@ -29,6 +30,8 @@ export interface GuardDetalleShift extends GuardFlags {
   isPendingClose?: boolean;
   retentionWait?: RetentionWaitInfo | null;
   lateArrivalEtaLabel?: string | null;
+  /** HH:MM de la respuesta del guardia al aviso (classifyOpsShift). */
+  lateArrivalRespondedLabel?: string | null;
   lateArrivalEtaMinutes?: number | null;
   minutesRemainingLate?: number | null;
   expectedArrivalAt?: TsLike;
@@ -72,6 +75,8 @@ export interface GuardDetalle {
   convocatoria: string | null;
   /** Cubre a X · EXT hasta HH:MM / Cubierto por X. */
   cobertura: string | null;
+  /** «Nota 15:21 · Lopez: sin llaves» (última nota del operador). */
+  nota: string | null;
   telefono: string | null;
 }
 
@@ -157,7 +162,12 @@ function estadoDe(shift: GuardDetalleShift, nowMs: number): string | null {
     const mins = startMs ? minutosDesde(startMs, nowMs) : 0;
     if (shift.isLateNotified) {
       const eta = shift.lateArrivalEtaLabel ? ` · llega ~${shift.lateArrivalEtaLabel}` : '';
-      return `Tarde ${mins} min · avisó${eta}`;
+      // Hora de la respuesta del guardia al aviso (¿venís? / avisó demora): misma fuente que el escritorio.
+      const respondidoMs = toMs(shift.lateArrivalConfirmedAt as TsLike) || toMs(shift.lateArrivalAt as TsLike);
+      const respondido = shift.lateArrivalRespondedLabel
+        ? ` · respondió ${shift.lateArrivalRespondedLabel}`
+        : respondidoMs ? ` · respondió ${hhmmAR(respondidoMs)}` : '';
+      return `Tarde ${mins} min · avisó${eta}${respondido}`;
     }
     return `Tarde ${mins} min · sin aviso`;
   }
@@ -265,6 +275,7 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
     loReleva,
     convocatoria,
     cobertura: coberturaDe(shift),
+    nota: formatOpsNotaLine(shift.opsNota as Partial<OpsNota> | null | undefined),
     telefono,
   };
 }

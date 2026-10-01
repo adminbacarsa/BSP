@@ -3,7 +3,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 import type { MovilModulo } from '@/lib/movil/modulos';
-import { MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilTopBar, type MovilTone } from './ui';
+import { MOVIL_CARD, MOVIL_FONT, MOVIL_PRIMARY_BORDER, MOVIL_PRIMARY_TEXT, MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilTopBar, type MovilTone } from './ui';
 
 export interface MovilMenuEmpresa {
   id: string;
@@ -30,10 +30,10 @@ function MenuRow({ icon, tone, label, hint, onClick, attrs }: { icon: LucideIcon
     <button type="button" onClick={onClick} {...attrs} className="flex min-h-14 w-full items-center gap-3 px-3 text-left active:bg-slate-50">
       <MovilIconBox icon={icon} tone={tone} size="md" />
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-black text-slate-900">{label}</span>
-        {hint && <span className="block truncate text-[11px] font-semibold text-slate-500">{hint}</span>}
+        <span className="block text-sm font-semibold text-slate-900">{label}</span>
+        {hint && <span className="block truncate text-[11px] font-medium text-slate-500">{hint}</span>}
       </span>
-      <ChevronRight size={16} className="shrink-0 text-slate-300" aria-hidden="true" />
+      <ChevronRight size={16} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
     </button>
   );
 }
@@ -54,7 +54,7 @@ export function MovilMenuScreens(props: {
 }) {
   const otras = props.canSwitchEmpresa ? props.empresas.filter((e) => e.id !== props.empresaId) : [];
   return (
-    <div data-movil-screen="menu" data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col bg-slate-100 pb-8">
+    <div data-movil-screen="menu" data-viewport="390x844" className={`mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-8 ${MOVIL_FONT}`}>
       <MovilTopBar modulo="Menú" empresa={props.empresaName} />
       <div className="flex flex-col gap-3 px-3 pt-3">
         <MovilHeader icon={LayoutGrid} title="Módulos" />
@@ -69,8 +69,8 @@ export function MovilMenuScreens(props: {
           {otras.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-1.5">
               {otras.map((e) => (
-                <button key={e.id} type="button" onClick={() => props.onSwitchEmpresa(e.id)} className="flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-100 bg-slate-50 px-3 text-[11px] font-black text-slate-700 shadow-sm active:scale-95">
-                  <ArrowLeftRight size={13} className="text-slate-400" aria-hidden="true" />
+                <button key={e.id} type="button" onClick={() => props.onSwitchEmpresa(e.id)} data-movil-empresa-switch={e.id} className={`flex min-h-10 items-center gap-1.5 rounded-lg border bg-white px-3 text-[11px] font-semibold active:bg-slate-50 ${MOVIL_PRIMARY_BORDER} ${MOVIL_PRIMARY_TEXT}`}>
+                  <ArrowLeftRight size={13} strokeWidth={1.75} aria-hidden="true" />
                   Cambiar a {e.name}
                 </button>
               ))}
@@ -103,13 +103,13 @@ export function MovilMenuScreens(props: {
                     <MovilIconBox icon={ui.icon} tone={ui.tone} size="md" />
                     {modulo.mobile === false && <MovilBadge tone="slate">PC</MovilBadge>}
                   </div>
-                  <b className="mt-3 block text-[15px] font-black leading-tight text-slate-900">{modulo.label}</b>
-                  <small className="mt-0.5 block text-[11px] font-semibold text-slate-500">{modulo.desc}</small>
+                  <b className="mt-3 block text-[15px] font-semibold leading-tight text-slate-900">{modulo.label}</b>
+                  <small className="mt-0.5 block text-[11px] font-medium text-slate-500">{modulo.desc}</small>
                 </MovilCard>
               );
             })}
             {props.modulos.length === 0 && (
-              <p className="col-span-2 rounded-2xl border border-slate-100 bg-white p-4 text-sm font-semibold text-slate-500 shadow-sm">Tu rol no tiene módulos para el celular.</p>
+              <p className={`col-span-2 ${MOVIL_CARD} p-4 text-sm font-medium text-slate-500`}>Tu rol no tiene módulos para el celular.</p>
             )}
           </section>
         )}
