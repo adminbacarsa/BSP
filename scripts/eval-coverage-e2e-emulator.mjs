@@ -2286,6 +2286,9 @@ async function run() {
         const ar = new Date(nowMs - 3 * 3600000);
         return { year: ar.getUTCFullYear(), month: ar.getUTCMonth() + 1 };
       })();
+      // El cerrado "vigente" tiene que incluir el día del turno (hoy AR): si quedara fijo en
+      // septiembre, el 01/10 el cache lo deja fuera y eso es correcto, no un bug.
+      const monthLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
       const shiftBase = (objectiveId, name, emp) => ({
         empresaId, clientId, objectiveId, objectiveName: name,
         employeeId: emp, employeeName: name, code: 'M',
@@ -2301,7 +2304,7 @@ async function run() {
         })
         .set(db.collection('servicios_sla').doc(`${prefix}_sla_closed`), {
           empresaId, clientId, objectiveId: objClosed, status: 'ACTIVE', closed: true,
-          startDate: utcDay(2026, 9, 1), endDate: utcDay(2026, 9, 30),
+          startDate: utcDay(year, month, 1), endDate: utcDay(year, month, monthLastDay),
         })
         .set(db.collection('servicios_sla').doc(`${prefix}_sla_peaje`), {
           empresaId, clientId, objectiveId: `${prefix}_peaje`, status: 'ACTIVE', closed: true,
