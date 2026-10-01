@@ -73,6 +73,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
   const mapa: Record<string, string> = {
     crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
     asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
+    arcaPendientes: 'read', arcaConfirmar: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -110,6 +111,40 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
         obraSocialRnos: String(d.data().obraSocialRnos || ''),
       }))),
     };
+  }
+
+  if (accion === 'arcaPendientes') {
+    const empresaId = String(data?.empresaId || '');
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const snap = await db().collection('arca_envios').where('empresaId', '==', empresaId).limit(80).get();
+    const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')));
+    const envios = await Promise.all(abiertos.slice(0, 30).map(async (doc) => {
+      const row = doc.data();
+      const cuil = String(row.bolsaCuil || '');
+      const ficha = cuil ? await db().collection('eventuales_bolsa').doc(cuil).get() : null;
+      return {
+        id: doc.id,
+        nombre: String(ficha?.data()?.nombre || cuil || 'Sin nombre'),
+        tipo: String(row.tipo || ''),
+        estado: String(row.estado || ''),
+      };
+    }));
+    return { envios };
+  }
+
+  if (accion === 'arcaConfirmar') {
+    const { aplicarTransicion } = await import('../arca/arcaEnviosApi');
+    const envioId = String(data?.envioId || '');
+    const nroTransaccion = String(data?.nroTransaccion || '').trim();
+    if (!envioId || !nroTransaccion) throw new functions.https.HttpsError('invalid-argument', 'Falta el envío o el número de transacción.');
+    const out = await aplicarTransicion(envioId, {
+      estado: 'CONFIRMADO',
+      origen: 'MANUAL',
+      nroTransaccion,
+      actor: auth.uid,
+    });
+    if (out.status !== 200) throw new functions.https.HttpsError('failed-precondition', String(out.body.error || 'No se pudo confirmar.'));
+    return { ok: true };
   }
 
   if (accion === 'habilitarEmpresa') {

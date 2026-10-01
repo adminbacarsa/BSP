@@ -56,7 +56,7 @@ export async function aplicarTransicion(
   envioId: string,
   input: {
     estado: EstadoEnvio;
-    origen: 'ROBOT' | 'LINK';
+    origen: 'ROBOT' | 'LINK' | 'MANUAL';
     nroTransaccion?: string;
     constanciaUrl?: string;
     error?: string;

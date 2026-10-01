@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import { EventualesMovil } from '@/components/movil/EventualesMovil';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { PageHeader, PageShell } from '@/components/ui';
 import FichaEventual, { type DocumentoVista, type EmpresaPlataforma, type FichaEventualData, type MarcoVista } from '@/components/eventuales/FichaEventual';
 import MarcosLotePanel from '@/components/eventuales/MarcosLotePanel';
@@ -81,6 +83,7 @@ function EstadoIcono({ icon: Icon, ok, title }: { icon: React.ElementType; ok: b
 export default function EventualesPage() {
   const { isSuperAdmin, rolePermissions } = useAuth();
   const { empresaId: empresaActivaId, empresa: empresaActiva } = useEmpresa();
+  const movil = useMovilMode();
   const acciones = rolePermissions?.EVENTUALES || [];
   const puede = (accion: string) => isSuperAdmin || acciones.includes(accion);
 
@@ -293,6 +296,15 @@ export default function EventualesPage() {
   };
 
   const ficha = fichas.find((f) => f.id === elegida) || null;
+
+  if (movil) {
+    return (
+      <>
+        <Head><title>Eventuales | COSP V1.0</title></Head>
+        {puede('read') ? <EventualesMovil /> : <p className="p-6 text-sm font-semibold text-slate-600">No tenés permiso para ver Eventuales.</p>}
+      </>
+    );
+  }
 
   if (!puede('read')) {
     return <DashboardLayout><p className="p-8 text-slate-600">No tenés permiso para ver Eventuales. Lo asigna Configuración → Roles.</p></DashboardLayout>;
