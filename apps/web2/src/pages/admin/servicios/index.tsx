@@ -38,6 +38,15 @@ import {
   WEEK_DAY_CODES,
 } from '@/lib/servicios/slaHoursCalculator';
 import {
+  defaultNewSlaDates,
+  localTodayYmd,
+  newSlaBornClosed,
+  normalizeReopenMotivo,
+  REOPEN_MOTIVO_MSG,
+  reopenMotivoError,
+  stripSlaLifecycle,
+} from '@/lib/servicios/newSlaDraft';
+import {
   applyEncargadoEmployeeChoice,
   buildEncargadoDefaultShift,
   ENCARGADO_ALL_DAYS,
@@ -1314,17 +1323,26 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const isClosedContract = isEditing && (form as { closed?: boolean }).closed === true;
+  const [reopenOpen, setReopenOpen] = useState(false);
+  const [reopenMotivo, setReopenMotivo] = useState('');
+  const [reopenBusy, setReopenBusy] = useState(false);
+  const reopenError = reopenMotivoError(reopenMotivo);
 
   const handleReopenContract = async () => {
-    if (!form.id) return;
-    const motivo = window.prompt('Motivo de la reapertura del contrato (queda auditado):', '');
-    if (!motivo || motivo.trim().length < 5) return addToast('Indicá un motivo (mínimo 5 caracteres)', 'error');
+    if (!form.id || reopenError) return;
+    setReopenBusy(true);
     try {
-      await httpsCallable(cloudFunctions, 'reabrirContratoSla')({ slaId: form.id, motivo: motivo.trim() });
-      setForm((prev: any) => ({ ...prev, closed: false, reopenedManually: true }));
+      const motivo = normalizeReopenMotivo(reopenMotivo);
+      await httpsCallable(cloudFunctions, 'reabrirContratoSla')({ slaId: form.id, motivo });
+      setForm((prev: any) => ({ ...prev, closed: false, reopenedManually: true, reopenReason: motivo }));
+      setReopenOpen(false);
+      setReopenMotivo('');
       addToast('Contrato reabierto', 'success');
     } catch (e: any) {
-      addToast('No se pudo reabrir: ' + (e?.message || e), 'error');
+      const msg = String(e?.message || '');
+      addToast(msg.includes('Escribí') ? REOPEN_MOTIVO_MSG : 'No se pudo reabrir el contrato', 'error');
+    } finally {
+      setReopenBusy(false);
     }
   };
 
@@ -1366,6 +1384,10 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       return rangesOverlap(startDate, endDate, sStart, sEnd);
     });
     if (hasOverlap) return addToast('Ya existe un SLA con fechas superpuestas para ese objetivo', 'error');
+
+    if (!isEditing && newSlaBornClosed(form.endDate, localTodayYmd())) {
+      if (!window.confirm('La vigencia que elegiste ya terminó. El servicio se va a crear cerrado.\n\n¿Continuar?')) return;
+    }
 
     const turnosBelong = (data: Record<string, unknown>) =>
       !scopeEmpresa || belongsToEmpresa(data, empresaId, true);
@@ -1429,13 +1451,23 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
 
     // JSON round-trip elimina campos undefined que Firestore no acepta
     const encPosToSave = findEncargadoPosition(form.positions);
-    const dataToSave = JSON.parse(JSON.stringify({
+    let dataToSave = JSON.parse(JSON.stringify({
       ...form,
       totalMonthlyHours: totalContractHours,
       encargadoEmployeeId: encPosToSave ? (form.encargadoEmployeeId || '') : '',
       encargadoEmployeeName: encPosToSave ? (form.encargadoEmployeeName || '') : '',
     })) as any;
     if (scopeEmpresa && empresaId) dataToSave.empresaId = empresaId;
+    if (!isEditing) {
+      const bornClosed = newSlaBornClosed(String(dataToSave.endDate || ''), localTodayYmd());
+      dataToSave = {
+        ...stripSlaLifecycle(dataToSave),
+        status: 'active',
+        closed: bornClosed,
+        ...(bornClosed ? { closedReason: 'VENCIDO' } : {}),
+      };
+      if (scopeEmpresa && empresaId) dataToSave.empresaId = empresaId;
+    }
     const prevEncargadoId = isEditing && form.id
       ? String(services.find((s) => s.id === form.id)?.encargadoEmployeeId || '').trim()
       : '';
@@ -1608,19 +1640,20 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const openNew = () => {
-    const { start, end } = monthBoundsYmd(kpiYear, kpiMonth);
+    const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     setForm({
         clientId: '', clientName: '', objectiveId: '', objectiveName: '',
-        startDate: start,
-        endDate: end,
-        positions: [], totalMonthlyHours: 0, status: 'active'
+        startDate,
+        endDate,
+        positions: [], totalMonthlyHours: 0, status: 'active',
+        closed: false,
     });
     setAvailableObjectives([]);
     setIsEditing(false); setView('form');
   };
 
   const openNewForObjective = (row: ServiciosCatalogRow) => {
-    const { start, end } = monthBoundsYmd(kpiYear, kpiMonth);
+    const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     const client = clients.find((c) => c.id === row.clientId);
     const clientObjs = client?.objectives || client?.objetivos || [];
     const hasObj = clientObjs.some((o: { id?: string }) => String(o.id ?? '').trim() === row.objectiveId);
@@ -1629,11 +1662,12 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       clientName: row.clientName,
       objectiveId: row.objectiveId,
       objectiveName: row.objectiveName,
-      startDate: start,
-      endDate: end,
+      startDate,
+      endDate,
       positions: [],
       totalMonthlyHours: 0,
       status: 'active',
+      closed: false,
     });
     setAvailableObjectives(
       hasObj || !row.objectiveId
@@ -1644,17 +1678,16 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     setView('form');
   };
 
-  // Nueva versión: copia los puestos del servicio origen, mes siguiente al endDate del origen
   const handleNewVersion = (srv: ServiceSLA) => {
-    // Usar endDate del servicio como referencia; si no tiene, usar hoy
-    const ref = srv.endDate ? new Date(srv.endDate + 'T00:00:00') : new Date();
-    const nextMonthStart = new Date(ref.getFullYear(), ref.getMonth() + 1, 1).toISOString().split('T')[0];
-    const nextMonthEnd = new Date(ref.getFullYear(), ref.getMonth() + 2, 0).toISOString().split('T')[0];
+    const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
+    const base = stripSlaLifecycle(srv as unknown as Record<string, unknown>) as unknown as ServiceSLA;
     setForm({
-      ...srv,
-      id: undefined as any,           // sin ID → crea nuevo documento
-      startDate: nextMonthStart,
-      endDate: nextMonthEnd,
+      ...base,
+      id: undefined as any,
+      startDate,
+      endDate,
+      status: 'active',
+      closed: false,
       positions: (srv.positions || []).map(p => ({ ...p, id: Date.now().toString() + Math.random() })),
     });
     const client = clients.find(c => c.id === srv.clientId);
@@ -2971,6 +3004,9 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
+                 {!isEditing && (
+                   <p className="text-[10px] font-bold text-slate-500 -mt-3">Elegí la vigencia acá, antes de crear. Arranca en el mes de arriba, o en el mes en curso.</p>
+                 )}
 
                  <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
                    <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Facturación prefactura</p>
@@ -4847,7 +4883,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                 </span>
               )}
               {isClosedContract && isSuperAdmin && (
-                <button type="button" onClick={handleReopenContract} className="text-indigo-700 font-black uppercase text-xs hover:text-indigo-900">
+                <button type="button" onClick={() => { setReopenMotivo(''); setReopenOpen(true); }} className="text-indigo-700 font-black uppercase text-xs hover:text-indigo-900">
                   Reabrir contrato
                 </button>
               )}
@@ -4870,6 +4906,42 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
             </div>
           </div>
         </PageShell>
+      )}
+
+      {reopenOpen && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-lg dark:bg-slate-800 dark:border dark:border-slate-600">
+            <h3 className="text-sm font-black uppercase text-slate-900 dark:text-white">Reabrir contrato</h3>
+            <p className="mt-1 text-[11px] font-bold text-slate-500">El motivo queda auditado.</p>
+            <textarea
+              value={reopenMotivo}
+              onChange={(e) => setReopenMotivo(e.target.value)}
+              rows={3}
+              className="mt-4 w-full rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-800 outline-none focus:border-indigo-400 dark:border-slate-600 dark:bg-slate-900 dark:text-white"
+              placeholder="Motivo de la reapertura"
+            />
+            {reopenError && (
+              <p className="mt-2 text-[11px] font-bold text-amber-700">{reopenError}</p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => { setReopenOpen(false); setReopenMotivo(''); }}
+                className="rounded-xl px-4 py-2 text-[10px] font-black uppercase text-slate-500 hover:bg-slate-100"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={!!reopenError || reopenBusy}
+                onClick={() => void handleReopenContract()}
+                className="rounded-xl bg-indigo-600 px-4 py-2 text-[10px] font-black uppercase text-white shadow-sm disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {reopenBusy ? 'Reabriendo…' : 'Reabrir'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {showPositionModal && (

@@ -22,6 +22,14 @@ function ymd(v: unknown): string {
   return String(v).slice(0, 10);
 }
 
+export function assertReopenMotivo(raw: unknown): string {
+  const motivo = String(raw ?? '').trim();
+  if (motivo.length < 5) {
+    throw new functions.https.HttpsError('invalid-argument', 'Escribí el motivo de la reapertura');
+  }
+  return motivo;
+}
+
 function isCancelled(status: unknown): boolean {
   const st = String(status ?? '').trim().toLowerCase();
   return st === 'inactive' || st === 'inactivo' || st === 'cancelled' || st === 'cancelado';
@@ -76,9 +84,8 @@ export const reabrirContratoSla = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Solo un SuperAdmin puede reabrir un contrato cerrado.');
   }
   const slaId = String((data as { slaId?: string })?.slaId || '').trim();
-  const motivo = String((data as { motivo?: string })?.motivo || '').trim();
   if (!slaId) throw new functions.https.HttpsError('invalid-argument', 'slaId requerido.');
-  if (motivo.length < 5) throw new functions.https.HttpsError('invalid-argument', 'Indicá el motivo de la reapertura.');
+  const motivo = assertReopenMotivo((data as { motivo?: string })?.motivo);
   const ref = db.collection('servicios_sla').doc(slaId);
   const snap = await ref.get();
   if (!snap.exists) throw new functions.https.HttpsError('not-found', 'Contrato inexistente.');
