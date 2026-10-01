@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { format, startOfWeek, endOfWeek } from 'date-fns';
-import { es } from 'date-fns/locale';
 import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { toast } from 'sonner';
@@ -20,6 +18,14 @@ import { endDateFromDefaultDays } from '@/lib/rrhh/novedadTypes';
 import { avisarNovedadDeAusencia, replicarAusenciaPlanificador } from '@/lib/rrhh/replicarAusenciaPlanificador';
 import { absenceService, type Absence } from '@/services/absenceService';
 import { novedadTypeService } from '@/services/novedadTypeService';
+
+// date-fns rompe el build de producción en esta página (import de directorio en ESM).
+const DIAS = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+const DIAS_LARGOS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+const dos = (n: number) => String(n).padStart(2, '0');
+const diaCorto = (d: Date) => `${DIAS[d.getDay()]} ${dos(d.getDate())}/${dos(d.getMonth() + 1)}`;
+const diaLargo = (d: Date) => `${DIAS_LARGOS[d.getDay()]} ${d.getDate()} de ${MESES[d.getMonth()]}`;
 
 type Guardia = { id: string; nombre: string; telefono: string; preferredObjectiveId?: string };
 const CACHE = 'cosp-movil-rrhh-dia';
@@ -143,8 +149,11 @@ export function RrhhMovil() {
 
   useEffect(() => {
     if (!elegidaId) return;
-    const desde = startOfWeek(new Date(), { weekStartsOn: 1 });
-    const hasta = endOfWeek(new Date(), { weekStartsOn: 1 });
+    const desde = new Date();
+    desde.setHours(0, 0, 0, 0);
+    desde.setDate(desde.getDate() - ((desde.getDay() + 6) % 7));
+    const hasta = new Date(desde);
+    hasta.setDate(hasta.getDate() + 6);
     hasta.setHours(23, 59, 59, 999);
     void getDocs(query(
       collection(db, 'turnos'),
@@ -157,7 +166,7 @@ export function RrhhMovil() {
         const inicio = data.startTime?.toDate?.() as Date | undefined;
         return {
           id: docSnap.id,
-          dia: inicio ? format(inicio, 'EEE dd/MM', { locale: es }) : '',
+          dia: inicio ? diaCorto(inicio) : '',
           codigo: String(data.code || data.type || ''),
         };
       }));
@@ -271,7 +280,7 @@ export function RrhhMovil() {
         online={online}
         pendingLabel={pendingLabel}
         panel={panel}
-        hoyLabel={format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
+        hoyLabel={diaLargo(new Date())}
         ausenciasHoy={dia.ausenciasHoy.map((row) => ({
           id: row.id,
           employeeId: row.employeeId || '',
