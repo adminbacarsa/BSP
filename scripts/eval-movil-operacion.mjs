@@ -9,7 +9,9 @@ const ts = require('typescript');
 
 const { createWriteQueue } = await import(pathToFileURL(join(here, '../apps/web2/src/lib/movil/writeQueue.ts')).href);
 const { createCallableGate } = await import(pathToFileURL(join(here, '../apps/web2/src/lib/movil/callableOnline.ts')).href);
-const { movilNavForPermissions } = await import(pathToFileURL(join(here, '../apps/web2/src/lib/movil/navItems.ts')).href);
+const { compileMovilLib } = await import('./movil-eval-lib.mjs');
+const movilLib = compileMovilLib(join(here, '../apps/web2/.movil-eval/lib'));
+const { movilNavForPermissions } = await import(movilLib.navItems);
 const { coveragePct, guardStatusLabel, guardTone } = await import(pathToFileURL(join(here, '../apps/web2/src/lib/movil/guardTone.ts')).href);
 let failed = 0;
 function check(name, ok) {
@@ -43,9 +45,9 @@ check('callable avisa y queda para reintentar', threw && gate.pending().length =
 online.value = true;
 check('callable se reintenta', (await gate.retry()) === 1 && calls === 1);
 
-const nav = movilNavForPermissions((key) => key === 'OPERATIONS');
-check('nav del operador', nav.map((item) => item.label).join(',') === 'Operaciones,Alertas,Novedades,Más');
-check('rrhh ve eventuales', movilNavForPermissions((key) => key === 'RRHH').some((item) => item.id === 'eventuales'));
+const nav = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones');
+check('barra de Operación solo con lo suyo', nav.map((item) => item.label).join(',') === 'Objetivos,Alertas,Sala,Menú');
+check('rrhh no ve Operación', movilNavForPermissions((key) => key === 'RRHH', '/admin/operaciones').map((item) => item.label).join(',') === 'Bolsa,ARCA,Alta,Menú');
 
 const shift = { isAbsent: true, employeeName: 'Guerrero, Martín', code: 'T', id: '1' };
 check('ausente es Llegó', guardTone(shift) === 'aus' && guardStatusLabel(shift).includes('Ausente'));

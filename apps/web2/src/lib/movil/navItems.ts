@@ -1,27 +1,21 @@
-export type MovilNavId = 'operaciones' | 'alertas' | 'eventuales' | 'novedades' | 'mas';
+import { barraDelModulo, moduloMovilDe, modulosMovil, type MovilNavItem } from './movilModulos';
 
-export interface MovilNavItem {
-  id: MovilNavId;
-  label: string;
-  href: string;
-}
+export type { MovilNavItem } from './movilModulos';
 
-/** Barra inferior según permisos de lectura. Más siempre está. */
-export function movilNavForPermissions(canRead: (moduleKey: string) => boolean): MovilNavItem[] {
-  const items: MovilNavItem[] = [];
-  if (canRead('OPERATIONS')) {
-    items.push({ id: 'operaciones', label: 'Operaciones', href: '/admin/operaciones/' });
-    items.push({ id: 'alertas', label: 'Alertas', href: '/admin/operaciones/?panel=alertas' });
-  }
-  if (canRead('EVENTUALES') || canRead('RRHH')) {
-    items.push({ id: 'eventuales', label: 'Eventuales', href: '/admin/rrhh/eventuales/' });
-  }
-  if (canRead('RRHH') || canRead('OPERATIONS')) {
-    items.push({ id: 'novedades', label: 'Novedades', href: '/admin/rrhh/movil/' });
-  }
-  if (canRead('PLANNING') && !canRead('OPERATIONS')) {
-    items.push({ id: 'operaciones', label: 'Plan', href: '/admin/planificacion/' });
-  }
-  items.push({ id: 'mas', label: 'Más', href: '/admin/operaciones/?panel=mas' });
-  return items;
+type Query = Record<string, string | string[] | undefined>;
+
+/**
+ * Barra inferior del módulo actual: solo sus secciones + Menú.
+ * Sin módulo en la ruta, se usa el primero permitido.
+ */
+export function movilNavForPermissions(
+  canRead: (moduleKey: string) => boolean,
+  pathname = '/admin/operaciones',
+  query?: Query,
+  isSuperAdmin = false,
+): MovilNavItem[] {
+  const permitidos = modulosMovil(canRead, isSuperAdmin);
+  const actual = moduloMovilDe(pathname, query);
+  const modulo = actual && permitidos.some((m) => m.id === actual.id) ? actual : permitidos[0] || null;
+  return barraDelModulo(modulo);
 }

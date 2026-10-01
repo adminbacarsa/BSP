@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
-import { EventualesScreens, type ArcaMovil, type EventualMovil } from '@/components/movil/EventualesScreens';
+import { EventualesScreens, type ArcaMovil, type EventualMovil, type EventualesPanel } from '@/components/movil/EventualesScreens';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
@@ -47,10 +48,13 @@ export function EventualesMovil() {
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
   const permitido = isSuperAdmin || canReadModule('EVENTUALES') || canReadModule('RRHH');
+  const router = useRouter();
+  const panelQuery = String(router.query.panel || '');
+  const panel: EventualesPanel = panelQuery === 'arca' || panelQuery === 'alta' ? panelQuery : 'bolsa';
+  const cerrarAlta = () => { void router.push('/admin/rrhh/eventuales/'); };
   const [fichas, setFichas] = useState<Ficha[]>([]);
   const [buscar, setBuscar] = useState('');
   const [elegidaId, setElegidaId] = useState('');
-  const [altaAbierta, setAltaAbierta] = useState(false);
   const [cuil, setCuil] = useState('');
   const [nombre, setNombre] = useState('');
   const [mail, setMail] = useState('');
@@ -143,7 +147,7 @@ export function EventualesMovil() {
       empresasHabilitadas: [empresaId],
     }).then(() => {
       toast.success('Alta en la bolsa.');
-      setAltaAbierta(false);
+      cerrarAlta();
       setCuil('');
       setNombre('');
       setMail('');
@@ -186,13 +190,12 @@ export function EventualesMovil() {
         empresa={empresa?.name || 'Empresa'}
         online={online}
         pendingLabel={pendingLabel}
+        panel={panel}
         buscar={buscar}
         onBuscar={setBuscar}
         personas={personas}
         onElegir={setElegidaId}
-        altaAbierta={altaAbierta}
-        onAbrirAlta={() => setAltaAbierta(true)}
-        onCerrarAlta={() => setAltaAbierta(false)}
+        onCerrarAlta={cerrarAlta}
         cuil={cuil}
         onCuil={setCuil}
         cuilEstado={cuilOk ? `${formatoCuil(cuilOk)} válido` : (cuil ? 'CUIL inválido' : '')}

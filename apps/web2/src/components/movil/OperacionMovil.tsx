@@ -107,7 +107,7 @@ export function OperacionMovil(props: Props) {
         onRetencion={props.onRetencion}
         onSala={() => setSalaOpen(true)}
       />
-      <BottomSheet open={salaOpen || panelQuery === 'mas'} title={panelQuery === 'mas' ? 'Más' : 'Sala'} onClose={() => { setSalaOpen(false); if (panelQuery === 'mas') void router.push('/admin/operaciones/'); }}>
+      <BottomSheet open={salaOpen || panelQuery === 'sala'} title="Sala" onClose={() => { setSalaOpen(false); if (panelQuery === 'sala') void router.push('/admin/operaciones/'); }}>
         <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
           <p className="text-[11px] font-black uppercase text-emerald-800">Operador manual</p>
           <p className="text-sm font-bold">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>
