@@ -213,8 +213,8 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
   const presentes = pool.filter((row) => row.isPresent && !row.realEndTime);
   const quienLoReleva = tone === 'ret' && shift.retentionWait
     ? null
-    : relieverFor(shift, pool, { peers: presentes });
-  const aQuienReleva = isVacante ? null : outgoingFor(shift, pool, { peers: pool });
+    : relieverFor(shift, pool, { peers: presentes, roster: siblings });
+  const aQuienReleva = isVacante ? null : outgoingFor(shift, pool, { peers: pool, roster: siblings });
 
   let loReleva: string | null = null;
   if (tone === 'ret' && shift.retentionWait) {

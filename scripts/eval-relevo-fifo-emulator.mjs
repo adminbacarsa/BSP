@@ -39,6 +39,7 @@ function report(name, ok, detail) {
 }
 
 const ar = (h, min) => Timestamp.fromDate(new Date(`2026-10-01T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00-03:00`));
+const arSec = (h, min, sec) => Timestamp.fromDate(new Date(`2026-10-01T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:${String(sec).padStart(2, '0')}-03:00`));
 const iso = (h, min) => `2026-10-01T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00-03:00`;
 const END = ar(15, 15);
 
@@ -204,10 +205,87 @@ function paridad() {
     const rel = lib.relieverFor(bosio, [brizuela, { ...lopez, checkInAt: t(15, 21) }], { peers: [ferrero] })?.id;
     const tie = lib.pairReliefs([{ ...ferrero, retentionAbsenceShiftId: 'lopez' }, bosio], [brizuela, lopez]).map((p) => `${p.outgoing.id}←${p.incoming?.id}`).join(' ');
     const forced = lib.pairReliefs([ferrero, { ...bosio, relievedBy: 'e_lopez' }], [brizuela, { ...lopez, checkInAt: t(15, 21) }]).map((p) => `${p.outgoing.id}←${p.incoming?.id}:${p.kind}`).join(' ');
+    const app = mk('ferrero', 'M', t(11, 30), t(15, 15), { employeeId: 'e_ferrero', checkInAt: t(11, 38) + 6000, realStartTime: t(11, 38) + 6000 });
+    const operador = mk('bosio', 'M', t(11, 30), t(15, 15), { employeeId: 'e_bosio', realStartTime: t(12, 5) + 36000 });
+    const sinCheckIn = lib.sortOutgoingsFifo([operador, app]).map((r) => r.id).join(',');
+    const cerca = mk('z_cerca', 'M', t(11, 30), t(15, 15), { employeeId: 'e_cerca', checkInAt: t(11, 38) });
+    const lejos = mk('a_lejos', 'M', t(11, 30), t(15, 15), { employeeId: 'e_lejos', checkInAt: t(11, 38) });
+    const roster = [
+      mk('duty_cerca', 'M', t(11, 30) + 86400000, t(11, 30) + 86400000 + 8 * 3600000, { employeeId: 'e_cerca' }),
+      mk('franco', 'F', t(11, 30) + 20 * 3600000, t(11, 30) + 28 * 3600000, { employeeId: 'e_lejos', isFranco: true }),
+      mk('duty_lejos', 'M', t(11, 30) + 4 * 86400000, t(11, 30) + 4 * 86400000 + 8 * 3600000, { employeeId: 'e_lejos' }),
+    ];
+    const porDescanso = lib.sortOutgoingsFifo([lejos, cerca], { roster }).map((r) => r.id).join(',');
+    const relevaCerca = lib.outgoingFor({ ...lopez, checkInAt: t(15, 21) }, [lejos, cerca], { roster })?.id;
     report(`${name} FIFO`, outs === 'ferrero,bosio' && ins === 'lopez,brizuela' && pares === 'ferrero←lopez bosio←brizuela' && out1 === 'ferrero' && out2 === 'bosio' && rel === 'brizuela'
-      && tie === 'ferrero←lopez bosio←brizuela' && forced === 'ferrero←brizuela:SERIES bosio←lopez:FORCED',
-      `outs=${outs} ins=${ins} pares=${pares} outgoingFor(lopez)=${out1} outgoingFor(brizuela|ferrero relevado)=${out2} relieverFor(bosio)=${rel} empate→vínculo=${tie} forzado=${forced}`);
+      && tie === 'ferrero←lopez bosio←brizuela' && forced === 'ferrero←brizuela:SERIES bosio←lopez:FORCED'
+      && sinCheckIn === 'ferrero,bosio' && porDescanso === 'z_cerca,a_lejos' && relevaCerca === 'z_cerca',
+      `outs=${outs} ins=${ins} pares=${pares} outgoingFor(lopez)=${out1} outgoingFor(brizuela|ferrero relevado)=${out2} relieverFor(bosio)=${rel} empate→vínculo=${tie} forzado=${forced} sinCheckIn=${sinCheckIn} descanso=${porDescanso} releva=${relevaCerca}`);
   }
+}
+
+/** Prod: BOSIO marcado por el operador (realStartTime, sin checkInAt); FERRERO por la app. */
+async function casoD() {
+  const id = await seed('fd');
+  await db.collection('turnos').doc(id('ferrero')).update({ checkInAt: arSec(11, 38, 6), realStartTime: arSec(11, 38, 6) });
+  await db.collection('turnos').doc(id('bosio')).update({
+    checkInAt: admin.firestore.FieldValue.delete(),
+    realStartTime: arSec(12, 5, 36),
+  });
+  const r = await registrarPresencia(db, { shiftId: id('lopez'), source: 'PORTAL_GPS', empId: 'e_lopez', recordedAt: iso(15, 21) });
+  const ferrero = (await db.collection('turnos').doc(id('ferrero')).get()).data();
+  const bosio = (await db.collection('turnos').doc(id('bosio')).get()).data();
+  report('D sin checkInAt no es el más antiguo: LOPEZ releva a FERRERO',
+    r.relieved?.shiftId === id('ferrero') && ferrero?.relievedBy === 'e_lopez' && bosio?.isCompleted !== true && !bosio?.checkInAt,
+    `relieved=${r.relieved?.shiftId} bosioCompleted=${bosio?.isCompleted} bosioCheckInAt=${bosio?.checkInAt ? 'sí' : 'no'}`);
+}
+
+/** Mismo segundo de ingreso: se releva primero al que tiene el próximo turno más cerca. */
+async function casoE() {
+  const prefix = 'fe';
+  const oid = `${prefix}_peaje`;
+  await db.collection('servicios_sla').doc(`${prefix}_sla`).set({
+    objectiveId: oid, clientId: `${prefix}_cli`, status: 'active', startDate: '2026-01-01', endDate: '2027-12-31',
+    positions: [{
+      name: 'Puesto 2', quantity: 2, coverageType: 'custom', activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+      allowedShiftTypes: [
+        { code: 'M', startTime: '11:30', endTime: '15:15', hours: 8, quantity: 2 },
+        { code: 'T', startTime: '15:15', endTime: '23:15', hours: 8, quantity: 2 },
+      ],
+    }],
+  });
+  const base = { empresaId: `${prefix}_emp`, objectiveId: oid, positionName: 'Puesto 2' };
+  const mismo = arSec(11, 38, 0);
+  const dia = (offset, h, min) => Timestamp.fromDate(new Date(`2026-10-${String(1 + offset).padStart(2, '0')}T${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}:00-03:00`));
+  await db.batch()
+    .set(db.collection('turnos').doc(`${prefix}_z_cerca`), { ...base, ...present({ employeeId: 'e_cerca', employeeName: 'CERCA', code: 'M', startTime: ar(11, 30), endTime: END, checkInAt: mismo, realStartTime: mismo }) })
+    .set(db.collection('turnos').doc(`${prefix}_a_lejos`), { ...base, ...present({ employeeId: 'e_lejos', employeeName: 'LEJOS', code: 'M', startTime: ar(11, 30), endTime: END, checkInAt: mismo, realStartTime: mismo }) })
+    .set(db.collection('turnos').doc(`${prefix}_lopez`), { ...base, employeeId: 'e_lopez', employeeName: 'LOPEZ, HECTOR', code: 'T', status: 'PENDING', startTime: END, endTime: ar(23, 15) })
+    .set(db.collection('turnos').doc(`${prefix}_duty_cerca`), { ...base, employeeId: 'e_cerca', employeeName: 'CERCA', code: 'M', status: 'PENDING', startTime: dia(1, 7, 0), endTime: dia(1, 15, 0) })
+    .set(db.collection('turnos').doc(`${prefix}_franco`), { ...base, employeeId: 'e_lejos', employeeName: 'LEJOS', code: 'F', isFranco: true, status: 'PENDING', startTime: dia(1, 0, 0), endTime: dia(1, 23, 59) })
+    .set(db.collection('turnos').doc(`${prefix}_duty_lejos`), { ...base, employeeId: 'e_lejos', employeeName: 'LEJOS', code: 'M', status: 'PENDING', startTime: dia(5, 7, 0), endTime: dia(5, 15, 0) })
+    .commit();
+  const r = await registrarPresencia(db, { shiftId: `${prefix}_lopez`, source: 'PORTAL_GPS', empId: 'e_lopez', recordedAt: iso(15, 21) });
+  const cerca = (await db.collection('turnos').doc(`${prefix}_z_cerca`).get()).data();
+  const lejos = (await db.collection('turnos').doc(`${prefix}_a_lejos`).get()).data();
+  report('E mismo segundo: releva al que tiene el próximo turno más cerca',
+    r.relieved?.shiftId === `${prefix}_z_cerca` && cerca?.relievedBy === 'e_lopez' && lejos?.isCompleted !== true,
+    `relieved=${r.relieved?.shiftId} lejosCompleted=${lejos?.isCompleted}`);
+}
+
+/** El ingreso manual del operador deja checkInAt con la hora real de la marca. */
+async function casoOperador() {
+  const id = 'op_marca';
+  await db.collection('turnos').doc(id).set({
+    empresaId: 'op_emp', objectiveId: 'op_obj', positionName: 'Puesto 9',
+    employeeId: 'e_op', employeeName: 'OP', code: 'M', status: 'PENDING',
+    startTime: ar(11, 30), endTime: END,
+  });
+  await registrarPresencia(db, { shiftId: id, source: 'OPERATIONS', empId: 'e_op', recordedAt: iso(12, 5) });
+  const d = (await db.collection('turnos').doc(id).get()).data();
+  const mark = Date.parse(iso(12, 5));
+  report('operador escribe checkInAt', d?.checkInAt?.toMillis?.() === mark && d?.isPresent === true,
+    `checkInAt=${d?.checkInAt?.toDate?.()?.toISOString?.()} present=${d?.isPresent}`);
 }
 
 async function main() {
@@ -215,6 +293,9 @@ async function main() {
   await casoA();
   await casoB();
   await casoC();
+  await casoD();
+  await casoE();
+  await casoOperador();
   const failed = results.filter((r) => !r.ok);
   if (failed.length) process.exitCode = 1;
   console.log(`relevo FIFO ${results.length - failed.length}/${results.length}`);

@@ -18,6 +18,7 @@ import {
   seriesCodeOf,
   seriesHandoffKind,
 } from '../common/shiftSeries';
+import { rosterIfSameSecond } from '../fichajes/relevoOutgoingMatch';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { retentionPendingReason } from './retentionPendingReason';
 import { guardFirstName } from '../common/pushGreeting';
@@ -112,6 +113,7 @@ function pickSeriesRelief(
   docs: QueryDocumentSnapshot[],
   pred: (d: QueryDocumentSnapshot) => boolean,
   peers: readonly Record<string, unknown>[] = [],
+  roster: readonly Record<string, unknown>[] = [],
 ): QueryDocumentSnapshot | undefined {
   const valid = docs.filter((d) => isValidReliefForOutgoing(d.data(), endTimeMs, outgoing));
   if (!valid.length) return undefined;
@@ -125,6 +127,7 @@ function pickSeriesRelief(
     earliestIncomingMs: endTimeMs - RELEVO_ALIGN_MS,
     latestIncomingMs: endTimeMs + RELEVO_WINDOW_AFTER_MS,
     peers: peers.filter((p) => String(p.id || '') !== outgoingId),
+    roster,
   };
   const asRows = (list: QueryDocumentSnapshot[]) => list.map((d) => ({
     id: d.id,
@@ -547,6 +550,11 @@ export async function runAutoCompletarTurnosPass(
       : [];
     // Los que ya cerraron (relevados antes) no compiten por los entrantes que quedan.
     const peers = siblings.filter((s) => String(s.id || '') !== docSnap.id && s.isCompleted !== true && !s.realEndTime);
+    const roster = await rosterIfSameSecond(
+      db,
+      [{ id: docSnap.id, ...(shift as Record<string, unknown>) }, ...peers],
+      endTimeMs,
+    );
 
     // Franja siguiente con menos lugares: se quedan los de menos tiempo en el puesto;
     // el resto se va a su horario, sin retención y sin tomar el relevo de otro.
@@ -570,16 +578,16 @@ export async function runAutoCompletarTurnosPass(
       if (reliefIncomingClaimed.has(d.id)) return false;
       if (reliefBusyForOther(d.data(), docSnap.id)) return false;
       return isReliefPresent(d.data());
-    }, peers);
+    }, peers, roster);
 
     const relievePending =
       pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
-        !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()), peers)
-      ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()), peers);
+        !reliefPendingClaimed.has(d.id) && isReliefPending(d.data()), peers, roster)
+      ?? pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) => isReliefPending(d.data()), peers, roster);
     if (relievePending) reliefPendingClaimed.add(relievePending.id);
 
     const relieveAbsent = pickSeriesRelief(docSnap.id, shift, endTimeMs, relieveDocs, (d) =>
-      isReliefAbsent(d.data()), peers);
+      isReliefAbsent(d.data()), peers, roster);
 
     if (relievePresent) {
       reliefIncomingClaimed.add(relievePresent.id);

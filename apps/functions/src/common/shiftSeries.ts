@@ -29,6 +29,11 @@ export type SeriesPickOpts = {
    * En `outgoingFor`: los otros entrantes de la franja (fichados o no).
    */
   peers?: readonly SeriesShift[];
+  /**
+   * Turnos del legajo (u otros) para el desempate: si dos salientes ficharon en el mismo
+   * segundo, se releva primero al que tiene el próximo turno planificado más cerca.
+   */
+  roster?: readonly SeriesShift[];
 };
 
 type ParsedSeries =
@@ -138,15 +143,37 @@ export function seriesBoundMs(shift: SeriesShift | null | undefined, kind: 'star
   return readMs(obj) || readMs(raw);
 }
 
-function fichajeMs(shift: SeriesShift): number {
+function positiveMs(value: unknown): number {
+  const t = readMs(value);
+  return t > 0 ? t : 0;
+}
+
+/**
+ * Inicio real efectivo de la fichada. Orden: `checkInAt`, `realStartTime`, `checkInTime`,
+ * `presenciaAt`. Un campo vacío no vale 0: si no hay marca, el resultado es 0 y el
+ * llamador sigue con el inicio planificado. Nunca se ordena por un `checkInAt` vacío.
+ */
+export function effectiveStartMs(shift: SeriesShift): number {
   if (typeof shift.checkInMs === 'number' && shift.checkInMs > 0) return shift.checkInMs;
   return (
-    readMs(shift.checkInAt)
-    || readMs(shift.realStartTime)
-    || readMs(shift.checkInTime)
-    || readMs(shift.presenciaAt)
+    positiveMs(shift.checkInAt)
+    || positiveMs(shift.realStartTime)
+    || positiveMs(shift.checkInTime)
+    || positiveMs(shift.presenciaAt)
     || 0
   );
+}
+
+function fichajeMs(shift: SeriesShift): number {
+  return effectiveStartMs(shift);
+}
+
+const REST_DUTY_CODES = new Set(['F', 'FF', 'FP', 'V', 'L', 'E', 'A', 'ART', 'AA', 'PG', 'SGS', 'SUS']);
+
+/** Franco, licencia o borrador: no es el próximo turno que exige descanso. */
+export function isRestOrLicenseShift(shift: SeriesShift): boolean {
+  const code = String(shift.code ?? shift.type ?? shift.shiftCode ?? '').trim().toUpperCase();
+  return shift.draft === true || shift.isFranco === true || REST_DUTY_CODES.has(code);
 }
 
 export function reliefPositionsMatch(a: unknown, b: unknown): boolean {
@@ -183,9 +210,51 @@ export function workStartMsOf(shift: SeriesShift): number {
   return fichajeMs(shift) || seriesBoundMs(shift, 'start');
 }
 
-/** FIFO salientes: primero el que más tiempo lleva en el puesto (inicio real más antiguo), después por id. */
-export function sortOutgoingsFifo<T extends SeriesShift>(rows: readonly T[]): T[] {
-  return [...rows].sort((a, b) => (workStartMsOf(a) - workStartMsOf(b)) || idOf(a).localeCompare(idOf(b)));
+/**
+ * Inicio del próximo turno planificado del legajo, después del fin de este.
+ * Se saltea franco y licencia. 0 si no hay.
+ */
+export function nextDutyStartMsOf(shift: SeriesShift, roster: readonly SeriesShift[] | undefined): number {
+  const stamped = positiveMs(shift.nextDutyStartMs);
+  if (stamped) return stamped;
+  const emp = String(shift.employeeId ?? '').trim();
+  if (!emp || !roster?.length) return 0;
+  const after = seriesBoundMs(shift, 'end') || workStartMsOf(shift);
+  let best = 0;
+  for (const row of roster) {
+    if (!row || sameShift(row, shift)) continue;
+    if (String(row.employeeId ?? '').trim() !== emp) continue;
+    if (isRestOrLicenseShift(row)) continue;
+    const start = seriesBoundMs(row, 'start');
+    if (!start || (after > 0 && start <= after)) continue;
+    if (!best || start < best) best = start;
+  }
+  return best;
+}
+
+/**
+ * Orden FIFO de salientes. Primero el inicio real efectivo más antiguo (al segundo:
+ * un `checkInAt` vacío no cuenta como 0). Mismo segundo: primero el que tiene el
+ * próximo turno planificado más cerca (franco y licencia no cuentan). Si no hay
+ * diferencia, id estable.
+ */
+export function compareOutgoingsFifo(a: SeriesShift, b: SeriesShift, opts?: SeriesPickOpts): number {
+  const sa = Math.floor(workStartMsOf(a) / 1000);
+  const sb = Math.floor(workStartMsOf(b) / 1000);
+  if (sa !== sb) return sa - sb;
+  const duty = (shift: SeriesShift) => {
+    const start = nextDutyStartMsOf(shift, opts?.roster);
+    return start > 0 ? start : Number.MAX_SAFE_INTEGER;
+  };
+  const da = duty(a);
+  const db = duty(b);
+  if (da !== db) return da - db;
+  return idOf(a).localeCompare(idOf(b));
+}
+
+/** FIFO salientes: ver `compareOutgoingsFifo`. */
+export function sortOutgoingsFifo<T extends SeriesShift>(rows: readonly T[], opts?: SeriesPickOpts): T[] {
+  return [...rows].sort((a, b) => compareOutgoingsFifo(a, b, opts));
 }
 
 /** Entrante que no va a venir: su hueco se lo queda el saliente que nadie releva. */
@@ -235,7 +304,7 @@ export function pairReliefs<T extends SeriesShift>(
   incomings: readonly T[],
   opts?: SeriesPickOpts,
 ): ReliefPair<T>[] {
-  const outs = sortOutgoingsFifo(outgoings.filter((row) => !!row));
+  const outs = sortOutgoingsFifo(outgoings.filter((row) => !!row), opts);
   const ins = sortIncomingsFifo(incomings.filter((row) => !!row && isReliefEligibleShift(row)));
   const claimed = new Set<T>();
   const picked = new Map<T, { incoming: T; kind: ReliefPairKind }>();
@@ -424,8 +493,8 @@ export function outgoingFor<T extends SeriesShift>(
     const kb = b.kind === 'SERIES' ? 0 : 1;
     if (ka !== kb) return ka - kb;
     if (a.dist !== b.dist) return a.dist - b.dist;
-    if (a.since !== b.since) return newestFirst ? b.since - a.since : a.since - b.since;
-    return idOf(a.row).localeCompare(idOf(b.row));
+    const fifo = compareOutgoingsFifo(a.row, b.row, opts);
+    return newestFirst ? -fifo : fifo;
   });
   return scored[0].row;
 }
