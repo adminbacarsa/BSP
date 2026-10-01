@@ -1,4 +1,4 @@
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 const CACHE_NAME = `cronoapp-offline-${CACHE_VERSION}`;
 // Assets are content-addressed (hashed filenames) — safe to keep across SW versions
 const RUNTIME_CACHE = `cronoapp-assets`;
@@ -7,6 +7,7 @@ const KEEP_CACHES = new Set([CACHE_NAME, RUNTIME_CACHE]);
 const PRECACHE_URLS = [
   '/offline.html',
   '/admin/dashboard/',
+  '/admin/operaciones/',
 ];
 
 self.addEventListener('install', (event) => {

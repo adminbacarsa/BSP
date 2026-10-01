@@ -9,6 +9,10 @@ const ALERT_TYPES = [
   'VACANTE_NO_CUBIERTA',
   'AUSENCIA_CORTO_PLAZO',
   'AVISO_AUSENCIA_ANTICIPADA',
+  'AUSENCIA_AUTO',
+  'VACANTE_PARCIAL',
+  'SIN_COBERTURA',
+  'RETENCION_LARGA',
 ];
 
 const TYPE_LABELS: Record<string, string> = {
@@ -19,6 +23,10 @@ const TYPE_LABELS: Record<string, string> = {
   VACANTE_NO_CUBIERTA:       '🔴 Vacante Devuelta',
   AUSENCIA_CORTO_PLAZO:      '🚨 Ausencia Urgente — menos de 4hs',
   AVISO_AUSENCIA_ANTICIPADA: '⚠️ Aviso Anticipado de Ausencia',
+  AUSENCIA_AUTO:             '⚠️ Ausencia',
+  VACANTE_PARCIAL:           '🔴 Vacante',
+  SIN_COBERTURA:             '🔴 Protocolo sin candidato',
+  RETENCION_LARGA:           '⏰ Retención larga',
 };
 
 export const onNovedadCreated = functions

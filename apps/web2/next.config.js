@@ -39,6 +39,9 @@ const manifest = {
     { src: '/icons/icon.svg',     sizes: 'any',     type: 'image/svg+xml' },
   ],
   categories: ['business', 'productivity'],
+  shortcuts: [
+    { name: 'Operaciones', short_name: 'CC', url: '/admin/operaciones/', description: 'Centro de Control' },
+  ],
 };
 fs.writeFileSync(path.join(__dirname, 'public', 'manifest.json'), JSON.stringify(manifest, null, 2));
 

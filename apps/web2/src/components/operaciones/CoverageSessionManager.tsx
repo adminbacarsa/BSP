@@ -279,6 +279,8 @@ interface Props {
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
   onUpdate: (id: string, fn: (s: CoverageSession) => CoverageSession) => void;
+  /** Escritorio: esquina. Celular: hoja inferior. */
+  dock?: 'corner' | 'sheet';
 }
 
 /**
@@ -296,7 +298,7 @@ export function pendingConvocatoriaIdsForSession(
   return Array.from(new Set(ids));
 }
 
-export function CoverageSessionManager({ sessions, activeId, logic, onActivate, onClose, onUpdate }: Props) {
+export function CoverageSessionManager({ sessions, activeId, logic, onActivate, onClose, onUpdate, dock = 'corner' }: Props) {
   const timerRefs = useRef<Record<string, ReturnType<typeof setInterval>>>({});
   const unsubRefs = useRef<Record<string, () => void>>({});
 
@@ -388,6 +390,7 @@ export function CoverageSessionManager({ sessions, activeId, logic, onActivate, 
           onClose={() => closeSession(activeSession.id)}
           onMinimize={() => upd(activeSession.id, { minimized: true })}
           unsubRefs={unsubRefs.current}
+          dock={dock}
         />
       )}
 
@@ -458,9 +461,10 @@ interface PanelProps {
   onClose: () => void;
   onMinimize: () => void;
   unsubRefs: Record<string, () => void>;
+  dock?: 'corner' | 'sheet';
 }
 
-function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinimize, unsubRefs }: PanelProps) {
+function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinimize, unsubRefs, dock = 'corner' }: PanelProps) {
   const [loading, setLoading] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
   /** 15 km (default CCT) → ampliar a 30 km si no hay candidatos cercanos. */
@@ -1506,7 +1510,9 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
 
   // ─── Panel layout ──────────────────────────────────────────────────────────
   return (
-    <div className="fixed bottom-10 right-4 z-[9000] w-[420px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden" style={{ maxHeight: 'calc(100vh - 5rem)' }}>
+    <div className={dock === 'sheet'
+      ? 'fixed inset-x-0 bottom-0 z-[9000] w-full max-h-[78vh] bg-white rounded-t-3xl shadow-lg border border-slate-200 flex flex-col overflow-hidden'
+      : 'fixed bottom-10 right-4 z-[9000] w-[420px] max-w-[calc(100vw-2rem)] bg-white rounded-2xl shadow-2xl border border-slate-200 flex flex-col overflow-hidden'} style={dock === 'sheet' ? undefined : { maxHeight: 'calc(100vh - 5rem)' }}>
       {/* Header */}
       <div className="p-3.5 bg-rose-600 text-white flex items-start gap-3 shrink-0">
         <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center font-black text-sm shrink-0 mt-0.5">
