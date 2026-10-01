@@ -1325,15 +1325,15 @@ export default function TacticalMapView() {
                                                 <p className="text-[11px] font-bold text-slate-800 leading-snug">
                                                     {s.employeeName || 'Desconocido'}
                                                     <ShiftCodeBadge shift={s} className="ml-1" />
-                                                    <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.manualRetentionType ? 'bg-amber-100 text-amber-700' : s.isRetention ? 'bg-orange-100 text-orange-700' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
-                                                        {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? `RETENIDO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.isPendingClose ? `ESPERANDO RELEVO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
+                                                    <span className={`ml-1.5 text-[9px] font-black px-1.5 rounded ${s.manualRetentionType ? 'bg-amber-100 text-amber-700' : s.isRetention ? 'bg-orange-100 text-orange-700' : s.cierreSinFranja ? 'bg-slate-200 text-slate-600' : s.isEarlyStart ? 'bg-indigo-100 text-indigo-700' : s.isAwaitingCoverageCheckIn ? 'bg-indigo-100 text-indigo-700' : 'bg-rose-100 text-rose-700'}`}>
+                                                        {s.manualRetentionType === 'extended' ? `+${s.manualRetentionHours}h MAN` : s.manualRetentionType === 'open' ? 'MAN INDEF' : s.isRetention ? `RETENIDO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.cierreSinFranja ? s.cierreSinFranja : s.isPendingClose ? `ESPERANDO RELEVO${s.retentionMinutes > 0 ? ` ${formatRetentionDuration(s.retentionMinutes)}` : ''}` : s.isEarlyStart ? 'ADELANTADO' : s.isAwaitingCoverageCheckIn ? 'CONVOCADO' : 'INMINENTE'}
                                                     </span>
                                                 </p>
                                                 <p className="text-[10px] text-slate-400 leading-tight">{s.objectiveName} · {s.positionName} · <span className="font-mono">{formatTimeSimple(s.shiftDateObj)}</span></p>
                                                 {s.esEventual === true && s.eventualAltaArcaConfirmada !== true && s.shiftDateObj instanceof Date && Date.now() >= s.shiftDateObj.getTime() - 2 * 60 * 60 * 1000 && (
                                                     <p className="text-[10px] font-black text-amber-700">ALTA_ARCA_PENDIENTE</p>
                                                 )}
-                                                {s.isPresent && s.retentionWait ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
+                                                {s.isPresent && s.retentionWait && !s.cierreSinFranja ? <p className="text-[10px] font-bold text-orange-700">{formatRetentionLine(s.retentionWait)}</p> : null}
                                                 {s.isPresent && formatIngresoLine(s) ? <p className="text-[10px] font-bold text-emerald-700">{formatIngresoLine(s)}</p> : null}
                                             </div>
                                             <div className="flex gap-1 shrink-0">

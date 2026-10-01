@@ -1173,6 +1173,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
     else if (shift.manualRetentionType === 'extended')  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white shrink-0 flex items-center gap-0.5"><Timer size={8}/>+{shift.manualRetentionHours}h MANUAL</span>;
     else if (shift.manualRetentionType === 'open')      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-amber-600 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Timer size={8}/>MANUAL INDEF</span>;
     else if (shift.isRetention)      badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white animate-pulse shrink-0 flex items-center gap-0.5"><Clock size={8}/>RETENIDO{shift.retentionMinutes > 0 ? ` ${formatRetentionDuration(shift.retentionMinutes)}` : ''}</span>;
+    else if (shift.cierreSinFranja)  badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-slate-200 text-slate-600 shrink-0">{shift.cierreSinFranja}</span>;
     else if (shift.isPendingClose)   badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-orange-500 text-white shrink-0 flex items-center gap-0.5"><Clock size={8}/>ESPERANDO RELEVO{shift.retentionMinutes > 0 ? ` ${formatRetentionDuration(shift.retentionMinutes)}` : ''}</span>;
     else if (shift.isCoverageSourceUsed && shift.coverageUsedLabel) {
         badge = <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-violet-600 text-white shrink-0 max-w-[min(100%,260px)] truncate" title={shift.coverageUsedLabel}>🔗 {shift.coverageUsedLabel}</span>;
@@ -1239,7 +1240,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                 {shift.isPresent && formatIngresoLine(shift) && (
                     <p className="text-[9px] font-bold text-emerald-700 truncate">{formatIngresoLine(shift)}</p>
                 )}
-                {shift.isPresent && shift.retentionWait && (
+                {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[9px] font-bold text-orange-700 truncate" title={formatRetentionLine(shift.retentionWait) || ''}>{formatRetentionLine(shift.retentionWait)}</p>
                 )}
                 {formatOpsNotaLine(shift.opsNota) && (
@@ -1325,7 +1326,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
                         {displayShiftTimeRange(shift)}
                     </span>
                 </div>
-                {shift.isPresent && shift.retentionWait && (
+                {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                     <p className="text-[10px] font-bold text-orange-700 mb-1.5 pl-10">{formatRetentionLine(shift.retentionWait)}</p>
                 )}
                 {shift.isPresent && formatIngresoLine(shift) && (

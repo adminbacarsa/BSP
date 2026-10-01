@@ -79,6 +79,8 @@ export {
   buildRetentionWaitInfo,
   formatRetentionLine,
 } from './retentionDisplay';
+export { etiquetaCierreSinContinuidad } from './cierreSinContinuidad';
+export type { CierreSinContinuidadInput } from './cierreSinContinuidad';
 export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';
 export { seriesReliefChoiceNotice } from './seriesReliefNotice';
 export type { SeriesReliefNotice } from './seriesReliefNotice';

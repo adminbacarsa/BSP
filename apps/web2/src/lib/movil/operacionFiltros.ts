@@ -22,6 +22,17 @@ export interface OpsFiltroMovil {
 
 export const FILTRO_VACIO: OpsFiltroMovil = { estado: 'TODOS', clientId: null, objectiveId: null };
 
+/**
+ * Alto hasta la primera tarjeta de guardia (panel del objetivo):
+ * barra 48 + fecha 20 + margen 4 + encabezado 36 + margen 4.
+ */
+export const ALTO_HASTA_PRIMERA_TARJETA_PX = 48 + 20 + 4 + 36 + 4;
+
+/** Los 6 chips (padding 24, 5 gaps de 4, chip mínimo 28) entran en el ancho. */
+export function contadoresCabenEnFila(anchoPx: number): boolean {
+  return anchoPx >= 24 + 5 * 4 + 6 * 28;
+}
+
 export type OpsShiftMovil = GuardDetalleShift & {
   clientId?: string;
   isFranco?: boolean;

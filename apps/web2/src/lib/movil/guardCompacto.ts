@@ -7,7 +7,7 @@ import { normalizarNota } from '@/lib/operaciones/opsNota';
  * Datos de la tarjeta compacta del guardia (celular): dos filas con íconos, sin textos
  * largos. El detalle completo (retención, relevo, cobertura) va en la hoja de acciones.
  */
-export type GuardEstadoCompacto = 'activo' | 'retenido' | 'tarde' | 'ausente' | 'cubierto' | 'vacante' | 'plan';
+export type GuardEstadoCompacto = 'activo' | 'retenido' | 'tarde' | 'ausente' | 'cubierto' | 'vacante' | 'plan' | 'cierra';
 
 export interface GuardCompacto {
   /** «LOPEZ Hector» (apellido en mayúsculas, nombre capitalizado). */
@@ -27,6 +27,8 @@ export interface GuardCompacto {
   respuesta: { hhmm: string; eta: string | null } | null;
   /** Última nota del operador (texto corto, StickyNote). */
   nota: string | null;
+  /** Fin vencido sin franja siguiente: texto gris, no es retención. */
+  cierre: string | null;
   /** Chip de estado a la derecha de la fila 1. */
   estado: { kind: GuardEstadoCompacto; texto: string };
   tone: GuardTone;
@@ -106,6 +108,11 @@ function titularCubierto(shift: GuardDetalleShift): boolean {
 }
 
 function estadoDe(shift: GuardDetalleShift, tone: GuardTone, nowMs: number): GuardCompacto['estado'] {
+  const cierre = String(shift.cierreSinFranja || '').trim();
+  if (cierre) {
+    const hm = cierre.match(/CIERRA\s+(\d{2}:\d{2})/);
+    return { kind: 'cierra', texto: hm ? `CIERRA ${hm[1]}` : 'CIERRA' };
+  }
   const startMs = toMs(shift.shiftDateObj || shift.startTime);
   const endMs = toMs(shift.endDateObj || shift.endTime);
   if (tone === 'ret') {
@@ -161,7 +168,8 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     }
   }
 
-  const tope = tone === 'ret' && shift.retentionWait && shift.retentionWait.capAtMs > 0 ? `tope ${hhmmAR(shift.retentionWait.capAtMs)}` : null;
+  const cierre = String(shift.cierreSinFranja || '').trim() || null;
+  const tope = !cierre && tone === 'ret' && shift.retentionWait && shift.retentionWait.capAtMs > 0 ? `tope ${hhmmAR(shift.retentionWait.capAtMs)}` : null;
 
   let respuesta: GuardCompacto['respuesta'] = null;
   if (!esVacante && !shift.isPresent && shift.isLateNotified) {
@@ -178,9 +186,10 @@ export function guardCompacto(shift: GuardDetalleShift, siblings: readonly Guard
     horario: horarioPlanificado(shift),
     ingreso,
     tope,
-    relevo,
     respuesta,
     nota: notaRaw,
+    cierre,
+    relevo: cierre ? null : relevo,
     estado: estadoDe(shift, tone, nowMs),
     tone,
     telefono: String(shift.phone || '').trim() || null,

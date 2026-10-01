@@ -242,6 +242,9 @@ export function OperacionesMapPopup({
               const mins = Number(shift.retentionMinutes) || 0;
               statusLabel = mins > 0 ? `RETENIDO ${formatRetentionDuration(mins)}` : 'RETENIDO';
               statusColor = '#ea580c';
+            } else if (shift.cierreSinFranja) {
+              statusLabel = String(shift.cierreSinFranja);
+              statusColor = '#64748b';
             } else if (shift.isPendingClose) {
               const mins = Number(shift.retentionMinutes) || 0;
               statusLabel = mins > 0 ? `ESPERA RELEVO ${formatRetentionDuration(mins)}` : 'ESPERA RELEVO';
@@ -485,7 +488,7 @@ export function OperacionesMapPopup({
                     </button>
                   )}
                 </div>
-                {shift.isPresent && shift.retentionWait && (
+                {shift.isPresent && shift.retentionWait && !shift.cierreSinFranja && (
                   <div
                     style={{
                       flex: '1 0 100%',

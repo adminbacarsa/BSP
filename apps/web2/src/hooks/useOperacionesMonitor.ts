@@ -28,6 +28,7 @@ import {
   buildSlaUnplannedGapDocId,
   plannedShiftCoversSlaBand,
   buildRetentionWaitInfo,
+  etiquetaCierreSinContinuidad,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -888,6 +889,27 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const arr = shiftsByObjective.get(oid);
             if (arr) arr.push(s);
             else shiftsByObjective.set(oid, [s]);
+        });
+        // Ventana hasta que el cron cierre: sin franja siguiente (o sin lugar) no es retención.
+        dedupByIdShifts.forEach((s: any) => {
+            if (!s.isPresent || s.isCompleted || s.isRetention) return;
+            const end = s.endDateObj instanceof Date ? s.endDateObj : null;
+            if (!end || !(currentTime > end)) return;
+            const oid = String(s.objectiveId || '').trim();
+            const label = etiquetaCierreSinContinuidad({
+                slaDocs: slaByObjective.get(oid) || [],
+                positionName: s.positionName,
+                shiftEnd: end,
+                outgoingCode: s.code || s.type,
+                outgoing: s,
+                siblings: shiftsByObjective.get(oid) || [],
+                finServicioSinCronograma: isFinServicioSinCronograma(s, publishStatusMap),
+            });
+            if (!label) return;
+            s.isPendingClose = false;
+            s.isPendingRetention = false;
+            s.retentionMinutes = 0;
+            s.cierreSinFranja = label;
         });
         dedupByIdShifts.forEach((s: any) => {
             if (!s.isPresent || s.isCompleted) return;

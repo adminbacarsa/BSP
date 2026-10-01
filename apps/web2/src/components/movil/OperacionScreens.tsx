@@ -5,12 +5,12 @@ import {
 } from 'lucide-react';
 import {
   MOVIL_BORDER, MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_FONT, MOVIL_PRIMARY_BG, MOVIL_TEXT,
-  MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct, type MovilTone,
+  MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct,
 } from './ui';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { guardCompacto, type GuardEstadoCompacto } from '@/lib/movil/guardCompacto';
-import { MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
+import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
 import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
 import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
@@ -353,7 +353,7 @@ export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
           onChange={(event) => setTexto(event.target.value)}
           placeholder="Buscar cliente u objetivo"
           aria-label="Buscar cliente u objetivo"
-          className={`min-h-12 w-full rounded-lg border ${MOVIL_BORDER} bg-white pl-9 pr-3 text-sm font-medium outline-none focus:border-[var(--movil-primary,#111827)]`}
+          className={`h-9 w-full rounded-lg border ${MOVIL_BORDER} bg-white pl-9 pr-3 text-[13px] font-medium outline-none focus:border-[var(--movil-primary,#111827)]`}
         />
       </div>
       <button type="button" onClick={() => onElegir(null, null)} className={`mb-2 ${opcion(!filtro.clientId && !filtro.objectiveId)}`}>
@@ -438,20 +438,10 @@ const TONE_TEXT: Record<string, string> = {
   plan: 'text-slate-500',
 };
 
-/** «jueves 1 de octubre» para el subtítulo del encabezado. */
+/** «jueves 1 de octubre» en la línea gris bajo la barra. */
 function movilFechaCorta(ms: number): string {
   return new Date(ms).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
 }
-
-/** Ícono y tono de cada contador del encabezado (mismo criterio que el escritorio). */
-const CONTADOR_UI: Record<Exclude<OpsEstadoFiltro, 'TODOS'>, { icon: LucideIcon; tone: MovilTone }> = {
-  ACTIVOS: { icon: UserCheck, tone: 'emerald' },
-  PLAN: { icon: CalendarClock, tone: 'slate' },
-  NO_LLEGO: { icon: Clock, tone: 'amber' },
-  AUSENTES: { icon: UserX, tone: 'rose' },
-  VACANTES: { icon: AlertTriangle, tone: 'rose' },
-  RETENIDOS: { icon: Hourglass, tone: 'orange' },
-};
 
 function BigButton({ label, tone, onClick }: { label: string; tone?: 'go' | 'pri' | 'warn'; onClick: () => void }) {
   const cls = tone === 'pri' ? MOVIL_BTN_PRIMARY : tone === 'go' ? `${MOVIL_BTN_SECONDARY} !text-emerald-700` : tone === 'warn' ? `${MOVIL_BTN_SECONDARY} !text-orange-700` : MOVIL_BTN_SECONDARY;
@@ -517,6 +507,7 @@ const ESTADO_ICON: Record<GuardEstadoCompacto, LucideIcon> = {
   cubierto: UserCheck,
   vacante: AlertTriangle,
   plan: CalendarClock,
+  cierra: Clock,
 };
 
 /** Ítem de la fila 2: ícono lucide + texto corto. */
@@ -572,7 +563,7 @@ export function GuardCard({
   onAcciones?: (shift: GuardShift) => void;
 }) {
   const c = guardCompacto(shift, siblings, now ?? Date.now());
-  const visual = toneForGuard(c.tone);
+  const visual = c.estado.kind === 'cierra' ? 'slate' : toneForGuard(c.tone);
   const EstadoIcon = ESTADO_ICON[c.estado.kind];
   const abrir = readOnly ? null : (onAcciones ?? onProtocolo ?? null);
   const Fila = abrir ? 'button' : 'div';
@@ -605,6 +596,7 @@ export function GuardCard({
             </MiniItem>
           )}
           {c.tope && <MiniItem icon={Hourglass} attr="tope" className="text-orange-600">{c.tope}</MiniItem>}
+          {c.cierre && <MiniItem icon={Clock} attr="cierre" className="text-slate-500">{c.cierre}</MiniItem>}
           {c.relevo && <MiniItem icon={ArrowRightLeft} attr="relevo" className="text-slate-600">{c.relevo.apellido} {c.relevo.hhmm}</MiniItem>}
           {c.respuesta && <MiniItem icon={MessageSquare} attr="respuesta" className="text-amber-600">resp. {c.respuesta.hhmm}{c.respuesta.eta ? ` ~${c.respuesta.eta}` : ''}</MiniItem>}
           {c.nota && <MiniItem icon={StickyNote} attr="nota" className="text-slate-600">{c.nota}</MiniItem>}
@@ -708,7 +700,7 @@ export function OperacionScreens({
   const filtrando = filtro.estado !== 'TODOS';
   const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion, onAcciones };
   const moduloLabel = readOnly ? 'Supervisión' : 'Operación';
-  const vacio = `${MOVIL_CARD} p-4 text-sm font-medium text-slate-500`;
+  const vacio = 'py-6 text-center text-[13px] font-medium text-slate-400';
   const resumenProx = proximas ? resumenProximas(proximas) : null;
   const pie = pieLabel ? (
     <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] font-medium tabular-nums text-slate-400" data-movil-pie="1">
@@ -716,7 +708,6 @@ export function OperacionScreens({
       {pieLabel}
     </p>
   ) : null;
-  const modoTone: MovilTone = modeLabel.toUpperCase().startsWith('MAN') ? 'emerald' : modeLabel.toUpperCase().startsWith('DEMO') ? 'amber' : 'slate';
   return (
     <div className={`mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24 ${MOVIL_FONT}`} data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <MovilTopBar
@@ -731,19 +722,19 @@ export function OperacionScreens({
             type="button"
             onClick={onSala}
             aria-label={`Sala · ${modeLabel}`}
-            className="flex min-h-9 items-center gap-1.5 rounded-full border border-white/40 pl-2.5 pr-3 text-[11px] font-semibold uppercase tracking-wide text-white active:bg-white/10"
+            data-movil-modo={modeLabel}
+            className="flex h-6 items-center rounded border border-white/50 px-1.5 text-[10px] font-medium uppercase tracking-wide text-white/90"
           >
-            <span aria-hidden="true" className={`h-2 w-2 rounded-full ${MOVIL_FILETE[modoTone]}`} />
             {modeLabel}
           </button>
         )}
       />
-      <div className="px-3 pt-3">
-        {panel === 'home' && (
-          <MovilHeader icon={Radio} title="Centro de Control" subtitle={online ? `${movilFechaCorta(nowMs)} · ${modeLabel}` : movilFechaCorta(nowMs)} className="mb-3" />
+      <div className="px-3 pt-1">
+        {(panel === 'home' || panel === 'objetivo') && (
+          <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">{movilFechaCorta(nowMs)} · {modeLabel}</p>
         )}
         {panel === 'objetivo' && (
-          <div className="mb-2 flex min-h-9 items-center gap-1.5" data-movil-objetivo-header="fino">
+          <div className="mb-1 flex h-9 items-center gap-1.5" data-movil-objetivo-header="fino" data-movil-hasta-tarjeta={ALTO_HASTA_PRIMERA_TARJETA_PX}>
             <button type="button" onClick={onBack} aria-label="Volver" className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${MOVIL_BTN_SECONDARY}`}>
               <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
             </button>
@@ -777,13 +768,14 @@ export function OperacionScreens({
                   type="button"
                   onClick={onAmbito}
                   aria-label="Filtrar por cliente u objetivo"
-                  className={`flex min-h-11 flex-1 items-center gap-2 rounded-lg px-3 text-left text-[12px] font-medium ${MOVIL_BTN_SECONDARY} !text-slate-600`}
+                  data-movil-buscar="1"
+                  className={`flex h-9 flex-1 items-center gap-2 rounded-lg px-3 text-left text-[12px] font-medium ${MOVIL_BTN_SECONDARY} !text-slate-600`}
                 >
                   <Search size={15} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
                   <span className="truncate">{ambitoLabel ? 'Cambiar cliente u objetivo' : 'Todos los clientes y objetivos'}</span>
                 </button>
                 {ambitoLabel && (
-                  <span className={`flex min-h-11 max-w-[55%] items-center gap-1 rounded-lg pl-3 pr-1 text-[11px] font-semibold ${MOVIL_PRIMARY_BG}`} data-movil-chip="ambito">
+                  <span className={`flex h-9 max-w-[55%] items-center gap-1 rounded-lg pl-3 pr-1 text-[11px] font-semibold ${MOVIL_PRIMARY_BG}`} data-movil-chip="ambito">
                     <span className="truncate">{ambitoLabel}</span>
                     <button type="button" onClick={onQuitarAmbito} aria-label={`Quitar filtro ${ambitoLabel}`} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg active:bg-white/10">
                       <X size={15} strokeWidth={1.75} aria-hidden="true" />
@@ -792,11 +784,9 @@ export function OperacionScreens({
                 )}
               </div>
             )}
-            <div className="-mx-3 mb-2 flex gap-1.5 overflow-x-auto px-3 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="group" aria-label="Filtrar por estado" data-movil-contadores="fila">
+            <div className="mb-2 grid grid-cols-6 gap-1" role="group" aria-label="Filtrar por estado" data-movil-contadores="fila">
               {counters.map((item) => {
                 const activo = filtro.estado === item.id;
-                const ui = CONTADOR_UI[item.id];
-                const Icon = ui.icon;
                 return (
                   <button
                     key={item.id}
@@ -806,11 +796,10 @@ export function OperacionScreens({
                     aria-label={`${item.label}: ${item.value}`}
                     data-movil-contador={item.id}
                     data-movil-filtro-activo={activo ? '1' : undefined}
-                    className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[11px] font-semibold tabular-nums ${activo ? `border-transparent ${MOVIL_PRIMARY_BG}` : `${MOVIL_BORDER} bg-white text-slate-700`}`}
+                    className={`flex h-8 min-w-0 items-center justify-center gap-0.5 rounded border px-0.5 text-[11px] font-semibold tabular-nums ${activo ? `border-transparent ${MOVIL_PRIMARY_BG}` : `${MOVIL_BORDER} bg-white text-slate-700`}`}
                   >
-                    <Icon size={13} strokeWidth={1.75} aria-hidden="true" className={activo ? '' : MOVIL_TEXT[ui.tone]} />
-                    <span className={`text-[10px] uppercase tracking-wide ${activo ? 'opacity-80' : 'text-slate-500'}`}>{item.corto}</span>
-                    <b className="text-[13px]">{item.value}</b>
+                    <b className="text-[11px] leading-none">{item.value}</b>
+                    <span className={`text-[10px] uppercase leading-none ${activo ? 'opacity-80' : 'text-slate-500'}`}>{item.corto}</span>
                   </button>
                 );
               })}

@@ -28,6 +28,8 @@ export interface GuardDetalleShift extends GuardFlags {
   vacancyBand?: string | null;
   isProvisionalLateAbsence?: boolean;
   isPendingClose?: boolean;
+  /** «CIERRA HH:MM · sin franja siguiente»: fin vencido sin continuidad. No es retención. */
+  cierreSinFranja?: string | null;
   retentionWait?: RetentionWaitInfo | null;
   lateArrivalEtaLabel?: string | null;
   /** HH:MM de la respuesta del guardia al aviso (classifyOpsShift). */
@@ -135,6 +137,8 @@ function etiquetaRelevo(row: GuardDetalleShift): string {
 }
 
 function estadoDe(shift: GuardDetalleShift, nowMs: number): string | null {
+  const cierre = String(shift.cierreSinFranja || '').trim();
+  if (cierre) return cierre;
   const startMs = toMs(shift.shiftDateObj || shift.startTime);
   const tone = guardTone(shift);
   if (tone === 'ret') {
@@ -227,7 +231,9 @@ export function guardDetalle(shift: GuardDetalleShift, siblings: readonly GuardD
   const aQuienReleva = isVacante ? null : outgoingFor(shift, pool, { peers: pool, roster: siblings });
 
   let loReleva: string | null = null;
-  if (tone === 'ret' && shift.retentionWait) {
+  if (String(shift.cierreSinFranja || '').trim()) {
+    loReleva = null;
+  } else if (tone === 'ret' && shift.retentionWait) {
     const rel = shift.retentionWait.reliever;
     if (!rel) loReleva = 'Sin relevo planificado → vacante';
     else if (rel.status === 'AUSENTE') loReleva = `Relevo ausente: ${rel.employeeName}${rel.code ? ` · ${rel.code}` : ''} ${hhmmAR(rel.startMs)}`;
