@@ -43,7 +43,7 @@ export const HandoverModal = ({ isOpen, onClose, incomingShift, activeGuardsInOb
     const handleExecuteRelevo = async () => {
         setLoading(true);
         try {
-            await updateDoc(doc(db, 'turnos', incomingShift.id), { status: 'PRESENT', isPresent: true, realStartTime: serverTimestamp(), isLate: false });
+            await updateDoc(doc(db, 'turnos', incomingShift.id), { status: 'PRESENT', isPresent: true, realStartTime: serverTimestamp(), checkInAt: serverTimestamp(), checkInTime: serverTimestamp(), isLate: false });
             if (selectedOutgoing) {
                 await updateDoc(doc(db, 'turnos', selectedOutgoing.id), { status: 'COMPLETED', isCompleted: true, isPresent: false, realEndTime: serverTimestamp(), checkoutNote: hasNovedad ? novedad : 'Sin Novedad (Relevo)', hasNovedad: hasNovedad });
             }

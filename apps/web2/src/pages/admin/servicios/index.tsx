@@ -44,6 +44,23 @@ import {
   reopenMotivoError,
   stripSlaLifecycle,
 } from '@/lib/servicios/newSlaDraft';
+import {
+  accionesAltaVisiblesConFiltroAnterior,
+  dayAfterYmd,
+  buildSlaDraftsForSegments,
+  firstOfMonthAfter,
+  lastDayOfMonth,
+  lastForwardOfObjective,
+  lastOfChain,
+  newSlaSeriesId,
+  overlappingSegments,
+  planAppendMonthsForward,
+  slaSegmentsForMode,
+  splitRangeByCalendarMonth,
+  summarizeSlaSplit,
+  validateSlaRange,
+  type SlaMonthsMode,
+} from '@/lib/servicios/slaMonthSplit';
 import { cerrarContratoSla, reabrirContratoSla } from '@/lib/servicios/contratoCierreClient';
 import { ServiciosMovil } from '@/components/movil/ServiciosMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
@@ -238,6 +255,14 @@ export default function ServiciosSLAPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
+  const [slaMonthsMode, setSlaMonthsMode] = useState<SlaMonthsMode>('agrupados');
+  const [appendingMonths, setAppendingMonths] = useState(false);
+  useEffect(() => {
+    if (view !== 'form') {
+      setSlaMonthsMode('agrupados');
+      setAppendingMonths(false);
+    }
+  }, [view]);
 
   // Historial de horarios
   const [showHorarioForm, setShowHorarioForm] = useState(false);
@@ -590,10 +615,6 @@ export default function ServiciosSLAPage() {
     if (!y || !m || !d) return null;
     const date = new Date(y, m - 1, d);
     return Number.isNaN(date.getTime()) ? null : date;
-  };
-
-  const rangesOverlap = (aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) => {
-    return aStart <= bEnd && aEnd >= bStart;
   };
 
   // --- MODAL Y UTILS ---
@@ -1358,16 +1379,124 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     }
   };
 
+  const openAppendMonths = (srv: ServiceSLA) => {
+    const last = lastOfChain(services, srv) || srv;
+    if ((last as { closed?: boolean }).closed === true) {
+      return addToast('El último servicio de la cadena está cerrado. Reabrilo para agregar meses.', 'error');
+    }
+    const mode: SlaMonthsMode = last.slaSeriesId ? 'individuales' : 'agrupados';
+    const suggestedEnd = lastDayOfMonth(firstOfMonthAfter(last.endDate));
+    const client = clients.find(c => c.id === last.clientId);
+    const clientObjectives = client?.objectives || client?.objetivos || [];
+    const hasCurrentObj = clientObjectives.some((o: { id?: string }) => o.id === last.objectiveId);
+    setAvailableObjectives(hasCurrentObj ? clientObjectives : [...clientObjectives, { id: last.objectiveId, name: last.objectiveName }]);
+    setForm({
+      ...last,
+      endDate: suggestedEnd,
+      positions: (last.positions || []).map(p => ({
+        ...p,
+        allowedShiftTypes: (p.allowedShiftTypes || []).map(s => ({ ...s })),
+      })),
+    });
+    setSlaMonthsMode(mode);
+    setAppendingMonths(true);
+    setIsEditing(true);
+    setView('form');
+  };
+
+  const handleAppendMonths = async () => {
+    if (!form.id) return;
+    const source = services.find(s => s.id === form.id);
+    if (!source?.endDate) return addToast('No se encontró el último servicio', 'error');
+    const plan = planAppendMonthsForward({
+      mode: slaMonthsMode,
+      lastEndDate: source.endDate,
+      newEndDate: form.endDate,
+    });
+    if (plan.error || (!plan.extendTo && plan.segments.length === 0)) {
+      return addToast(plan.error || 'Solo podés agregar meses posteriores al último vigente', 'error');
+    }
+    const overlapped = overlappingSegments(
+      plan.segments,
+      services,
+      { clientId: form.clientId, objectiveId: form.objectiveId },
+      form.id,
+    );
+    if (overlapped.length > 0) {
+      return addToast(`Ya hay un servicio en ${overlapped.map((s) => s.label).join(', ')} para ese objetivo. No se pisa.`, 'error');
+    }
+    const lines = plan.mode === 'agrupados'
+      ? [`• hasta ${form.endDate.slice(8, 10)}/${form.endDate.slice(5, 7)}/${form.endDate.slice(0, 4)}`]
+      : plan.segments.map((s) => `• ${s.label}: ${s.startDate.slice(8, 10)}/${s.startDate.slice(5, 7)} → ${s.endDate.slice(8, 10)}/${s.endDate.slice(5, 7)}${s.partial ? ' (parcial)' : ''}`);
+    if (!window.confirm(`${plan.summary}\n\n${lines.join('\n')}\n\n¿Confirmar?`)) return;
+
+    const encPosToSave = findEncargadoPosition(form.positions);
+    const base = JSON.parse(JSON.stringify({
+      ...form,
+      startDate: source.startDate,
+      endDate: source.endDate,
+      totalMonthlyHours: totalContractHours,
+      encargadoEmployeeId: encPosToSave ? (form.encargadoEmployeeId || '') : '',
+      encargadoEmployeeName: encPosToSave ? (form.encargadoEmployeeName || '') : '',
+    })) as Record<string, unknown>;
+    if (scopeEmpresa && empresaId) base.empresaId = empresaId;
+    try {
+      if (plan.mode === 'agrupados' && plan.extendTo) {
+        const patch = { endDate: plan.extendTo, totalMonthlyHours: totalContractHours };
+        savedSelfRef.current = true;
+        await slaService.update(form.id, patch, { empresaId, migracionCompleta });
+        setServices(prev => prev.map(s => s.id === form.id ? { ...s, ...patch } : s));
+        await registrarAuditoria('UPDATE_CONTRACT', `Extendió vigencia hasta ${plan.extendTo}: ${form.clientName} - ${form.objectiveName}`);
+        addToast(plan.summary, 'success');
+      } else {
+        const seriesId = String(source.slaSeriesId || newSlaSeriesId());
+        const today = localTodayYmd();
+        const drafts = buildSlaDraftsForSegments(
+          { ...stripSlaLifecycle(base), status: 'active', slaSeriesId: seriesId } as ServiceSLA,
+          plan.segments,
+          seriesId,
+        ).map((d) => {
+          const bornClosed = newSlaBornClosed(d.endDate, today);
+          return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+        });
+        if (!source.slaSeriesId) {
+          savedSelfRef.current = true;
+          await slaService.update(form.id, { slaSeriesId: seriesId }, { empresaId, migracionCompleta });
+        }
+        const created: Array<ServiceSLA & { id: string }> = [];
+        for (const draft of drafts) {
+          const row = { ...draft } as ServiceSLA & { id?: string };
+          delete row.id;
+          const ref = await slaService.add(row, empresaId);
+          created.push({ ...row, id: ref.id });
+        }
+        setServices(prev => [
+          ...prev.map(s => s.id === form.id && !source.slaSeriesId ? { ...s, slaSeriesId: seriesId } : s),
+          ...created,
+        ]);
+        await registrarAuditoria('CREATE_CONTRACT', `Agregó meses (${plan.segments.map((s) => s.label).join(', ')}): ${form.clientName} - ${form.objectiveName}`);
+        addToast(plan.summary, 'success');
+      }
+      setAppendingMonths(false);
+      setView('list');
+    } catch (e: unknown) {
+      console.error(e);
+      addToast(e instanceof TenantIsolationError ? e.message : 'No se pudieron agregar los meses', 'error');
+    }
+  };
+
   const handleSave = async () => {
+    if (appendingMonths) return handleAppendMonths();
     if (isClosedContract) return addToast('Contrato cerrado: no se puede modificar. Un SuperAdmin puede reabrirlo.', 'error');
     if (!form.clientId) return addToast('Falta Cliente', 'error');
     if (!form.objectiveId) return addToast('Falta Objetivo', 'error');
     if (form.positions.length === 0) return addToast('Agregue al menos un puesto', 'error');
 
+    const rangeError = validateSlaRange(form.startDate, form.endDate);
+    if (rangeError) return addToast(rangeError, 'error');
     const startDate = parseDate(form.startDate);
     const endDate = parseDate(form.endDate);
     if (!startDate || !endDate) return addToast('Fechas inválidas', 'error');
-    if (startDate > endDate) return addToast('La fecha de inicio no puede ser mayor que la de fin', 'error');
 
     // Al editar, el objetivo ya era válido cuando se creó; solo validar en creación
     if (!isEditing) {
@@ -1375,18 +1504,32 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       if (!objectiveValid) return addToast('El objetivo no pertenece al cliente seleccionado', 'error');
     }
 
-    const hasOverlap = services.some(s => {
-      if (!s.startDate || !s.endDate) return false;
-      if (s.clientId !== form.clientId || s.objectiveId !== form.objectiveId) return false;
-      if (isEditing && form.id && s.id === form.id) return false;
-      const sStart = parseDate(s.startDate);
-      const sEnd = parseDate(s.endDate);
-      if (!sStart || !sEnd) return false;
-      return rangesOverlap(startDate, endDate, sStart, sEnd);
-    });
-    if (hasOverlap) return addToast('Ya existe un SLA con fechas superpuestas para ese objetivo', 'error');
+    const segments = slaSegmentsForMode(slaMonthsMode, form.startDate, form.endDate);
+    const splitting = segments.length > 1;
+    const overlapped = overlappingSegments(
+      segments,
+      services,
+      { clientId: form.clientId, objectiveId: form.objectiveId },
+      isEditing ? form.id : null,
+    );
+    if (overlapped.length > 0) {
+      return addToast(
+        splitting
+          ? `Ya hay un servicio en ${overlapped.map((s) => s.label).join(', ')} para ese objetivo. No se pisa: ajustá la vigencia.`
+          : 'Ya existe un SLA con fechas superpuestas para ese objetivo',
+        'error',
+      );
+    }
 
-    if (!isEditing && newSlaBornClosed(form.endDate, localTodayYmd())) {
+    if (splitting) {
+      const lines = segments.map((s) => `• ${s.label}: ${s.startDate.slice(8, 10)}/${s.startDate.slice(5, 7)} → ${s.endDate.slice(8, 10)}/${s.endDate.slice(5, 7)}${s.partial ? ' (parcial)' : ''}`);
+      const head = isEditing
+        ? `Este servicio queda en ${segments[0].label} y se crean ${segments.length - 1} más: ${segments.slice(1).map((s) => s.label).join(', ')}`
+        : summarizeSlaSplit(segments);
+      if (!window.confirm(`${head}\n\n${lines.join('\n')}\n\nCada uno se edita, cierra o reabre por separado.\n\n¿Confirmar?`)) return;
+    }
+
+    if (!isEditing && !splitting && newSlaBornClosed(form.endDate, localTodayYmd())) {
       if (!window.confirm('La vigencia que elegiste ya terminó. El servicio se va a crear cerrado.\n\n¿Continuar?')) return;
     }
 
@@ -1474,7 +1617,39 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       : '';
 
     try {
-      if (isEditing && form.id) {
+      if (splitting) {
+          const today = localTodayYmd();
+          const seriesId = newSlaSeriesId();
+          const drafts = buildSlaDraftsForSegments(dataToSave, segments, seriesId).map((d: any) => {
+            const bornClosed = newSlaBornClosed(String(d.endDate || ''), today);
+            return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+          });
+          const created: Array<ServiceSLA & { id: string }> = [];
+          let keptId: string | null = null;
+          for (let i = 0; i < drafts.length; i++) {
+            const draft = { ...drafts[i] };
+            delete draft.id;
+            if (i === 0 && isEditing && form.id) {
+              savedSelfRef.current = true;
+              const firstPatch = { ...draft, closed: (form as { closed?: boolean }).closed === true };
+              delete firstPatch.closedReason;
+              await slaService.update(form.id, firstPatch, { empresaId, migracionCompleta });
+              keptId = form.id;
+              created.push({ ...firstPatch, id: form.id });
+            } else {
+              const ref = await slaService.add(draft, empresaId);
+              created.push({ ...draft, id: ref.id });
+            }
+          }
+          setServices(prev => [
+            ...prev.filter((s) => s.id !== keptId),
+            ...created,
+          ]);
+          await registrarAuditoria(
+            isEditing ? 'UPDATE_CONTRACT' : 'CREATE_CONTRACT',
+            `${isEditing ? 'Dividió' : 'Creó'} contrato por meses (${segments.map((s) => s.label).join(', ')}): ${form.clientName} - ${form.objectiveName}`,
+          );
+      } else if (isEditing && form.id) {
           savedSelfRef.current = true;
           await slaService.update(form.id, dataToSave, { empresaId, migracionCompleta });
           // Actualización optimista: no esperar al snapshot
@@ -1487,7 +1662,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           setServices(prev => [...prev, { ...dataToSave, id: ref.id }]);
           await registrarAuditoria('CREATE_CONTRACT', `Creó contrato: ${form.clientName} - ${form.objectiveName}`);
       }
-      addToast('Guardado correctamente', 'success');
+      addToast(splitting ? `${segments.length} servicios guardados (${segments.map((s) => s.label).join(', ')})` : 'Guardado correctamente', 'success');
       setView('list');
       const nextEncargadoId = String(dataToSave.encargadoEmployeeId || '').trim();
       if (dataToSave.objectiveId && (prevEncargadoId || nextEncargadoId || encPosToSave)) {
@@ -1519,6 +1694,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const handleEdit = (srv: ServiceSLA) => {
+    setAppendingMonths(false);
     // Deep copy para evitar mutar el objeto del estado services
     setForm({
       ...srv,
@@ -1641,6 +1817,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const openNew = () => {
+    setAppendingMonths(false);
     const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     setForm({
         clientId: '', clientName: '', objectiveId: '', objectiveName: '',
@@ -1654,6 +1831,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const openNewForObjective = (row: ServiciosCatalogRow) => {
+    setAppendingMonths(false);
     const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     const client = clients.find((c) => c.id === row.clientId);
     const clientObjs = client?.objectives || client?.objetivos || [];
@@ -1680,6 +1858,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   };
 
   const handleNewVersion = (srv: ServiceSLA) => {
+    setAppendingMonths(false);
     const { startDate, endDate } = defaultNewSlaDates(new Date(), { year: kpiYear, monthIndex0: kpiMonth });
     const base = stripSlaLifecycle(srv as unknown as Record<string, unknown>) as unknown as ServiceSLA;
     setForm({
@@ -2055,7 +2234,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
               >
                 <RotateCw size={14} className={loading ? 'animate-spin' : ''}/>
               </button>
-              {canCreateService && mainTab === 'sla' && (
+              {accionesAltaVisiblesConFiltroAnterior(canCreateService).nuevoServicio && mainTab === 'sla' && (
               <button data-action="nuevo-servicio" onClick={openNew} className="bg-indigo-600 hover:bg-indigo-700 transition-colors text-white px-5 py-2.5 rounded-xl font-black text-xs uppercase shadow-sm flex gap-2 items-center">
                 <Plus size={14}/> Nuevo Servicio
               </button>
@@ -2323,12 +2502,21 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                       Sin servicio SLA en {kpiDisplay.label}
                                     </p>
                                   </div>
-                                  {canCreateService && srvCatalogFilter !== 'closed_sla' && (
+                                  {accionesAltaVisiblesConFiltroAnterior(canCreateService).nuevoServicio && srvCatalogFilter !== 'closed_sla' && (
                                     <button
                                       onClick={() => openNewForObjective(row)}
                                       className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-[9px] font-black uppercase transition-colors shrink-0"
                                     >
                                       <Plus size={11}/> Agregar servicio
+                                    </button>
+                                  )}
+                                  {accionesAltaVisiblesConFiltroAnterior(canUpdateService).agregarMeses && srvCatalogFilter !== 'closed_sla' && lastForwardOfObjective(row.allSlas) && (
+                                    <button
+                                      type="button"
+                                      onClick={() => openAppendMonths(lastForwardOfObjective(row.allSlas)!)}
+                                      className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white text-indigo-700 border border-indigo-200 text-[9px] font-black uppercase transition-colors shrink-0"
+                                    >
+                                      <Plus size={11}/> Agregar meses
                                     </button>
                                   )}
                                 </div>
@@ -2450,12 +2638,21 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                         <p className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
                           Sin servicio SLA en {kpiDisplay.label}
                         </p>
-                        {canCreateService && srvCatalogFilter !== 'closed_sla' && (
+                        {accionesAltaVisiblesConFiltroAnterior(canCreateService).nuevoServicio && srvCatalogFilter !== 'closed_sla' && (
                           <button
                             onClick={() => openNewForObjective(row)}
                             className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black uppercase transition-colors"
                           >
                             <Plus size={12}/> Agregar servicio
+                          </button>
+                        )}
+                        {accionesAltaVisiblesConFiltroAnterior(canUpdateService).agregarMeses && srvCatalogFilter !== 'closed_sla' && lastForwardOfObjective(row.allSlas) && (
+                          <button
+                            type="button"
+                            onClick={() => openAppendMonths(lastForwardOfObjective(row.allSlas)!)}
+                            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-white text-indigo-700 border border-indigo-200 text-[10px] font-black uppercase transition-colors"
+                          >
+                            <Plus size={12}/> Agregar meses
                           </button>
                         )}
                       </div>
@@ -2570,6 +2767,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                                     })()}
                                   </div>
                                   <div className="flex gap-1 shrink-0">
+                                    {canUpdateService && !(srv as { closed?: boolean }).closed && lastOfChain(group.services, srv)?.id === srv.id && (
+                                    <button type="button" onClick={() => openAppendMonths(srv)} title="Agregar meses hacia adelante" className="px-1.5 py-1 rounded-lg bg-indigo-600 text-white text-[8px] font-black uppercase hover:bg-indigo-700 transition-colors">
+                                      + meses
+                                    </button>
+                                    )}
                                     <button onClick={() => { handleNewVersion(srv); }} title="Nueva versión" className="p-1.5 rounded-lg bg-amber-50 text-amber-600 hover:bg-amber-100 transition-colors">
                                       <Copy size={11}/>
                                     </button>
@@ -3019,12 +3221,79 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                  <div data-action="sla-form-cliente"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Cliente</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.clientId} onChange={handleClientChange}><option value="">Seleccionar...</option>{clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></div>
                  <div data-action="sla-form-objetivo"><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Objetivo</label><select className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-sm dark:text-white" value={form.objectiveId} onChange={handleObjectiveChange} disabled={!form.clientId}><option value="">Seleccionar...</option>{availableObjectives.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}</select></div>
                  <div className="grid grid-cols-2 gap-4">
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
-                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Fin</label><input type="date" disabled={isClosedContract} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" disabled={isClosedContract || appendingMonths} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={appendingMonths ? (services.find(s => s.id === form.id)?.startDate || form.startDate) : form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
+                     <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">{appendingMonths ? 'Hasta' : 'Fin'}</label><input type="date" disabled={isClosedContract} min={appendingMonths ? (slaMonthsMode === 'individuales' ? firstOfMonthAfter(services.find(s => s.id === form.id)?.endDate || form.endDate) : dayAfterYmd(services.find(s => s.id === form.id)?.endDate || form.endDate)) : undefined} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
+                 <label className={`flex items-start gap-2 rounded-2xl border px-3 py-2 ${form.autoRenewMonthly ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40'}`}>
+                   <input
+                     type="checkbox"
+                     className="mt-0.5"
+                     disabled={isClosedContract}
+                     checked={form.autoRenewMonthly === true}
+                     onChange={(e) => setForm({ ...form, autoRenewMonthly: e.target.checked })}
+                   />
+                   <span>
+                     <span className="block text-[10px] font-black uppercase text-slate-700 dark:text-slate-200">Renovar mes a mes automáticamente</span>
+                     <span className="block text-[10px] font-bold text-slate-500">Al publicar el cronograma del último mes se crea el mes siguiente. No entra en operación hasta que se publique ese cronograma.</span>
+                   </span>
+                 </label>
                  {!isEditing && (
-                   <p className="text-[10px] font-bold text-slate-500 -mt-3">Elegí la vigencia acá, antes de crear. Arranca en el mes de arriba, o en el mes en curso.</p>
+                   <p className="text-[10px] font-bold text-slate-500 -mt-3">El mes de arriba solo propone el desde. Podés elegir meses posteriores.</p>
                  )}
+                 {appendingMonths && (() => {
+                   const source = services.find(s => s.id === form.id);
+                   const plan = source?.endDate
+                     ? planAppendMonthsForward({ mode: slaMonthsMode, lastEndDate: source.endDate, newEndDate: form.endDate })
+                     : null;
+                   return (
+                     <div className="-mt-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
+                       <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Agregar meses hacia adelante</p>
+                       <p className="text-[10px] font-bold text-slate-500">
+                         {slaMonthsMode === 'agrupados'
+                           ? 'Agrupado: se extiende la vigencia de este servicio. No rellena meses anteriores.'
+                           : 'Individuales: se crea un servicio por cada mes posterior al último vigente.'}
+                       </p>
+                       <p className={`text-[10px] font-bold ${plan?.error ? 'text-rose-600' : 'text-slate-600 dark:text-slate-300'}`}>
+                         {plan?.error || plan?.summary || 'Elegí una fecha hasta posterior.'}
+                       </p>
+                     </div>
+                   );
+                 })()}
+                 {!appendingMonths && (() => {
+                   const rangeError = validateSlaRange(form.startDate, form.endDate);
+                   if (rangeError) {
+                     return <p className="text-[10px] font-bold text-rose-600 -mt-2">{rangeError}</p>;
+                   }
+                   const months = splitRangeByCalendarMonth(form.startDate, form.endDate);
+                   if (months.length <= 1 || isClosedContract) return null;
+                   return (
+                     <div className="-mt-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
+                       <div className="flex items-center justify-between gap-2">
+                         <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Meses</p>
+                         <div className="flex items-center gap-1 bg-white dark:bg-slate-900 rounded-xl p-1 border border-indigo-100 dark:border-slate-700">
+                           {([
+                             { v: 'agrupados' as const, label: 'Agrupados' },
+                             { v: 'individuales' as const, label: 'Individuales' },
+                           ]).map(({ v, label }) => (
+                             <button
+                               key={v}
+                               type="button"
+                               onClick={() => setSlaMonthsMode(v)}
+                               className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${slaMonthsMode === v ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                             >
+                               {label}
+                             </button>
+                           ))}
+                         </div>
+                       </div>
+                       <p className="text-[10px] font-bold text-slate-500">
+                         {slaMonthsMode === 'agrupados'
+                           ? `Un solo servicio de ${months.length} meses (${months[0].label} → ${months[months.length - 1].label}).`
+                           : `${isEditing ? `Este servicio queda en ${months[0].label} y se crean ${months.length - 1} más` : summarizeSlaSplit(months)}${isEditing ? `: ${months.slice(1).map((m) => m.label).join(', ')}` : ''}. Misma estructura, uno por mes; cada uno se edita, cierra o reabre por separado.`}
+                       </p>
+                     </div>
+                   );
+                 })()}
 
                  <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
                    <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Facturación prefactura</p>

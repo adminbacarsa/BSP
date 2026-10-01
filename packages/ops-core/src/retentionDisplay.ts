@@ -150,7 +150,10 @@ export function buildRetentionWaitInfo(
   const incomings = pool.filter((row) => !peers.includes(row));
   // Primero quien todavía puede venir; el ausente solo si no hay otro de la serie.
   const alive = incomings.filter((row) => relieverStatus(row) !== 'AUSENTE');
-  const picked = relieverFor(shift, alive, { peers }) ?? relieverFor(shift, incomings, { peers }) ?? linked ?? null;
+  const picked = relieverFor(shift, alive, { peers, roster: sameObjectiveShifts })
+    ?? relieverFor(shift, incomings, { peers, roster: sameObjectiveShifts })
+    ?? linked
+    ?? null;
 
   const reliever = picked
     ? {

@@ -60,6 +60,7 @@ export async function revertirAusenciaShift(
     isPresent: true,
     realStartTime: now,
     checkInTime: now,
+    checkInAt: now,
     isLate: true,
     lateMinutes: startMs ? Math.max(0, Math.round((nowMs - startMs) / 60000)) : 0,
     absenceRevertedAt: now,

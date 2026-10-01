@@ -155,6 +155,7 @@ import {
 import {
   calculateMonthlyBreakdown,
 } from '@/lib/servicios/slaHoursCalculator';
+import { validateSlaRange } from '@/lib/servicios/slaMonthSplit';
 import {
   isCrmPlannedEligibleShift,
   resolveClientIdForTurno,
@@ -1821,7 +1822,8 @@ export default function CRMPage() {
   // Crea un servicio nuevo o una nueva versión de uno existente
   const handleCreateServiceVersion = async () => {
     if (!selectedClient?.id) return;
-    if (!serviceVersionForm.startDate || !serviceVersionForm.endDate) return toast.error('Completá las fechas');
+    const rangeError = validateSlaRange(serviceVersionForm.startDate, serviceVersionForm.endDate);
+    if (rangeError) return toast.error(rangeError);
     if (!serviceVersionForm.objectiveName.trim()) return toast.error('Ingresá el nombre del servicio/objetivo');
     const source = serviceVersionForm.sourceId ? clientServices.find(s => s.id === serviceVersionForm.sourceId) : null;
     try {

@@ -74,6 +74,12 @@ export function pickRetentionShiftForGap(
   });
   if (!rows.length) return null;
 
+  const roster = ((processedData || []) as Record<string, unknown>[]).map((sh) => ({
+    ...sh,
+    id: String(sh.id || ''),
+    startMs: shiftBoundMs(sh, 'start'),
+    endMs: shiftBoundMs(sh, 'end'),
+  }));
   const winner = outgoingFor(
     { ...absenceShift, startMs: gapStart },
     rows.map((sh) => ({
@@ -81,8 +87,8 @@ export function pickRetentionShiftForGap(
       id: String(sh.id || ''),
       startMs: shiftBoundMs(sh, 'start'),
       endMs: shiftBoundMs(sh, 'end'),
-      checkInMs: checkInMsFromShift(sh),
     })),
+    { roster },
   );
   const shiftId = String(winner?.id || '').trim();
   if (!winner || !shiftId) return null;

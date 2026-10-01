@@ -112,6 +112,21 @@ for (const [tag, lib] of [['ops-core', core], ['functions', fn]]) {
   const mixto = lib.pairReliefs([ferrero, bosio], [lopezAa, brizuelaFicha]).map((p) => `${p.outgoing.id}←${p.incoming?.id}`).join(' ');
   const okAa = soloAa?.id === 'bosio' && mixto === 'ferrero←brizuela bosio←lopez';
   report(`fifo-ausente-${tag}`, okAa, `T ausente retiene a ${soloAa?.id}; con BRIZUELA fichada: ${mixto}`);
+
+  const app = { ...ferrero, checkInMs: undefined, checkInAt: ferrero.checkInMs + 6000, realStartTime: ferrero.checkInMs + 6000 };
+  const operador = { ...bosio, checkInMs: undefined, checkInAt: undefined, realStartTime: bosio.checkInMs + 36000 };
+  const sinCheckIn = lib.sortOutgoingsFifo([operador, app]).map((r) => r.id).join(',');
+  const cerca = { id: 'z_cerca', employeeId: 'e_cerca', code: 'M', positionName: p2, startMs: ini, endMs: fin, checkInAt: ferrero.checkInMs };
+  const lejos = { id: 'a_lejos', employeeId: 'e_lejos', code: 'M', positionName: p2, startMs: ini, endMs: fin, checkInAt: ferrero.checkInMs };
+  const roster = [
+    { id: 'duty_cerca', employeeId: 'e_cerca', code: 'M', startMs: fin + 16 * 3600 * 1000, endMs: fin + 24 * 3600 * 1000 },
+    { id: 'franco', employeeId: 'e_lejos', code: 'F', isFranco: true, startMs: fin + 9 * 3600 * 1000, endMs: fin + 20 * 3600 * 1000 },
+    { id: 'duty_lejos', employeeId: 'e_lejos', code: 'M', startMs: fin + 4 * 86400000, endMs: fin + 4 * 86400000 + 8 * 3600 * 1000 },
+  ];
+  const porDescanso = lib.sortOutgoingsFifo([lejos, cerca], { roster }).map((r) => r.id).join(',');
+  const releva = lib.outgoingFor(lopezFicha, [lejos, cerca], { roster });
+  report(`fifo-marca-${tag}`, sinCheckIn === 'ferrero,bosio' && porDescanso === 'z_cerca,a_lejos' && releva?.id === 'z_cerca',
+    `sin checkInAt=${sinCheckIn} mismo segundo→${porDescanso} releva ${releva?.id}`);
 }
 
 const failed = results.filter((r) => !r.ok).length;

@@ -1,6 +1,6 @@
-import type { Firestore } from 'firebase-admin/firestore';
+import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { isReliefEligibleShift } from '../common/reliefEligibility';
-import { outgoingFor } from '../common/shiftSeries';
+import { outgoingFor, workStartMsOf, type SeriesShift } from '../common/shiftSeries';
 
 export const RELEVO_GAP_ALIGN_MS = 30 * 60 * 1000;
 
@@ -21,21 +21,41 @@ export const posMatchRelief = (a: unknown, b: unknown): boolean => {
   return false;
 };
 
-const checkInMs = (data: Record<string, unknown>): number => {
-  const real = data.realStartTime as { toMillis?: () => number } | undefined;
-  if (real?.toMillis) return real.toMillis();
-  const ci = data.checkInTime as { toMillis?: () => number } | undefined;
-  if (ci?.toMillis) return ci.toMillis();
-  const pres = data.presenciaAt as { toMillis?: () => number } | undefined;
-  if (pres?.toMillis) return pres.toMillis();
-  const st = data.startTime as { toMillis?: () => number } | undefined;
-  return st?.toMillis?.() ?? 0;
-};
-
 const endMs = (data: Record<string, unknown>): number => {
   const et = data.endTime as { toMillis?: () => number } | undefined;
   return et?.toMillis?.() ?? 0;
 };
+
+/**
+ * Próximos turnos del legajo, solo si hay dos salientes con el mismo inicio real
+ * (mismo segundo). Índice existente: employeeId + startTime.
+ */
+export async function rosterIfSameSecond(
+  db: Firestore,
+  rows: SeriesShift[],
+  afterMs: number,
+): Promise<SeriesShift[]> {
+  const secs = rows.map((row) => Math.floor(workStartMsOf(row) / 1000)).filter((sec) => sec > 0);
+  if (new Set(secs).size === secs.length) return [];
+  const ids = [...new Set(rows.map((row) => String(row.employeeId || '').trim()).filter((id) => id && id !== 'VACANTE'))];
+  const after = Timestamp.fromMillis(afterMs);
+  const roster: SeriesShift[] = [];
+  for (const employeeId of ids) {
+    const snap = await db.collection('turnos')
+      .where('employeeId', '==', employeeId)
+      .where('startTime', '>', after)
+      .orderBy('startTime', 'asc')
+      .limit(8)
+      .get();
+    for (const doc of snap.docs) {
+      const data = doc.data() as Record<string, unknown>;
+      const start = (data.startTime as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
+      const end = (data.endTime as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
+      roster.push({ id: doc.id, ...data, startMs: start, endMs: end });
+    }
+  }
+  return roster;
+}
 
 const startMs = (data: Record<string, unknown>): number => {
   const st = data.startTime as { toMillis?: () => number } | undefined;
@@ -96,10 +116,11 @@ export async function findPresentOutgoingAlignedToGapStart(
       if (Math.abs(en - gapStartMs) > RELEVO_GAP_ALIGN_MS) return false;
       return true;
     })
-    // FIFO: el que más tiempo lleva en el puesto primero (`outgoingFor` aplica el mismo orden).
-    .sort((a, b) => checkInMs(a.data) - checkInMs(b.data));
+    // FIFO: inicio real efectivo (`checkInAt` vacío no cuenta como 0). `outgoingFor` aplica el mismo orden.
+    .sort((a, b) => workStartMsOf(a.data) - workStartMsOf(b.data) || a.id.localeCompare(b.id));
 
   const absenceShiftId = String(params.absenceShiftId || '').trim();
+  const roster = await rosterIfSameSecond(db, outgoing.map((row) => ({ id: row.id, ...row.data })), gapStartMs);
   const incoming: Record<string, unknown> = {
     ...(params.incoming || {}),
     positionName: params.positionName,
@@ -116,6 +137,7 @@ export async function findPresentOutgoingAlignedToGapStart(
         startMs: startMs(cand.data),
         endMs: endMs(cand.data),
       })),
+      { roster },
     );
     if (!winner?.id) return null;
     const cand = visible.find((row) => row.id === winner.id);
