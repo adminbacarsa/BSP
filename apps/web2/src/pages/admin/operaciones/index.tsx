@@ -15,7 +15,7 @@ import {
     FileText, Volume2, VolumeX, RefreshCw, AlarmClock, Loader2, Timer, GitBranch
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel } from '@/hooks/useOperacionesMonitor';
+import { useOperacionesMonitor, shiftMatchesOpsViewTab, isOpsShiftHoy, isActionableOpsVacancy, opsShiftDayLabel, shiftCountsInOpsHeader } from '@/hooks/useOperacionesMonitor';
 import { usePersistedState } from '@/hooks/usePersistedState';
 import { useAutoMonitor } from '@/hooks/useAutoMonitor';
 import { useStaleBuild } from '@/hooks/useStaleBuild';
@@ -768,6 +768,7 @@ const TYPE_META: Record<string, { label: string; bg: string; text: string; borde
     COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
     TURNO_COMPLETADO_AUTO:        { label: 'TURNO FIN',       bg: 'bg-slate-600',  text: 'text-white',     border: 'border-slate-500' },
     INGRESO_AUTOREGISTRO:         { label: 'INGRESO',         bg: 'bg-teal-600',   text: 'text-white',     border: 'border-teal-500' },
+    CRONOGRAMA_SIN_PUBLICAR:      { label: 'SIN CRONOGRAMA',  bg: 'bg-amber-500',  text: 'text-white',     border: 'border-amber-400' },
 };
 const DEFAULT_META = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 
@@ -3645,14 +3646,7 @@ export default function OperacionesPage() {
                 if (!objectiveMatchesTab(o) || !objectiveMatchesSearch(o)) return false;
                 const pubKey = `${o.objectiveId}_${y}_${m}`;
                 if (logic.publishStatusMap[pubKey]) return true;
-                // Mostrar aunque no haya planificación publicada si tiene turnos de origen operativo
-                return (o.shifts || []).some((s: any) =>
-                    s.origin === 'RETEN' ||
-                    s.origin === 'SLA_VIRTUAL' ||
-                    s.isReten === true ||
-                    s.resolvedBy === 'OPERACIONES' ||
-                    s.isVirtual === true
-                );
+                return (o.shifts || []).some((s: any) => shiftCountsInOpsHeader(s, logic.publishStatusMap));
             })
             .sort((a, b) => sortObjectiveCards(a, b, objectivesSortMode));
     }, [objectivesWithAlerts, logic.viewTab, logic.filterText, objectivesSortMode, logic.publishStatusMap]);
@@ -3753,6 +3747,9 @@ export default function OperacionesPage() {
                         setViewTab: (tab: string) => logic.setViewTab(tab as never),
                         handleAction: (action: string, shiftId: string, payload?: unknown) => logic.handleAction(action, shiftId, payload),
                     }}
+                    notices={empNovedades
+                        .filter((n: any) => n.type === 'CRONOGRAMA_SIN_PUBLICAR' && n.status !== 'ATENDIDA' && n.status !== 'atendida')
+                        .map((n: any) => String(n.description || n.title || 'Cronograma sin publicar'))}
                     objectives={objectivesWithAlerts}
                     modeLabel={ccManualOn ? 'Manual' : ccAutoOn ? 'Auto' : 'Demo'}
                     isPilot={session.isPilot}

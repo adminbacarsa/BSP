@@ -45,6 +45,8 @@ const {
 } = requireFn('./lib/coverage/coverageRetention.js');
 const { isEmpresaManualMode } = requireFn('./lib/ops/opsManualMode.js');
 const { runAutoCompletarTurnosPass } = requireFn('./lib/scheduling/autoCompletarTurnosCore.js');
+const { detectPublishedSlaGapsForEmpresa } = requireFn('./lib/coverage/detectPublishedSlaGaps.js');
+const { runAvisoCronogramaSinPublicar, corteServicioHm } = requireFn('./lib/coverage/avisoCronogramaSinPublicar.js');
 const { positionHasContinuityFromSlaDoc } = requireFn('./lib/coverage/positionHasContinuity.js');
 const { skipAbsencePipelineForShift } = requireFn('./lib/coverage/coverageTraceShift.js');
 const { markShiftAbsent } = requireFn('./lib/attendance/markShiftAbsent.js');
@@ -3281,6 +3283,109 @@ async function run() {
       report(87, ok, ok
         ? 'EXT 23–03 deja PARTIAL; la cascada ofrece FT y applyCoverage cubre 03–07'
         : `partial=${partial?.coverageStatus} ftConv=${ftConvs.size} covered=${covered?.coverageStatus} ft=${ftOps?.startTime?.toDate?.()?.toISOString?.()}/${ftOps?.endTime?.toDate?.()?.toISOString?.()} extEnd=${extOps?.endTime?.toDate?.()?.toISOString?.()} supExt=${extOps?.coverageSuperseded}`);
+    }
+
+    async function seedFinServicio(prefix, publishOctober) {
+      const empresaId = `${prefix}_emp`;
+      const objectiveId = `${prefix}_obj`;
+      const clientId = `${prefix}_cli`;
+      await db.collection('clients').doc(clientId).set({ empresaId, name: 'NK', status: 'ACTIVO', active: true });
+      await db.collection('servicios_sla').doc(`${prefix}_sla`).set({
+        empresaId, objectiveId, clientId, status: 'active',
+        objectiveName: 'Nuevo Edificio',
+        startDate: '2026-01-01', endDate: '2026-12-31',
+        positions: [{
+          name: 'Puesto 1', quantity: 1, coverageType: '24hs',
+          activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'],
+          allowedShiftTypes: [
+            { code: 'N', startTime: '23:00', endTime: '07:00', hours: 8 },
+            { code: 'M', startTime: '07:00', endTime: '15:00', hours: 8 },
+          ],
+        }],
+      });
+      await db.collection('planificacion_estados').doc(`${empresaId}_${objectiveId}_2026_9`).set({
+        empresaId, objectiveId, year: 2026, month: 9, publishedAt: Timestamp.now(),
+      });
+      await db.collection('planificacion_estados').doc(`${objectiveId}_2026_9`).set({
+        objectiveId, year: 2026, month: 9, publishedAt: Timestamp.now(),
+      });
+      if (publishOctober) {
+        await db.collection('planificacion_estados').doc(`${empresaId}_${objectiveId}_2026_10`).set({
+          empresaId, objectiveId, year: 2026, month: 10, publishedAt: Timestamp.now(),
+        });
+      } else {
+        await db.collection('planificacion_estados').doc(`${empresaId}_${objectiveId}_2026_10`).set({
+          empresaId, objectiveId, year: 2026, month: 10,
+        });
+      }
+      const shiftId = `${prefix}_n`;
+      await db.collection('turnos').doc(shiftId).set({
+        empresaId, objectiveId, clientId, positionName: 'Puesto 1',
+        employeeId: `${prefix}_e`, employeeName: 'Rodriguez', code: 'N',
+        status: 'PRESENT', isPresent: true, isCompleted: false,
+        startTime: tsAt(2026, 9, 30, 23, 0), endTime: tsAt(2026, 10, 1, 7, 0),
+        checkInTime: tsAt(2026, 9, 30, 22, 55),
+      });
+      return { empresaId, objectiveId, shiftId };
+    }
+
+    // Caso 88 — octubre sin cronograma: el N cierra a las 07:00, sin retención ni hueco
+    {
+      const prefix = `${runId}_c88`;
+      const seeded = await seedFinServicio(prefix, false);
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 10, 1, 7, 10), { onlyOutgoingShiftId: seeded.shiftId });
+      const data = (await db.collection('turnos').doc(seeded.shiftId).get()).data();
+      const ret = await retainOutgoingForGap(db, {
+        id: `${prefix}_m`,
+        empresaId: seeded.empresaId,
+        objectiveId: seeded.objectiveId,
+        positionName: 'Puesto 1',
+        employeeId: 'VACANTE',
+        code: 'M',
+        startTime: tsAt(2026, 10, 1, 7, 0),
+        endTime: tsAt(2026, 10, 1, 15, 0),
+      }, { sendPush: false });
+      await detectPublishedSlaGapsForEmpresa(db, seeded.empresaId, tsAt(2026, 10, 1, 7, 10));
+      const gaps = await db.collection('sla_huecos_sin_plan').where('objectiveId', '==', seeded.objectiveId).get();
+      const ok = data?.status === 'COMPLETED'
+        && data?.completionReason === 'FIN_SERVICIO_SIN_CRONOGRAMA'
+        && data?.isRetention !== true
+        && data?.realEndTime?.toMillis?.() === tsAt(2026, 10, 1, 7, 0).toMillis()
+        && ret.skippedReason === 'FIN_SERVICIO_SIN_CRONOGRAMA'
+        && gaps.size === 0;
+      report(88, ok, ok
+        ? 'fin de servicio sin cronograma: cierra 07:00, sin retención ni hueco'
+        : `st=${data?.status} r=${data?.completionReason} ret=${data?.isRetention} end=${data?.realEndTime?.toMillis?.()} skip=${ret.skippedReason} gaps=${gaps.size}`);
+    }
+
+    // Caso 89 — octubre publicado: el mismo N se retiene (hay franja siguiente)
+    {
+      const prefix = `${runId}_c89`;
+      const seeded = await seedFinServicio(prefix, true);
+      await runAutoCompletarTurnosPass(db, autoCompleteCtx, tsAt(2026, 10, 1, 7, 10), { onlyOutgoingShiftId: seeded.shiftId });
+      const data = (await db.collection('turnos').doc(seeded.shiftId).get()).data();
+      const ok = data?.status === 'PRESENT' && data?.isRetention === true && data?.isCompleted !== true;
+      report(89, ok, ok ? 'mes siguiente publicado: retiene normal' : `st=${data?.status} ret=${data?.isRetention} r=${data?.completionReason}`);
+    }
+
+    // Caso 90 — aviso 18:00 AR si mañana no está publicado
+    {
+      const prefix = `${runId}_c90`;
+      const seeded = await seedFinServicio(prefix, false);
+      await db.collection('empresas').doc(seeded.empresaId).set({ name: 'Pruebas', active: true });
+      const early = await runAvisoCronogramaSinPublicar(db, new Date('2026-09-30T17:00:00-03:00'));
+      const at18 = await runAvisoCronogramaSinPublicar(db, new Date('2026-09-30T18:00:00-03:00'));
+      const again = await runAvisoCronogramaSinPublicar(db, new Date('2026-09-30T18:05:00-03:00'));
+      const nov = await db.collection('novedades').where('objectiveId', '==', seeded.objectiveId).where('type', '==', 'CRONOGRAMA_SIN_PUBLICAR').get();
+      const text = nov.docs[0]?.data()?.description || '';
+      const ok = early.skipped === 'NOT_18' && early.created === 0
+        && at18.created >= 1
+        && again.created === 0
+        && nov.size === 1
+        && text.includes('octubre')
+        && text.includes('07:00')
+        && corteServicioHm([{ allowedShiftTypes: [{ startTime: '23:00', endTime: '07:00' }] }]) === '07:00';
+      report(90, ok, ok ? 'aviso 18:00: octubre sin cronograma, corte 07:00, sin duplicar' : `early=${JSON.stringify(early)} at18=${JSON.stringify(at18)} again=${again.created} n=${nov.size} ${text}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

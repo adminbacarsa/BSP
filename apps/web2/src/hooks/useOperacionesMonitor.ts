@@ -10,6 +10,7 @@ import { useEmpresa } from '@/context/EmpresaContext';
 import { shouldScopeQueriesToEmpresa, belongsToEmpresaView, updateDocForEmpresa, stampEmpresaId, planificacionPublishLookupKey, parsePlanificacionEstadoDocId, empresaCollectionQuery, filterSlaRowsByEmpresa, buildAuditLogsRecentQuery, auditLogTimestampMs, sortAuditLogRows } from '@/lib/multiempresa';
 import { combinedContiguousRangeLabel, isTuraContiguousToParent, findParentShiftForTura } from '@/lib/refuerzo/turaContiguity';
 import { planningMonthHasActiveSla } from '@/lib/slaPlanningMatch';
+import { isFinServicioSinCronograma, shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
 import {
   classifyOpsShift,
   isOpsCoverageHoursOnSourceDoc,
@@ -64,6 +65,8 @@ export function isRestFrancoShift(shift: any): boolean {
  * y parece que nadie releva / no hay continuidad.
  */
 export const OPS_PLAN_LOOKAHEAD_MS = 16 * 60 * 60 * 1000;
+
+export { isFinServicioSinCronograma, shiftCountsInOpsHeader } from '@/lib/operaciones/opsHeaderCounts';
 
 export function isOpsShiftHoy(s: any, now: Date): boolean {
     if (s.isCompleted && !s.isRetention && !isRestFrancoShift(s)) return false;
@@ -587,6 +590,12 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
             const isTuraCutSegment = shiftCode === 'TURA' && !suppressedTuraIds.has(shift.id)
                 && (!!shift.parentShiftId || !!parentEmpleadoId);
 
+            if (isFinServicioSinCronograma({ ...shift, endDateObj: effectiveEndDateObj || shift.endDateObj }, publishStatusMap)) {
+                classified.isPendingClose = false;
+                classified.isRetention = false;
+                classified.isPendingRetention = false;
+            }
+
             return {
                 ...shift, employeeName: finalEmpName, clientName: finalClient, objectiveName: finalObj, positionName: displayPos,
                 phone,
@@ -1092,12 +1101,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
 
     // ... Resto del hook igual ...
     const listData = useMemo(() => {
-        const vy = now.getFullYear();
-        const vm = now.getMonth() + 1;
-        const isVisible = (s: any) => {
-            if (publishStatusMap[`${s.objectiveId}_${vy}_${vm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
-        };
+        const isVisible = (s: any) => shiftCountsInOpsHeader(s, publishStatusMap);
         let list = processedData.filter(isVisible);
         if (selectedClientId) list = list.filter((s:any) => s.clientId === selectedClientId);
         if (filterText) {
@@ -1124,12 +1128,7 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
     }, [listData, filteredObjectives]);
 
     const stats = useMemo(() => {
-        const sy = now.getFullYear();
-        const sm = now.getMonth() + 1;
-        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => {
-            if (publishStatusMap[`${s.objectiveId}_${sy}_${sm}`]) return true;
-            return s.origin === 'RETEN' || s.origin === 'SLA_VIRTUAL' || s.isReten === true || s.resolvedBy === 'OPERACIONES' || s.isVirtual === true;
-        });
+        const hoy = processedData.filter((s) => isOpsShiftHoy(s, now)).filter((s: any) => shiftCountsInOpsHeader(s, publishStatusMap));
         return {
             prioridad: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'PRIORIDAD')).length,
             no_llego: hoy.filter((s) => shiftMatchesOpsViewTab(s, 'NO_LLEGO')).length,

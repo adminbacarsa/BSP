@@ -15,6 +15,7 @@ const ETIQUETA: Record<string, string> = {
   ARCA_BAJA_PENDIENTE: 'ARCA — baja pendiente',
   ARCA_ERROR: 'ARCA — error de envío',
   MARCO_POR_VENCER: 'Contrato marco — vence en 30 días',
+  CRONOGRAMA_SIN_PUBLICAR: 'Cronograma sin publicar (18:00)',
 };
 
 const ROL_LABEL: Record<string, string> = {

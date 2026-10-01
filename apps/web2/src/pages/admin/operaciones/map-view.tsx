@@ -454,6 +454,7 @@ const TYPE_META_MAP: Record<string, { label: string; bg: string; text: string; b
     TURA_EXTENSION:               { label: 'TURA EXT', bg: 'bg-violet-600', text: 'text-white', border: 'border-violet-500' },
     LLEGADA_TARDE:                { label: 'LLEGADA TARDE',  bg: 'bg-amber-500',  text: 'text-white', border: 'border-amber-400' },
     COBERTURA_RESUELTA:           { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.bg, text: COBERTURA_RESUELTA_META.text, border: COBERTURA_RESUELTA_META.border },
+    CRONOGRAMA_SIN_PUBLICAR:      { label: 'SIN CRONOGRAMA', bg: 'bg-amber-500', text: 'text-white', border: 'border-amber-400' },
 };
 const DEFAULT_META_MAP = { label: 'NOVEDAD', bg: 'bg-slate-700', text: 'text-white', border: 'border-slate-500' };
 const AUTO_CLOSE_MAP = 10000;
@@ -1226,6 +1227,7 @@ export default function TacticalMapView() {
                     VACANTE_OPERATIVA:           { label: 'VAC RFZ', bg: 'bg-fuchsia-100 text-fuchsia-800',     border: 'border-l-fuchsia-500' },
                     TURA_EXTENSION:              { label: 'TURA', bg: 'bg-violet-100 text-violet-800',       border: 'border-l-violet-500' },
                     COBERTURA_RESUELTA:          { label: COBERTURA_RESUELTA_META.label, bg: COBERTURA_RESUELTA_META.listBg, border: COBERTURA_RESUELTA_META.listBorder },
+                    CRONOGRAMA_SIN_PUBLICAR:     { label: 'SIN CRONOGRAMA', bg: 'bg-amber-50 text-amber-800', border: 'border-l-amber-400' },
                 };
                 const getNovMeta = (t: string) => NOV_TYPE_META[t] || { label: 'NOV', bg: 'bg-slate-100 text-slate-600', border: 'border-l-slate-300' };
 

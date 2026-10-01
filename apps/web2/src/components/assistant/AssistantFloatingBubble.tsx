@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/router';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { X, SendHorizontal, Trash2, Mic, MicOff, CheckCircle, XCircle } from 'lucide-react';
 import { httpsCallable } from 'firebase/functions';
 import { functions } from '@/lib/firebase';
@@ -217,6 +218,7 @@ const deployCtx: ClientDeployContext = getClientDeployContext();
 
 export function AssistantFloatingBubble(): React.ReactNode {
   const router = useRouter();
+  const movil = useMovilMode();
   const { user, loading, canReadModule, isSuperAdmin } = useAuth();
   const { empresaId: empresaCtxId, empresa } = useEmpresa();
   const brandColor = empresa?.primaryColor || '#6366f1';
@@ -244,6 +246,12 @@ export function AssistantFloatingBubble(): React.ReactNode {
 
   useEffect(() => {
     setPortalRoot(document.body);
+  }, []);
+
+  useEffect(() => {
+    const openFromMenu = () => setOpen(true);
+    window.addEventListener('cosp-assistant-open', openFromMenu);
+    return () => window.removeEventListener('cosp-assistant-open', openFromMenu);
   }, []);
 
   useEffect(() => {
@@ -449,7 +457,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
 
   const overlay = (
     <>
-      <button
+      {(!movil || open) && <button
         type="button"
         style={{
           bottom: fabBottomCss,
@@ -495,7 +503,7 @@ export function AssistantFloatingBubble(): React.ReactNode {
         ) : (
           <CospShieldIcon size={40} className="text-white drop-shadow-sm" />
         )}
-      </button>
+      </button>}
 
       {open && (
         <div

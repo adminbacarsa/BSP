@@ -137,6 +137,7 @@ export function OperacionScreens({
   online,
   pendingLabel,
   stats,
+  notices = [],
   objectives,
   objective,
   alerts,
@@ -156,6 +157,7 @@ export function OperacionScreens({
   online: boolean;
   pendingLabel: string | null;
   stats: MovilStats;
+  notices?: string[];
   objectives: MovilObjective[];
   objective: MovilObjective | null;
   alerts: GuardShift[];
@@ -201,6 +203,9 @@ export function OperacionScreens({
       <div className="px-3 pt-3">
         {panel === 'home' && (
           <>
+            {notices.map((text) => (
+              <p key={text} className="mb-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">{text}</p>
+            ))}
             <div className="mb-3 grid grid-cols-5 gap-1.5">
               {counters.map((item) => (
                 <button key={item.id} type="button" onClick={() => onCounter(item.id)} className="rounded-2xl border border-slate-200 bg-white py-2 text-center shadow-sm">

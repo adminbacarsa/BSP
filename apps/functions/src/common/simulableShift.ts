@@ -179,10 +179,14 @@ type SlaDoc = { data: () => Record<string, unknown> };
  * o cerrado cuya vigencia incluye ese día, cliente activo y cronograma PUBLICADO.
  * Borrador (sin `publishedAt`) no se simula. Cache por empresa/objetivo/mes.
  */
+export type OperationVerdict = 'IN' | 'OUT' | 'UNMODELED';
+
 export class ObjectiveOperationCache {
   private slasByEmpresa = new Map<string, SlaDoc[]>();
   private clientsByEmpresa = new Map<string, Map<string, Record<string, unknown>>>();
   private monthCache = new Map<string, MonthOp>();
+  /** Objetivo con SLA fechado de esa empresa. Sin fechas, el resto del CC sigue la regla anterior. */
+  private modeledKeys = new Set<string>();
 
   async isShiftInOperation(
     db: Firestore,
@@ -198,6 +202,26 @@ export class ObjectiveOperationCache {
     const entry = await this.monthEntry(db, empresaId, objectiveId, year, month);
     if (!entry.published) return false;
     return entry.ranges.some((r) => ymd >= r.start && ymd <= r.end);
+  }
+
+  /**
+   * IN = día en operación (SLA vigente + cliente activo + cronograma publicado).
+   * OUT = hay SLA fechado y ese día no entra.
+   * UNMODELED = el objetivo no tiene vigencia cargada: no se usa para cortar el servicio.
+   */
+  async operationVerdict(
+    db: Firestore,
+    shift: Record<string, unknown> | null | undefined,
+  ): Promise<OperationVerdict> {
+    if (!shift) return 'UNMODELED';
+    const empresaId = String(shift.empresaId ?? '').trim();
+    const objectiveId = String(shift.objectiveId ?? '').trim();
+    const ms = shiftStartMs(shift);
+    if (!empresaId || !objectiveId || !ms) return 'UNMODELED';
+    const { year, month } = arYearMonth(ms);
+    await this.monthEntry(db, empresaId, objectiveId, year, month);
+    if (!this.modeledKeys.has(`${empresaId}|${objectiveId}`)) return 'UNMODELED';
+    return (await this.isShiftInOperation(db, shift)) ? 'IN' : 'OUT';
   }
 
   private async monthEntry(
@@ -218,6 +242,11 @@ export class ObjectiveOperationCache {
     ]);
 
     const ranges: Array<{ start: string; end: string }> = [];
+    for (const doc of slas) {
+      const data = doc.data();
+      if (String(data.objectiveId ?? '').trim() !== objectiveId) continue;
+      if (slaMonthRange(data)) this.modeledKeys.add(`${empresaId}|${objectiveId}`);
+    }
     if (published) {
       for (const doc of slas) {
         const data = doc.data();

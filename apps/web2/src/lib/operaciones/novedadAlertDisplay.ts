@@ -136,6 +136,7 @@ export const INFO_NOVEDAD_TYPES = new Set([
     'COBERTURA_RESUELTA',
     'TURNO_COMPLETADO_AUTO',
     'INGRESO_AUTOREGISTRO',
+    'CRONOGRAMA_SIN_PUBLICAR',
 ]);
 
 /**
@@ -159,6 +160,7 @@ export function isNovedadOutsideCcMonitorScope(
     servicesSLA: any[] = [],
     now: Date = new Date(),
 ): boolean {
+    if (String(n?.type || '') === 'CRONOGRAMA_SIN_PUBLICAR') return false;
     const objId = String(n?.objectiveId || '').trim();
     if (!objId) return false;
 

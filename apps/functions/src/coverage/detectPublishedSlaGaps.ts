@@ -1,5 +1,6 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
-import { ymCordobaParts } from '../assistant/planificacionEstadoKeys';
+import { planificacionEstadoLookupDocIds, ymCordobaParts } from '../assistant/planificacionEstadoKeys';
+import { ObjectiveOperationCache } from '../common/simulableShift';
 import { seriesCodeOf } from '../common/shiftSeries';
 import { buildSlaUnplannedGapDocId } from './slaGapId';
 
@@ -33,15 +34,18 @@ function normPos(n: unknown): string {
 
 async function isPlanPublished(
   db: Firestore,
+  empresaId: string,
   objectiveId: string,
   when: Date,
 ): Promise<boolean> {
   const { year, month } = ymCordobaParts(when);
-  const planKey = `${objectiveId}_${year}_${month}`;
-  const pub = await db.collection('planificacion_estados').doc(planKey).get();
-  if (!pub.exists) return false;
-  const publishedAt = pub.data()?.publishedAt;
-  return publishedAt != null && publishedAt !== '';
+  const docIds = planificacionEstadoLookupDocIds(empresaId, objectiveId, year, month);
+  const docs = await Promise.all(docIds.map((id) => db.collection('planificacion_estados').doc(id).get()));
+  return docs.some((pub) => {
+    if (!pub.exists) return false;
+    const publishedAt = pub.data()?.publishedAt;
+    return publishedAt != null && publishedAt !== '';
+  });
 }
 
 export async function detectPublishedSlaGapsForEmpresa(
@@ -66,12 +70,12 @@ export async function detectPublishedSlaGapsForEmpresa(
   for (let ms = nowMs; ms < horizonMs; ms += 3600000) {
     daySet.add(ymdAr(new Date(ms)));
   }
+  const opCache = new ObjectiveOperationCache();
 
   for (const slaDoc of slaSnap.docs) {
     const sla = slaDoc.data();
     const objectiveId = String(sla.objectiveId || '').trim();
     if (!objectiveId) continue;
-    if (!(await isPlanPublished(db, objectiveId, new Date(nowMs)))) continue;
 
     const positions = Array.isArray(sla.positions) ? sla.positions : [];
     const turnoSnap = await db
@@ -97,6 +101,13 @@ export async function detectPublishedSlaGapsForEmpresa(
 
       for (const dayStr of daySet) {
         const dayDate = new Date(bandStartMsOnDay(dayStr, '12:00'));
+        const verdict = await opCache.operationVerdict(db, {
+          empresaId: eid,
+          objectiveId,
+          startTime: Timestamp.fromMillis(dayDate.getTime()),
+        });
+        if (verdict === 'OUT') continue;
+        if (verdict !== 'IN' && !(await isPlanPublished(db, eid, objectiveId, dayDate))) continue;
         if (!activeDays.includes(weekdayLetter(dayDate))) continue;
 
         for (const band of bands) {

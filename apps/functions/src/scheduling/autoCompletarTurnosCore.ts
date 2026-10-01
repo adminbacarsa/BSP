@@ -6,6 +6,8 @@ import {
   positionHasContinuityFromSlaDoc,
 } from '../coverage/positionHasContinuity';
 import { retainOutgoingForGap } from '../coverage/coverageRetention';
+import { handoffAtEnd } from '../coverage/handoffContinuity';
+import { ObjectiveOperationCache } from '../common/simulableShift';
 import { isOpsCoverageHoursOnSourceDoc } from '../coverage/coverageTraceShift';
 import { isLicenseShiftCode } from '../common/simulableShift';
 import { isExtraNonReliefShift, isReliefEligibleShift } from '../common/reliefEligibility';
@@ -224,6 +226,7 @@ export async function runAutoCompletarTurnosPass(
   let alertedNoRelief = 0;
 
   const slaCache = new Map<string, FirebaseFirestore.DocumentData[]>();
+  const opCache = new ObjectiveOperationCache();
   const reliefIncomingClaimed = new Set<string>();
   const reliefPendingClaimed = new Set<string>();
   const capEscalations: CapEscalation[] = [];
@@ -446,6 +449,12 @@ export async function runAutoCompletarTurnosPass(
     if (isExtraNonReliefShift(shift as Record<string, unknown>)) {
       const cappedEnd = capAtMs > 0 ? Math.min(endTimeMs, capAtMs) : endTimeMs;
       close(docSnap, shift, cappedEnd, cappedEnd < endTimeMs ? 'TOPE_JORNADA' : 'FIN_TURNO_EXTRA');
+      continue;
+    }
+
+    const handoff = await handoffAtEnd(db, shift as Record<string, unknown>, new Date(endTimeMs), await slasFor(String(shift.objectiveId || '')), opCache);
+    if (handoff === 'FIN_SERVICIO') {
+      close(docSnap, shift, endTimeMs, 'FIN_SERVICIO_SIN_CRONOGRAMA', { isRetention: false });
       continue;
     }
 

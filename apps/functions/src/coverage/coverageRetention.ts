@@ -8,6 +8,7 @@ import { isReliefEligibleShift } from '../common/reliefEligibility';
 import { seriesCodeOf } from '../common/shiftSeries';
 import { eventoTieneFranjasEncadenadas, isEventoShift } from '../eventos/eventoCoverage';
 import { buildAutoClosePatch, SHIFT_HARD_CAP_MS } from '../scheduling/shiftClose';
+import { ObjectiveOperationCache } from '../common/simulableShift';
 
 const GAP_ALIGN_MS = 30 * 60 * 1000;
 const RETENTION_MAX_TOTAL_MS = SHIFT_HARD_CAP_MS;
@@ -90,6 +91,10 @@ export async function retainOutgoingForGap(
   }
   if (isEventoShift(titularShift) && !eventoTieneFranjasEncadenadas(titularShift)) {
     return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'EVENTO_SIN_CONTINUIDAD' };
+  }
+  const dayVerdict = await new ObjectiveOperationCache().operationVerdict(db, titularShift);
+  if (dayVerdict === 'OUT') {
+    return { applied: false, shiftIds: [], employeeNames: [], skippedReason: 'FIN_SERVICIO_SIN_CRONOGRAMA' };
   }
 
   const absenceShiftId = String(titularShift.id || '').trim();

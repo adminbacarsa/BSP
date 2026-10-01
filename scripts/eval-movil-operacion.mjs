@@ -143,6 +143,46 @@ const guardHtml = renderToStaticMarkup(createElement(OperacionScreens, {
 }));
 check('objetivo muestra Llegó, protocolo y pendiente', guardHtml.includes('Llegó?') && guardHtml.includes('Protocolo') && guardHtml.includes('Pendiente de enviar') && guardHtml.includes('42'));
 check('marco de pantalla', html.includes('data-movil-screen') && html.includes('max-w-[480px]'));
+
+const { shiftCountsInOpsHeader, isFinServicioSinCronograma } = await import(pathToFileURL(join(here, '../apps/web2/src/lib/operaciones/opsHeaderCounts.ts')).href);
+const enActivos = (s) => s.isPresent && !s.isCompleted;
+const enRetenidos = (s) => !!s.isRetention || (!!s.isPendingClose && !!s.isPresent && !s.isCompleted);
+const noche = {
+  objectiveId: 'NK1',
+  shiftDateObj: new Date('2026-09-30T23:00:00-03:00'),
+  endDateObj: new Date('2026-10-01T07:00:00-03:00'),
+  isPresent: true,
+  isCompleted: false,
+  isRetention: true,
+};
+const publicado = { NK1_2026_9: true };
+const visibles = [noche, { ...noche }, { ...noche }].filter((s) => shiftCountsInOpsHeader(s, publicado));
+const activos = visibles.filter(enActivos).length;
+const retenidos = visibles.filter(enRetenidos).length;
+check('contadores igual que escritorio con octubre sin publicar', activos === 3 && retenidos === 3);
+check('fin de servicio cruza de mes', isFinServicioSinCronograma(noche, publicado) === true);
+const headerHtml = renderToStaticMarkup(createElement(OperacionScreens, {
+  empresa: 'Pruebas S.A.',
+  modeLabel: 'Manual',
+  online: true,
+  pendingLabel: null,
+  stats: { activos, retenidos, ausentes: 0, vacantes: 0, plan: 0 },
+  notices: ['Nuevo Edificio: octubre sin cronograma publicado. Mañana el servicio se corta a las 07:00.'],
+  panel: 'home',
+  objective: null,
+  alerts: [],
+  objectives: [{ objectiveId: 'NK1', name: 'Nuevo Edificio', client: 'NK', active: 0, retention: 3, absent: 0, vacant: 0, plan: 0, shifts: [] }],
+  onBack: () => {},
+  onOpen: () => {},
+  onCounter: () => {},
+  onLlego: () => {},
+  onRevertir: () => {},
+  onSalida: () => {},
+  onProtocolo: () => {},
+  onRetencion: () => {},
+  onSala: () => {},
+}));
+check('header muestra ACT 3 y RET 3 y el aviso', headerHtml.includes('>3<') && headerHtml.includes('se corta a las 07:00'));
 rmSync(outdir, { recursive: true, force: true });
 
 if (failed) {

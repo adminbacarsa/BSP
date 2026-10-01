@@ -27,6 +27,7 @@ interface Props {
     setViewTab: (tab: string) => void;
     handleAction: (action: string, shiftId: string, payload?: unknown) => Promise<unknown> | void;
   };
+  notices?: string[];
   objectives: Array<MovilObjective & Record<string, unknown>>;
   modeLabel: string;
   isPilot: boolean;
@@ -83,6 +84,7 @@ export function OperacionMovil(props: Props) {
         online={online}
         pendingLabel={pending}
         stats={props.logic.stats}
+        notices={props.notices}
         objectives={props.objectives}
         objective={objective}
         alerts={alerts}
@@ -126,6 +128,7 @@ export function OperacionMovil(props: Props) {
         <button type="button" className="mb-2 min-h-12 w-full rounded-2xl border border-emerald-300 bg-white text-sm font-black text-emerald-800" onClick={() => { void call('Tomar mando', props.onTomarMando); }}>Tomar mando</button>
         <button type="button" className="mb-4 min-h-12 w-full rounded-2xl bg-rose-50 text-sm font-black text-rose-700" onClick={() => { void call('Pasar a Auto', props.onPasarAuto); }}>Pasar a Auto</button>
         <p className="mb-2 text-[11px] font-bold text-slate-500">Protocolo vigente: {steps.join(' → ')}. Los candidatos y Convocar abren la hoja del protocolo.</p>
+        <button type="button" className="mb-2 min-h-11 w-full rounded-2xl bg-indigo-50 text-sm font-black text-indigo-800" onClick={() => { setSalaOpen(false); window.dispatchEvent(new Event('cosp-assistant-open')); }}>Asistente</button>
         <button type="button" className="mb-2 min-h-11 w-full rounded-2xl border border-slate-200 text-sm font-bold" onClick={() => writeMovilChoice('0')}>Ver como escritorio</button>
         <button type="button" className="min-h-11 w-full rounded-2xl bg-indigo-600 text-sm font-black text-white" onClick={() => {
           if (typeof Notification === 'undefined') return;

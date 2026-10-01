@@ -2738,6 +2738,7 @@ export const gestionarVacantes = functions
 
     let sentToPlanning = 0;
     let sentToProtocol = 0;
+    const vacantesOpCache = new ObjectiveOperationCache();
 
     for (const docSnap of snap.docs) {
       const shift = docSnap.data();
@@ -2761,6 +2762,7 @@ export const gestionarVacantes = functions
           }
         }
       }
+      if ((await vacantesOpCache.operationVerdict(db, shift as Record<string, unknown>)) === 'OUT') continue;
 
       // Ignorar si ya fue cancelada o resuelta
       const st = (shift.status || '').toUpperCase();
@@ -3423,6 +3425,23 @@ export const onAusenciaCreatedFromPortal = functions
  * No borra docs — fase 1. Callable manual: tagTurnosArchiveTier.
  */
 /** T−5 «¿estás llegando?» y ¿Venís? en el minuto de T. Idempotente. CC ON + objetivo en operación. */
+/** 18:00 AR: SLA vigente mañana y cronograma de ese mes sin publicar. */
+export const scheduledCronogramaSinPublicar = onScheduleV2(
+  {
+    schedule: '0 18 * * *',
+    timeZone: 'America/Argentina/Buenos_Aires',
+    timeoutSeconds: 300,
+    memory: '512MiB',
+    region: 'us-central1',
+  },
+  async () => {
+    const db = admin.firestore();
+    const { runAvisoCronogramaSinPublicar } = await import('./coverage/avisoCronogramaSinPublicar');
+    const r = await runAvisoCronogramaSinPublicar(db, new Date());
+    if (r.created > 0) console.log(`[scheduledCronogramaSinPublicar] novedades=${r.created}`);
+  },
+);
+
 export const scheduledArrivalNotices = onScheduleV2(
   {
     schedule: 'every 1 minutes',
