@@ -19,6 +19,8 @@ import {
     ChevronsUp, ChevronsDown, MoreHorizontal, FlaskConical, Shuffle, Timer
 } from 'lucide-react';
 
+import { PlanificacionMovil } from '@/components/movil/PlanificacionMovil';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { canAccessAutoLab } from '@/lib/planificacion/autoLabAccess';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { SwapSupervisorQueue } from '@/components/planificacion/SwapSupervisorQueue';
@@ -1043,7 +1045,7 @@ function computeServiceRuleChanges(
     return additions;
 }
 
-export default function PlanificacionPage() {
+function PlanificacionDesktop() {
     const { empresaId, empresa, loadingEmpresa } = useEmpresa();
     const { rules: planningRules } = usePlanningRules(empresaId);
     const planningLimits = useMemo(
@@ -18573,4 +18575,13 @@ export default function PlanificacionPage() {
         )}
         </DashboardLayout>
     );
+}
+
+export default function PlanificacionPage() {
+    const movil = useMovilMode();
+    const [modoListo, setModoListo] = useState(false);
+    useEffect(() => setModoListo(true), []);
+    if (!modoListo) return <div className="min-h-screen bg-slate-100" />;
+    if (movil) return <PlanificacionMovil />;
+    return <PlanificacionDesktop />;
 }
