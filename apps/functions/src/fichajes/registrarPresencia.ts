@@ -124,7 +124,7 @@ export async function registrarPresencia(
   const now = FieldValue.serverTimestamp();
 
   let fichadaRemota = input.fichadaRemota === true;
-  if (input.fichadaRemota == null && (source === 'PORTAL_GPS' || source === 'PORTAL') && empId) {
+  if (input.fichadaRemota == null && source === 'PORTAL_GPS' && empId) {
     const empSnap = await db.collection('empleados').doc(empId).get();
     fichadaRemota = empSnap.data()?.fichadaRemota === true;
   }
