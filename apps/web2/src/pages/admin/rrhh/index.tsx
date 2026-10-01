@@ -1,8 +1,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
+import Head from 'next/head';
 import Link from 'next/link';
 import { createPortal } from 'react-dom';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import { RrhhMovil } from '@/components/movil/RrhhMovil';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { avisarNovedadDeAusencia, replicarAusenciaPlanificador } from '@/lib/rrhh/replicarAusenciaPlanificador';
 import { TabBar, SupervisorPinInput } from '@/components/ui';
 import { employeeService, Employee } from '@/services/employeeService';
 import { absenceService, Absence } from '@/services/absenceService';
@@ -319,6 +323,7 @@ export default function EmployeesPage() {
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const { addToast } = useToast();
+  const movil = useMovilMode();
   const canAdjust = authIsSuperAdmin || (rolePermissions['RRHH'] || []).includes('adjust');
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -466,99 +471,15 @@ export default function EmployeesPage() {
   const getCycleDates = (refDate: Date, startDay: number = 26) => { const year = refDate.getFullYear(); const month = refDate.getMonth(); const start = new Date(year, month - 1, startDay); start.setHours(0,0,0,0); const end = new Date(year, month, startDay - 1); end.setHours(23,59,59,999); return { start, end }; };
 
   const replicarAusenciaEnPlanificador = async (absenceId: string, data: Absence) => {
-    try {
-      if (!data.employeeId?.trim()) {
-        addToast('No se puede replicar: la ausencia no tiene empleado asignado.', 'error');
-        return;
-      }
-      const range = validateAbsenceDateRange(data.startDate, data.endDate);
-      if (!range.ok) return;
-      const turnosQ = query(collection(db, 'turnos'), where('absenceId', '==', absenceId));
-      await queryAndDeleteForEmpresa('turnos', turnosQ, empresaId, migracionCompleta);
-      const [sY, sM, sD] = range.startDate.split('-').map(Number);
-      const [eY, eM, eD] = range.endDate.split('-').map(Number);
-      const start = new Date(sY, sM - 1, sD);
-      const end = new Date(eY, eM - 1, eD);
-      const code = inferAbsenceCode(data);
-      const emp = employees.find(e => e.id === data.employeeId);
-      const portal = data as Absence & { objectiveId?: string; objectiveName?: string; clientId?: string };
-      const objectiveId =
-        String(portal.objectiveId ?? '').trim() ||
-        String(emp?.preferredObjectiveId ?? '').trim();
-      const objRow = allObjectives.find(o => o.id === objectiveId || o.docId === objectiveId);
-      const clientId =
-        String(portal.clientId ?? '').trim() ||
-        String(objRow?.clientId ?? '').trim();
-      const objectiveName =
-        String(portal.objectiveName ?? '').trim() ||
-        objRow?.name ||
-        (objectiveId ? `Objetivo ${objectiveId}` : `NOVEDAD - ${data.type}`);
-      const absenceCreatedAt = new Date().toISOString();
-      const batch = writeBatch(db);
-
-      const rangeStartTs = Timestamp.fromDate(new Date(sY, sM - 1, sD, 0, 0, 0));
-      const rangeEndTs   = Timestamp.fromDate(new Date(eY, eM - 1, eD, 23, 59, 59));
-      try {
-        const originalTurnosSnap = await getDocs(query(
-          collection(db, 'turnos'),
-          where('employeeId', '==', data.employeeId),
-          where('startTime', '>=', rangeStartTs),
-          where('startTime', '<=', rangeEndTs),
-        ));
-        originalTurnosSnap.forEach(docSnap => {
-          const t = docSnap.data();
-          if (!belongsToEmpresaView(t, empresaId, migracionCompleta)) return;
-          if (t.type === 'NOVEDAD' || t.hasNovedad || t.isAbsent || t.isFranco) return;
-          batch.update(docSnap.ref, {
-            hasNovedad: true,
-            isAbsent: true,
-            absenceId,
-            absenceType: data.type,
-            absenceCreatedAt,
-          });
-        });
-      } catch (queryErr) {
-        console.warn('[replicarAusencia] No se pudieron marcar turnos originales (índice o permisos):', queryErr);
-      }
-
-      for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-        const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-        const isPeriodOnly = code === 'V';
-        const dayEnd = isPeriodOnly
-          ? new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
-          : new Date(dayStart.getTime() + 8 * 3600000);
-        const turnoRef = doc(collection(db, 'turnos'));
-        const turnoPayload: Record<string, unknown> = {
-          employeeId: data.employeeId,
-          employeeName: data.employeeName,
-          startTime: Timestamp.fromDate(dayStart),
-          endTime: Timestamp.fromDate(dayEnd),
-          hours: isPeriodOnly ? 0 : 8,
-          type: 'NOVEDAD',
-          code,
-          status: 'Approved',
-          absenceId,
-          isFranco: false,
-          hasNovedad: true,
-          plannedNovedad: data.type?.includes('Licencia') ? 'LICENCIA' : 'AVISO',
-          comments: data.reason || '',
-        };
-        if (objectiveId) turnoPayload.objectiveId = objectiveId;
-        if (objectiveName) turnoPayload.objectiveName = objectiveName;
-        if (clientId) turnoPayload.clientId = clientId;
-        batch.set(turnoRef, stampEmpresaId(turnoPayload, empresaId));
-      }
-      await batch.commit();
-    } catch (e) {
-      console.error('[replicarAusencia]', e);
-      const msg =
-        e instanceof TenantIsolationError
-          ? e.message
-          : e instanceof Error
-            ? e.message
-            : 'Error replicando';
-      addToast(msg.length > 120 ? `${msg.slice(0, 120)}…` : msg, 'error');
-    }
+    await replicarAusenciaPlanificador({
+      empresaId,
+      migracionCompleta,
+      absenceId,
+      data,
+      employees,
+      objectives: allObjectives,
+      notify: (message) => addToast(message, 'error'),
+    });
   };
 
   const eliminarReplicasPlanificador = async (absenceId: string) => {
@@ -1387,19 +1308,12 @@ export default function EmployeesPage() {
     if (absenceReplicatesToPlanning(dataToSave)) {
       await replicarAusenciaEnPlanificador(savedId, { ...dataToSave, id: savedId });
       if (dataToSave.status === 'Autorizada' || dataToSave.status === 'Justificada') {
-        await addDoc(collection(db, 'novedades'), stampEmpresaId({
-          source: 'AUSENCIA',
-          type: dataToSave.type,
-          status: 'pending',
-          employeeId: dataToSave.employeeId,
-          employeeName: dataToSave.employeeName,
-          startDate: dataToSave.startDate,
-          endDate: dataToSave.endDate,
+        await avisarNovedadDeAusencia({
+          empresaId,
           ausenciaId: savedId,
-          description: `${dataToSave.type} de ${dataToSave.employeeName} — ${dataToSave.startDate} al ${dataToSave.endDate}`,
           reportedBy: nombreReal,
-          createdAt: serverTimestamp(),
-        }, empresaId));
+          data: dataToSave,
+        });
       }
     } else if (dataToSave.status === 'Rechazada') {
       await eliminarReplicasPlanificador(savedId);
@@ -1955,6 +1869,15 @@ export default function EmployeesPage() {
       avgSeniority, avgAge, ageCount,
     };
   }, [employees, absences, holidays, allObjectives]);
+
+  if (movil) {
+    return (
+      <>
+        <Head><title>COSP V1.0 | RRHH</title></Head>
+        <RrhhMovil />
+      </>
+    );
+  }
 
   return (
     <DashboardLayout>

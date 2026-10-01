@@ -1,0 +1,305 @@
+import { useEffect, useMemo, useState } from 'react';
+import { format, startOfWeek, endOfWeek } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { toast } from 'sonner';
+import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { RrhhScreens, type RrhhPanel } from '@/components/movil/RrhhScreens';
+import { useOnlineFlag } from '@/components/movil/OperacionScreens';
+import { useAuth } from '@/context/AuthContext';
+import { useEmpresa } from '@/context/EmpresaContext';
+import { db, storage } from '@/lib/firebase';
+import { movilCallableGate } from '@/lib/movil/callableOnline';
+import { resumenDiaRrhh, type AusenciaDia } from '@/lib/movil/rrhhDia';
+import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
+import { stampEmpresaId, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { absenceNeedsMedicalVerification, absenceReplicatesToPlanning } from '@/lib/planificacion/absenceCodes';
+import { endDateFromDefaultDays } from '@/lib/rrhh/novedadTypes';
+import { avisarNovedadDeAusencia, replicarAusenciaPlanificador } from '@/lib/rrhh/replicarAusenciaPlanificador';
+import { absenceService, type Absence } from '@/services/absenceService';
+import { novedadTypeService } from '@/services/novedadTypeService';
+
+type Guardia = { id: string; nombre: string; telefono: string; preferredObjectiveId?: string };
+const CACHE = 'cosp-movil-rrhh-dia';
+
+function ymd(date: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`;
+}
+
+export function RrhhMovil() {
+  const { isSuperAdmin, canReadModule } = useAuth();
+  const { empresaId, empresa } = useEmpresa();
+  const online = useOnlineFlag();
+  const permitido = isSuperAdmin || canReadModule('RRHH');
+  const [panel, setPanel] = useState<RrhhPanel>('dia');
+  const [pendingLabel, setPendingLabel] = useState<string | null>(null);
+  const [ausencias, setAusencias] = useState<AusenciaDia[]>([]);
+  const [guardias, setGuardias] = useState<Guardia[]>([]);
+  const [tipos, setTipos] = useState<{ id: string; label: string; code: string; defaultDays: number | null }[]>([]);
+  const [busqueda, setBusqueda] = useState('');
+  const [elegidaId, setElegidaId] = useState('');
+  const [tipoId, setTipoId] = useState('');
+  const [dias, setDias] = useState('1');
+  const [foto, setFoto] = useState<File | null>(null);
+  const [novedadTipo, setNovedadTipo] = useState('Observación');
+  const [novedadTexto, setNovedadTexto] = useState('');
+  const [turnos, setTurnos] = useState<{ id: string; dia: string; codigo: string }[]>([]);
+  const hoy = ymd(new Date());
+  const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
+
+  useEffect(() => {
+    const sync = () => {
+      const cola = movilWriteQueue.pending()[0] || movilCallableGate.pending()[0] || null;
+      setPendingLabel(cola);
+    };
+    const offWrite = movilWriteQueue.subscribe(sync);
+    const offCall = movilCallableGate.subscribe(sync);
+    sync();
+    return () => { offWrite(); offCall(); };
+  }, []);
+
+  useEffect(() => {
+    if (!empresaId || !permitido) return;
+    let cancel = false;
+    const cargar = async () => {
+      try {
+        const scope = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+        const [lista, catalogo, empSnap] = await Promise.all([
+          absenceService.getAll({ empresaId, scopeEmpresa: scope }),
+          novedadTypeService.ensureSeeded(empresaId),
+          getDocs(query(collection(db, 'empleados'), where('empresaId', '==', empresaId))),
+        ]);
+        if (cancel) return;
+        const rows: AusenciaDia[] = lista.map((row) => ({
+          id: String(row.id || ''),
+          employeeId: row.employeeId,
+          employeeName: row.employeeName || '',
+          type: row.type || '',
+          startDate: row.startDate || '',
+          endDate: row.endDate || '',
+          status: row.status || '',
+          hasCertificate: row.hasCertificate,
+          certificateUrl: row.certificateUrl,
+        }));
+        const gente: Guardia[] = empSnap.docs
+          .map((docSnap) => {
+            const data = docSnap.data();
+            const status = String(data.status || 'ACTIVE').toUpperCase();
+            if (status === 'INACTIVE') return null;
+            return {
+              id: docSnap.id,
+              nombre: `${data.lastName || ''} ${data.firstName || ''}`.trim() || String(data.nombre || 'Sin nombre'),
+              telefono: String(data.phone || data.telefono || ''),
+              preferredObjectiveId: String(data.preferredObjectiveId || ''),
+            };
+          })
+          .filter((row): row is Guardia => !!row);
+        setAusencias(rows);
+        setGuardias(gente);
+        const activos = catalogo.filter((tipo) => tipo.status === 'ACTIVE').map((tipo) => ({
+          id: String(tipo.id || tipo.label),
+          label: tipo.label,
+          code: tipo.code,
+          defaultDays: tipo.defaultDays,
+        }));
+        setTipos(activos);
+        setTipoId((actual) => actual || activos[0]?.id || '');
+        try {
+          sessionStorage.setItem(CACHE, JSON.stringify({ rows, gente }));
+        } catch { /* caché llena */ }
+      } catch {
+        if (!navigator.onLine) {
+          try {
+            const raw = sessionStorage.getItem(CACHE);
+            if (!raw) return;
+            const saved = JSON.parse(raw) as { rows: AusenciaDia[]; gente: Guardia[] };
+            setAusencias(saved.rows || []);
+            setGuardias(saved.gente || []);
+          } catch { /* sin caché */ }
+        } else {
+          toast.error('No se pudo leer el día.');
+        }
+      }
+    };
+    void cargar();
+    return () => { cancel = true; };
+  }, [empresaId, migracionCompleta, permitido]);
+
+  const dia = useMemo(() => resumenDiaRrhh(hoy, ausencias), [hoy, ausencias]);
+  const q = busqueda.trim().toLowerCase();
+  const filtradas = guardias.filter((guardia) => !q || guardia.nombre.toLowerCase().includes(q)).slice(0, 8);
+  const elegida = guardias.find((guardia) => guardia.id === elegidaId) || null;
+
+  useEffect(() => {
+    if (!elegidaId) return;
+    const desde = startOfWeek(new Date(), { weekStartsOn: 1 });
+    const hasta = endOfWeek(new Date(), { weekStartsOn: 1 });
+    hasta.setHours(23, 59, 59, 999);
+    void getDocs(query(
+      collection(db, 'turnos'),
+      where('employeeId', '==', elegidaId),
+      where('startTime', '>=', Timestamp.fromDate(desde)),
+      where('startTime', '<=', Timestamp.fromDate(hasta)),
+    )).then((snap) => {
+      setTurnos(snap.docs.map((docSnap) => {
+        const data = docSnap.data();
+        const inicio = data.startTime?.toDate?.() as Date | undefined;
+        return {
+          id: docSnap.id,
+          dia: inicio ? format(inicio, 'EEE dd/MM', { locale: es }) : '',
+          codigo: String(data.code || data.type || ''),
+        };
+      }));
+    }).catch(() => setTurnos([]));
+  }, [elegidaId]);
+
+  const abrirFicha = (id: string) => {
+    setElegidaId(id);
+    setPanel('ficha');
+  };
+
+  const guardarAusencia = () => {
+    const tipo = tipos.find((row) => row.id === tipoId);
+    if (!elegida || !tipo || !empresaId) {
+      toast.error('Elegí guardia y tipo.');
+      return;
+    }
+    const cantidad = Math.max(1, Number(dias) || 1);
+    const startDate = hoy;
+    const endDate = endDateFromDefaultDays(startDate, cantidad) || startDate;
+    const archivo = foto;
+    const label = `Ausencia ${elegida.nombre}`;
+    void enqueueFirestoreWrite(label, async () => {
+      let certificateUrl: string | null = null;
+      let certificateStoragePath: string | null = null;
+      if (archivo) {
+        certificateStoragePath = `absences/${empresaId}/${Date.now()}_${archivo.name.replace(/\s+/g, '_')}`;
+        const fileRef = ref(storage, certificateStoragePath);
+        await uploadBytes(fileRef, archivo);
+        certificateUrl = await getDownloadURL(fileRef);
+      }
+      const status = absenceNeedsMedicalVerification({ type: tipo.label }) ? 'En verificación' as const : 'Autorizada' as const;
+      const data: Absence = {
+        employeeId: elegida.id,
+        employeeName: elegida.nombre,
+        type: tipo.label,
+        startDate,
+        endDate,
+        status,
+        hasCertificate: !!certificateUrl,
+        certificateUrl,
+        certificateName: archivo?.name || null,
+        certificateStoragePath,
+        reason: 'Carga rápida celular',
+        comments: 'Cargado desde el celular',
+      };
+      (data as Absence & { absenceType: string }).absenceType = tipo.code;
+      const docRef = await absenceService.add(data, empresaId);
+      if (absenceReplicatesToPlanning({ ...data, id: docRef.id })) {
+        await replicarAusenciaPlanificador({
+          empresaId,
+          migracionCompleta,
+          absenceId: docRef.id,
+          data: { ...data, id: docRef.id },
+          employees: [{ id: elegida.id, preferredObjectiveId: elegida.preferredObjectiveId }],
+          objectives: [],
+          notify: (message) => toast.error(message),
+        });
+        if (status === 'Autorizada') {
+          await avisarNovedadDeAusencia({
+            empresaId,
+            ausenciaId: docRef.id,
+            reportedBy: 'RRHH celular',
+            data: { type: tipo.label, employeeId: elegida.id, employeeName: elegida.nombre, startDate, endDate },
+          });
+        }
+      }
+    }).then((result) => {
+      toast[result === 'queued' ? 'message' : 'success'](result === 'queued' ? 'Pendiente de enviar' : 'Ausencia cargada. Los turnos quedan marcados.');
+    }).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cargar la ausencia.');
+    });
+  };
+
+  const guardarNovedad = () => {
+    if (!novedadTexto.trim() || !empresaId) {
+      toast.error('Escribí la novedad.');
+      return;
+    }
+    const texto = novedadTexto.trim();
+    const label = `Novedad ${elegida?.nombre || novedadTipo}`;
+    void enqueueFirestoreWrite(label, async () => {
+      await addDoc(collection(db, 'novedades'), stampEmpresaId({
+        type: novedadTipo.toUpperCase(),
+        title: novedadTipo,
+        status: 'pending',
+        employeeId: elegida?.id || null,
+        employeeName: elegida?.nombre || '',
+        description: texto,
+        reportedBy: 'RRHH celular',
+        createdAt: Timestamp.now(),
+      }, empresaId));
+    }).then((result) => {
+      if (result === 'sent') setNovedadTexto('');
+      toast[result === 'queued' ? 'message' : 'success'](result === 'queued' ? 'Pendiente de enviar' : 'Novedad cargada');
+    }).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'No se pudo cargar la novedad.');
+    });
+  };
+
+  if (!permitido) {
+    return <p className="p-6 text-sm font-semibold text-slate-600">No tenés permiso de RRHH.</p>;
+  }
+
+  return (
+    <>
+      <RrhhScreens
+        empresa={empresa?.name || 'Empresa'}
+        online={online}
+        pendingLabel={pendingLabel}
+        panel={panel}
+        hoyLabel={format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
+        ausenciasHoy={dia.ausenciasHoy.map((row) => ({
+          id: row.id,
+          employeeId: row.employeeId || '',
+          nombre: row.employeeName,
+          tipo: row.type,
+        }))}
+        licencias={dia.licencias.map((row) => ({
+          id: row.id,
+          employeeId: row.employeeId || '',
+          nombre: row.employeeName,
+          detalle: row.startDate === hoy ? 'Empieza' : 'Termina',
+        }))}
+        certificados={dia.certificados.map((row) => ({
+          id: row.id,
+          employeeId: row.employeeId || '',
+          nombre: row.employeeName,
+        }))}
+        busqueda={busqueda}
+        onBusqueda={setBusqueda}
+        guardias={filtradas}
+        tipos={tipos}
+        tipoId={tipoId}
+        onTipo={setTipoId}
+        dias={dias}
+        onDias={setDias}
+        fotoNombre={foto?.name || null}
+        onFoto={setFoto}
+        onGuardarAusencia={guardarAusencia}
+        novedadTipo={novedadTipo}
+        onNovedadTipo={setNovedadTipo}
+        novedadTexto={novedadTexto}
+        onNovedadTexto={setNovedadTexto}
+        onGuardarNovedad={guardarNovedad}
+        ficha={elegida ? { nombre: elegida.nombre, telefono: elegida.telefono, turnos } : null}
+        onElegir={setElegidaId}
+        onFicha={abrirFicha}
+        onPanel={setPanel}
+      />
+      <MovilBottomNav />
+    </>
+  );
+}

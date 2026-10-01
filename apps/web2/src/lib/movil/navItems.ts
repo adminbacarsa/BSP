@@ -17,7 +17,7 @@ export function movilNavForPermissions(canRead: (moduleKey: string) => boolean):
     items.push({ id: 'eventuales', label: 'Eventuales', href: '/admin/rrhh/eventuales/' });
   }
   if (canRead('RRHH') || canRead('OPERATIONS')) {
-    items.push({ id: 'novedades', label: 'Novedades', href: '/admin/rrhh/' });
+    items.push({ id: 'novedades', label: 'Novedades', href: '/admin/rrhh/movil/' });
   }
   if (canRead('PLANNING') && !canRead('OPERATIONS')) {
     items.push({ id: 'operaciones', label: 'Plan', href: '/admin/planificacion/' });
