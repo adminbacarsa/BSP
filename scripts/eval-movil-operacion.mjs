@@ -584,6 +584,22 @@ check('onNovedadCreated: ausencia, retención larga, tope 12:59, convocatoria re
 const movilSrc = readFileSync(join(web2, 'src/components/movil/OperacionMovil.tsx'), 'utf8');
 check('OperacionMovil: ?shiftId abre el objetivo y la hoja de acciones del turno', movilSrc.includes('router.query.shiftId') && movilSrc.includes('setAccionesShiftId(shift.id)') && movilSrc.includes('setSelectedId(esTurnoEvento(shift)'));
 
+// ── Estilo del panel (components/movil/ui): barra oscura, encabezado RRHH, KPIs, tarjetas, píldoras ──
+const UI = await importFront('components/movil/ui/index.ts');
+const RadioIcon = (p) => createElement('svg', { 'data-icon': 'radio', width: p.size, height: p.size });
+const headerHtmlUi = render(UI.MovilHeader, { icon: RadioIcon, title: 'Centro de Control', date: new Date(2026, 9, 1) });
+check('MovilHeader: ícono en cuadrado gris-azulado con sombra, título en MAYÚSCULAS negro y fecha con tracking', headerHtmlUi.includes('bg-slate-200/80') && headerHtmlUi.includes('shadow-md') && headerHtmlUi.includes('font-black uppercase') && headerHtmlUi.includes('text-slate-900') && headerHtmlUi.includes('tracking-widest text-slate-400') && /jueves,? 1 de octubre de 2026/.test(headerHtmlUi));
+const statHtml = render(UI.MovilStat, { icon: RadioIcon, tone: 'emerald', label: 'Activos', value: 7, badge: createElement(UI.MovilBadge, { tone: 'emerald' }, '99%'), pct: 99, onClick: () => {}, active: true, attrs: { 'data-x': 'a' } });
+check('MovilStat: ícono pastel, etiqueta MAYÚSCULAS slate-600, número grande emerald, píldora, barra y anillo activo', statHtml.includes('bg-emerald-50 text-emerald-600') && statHtml.includes('uppercase tracking-wide text-slate-600') && statHtml.includes('text-emerald-600">7<') && statHtml.includes('>99%<') && statHtml.includes('role="progressbar"') && statHtml.includes('ring-2 ring-emerald-500') && statHtml.includes('aria-pressed="true"') && statHtml.includes('data-x="a"'));
+const cardHtmlUi = render(UI.MovilCard, { icon: RadioIcon, tone: 'rose', title: 'Peaje', subtitle: 'Ruta 9', badge: createElement(UI.MovilBadge, { tone: 'rose', size: 'md' }, '50%'), onClick: () => {}, attrs: { 'data-c': '1' } }, null);
+check('MovilCard: blanca rounded-2xl borde slate-100 sombra suave, botón si tiene onClick', cardHtmlUi.startsWith('<button') && cardHtmlUi.includes('rounded-2xl border bg-white') && cardHtmlUi.includes('border-slate-100') && cardHtmlUi.includes('shadow-sm') && cardHtmlUi.includes('>Peaje<') && cardHtmlUi.includes('>50%<') && cardHtmlUi.includes('data-c="1"'));
+const topHtml = render(UI.MovilTopBar, { modulo: 'Operación', empresa: 'Pruebas S.A.', online: false, pendingLabel: '1 ingreso' });
+check('MovilTopBar: barra oscura con módulo, empresa en píldora, sin señal y pendiente', topHtml.includes('bg-slate-900') && topHtml.includes('>Operación<') && topHtml.includes('rounded-full bg-white/10') && topHtml.includes('>Pruebas S.A.<') && topHtml.includes('Sin señal') && topHtml.includes('Pendiente de enviar: 1 ingreso'));
+check('Operación usa la barra, el encabezado y los KPI compartidos', todosHtml.includes('data-movil-topbar="Operación"') && todosHtml.includes('>Centro de Control<') && (todosHtml.match(/role="progressbar"/g) || []).length >= 3 && todosHtml.includes('data-movil-objetivo-card="peaje"'));
+check('Supervisión: barra con «Supervisión» y Solo lectura en píldora', supervisionHtml.includes('data-movil-topbar="Supervisión"') && supervisionHtml.includes('Solo lectura'));
+check('Selector de módulos con barra oscura, encabezado y tarjetas con ícono', menuHtml.includes('data-movil-topbar="Menú"') && menuHtml.includes('>Módulos<') && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
+check('ningún módulo del celular redefine tarjetas/píldoras sueltas en Operación', !readFileSync(join(web2, 'src/components/movil/OperacionScreens.tsx'), 'utf8').includes('TONE_PILL'));
+
 rmSync(outdir, { recursive: true, force: true });
 
 if (failed) {

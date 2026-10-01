@@ -34,7 +34,7 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
   const activa = seccionActiva(modulo, query);
   return (
     <nav
-      className="fixed bottom-0 left-0 right-0 z-50 flex border-t border-slate-200 bg-white md:hidden"
+      className="fixed bottom-0 left-0 right-0 z-50 flex border-t border-slate-100 bg-white shadow-[0_-6px_16px_rgba(15,23,42,0.06)] md:hidden"
       aria-label={modulo ? `Navegación ${modulo.label}` : 'Navegación celular'}
       style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
     >
@@ -48,9 +48,11 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
             href={item.href}
             // La primera sección vuelve a la pantalla principal del módulo aunque la URL no cambie.
             onClick={esInicio ? () => window.dispatchEvent(new Event('cosp-modulo-inicio')) : undefined}
-            className={`relative flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 text-[9px] font-black ${active ? 'text-indigo-600' : 'text-slate-400'}`}
+            className={`relative flex min-h-[60px] flex-1 flex-col items-center justify-center gap-1 text-[9px] font-black uppercase tracking-wide ${active ? 'text-indigo-600' : 'text-slate-400'}`}
           >
-            <Icon size={18} strokeWidth={2.2} />
+            <span className={`flex h-8 w-11 items-center justify-center rounded-xl transition-colors ${active ? 'bg-indigo-50' : ''}`}>
+              <Icon size={18} strokeWidth={2.2} />
+            </span>
             {item.id === 'alertas' && alertCount > 0 && (
               <span className="absolute right-[calc(50%-18px)] top-1 min-w-[14px] rounded-full bg-rose-600 px-1 text-[8px] text-white">
                 {alertCount > 9 ? '9+' : alertCount}

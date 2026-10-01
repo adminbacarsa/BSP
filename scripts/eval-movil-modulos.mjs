@@ -58,7 +58,7 @@ check('RRHH ve licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrh
 check('Planificación ve cronograma y licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/planificacion/'), alertas).map((a) => a.type).join(',') === 'CRONOGRAMA_SIN_PUBLICAR,Enfermedad');
 
 const compile = (src, name) => {
-  const out = join(outdir, name.replace(/\.tsx$/, '.mjs'));
+  const out = join(outdir, name.replace(/\.tsx?$/, '.mjs'));
   writeFileSync(out, ts.transpileModule(src, {
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
     fileName: name,
@@ -66,7 +66,22 @@ const compile = (src, name) => {
   return out;
 };
 const sheet = compile(readFileSync(join(root, 'components/movil/BottomSheet.tsx'), 'utf8'), 'BottomSheet.tsx');
-const menuFile = compile(readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8').replace(/import type .*\n/, ''), 'MovilMenuScreens.tsx');
+// components/movil/ui: piezas visuales compartidas (lucide-react se resuelve desde apps/web2/node_modules).
+const uiDir = join(root, 'components/movil/ui');
+const { readdirSync, mkdirSync } = await import('node:fs');
+mkdirSync(join(outdir, 'ui'), { recursive: true });
+let uiIndex = '';
+for (const name of readdirSync(uiDir)) {
+  const src = readFileSync(join(uiDir, name), 'utf8').replace(/from '\.\/(\w+)'/g, "from './$1.mjs'");
+  const out = compile(src, `ui/${name}`);
+  if (name === 'index.ts') uiIndex = out;
+}
+const menuFile = compile(
+  readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8')
+    .replace(/import type .*\n/, '')
+    .replace("from './ui'", `from ${JSON.stringify(pathToFileURL(uiIndex).href)}`),
+  'MovilMenuScreens.tsx',
+);
 const rrhhFile = compile(readFileSync(join(root, 'components/movil/RrhhScreens.tsx'), 'utf8'), 'RrhhScreens.tsx');
 const evFile = compile(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8').replace("from './BottomSheet'", JSON.stringify(pathToFileURL(sheet).href).replace(/^/, 'from ')), 'EventualesScreens.tsx');
 
