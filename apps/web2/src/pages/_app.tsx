@@ -62,6 +62,7 @@ export default function App({ Component, pageProps }: AppProps) {
     && !router.pathname.startsWith('/objetivo')
     && !router.pathname.includes('crono-popout')
     && router.pathname !== '/admin/operaciones'
+    && !router.pathname.startsWith('/admin/movil/planificacion')
     && !router.pathname.startsWith('/privacidad');
   useEffect(() => {
     initTheme();
