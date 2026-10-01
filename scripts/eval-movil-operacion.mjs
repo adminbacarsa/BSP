@@ -782,7 +782,32 @@ check('Operación: barra + fecha/modo en línea gris, sin encabezado «Centro de
 const objChrome = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: [baezM] }, onAcciones: () => {}, ...noops });
 check('primera tarjeta de guardia a menos de 170 px del borde', F.ALTO_HASTA_PRIMERA_TARJETA_PX < 170 && F.ALTO_HASTA_PRIMERA_TARJETA_PX === 112 && objChrome.includes(`data-movil-hasta-tarjeta="${F.ALTO_HASTA_PRIMERA_TARJETA_PX}"`) && objChrome.includes('data-movil-card="compacta"') && objChrome.indexOf('data-movil-fecha') < objChrome.indexOf('data-movil-card="compacta"'));
 check('Supervisión: barra con «Supervisión» y Solo lectura en píldora', supervisionHtml.includes('data-movil-topbar="Supervisión"') && supervisionHtml.includes('Solo lectura'));
-check('Selector de módulos con barra oscura, fecha en línea gris y tiles compactos con ícono', menuHtml.includes('data-movil-topbar="Menú"') && !menuHtml.includes('>Módulos<') && menuHtml.includes('data-movil-fecha="1"') && (menuHtml.match(/data-movil-tile="64"/g) || []).length === 6 && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
+check('Selector de módulos con barra oscura, fecha en línea gris y tiles que ocupan la pantalla', menuHtml.includes('data-movil-topbar="Menú"') && !menuHtml.includes('>Módulos<') && menuHtml.includes('data-movil-fecha="1"') && (menuHtml.match(/data-movil-tile="flex"/g) || []).length === 6 && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
+const ML = await importFront('lib/movil/menuLayout.ts');
+check('menú 390x844: tile 150 (tope), todo entra sin scroll', ML.tileAltoPx(844, 6) === 150 && ML.menuCabeEnPantalla(6, 844) && ML.altoMenuPx(6, 844) <= 844 && menuHtml.includes(`data-movil-alto="${ML.altoMenuPx(6, 844)}"`));
+check('menú 360x740: tile ≥ 96 y sin cortar (scroll solo si no entra)', ML.tileAltoPx(740, 6) >= 96 && ML.tileAltoPx(740, 6) <= 150 && ML.menuCabeEnPantalla(6, 740) && ML.tileAltoPx(560, 6) === 96 && !ML.menuCabeEnPantalla(6, 560) && !menuHtml.includes('min-h-[844px]') && menuHtml.includes('min-h-[100dvh]'));
+check('tile: alto por CSS con el mismo clamp (96–150) y subtítulo completo sin truncar', menuHtml.includes(ML.tileAltoCss(6)) && ML.tileAltoCss(6).startsWith('clamp(96px, calc((100dvh - ') && menuHtml.includes('Lo del día, ausencias y novedades') && !/data-movil-desc="1"[^>]*truncate|truncate[^>]*data-movil-desc="1"/.test(menuHtml) && menuHtml.includes('text-[17px] font-semibold'));
+const menuDatos = render(MovilMenuScreens, {
+  empresaName: 'Pruebas S.A.', modulos: saModules, unico: null, now: Date.UTC(2026, 9, 1, 15, 0, 0),
+  alertas: { operacion: 2, supervision: 0 },
+  datos: { operacion: { activos: 6 }, supervision: { activos: 6 }, planificacion: { huecos: 3, sinCronograma: 1 }, rrhh: { ausentesHoy: 4 }, eventuales: { arcaPendientes: 2 } },
+  onEmpresa: () => {}, onModulo: () => {}, onAsistente: () => {}, onEscritorio: () => {}, onLogout: () => {},
+});
+check('línea de estado con dato real por módulo', menuDatos.includes('>2 alertas · 6 activos<') && menuDatos.includes('>6 activos<') && menuDatos.includes('>3 huecos · 1 sin cronograma<') && menuDatos.includes('>4 ausencias hoy<') && menuDatos.includes('>2 ARCA pendientes<') && !menuDatos.includes('data-movil-module="servicios"[^>]*data-movil-estado'));
+check('tono: rojo en Operación con alertas, ámbar en lo pendiente, gris en Supervisión', menuDatos.includes('data-movil-estado="rojo"') && (menuDatos.match(/data-movil-estado="ambar"/g) || []).length === 3 && menuDatos.includes('data-movil-estado="gris"') && (menuDatos.match(/data-movil-estado=/g) || []).length === 5);
+check('sin dato no hay línea de estado', !menuHtml.includes('data-movil-estado=') && ML.estadoModulo('operacion', null) === null && ML.estadoModulo('operacion', { alertas: 0 }).texto === 'Sin alertas' && ML.estadoModulo('operacion', { alertas: 0, activos: 0 }).texto === '0 activos' && ML.estadoModulo('planificacion', { huecos: 0, sinCronograma: 0 }).texto === 'Al día' && ML.estadoModulo('rrhh', { ausentesHoy: 1 }).texto === '1 ausencia hoy' && ML.estadoModulo('servicios', {}) === null);
+const NOW_MENU = Date.UTC(2026, 9, 1, 15, 0, 0);
+const resumenMenu = ML.resumenTurnosMenu([
+  { startTime: NOW_MENU - 3600000, isPresent: true },
+  { startTime: NOW_MENU - 3600000, isPresent: true, isCompleted: true, realEndTime: {} },
+  { startTime: NOW_MENU - 3600000, isAbsent: true },
+  { startTime: NOW_MENU - 30 * 3600000, isAbsent: true },
+  { startTime: NOW_MENU + 3600000, employeeId: 'VACANTE' },
+  { startTime: NOW_MENU + 20 * 3600000, isUnassigned: true },
+  { startTime: NOW_MENU + 3600000, employeeId: 'VACANTE', draft: true },
+  { startTime: NOW_MENU - 3600000, isPresent: true, isFranco: true },
+], NOW_MENU);
+check('resumen de turnos del menú: activos, ausencias de hoy y huecos (sin borradores ni francos)', resumenMenu.activos === 1 && resumenMenu.ausentesHoy === 1 && resumenMenu.huecos === 2);
 check('ningún módulo del celular redefine tarjetas/píldoras sueltas en Operación', !readFileSync(join(web2, 'src/components/movil/OperacionScreens.tsx'), 'utf8').includes('TONE_PILL'));
 
 // ── Zoom del navegador: viewport, touch-action, inputs de 16 px y nada más ancho que la pantalla ──

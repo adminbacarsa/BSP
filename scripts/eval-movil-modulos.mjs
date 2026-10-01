@@ -78,6 +78,7 @@ for (const name of readdirSync(uiDir)) {
 }
 const withLibs = (src) => src
   .replace("from '@/lib/movil/empresaSelector'", `from ${JSON.stringify(lib.empresaSelector)}`)
+  .replace("from '@/lib/movil/menuLayout'", `from ${JSON.stringify(lib.menuLayout)}`)
   .replace("from '@/lib/movil/fechaCorta'", `from ${JSON.stringify(lib.fechaCorta)}`)
   .replace("from './ui/tones'", "from './ui/tones.mjs'")
   .replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
@@ -109,12 +110,12 @@ const menuBase = {
 };
 const todos = m.modulosMovil(() => false, true);
 const menuSa = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, modulos: todos, unico: null, alertas: { operacion: 3, rrhh: 1 } }));
-const tilesSa = (menuSa.match(/data-movil-tile="64"/g) || []).length;
+const tilesSa = (menuSa.match(/data-movil-tile="flex"/g) || []).length;
 check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && tilesSa === 6);
 check('menú sin encabezado grande ni bloque de empresa', !menuSa.includes('>Módulos<') && !menuSa.includes('Empresa activa') && !menuSa.includes('Cambiar a ') && !menuSa.includes('empresas<') && menuSa.includes('data-movil-fecha="1"'));
 check('menú: píldora de empresa es botón que abre la hoja', menuSa.includes('aria-label="Empresa Pruebas S.A.. Cambiar"') && menuSa.includes('data-movil-topbar="Menú"'));
-check('menú: tiles compactos 2 columnas con alertas a la derecha', menuSa.includes('grid-cols-2') && menuSa.includes('data-movil-tiles="6"') && menuSa.includes('data-movil-alertas="3"') && menuSa.includes('data-movil-alertas="1"') && (menuSa.match(/data-movil-alertas=/g) || []).length === 2 && !menuSa.includes('MovilIconBox') && !/bg-(emerald|indigo|violet|amber|blue)-(50|100)/.test(menuSa));
-check('menú: seis módulos + asistente entran en 844 sin scroll', sel.menuCabeEnPantalla(6) && sel.altoMenuPx(6) < 844 && menuSa.includes(`data-movil-alto="${sel.altoMenuPx(6)}"`) && menuSa.includes('>Asistente<') && menuSa.includes('Ver como escritorio'));
+check('menú: grilla 2x3 que ocupa la pantalla, alertas en la línea de estado', menuSa.includes('grid-cols-2') && menuSa.includes('data-movil-tiles="6"') && menuSa.includes('>3 alertas<') && menuSa.includes('data-movil-estado="rojo"') && !menuSa.includes('data-movil-alertas=') && !menuSa.includes('MovilIconBox') && !/bg-(emerald|indigo|violet|amber|blue)-(50|100)/.test(menuSa));
+check('menú: seis módulos entran en 390x844 sin scroll y en 360x740 sin cortar', sel.menuCabeEnPantalla(6, 844) && sel.altoMenuPx(6, 844) <= 844 && sel.tileAltoPx(844, 6) === 150 && sel.tileAltoPx(740, 6) >= 96 && menuSa.includes(`data-movil-alto="${sel.altoMenuPx(6)}"`) && menuSa.includes(`data-movil-alto-740="${sel.altoMenuPx(6, 740)}"`) && menuSa.includes('>Asistente<') && menuSa.includes('Ver como escritorio'));
 const menuOp = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, onEmpresa: undefined, modulos: operador, unico: operador[0] }));
 check('menú de un solo módulo: empresa, asistente y salir', !menuOp.includes('data-movil-module="rrhh"') && menuOp.includes('Volver a Operación') && menuOp.includes('Asistente') && menuOp.includes('Cerrar sesión') && menuOp.includes('data-movil-empresa="Pruebas S.A."') && !menuOp.includes('aria-label="Empresa'));
 
