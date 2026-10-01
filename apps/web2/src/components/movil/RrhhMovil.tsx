@@ -35,7 +35,15 @@ export function RrhhMovil() {
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
   const permitido = isSuperAdmin || canReadModule('RRHH');
-  const [panel, setPanel] = useState<RrhhPanel>('dia');
+  const router = useRouter();
+  const [fichaAbierta, setFichaAbierta] = useState(false);
+  const panelQuery = String(router.query.panel || '');
+  const panel: RrhhPanel = fichaAbierta ? 'ficha' : panelQuery === 'ausencia' || panelQuery === 'novedad' ? panelQuery : 'dia';
+  const setPanel = (next: RrhhPanel) => {
+    setFichaAbierta(next === 'ficha');
+    if (next === 'ficha') return;
+    void router.push(next === 'dia' ? '/admin/rrhh/movil/' : `/admin/rrhh/movil/?panel=${next}`);
+  };
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
   const [ausencias, setAusencias] = useState<AusenciaDia[]>([]);
   const [guardias, setGuardias] = useState<Guardia[]>([]);
@@ -94,7 +102,7 @@ export function RrhhMovil() {
           certificateUrl: row.certificateUrl,
         }));
         const gente: Guardia[] = empSnap.docs
-          .map((docSnap) => {
+          .map((docSnap): Guardia | null => {
             const data = docSnap.data();
             const status = String(data.status || 'ACTIVE').toUpperCase();
             if (status === 'INACTIVE') return null;
@@ -105,7 +113,7 @@ export function RrhhMovil() {
               preferredObjectiveId: String(data.preferredObjectiveId || ''),
             };
           })
-          .filter((row): row is Guardia => !!row);
+          .filter((row): row is Guardia => row !== null);
         setAusencias(rows);
         setGuardias(gente);
         const activos = catalogo.filter((tipo) => tipo.status === 'ACTIVE').map((tipo) => ({
@@ -167,8 +175,10 @@ export function RrhhMovil() {
 
   const abrirFicha = (id: string) => {
     setElegidaId(id);
-    setPanel('ficha');
+    setFichaAbierta(true);
   };
+
+  useEffect(() => { setFichaAbierta(false); }, [panelQuery]);
 
   const guardarAusencia = () => {
     const tipo = tipos.find((row) => row.id === tipoId);
@@ -207,7 +217,7 @@ export function RrhhMovil() {
       };
       (data as Absence & { absenceType: string }).absenceType = tipo.code;
       const docRef = await absenceService.add(data, empresaId);
-      if (absenceReplicatesToPlanning({ ...data, id: docRef.id })) {
+      if (absenceReplicatesToPlanning(data)) {
         await replicarAusenciaPlanificador({
           empresaId,
           migracionCompleta,

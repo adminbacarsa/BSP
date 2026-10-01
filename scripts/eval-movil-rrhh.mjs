@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -10,18 +10,11 @@ const root = join(here, '../apps/web2/src');
 
 const { createWriteQueue } = await import(pathToFileURL(join(root, 'lib/movil/writeQueue.ts')).href);
 const { resumenDiaRrhh } = await import(pathToFileURL(join(root, 'lib/movil/rrhhDia.ts')).href);
-const { movilDestinosVisibles } = await import(pathToFileURL(join(root, 'lib/movil/destinos.ts')).href);
-const navOut = join(here, '../apps/web2/.movil-eval-rrhh');
-mkdirSync(navOut, { recursive: true });
-const navJs = ts.transpileModule(
-  readFileSync(join(root, 'lib/movil/navItems.ts'), 'utf8').replace(
-    "from '@/lib/movil/destinos'",
-    `from ${JSON.stringify(pathToFileURL(join(root, 'lib/movil/destinos.ts')).href)}`,
-  ),
-  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 }, fileName: 'navItems.ts' },
-).outputText;
-writeFileSync(join(navOut, 'navItems.mjs'), navJs);
-const { movilNavForPermissions } = await import(pathToFileURL(join(navOut, 'navItems.mjs')).href);
+const { compileMovilLib } = await import('./movil-eval-lib.mjs');
+const outdir = join(here, '../apps/web2/.movil-eval');
+rmSync(outdir, { recursive: true, force: true });
+const lib = compileMovilLib(outdir);
+const { movilNavForPermissions } = await import(lib.navItems);
 
 let failed = 0;
 function check(name, ok) {
@@ -48,18 +41,11 @@ const dia = resumenDiaRrhh('2026-10-04', [
 ]);
 check('tarjetas del día', dia.ausenciasHoy.length === 2 && dia.licencias.length === 2 && dia.certificados.length === 1 && dia.certificados[0].employeeName.includes('Guerrero'));
 
-const destinos = movilDestinosVisibles(() => false, true).map((item) => item.label).join(',');
-check('superadmin ve el menú', destinos === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
+const { modulosMovil } = await import(lib.movilModulos);
+check('superadmin ve el menú', modulosMovil(() => false, true).map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 const ops = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones').map((item) => item.label).join(',');
-check('barra de Operación solo con sus secciones', ops === 'Objetivos,Alertas de operación,Sala,Menú');
-const rrhhBar = movilNavForPermissions((key) => key === 'RRHH', '/admin/rrhh/movil').map((item) => item.label).join(',');
-check('barra de RRHH', rrhhBar === 'Hoy,Cargar,Novedades,Menú');
-const evBar = movilNavForPermissions((key) => key === 'EVENTUALES', '/admin/rrhh/eventuales').map((item) => item.label).join(',');
-check('barra de Eventuales', evBar === 'Bolsa,ARCA pendientes,Alta,Menú');
+check('barra de Operación sin RRHH', ops === 'Objetivos,Alertas,Sala,Menú');
 
-const outdir = join(here, '../apps/web2/.movil-eval');
-rmSync(outdir, { recursive: true, force: true });
-mkdirSync(outdir, { recursive: true });
 function compile(file, name) {
   const js = ts.transpileModule(readFileSync(file, 'utf8'), {
     compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
@@ -148,16 +134,15 @@ const ficha = renderToStaticMarkup(createElement(RrhhScreens, {
 }));
 check('ficha con llamar', ficha.includes('Llamar') && ficha.includes('lun 06/10') && ficha.includes('href="tel:3510000000"'));
 
-const ev = renderToStaticMarkup(createElement(EventualesScreens, {
+const evProps = {
   empresa: 'Pruebas S.A.',
   online: false,
   pendingLabel: null,
+  panel: 'alta',
   buscar: 'Sosa',
   onBuscar: noop,
   personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' }],
   onElegir: noop,
-  altaAbierta: true,
-  onAbrirAlta: noop,
   onCerrarAlta: noop,
   cuil: '20-11111111-2',
   onCuil: noop,
@@ -177,10 +162,11 @@ const ev = renderToStaticMarkup(createElement(EventualesScreens, {
   onArca: noop,
   onConfirmarArca: noop,
   elegido: { id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' },
-}));
-check('eventuales 390 muestra bolsa, marco y arca', ev.includes('data-viewport="390x844"') && ev.includes('Sosa, Carla') && ev.includes('Marco vigente') && ev.includes('Alta rápida') && ev.includes('ARCA requiere conexión') && ev.includes('20-11111111-2 válido'));
+};
+const ev = renderToStaticMarkup(createElement(EventualesScreens, evProps));
+const evArca = renderToStaticMarkup(createElement(EventualesScreens, { ...evProps, panel: 'arca' }));
+check('eventuales 390 muestra bolsa, marco y arca', ev.includes('data-viewport="390x844"') && ev.includes('Sosa, Carla') && ev.includes('Marco vigente') && ev.includes('Alta rápida') && evArca.includes('ARCA requiere conexión') && ev.includes('20-11111111-2 válido'));
 
-rmSync(navOut, { recursive: true, force: true });
 if (failed) {
   console.error(failed, 'fallos');
   process.exit(1);

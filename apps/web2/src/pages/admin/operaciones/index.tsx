@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { OperacionMovil } from '@/components/movil/OperacionMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { filtrarAlertasDelModulo, moduloMovilDe } from '@/lib/movil/movilModulos';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield,
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
@@ -3750,7 +3751,7 @@ export default function OperacionesPage() {
                         setViewTab: (tab: string) => logic.setViewTab(tab as never),
                         handleAction: (action: string, shiftId: string, payload?: unknown) => logic.handleAction(action, shiftId, payload),
                     }}
-                    notices={empNovedades
+                    notices={filtrarAlertasDelModulo(moduloMovilDe('/admin/operaciones'), empNovedades as Array<{ type?: string; source?: string }>)
                         .filter((n: any) => n.type === 'CRONOGRAMA_SIN_PUBLICAR' && n.status !== 'ATENDIDA' && n.status !== 'atendida')
                         .map((n: any) => String(n.description || n.title || 'Cronograma sin publicar'))}
                     objectives={objectivesWithAlerts}

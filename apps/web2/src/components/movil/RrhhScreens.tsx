@@ -52,23 +52,7 @@ export function RrhhScreens(props: {
           <p className="mt-2 rounded-xl bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-900">Pendiente de enviar: {props.pendingLabel}</p>
         )}
       </header>
-      <div className="flex gap-2 overflow-x-auto px-3 py-3">
-        {([
-          ['dia', 'Hoy'],
-          ['ausencia', 'Ausencia'],
-          ['novedad', 'Novedad'],
-        ] as const).map(([id, label]) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => props.onPanel(id)}
-            className={`min-h-12 shrink-0 rounded-2xl px-4 text-sm font-black shadow-sm ${props.panel === id ? 'bg-indigo-600 text-white' : 'bg-white text-slate-600'}`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-      <div className="flex flex-1 flex-col gap-3 px-3">
+      <div className="flex flex-1 flex-col gap-3 px-3 pt-3">
         {props.panel === 'dia' && (
           <>
             <Tarjeta titulo="Ausencias de hoy" vacio="Nadie ausente hoy." items={props.ausenciasHoy.map((row) => ({ key: row.id, id: row.employeeId, titulo: row.nombre, detalle: row.tipo }))} onOpen={props.onFicha} />

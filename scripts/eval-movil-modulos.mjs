@@ -1,0 +1,123 @@
+import { createRequire } from 'node:module';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const here = dirname(fileURLToPath(import.meta.url));
+const require = createRequire(join(here, '../apps/web2/package.json'));
+const ts = require('typescript');
+const root = join(here, '../apps/web2/src');
+
+const { compileMovilLib } = await import('./movil-eval-lib.mjs');
+const outdir = join(here, '../apps/web2/.movil-eval');
+rmSync(outdir, { recursive: true, force: true });
+const lib = compileMovilLib(outdir);
+const m = await import(lib.movilModulos);
+
+let failed = 0;
+function check(name, ok) {
+  if (!ok) {
+    failed += 1;
+    console.error('FAIL', name);
+  } else {
+    console.log('OK', name);
+  }
+}
+
+const labels = (items) => items.map((i) => i.label).join(' · ');
+const solo = (...keys) => (key) => keys.includes(key);
+
+check('seis módulos registrados', m.modulosRegistrados().map((x) => x.id).join(',') === 'operacion,supervision,planificacion,eventuales,rrhh,servicios');
+check('Operación: Objetivos · Alertas · Sala · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/operaciones/'))) === 'Objetivos · Alertas · Sala · Menú');
+check('Supervisión por query modo', m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }).id === 'supervision' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }))) === 'Objetivos · Alertas · Menú');
+check('Planificación: Próximos días · Huecos · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/planificacion/'))) === 'Próximos días · Huecos · Menú');
+check('RRHH: Hoy · Cargar · Novedades · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'))) === 'Hoy · Cargar · Novedades · Menú');
+check('Eventuales: Bolsa · ARCA · Alta · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'))) === 'Bolsa · ARCA · Alta · Menú');
+check('Servicios: Lista · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/servicios/'))) === 'Lista · Menú');
+check('sección activa por panel', m.seccionActiva(m.moduloMovilDe('/admin/rrhh/movil/'), { panel: 'ausencia' }) === 'cargar' && m.seccionActiva(m.moduloMovilDe('/admin/operaciones/'), {}) === 'objetivos');
+
+const operador = m.modulosMovil(solo('OPERATIONS'));
+check('operador sin RRHH nunca lo ve', operador.map((x) => x.id).join(',') === 'operacion' && m.menuMovil(operador).unico?.id === 'operacion' && !m.menuMovil(operador).mostrarModulos);
+check('rrhh ve RRHH y Eventuales', m.modulosMovil(solo('RRHH')).map((x) => x.id).join(',') === 'eventuales,rrhh');
+check('superadmin ve todo', m.modulosMovil(() => false, true).length === 6);
+
+const ops = m.moduloMovilDe('/admin/operaciones/');
+const alertas = [
+  { type: 'AUSENCIA_OPERATIVA' },
+  { type: 'ALTA_ARCA_PENDIENTE' },
+  { type: 'ARCA_BAJA_PENDIENTE' },
+  { type: 'CRONOGRAMA_SIN_PUBLICAR' },
+  { type: 'IA_ALERTA_X' },
+  { type: 'Enfermedad', source: 'AUSENCIA' },
+];
+check('Operación filtra ARCA salvo la fichada', m.filtrarAlertasDelModulo(ops, alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,ALTA_ARCA_PENDIENTE,CRONOGRAMA_SIN_PUBLICAR');
+check('Eventuales ve ARCA', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'), alertas).map((a) => a.type).join(',') === 'ALTA_ARCA_PENDIENTE,ARCA_BAJA_PENDIENTE');
+check('RRHH ve licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'), alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,Enfermedad');
+check('Planificación ve cronograma y licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/planificacion/'), alertas).map((a) => a.type).join(',') === 'CRONOGRAMA_SIN_PUBLICAR,Enfermedad');
+
+const compile = (src, name) => {
+  const out = join(outdir, name.replace(/\.tsx$/, '.mjs'));
+  writeFileSync(out, ts.transpileModule(src, {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
+    fileName: name,
+  }).outputText);
+  return out;
+};
+const sheet = compile(readFileSync(join(root, 'components/movil/BottomSheet.tsx'), 'utf8'), 'BottomSheet.tsx');
+const menuFile = compile(readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8').replace(/import type .*\n/, ''), 'MovilMenuScreens.tsx');
+const rrhhFile = compile(readFileSync(join(root, 'components/movil/RrhhScreens.tsx'), 'utf8'), 'RrhhScreens.tsx');
+const evFile = compile(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8').replace("from './BottomSheet'", JSON.stringify(pathToFileURL(sheet).href).replace(/^/, 'from ')), 'EventualesScreens.tsx');
+
+const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
+const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);
+const { MovilMenuScreens } = await import(pathToFileURL(menuFile).href);
+const { RrhhScreens } = await import(pathToFileURL(rrhhFile).href);
+const { EventualesScreens } = await import(pathToFileURL(evFile).href);
+const noop = () => {};
+
+const menuBase = {
+  empresaId: 'pruebas_sa',
+  empresaName: 'Pruebas S.A.',
+  empresas: [{ id: 'pruebas_sa', name: 'Pruebas S.A.' }, { id: 'otra', name: 'Otra S.A.' }],
+  canSwitchEmpresa: true,
+  onModulo: noop, onSwitchEmpresa: noop, onAsistente: noop, onEscritorio: noop, onLogout: noop,
+};
+const todos = m.modulosMovil(() => false, true);
+const menuSa = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, modulos: todos, unico: null }));
+check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && menuSa.includes('Cambiar a Otra S.A.'));
+const menuOp = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, canSwitchEmpresa: false, modulos: operador, unico: operador[0] }));
+check('menú de un solo módulo: empresa, asistente y salir', !menuOp.includes('data-movil-module="rrhh"') && menuOp.includes('Volver a Operación') && menuOp.includes('Asistente') && menuOp.includes('Cerrar sesión') && !menuOp.includes('Cambiar a'));
+
+const rrhhBase = {
+  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, hoyLabel: 'sábado 4 de octubre',
+  ausenciasHoy: [{ id: '1', employeeId: 'g', nombre: 'Guerrero, Martín', tipo: 'Enfermedad' }], licencias: [], certificados: [],
+  busqueda: '', onBusqueda: noop, guardias: [{ id: 'g', nombre: 'Guerrero, Martín', telefono: '351' }], tipos: [{ id: 'e', label: 'Enfermedad', code: 'E' }], tipoId: 'e', onTipo: noop,
+  dias: '1', onDias: noop, fotoNombre: null, onFoto: noop, onGuardarAusencia: noop, novedadTipo: 'Observación', onNovedadTipo: noop, novedadTexto: '', onNovedadTexto: noop, onGuardarNovedad: noop,
+  ficha: null, onElegir: noop, onFicha: noop, onPanel: noop,
+};
+const hoy = renderToStaticMarkup(createElement(RrhhScreens, { ...rrhhBase, panel: 'dia' }));
+const cargar = renderToStaticMarkup(createElement(RrhhScreens, { ...rrhhBase, panel: 'ausencia' }));
+const novedad = renderToStaticMarkup(createElement(RrhhScreens, { ...rrhhBase, panel: 'novedad' }));
+check('RRHH Hoy sin pestañas internas', hoy.includes('Ausencias de hoy') && !hoy.includes('Cargar ausencia') && !hoy.includes('>Hoy<'));
+check('RRHH Cargar', cargar.includes('Cargar ausencia') && cargar.includes('Foto del certificado') && !cargar.includes('Ausencias de hoy'));
+check('RRHH Novedades', novedad.includes('Novedad rápida') && novedad.includes('Incidente'));
+
+const evBase = {
+  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, buscar: '', onBuscar: noop,
+  personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' }], onElegir: noop, onCerrarAlta: noop,
+  cuil: '', onCuil: noop, cuilEstado: '', nombre: '', onNombre: noop, mail: '', onMail: noop, telefono: '', onTelefono: noop, onGuardarAlta: noop, onCrearAcceso: noop,
+  arca: [{ id: 'a', nombre: 'Sosa, Carla', tipo: 'AT', estado: 'PENDIENTE' }], nro: '', onNro: noop, arcaId: '', onArca: noop, onConfirmarArca: noop, elegido: null,
+};
+const bolsa = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'bolsa' }));
+const arca = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'arca' }));
+const alta = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'alta' }));
+check('Eventuales Bolsa', bolsa.includes('Sosa, Carla') && bolsa.includes('Marco vigente') && !bolsa.includes('ARCA pendiente') && !bolsa.includes('Alta rápida'));
+check('Eventuales ARCA', arca.includes('ARCA pendiente') && arca.includes('AT PENDIENTE') && !arca.includes('Buscar en la bolsa'));
+check('Eventuales Alta', alta.includes('Alta rápida') && alta.includes('Guardar en la bolsa'));
+
+rmSync(outdir, { recursive: true, force: true });
+if (failed) {
+  console.error(failed, 'fallos');
+  process.exit(1);
+}
+console.log('eval-movil-modulos ok');
