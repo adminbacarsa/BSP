@@ -51,6 +51,8 @@ interface Props {
     handleAction: (action: string, shiftId: string, payload?: unknown) => Promise<unknown> | void;
   };
   notices?: string[];
+  /** Única huella de CRONOGRAMA_SIN_PUBLICAR en Operación: una línea agrupada con las que cortan mañana. */
+  cronogramaAviso?: { texto: string; onVista: () => Promise<unknown> | void } | null;
   /** Supervisión: mismo Centro de Control sin acciones ni sala. */
   readOnly?: boolean;
   /** Turnos de hoy (`isOpsShiftHoy`) del monitor; acá se aplica el mismo corte del encabezado del escritorio. */
@@ -280,6 +282,7 @@ export function OperacionMovil(props: Props) {
         online={online}
         pendingLabel={pending}
         notices={props.notices}
+        cronogramaAviso={props.cronogramaAviso}
         readOnly={readOnly}
         now={nowMs}
         objectives={objectives}

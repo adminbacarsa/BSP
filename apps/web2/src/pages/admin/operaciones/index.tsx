@@ -6,7 +6,8 @@ import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { OperacionMovil } from '@/components/movil/OperacionMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
-import { filtrarAlertasDelModulo, moduloMovilDe } from '@/lib/movil/movilModulos';
+import { CronogramaAvisoLinea } from '@/components/operaciones/CronogramaAvisoLinea';
+import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield,
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
@@ -2029,6 +2030,11 @@ export default function OperacionesPage() {
     const [cierreObs, setCierreObs] = useState('');
     const [cierreLoading, setCierreLoading] = useState(false);
     const [empNovedades, setEmpNovedades] = useState<any[]>([]);
+    // CRONOGRAMA_SIN_PUBLICAR es de Planificación: acá solo una línea agrupada con las que cortan mañana.
+    const cronograma = useCronogramaSinPublicar(empresaId);
+    const cronogramaAviso = cronograma.resumenOperacion
+        ? { texto: cronograma.resumenOperacion.texto, onVista: () => cronograma.marcarVista(cronograma.resumenOperacion!.ids, 'OPERACIONES') }
+        : null;
     const [activeConvsByObjective, setActiveConvsByObjective] = useState<Record<string, number>>({});
     const [activeConvsList, setActiveConvsList] = useState<any[]>([]);
     const [convsPanelOpen, setConvsPanelOpen] = useState(true);
@@ -2077,6 +2083,7 @@ export default function OperacionesPage() {
         const filtered = empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false; // auto-procesada
+            if (n.type === 'CRONOGRAMA_SIN_PUBLICAR') return false; // de Planificación: solo la línea agrupada (cronogramaAviso)
             if (isHiddenFromOpsAlerts(n)) return false; // fin rutinario: no inbox
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false; // REC+12 / retención sin ACT
             if (isStaleIaAutomationNovedad(n, logic.processedData)) return false; // IA fuera de ventana CC
@@ -3765,9 +3772,7 @@ export default function OperacionesPage() {
                         setViewTab: (tab: string) => logic.setViewTab(tab as never),
                         handleAction: (action: string, shiftId: string, payload?: unknown) => logic.handleAction(action, shiftId, payload),
                     }}
-                    notices={filtrarAlertasDelModulo(moduloMovilDe('/admin/operaciones'), empNovedades as Array<{ type?: string; source?: string }>)
-                        .filter((n: any) => n.type === 'CRONOGRAMA_SIN_PUBLICAR' && n.status !== 'ATENDIDA' && n.status !== 'atendida')
-                        .map((n: any) => String(n.description || n.title || 'Cronograma sin publicar'))}
+                    cronogramaAviso={cronogramaAviso}
                     shifts={movilShiftsHoy}
                     publishStatusMap={logic.publishStatusMap}
                     catalogo={logic.objectives as Array<{ id?: unknown; clientId?: unknown; name?: unknown; clientName?: unknown }>}
@@ -4747,6 +4752,7 @@ export default function OperacionesPage() {
                         {/* ── Tab Novedades ── */}
                         {bitacoraTab === 'alertas' && (
                         <div className="flex-1 overflow-y-auto">
+                          {cronogramaAviso && <CronogramaAvisoLinea texto={cronogramaAviso.texto} onVista={cronogramaAviso.onVista} />}
                           {pendingNovedades.length === 0 ? (
                             <div className="p-6 text-center">
                               <CheckCircle size={24} className="mx-auto mb-2 text-emerald-400 opacity-50"/>
@@ -5105,6 +5111,7 @@ export default function OperacionesPage() {
                         })()}
 
                         <div className="flex-1 overflow-y-auto">
+                            {cronogramaAviso && <CronogramaAvisoLinea texto={cronogramaAviso.texto} onVista={cronogramaAviso.onVista} />}
                             {pendingNovedades.length === 0 ? (
                                 <div className="p-4 text-center">
                                     <CheckCircle size={22} className="mx-auto mb-1.5 text-emerald-400 opacity-50"/>

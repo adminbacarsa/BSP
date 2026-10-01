@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { CalendarX2, Check, ChevronDown, ChevronUp } from 'lucide-react';
 import type { CandidatoMovil, FranjaMovil, TabCandidato } from '@/lib/movil/planificacionBasica';
+import type { CronogramaGrupo, CronogramaItem } from '@/lib/movil/cronogramaAlertas';
 import { MovilTopBar } from './ui/MovilTopBar';
 
 const TABS: { id: TabCandidato | 'eventuales'; label: string }[] = [
@@ -24,6 +26,52 @@ function diaCorto(fecha: string): { n: string; lab: string } {
   return { n: String(d), lab };
 }
 
+/**
+ * Alerta agrupada de Planificación: «15 objetivos sin cronograma de octubre». Se despliega a la
+ * lista por objetivo, cada uno con «Publicar» (abre el planificador del mes) y «Vista».
+ */
+export function CronogramaSinPublicarCard({ grupo, onVista, onPublicar, abiertoInicial = false }: {
+  grupo: CronogramaGrupo;
+  onVista: (ids: readonly string[]) => void;
+  onPublicar: (item: CronogramaItem) => void;
+  abiertoInicial?: boolean;
+}) {
+  const [abierto, setAbierto] = useState(abiertoInicial);
+  return (
+    <section className="rounded-lg border border-amber-200 bg-white" data-cronograma-grupo={grupo.items.length} data-cronograma-mes={grupo.mesLabel}>
+      <button type="button" onClick={() => setAbierto((v) => !v)} aria-expanded={abierto} className="flex min-h-12 w-full items-center gap-2 px-3 text-left">
+        <span aria-hidden="true" className="h-8 w-[3px] rounded bg-amber-500" />
+        <CalendarX2 size={15} strokeWidth={1.75} className="shrink-0 text-amber-600" aria-hidden="true" />
+        <span className="flex-1 text-[13px] font-semibold text-slate-900">{grupo.titulo}</span>
+        {abierto ? <ChevronUp size={15} strokeWidth={1.75} className="text-slate-400" aria-hidden="true" /> : <ChevronDown size={15} strokeWidth={1.75} className="text-slate-400" aria-hidden="true" />}
+      </button>
+      {abierto && (
+        <div className="border-t border-[#eceef1] px-3 pb-2">
+          <div className="flex justify-end py-1">
+            <button type="button" onClick={() => onVista(grupo.ids)} className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[11px] font-semibold text-slate-700" data-cronograma-vista="todas">
+              Marcar todas como vistas
+            </button>
+          </div>
+          {grupo.items.map((item) => (
+            <div key={item.id} className="flex min-h-12 items-center gap-2 border-t border-[#eceef1] py-1.5" data-cronograma-item={item.objectiveId}>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-slate-900">{item.objectiveName}</span>
+                <span className="block text-[11px] font-medium text-slate-500">{item.corte ? `Mañana corta a las ${item.corte}` : 'Mañana no entra en operación'}</span>
+              </span>
+              <button type="button" onClick={() => onPublicar(item)} className="h-8 shrink-0 rounded-lg bg-[var(--movil-primary,#111827)] px-2.5 text-[11px] font-semibold text-[var(--movil-primary-text,#fff)]" data-cronograma-publicar={item.objectiveId}>
+                Publicar
+              </button>
+              <button type="button" onClick={() => onVista([item.id])} aria-label={`Marcar como vista ${item.objectiveName}`} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700" data-cronograma-vista={item.id}>
+                <Check size={14} strokeWidth={2} aria-hidden="true" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function PlanificacionMovilView(props: {
   empresa: string;
   onEmpresa?: () => void;
@@ -35,6 +83,10 @@ export function PlanificacionMovilView(props: {
   porPublicar: number;
   puedePublicar: boolean;
   mesPublicado: boolean;
+  /** CRONOGRAMA_SIN_PUBLICAR agrupadas por mes (pendientes). */
+  cronograma?: CronogramaGrupo[];
+  onCronogramaVista?: (ids: readonly string[]) => void;
+  onCronogramaPublicar?: (item: CronogramaItem) => void;
   onDia: (dia: string) => void;
   onHueco: (franja: FranjaMovil) => void;
   onAsignado: (franja: FranjaMovil) => void;
@@ -73,6 +125,14 @@ export function PlanificacionMovilView(props: {
         })}
       </div>
       <div className="flex-1 space-y-2 px-3 pb-28">
+        {(props.cronograma || []).map((grupo) => (
+          <CronogramaSinPublicarCard
+            key={grupo.mesLabel}
+            grupo={grupo}
+            onVista={(ids) => props.onCronogramaVista?.(ids)}
+            onPublicar={(item) => props.onCronogramaPublicar?.(item)}
+          />
+        ))}
         {huecos > 0 && (
           <p className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-[11px] font-bold text-rose-800">{huecos} hueco{huecos === 1 ? '' : 's'} en estos 4 días</p>
         )}

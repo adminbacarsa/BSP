@@ -52,18 +52,61 @@ export function corteServicioHm(positions: unknown): string | null {
   return best;
 }
 
+const VISTA = new Set(['ATENDIDA', 'atendida']);
+
+/** Id de la novedad: UNA por empresa, objetivo y mes (antes era por día y se acumulaban). */
+export function cronogramaSinPublicarDocId(empresaId: string, objectiveId: string, mesKey: string): string {
+  return `crono_sin_pub_${empresaId}_${objectiveId}_${mesKey}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 180);
+}
+
+/**
+ * Si ya existía una novedad del mismo objetivo-mes marcada como vista (por ejemplo las
+ * diarias del cron anterior) con el mismo texto, la nueva nace vista: nada cambió.
+ */
+async function vistaHeredada(
+  db: Firestore,
+  empresaId: string,
+  objectiveId: string,
+  mesKey: string,
+  description: string,
+): Promise<Record<string, unknown> | null> {
+  const snap = await db.collection('novedades')
+    .where('empresaId', '==', empresaId)
+    .where('objectiveId', '==', objectiveId)
+    .where('type', '==', 'CRONOGRAMA_SIN_PUBLICAR')
+    .get();
+  const previas = snap.docs
+    .map((d) => d.data())
+    .filter((d) => {
+      const mesDoc = String(d.mesKey || String(d.dayYmd || '').slice(0, 7));
+      return mesDoc === mesKey && VISTA.has(String(d.status || ''));
+    })
+    .sort((a, b) => ((b.atendidaAt as { toMillis?: () => number })?.toMillis?.() || 0) - ((a.atendidaAt as { toMillis?: () => number })?.toMillis?.() || 0));
+  const ultima = previas[0];
+  if (!ultima || String(ultima.description || '') !== description) return null;
+  return {
+    status: 'ATENDIDA',
+    atendidaAt: ultima.atendidaAt || admin.firestore.FieldValue.serverTimestamp(),
+    atendidaPor: ultima.atendidaPor || 'Sistema',
+    atendidaPorUid: ultima.atendidaPorUid || null,
+    vistaHeredadaDe: ultima.dayYmd || null,
+  };
+}
+
 export async function runAvisoCronogramaSinPublicar(
   db: Firestore,
   now: Date = new Date(),
-): Promise<{ created: number; skipped?: string }> {
+): Promise<{ created: number; updated: number; skipped?: string }> {
   const clock = arParts(now);
-  if (clock.hour !== 18) return { created: 0, skipped: 'NOT_18' };
+  if (clock.hour !== 18) return { created: 0, updated: 0, skipped: 'NOT_18' };
   const tomorrow = addDays(clock.ymd, 1);
   const mes = MESES[tomorrow.month - 1] || String(tomorrow.month);
+  const mesKey = `${tomorrow.year}-${String(tomorrow.month).padStart(2, '0')}`;
   const probe = admin.firestore.Timestamp.fromDate(new Date(`${tomorrow.ymd}T12:00:00-03:00`));
   const cache = new ObjectiveOperationCache();
   const empresas = await db.collection('empresas').get();
   let created = 0;
+  let updated = 0;
 
   for (const emp of empresas.docs) {
     const empresaId = emp.id;
@@ -82,15 +125,28 @@ export async function runAvisoCronogramaSinPublicar(
         startTime: probe,
       });
       if (verdict !== 'OUT') continue;
-      const id = `crono_sin_pub_${empresaId}_${objectiveId}_${tomorrow.ymd}`.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 180);
-      const ref = db.collection('novedades').doc(id);
-      const prev = await ref.get();
-      if (prev.exists) continue;
+      const ref = db.collection('novedades').doc(cronogramaSinPublicarDocId(empresaId, objectiveId, mesKey));
       const name = String(sla.objectiveName || sla.name || objectiveId);
       const corte = corteServicioHm(sla.positions);
       const description = corte
         ? `${name}: ${mes} sin cronograma publicado. Mañana el servicio se corta a las ${corte}.`
         : `${name}: ${mes} sin cronograma publicado. Mañana el servicio no entra en operación.`;
+      const prev = await ref.get();
+      if (prev.exists) {
+        // Misma novedad del objetivo-mes: se actualiza el día y el texto; el status (vista o no) no cambia.
+        if (prev.data()?.dayYmd === tomorrow.ymd) continue;
+        await ref.set({
+          description,
+          objectiveName: name,
+          corteHm: corte,
+          dayYmd: tomorrow.ymd,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          vecesAvisado: admin.firestore.FieldValue.increment(1),
+        }, { merge: true });
+        updated += 1;
+        continue;
+      }
+      const heredada = await vistaHeredada(db, empresaId, objectiveId, mesKey, description);
       await ref.set({
         type: 'CRONOGRAMA_SIN_PUBLICAR',
         status: 'PENDIENTE',
@@ -100,17 +156,25 @@ export async function runAvisoCronogramaSinPublicar(
         clientId: sla.clientId || null,
         description,
         informational: true,
+        mesKey,
+        year: tomorrow.year,
+        month: tomorrow.month,
+        corteHm: corte,
         dayYmd: tomorrow.ymd,
+        vecesAvisado: 1,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         source: 'CRONOGRAMA_18',
+        ...(heredada || {}),
       });
       created += 1;
+      if (heredada) continue;
       await pushPlanificacion(db, empresaId, description).catch((e) => {
         console.warn('[cronogramaSinPublicar] push:', (e as Error)?.message);
       });
     }
   }
-  return { created };
+  return { created, updated };
 }
 
 async function pushPlanificacion(db: Firestore, empresaId: string, body: string): Promise<void> {

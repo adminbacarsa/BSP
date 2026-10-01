@@ -1,7 +1,8 @@
 import { registrarModuloMovil, tipoAlerta, type MovilAlerta } from './modulos';
 
 const ARCA_EN_OPERACION = new Set(['ALTA_ARCA_PENDIENTE']);
-const FUERA_DE_OPERACION = /^(IA_ALERTA_|INTEGRIDAD_DATOS|CERTIFICADO_|MARCO_|CONTRATO_|EVENTUAL_)/;
+// CRONOGRAMA_* es de Planificación: Operación solo muestra una línea agrupada (`cronogramaAlertas.ts`).
+const FUERA_DE_OPERACION = /^(IA_ALERTA_|INTEGRIDAD_DATOS|CERTIFICADO_|MARCO_|CONTRATO_|EVENTUAL_|CRONOGRAMA_)/;
 
 /** Alertas operativas: lo que afecta una fichada o un puesto hoy. ARCA solo si frena la fichada. */
 export function esAlertaDeOperacion(alerta: MovilAlerta): boolean {

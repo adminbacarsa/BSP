@@ -52,7 +52,7 @@ const alertas = [
   { type: 'IA_ALERTA_X' },
   { type: 'Enfermedad', source: 'AUSENCIA' },
 ];
-check('Operación filtra ARCA salvo la fichada', m.filtrarAlertasDelModulo(ops, alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,ALTA_ARCA_PENDIENTE,CRONOGRAMA_SIN_PUBLICAR');
+check('Operación filtra ARCA salvo la fichada y no lista cronograma', m.filtrarAlertasDelModulo(ops, alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,ALTA_ARCA_PENDIENTE');
 check('Eventuales ve ARCA', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/eventuales/'), alertas).map((a) => a.type).join(',') === 'ALTA_ARCA_PENDIENTE,ARCA_BAJA_PENDIENTE');
 check('RRHH ve licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'), alertas).map((a) => a.type).join(',') === 'AUSENCIA_OPERATIVA,Enfermedad');
 check('Planificación ve cronograma y licencias', m.filtrarAlertasDelModulo(m.moduloMovilDe('/admin/planificacion/'), alertas).map((a) => a.type).join(',') === 'CRONOGRAMA_SIN_PUBLICAR,Enfermedad');

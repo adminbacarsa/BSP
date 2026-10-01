@@ -3483,7 +3483,7 @@ export const scheduledCronogramaSinPublicar = onScheduleV2(
     const db = admin.firestore();
     const { runAvisoCronogramaSinPublicar } = await import('./coverage/avisoCronogramaSinPublicar');
     const r = await runAvisoCronogramaSinPublicar(db, new Date());
-    if (r.created > 0) console.log(`[scheduledCronogramaSinPublicar] novedades=${r.created}`);
+    if (r.created > 0 || r.updated > 0) console.log(`[scheduledCronogramaSinPublicar] creadas=${r.created} actualizadas=${r.updated}`);
   },
 );
 

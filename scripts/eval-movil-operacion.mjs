@@ -110,7 +110,7 @@ check('un operador sin RRHH no lo ve', !movilModulesForPermissions((key) => key 
 check('ALTA_ARCA_PENDIENTE es de Operación', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE'));
 check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
 check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'CERTIFICADO_VENCIDO') && alertaDelModulo('rrhh', 'CERTIFICADO_VENCIDO'));
-check('cronograma sin publicar es de Planificación y Operación lo ve como aviso', alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR') && alertaDelModulo('operacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('eventuales', 'CRONOGRAMA_SIN_PUBLICAR'));
+check('cronograma sin publicar es solo de Planificación (Operación no la lista)', alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('operacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('supervision', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('eventuales', 'CRONOGRAMA_SIN_PUBLICAR'));
 const saModules = movilModulesForPermissions(() => true);
 check('SuperAdmin ve los 6 módulos', saModules.map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 check('solo SUPERVISION ve Supervisión y nada más', movilModulesForPermissions((key) => key === 'SUPERVISION').map((item) => item.id).join(',') === 'supervision');
@@ -456,14 +456,66 @@ const headerHtml = render(OperacionScreens, {
   online: true,
   pendingLabel: null,
   stats: { activos, retenidos, ausentes: 0, vacantes: 0, plan: 0 },
-  notices: ['Nuevo Edificio: octubre sin cronograma publicado. Mañana el servicio se corta a las 07:00.'],
+  cronogramaAviso: { texto: 'Nuevo Edificio corta mañana a las 07:00 por falta de cronograma', onVista: () => {} },
   panel: 'home',
   objective: null,
   alerts: [],
   objectives: [{ objectiveId: 'NK1', name: 'Nuevo Edificio', client: 'NK', active: 0, retention: 3, absent: 0, vacant: 0, plan: 0, shifts: [] }],
   ...noops,
 });
-check('header muestra ACT 3 y RET 3 y el aviso', headerHtml.includes('>3<') && headerHtml.includes('se corta a las 07:00'));
+check('header muestra ACT 3 y RET 3 y la línea agrupada con «Vista»', headerHtml.includes('>3<') && headerHtml.includes('corta mañana a las 07:00') && (headerHtml.match(/data-cronograma-aviso/g) || []).length === 1 && headerHtml.includes('aria-label="Marcar como vista"'));
+
+// ── CRONOGRAMA_SIN_PUBLICAR: de Planificación; Operación solo una línea con las que cortan ──
+const C = await importFront('lib/movil/cronogramaAlertas.ts');
+const cronoNov = (id, objectiveName, corte, status = 'PENDIENTE', extra = {}) => ({
+  id, type: 'CRONOGRAMA_SIN_PUBLICAR', status, objectiveId: `o_${id}`, objectiveName, clientId: 'c9', mesKey: '2026-10', year: 2026, month: 10, dayYmd: '2026-10-02',
+  description: corte ? `${objectiveName}: octubre sin cronograma publicado. Mañana el servicio se corta a las ${corte}.` : `${objectiveName}: octubre sin cronograma publicado. Mañana el servicio no entra en operación.`,
+  ...extra,
+});
+const quince = [
+  cronoNov('a', 'Sucursal Plaza Rivadavia', null), cronoNov('b', 'Inmunidad', '07:00'), cronoNov('c', 'Kempes', '07:00'), cronoNov('d', 'Savio', '08:00'),
+  ...Array.from({ length: 11 }, (_, i) => cronoNov(`e${i}`, `Sucursal ${i}`, null)),
+];
+const resumen = C.resumenCronogramaOperacion(quince);
+check('Operación: una sola línea, solo las que cortan (3 de 15), con horas', resumen.texto === '3 objetivos cortan mañana (07:00, 08:00) por falta de cronograma' && resumen.ids.length === 3 && !resumen.texto.includes('Plaza Rivadavia'));
+check('Operación: una sola que corta nombra al objetivo', C.resumenCronogramaOperacion([cronoNov('b', 'Inmunidad', '07:00')]).texto === 'Inmunidad corta mañana a las 07:00 por falta de cronograma');
+check('Operación: «no entra en operación» no genera línea', C.resumenCronogramaOperacion([cronoNov('a', 'Sucursal Plaza Rivadavia', null)]) === null);
+check('vistas no cuentan', C.resumenCronogramaOperacion(quince.map((n) => ({ ...n, status: 'ATENDIDA' }))) === null && C.agruparCronogramaPlanificacion(quince.map((n) => ({ ...n, status: 'atendida' }))).length === 0);
+const grupos15 = C.agruparCronogramaPlanificacion(quince);
+check('Planificación: «15 objetivos sin cronograma de octubre» con la lista', grupos15.length === 1 && grupos15[0].titulo === '15 objetivos sin cronograma de octubre' && grupos15[0].items.length === 15 && grupos15[0].ids.length === 15 && grupos15[0].items[0].objectiveName === 'Inmunidad');
+const legadoDiario = [
+  cronoNov('x1', 'Inmunidad', '07:00', 'PENDIENTE', { mesKey: undefined, year: undefined, month: undefined, dayYmd: '2026-10-02', objectiveId: 'o_x' }),
+  cronoNov('x2', 'Inmunidad', '07:00', 'PENDIENTE', { mesKey: undefined, year: undefined, month: undefined, dayYmd: '2026-10-03', objectiveId: 'o_x' }),
+];
+check('legado diario duplicado: una sola fila, «todas» marca las dos', C.agruparCronogramaPlanificacion(legadoDiario)[0].items.length === 1 && C.idsPendientesCronograma(legadoDiario).length === 2 && C.mesDe(legadoDiario[0]).label === 'octubre');
+check('vistaPatch = Entendido del escritorio', JSON.stringify(Object.keys(C.vistaPatch({ actorName: 'Mauro', uid: 'u1' }, 'ts'))) === '["status","atendidaAt","atendidaPor","atendidaPorUid"]' && C.vistaPatch({ actorName: 'Mauro', uid: 'u1' }, 'ts').status === 'ATENDIDA');
+check('link a publicar el mes del objetivo', C.linkPublicar(grupos15[0].items[0]) === '/admin/planificacion/?objectiveId=o_b&year=2026&month=10&clientId=c9');
+const { PlanificacionMovilView, CronogramaSinPublicarCard } = await importFront('components/movil/PlanificacionMovilView.tsx');
+const planBase = { empresa: 'Pruebas S.A.', online: true, pendingLabel: null, dias: ['2026-10-01'], dia: '2026-10-01', franjas: [], porPublicar: 0, puedePublicar: false, mesPublicado: true, onDia: () => {}, onHueco: () => {}, onAsignado: () => {}, onPublicar: () => {} };
+const planHtml = render(PlanificacionMovilView, { ...planBase, cronograma: grupos15, onCronogramaVista: () => {}, onCronogramaPublicar: () => {} });
+check('Planificación celular: una tarjeta agrupada cerrada (sin las 15 filas)', planHtml.includes('15 objetivos sin cronograma de octubre') && planHtml.includes('data-cronograma-grupo="15"') && !planHtml.includes('data-cronograma-item=') && planHtml.includes('aria-expanded="false"'));
+const tarjetaCerrada = render(CronogramaSinPublicarCard, { grupo: grupos15[0], onVista: () => {}, onPublicar: () => {} });
+check('tarjeta agrupada cerrada: un solo botón (desplegar)', (tarjetaCerrada.match(/<button/g) || []).length === 1);
+const tarjetaAbierta = render(CronogramaSinPublicarCard, { grupo: grupos15[0], abiertoInicial: true, onVista: () => {}, onPublicar: () => {} });
+check('desplegada: 15 filas, Publicar por objetivo, vista por alerta y «todas»', (tarjetaAbierta.match(/data-cronograma-item=/g) || []).length === 15 && (tarjetaAbierta.match(/data-cronograma-publicar=/g) || []).length === 15 && (tarjetaAbierta.match(/data-cronograma-vista="/g) || []).length === 16 && tarjetaAbierta.includes('Marcar todas como vistas') && tarjetaAbierta.includes('Mañana no entra en operación') && tarjetaAbierta.includes('Mañana corta a las 07:00'));
+const sinCronograma = render(PlanificacionMovilView, { ...planBase, cronograma: [] });
+check('sin pendientes no hay tarjeta', !sinCronograma.includes('data-cronograma-grupo'));
+// Operación recibe solo el resumen: las 15 descripciones nunca llegan a la pantalla.
+const opsConResumen = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, stats: { activos: 0, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 },
+  cronogramaAviso: { texto: resumen.texto, onVista: () => {} }, panel: 'home', objective: null, alerts: [], objectives: [], ...noops,
+});
+check('Operación no lista las 15 novedades una por una', !opsConResumen.includes('Plaza Rivadavia') && !opsConResumen.includes('sin cronograma publicado') && (opsConResumen.match(/data-cronograma-aviso/g) || []).length === 1 && opsConResumen.includes('3 objetivos cortan mañana'));
+const supervisionResumen = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Auto', online: true, pendingLabel: null, readOnly: true, stats: { activos: 0, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 },
+  cronogramaAviso: { texto: resumen.texto, onVista: () => {} }, panel: 'home', objective: null, alerts: [], objectives: [], ...noops,
+});
+check('Supervisión ve la línea pero no la marca', supervisionResumen.includes('3 objetivos cortan mañana') && !supervisionResumen.includes('aria-label="Marcar como vista"'));
+const sinResumen = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, stats: { activos: 0, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 },
+  cronogramaAviso: C.resumenCronogramaOperacion([cronoNov('a', 'Sucursal Plaza Rivadavia', null)]), panel: 'home', objective: null, alerts: [], objectives: [], ...noops,
+});
+check('«no entra en operación»: Operación no muestra nada', !sinResumen.includes('data-cronograma-aviso'));
 
 // ── Servicios ──
 const { buildServiciosMovilRows, slaMovilDetalle, serviciosMovilAcciones, fechaCorta } = await importFront('lib/servicios/serviciosMovil.ts');

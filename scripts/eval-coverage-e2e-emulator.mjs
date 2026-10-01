@@ -3386,6 +3386,30 @@ async function run() {
         && text.includes('07:00')
         && corteServicioHm([{ allowedShiftTypes: [{ startTime: '23:00', endTime: '07:00' }] }]) === '07:00';
       report(90, ok, ok ? 'aviso 18:00: octubre sin cronograma, corte 07:00, sin duplicar' : `early=${JSON.stringify(early)} at18=${JSON.stringify(at18)} again=${again.created} n=${nov.size} ${text}`);
+
+      // Caso 91 — una por objetivo-mes: al día siguiente actualiza (no crea) y respeta la vista;
+      // una diaria vieja ya vista con el mismo texto hace nacer vista a la mensual.
+      const ref = nov.docs[0]?.ref;
+      await ref.update({ status: 'ATENDIDA', atendidaPor: 'Mauro', atendidaAt: admin.firestore.Timestamp.fromDate(new Date('2026-09-30T19:00:00-03:00')) });
+      const nextDay = await runAvisoCronogramaSinPublicar(db, new Date('2026-10-01T18:00:00-03:00'));
+      const nov2 = await db.collection('novedades').where('objectiveId', '==', seeded.objectiveId).where('type', '==', 'CRONOGRAMA_SIN_PUBLICAR').get();
+      const d2 = nov2.docs[0]?.data();
+      // `updated` cuenta también los objetivos de otros casos del mismo run; lo que importa es este objetivo.
+      const okUpd = nextDay.created === 0 && nextDay.updated >= 1 && nov2.size === 1
+        && nov2.docs[0].id === `crono_sin_pub_${seeded.empresaId}_${seeded.objectiveId}_2026-10`
+        && d2?.status === 'ATENDIDA' && d2?.dayYmd === '2026-10-02' && d2?.mesKey === '2026-10' && d2?.vecesAvisado === 2;
+      // legado diario visto → la mensual nace vista
+      await ref.delete();
+      await db.collection('novedades').doc(`crono_sin_pub_${seeded.empresaId}_${seeded.objectiveId}_2026-10-01`).set({
+        type: 'CRONOGRAMA_SIN_PUBLICAR', status: 'ATENDIDA', atendidaPor: 'Mauro', empresaId: seeded.empresaId, objectiveId: seeded.objectiveId,
+        description: text, dayYmd: '2026-10-01', atendidaAt: admin.firestore.Timestamp.fromDate(new Date('2026-09-30T19:00:00-03:00')), createdAt: admin.firestore.Timestamp.fromDate(new Date('2026-09-30T18:00:00-03:00')),
+      });
+      const migr = await runAvisoCronogramaSinPublicar(db, new Date('2026-09-30T18:00:00-03:00'));
+      const mensual = (await db.collection('novedades').doc(`crono_sin_pub_${seeded.empresaId}_${seeded.objectiveId}_2026-10`).get()).data();
+      const okHer = migr.created >= 1 && mensual?.status === 'ATENDIDA' && mensual?.vistaHeredadaDe === '2026-10-01';
+      report(91, okUpd && okHer, okUpd && okHer
+        ? 'una por objetivo-mes: actualiza al día siguiente, conserva vista, hereda la vista del legado diario'
+        : `next=${JSON.stringify(nextDay)} n=${nov2.size} id=${nov2.docs[0]?.id} st=${d2?.status} day=${d2?.dayYmd} veces=${d2?.vecesAvisado} migr=${JSON.stringify(migr)} mst=${mensual?.status} her=${mensual?.vistaHeredadaDe}`);
     }
   } catch (e) {
     console.error('Error fatal E2E:', e);

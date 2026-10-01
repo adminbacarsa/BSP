@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
+import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
 import { Timestamp, addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc, updateDoc, type QueryDocumentSnapshot } from 'firebase/firestore';
@@ -10,9 +11,12 @@ import { CambioPuntual, CandidatosHueco, PlanificacionMovilView, type EventualMo
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
 import { db, functions } from '@/lib/firebase';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
 import { runCallableOnline, movilCallableGate } from '@/lib/movil/callableOnline';
+import { linkPublicar } from '@/lib/movil/cronogramaAlertas';
+import { writeMovilChoice } from '@/lib/movil/useMovilMode';
 import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
 import {
   aplicarCambios,
@@ -51,6 +55,7 @@ export function PlanificacionMovil() {
   const { isSuperAdmin, rolePermissions, canReadModule, user } = useAuth();
   const online = useOnlineFlag();
   const empresaSheet = useEmpresaSheet();
+  const router = useRouter();
   const [readyTurnos, setReadyTurnos] = useState(false);
   const [turnos, setTurnos] = useState<TurnoMovil[]>([]);
   const [empleados, setEmpleados] = useState<EmpleadoMovil[]>([]);
@@ -76,6 +81,7 @@ export function PlanificacionMovil() {
   const puedeFt = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
   const puedeEventuales = canConvocarEventuales(isSuperAdmin, rolePermissions);
   const actorName = user?.displayName || user?.email || 'Planificación celular';
+  const cronograma = useCronogramaSinPublicar(empresaId, puedeLeer);
 
   useEffect(() => movilWriteQueue.subscribe(() => {
     const labels = [...movilWriteQueue.pending(), ...movilCallableGate.pending()];
@@ -337,6 +343,17 @@ export function PlanificacionMovil() {
         porPublicar={cambios.length}
         puedePublicar={puedeCorregir && mesesPublicados}
         mesPublicado={mesesPublicados || !readyTurnos}
+        cronograma={cronograma.gruposPlanificacion}
+        onCronogramaVista={(ids) => {
+          void cronograma.marcarVista(ids, 'PLANIFICACION')
+            .then((n) => { if (n > 0) toast.success(n === 1 ? 'Alerta marcada como vista' : `${n} alertas marcadas como vistas`); })
+            .catch(() => toast.error('No se pudo marcar como vista'));
+        }}
+        onCronogramaPublicar={(item) => {
+          // La primera publicación del mes se hace en el planificador completo (escritorio).
+          writeMovilChoice('0');
+          void router.push(linkPublicar(item));
+        }}
         onDia={setDia}
         onHueco={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franjaId: franja.id }); }}
         onAsignado={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cambiar', franjaId: franja.id }); }}

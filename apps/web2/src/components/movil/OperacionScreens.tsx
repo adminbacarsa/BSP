@@ -611,6 +611,7 @@ export function OperacionScreens({
   pendingLabel,
   stats,
   notices = [],
+  cronogramaAviso = null,
   readOnly = false,
   objectives,
   objective,
@@ -648,6 +649,8 @@ export function OperacionScreens({
   /** Compatibilidad: si no vienen `contadores`, se muestran estos números. */
   stats?: MovilStats;
   notices?: string[];
+  /** CRONOGRAMA_SIN_PUBLICAR: una sola línea agrupada (solo las que cortan mañana) con «Vista». */
+  cronogramaAviso?: { texto: string; onVista: () => Promise<unknown> | void } | null;
   /** Supervisión: mismas pantallas sin botones de acción ni sala. */
   readOnly?: boolean;
   /** Instante de referencia (tests). Default `Date.now()`. */
@@ -758,6 +761,18 @@ export function OperacionScreens({
         )}
         {panel === 'home' && (
           <>
+            {cronogramaAviso && (
+              <p className={`relative mb-2 flex items-center gap-2 ${MOVIL_CARD} px-3 py-2 pl-4 text-xs font-medium text-slate-800`} data-cronograma-aviso="1">
+                <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] rounded-l-lg bg-amber-500" />
+                <AlertTriangle size={14} strokeWidth={1.75} className="shrink-0 text-amber-600" aria-hidden="true" />
+                <span className="flex-1">{cronogramaAviso.texto}</span>
+                {!readOnly && (
+                  <button type="button" onClick={() => { void cronogramaAviso.onVista(); }} aria-label="Marcar como vista" className={`flex h-8 shrink-0 items-center rounded-lg px-2 text-[11px] font-semibold ${MOVIL_BTN_SECONDARY}`}>
+                    Vista
+                  </button>
+                )}
+              </p>
+            )}
             {notices.map((text) => (
               <p key={text} className={`relative mb-2 flex items-start gap-2 ${MOVIL_CARD} px-3 py-2 pl-4 text-xs font-medium text-slate-800`}>
                 <span aria-hidden="true" className="absolute inset-y-0 left-0 w-[3px] rounded-l-lg bg-amber-500" />

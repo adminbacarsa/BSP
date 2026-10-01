@@ -740,6 +740,7 @@ export default function TacticalMapView() {
         const filtered = empNovedades.filter(n => {
             if (n.status === 'ATENDIDA' || n.status === 'atendida') return false;
             if (n.type === 'VACANTE_A_PLANIFICACION') return false;
+            if (n.type === 'CRONOGRAMA_SIN_PUBLICAR') return false; // de Planificación (línea agrupada en el CC)
             if (isHiddenFromOpsAlerts(n)) return false;
             if (isOrphanShiftNoiseNovedad(n, logic.processedData)) return false;
             if (isStaleIaAutomationNovedad(n, logic.processedData)) return false;
