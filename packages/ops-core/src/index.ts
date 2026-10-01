@@ -79,6 +79,15 @@ export {
   buildRetentionWaitInfo,
   formatRetentionLine,
 } from './retentionDisplay';
+export {
+  SHIFT_HARD_CAP_MS,
+  STALE_CAP_GRACE_MS,
+  closeTimeMs,
+  shiftWorkStartMs,
+  shiftHardCapAtMs,
+  computeShiftCloseTimes,
+} from './shiftClose';
+export type { ShiftCloseTimes } from './shiftClose';
 export { etiquetaCierreSinContinuidad } from './cierreSinContinuidad';
 export type { CierreSinContinuidadInput } from './cierreSinContinuidad';
 export type { RetentionWaitInfo, RetentionRelieverStatus } from './retentionDisplay';

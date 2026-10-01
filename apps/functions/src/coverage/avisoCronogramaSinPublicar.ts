@@ -110,13 +110,13 @@ export async function runAvisoCronogramaSinPublicar(
 
   for (const emp of empresas.docs) {
     const empresaId = emp.id;
-    const slaSnap = await db.collection('servicios_sla').where('empresaId', '==', empresaId).get();
+    // Solo objetivos con servicio vendido para ma?ana (SLA vigente ese d?a, cliente activo).
+    // Auditor?a 01/10: 38 de 41 avisos eran de objetivos con contratos cerrados de meses anteriores.
+    const vigentes = await cache.slasVigentesEnDia(db, empresaId, tomorrow.ymd);
     const byObjective = new Map<string, FirebaseFirestore.DocumentData>();
-    slaSnap.docs.forEach((d) => {
-      const data = d.data();
-      const oid = String(data.objectiveId || '').trim();
-      if (oid && !byObjective.has(oid)) byObjective.set(oid, data);
-    });
+    for (const sla of vigentes) {
+      if (!byObjective.has(sla.objectiveId)) byObjective.set(sla.objectiveId, sla.data);
+    }
 
     for (const [objectiveId, sla] of byObjective) {
       const verdict = await cache.operationVerdict(db, {

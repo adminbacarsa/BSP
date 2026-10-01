@@ -3411,6 +3411,77 @@ async function run() {
         ? 'una por objetivo-mes: actualiza al día siguiente, conserva vista, hereda la vista del legado diario'
         : `next=${JSON.stringify(nextDay)} n=${nov2.size} id=${nov2.docs[0]?.id} st=${d2?.status} day=${d2?.dayYmd} veces=${d2?.vecesAvisado} migr=${JSON.stringify(migr)} mst=${mensual?.status} her=${mensual?.vistaHeredadaDe}`);
     }
+
+    // Caso 92 ? huecos SLA: solo el contrato que cubre el d?a. Un SLA cerrado del 25/09 con otras
+    // franjas (M3 12:00) no genera huecos del 02/10; el de octubre (M3 12:30) est? planificado.
+    // Un contrato cerrado cuya vigencia incluye el d?a s? cuenta (universo P1d).
+    {
+      const prefix = `${runId}_c92`;
+      const empresaId = `${prefix}_emp`;
+      const clientId = `${prefix}_cli`;
+      const objA = `${prefix}_peaje`;
+      const objB = `${prefix}_cerrado_vigente`;
+      await db.collection('clients').doc(clientId).set({ empresaId, name: 'CASISA', status: 'ACTIVE', active: true });
+      const bands = (code, start, end) => [{ name: 'Puesto 1', quantity: 1, activeDays: ['L', 'M', 'X', 'J', 'V', 'S', 'D'], allowedShiftTypes: [{ code, startTime: start, endTime: end, hours: 4 }] }];
+      await db.collection('servicios_sla').doc(`${prefix}_sla_viejo`).set({
+        empresaId, objectiveId: objA, clientId, status: 'active', closed: true, objectiveName: 'Peaje',
+        startDate: '2026-09-25', endDate: '2026-09-25', positions: bands('M3', '12:00', '16:00'),
+      });
+      await db.collection('servicios_sla').doc(`${prefix}_sla_oct`).set({
+        empresaId, objectiveId: objA, clientId, status: 'active', objectiveName: 'Peaje',
+        startDate: '2026-10-01', endDate: '2026-10-31', positions: bands('M3', '12:30', '16:00'),
+      });
+      await db.collection('servicios_sla').doc(`${prefix}_sla_cerrado_vig`).set({
+        empresaId, objectiveId: objB, clientId, status: 'active', closed: true, objectiveName: 'Cerrado vigente',
+        startDate: '2026-10-01', endDate: '2026-10-31', positions: bands('M', '07:00', '15:00'),
+      });
+      for (const oid of [objA, objB]) {
+        await db.collection('planificacion_estados').doc(`${empresaId}_${oid}_2026_10`).set({ empresaId, objectiveId: oid, year: 2026, month: 10, publishedAt: Timestamp.now() });
+      }
+      for (const day of [1, 2]) {
+        await db.collection('turnos').doc(`${prefix}_m3_d${day}`).set({
+          empresaId, objectiveId: objA, clientId, positionName: 'Puesto 1', employeeId: `${prefix}_e`, employeeName: 'Farias', code: 'M3',
+          startTime: tsAt(2026, 10, day, 12, 30), endTime: tsAt(2026, 10, day, 16, 0), draft: false,
+        });
+      }
+      // 12:05 del 01/10: la franja vieja (02/10 12:00) entra en el horizonte de 24 h y el turno de las
+      // 12:30 queda afuera de la consulta, igual que en prod el 01/10.
+      await detectPublishedSlaGapsForEmpresa(db, empresaId, tsAt(2026, 10, 1, 12, 5));
+      const gapsA = await db.collection('sla_huecos_sin_plan').where('objectiveId', '==', objA).get();
+      const gapsB = await db.collection('sla_huecos_sin_plan').where('objectiveId', '==', objB).get();
+      const ok = gapsA.size === 0 && gapsB.size === 1 && gapsB.docs[0].data().bandCode === 'M';
+      report(92, ok, ok
+        ? 'huecos: el SLA cerrado del 25/09 no genera huecos del 02/10; el cerrado vigente s? cuenta'
+        : `gapsPeaje=${gapsA.size} [${gapsA.docs.map((d) => d.id).join(',')}] gapsCerradoVigente=${gapsB.size}`);
+    }
+
+    // Caso 93 ? aviso 18:00 solo para objetivos con SLA vigente ma?ana y cliente activo.
+    {
+      const prefix = `${runId}_c93`;
+      const empresaId = `${prefix}_emp`;
+      const cliOk = `${prefix}_cli`;
+      const cliOff = `${prefix}_cli_off`;
+      const objViejo = `${prefix}_patricios`;
+      const objOct = `${prefix}_nec`;
+      const objCliOff = `${prefix}_baja`;
+      await db.collection('empresas').doc(empresaId).set({ name: 'Pruebas 93', active: true });
+      await db.collection('clients').doc(cliOk).set({ empresaId, name: 'CONIFERAL', status: 'ACTIVE', active: true });
+      await db.collection('clients').doc(cliOff).set({ empresaId, name: 'BAJA', status: 'INACTIVE', active: false });
+      const pos = [{ name: 'Puesto 1', quantity: 1, allowedShiftTypes: [{ code: 'N', startTime: '22:00', endTime: '06:00', hours: 8 }] }];
+      await db.collection('servicios_sla').doc(`${prefix}_sla_sep`).set({ empresaId, objectiveId: objViejo, clientId: cliOk, status: 'active', closed: true, objectiveName: 'Patricios', startDate: '2026-09-01', endDate: '2026-09-30', positions: pos });
+      await db.collection('servicios_sla').doc(`${prefix}_sla_oct`).set({ empresaId, objectiveId: objOct, clientId: cliOk, status: 'active', objectiveName: 'Nuevo Edificio', startDate: '2026-10-01', endDate: '2026-10-31', positions: pos });
+      await db.collection('servicios_sla').doc(`${prefix}_sla_baja`).set({ empresaId, objectiveId: objCliOff, clientId: cliOff, status: 'active', objectiveName: 'Cliente de baja', startDate: '2026-10-01', endDate: '2026-10-31', positions: pos });
+      for (const oid of [objViejo, objOct, objCliOff]) {
+        await db.collection('planificacion_estados').doc(`${empresaId}_${oid}_2026_9`).set({ empresaId, objectiveId: oid, year: 2026, month: 9, publishedAt: Timestamp.now() });
+      }
+      await runAvisoCronogramaSinPublicar(db, new Date('2026-10-01T18:00:00-03:00'));
+      const novs = await db.collection('novedades').where('empresaId', '==', empresaId).where('type', '==', 'CRONOGRAMA_SIN_PUBLICAR').get();
+      const ids = novs.docs.map((d) => d.data().objectiveId);
+      const ok = novs.size === 1 && ids[0] === objOct && novs.docs[0].id === `crono_sin_pub_${empresaId}_${objOct}_2026-10`;
+      report(93, ok, ok
+        ? 'aviso 18:00: solo el objetivo con SLA vigente en octubre y cliente activo (ni contrato cerrado de septiembre ni cliente de baja)'
+        : `n=${novs.size} objetivos=${ids.join(',')}`);
+    }
   } catch (e) {
     console.error('Error fatal E2E:', e);
     process.exitCode = 1;

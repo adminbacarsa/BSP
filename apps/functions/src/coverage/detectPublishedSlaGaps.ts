@@ -1,6 +1,6 @@
 import { Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { planificacionEstadoLookupDocIds, ymCordobaParts } from '../assistant/planificacionEstadoKeys';
-import { ObjectiveOperationCache } from '../common/simulableShift';
+import { ObjectiveOperationCache, slaDayCoverage } from '../common/simulableShift';
 import { seriesCodeOf } from '../common/shiftSeries';
 import { buildSlaUnplannedGapDocId } from './slaGapId';
 
@@ -100,6 +100,9 @@ export async function detectPublishedSlaGapsForEmpresa(
       if (bands.length === 0) continue;
 
       for (const dayStr of daySet) {
+        // Solo el contrato que cubre ese d?a (activo o cerrado con vigencia que lo incluye; P1d).
+        // Un SLA cerrado del 25/09 con otras franjas no genera huecos del 02/10.
+        if (slaDayCoverage(sla, dayStr) === 'OUT') continue;
         const dayDate = new Date(bandStartMsOnDay(dayStr, '12:00'));
         const verdict = await opCache.operationVerdict(db, {
           empresaId: eid,
