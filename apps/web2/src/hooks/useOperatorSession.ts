@@ -234,11 +234,13 @@ export const useOperatorSession = () => {
     await callSesionOperador('takeOverPilot', { deviceInfo: describeDevice() });
   }, [user, empresaId, mySession, callSesionOperador]);
 
-  /** Heartbeat: mientras estoy en la sala y la pestaña está visible, cada minuto. */
+  /**
+   * Heartbeat cada minuto mientras estoy en la sala, también con la pestaña en segundo plano:
+   * un piloto con el CC minimizado sigue presente; solo la PC sin luz/red deja de latir.
+   */
   useEffect(() => {
     if (!mySession?.id) return;
     const beat = () => {
-      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
       updateDoc(doc(db, 'sesiones_operador', mySession.id), { lastActivityAt: Timestamp.now() })
         .catch((e) => console.warn('[heartbeat]', e));
