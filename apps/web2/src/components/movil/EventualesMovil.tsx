@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
 import { normalizeCuil } from '@/lib/eventuales/cuil.mjs';
+import { filtrarFichas, fmtFechaAr } from '@/lib/eventuales/fichaUx.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { movilCallableGate, runCallableOnline } from '@/lib/movil/callableOnline';
@@ -25,11 +26,26 @@ const MARCO: Record<string, string> = {
 
 type Ficha = {
   id: string;
+  cuil: string;
+  dni: string;
   nombre: string;
   mail: string;
   telefono: string;
+  legajoPlanilla: string;
+  primerIngreso: string;
+  disponibilidad: string;
   empresasHabilitadas: string[];
   marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
+};
+
+type EnvioArcaServidor = {
+  id: string;
+  nombre?: string;
+  cuil?: string;
+  tipo?: string;
+  estado?: string;
+  fecha?: string;
+  nroTransaccion?: string;
 };
 
 function hoy(): string {
@@ -42,6 +58,18 @@ function formatoCuil(raw: string): string {
   const digits = raw.replace(/\D/g, '');
   if (digits.length !== 11) return raw;
   return `${digits.slice(0, 2)}-${digits.slice(2, 10)}-${digits.slice(10)}`;
+}
+
+function envioAMovil(row: EnvioArcaServidor): ArcaMovil {
+  return {
+    id: row.id,
+    nombre: String(row.nombre || ''),
+    cuil: formatoCuil(String(row.cuil || '')),
+    tipo: String(row.tipo || ''),
+    estado: String(row.estado || ''),
+    fecha: fmtFechaAr(String(row.fecha || '')),
+    nroTransaccion: String(row.nroTransaccion || ''),
+  };
 }
 
 export function EventualesMovil() {
@@ -62,6 +90,8 @@ export function EventualesMovil() {
   const [mail, setMail] = useState('');
   const [telefono, setTelefono] = useState('');
   const [arca, setArca] = useState<ArcaMovil[]>([]);
+  const [arcaCargando, setArcaCargando] = useState(false);
+  const [arcaEnviando, setArcaEnviando] = useState(false);
   const [arcaId, setArcaId] = useState('');
   const [nro, setNro] = useState('');
   const [pendingLabel, setPendingLabel] = useState<string | null>(null);
@@ -77,13 +107,18 @@ export function EventualesMovil() {
     if (!permitido) return;
     const q = query(collection(db, 'eventuales_bolsa'), where('grupoId', '==', GRUPO_EVENTUALES_ID));
     return onSnapshot(q, (snap) => {
-      const rows = snap.docs.map((docSnap) => {
+      const rows = snap.docs.map((docSnap): Ficha => {
         const data = docSnap.data();
         return {
           id: docSnap.id,
+          cuil: String(data.cuil || docSnap.id),
+          dni: String(data.dni || ''),
           nombre: String(data.nombre || ''),
           mail: String(data.mail || ''),
           telefono: String(data.telefono || ''),
+          legajoPlanilla: String(data.legajoPlanilla || ''),
+          primerIngreso: String(data.primerIngreso || ''),
+          disponibilidad: String(data.disponibilidad || ''),
           empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
         };
@@ -98,30 +133,52 @@ export function EventualesMovil() {
     });
   }, [permitido]);
 
-  useEffect(() => {
+  // Solo los envíos de la empresa activa: el servidor filtra por `empresaId` (arca_envios no se lee desde el cliente).
+  const cargarArca = useCallback((silencioso = false) => {
     if (!empresaId || !online) return;
+    setArcaCargando(true);
     void runCallableOnline('ARCA pendientes', async () => {
       const fn = httpsCallable(functions, 'gestionarEventual');
       const res = await fn({ accion: 'arcaPendientes', empresaId });
-      const data = res.data as { envios?: ArcaMovil[] };
-      setArca(data.envios || []);
-    }).catch(() => { /* el gate avisa al confirmar */ });
+      const data = res.data as { envios?: EnvioArcaServidor[] };
+      const nuevos = (data.envios || []).map(envioAMovil);
+      setArca((previos) => {
+        const confirmadosRecientes = previos.filter((envio) => envio.estado === 'CONFIRMADO' && !nuevos.some((n) => n.id === envio.id));
+        return [...nuevos, ...confirmadosRecientes];
+      });
+    }).catch((error: unknown) => {
+      if (!silencioso) toast.error(error instanceof Error ? error.message : 'No se pudieron leer los envíos ARCA.');
+    }).finally(() => setArcaCargando(false));
   }, [empresaId, online]);
 
+  useEffect(() => {
+    setArca([]);
+    setArcaId('');
+    setNro('');
+    cargarArca(true);
+  }, [cargarArca]);
+
+  const habilitadas = useMemo(
+    () => filtrarFichas({ fichas, empresaId: empresaId || '', todaLaBolsa: false, filtro: 'TODOS', buscar: '', hoy: hoy() }) as Ficha[],
+    [empresaId, fichas],
+  );
+
   const personas = useMemo(() => {
-    const q = buscar.trim().toLowerCase();
-    return fichas
-      .filter((ficha) => !empresaId || ficha.empresasHabilitadas.includes(empresaId))
-      .filter((ficha) => !q || ficha.nombre.toLowerCase().includes(q) || ficha.id.includes(q.replace(/\D/g, '')))
-      .slice(0, 20)
+    const lista = filtrarFichas({ fichas, empresaId: empresaId || '', todaLaBolsa: false, filtro: 'TODOS', buscar, hoy: hoy() }) as Ficha[];
+    return lista
+      .slice(0, 30)
       .map((ficha): EventualMovil => {
         const marco = marcoDeBolsa(ficha, empresaId || '', hoy()) as { estado?: string };
+        const estado = marco.estado || 'SIN_MARCO';
         return {
           id: ficha.id,
           nombre: ficha.nombre,
           cuil: formatoCuil(ficha.id),
-          marco: MARCO[marco.estado || ''] || 'Sin marco',
+          marco: MARCO[estado] || 'Sin marco',
+          marcoEstado: estado,
           telefono: ficha.telefono,
+          legajo: ficha.legajoPlanilla,
+          primerIngreso: fmtFechaAr(ficha.primerIngreso),
         };
       });
   }, [buscar, empresaId, fichas]);
@@ -168,18 +225,28 @@ export function EventualesMovil() {
     });
   };
 
+  // Alta/baja → nro de transacción → CONFIRMADO (callable gestionarEventual/arcaConfirmar; el servidor propaga el alta a los turnos).
   const confirmarArca = () => {
-    if (!arcaId || !nro.trim()) {
+    const envio = arca.find((row) => row.id === arcaId) || null;
+    const numero = nro.trim();
+    if (!envio || !numero) {
       toast.error('Elegí el envío y el número de transacción.');
       return;
     }
-    void llamar('ARCA', { accion: 'arcaConfirmar', envioId: arcaId, nroTransaccion: nro.trim() }).then(() => {
-      toast.success('Transacción cargada.');
+    if (!online) {
+      toast.error('ARCA requiere conexión.');
+      return;
+    }
+    setArcaEnviando(true);
+    void llamar('ARCA', { accion: 'arcaConfirmar', envioId: envio.id, nroTransaccion: numero }).then(() => {
+      toast.success(`${envio.tipo === 'BT' ? 'Baja' : 'Alta'} confirmada en ARCA.`);
       setNro('');
-      setArca((lista) => lista.filter((envio) => envio.id !== arcaId));
+      setArcaId('');
+      setArca((lista) => lista.map((row) => (row.id === envio.id ? { ...row, estado: 'CONFIRMADO', nroTransaccion: numero } : row)));
+      cargarArca(true);
     }).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'No se pudo confirmar.');
-    });
+    }).finally(() => setArcaEnviando(false));
   };
 
   if (!permitido) {
@@ -197,7 +264,8 @@ export function EventualesMovil() {
         buscar={buscar}
         onBuscar={setBuscar}
         personas={personas}
-        onElegir={setElegidaId}
+        totalEmpresa={habilitadas.length}
+        onElegir={(id) => setElegidaId((prev) => (prev === id ? '' : id))}
         onCerrarAlta={cerrarAlta}
         cuil={cuil}
         onCuil={setCuil}
@@ -211,11 +279,14 @@ export function EventualesMovil() {
         onGuardarAlta={guardarAlta}
         onCrearAcceso={crearAcceso}
         arca={arca}
+        arcaCargando={arcaCargando}
+        onRecargarArca={() => cargarArca(false)}
         nro={nro}
         onNro={setNro}
         arcaId={arcaId}
-        onArca={setArcaId}
+        onArca={(id) => { setArcaId(id); setNro(''); }}
         onConfirmarArca={confirmarArca}
+        arcaEnviando={arcaEnviando}
         elegido={elegido}
       />
       {empresaSheet.sheet}

@@ -177,19 +177,38 @@ async function main() {
     const win = evaluateServerCheckInWindow(cov, Date.now(), { source: 'OPERATIONS' });
     report('fichada bloqueada sin alta', blocked === 'ALTA_ARCA_PENDIENTE' && win.rejectCode === 'ALTA_ARCA_PENDIENTE', blocked);
 
-    await db.collection('turnos').doc(covId).update({ eventualAltaArcaConfirmada: true });
+    // Mismo camino que el celular: gestionarEventual/arcaConfirmar → aplicarTransicion(CONFIRMADO, MANUAL) → propagarAltaEnTurnos.
+    const { aplicarTransicion } = requireFn('./lib/arca/arcaEnviosApi.js');
+    const envioId = envios.docs[0]?.id || '';
+    const sinNro = await aplicarTransicion(envioId, { estado: 'CONFIRMADO', origen: 'MANUAL', actor: 'uid-rrhh-movil' });
+    report('CONFIRMADO exige nro de transacción', sinNro.status === 409 && sinNro.body.error === 'FALTA_NRO_TRANSACCION', `status=${sinNro.status} error=${sinNro.body.error}`);
+
+    const nro = '20261001-AT-000777';
+    const confirmado = await aplicarTransicion(envioId, { estado: 'CONFIRMADO', origen: 'MANUAL', nroTransaccion: nro, actor: 'uid-rrhh-movil' });
+    const envioDespues = (await db.collection('arca_envios').doc(envioId).get()).data() || {};
+    const covDespues = (await db.collection('turnos').doc(covId).get()).data() || {};
+    report(
+      'arcaConfirmar deja el AT CONFIRMADO y el nro en el turno',
+      confirmado.status === 200
+        && envioDespues.estado === 'CONFIRMADO'
+        && envioDespues.nroTransaccion === nro
+        && envioDespues.origen === 'MANUAL'
+        && covDespues.eventualAltaArcaConfirmada === true
+        && covDespues.nroTransaccion === nro,
+      `status=${confirmado.status} envio=${envioDespues.estado} turnoAlta=${covDespues.eventualAltaArcaConfirmada} nro=${covDespues.nroTransaccion}`,
+    );
+
     const after = await registrarPresencia(db, {
       shiftId: covId,
       empId: cuilOk,
       source: 'OPERATIONS',
       recordedAt: new Date().toISOString(),
     });
-    const opened = evaluateServerCheckInWindow(
-      { ...cov, eventualAltaArcaConfirmada: true },
-      Date.now(),
-      { source: 'OPERATIONS' },
-    );
-    report('fichada habilitada con alta', after.success === true && opened.allowed === true, `success=${after.success}`);
+    const opened = evaluateServerCheckInWindow(covDespues, Date.now(), { source: 'OPERATIONS' });
+    report('fichada habilitada con nro de transacción', after.success === true && opened.allowed === true, `success=${after.success}`);
+
+    const repetido = await aplicarTransicion(envioId, { estado: 'CONFIRMADO', origen: 'MANUAL', nroTransaccion: nro, actor: 'uid-rrhh-movil' });
+    report('confirmar dos veces no rompe', repetido.status === 409, `status=${repetido.status} error=${repetido.body.error}`);
   }
 
   const failed = results.filter((r) => !r.ok);

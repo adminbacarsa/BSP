@@ -59,7 +59,11 @@ function compile(file, name, transform = (src) => src) {
 mkdirSync(join(outdir, 'ui'), { recursive: true });
 compile(join(root, 'components/movil/ui/tones.ts'), 'ui/tones.ts');
 compile(join(root, 'components/movil/ui/MovilTopBar.tsx'), 'ui/MovilTopBar.tsx', (src) => src.replace("from './tones'", "from './tones.mjs'"));
-const conTopBar = (src) => src.replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
+compile(join(root, 'components/movil/ui/MovilBadge.tsx'), 'ui/MovilBadge.tsx', (src) => src.replace("from './tones'", "from './tones.mjs'"));
+const conTopBar = (src) => src
+  .replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'")
+  .replace("from './ui/MovilBadge'", "from './ui/MovilBadge.mjs'")
+  .replace("from './ui/tones'", "from './ui/tones.mjs'");
 compile(join(root, 'components/movil/BottomSheet.tsx'), 'BottomSheet.tsx', (src) => src.replace("from './ui/tones'", "from './ui/tones.mjs'"));
 const eventualesSrc = conTopBar(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8'))
   .replace("from './BottomSheet'", `from ${JSON.stringify(pathToFileURL(join(outdir, 'BottomSheet.mjs')).href)}`);
@@ -146,7 +150,8 @@ const evProps = {
   panel: 'alta',
   buscar: 'Sosa',
   onBuscar: noop,
-  personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' }],
+  totalEmpresa: 1,
+  personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '351', legajo: '148', primerIngreso: '15/02/2024' }],
   onElegir: noop,
   onCerrarAlta: noop,
   cuil: '20-11111111-2',
@@ -160,17 +165,35 @@ const evProps = {
   onTelefono: noop,
   onGuardarAlta: noop,
   onCrearAcceso: noop,
-  arca: [{ id: 'a', nombre: 'Sosa, Carla', tipo: 'AT', estado: 'PENDIENTE' }],
+  arca: [
+    { id: 'a', nombre: 'Sosa, Carla', cuil: '20-11111111-2', tipo: 'AT', estado: 'PENDIENTE', fecha: '01/10/2026', nroTransaccion: '' },
+    { id: 'b', nombre: 'Lopez, Luis', cuil: '20-22222222-8', tipo: 'BT', estado: 'ERROR', fecha: '30/09/2026', nroTransaccion: '' },
+  ],
   nro: '',
   onNro: noop,
   arcaId: 'a',
   onArca: noop,
   onConfirmarArca: noop,
-  elegido: { id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' },
+  elegido: { id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '351', legajo: '148', primerIngreso: '15/02/2024' },
 };
 const ev = renderToStaticMarkup(createElement(EventualesScreens, evProps));
 const evArca = renderToStaticMarkup(createElement(EventualesScreens, { ...evProps, panel: 'arca' }));
 check('eventuales 390 muestra bolsa, marco y arca', ev.includes('data-viewport="390x844"') && ev.includes('Sosa, Carla') && ev.includes('Marco vigente') && ev.includes('Alta rápida') && evArca.includes('ARCA requiere conexión') && ev.includes('20-11111111-2 válido'));
+check('bolsa muestra legajo y 1º ingreso', ev.includes('data-legajo="148"') && ev.includes('data-primer-ingreso="15/02/2024"') && ev.includes('Legajo 148') && ev.includes('1º ingreso 15/02/2024') && ev.includes('1 habilitado'));
+check('ARCA lista alta y baja de la empresa activa', evArca.includes('Alta AT') && evArca.includes('Baja BT') && evArca.includes('ERROR') && evArca.includes('Pruebas S.A.') && evArca.includes('data-movil-arca-form="a"'));
+
+const evOnline = { ...evProps, panel: 'arca', online: true };
+const sinNro = renderToStaticMarkup(createElement(EventualesScreens, evOnline));
+const conNro = renderToStaticMarkup(createElement(EventualesScreens, { ...evOnline, nro: '20261001-AT-000777' }));
+const sinEnvio = renderToStaticMarkup(createElement(EventualesScreens, { ...evOnline, arcaId: '', nro: '123' }));
+const botonConfirmar = (html) => html.match(/<button[^>]*>Confirmar en ARCA<\/button>/)?.[0] || '';
+check('confirmar requiere envío elegido y nro', botonConfirmar(sinNro).includes('disabled=""') && botonConfirmar(sinEnvio).includes('disabled=""') && sinEnvio.includes('Elegí un envío de la lista') && botonConfirmar(conNro) !== '' && !botonConfirmar(conNro).includes('disabled=""'));
+const confirmado = renderToStaticMarkup(createElement(EventualesScreens, {
+  ...evOnline,
+  arcaId: '',
+  arca: [evProps.arca[1], { ...evProps.arca[0], estado: 'CONFIRMADO', nroTransaccion: '20261001-AT-000777' }],
+}));
+check('alta confirmada pasa a CONFIRMADO con su transacción', confirmado.includes('Confirmados ahora') && confirmado.includes('data-arca-estado="CONFIRMADO"') && confirmado.includes('Transacción 20261001-AT-000777') && confirmado.includes('ARCA pendiente · Pruebas S.A. · <span class="tabular-nums text-slate-900">1</span>'));
 
 if (failed) {
   console.error(failed, 'fallos');

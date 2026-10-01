@@ -81,6 +81,7 @@ const withLibs = (src) => src
   .replace("from '@/lib/movil/menuLayout'", `from ${JSON.stringify(lib.menuLayout)}`)
   .replace("from '@/lib/movil/fechaCorta'", `from ${JSON.stringify(lib.fechaCorta)}`)
   .replace("from './ui/tones'", "from './ui/tones.mjs'")
+  .replace("from './ui/MovilBadge'", "from './ui/MovilBadge.mjs'")
   .replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
 const menuFile = compile(
   withLibs(readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8'))
@@ -164,16 +165,18 @@ check('RRHH Cargar', cargar.includes('Cargar ausencia') && cargar.includes('Foto
 check('RRHH Novedades', novedad.includes('Novedad rápida') && novedad.includes('Incidente'));
 
 const evBase = {
-  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, buscar: '', onBuscar: noop,
-  personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', telefono: '351' }], onElegir: noop, onCerrarAlta: noop,
+  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, buscar: '', onBuscar: noop, totalEmpresa: 1,
+  personas: [{ id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '351', legajo: '148', primerIngreso: '15/02/2024' }],
+  onElegir: noop, onCerrarAlta: noop,
   cuil: '', onCuil: noop, cuilEstado: '', nombre: '', onNombre: noop, mail: '', onMail: noop, telefono: '', onTelefono: noop, onGuardarAlta: noop, onCrearAcceso: noop,
-  arca: [{ id: 'a', nombre: 'Sosa, Carla', tipo: 'AT', estado: 'PENDIENTE' }], nro: '', onNro: noop, arcaId: '', onArca: noop, onConfirmarArca: noop, elegido: null,
+  arca: [{ id: 'a', nombre: 'Sosa, Carla', cuil: '20-11111111-2', tipo: 'AT', estado: 'PENDIENTE', fecha: '01/10/2026', nroTransaccion: '' }],
+  nro: '', onNro: noop, arcaId: '', onArca: noop, onConfirmarArca: noop, elegido: null,
 };
 const bolsa = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'bolsa' }));
 const arca = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'arca' }));
 const alta = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'alta' }));
-check('Eventuales Bolsa', bolsa.includes('Sosa, Carla') && bolsa.includes('Marco vigente') && !bolsa.includes('ARCA pendiente') && !bolsa.includes('Alta rápida'));
-check('Eventuales ARCA', arca.includes('ARCA pendiente') && arca.includes('AT PENDIENTE') && !arca.includes('Buscar en la bolsa'));
+check('Eventuales Bolsa', bolsa.includes('Sosa, Carla') && bolsa.includes('Marco vigente') && bolsa.includes('data-legajo="148"') && bolsa.includes('data-primer-ingreso="15/02/2024"') && !bolsa.includes('ARCA pendiente') && !bolsa.includes('Alta rápida'));
+check('Eventuales ARCA', arca.includes('ARCA pendiente') && arca.includes('Alta AT') && arca.includes('PENDIENTE') && !arca.includes('Buscar por nombre'));
 check('Eventuales Alta', alta.includes('Alta rápida') && alta.includes('Guardar en la bolsa'));
 
 rmSync(outdir, { recursive: true, force: true });

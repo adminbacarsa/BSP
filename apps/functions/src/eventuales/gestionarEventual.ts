@@ -118,17 +118,39 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
     const snap = await db().collection('arca_envios').where('empresaId', '==', empresaId).limit(80).get();
     const abiertos = snap.docs.filter((doc) => ['PENDIENTE', 'ERROR', 'MANUAL', 'SUBIENDO'].includes(String(doc.data().estado || '')));
+    const fichaCache = new Map<string, Promise<admin.firestore.DocumentSnapshot | null>>();
+    const fichaDe = (cuil: string): Promise<admin.firestore.DocumentSnapshot | null> => {
+      if (!cuil) return Promise.resolve(null);
+      let pendiente = fichaCache.get(cuil);
+      if (!pendiente) {
+        pendiente = db().collection('eventuales_bolsa').doc(cuil).get();
+        fichaCache.set(cuil, pendiente);
+      }
+      return pendiente;
+    };
+    const fechaDe = (row: admin.firestore.DocumentData): string => {
+      const directa = String(row.fecha || row.fechaAlta || row.fechaBaja || '');
+      if (/^\d{4}-\d{2}-\d{2}/.test(directa)) return directa.slice(0, 10);
+      const created = row.createdAt as { toMillis?: () => number } | undefined;
+      const ms = created?.toMillis?.();
+      return ms ? new Date(ms - 3 * 3600 * 1000).toISOString().slice(0, 10) : '';
+    };
     const envios = await Promise.all(abiertos.slice(0, 30).map(async (doc) => {
       const row = doc.data();
       const cuil = String(row.bolsaCuil || '');
-      const ficha = cuil ? await db().collection('eventuales_bolsa').doc(cuil).get() : null;
+      const ficha = await fichaDe(cuil);
       return {
         id: doc.id,
         nombre: String(ficha?.data()?.nombre || cuil || 'Sin nombre'),
+        cuil,
         tipo: String(row.tipo || ''),
         estado: String(row.estado || ''),
+        canal: String(row.canal || ''),
+        fecha: fechaDe(row),
+        nroTransaccion: String(row.nroTransaccion || ''),
       };
     }));
+    envios.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
     return { envios };
   }
 
