@@ -41,7 +41,7 @@ export function RrhhScreens(props: {
 }) {
   const guardar = props.online ? 'Guardar' : 'Guardar · pendiente de enviar';
   return (
-    <div data-movil-screen data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa] pb-24">
+    <div data-movil-screen data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24">
       <MovilTopBar modulo="RRHH" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="flex flex-1 flex-col gap-3 px-3 pt-1">
         <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">{props.hoyLabel}</p>
@@ -59,7 +59,7 @@ export function RrhhScreens(props: {
               value={props.busqueda}
               onChange={(event) => props.onBusqueda(event.target.value)}
               placeholder="Buscar guardia"
-              className="mt-3 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold"
+              className="mt-3 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-semibold"
             />
             <ul className="mt-2 max-h-40 space-y-1 overflow-auto">
               {props.guardias.map((guardia) => (
@@ -84,7 +84,7 @@ export function RrhhScreens(props: {
             </div>
             <label className="mt-3 block text-xs font-semibold uppercase text-slate-500">
               Días
-              <input value={props.dias} onChange={(event) => props.onDias(event.target.value)} inputMode="numeric" className="mt-1 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+              <input value={props.dias} onChange={(event) => props.onDias(event.target.value)} inputMode="numeric" className="mt-1 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-bold" />
             </label>
             <label className="mt-3 flex min-h-12 cursor-pointer items-center justify-center rounded-lg bg-slate-100 text-sm font-semibold text-slate-700">
               {props.fotoNombre || 'Foto del certificado'}
@@ -105,7 +105,7 @@ export function RrhhScreens(props: {
                 </button>
               ))}
             </div>
-            <textarea value={props.novedadTexto} onChange={(event) => props.onNovedadTexto(event.target.value)} placeholder="Qué pasó" className="mt-3 min-h-28 w-full rounded-lg border border-slate-200 p-3 text-sm font-semibold" />
+            <textarea value={props.novedadTexto} onChange={(event) => props.onNovedadTexto(event.target.value)} placeholder="Qué pasó" className="mt-3 min-h-28 w-full rounded-lg border border-slate-200 p-3 text-base font-semibold" />
             <button type="button" onClick={props.onGuardarNovedad} className="mt-3 min-h-12 w-full rounded-lg bg-[var(--movil-primary,#111827)] text-sm font-semibold text-white active:bg-slate-50">
               {guardar}
             </button>

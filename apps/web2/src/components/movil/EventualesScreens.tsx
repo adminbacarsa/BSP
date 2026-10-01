@@ -49,12 +49,12 @@ export function EventualesScreens(props: {
   elegido: EventualMovil | null;
 }) {
   return (
-    <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa] pb-24">
+    <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24">
       <MovilTopBar modulo="Eventuales" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
         {props.panel !== 'arca' && (
           <>
-            <input value={props.buscar} onChange={(event) => props.onBuscar(event.target.value)} placeholder="Buscar en la bolsa" className="min-h-12 rounded-lg border border-slate-200 px-3 text-sm font-semibold" />
+            <input value={props.buscar} onChange={(event) => props.onBuscar(event.target.value)} placeholder="Buscar en la bolsa" className="min-h-12 rounded-lg border border-slate-200 px-3 text-base font-semibold" />
             <ul className="space-y-2">
               {props.personas.map((persona) => (
                 <li key={persona.id}>
@@ -94,7 +94,7 @@ export function EventualesScreens(props: {
               ))}
               {props.arca.length === 0 && <li className="text-sm font-semibold text-slate-500">Sin altas ni bajas pendientes.</li>}
             </ul>
-            <input value={props.nro} onChange={(event) => props.onNro(event.target.value)} placeholder="Número de transacción" className="mt-3 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold" />
+            <input value={props.nro} onChange={(event) => props.onNro(event.target.value)} placeholder="Número de transacción" className="mt-3 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-semibold" />
             <button type="button" onClick={props.onConfirmarArca} className="mt-2 min-h-12 w-full rounded-lg border border-emerald-600 bg-white text-sm font-semibold text-emerald-700">
               {props.online ? 'Cargar transacción' : 'ARCA requiere conexión'}
             </button>
@@ -103,12 +103,12 @@ export function EventualesScreens(props: {
       </div>
       <BottomSheet open={props.panel === 'alta'} title="Alta rápida" onClose={props.onCerrarAlta}>
         <label className="block text-xs font-semibold uppercase text-slate-500">CUIL
-          <input value={props.cuil} onChange={(event) => props.onCuil(event.target.value)} className="mt-1 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-bold" />
+          <input value={props.cuil} onChange={(event) => props.onCuil(event.target.value)} className="mt-1 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-bold" />
         </label>
         <p className="mt-1 text-xs font-semibold text-[var(--movil-primary,#111827)]">{props.cuilEstado}</p>
-        <input value={props.nombre} onChange={(event) => props.onNombre(event.target.value)} placeholder="Nombre" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold" />
-        <input value={props.mail} onChange={(event) => props.onMail(event.target.value)} placeholder="Mail" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold" />
-        <input value={props.telefono} onChange={(event) => props.onTelefono(event.target.value)} placeholder="Teléfono" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold" />
+        <input value={props.nombre} onChange={(event) => props.onNombre(event.target.value)} placeholder="Nombre" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-semibold" />
+        <input value={props.mail} onChange={(event) => props.onMail(event.target.value)} placeholder="Mail" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-semibold" />
+        <input value={props.telefono} onChange={(event) => props.onTelefono(event.target.value)} placeholder="Teléfono" className="mt-2 min-h-12 w-full rounded-lg border border-slate-200 px-3 text-base font-semibold" />
         <p className="mt-2 text-xs font-semibold text-slate-500">Empresa habilitada: {props.empresa}</p>
         <button type="button" onClick={props.onGuardarAlta} className="mt-3 min-h-12 w-full rounded-lg bg-[var(--movil-primary,#111827)] text-sm font-semibold text-white">
           {props.online ? 'Guardar en la bolsa' : 'El alta requiere conexión'}

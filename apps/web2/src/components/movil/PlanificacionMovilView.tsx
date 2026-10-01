@@ -50,7 +50,7 @@ export function PlanificacionMovilView(props: {
   }
   const huecos = props.franjas.filter((f) => f.kind !== 'ok').length;
   return (
-    <div data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa]">
+    <div data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa]">
       <MovilTopBar modulo="Planificación" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="px-3 pt-1">
         <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">Próximos días</p>

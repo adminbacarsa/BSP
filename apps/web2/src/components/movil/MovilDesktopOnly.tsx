@@ -4,7 +4,7 @@ import { writeMovilChoice } from '@/lib/movil/useMovilMode';
 /** Pantalla para rutas /admin/* que todavía no tienen versión celular. */
 export function MovilDesktopOnly({ moduleLabel, onOpenFull = () => writeMovilChoice('0') }: { moduleLabel: string; onOpenFull?: () => void }) {
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24" data-movil-screen="escritorio">
+    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24" data-movil-screen="escritorio">
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-3">
         <p className="truncate text-sm font-semibold">{moduleLabel}</p>
         <p className="text-[11px] font-semibold text-slate-500">Modo celular</p>

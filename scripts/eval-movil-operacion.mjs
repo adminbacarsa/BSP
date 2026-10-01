@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve as resolvePath } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -732,6 +732,34 @@ check('primera tarjeta de guardia a menos de 170 px del borde', F.ALTO_HASTA_PRI
 check('Supervisión: barra con «Supervisión» y Solo lectura en píldora', supervisionHtml.includes('data-movil-topbar="Supervisión"') && supervisionHtml.includes('Solo lectura'));
 check('Selector de módulos con barra oscura, fecha en línea gris y tiles compactos con ícono', menuHtml.includes('data-movil-topbar="Menú"') && !menuHtml.includes('>Módulos<') && menuHtml.includes('data-movil-fecha="1"') && (menuHtml.match(/data-movil-tile="64"/g) || []).length === 6 && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
 check('ningún módulo del celular redefine tarjetas/píldoras sueltas en Operación', !readFileSync(join(web2, 'src/components/movil/OperacionScreens.tsx'), 'utf8').includes('TONE_PILL'));
+
+// ── Zoom del navegador: viewport, touch-action, inputs de 16 px y nada más ancho que la pantalla ──
+const VP = await importFront('lib/movil/viewportMovil.ts');
+check('viewport: celular sin zoom (maximum-scale=1, viewport-fit=cover); escritorio igual que siempre', VP.metaViewport(true) === 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover' && VP.metaViewport(false) === 'width=device-width, initial-scale=1');
+const appSrc = readFileSync(join(web2, 'src/pages/_app.tsx'), 'utf8');
+check('_app usa metaViewport(movil) y marca html[data-movil]', appSrc.includes('content={metaViewport(movil)}') && appSrc.includes('aplicarModoMovilAlDocumento(movil)') && !appSrc.includes('content="width=device-width, initial-scale=1"'));
+const rootAttrs = {};
+const fakeRoot = { setAttribute: (k, v) => { rootAttrs[k] = v; }, removeAttribute: (k) => { delete rootAttrs[k]; } };
+VP.aplicarModoMovilAlDocumento(true, fakeRoot);
+const marcado = rootAttrs['data-movil'] === '1';
+VP.aplicarModoMovilAlDocumento(false, fakeRoot);
+check('html[data-movil="1"] solo en modo celular', marcado && !('data-movil' in rootAttrs));
+const css = readFileSync(join(web2, 'src/styles/globals.css'), 'utf8');
+const bloqueMovil = css.slice(css.indexOf('html[data-movil="1"]'), css.indexOf('/* Inputs y selects más grandes en mobile'));
+check('globals.css: touch-action manipulation + overflow-x hidden + inputs 16px bajo html[data-movil]', bloqueMovil.includes('touch-action: manipulation') && bloqueMovil.includes('overflow-x: hidden') && bloqueMovil.includes('html[data-movil="1"] input') && bloqueMovil.includes('font-size: 16px !important') && bloqueMovil.includes('textarea'));
+const inputsMovil = readdirSync(join(web2, 'src/components/movil')).filter((f) => f.endsWith('.tsx')).map((f) => readFileSync(join(web2, 'src/components/movil', f), 'utf8')).join('\n');
+const tagsInput = inputsMovil.match(/<(input|textarea)\b[\s\S]*?(?<!=)\/?>/g) || [];
+check(`inputs del celular con font-size ≥ 16 px (${tagsInput.length} inputs, ninguno text-sm/xs/[13px])`, tagsInput.length >= 10 && tagsInput.every((t) => !/text-\[1[0-5]px\]|\btext-sm\b|\btext-xs\b/.test(t)) && tagsInput.filter((t) => !t.includes('type="file"')).every((t) => t.includes('text-base')));
+const pantallas = { home: todosHtml, objetivo: objChrome, filtrada: vacioHtml, ocho: ochoHtml, menu: menuHtml, supervision: supervisionHtml };
+for (const ancho of [360, 390]) {
+  const fallan = Object.entries(pantallas).filter(([, h]) => !VP.cabeEnViewport(h, ancho)).map(([k, h]) => `${k}:${VP.scrollWidthEstimado(h, ancho)}`);
+  check(`a ${ancho} px ningún render supera el viewport (scrollWidth ≤ clientWidth) y la raíz corta el desborde`, fallan.length === 0 && Object.values(pantallas).every((h) => h.includes('touch-manipulation overflow-x-hidden')) && F.contadoresCabenEnFila(ancho));
+  if (fallan.length) console.error('   desbordan:', fallan.join(', '));
+}
+check('scrollWidthEstimado detecta anchos fijos', VP.anchoFijoMaximoPx('<div class="w-[420px]">') === 420 && VP.anchoFijoMaximoPx('<div class="min-w-96 max-w-[480px]">') === 384 && VP.anchoFijoMaximoPx('<div style="width:500px">') === 500 && !VP.cabeEnViewport('<div class="overflow-x-hidden w-[400px]">', 390) && VP.cabeEnViewport('<div class="overflow-x-hidden w-full">', 360));
+// Estado vacío con filtro activo: dice el filtro, no «Mostrando ACT · 0».
+const vacioAct = render(OperacionScreens, { ...baseFiltros, filtro: { ...F.FILTRO_VACIO, estado: 'ACTIVOS' }, contadores: { ACTIVOS: 0 }, grupos: [], objectives: [], vacioLabel: undefined });
+check('vacío con filtro: «Sin guardias en ACT», sin «Mostrando ACT · 0», con Ver todos', vacioAct.includes('Sin guardias en ACT') && !vacioAct.includes('Mostrando') && vacioAct.includes('Ver todos') && vacioHtml.includes('Sin guardias en AUS para Malagueño') && !vacioHtml.includes('Mostrando'));
 
 rmSync(outdir, { recursive: true, force: true });
 

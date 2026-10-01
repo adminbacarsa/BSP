@@ -10,7 +10,7 @@ import {
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { guardCompacto, type GuardEstadoCompacto } from '@/lib/movil/guardCompacto';
-import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
+import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etiquetaEstado, mensajeVacio, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
 import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
 import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
@@ -154,7 +154,7 @@ export function GuardAccionesSheetBody({
                   onChange={(event) => setNota(event.target.value)}
                   placeholder="Ej.: sin llaves del portón"
                   data-movil-nota-input="1"
-                  className={`min-h-11 min-w-0 flex-1 rounded-lg border ${MOVIL_BORDER} bg-white px-3 text-sm text-slate-900 outline-none focus:border-[var(--movil-primary,#111827)]`}
+                  className={`min-h-11 min-w-0 flex-1 rounded-lg border ${MOVIL_BORDER} bg-white px-3 text-base text-slate-900 outline-none focus:border-[var(--movil-primary,#111827)]`}
                 />
                 <button type="button" disabled={guardandoNota || !nota.trim()} onClick={() => { void guardarNota(); }} className={`${BTN} px-3 ${MOVIL_BTN_PRIMARY}`} data-movil-nota-guardar="1">
                   {guardandoNota ? '…' : 'Guardar'}
@@ -354,7 +354,7 @@ export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
           onChange={(event) => setTexto(event.target.value)}
           placeholder="Buscar cliente u objetivo"
           aria-label="Buscar cliente u objetivo"
-          className={`h-9 w-full rounded-lg border ${MOVIL_BORDER} bg-white pl-9 pr-3 text-[13px] font-medium outline-none focus:border-[var(--movil-primary,#111827)]`}
+          className={`h-9 w-full rounded-lg border ${MOVIL_BORDER} bg-white pl-9 pr-3 text-base font-medium outline-none focus:border-[var(--movil-primary,#111827)]`}
         />
       </div>
       <button type="button" onClick={() => onElegir(null, null)} className={`mb-2 ${opcion(!filtro.clientId && !filtro.objectiveId)}`}>
@@ -630,7 +630,7 @@ export function OperacionScreens({
   contadores,
   ambitoLabel = null,
   grupos = [],
-  vacioLabel = 'Sin guardias',
+  vacioLabel,
   onAmbito,
   onQuitarAmbito,
   onAcciones,
@@ -698,6 +698,8 @@ export function OperacionScreens({
     .map((item) => ({ ...item, value: contadores?.[item.id] ?? legacy[item.id] }))
     .filter((item) => item.value !== undefined);
   const filtrando = filtro.estado !== 'TODOS';
+  // El vacío siempre nombra el filtro activo («Sin guardias en ACT»), nunca «Mostrando ACT · 0».
+  const vacioTexto = vacioLabel ?? mensajeVacio(filtro, []);
   const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion, onAcciones };
   const moduloLabel = readOnly ? 'Supervisión' : 'Operación';
   const vacio = 'py-6 text-center text-[13px] font-medium text-slate-400';
@@ -709,7 +711,7 @@ export function OperacionScreens({
     </p>
   ) : null;
   return (
-    <div className={`mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24 ${MOVIL_FONT}`} data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
+    <div className={`mx-auto flex min-h-screen w-full max-w-[480px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24 ${MOVIL_FONT}`} data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <MovilTopBar
         modulo={moduloLabel}
         empresa={empresa}
@@ -819,7 +821,7 @@ export function OperacionScreens({
                 <span aria-hidden="true" className="ml-auto text-slate-400">›</span>
               </button>
             )}
-            {filtrando && (
+            {filtrando && grupos.length > 0 && (
               <p className="mb-2 flex items-center justify-between text-[11px] font-medium text-slate-500">
                 <span>Mostrando <b className="font-semibold text-slate-900">{etiquetaEstado(filtro.estado)}</b>{ambitoLabel ? ` · ${ambitoLabel}` : ''} · {grupos.reduce((acc, g) => acc + g.shifts.length, 0)}</span>
                 <button type="button" onClick={() => onCounter(filtro.estado)} className="min-h-9 rounded-lg px-2 font-semibold text-slate-900 underline-offset-2 active:underline">Ver todos</button>
@@ -838,7 +840,10 @@ export function OperacionScreens({
               </section>
             ))}
             {filtrando && grupos.length === 0 && (
-              <p className={vacio} data-movil-vacio="1">{vacioLabel}</p>
+              <div className="flex flex-col items-center gap-1">
+                <p className={vacio} data-movil-vacio="1">{vacioTexto}</p>
+                <button type="button" onClick={() => onCounter(filtro.estado)} className="min-h-9 rounded-lg px-2 text-[12px] font-semibold text-slate-900 underline-offset-2 active:underline">Ver todos</button>
+              </div>
             )}
             {!filtrando && objectives.map((item) => {
               const pct = coveragePct(item);
@@ -869,7 +874,7 @@ export function OperacionScreens({
               );
             })}
             {!filtrando && objectives.length === 0 && (
-              <p className={vacio} data-movil-vacio="1">{ambitoLabel ? vacioLabel : 'Sincronizando objetivos…'}</p>
+              <p className={vacio} data-movil-vacio="1">{ambitoLabel ? vacioTexto : 'Sincronizando objetivos…'}</p>
             )}
             {pie}
           </>

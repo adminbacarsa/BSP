@@ -15,6 +15,7 @@ import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
 import { useTrainingCleanup } from '@/hooks/useTrainingCleanup';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { aplicarModoMovilAlDocumento, metaViewport } from '@/lib/movil/viewportMovil';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
@@ -65,6 +66,9 @@ const NewVersionNotice = dynamic(
 
 export default function App({ Component, pageProps }: AppProps) {
   const router = useRouter();
+  const movil = useMovilMode();
+  // Modo celular: sin zoom del navegador ni scroll lateral (viewport + reglas html[data-movil] en globals.css).
+  useEffect(() => { aplicarModoMovilAlDocumento(movil); }, [movil]);
   const showTrainingCoach = router.pathname.startsWith('/admin');
   const showAssistant = !router.pathname.startsWith('/empleado')
     && !router.pathname.startsWith('/cliente')
@@ -107,7 +111,7 @@ export default function App({ Component, pageProps }: AppProps) {
       <ToastProvider>
         <Head>
           <title>COSP V1.0 | Grupo Bacar</title>
-          <meta name="viewport" content="width=device-width, initial-scale=1" />
+          <meta name="viewport" content={metaViewport(movil)} />
         </Head>
         <AdminFcmRegistrar />
         <TrainingEvidenceWatcher />

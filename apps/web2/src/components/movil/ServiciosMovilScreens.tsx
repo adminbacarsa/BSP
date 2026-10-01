@@ -60,7 +60,7 @@ export function ServiciosMovilScreens({
     : rows;
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24" data-movil-screen={`servicios-${panel}`}>
+    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-24" data-movil-screen={`servicios-${panel}`}>
       <MovilTopBar modulo="Servicios" empresa={empresa} onEmpresa={onEmpresa} online={online} pendingLabel={pendingLabel} />
       {row && (
         <div className="flex h-11 items-center gap-2 px-3 pt-1" data-movil-objetivo-header="fino">
@@ -90,7 +90,7 @@ export function ServiciosMovilScreens({
               value={filter}
               onChange={(event) => onFilter(event.target.value)}
               placeholder="Buscar objetivo o cliente"
-              className="mb-3 min-h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold outline-none focus:border-[var(--movil-primary,#111827)]"
+              className="mb-3 min-h-12 w-full rounded-lg border border-slate-200 bg-white px-4 text-base font-semibold outline-none focus:border-[var(--movil-primary,#111827)]"
             />
             {visibles.map((item) => (
               <button key={item.objectiveId} type="button" onClick={() => onOpen(item.objectiveId)} className="mb-2 flex w-full overflow-hidden rounded-lg border border-slate-200 bg-white text-left active:scale-[0.99]">

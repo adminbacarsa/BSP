@@ -1,5 +1,5 @@
+import React, { type ReactNode } from 'react';
 import { Building2, WifiOff } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { MOVIL_TOPBAR_BG } from './tones';
 
 /**

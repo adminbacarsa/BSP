@@ -78,7 +78,7 @@ export function MovilMenuScreens(props: {
   const nowMs = props.now ?? Date.now();
   const alertasDe = (id: string): number => props.alertas?.[id] ?? 0;
   return (
-    <div data-movil-screen="menu" data-viewport="390x844" data-movil-alto={altoMenuPx(props.modulos.length)} className={`mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-8 ${MOVIL_FONT}`}>
+    <div data-movil-screen="menu" data-viewport="390x844" data-movil-alto={altoMenuPx(props.modulos.length)} className={`mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col touch-manipulation overflow-x-hidden bg-[#f7f8fa] pb-8 ${MOVIL_FONT}`}>
       <MovilTopBar modulo="Menú" empresa={props.empresaName} onEmpresa={props.onEmpresa} />
       <div className="flex flex-col gap-3 px-3 pt-1">
         <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">{movilFechaCorta(nowMs)}</p>

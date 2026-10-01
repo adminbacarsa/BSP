@@ -446,6 +446,21 @@ html, body {
   overflow-x: hidden !important;
 }
 
+/* Modo celular (html[data-movil="1"], lo pone _app con useMovilMode): sin zoom por doble toque,
+   sin scroll lateral y inputs de 16 px (iPhone hace zoom al enfocar inputs más chicos). */
+html[data-movil="1"],
+html[data-movil="1"] body,
+html[data-movil="1"] #__next {
+  touch-action: manipulation;
+  overflow-x: hidden;
+  max-width: 100vw;
+}
+html[data-movil="1"] input:not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="color"]),
+html[data-movil="1"] select,
+html[data-movil="1"] textarea {
+  font-size: 16px !important;
+}
+
 /* Inputs y selects más grandes en mobile para facilitar el toque */
 @media (max-width: 640px) {
   input:not([type="color"]):not([type="checkbox"]):not([type="radio"]),

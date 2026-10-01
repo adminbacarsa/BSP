@@ -149,7 +149,7 @@ export function ServiciosMovil(props: Props) {
           onChange={(event) => setReopenMotivo(event.target.value)}
           rows={3}
           placeholder="Motivo de la reapertura"
-          className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm font-bold text-slate-800 outline-none focus:border-[var(--movil-primary,#111827)]"
+          className="w-full rounded-lg border border-slate-200 bg-slate-50 p-3 text-base font-bold text-slate-800 outline-none focus:border-[var(--movil-primary,#111827)]"
         />
         {reopenError && <p className="mt-2 text-[11px] font-bold text-amber-700">{reopenError}</p>}
         <button

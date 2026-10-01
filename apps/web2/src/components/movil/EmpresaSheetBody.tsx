@@ -27,7 +27,7 @@ export function EmpresaSheetBody({ empresas, activaId, onElegir }: {
             onChange={(event) => setBusqueda(event.target.value)}
             placeholder="Buscar empresa"
             data-movil-empresa-buscar="1"
-            className="min-w-0 flex-1 bg-transparent text-[13px] text-slate-900 outline-none placeholder:text-slate-400"
+            className="min-w-0 flex-1 bg-transparent text-base text-slate-900 outline-none placeholder:text-slate-400"
           />
         </label>
       )}
