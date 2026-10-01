@@ -187,7 +187,8 @@ const guardHtml = render(OperacionScreens, {
   objective: objetivoPeaje,
   ...noops,
 });
-check('objetivo muestra Llegó, protocolo y pendiente', guardHtml.includes('Llegó?') && guardHtml.includes('Protocolo') && guardHtml.includes('Pendiente de enviar') && guardHtml.includes('42'));
+check('objetivo: tarjetas compactas que abren la hoja, RET con minutos y pendiente', guardHtml.includes('data-movil-card="compacta"') && guardHtml.includes('data-movil-tap="b"') && guardHtml.includes('data-movil-tap="g"') && guardHtml.includes('RET 42m') && guardHtml.includes('Pendiente de enviar') && !guardHtml.includes('Llegó?') && !guardHtml.includes('>Protocolo<'));
+check('objetivo: encabezado en una línea fina con volver y cantidad', guardHtml.includes('data-movil-objetivo-header="fino"') && guardHtml.includes('aria-label="Volver"') && guardHtml.includes('>Peaje 9 Norte<') && guardHtml.includes('>2<') && !guardHtml.includes('h-12 w-12'));
 check('marco de pantalla', html.includes('data-movil-screen') && html.includes('max-w-[480px]'));
 
 // ── Supervisión: mismo CC en solo lectura ──
@@ -204,8 +205,8 @@ const supervisionHtml = render(OperacionScreens, {
   objective: objetivoPeaje,
   ...noops,
 });
-check('supervisión muestra guardias y estados', supervisionHtml.includes('Baez, Juan') && supervisionHtml.includes('Guerrero, Martín') && supervisionHtml.includes('42'));
-check('supervisión sin botones de acción ni sala', !supervisionHtml.includes('Llegó?') && !supervisionHtml.includes('Protocolo') && !supervisionHtml.includes('Salida') && !supervisionHtml.includes('aria-label="Sala') && supervisionHtml.includes('Solo lectura') && supervisionHtml.includes('data-movil-readonly="1"'));
+check('supervisión muestra guardias y estados', supervisionHtml.includes('BAEZ Juan') && supervisionHtml.includes('GUERRERO Martín') && supervisionHtml.includes('RET 42m') && supervisionHtml.includes('data-movil-estado="ausente"'));
+check('supervisión sin botones de acción ni sala', !supervisionHtml.includes('data-movil-tap') && !supervisionHtml.includes('Llegó?') && !supervisionHtml.includes('Protocolo') && !supervisionHtml.includes('Salida') && !supervisionHtml.includes('aria-label="Sala') && supervisionHtml.includes('Solo lectura') && supervisionHtml.includes('data-movil-readonly="1"'));
 const supervisionAlertas = render(OperacionScreens, {
   empresa: 'Pruebas S.A.',
   modeLabel: 'Auto',
@@ -283,9 +284,9 @@ const tarjetasHtml = render(OperacionScreens, {
   panel: 'objetivo', alerts: [], objectives: [objetivoDetalle], objective: objetivoDetalle, ...noops,
 });
 check('tarjeta 390: horario planificado y código en cada guardia', tarjetasHtml.includes('07:00–15:00') && tarjetasHtml.includes('15:00–23:00') && tarjetasHtml.includes('23:00–07:00') && (tarjetasHtml.match(/data-movil-detalle=/g) || []).length === 3);
-check('tarjeta 390: ingreso real debajo del horario', tarjetasHtml.includes('Ingresó 07:00 · marcó 06:52') && tarjetasHtml.includes('Ingresó 15:12 (12 min tarde)'));
-check('tarjeta 390: relevo y plan', tarjetasHtml.includes('Lo releva Guerrero, Martín · T 15:00') && tarjetasHtml.includes('Entra 23:00'));
-check('tarjeta 390: LLAMAR con tel: del legajo junto a las acciones', tarjetasHtml.includes('href="tel:3515550101"') && (tarjetasHtml.match(/data-movil-llamar="1"/g) || []).length === 3 && tarjetasHtml.includes('Salida'));
+check('tarjeta 390: ingreso con ícono (verde a tiempo, ámbar con +min)', (tarjetasHtml.match(/data-movil-mini="ingreso"/g) || []).length === 2 && tarjetasHtml.includes('</svg>07:00</span>') && tarjetasHtml.includes('15:12 +12′') && tarjetasHtml.includes('text-amber-700') && !tarjetasHtml.includes('Ingresó'));
+check('tarjeta 390: relevo con apellido y hora; plan con chip de hora', tarjetasHtml.includes('GUERRERO 15:00') && tarjetasHtml.includes('GUERRERO 23:00') && tarjetasHtml.includes('data-movil-estado="plan"') && tarjetasHtml.includes('</svg>23:00</span>') && !tarjetasHtml.includes('Lo releva') && !tarjetasHtml.includes('Entra 23:00'));
+check('tarjeta 390: teléfono como ícono de 36 px, sin fila de botones; tocar abre la hoja', tarjetasHtml.includes('href="tel:3515550101"') && (tarjetasHtml.match(/data-movil-llamar="1"/g) || []).length === 3 && tarjetasHtml.includes('h-9 w-9') && !tarjetasHtml.includes('Salida') && !tarjetasHtml.includes('data-movil-mas-acciones') && (tarjetasHtml.match(/data-movil-tap="/g) || []).length === 3);
 const homeRelevo = render(OperacionScreens, {
   empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA,
   stats: { activos: 2, retenidos: 0, ausentes: 0, vacantes: 0, plan: 1 },
@@ -300,15 +301,23 @@ const estadosHtml = render(OperacionScreens, {
   panel: 'objetivo', alerts: [], objectives: [objetivoEstados], objective: objetivoEstados, ...noops,
 });
 for (const [nombre, texto] of [
-  ['retenido', 'Retenido desde 15:00 · 20 min · tope 19:59'],
-  ['ausente', 'No llegó desde 15:00 · ausente'],
-  ['ausente cubierto', 'Cubierto por Sosa, Carla'],
-  ['tarde avisada', 'Tarde 20 min · avisó · llega ~15:30'],
-  ['tarde sin aviso', 'Tarde 20 min · sin aviso'],
-  ['vacante', 'Vacante T · desde 15:00'],
-  ['convocado', 'EN CAMINO · llega ~15:40'],
-  ['EXT', 'EXT hasta 19:00 · cubre a Guerrero, Martín'],
+  ['retenido: chip RET con minutos', 'RET 20m'],
+  ['retenido: tope 12:59 con reloj de arena', 'data-movil-mini="tope"'],
+  ['retenido: tope hora', 'tope 19:59'],
+  ['retenido: a quién espera', 'GUERRERO 15:00'],
+  ['ausente', 'data-movil-estado="ausente"'],
+  ['ausente cubierto', 'data-movil-estado="cubierto"'],
+  ['tarde avisada', 'TAR 20′'],
+  ['tarde sin aviso', 'data-movil-estado="tarde"'],
+  ['vacante', 'data-movil-estado="vacante"'],
+  ['vacante con banda', 'VACANTE · T'],
 ]) check(`render estado ${nombre}`, estadosHtml.includes(texto));
+check('la tarjeta no lleva los textos largos (van en la hoja)', !estadosHtml.includes('Retenido desde') && !estadosHtml.includes('No llegó desde') && !estadosHtml.includes('Cubierto por') && !estadosHtml.includes('EN CAMINO'));
+const { GuardAccionesSheetBody: HojaDetalle } = await importFront('components/movil/OperacionScreens.tsx');
+const hojaDe = (s) => render(HojaDetalle, { shift: s, siblings: estadosTarjeta, now: AHORA, onEjecutar: () => {}, onCerrar: () => {} });
+check('hoja: detalle completo del retenido', hojaDe(retenido).includes('Retenido desde 15:00 · 20 min · tope 19:59') && hojaDe(retenido).includes('Espera a Guerrero, Martín · T 15:00'));
+check('hoja: ausente, cubierto, tarde y vacante con texto largo', hojaDe(ausente).includes('No llegó desde 15:00 · ausente') && hojaDe(ausenteCubierto).includes('Cubierto por Sosa, Carla') && hojaDe(tardeAvisada).includes('Tarde 20 min · avisó · llega ~15:30') && hojaDe(vacante).includes('Vacante T · desde 15:00'));
+check('hoja: convocatoria y cobertura EXT', hojaDe(convocado).includes('EN CAMINO · llega ~15:40') && hojaDe(ext).includes('EXT hasta 19:00 · cubre a Guerrero, Martín'));
 const sinTelHtml = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, stats: { activos: 1, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 }, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: [{ ...baezM, phone: '' }] }, ...noops });
 check('vacante sin LLAMAR; sin teléfono deshabilitado', !estadosHtml.includes('data-movil-llamar="0"') && (estadosHtml.match(/data-movil-llamar="1"/g) || []).length === estadosTarjeta.length - 1 && sinTelHtml.includes('data-movil-llamar="0"'));
 const alertasDetalle = render(OperacionScreens, {
@@ -322,7 +331,7 @@ const supervisionDetalle = render(OperacionScreens, {
   stats: { activos: 2, retenidos: 1, ausentes: 2, vacantes: 1, plan: 1 },
   panel: 'objetivo', alerts: [], objectives: [objetivoEstados], objective: objetivoEstados, ...noops,
 });
-check('supervisión: mismo detalle y LLAMAR, sin acciones', supervisionDetalle.includes('Retenido desde 15:00') && supervisionDetalle.includes('>Llamar<') && !supervisionDetalle.includes('Llegó?') && !supervisionDetalle.includes('Protocolo'));
+check('supervisión: mismas tarjetas compactas y teléfono, sin tocar ni acciones', supervisionDetalle.includes('RET 20m') && supervisionDetalle.includes('tope 19:59') && supervisionDetalle.includes('data-movil-llamar="1"') && !supervisionDetalle.includes('data-movil-tap') && !supervisionDetalle.includes('Llegó?') && !supervisionDetalle.includes('Protocolo'));
 
 // ── Contadores como filtros + cliente/objetivo (paridad con las solapas del escritorio) ──
 const F = await importFront('lib/movil/operacionFiltros.ts');
@@ -406,7 +415,7 @@ for (const estado of ['ACTIVOS', 'PLAN', 'AUSENTES', 'VACANTES', 'RETENIDOS', 'N
   check(`filtro ${estado}: contador activo y ${cont[estado]} tarjetas agrupadas`, html.includes(`data-movil-contador="${estado}" data-movil-filtro-activo="1"`) && tarjetas === cont[estado] && html.includes('Ver todos'));
 }
 const ausHtml = renderFiltro({ ...F.FILTRO_VACIO, estado: 'AUSENTES' }).html;
-check('AUS muestra Sosa y Diaz agrupadas por objetivo con detalle', ausHtml.includes('Sosa, Carla') && ausHtml.includes('Diaz, Rosa') && !ausHtml.includes('Guerrero, Martín') && ausHtml.includes('data-movil-grupo="peaje"') && ausHtml.includes('data-movil-grupo="cet"') && ausHtml.includes('No llegó desde 15:00 · ausente'));
+check('AUS muestra Sosa y Diaz agrupadas por objetivo con detalle', ausHtml.includes('SOSA Carla') && ausHtml.includes('DIAZ Rosa') && !ausHtml.includes('GUERRERO Martín') && ausHtml.includes('data-movil-grupo="peaje"') && ausHtml.includes('data-movil-grupo="cet"') && ausHtml.includes('data-movil-estado="ausente"'));
 const comboHtml = renderFiltro({ estado: 'AUSENTES', clientId: 'c1', objectiveId: null }).html;
 check('cliente + AUS: chip con X, contadores del cliente y solo sus ausentes', comboHtml.includes('data-movil-chip="ambito"') && comboHtml.includes('>Ruta 9<') && comboHtml.includes('aria-label="Quitar filtro Ruta 9"') && comboHtml.includes('data-movil-ambito="cliente"') && (comboHtml.match(/data-movil-detalle=/g) || []).length === 2 && !comboHtml.includes('Obrador'));
 const vacioHtml = renderFiltro({ estado: 'AUSENTES', clientId: 'c2', objectiveId: null }).html;
@@ -538,7 +547,30 @@ check('hoja 390 confirmación en la hoja: pregunta + Confirmar/Volver, sin lista
 const hojaSin = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isCompleted: true }, siblings: [], now: NOW_A, ...hojaNoops });
 check('hoja 390 sin acciones: aviso', hojaSin.includes('data-movil-acciones-vacio="1"'));
 const tarjetaTarde = render(GuardCard, { shift: { ...turnoBase, isLateUnnotified: true }, now: NOW_A, onLlego: () => {}, onRevertir: () => {}, onSalida: () => {}, onProtocolo: () => {}, onRetencion: () => {}, onAcciones: () => {} });
-check('tarjeta 390 tarde: botón Ingreso y ⋯ abren la hoja', tarjetaTarde.includes('>Ingreso<') && tarjetaTarde.includes('data-movil-mas-acciones="a1"'));
+check('tarjeta 390 tarde: tocar la tarjeta abre la hoja; sin botones Ingreso/⋯', tarjetaTarde.includes('data-movil-tap="a1"') && tarjetaTarde.includes('aria-label="Acciones de BAEZ Juan"') && tarjetaTarde.includes('data-movil-estado="tarde"') && tarjetaTarde.includes('TAR 20′') && !tarjetaTarde.includes('>Ingreso<') && !tarjetaTarde.includes('data-movil-mas-acciones'));
+check('hoja: Llamar y WhatsApp (wa.me +549)', hojaTarde.includes('data-movil-whatsapp="1"') && hojaTarde.includes('href="https://wa.me/549351"') && hojaTarde.includes('>Llamar<'));
+
+// ── Tarjeta compacta 390x844: alto, cantidad visible, un solo botón ──
+const GC = await importFront('lib/movil/guardCompacto.ts');
+check('nombre compacto APELLIDO Nombre', GC.nombreCompacto('Lopez, Hector Juan') === 'LOPEZ Hector Juan' && GC.nombreCompacto('LOPEZ, HECTOR') === 'LOPEZ Hector' && GC.nombreCompacto('Sin coma') === 'Sin coma' && GC.apellidoCompacto('Guerrero, Martín') === 'GUERRERO');
+check('puesto compacto', GC.puestoCompacto('Puesto 2') === 'P2' && GC.puestoCompacto('Puesto 12') === 'P12' && GC.puestoCompacto('Portería Norte') === 'PORTER…' && GC.puestoCompacto('') === 'P?');
+const cBaez = GC.guardCompacto(baezM, peaje, AHORA);
+check('activo: reloj con horas en servicio desde la marca real, ingreso a tiempo y relevo', cBaez.estado.kind === 'activo' && cBaez.estado.texto === '08:28' && cBaez.ingreso.hhmm === '07:00' && cBaez.ingreso.tardeMin === 0 && cBaez.relevo.apellido === 'GUERRERO' && cBaez.relevo.hhmm === '15:00' && cBaez.relevo.sentido === 'lo_releva' && cBaez.puesto === 'P1');
+const cRet = GC.guardCompacto(retenido, [retenido, { ...guerreroT, isPresent: false, isAbsent: true }], AHORA);
+check('retenido: RET minutos, tope y a quién espera', cRet.estado.texto === 'RET 20m' && cRet.tope === 'tope 19:59' && cRet.relevo.apellido === 'GUERRERO');
+check('tarde: TAR minutos sin ingreso', GC.guardCompacto(tardeSinAviso, [], AHORA).estado.texto === 'TAR 20′' && GC.guardCompacto(tardeSinAviso, [], AHORA).ingreso === null);
+check('vacante: VAC sin teléfono', GC.guardCompacto(vacante, peaje, AHORA).estado.kind === 'vacante' && GC.guardCompacto(vacante, peaje, AHORA).telefono === null && GC.guardCompacto(vacante, peaje, AHORA).nombre === 'VACANTE · T');
+check('alto de diseño ≤ 80 px y ≥ 7 tarjetas en 390x844 con barra, encabezado fino, contadores y nav', GC.ALTO_TARJETA_COMPACTA_PX <= 80 && GC.tarjetasVisibles(844, 56 + 40 + 44 + 64) >= 7 && GC.tarjetasVisibles(844, 56 + 40 + 44 + 64) === 10);
+const soloTarjeta = render(GuardCard, { shift: baezM, siblings: peaje, now: AHORA, onAcciones: () => {} });
+check('tarjeta: 2 filas (leading-5 + leading-4, py-2), sin avatar grande ni botones altos', soloTarjeta.includes('leading-5') && soloTarjeta.includes('leading-4') && soloTarjeta.includes('py-2') && !soloTarjeta.includes('h-10 w-10') && !soloTarjeta.includes('min-h-12') && !soloTarjeta.includes('min-h-14') && (soloTarjeta.match(/<button/g) || []).length === 1 && (soloTarjeta.match(/<a /g) || []).length === 1);
+check('tarjeta: íconos lucide en la fila 2 (MapPin, Clock, LogIn, ArrowRightLeft)', ['puesto', 'horario', 'ingreso', 'relevo'].every((k) => soloTarjeta.includes(`data-movil-mini="${k}"`)) && (soloTarjeta.match(/<svg/g) || []).length >= 6);
+const ocho = Array.from({ length: 8 }, (_, i) => ({ ...baezM, id: `k${i}`, employeeId: `k${i}`, employeeName: `Guardia ${i}, Nombre` }));
+const ochoHtml = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, stats: { activos: 8, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 }, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: ocho }, onAcciones: () => {}, ...noops });
+check('8 tarjetas compactas en el objetivo, cada una con una sola zona de toque', (ochoHtml.match(/data-movil-card="compacta"/g) || []).length === 8 && (ochoHtml.match(/data-movil-tap="/g) || []).length === 8 && (ochoHtml.match(/data-movil-detalle=/g) || []).length === 8);
+const soloLectura = render(GuardCard, { shift: baezM, siblings: peaje, now: AHORA, readOnly: true, onAcciones: () => {} });
+check('solo lectura: la tarjeta no se toca y conserva el teléfono', !soloLectura.includes('<button') && !soloLectura.includes('data-movil-tap') && soloLectura.includes('data-movil-llamar="1"'));
+check('contadores: una fila horizontal de 6 chips ícono+número con scroll', todosHtml.includes('data-movil-contadores="fila"') && todosHtml.includes('overflow-x-auto') && !todosHtml.includes('grid-cols-3') && (todosHtml.match(/data-movil-contador=/g) || []).length === 6 && ['ACT', 'PLA', 'TAR', 'AUS', 'VAC', 'RET'].every((c) => todosHtml.includes(`>${c}<`)) && todosHtml.includes('h-9 shrink-0'));
+check('contador activo resaltado con anillo', ausHtml.includes('data-movil-contador="AUSENTES" data-movil-filtro-activo="1"') && ausHtml.includes('ring-2 ring-slate-600') && ausHtml.includes('aria-pressed="true"'));
 
 // ── Sala del celular: tomar mando con piloto inactivo, pedir mando, pasar a Auto con confirmación ──
 const sesionPiloto = (minAgo) => ({ startTime: new Date(NOW_A - 3 * 3600000), lastActivityAt: new Date(NOW_A - minAgo * 60000) });
