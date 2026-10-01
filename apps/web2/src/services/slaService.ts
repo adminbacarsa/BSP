@@ -226,6 +226,8 @@ export interface ServiceSLA {
   cancelReason?: string;
   closed?: boolean;
   closedReason?: string;
+  /** Alta «Meses: Individuales»: enlaza los docs de la misma vigencia partida por mes. */
+  slaSeriesId?: string;
   /** Modo de facturación prefactura (default PLANIFICADO). */
   /** null / ausente = Auto: contrato comercial abierto → EJECUTADO, si no PLANIFICADO. */
   billingMode?: 'PLANIFICADO' | 'EJECUTADO' | 'FIJO' | 'ORDEN_COMPRA' | null;

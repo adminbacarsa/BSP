@@ -44,6 +44,16 @@ import {
   reopenMotivoError,
   stripSlaLifecycle,
 } from '@/lib/servicios/newSlaDraft';
+import {
+  buildSlaDraftsForSegments,
+  newSlaSeriesId,
+  overlappingSegments,
+  slaSegmentsForMode,
+  splitRangeByCalendarMonth,
+  summarizeSlaSplit,
+  validateSlaRange,
+  type SlaMonthsMode,
+} from '@/lib/servicios/slaMonthSplit';
 import { cerrarContratoSla, reabrirContratoSla } from '@/lib/servicios/contratoCierreClient';
 import { ServiciosMovil } from '@/components/movil/ServiciosMovil';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
@@ -238,6 +248,10 @@ export default function ServiciosSLAPage() {
 
   const [isEditing, setIsEditing] = useState(false);
   const [externalChange, setExternalChange] = useState(false);
+  const [slaMonthsMode, setSlaMonthsMode] = useState<SlaMonthsMode>('agrupados');
+  useEffect(() => {
+    if (view === 'form') setSlaMonthsMode('agrupados');
+  }, [view]);
 
   // Historial de horarios
   const [showHorarioForm, setShowHorarioForm] = useState(false);
@@ -590,10 +604,6 @@ export default function ServiciosSLAPage() {
     if (!y || !m || !d) return null;
     const date = new Date(y, m - 1, d);
     return Number.isNaN(date.getTime()) ? null : date;
-  };
-
-  const rangesOverlap = (aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) => {
-    return aStart <= bEnd && aEnd >= bStart;
   };
 
   // --- MODAL Y UTILS ---
@@ -1364,10 +1374,11 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     if (!form.objectiveId) return addToast('Falta Objetivo', 'error');
     if (form.positions.length === 0) return addToast('Agregue al menos un puesto', 'error');
 
+    const rangeError = validateSlaRange(form.startDate, form.endDate);
+    if (rangeError) return addToast(rangeError, 'error');
     const startDate = parseDate(form.startDate);
     const endDate = parseDate(form.endDate);
     if (!startDate || !endDate) return addToast('Fechas inválidas', 'error');
-    if (startDate > endDate) return addToast('La fecha de inicio no puede ser mayor que la de fin', 'error');
 
     // Al editar, el objetivo ya era válido cuando se creó; solo validar en creación
     if (!isEditing) {
@@ -1375,18 +1386,32 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       if (!objectiveValid) return addToast('El objetivo no pertenece al cliente seleccionado', 'error');
     }
 
-    const hasOverlap = services.some(s => {
-      if (!s.startDate || !s.endDate) return false;
-      if (s.clientId !== form.clientId || s.objectiveId !== form.objectiveId) return false;
-      if (isEditing && form.id && s.id === form.id) return false;
-      const sStart = parseDate(s.startDate);
-      const sEnd = parseDate(s.endDate);
-      if (!sStart || !sEnd) return false;
-      return rangesOverlap(startDate, endDate, sStart, sEnd);
-    });
-    if (hasOverlap) return addToast('Ya existe un SLA con fechas superpuestas para ese objetivo', 'error');
+    const segments = slaSegmentsForMode(slaMonthsMode, form.startDate, form.endDate);
+    const splitting = segments.length > 1;
+    const overlapped = overlappingSegments(
+      segments,
+      services,
+      { clientId: form.clientId, objectiveId: form.objectiveId },
+      isEditing ? form.id : null,
+    );
+    if (overlapped.length > 0) {
+      return addToast(
+        splitting
+          ? `Ya hay un servicio en ${overlapped.map((s) => s.label).join(', ')} para ese objetivo. No se pisa: ajustá la vigencia.`
+          : 'Ya existe un SLA con fechas superpuestas para ese objetivo',
+        'error',
+      );
+    }
 
-    if (!isEditing && newSlaBornClosed(form.endDate, localTodayYmd())) {
+    if (splitting) {
+      const lines = segments.map((s) => `• ${s.label}: ${s.startDate.slice(8, 10)}/${s.startDate.slice(5, 7)} → ${s.endDate.slice(8, 10)}/${s.endDate.slice(5, 7)}${s.partial ? ' (parcial)' : ''}`);
+      const head = isEditing
+        ? `Este servicio queda en ${segments[0].label} y se crean ${segments.length - 1} más: ${segments.slice(1).map((s) => s.label).join(', ')}`
+        : summarizeSlaSplit(segments);
+      if (!window.confirm(`${head}\n\n${lines.join('\n')}\n\nCada uno se edita, cierra o reabre por separado.\n\n¿Confirmar?`)) return;
+    }
+
+    if (!isEditing && !splitting && newSlaBornClosed(form.endDate, localTodayYmd())) {
       if (!window.confirm('La vigencia que elegiste ya terminó. El servicio se va a crear cerrado.\n\n¿Continuar?')) return;
     }
 
@@ -1474,7 +1499,39 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
       : '';
 
     try {
-      if (isEditing && form.id) {
+      if (splitting) {
+          const today = localTodayYmd();
+          const seriesId = newSlaSeriesId();
+          const drafts = buildSlaDraftsForSegments(dataToSave, segments, seriesId).map((d: any) => {
+            const bornClosed = newSlaBornClosed(String(d.endDate || ''), today);
+            return { ...d, closed: bornClosed, ...(bornClosed ? { closedReason: 'VENCIDO' } : {}) };
+          });
+          const created: Array<ServiceSLA & { id: string }> = [];
+          let keptId: string | null = null;
+          for (let i = 0; i < drafts.length; i++) {
+            const draft = { ...drafts[i] };
+            delete draft.id;
+            if (i === 0 && isEditing && form.id) {
+              savedSelfRef.current = true;
+              const firstPatch = { ...draft, closed: (form as { closed?: boolean }).closed === true };
+              delete firstPatch.closedReason;
+              await slaService.update(form.id, firstPatch, { empresaId, migracionCompleta });
+              keptId = form.id;
+              created.push({ ...firstPatch, id: form.id });
+            } else {
+              const ref = await slaService.add(draft, empresaId);
+              created.push({ ...draft, id: ref.id });
+            }
+          }
+          setServices(prev => [
+            ...prev.filter((s) => s.id !== keptId),
+            ...created,
+          ]);
+          await registrarAuditoria(
+            isEditing ? 'UPDATE_CONTRACT' : 'CREATE_CONTRACT',
+            `${isEditing ? 'Dividió' : 'Creó'} contrato por meses (${segments.map((s) => s.label).join(', ')}): ${form.clientName} - ${form.objectiveName}`,
+          );
+      } else if (isEditing && form.id) {
           savedSelfRef.current = true;
           await slaService.update(form.id, dataToSave, { empresaId, migracionCompleta });
           // Actualización optimista: no esperar al snapshot
@@ -1487,7 +1544,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
           setServices(prev => [...prev, { ...dataToSave, id: ref.id }]);
           await registrarAuditoria('CREATE_CONTRACT', `Creó contrato: ${form.clientName} - ${form.objectiveName}`);
       }
-      addToast('Guardado correctamente', 'success');
+      addToast(splitting ? `${segments.length} servicios guardados (${segments.map((s) => s.label).join(', ')})` : 'Guardado correctamente', 'success');
       setView('list');
       const nextEncargadoId = String(dataToSave.encargadoEmployeeId || '').trim();
       if (dataToSave.objectiveId && (prevEncargadoId || nextEncargadoId || encPosToSave)) {
@@ -3025,6 +3082,41 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                  {!isEditing && (
                    <p className="text-[10px] font-bold text-slate-500 -mt-3">Elegí la vigencia acá, antes de crear. Arranca en el mes de arriba, o en el mes en curso.</p>
                  )}
+                 {(() => {
+                   const rangeError = validateSlaRange(form.startDate, form.endDate);
+                   if (rangeError) {
+                     return <p className="text-[10px] font-bold text-rose-600 -mt-2">{rangeError}</p>;
+                   }
+                   const months = splitRangeByCalendarMonth(form.startDate, form.endDate);
+                   if (months.length <= 1 || isClosedContract) return null;
+                   return (
+                     <div className="-mt-2 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 p-3 space-y-2">
+                       <div className="flex items-center justify-between gap-2">
+                         <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Meses</p>
+                         <div className="flex items-center gap-1 bg-white dark:bg-slate-900 rounded-xl p-1 border border-indigo-100 dark:border-slate-700">
+                           {([
+                             { v: 'agrupados' as const, label: 'Agrupados' },
+                             { v: 'individuales' as const, label: 'Individuales' },
+                           ]).map(({ v, label }) => (
+                             <button
+                               key={v}
+                               type="button"
+                               onClick={() => setSlaMonthsMode(v)}
+                               className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase transition-all ${slaMonthsMode === v ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+                             >
+                               {label}
+                             </button>
+                           ))}
+                         </div>
+                       </div>
+                       <p className="text-[10px] font-bold text-slate-500">
+                         {slaMonthsMode === 'agrupados'
+                           ? `Un solo servicio de ${months.length} meses (${months[0].label} → ${months[months.length - 1].label}).`
+                           : `${isEditing ? `Este servicio queda en ${months[0].label} y se crean ${months.length - 1} más` : summarizeSlaSplit(months)}${isEditing ? `: ${months.slice(1).map((m) => m.label).join(', ')}` : ''}. Misma estructura, uno por mes; cada uno se edita, cierra o reabre por separado.`}
+                       </p>
+                     </div>
+                   );
+                 })()}
 
                  <div className="p-4 rounded-2xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
                    <p className="text-[10px] font-black uppercase text-indigo-600 tracking-widest">Facturación prefactura</p>
