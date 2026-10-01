@@ -13,6 +13,7 @@ import { db, onSnapshotFresh, functions } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { pickCanonicalPilotSession, type OpsSessionRole } from '@/lib/operaciones/opsMode';
+import { PILOT_HEARTBEAT_MS, isPilotInactive, pilotInactiveMinutes } from '@/lib/operaciones/pilotInactivity';
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -23,7 +24,19 @@ type SesionOperadorAction =
   | 'cancelPilotRequest'
   | 'acceptPilot'
   | 'rejectPilot'
-  | 'passToAuto';
+  | 'passToAuto'
+  | 'heartbeat'
+  | 'takeOverPilot';
+
+/** User agent corto para la bitácora de toma de mando. */
+export function describeDevice(): string {
+  if (typeof navigator === 'undefined') return 'WEB';
+  const ua = navigator.userAgent || '';
+  const os = /Android/i.test(ua) ? 'Android' : /iPhone|iPad/i.test(ua) ? 'iOS' : /Windows/i.test(ua) ? 'Windows' : /Mac/i.test(ua) ? 'Mac' : 'Web';
+  const browser = /Edg\//i.test(ua) ? 'Edge' : /Chrome\//i.test(ua) ? 'Chrome' : /Safari\//i.test(ua) ? 'Safari' : /Firefox\//i.test(ua) ? 'Firefox' : 'Navegador';
+  const movil = /Mobi|Android|iPhone/i.test(ua) ? ' celular' : '';
+  return `${os} ${browser}${movil}`.trim();
+}
 
 export type PilotRequestStatus = 'NONE' | 'PENDING' | 'REJECTED';
 
@@ -40,6 +53,8 @@ export interface OperatorSession {
   role: OpsSessionRole;
   pilotRequestStatus: PilotRequestStatus;
   pilotRequestedAt: Date | null;
+  /** Último heartbeat o acción (piloto sin actividad >= 5 min = se puede tomar el mando). */
+  lastActivityAt: Date | null;
 }
 
 function mapSession(id: string, data: Record<string, any>): OperatorSession {
@@ -61,6 +76,7 @@ function mapSession(id: string, data: Record<string, any>): OperatorSession {
     role,
     pilotRequestStatus,
     pilotRequestedAt: data.pilotRequestedAt?.toDate?.() || null,
+    lastActivityAt: data.lastActivityAt?.toDate?.() || null,
   };
 }
 
@@ -72,10 +88,11 @@ export const useOperatorSession = () => {
   const reconcileBusy = useRef(false);
 
   const callSesionOperador = useCallback(
-    async (action: SesionOperadorAction) => {
+    async (action: SesionOperadorAction, extra?: Record<string, unknown>) => {
       if (!empresaId) throw new Error('Sin empresa');
       const fn = httpsCallable(functions, 'sesionOperador');
-      await fn({ action, empresaId, writeOrigin: 'WEB' });
+      const movil = typeof window !== 'undefined' && window.innerWidth < 768;
+      await fn({ action, empresaId, writeOrigin: movil ? 'MOBILE' : 'WEB', ...(extra || {}) });
     },
     [empresaId],
   );
@@ -198,6 +215,44 @@ export const useOperatorSession = () => {
     await callSesionOperador('rejectPilot');
   }, [isPilot, pendingPilotRequest, callSesionOperador]);
 
+  /** Piloto de otro operador sin heartbeat hace >= 5 min: el copiloto puede tomar el mando sin aceptación. */
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 30000);
+    return () => clearInterval(id);
+  }, []);
+  const pilotInactive = !!pilotSession && !isPilot && isPilotInactive(pilotSession, nowTick);
+  const pilotInactiveMin = pilotSession ? pilotInactiveMinutes(pilotSession, nowTick) : 0;
+
+  /**
+   * Toma de mando por piloto inactivo. Si no estoy en la sala, primero entro (copiloto).
+   * El servidor valida la inactividad y deja la bitácora (quién, dispositivo, motivo).
+   */
+  const takeOverPilot = useCallback(async () => {
+    if (!user || !empresaId) throw new Error('Sin sesión de usuario');
+    if (!mySession) await callSesionOperador('start');
+    await callSesionOperador('takeOverPilot', { deviceInfo: describeDevice() });
+  }, [user, empresaId, mySession, callSesionOperador]);
+
+  /** Heartbeat: mientras estoy en la sala y la pestaña está visible, cada minuto. */
+  useEffect(() => {
+    if (!mySession?.id) return;
+    const beat = () => {
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+      updateDoc(doc(db, 'sesiones_operador', mySession.id), { lastActivityAt: Timestamp.now() })
+        .catch((e) => console.warn('[heartbeat]', e));
+    };
+    beat();
+    const id = setInterval(beat, PILOT_HEARTBEAT_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') beat(); };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, [mySession?.id]);
+
   useEffect(() => {
     if (!mySession?.expiresAt) return;
     const timeToExpiry = mySession.expiresAt.getTime() - Date.now();
@@ -231,6 +286,9 @@ export const useOperatorSession = () => {
     cancelPilotRequest,
     acceptPilotRequest,
     rejectPilotRequest,
+    takeOverPilot,
+    pilotInactive,
+    pilotInactiveMin,
     isAutoMode,
     isMySession,
   };

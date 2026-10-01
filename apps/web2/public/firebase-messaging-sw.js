@@ -22,29 +22,35 @@ messaging.onBackgroundMessage((payload) => {
   const link  = data.link  || '/app/';
   const notificationId = data.notificationId || '';
 
+  const esOperador = String(data.click_action || '') === 'OPERACIONES_ALERT';
+
   self.registration.showNotification(title, {
     body,
     icon: '/icons/icon-192x192.png',
     badge: '/icons/badge-72x72.png',
-    tag: notificationId || 'crono-notif',
+    tag: notificationId || data.shiftId || 'crono-notif',
     renotify: true,
-    data: { link, notificationId }
+    // Operador (ausencia, no llegó, retenido, tope, convocatoria): queda hasta que lo toque y vibra.
+    requireInteraction: esOperador,
+    vibrate: esOperador ? [300, 120, 300] : undefined,
+    data: { link, notificationId, shiftId: data.shiftId || '' }
   });
 });
 
-// Mark as read when tapped: open app at the notification link
+// Mark as read when tapped: open app at the notification link (deep-link ?shiftId= abre la tarjeta)
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const link = event.notification.data?.link || '/app/';
+  const link = event.notification.data?.link || (event.notification.data?.FCM_MSG?.data?.link) || '/app/';
+  const target = new URL(link, self.location.origin).href;
   event.waitUntil(
     clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
       for (const client of clientList) {
-        if (client.url.includes('comtroldata') && 'focus' in client) {
-          client.navigate(link);
+        if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+          if ('navigate' in client) client.navigate(target);
           return client.focus();
         }
       }
-      if (clients.openWindow) return clients.openWindow(link);
+      if (clients.openWindow) return clients.openWindow(target);
     })
   );
 });

@@ -44,17 +44,32 @@ export function useAdminFcm() {
 
         localStorage.setItem('fcm_admin_token', token);
 
-        // Foreground: mostrar notificación del sistema cuando la app está abierta
+        // Foreground: notificación del sistema aunque la app esté abierta. Va por el service worker
+        // (persistente): respeta requireInteraction + vibrate y el click navega al deep-link
+        // (/admin/operaciones/?shiftId=…) desde firebase-messaging-sw.js.
         const unsub = onMessage(messaging, (payload) => {
           if (cancelled) return;
           const title = payload?.data?.title || payload?.notification?.title || 'COSP';
           const body  = payload?.data?.body  || payload?.notification?.body  || '';
-          const link  = payload?.data?.link  || '/admin/operaciones';
+          const link  = payload?.data?.link  || '/admin/operaciones/';
+          const tag   = payload?.data?.shiftId ? `ops_${payload.data.type || 'alerta'}_${payload.data.shiftId}` : undefined;
+          try { navigator.vibrate?.([300, 120, 300]); } catch (_) {}
           try {
-            if (Notification.permission === 'granted') {
-              const n = new Notification(title, { body, icon: '/icons/icon-192x192.png' });
+            if (Notification.permission !== 'granted') return;
+            const opts: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
+              body,
+              icon: '/icons/icon-192x192.png',
+              badge: '/icons/badge-72x72.png',
+              requireInteraction: true,
+              vibrate: [300, 120, 300],
+              renotify: !!tag,
+              tag,
+              data: { link },
+            };
+            registration.showNotification(title, opts).catch(() => {
+              const n = new Notification(title, { body, icon: '/icons/icon-192x192.png', requireInteraction: true });
               n.onclick = () => { window.location.href = link; };
-            }
+            });
           } catch (_) {}
         });
 

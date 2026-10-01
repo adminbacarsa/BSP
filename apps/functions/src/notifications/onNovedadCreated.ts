@@ -13,7 +13,17 @@ const ALERT_TYPES = [
   'VACANTE_PARCIAL',
   'SIN_COBERTURA',
   'RETENCION_LARGA',
+  // Respaldo celular: tope 12:59, convocatoria rechazada y vacante sin candidato también despiertan al operador.
+  'TOPE_JORNADA',
+  'CONVOCATORIA_RECHAZADA',
+  'VACANTE_SIN_COBERTURA',
 ];
+
+/** Deep-link del aviso: abre la tarjeta del turno en el Centro de Control (escritorio ignora el query). */
+export function opsAlertLink(data: { shiftId?: unknown; virtualVacancyId?: unknown } | null | undefined): string {
+  const shiftId = String(data?.shiftId || data?.virtualVacancyId || '').trim();
+  return shiftId ? `/admin/operaciones/?shiftId=${encodeURIComponent(shiftId)}` : '/admin/operaciones/';
+}
 
 const TYPE_LABELS: Record<string, string> = {
   INGRESO_AUTOREGISTRO:      '⚡ Ingreso por Portal',
@@ -27,6 +37,9 @@ const TYPE_LABELS: Record<string, string> = {
   VACANTE_PARCIAL:           '🔴 Vacante',
   SIN_COBERTURA:             '🔴 Protocolo sin candidato',
   RETENCION_LARGA:           '⏰ Retención larga',
+  TOPE_JORNADA:              '⛔ Tope 12:59 — turno cerrado',
+  CONVOCATORIA_RECHAZADA:    '✗ Convocatoria rechazada',
+  VACANTE_SIN_COBERTURA:     '🔴 Vacante sin candidato',
 };
 
 export const onNovedadCreated = functions
@@ -103,24 +116,34 @@ export const onNovedadCreated = functions
     }
 
     // ── Enviar FCM ────────────────────────────────────────────────────────────
+    const link = opsAlertLink(data);
+    const shiftId = String(data.shiftId || data.virtualVacancyId || '');
     const message: admin.messaging.MulticastMessage = {
       notification: { title, body },
       data: {
         novedadId: snap.id,
         type: data.type,
         objectiveName: data.objectiveName || '',
+        shiftId,
         click_action: 'OPERACIONES_ALERT',
-        link: '/admin/operaciones',
+        link,
       },
+      android: { priority: 'high' },
       webpush: {
+        headers: { Urgency: 'high' },
         notification: {
           title,
           body,
           icon: '/icons/icon-192x192.png',
           badge: '/icons/badge-72x72.png',
           requireInteraction: true,
+          // Sonido = el del sistema (la web no permite uno propio); vibración + reaviso.
+          vibrate: [300, 120, 300],
+          renotify: true,
+          tag: shiftId ? `ops_${data.type}_${shiftId}` : `ops_${snap.id}`,
+          data: { link, shiftId, novedadId: snap.id },
         },
-        fcmOptions: { link: '/admin/operaciones' },
+        fcmOptions: { link },
       },
       tokens,
     };

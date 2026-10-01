@@ -2,6 +2,200 @@ import { useEffect, useState } from 'react';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 import { MOVIL_CONTADORES, buscarClientes, etiquetaEstado, type OpsClienteMovil, type OpsEstadoFiltro, type OpsFiltroMovil } from '@/lib/movil/operacionFiltros';
+import { accionesParaTurno, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
+
+const ACCION_CLS: Record<GuardAccion['tone'], string> = {
+  go: 'bg-emerald-600 text-white',
+  pri: 'bg-indigo-600 text-white',
+  warn: 'border border-orange-200 bg-orange-50 text-orange-800',
+  danger: 'border border-rose-200 bg-rose-50 text-rose-800',
+  neutral: 'border border-slate-200 bg-white text-slate-800',
+};
+
+/**
+ * Hoja inferior de la tarjeta: acciones que corresponden al estado del turno,
+ * con confirmación dentro de la hoja. Mismas callables que el escritorio.
+ */
+export function GuardAccionesSheetBody({
+  shift,
+  siblings = [],
+  now,
+  onEjecutar,
+  onCerrar,
+  confirmandoInicial = null,
+}: {
+  shift: GuardShift;
+  siblings?: readonly GuardShift[];
+  now?: number;
+  onEjecutar: (id: GuardAccionId) => void | Promise<void>;
+  onCerrar: () => void;
+  /** Tests: arrancar con una acción en confirmación. */
+  confirmandoInicial?: GuardAccionId | null;
+}) {
+  const nowMs = now ?? Date.now();
+  const acciones = accionesParaTurno(shift as never, nowMs);
+  const [confirmando, setConfirmando] = useState<GuardAccionId | null>(confirmandoInicial);
+  const [ocupado, setOcupado] = useState(false);
+  const telefono = String(shift.phone || '').trim() || null;
+  const pendiente = acciones.find((a) => a.id === confirmando) || null;
+  const ejecutar = async (accion: GuardAccion) => {
+    setOcupado(true);
+    try {
+      await onEjecutar(accion.id);
+      onCerrar();
+    } finally {
+      setOcupado(false);
+      setConfirmando(null);
+    }
+  };
+  return (
+    <div data-movil-sheet="acciones" data-movil-acciones-shift={shift.id}>
+      <div className="mb-3 rounded-2xl border border-slate-200 bg-slate-50 p-3">
+        <div className="flex items-center gap-2">
+          <strong className={`truncate text-sm ${shift.isUnassigned ? 'text-rose-700' : 'text-slate-900'}`}>
+            {shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre'}
+          </strong>
+          <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${TONE_PILL[guardTone(shift)]}`}>{guardStatusLabel(shift)}</span>
+        </div>
+        <GuardDetalleLines shift={shift} siblings={siblings} now={nowMs} />
+      </div>
+      {pendiente ? (
+        <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3" data-movil-confirmar={pendiente.id}>
+          <p className="text-sm font-black text-slate-900">{pendiente.label}</p>
+          <p className="mt-1 text-[12px] font-semibold text-slate-700">{pendiente.confirm}</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" disabled={ocupado} onClick={() => { void ejecutar(pendiente); }} className={`min-h-12 flex-1 rounded-2xl text-sm font-black ${ACCION_CLS[pendiente.tone]} disabled:opacity-50`} data-movil-confirmar-ok="1">
+              {ocupado ? 'Enviando…' : 'Confirmar'}
+            </button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black text-slate-700">Volver</button>
+          </div>
+        </div>
+      ) : (
+        <>
+          {acciones.map((accion) => (
+            <button
+              key={accion.id}
+              type="button"
+              data-movil-accion={accion.id}
+              onClick={() => (accion.confirm ? setConfirmando(accion.id) : void ejecutar(accion))}
+              className={`mb-2 flex min-h-14 w-full items-center justify-between rounded-2xl px-3 text-left ${ACCION_CLS[accion.tone]}`}
+            >
+              <span>
+                <span className="block text-sm font-black">{accion.label}</span>
+                <span className="block text-[11px] font-semibold opacity-80">{accion.hint}</span>
+              </span>
+              <span aria-hidden="true" className="text-lg font-black">›</span>
+            </button>
+          ))}
+          {acciones.length === 0 && <p className="rounded-2xl bg-white p-3 text-sm font-semibold text-slate-500" data-movil-acciones-vacio="1">Sin acciones para este estado.</p>}
+          {!shift.isUnassigned && (
+            <div className="mt-1 flex gap-2">
+              <LlamarButton telefono={telefono} />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+export interface SalaSheetProps {
+  modeLabel: string;
+  isPilot: boolean;
+  inRoom: boolean;
+  pilotName?: string;
+  apoyo?: string;
+  pendingPilotName?: string;
+  /** Piloto de otro operador sin heartbeat hace >= 5 min. */
+  pilotInactive?: boolean;
+  pilotInactiveMin?: number;
+  steps: readonly string[];
+  onTomarMando: () => Promise<void> | void;
+  onTakeOver: () => Promise<void> | void;
+  onRequestPilot: () => Promise<void> | void;
+  onAcceptPilot: () => Promise<void> | void;
+  onRejectPilot: () => Promise<void> | void;
+  onPasarAuto: () => Promise<void> | void;
+  onSalir: () => Promise<void> | void;
+  /** Tests: arrancar con una confirmación abierta. */
+  confirmandoInicial?: 'AUTO' | 'TOMAR' | null;
+}
+
+/** Sala del celular: piloto/copiloto, tomar/pedir/pasar mando, pasar a Auto. */
+export function SalaSheetBody(props: SalaSheetProps) {
+  const [confirmando, setConfirmando] = useState<'AUTO' | 'TOMAR' | null>(props.confirmandoInicial ?? null);
+  const [ocupado, setOcupado] = useState(false);
+  const hayPiloto = !!props.pilotName;
+  const otroPiloto = hayPiloto && !props.isPilot;
+  const run = async (fn: () => Promise<void> | void) => {
+    setOcupado(true);
+    try { await fn(); } finally { setOcupado(false); setConfirmando(null); }
+  };
+  const btn = 'mb-2 min-h-12 w-full rounded-2xl text-sm font-black disabled:opacity-50';
+  return (
+    <div data-movil-sheet="sala" data-movil-sala-rol={props.isPilot ? 'piloto' : props.inRoom ? 'copiloto' : 'fuera'}>
+      <div className={`mb-3 rounded-2xl border p-3 ${props.pilotInactive ? 'border-rose-200 bg-rose-50' : 'border-emerald-200 bg-emerald-50'}`}>
+        <p className={`text-[11px] font-black uppercase ${props.pilotInactive ? 'text-rose-800' : 'text-emerald-800'}`}>Modo {props.modeLabel}</p>
+        <p className="text-sm font-bold">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>
+        {otroPiloto && props.pilotInactive && (
+          <p className="text-[12px] font-black text-rose-700" data-movil-piloto-inactivo="1">Sin actividad hace {props.pilotInactiveMin ?? 0} min · podés tomar el mando</p>
+        )}
+        <p className="text-xs font-semibold text-slate-500">Apoyo: {props.apoyo || 'nadie'}</p>
+      </div>
+      {confirmando === 'AUTO' && (
+        <div className="mb-3 rounded-2xl border border-rose-200 bg-rose-50 p-3" data-movil-confirmar="AUTO">
+          <p className="text-sm font-black text-slate-900">Pasar a Auto</p>
+          <p className="mt-1 text-[12px] font-semibold text-slate-700">Se cierra la sala para todos y el Centro de Control queda automático. ¿Confirmás?</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" disabled={ocupado} onClick={() => { void run(props.onPasarAuto); }} className="min-h-12 flex-1 rounded-2xl bg-rose-600 text-sm font-black text-white disabled:opacity-50" data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, pasar a Auto'}</button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black">Volver</button>
+          </div>
+        </div>
+      )}
+      {confirmando === 'TOMAR' && (
+        <div className="mb-3 rounded-2xl border border-indigo-200 bg-indigo-50 p-3" data-movil-confirmar="TOMAR">
+          <p className="text-sm font-black text-slate-900">Tomar el mando</p>
+          <p className="mt-1 text-[12px] font-semibold text-slate-700">{props.pilotName || 'El piloto'} no da señales hace {props.pilotInactiveMin ?? 0} min. Tomás el mando desde este celular sin su aceptación; queda registrado en la bitácora (quién, dispositivo, motivo).</p>
+          <div className="mt-3 flex gap-2">
+            <button type="button" disabled={ocupado} onClick={() => { void run(props.onTakeOver); }} className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white disabled:opacity-50" data-movil-confirmar-ok="1">{ocupado ? 'Enviando…' : 'Sí, tomar el mando'}</button>
+            <button type="button" disabled={ocupado} onClick={() => setConfirmando(null)} className="min-h-12 flex-1 rounded-2xl border border-slate-200 bg-white text-sm font-black">Volver</button>
+          </div>
+        </div>
+      )}
+      {!confirmando && (
+        <>
+          {props.isPilot && props.pendingPilotName && (
+            <div className="mb-3 rounded-2xl border border-indigo-200 p-3" data-movil-pedido-mando="1">
+              <p className="text-sm font-black">{props.pendingPilotName} pide el mando</p>
+              <div className="mt-2 flex gap-2">
+                <button type="button" disabled={ocupado} className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white" onClick={() => { void run(props.onAcceptPilot); }}>Aceptar</button>
+                <button type="button" disabled={ocupado} className="min-h-12 flex-1 rounded-2xl bg-slate-100 text-sm font-black" onClick={() => { void run(props.onRejectPilot); }}>No</button>
+              </div>
+            </div>
+          )}
+          {otroPiloto && props.pilotInactive && (
+            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR_INACTIVO" className={`${btn} bg-indigo-600 text-white`} onClick={() => setConfirmando('TOMAR')}>Tomar el mando ahora · piloto sin actividad</button>
+          )}
+          {otroPiloto && !props.pilotInactive && (
+            <button type="button" disabled={ocupado} data-movil-sala-accion="PEDIR" className={`${btn} bg-indigo-600 text-white`} onClick={() => { void run(props.inRoom ? props.onRequestPilot : props.onTomarMando); }}>
+              {props.inRoom ? 'Pedir mando' : 'Entrar como apoyo y pedir mando'}
+            </button>
+          )}
+          {!hayPiloto && (
+            <button type="button" disabled={ocupado} data-movil-sala-accion="TOMAR" className={`${btn} border border-emerald-300 bg-white text-emerald-800`} onClick={() => { void run(props.onTomarMando); }}>Tomar mando · pasar a Manual</button>
+          )}
+          {props.isPilot && (
+            <button type="button" disabled={ocupado} data-movil-sala-accion="AUTO" className={`${btn} bg-rose-50 text-rose-700`} onClick={() => setConfirmando('AUTO')}>Pasar a Auto</button>
+          )}
+          {props.inRoom && !props.isPilot && (
+            <button type="button" disabled={ocupado} data-movil-sala-accion="SALIR" className={`${btn} border border-slate-200 bg-white text-slate-700`} onClick={() => { void run(props.onSalir); }}>Salir de la sala</button>
+          )}
+          <p className="mt-2 text-[11px] font-bold text-slate-500">Protocolo vigente: {props.steps.join(' → ')}. Los candidatos y Convocar abren la hoja del protocolo.</p>
+        </>
+      )}
+    </div>
+  );
+}
 
 /** Hoja «Cliente → objetivos» con buscador. */
 export function AmbitoSheetBody({ clientes, filtro, onElegir }: {
@@ -205,6 +399,7 @@ export function GuardCard({
   onSalida,
   onProtocolo,
   onRetencion,
+  onAcciones,
 }: {
   shift: GuardShift;
   /** Turnos del mismo objetivo: de acá sale a quién releva / quién lo releva. */
@@ -216,6 +411,8 @@ export function GuardCard({
   onSalida: (shift: GuardShift) => void;
   onProtocolo: (shift: GuardShift) => void;
   onRetencion: (shift: GuardShift) => void;
+  /** Abre la hoja de acciones del turno (ingreso, salida, ausente, llegó, liberar, protocolo). */
+  onAcciones?: (shift: GuardShift) => void;
 }) {
   const tone = guardTone(shift);
   const telefono = String(shift.phone || '').trim() || null;
@@ -239,7 +436,8 @@ export function GuardCard({
               {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
               {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
               {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
-              <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" onClick={() => onProtocolo(shift)}>⋯</button>
+              {(tone === 'plan' || tone === 'late') && onAcciones && <BigButton label="Ingreso" tone="go" onClick={() => onAcciones(shift)} />}
+              <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" data-movil-mas-acciones={shift.id} onClick={() => (onAcciones ? onAcciones(shift) : onProtocolo(shift))}>⋯</button>
             </>
           )}
         </div>
@@ -277,6 +475,7 @@ export function OperacionScreens({
   vacioLabel = 'Sin guardias',
   onAmbito,
   onQuitarAmbito,
+  onAcciones,
 }: {
   empresa: string;
   modeLabel: string;
@@ -305,6 +504,8 @@ export function OperacionScreens({
   vacioLabel?: string;
   onAmbito?: () => void;
   onQuitarAmbito?: () => void;
+  /** Hoja de acciones de la tarjeta. */
+  onAcciones?: (shift: GuardShift) => void;
   onBack: () => void;
   onOpen: (id: string) => void;
   onCounter: (id: string) => void;
@@ -328,7 +529,7 @@ export function OperacionScreens({
     .map((item) => ({ ...item, value: contadores?.[item.id] ?? legacy[item.id] }))
     .filter((item) => item.value !== undefined);
   const filtrando = filtro.estado !== 'TODOS';
-  const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion };
+  const cardProps = { now: nowMs, readOnly, onLlego, onRevertir, onSalida, onProtocolo, onRetencion, onAcciones };
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-slate-100 pb-24" data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-2">
@@ -458,6 +659,7 @@ export function OperacionScreens({
               onSalida={onSalida}
               onProtocolo={onProtocolo}
               onRetencion={onRetencion}
+              onAcciones={onAcciones}
             />
           ))
         )}
@@ -483,6 +685,7 @@ export function OperacionScreens({
                       <>
                         {!shift.isUnassigned && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
                         <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />
+                        {onAcciones && <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" data-movil-mas-acciones={shift.id} onClick={() => onAcciones(shift)}>⋯</button>}
                       </>
                     )}
                   </div>

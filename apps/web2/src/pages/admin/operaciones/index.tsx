@@ -3765,17 +3765,33 @@ export default function OperacionesPage() {
                     catalogo={logic.objectives as Array<{ id?: unknown; clientId?: unknown; name?: unknown; clientName?: unknown }>}
                     modeLabel={ccManualOn ? 'Manual' : ccAutoOn ? 'Auto' : 'Demo'}
                     isPilot={session.isPilot}
+                    inRoom={session.inRoom}
                     pilotName={session.pilotSession?.operatorName}
                     apoyo={apoyo}
                     pendingPilotName={session.pendingPilotRequest?.operatorName}
+                    pilotInactive={session.pilotInactive}
+                    pilotInactiveMin={session.pilotInactiveMin}
                     onTomarMando={handleStartManualGuardia}
+                    onTakeOver={() => session.takeOverPilot()}
                     onPasarAuto={handleEndManualGuardia}
+                    onSalirSala={() => session.endSession()}
                     onRequestPilot={() => session.requestPilot()}
                     onAcceptPilot={() => session.acceptPilotRequest()}
                     onRejectPilot={() => session.rejectPilotRequest()}
                     onLlego={handleRevertAbsence}
                     onProtocolo={openCoverageProtocol}
                     onRetencion={(shift) => setManualRetentionData({ isOpen: true, shift })}
+                    onIngreso={async (shift) => {
+                        // Misma callable que el modal de ingreso del escritorio; el relevo lo decide la serie (P9c).
+                        const res = await registrarPresenciaOps({ shiftId: shift.id, source: 'OPERATIONS' });
+                        if (res.alreadyPresent) toast.message('El turno ya estaba marcado presente.');
+                        else if (res.relieved) toast.success(`Ingreso registrado. Relevó a ${res.relieved.employeeName}.`);
+                        else toast.success('Ingreso registrado.');
+                    }}
+                    onAusente={async (shift) => {
+                        await handleMarkAbsent(shift);
+                        openCoverageProtocol(shift);
+                    }}
                 />
                 <CoverageSessionManager
                     dock="sheet"

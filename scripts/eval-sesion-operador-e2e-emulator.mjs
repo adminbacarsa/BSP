@@ -143,6 +143,48 @@ async function runFlow() {
   }
   report('7-sin-perfil-rechazado', noClaimDenied, `denied=${noClaimDenied}`);
   await handleSesionOperador(db, saUid, { action: 'passToAuto', empresaId, writeOrigin: 'WEB' }, 'SUPERADMIN', 'sa@x.com');
+
+  // ── Respaldo celular: tomar el mando con piloto sin actividad (>= 5 min sin heartbeat) ──
+  await handleSesionOperador(db, pilotUid, { action: 'start', empresaId, writeOrigin: 'WEB' });
+  await handleSesionOperador(db, copilotUid, { action: 'start', empresaId, writeOrigin: 'MOBILE' });
+  const sessionOf = async (uid) => {
+    const snap = await db.collection('sesiones_operador')
+      .where('empresaId', '==', empresaId).where('operatorId', '==', uid).where('status', '==', 'ACTIVO').get();
+    return snap.docs[0];
+  };
+  const pilotStart = await sessionOf(pilotUid);
+  report('8-start-escribe-lastActivityAt', !!pilotStart?.data()?.lastActivityAt, `lastActivityAt=${!!pilotStart?.data()?.lastActivityAt}`);
+
+  let activeDenied = '';
+  try {
+    await handleSesionOperador(db, copilotUid, { action: 'takeOverPilot', empresaId, writeOrigin: 'MOBILE', deviceInfo: 'Android Chrome' });
+  } catch (e) {
+    activeDenied = String(e?.code || e?.message || '');
+  }
+  const stillPilot = await sessionOf(pilotUid);
+  report('9-piloto-activo-no-se-toma', activeDenied.includes('failed-precondition') && String(stillPilot.data().role).toUpperCase() === 'PILOTO', `err=${activeDenied} rol=${stillPilot.data().role}`);
+
+  // Heartbeat del piloto refresca lastActivityAt.
+  const beforeBeat = pilotStart.data().lastActivityAt.toMillis();
+  await new Promise((r) => setTimeout(r, 1100));
+  await handleSesionOperador(db, pilotUid, { action: 'heartbeat', empresaId, writeOrigin: 'WEB' });
+  const afterBeat = (await sessionOf(pilotUid)).data().lastActivityAt.toMillis();
+  report('10-heartbeat', afterBeat > beforeBeat, `antes=${beforeBeat} despues=${afterBeat}`);
+
+  // Piloto sin actividad hace 6 min → el celular toma el mando sin aceptación y queda en audit_logs.
+  await pilotStart.ref.update({ lastActivityAt: admin.firestore.Timestamp.fromMillis(Date.now() - 6 * 60000), startTime: admin.firestore.Timestamp.fromMillis(Date.now() - 60 * 60000) });
+  await handleSesionOperador(db, copilotUid, { action: 'takeOverPilot', empresaId, writeOrigin: 'MOBILE', deviceInfo: 'Android Chrome' });
+  const newPilot = await sessionOf(copilotUid);
+  const oldPilot = await sessionOf(pilotUid);
+  report('11-piloto-inactivo-toma-mando', String(newPilot.data().role).toUpperCase() === 'PILOTO' && String(oldPilot.data().role).toUpperCase() === 'COPILOTO' && newPilot.data().takenOverFrom === pilotUid, `nuevo=${newPilot.data().role} viejo=${oldPilot.data().role}`);
+  const audit = await db.collection('audit_logs').where('action', '==', 'TOMAR_MANDO_PILOTO_INACTIVO').where('empresaId', '==', empresaId).get();
+  const log = audit.docs[0]?.data();
+  report('12-audit-log-toma-mando', !!log && log.actorId === copilotUid && log.device === 'Android Chrome' && log.reason === 'piloto sin actividad' && log.pilotInactiveMinutes >= 5, `log=${JSON.stringify(log ? { actorId: log.actorId, device: log.device, reason: log.reason, min: log.pilotInactiveMinutes } : null)}`);
+  manual = await isEmpresaManualMode(db, empresaId);
+  report('13-sala-sigue-manual', manual === true, `manual=${manual}`);
+  await handleSesionOperador(db, copilotUid, { action: 'passToAuto', empresaId, writeOrigin: 'MOBILE' });
+  manual = await isEmpresaManualMode(db, empresaId);
+  report('14-nuevo-piloto-pasa-a-auto-desde-celular', manual === false, `manual=${manual}`);
 }
 
 async function main() {

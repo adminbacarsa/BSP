@@ -1,17 +1,19 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
-import { AmbitoSheetBody, OperacionScreens, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
+import { AmbitoSheetBody, GuardAccionesSheetBody, OperacionScreens, SalaSheetBody, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
 import { COVERAGE_CASCADE_ORDER } from '@cosp/ops-core';
 import { guardTone } from '@/lib/movil/guardTone';
+import type { GuardAccionId } from '@/lib/movil/guardAcciones';
 import {
   FILTRO_VACIO,
   agruparPorObjetivo,
   alternarEstado,
   clientesParaFiltro,
   contadoresMovil,
+  esTurnoEvento,
   etiquetaAmbito,
   guardarFiltro,
   leerFiltroGuardado,
@@ -55,17 +57,30 @@ interface Props {
   now?: number;
   modeLabel: string;
   isPilot: boolean;
+  /** Tengo sesión en la sala (piloto o copiloto). */
+  inRoom?: boolean;
   pilotName?: string;
   apoyo?: string;
   pendingPilotName?: string;
+  /** Piloto de otro operador sin heartbeat hace >= 5 min. */
+  pilotInactive?: boolean;
+  pilotInactiveMin?: number;
   onTomarMando: () => Promise<void>;
+  /** Toma de mando por piloto inactivo (callable `sesionOperador` takeOverPilot). */
+  onTakeOver?: () => Promise<void>;
   onPasarAuto: () => Promise<void>;
+  /** Copiloto sale de la sala sin pasar a Auto. */
+  onSalirSala?: () => Promise<void>;
   onRequestPilot: () => Promise<void>;
   onAcceptPilot: () => Promise<void>;
   onRejectPilot: () => Promise<void>;
   onLlego: (shift: GuardShift) => Promise<void>;
   onProtocolo: (shift: GuardShift) => void;
   onRetencion: (shift: GuardShift) => void;
+  /** Ingreso manual desde Operaciones (registrarPresencia, relevo de la serie). */
+  onIngreso?: (shift: GuardShift) => Promise<void>;
+  /** Declarar ausente (marcarAusenciaOperaciones). */
+  onAusente?: (shift: GuardShift) => Promise<void>;
 }
 
 export { AmbitoSheetBody };
@@ -78,6 +93,7 @@ export function OperacionMovil(props: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [salaOpen, setSalaOpen] = useState(false);
   const [ambitoOpen, setAmbitoOpen] = useState(false);
+  const [accionesShiftId, setAccionesShiftId] = useState<string | null>(null);
   const [pending, setPending] = useState<string | null>(null);
   const [filtro, setFiltroState] = useState<OpsFiltroMovil>(FILTRO_VACIO);
 
@@ -144,6 +160,61 @@ export function OperacionMovil(props: Props) {
   };
   const noop = () => {};
 
+  const salida = (shift: GuardShift, nota: string) =>
+    enqueueFirestoreWrite(`Salida ${shift.employeeName || ''}`.trim(), async () => {
+      await props.logic.handleAction('CHECKOUT', shift.id, nota);
+    }).then((result) => {
+      if (result === 'queued') toast.message('Pendiente de enviar');
+      else toast.success('Salida registrada');
+    });
+
+  // Hoja de acciones: el turno se busca en todo lo visible (también si cambió de grupo).
+  const accionesShift = accionesShiftId ? visibles.find((s) => s.id === accionesShiftId) || props.shifts.find((s) => s.id === accionesShiftId) || null : null;
+  const accionesSiblings = accionesShift ? visibles.filter((s) => s.objectiveId === accionesShift.objectiveId) : [];
+  const ejecutarAccion = async (shift: GuardShift, id: GuardAccionId) => {
+    if (readOnly) return;
+    switch (id) {
+      case 'LLEGO':
+        await call('Llegó · revertir', () => props.onLlego(shift));
+        return;
+      case 'PROTOCOLO':
+        props.onProtocolo(shift);
+        return;
+      case 'INGRESO':
+        if (!props.onIngreso) return;
+        await call('Ingreso', () => props.onIngreso!(shift));
+        return;
+      case 'AUSENTE':
+        if (!props.onAusente) return;
+        await call('Marcar ausente', () => props.onAusente!(shift));
+        return;
+      case 'LIBERAR':
+        await salida(shift, 'Liberado desde el celular');
+        return;
+      case 'SALIDA':
+        await salida(shift, 'Salida desde el celular');
+        return;
+      case 'RETENCION':
+        props.onRetencion(shift);
+        return;
+      default:
+        return;
+    }
+  };
+
+  // Deep-link del push: /admin/operaciones/?shiftId=… abre la tarjeta (su objetivo + hoja de acciones).
+  const deepShiftId = String(router.query.shiftId || '');
+  const deepAbiertoRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!deepShiftId || deepAbiertoRef.current === deepShiftId) return;
+    const shift = props.shifts.find((s) => s.id === deepShiftId);
+    if (!shift) return;
+    deepAbiertoRef.current = deepShiftId;
+    setFiltroState((f) => (f.estado === 'TODOS' ? f : { ...f, estado: 'TODOS' }));
+    setSelectedId(esTurnoEvento(shift) ? `ev_${String(shift.eventoId || shift.id)}` : String(shift.objectiveId || ''));
+    setAccionesShiftId(shift.id);
+  }, [deepShiftId, props.shifts]);
+
   return (
     <>
       <OperacionScreens
@@ -170,19 +241,23 @@ export function OperacionMovil(props: Props) {
         onCounter={(id) => setFiltro(alternarEstado(filtro, id as OpsEstadoFiltro))}
         onLlego={readOnly ? noop : (shift) => { void call('Llegó?', () => props.onLlego(shift)); }}
         onRevertir={readOnly ? noop : (shift) => { void call('Revertir', () => props.onLlego(shift)); }}
-        onSalida={readOnly ? noop : (shift) => {
-          void enqueueFirestoreWrite(`Salida ${shift.employeeName || ''}`.trim(), async () => {
-            await props.logic.handleAction('CHECKOUT', shift.id, 'Salida desde el celular');
-          })
-            .then((result) => {
-              if (result === 'queued') toast.message('Pendiente de enviar');
-              else toast.success('Salida registrada');
-            });
-        }}
+        onSalida={readOnly ? noop : (shift) => { void salida(shift, 'Salida desde el celular'); }}
         onProtocolo={readOnly ? noop : props.onProtocolo}
         onRetencion={readOnly ? noop : props.onRetencion}
+        onAcciones={readOnly ? undefined : (shift) => setAccionesShiftId(shift.id)}
         onSala={readOnly ? noop : () => setSalaOpen(true)}
       />
+      <BottomSheet open={!!accionesShift && !readOnly} title="Acciones del turno" onClose={() => setAccionesShiftId(null)}>
+        {accionesShift && (
+          <GuardAccionesSheetBody
+            shift={accionesShift}
+            siblings={accionesSiblings}
+            now={nowMs}
+            onEjecutar={(id) => ejecutarAccion(accionesShift, id)}
+            onCerrar={() => setAccionesShiftId(null)}
+          />
+        )}
+      </BottomSheet>
       <BottomSheet open={ambitoOpen} title="Cliente y objetivo" onClose={() => setAmbitoOpen(false)}>
         {ambitoOpen && (
           <AmbitoSheetBody
@@ -198,26 +273,30 @@ export function OperacionMovil(props: Props) {
       </BottomSheet>
       {!readOnly && (
         <BottomSheet open={salaVisible} title={`Sala · ${props.modeLabel}`} onClose={cerrarSala}>
-          <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3">
-            <p className="text-[11px] font-black uppercase text-emerald-800">Modo {props.modeLabel}</p>
-            <p className="text-sm font-bold">A mando: {props.pilotName || '—'}{props.isPilot ? ' (vos)' : ''}</p>
-            <p className="text-xs font-semibold text-slate-500">Apoyo: {props.apoyo || 'nadie'}</p>
-          </div>
-          {props.pendingPilotName && (
-            <div className="mb-3 rounded-2xl border border-indigo-200 p-3">
-              <p className="text-sm font-black">{props.pendingPilotName} pide el mando</p>
-              <div className="mt-2 flex gap-2">
-                <button type="button" className="min-h-12 flex-1 rounded-2xl bg-indigo-600 text-sm font-black text-white" onClick={() => { void call('Aceptar mando', props.onAcceptPilot); }}>Aceptar</button>
-                <button type="button" className="min-h-12 flex-1 rounded-2xl bg-slate-100 text-sm font-black" onClick={() => { void call('Rechazar mando', props.onRejectPilot); }}>No</button>
-              </div>
-            </div>
+          {salaVisible && (
+            <SalaSheetBody
+              modeLabel={props.modeLabel}
+              isPilot={props.isPilot}
+              inRoom={props.inRoom ?? props.isPilot}
+              pilotName={props.pilotName}
+              apoyo={props.apoyo}
+              pendingPilotName={props.pendingPilotName}
+              pilotInactive={props.pilotInactive}
+              pilotInactiveMin={props.pilotInactiveMin}
+              steps={steps}
+              onTomarMando={() => call('Tomar mando', props.onTomarMando)}
+              onTakeOver={() => call('Tomar el mando', async () => {
+                if (!props.onTakeOver) return;
+                await props.onTakeOver();
+                toast.success('Tomaste el mando del Centro de Control');
+              })}
+              onRequestPilot={() => call('Pedir mando', props.onRequestPilot)}
+              onAcceptPilot={() => call('Aceptar mando', props.onAcceptPilot)}
+              onRejectPilot={() => call('Rechazar mando', props.onRejectPilot)}
+              onPasarAuto={() => call('Pasar a Auto', async () => { await props.onPasarAuto(); cerrarSala(); })}
+              onSalir={() => call('Salir de la sala', async () => { await (props.onSalirSala || props.onPasarAuto)(); cerrarSala(); })}
+            />
           )}
-          {!props.isPilot && (
-            <button type="button" className="mb-2 min-h-12 w-full rounded-2xl bg-indigo-600 text-sm font-black text-white" onClick={() => { void call('Pedir mando', props.onRequestPilot); }}>Pedir mando</button>
-          )}
-          <button type="button" className="mb-2 min-h-12 w-full rounded-2xl border border-emerald-300 bg-white text-sm font-black text-emerald-800" onClick={() => { void call('Tomar mando', props.onTomarMando); }}>Tomar mando</button>
-          <button type="button" className="mb-4 min-h-12 w-full rounded-2xl bg-rose-50 text-sm font-black text-rose-700" onClick={() => { void call('Pasar a Auto', props.onPasarAuto); }}>Pasar a Auto</button>
-          <p className="text-[11px] font-bold text-slate-500">Protocolo vigente: {steps.join(' → ')}. Los candidatos y Convocar abren la hoja del protocolo.</p>
         </BottomSheet>
       )}
       <MovilBottomNav alertCount={alerts.length} />

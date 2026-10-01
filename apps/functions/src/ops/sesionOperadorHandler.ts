@@ -3,6 +3,7 @@ import type { Firestore } from 'firebase-admin/firestore';
 import { FieldValue, Timestamp } from 'firebase-admin/firestore';
 import * as functions from 'firebase-functions/v1';
 import { assertOperationsUpdatePermission } from './staffPermissions';
+import { isPilotInactive, pilotInactiveMinutes, PILOT_INACTIVE_MS } from './pilotInactivity';
 
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -13,7 +14,9 @@ export type SesionOperadorAction =
   | 'cancelPilotRequest'
   | 'acceptPilot'
   | 'rejectPilot'
-  | 'passToAuto';
+  | 'passToAuto'
+  | 'heartbeat'
+  | 'takeOverPilot';
 
 export type WriteOrigin = 'WEB' | 'MOBILE';
 
@@ -21,12 +24,16 @@ export type SesionOperadorRequest = {
   action: SesionOperadorAction;
   empresaId: string;
   writeOrigin?: WriteOrigin;
+  /** Dispositivo del operador (user agent corto) para la bitácora de toma de mando. */
+  deviceInfo?: string;
 };
 
 type ActiveSessionRow = {
   id: string;
   operatorId: string;
+  operatorName: string;
   startTime: Date;
+  lastActivityAt: Date | null;
   expiresAt: Date | null;
   role: 'PILOTO' | 'COPILOTO';
   pilotRequestStatus: 'NONE' | 'PENDING' | 'REJECTED';
@@ -71,7 +78,9 @@ async function loadActiveSessions(db: Firestore, empresaId: string): Promise<Act
       return {
         id: d.id,
         operatorId: String(data.operatorId || ''),
+        operatorName: String(data.operatorName || ''),
         startTime: data.startTime?.toDate?.() || new Date(),
+        lastActivityAt: data.lastActivityAt?.toDate?.() || null,
         expiresAt: data.expiresAt?.toDate?.() || null,
         role: roleRaw === 'COPILOTO' ? 'COPILOTO' : 'PILOTO',
         pilotRequestStatus:
@@ -112,6 +121,7 @@ export async function handleSesionOperador(
   const writeOrigin = normalizeWriteOrigin(data?.writeOrigin);
   const validActions: SesionOperadorAction[] = [
     'start', 'end', 'requestPilot', 'cancelPilotRequest', 'acceptPilot', 'rejectPilot', 'passToAuto',
+    'heartbeat', 'takeOverPilot',
   ];
   if (!validActions.includes(action)) {
     throw new functions.https.HttpsError('invalid-argument', 'action inválida.');
@@ -147,6 +157,7 @@ export async function handleSesionOperador(
       role,
       pilotRequestStatus: 'NONE',
       pilotRequestedAt: null,
+      lastActivityAt: FieldValue.serverTimestamp(),
       ...audit,
     });
     return { success: true, action };
@@ -195,11 +206,70 @@ export async function handleSesionOperador(
     active.find((s) => s.role === 'PILOTO') || pickCanonicalPilotSession(active);
   const isPilot = !!pilotSession && pilotSession.operatorId === uid;
 
+  if (action === 'heartbeat') {
+    await db.collection('sesiones_operador').doc(mySession.id).update({
+      lastActivityAt: FieldValue.serverTimestamp(),
+      writeOrigin,
+    });
+    return { success: true, action };
+  }
+
+  if (action === 'takeOverPilot') {
+    // Respaldo (celular / fin de semana): si el piloto no da señales hace >= 5 min,
+    // el copiloto toma el mando sin aceptación. Con piloto activo sigue el pedido normal.
+    if (isPilot || !pilotSession) return { success: true, action };
+    const nowMs = Date.now();
+    if (!isPilotInactive(pilotSession, nowMs)) {
+      throw new functions.https.HttpsError(
+        'failed-precondition',
+        `El piloto está activo (última actividad hace ${pilotInactiveMinutes(pilotSession, nowMs)} min). Pedí el mando.`,
+      );
+    }
+    const inactiveMin = pilotInactiveMinutes(pilotSession, nowMs);
+    const device = String(data?.deviceInfo || '').trim().slice(0, 160) || writeOrigin;
+    const batch = db.batch();
+    batch.update(db.collection('sesiones_operador').doc(mySession.id), {
+      role: 'PILOTO',
+      pilotRequestStatus: 'NONE',
+      pilotRequestedAt: null,
+      lastActivityAt: FieldValue.serverTimestamp(),
+      startTime: Timestamp.fromMillis(Math.min(pilotSession.startTime.getTime() - 1000, nowMs - 1000)),
+      takenOverFrom: pilotSession.operatorId,
+      takenOverAt: FieldValue.serverTimestamp(),
+      ...audit,
+    });
+    batch.update(db.collection('sesiones_operador').doc(pilotSession.id), {
+      role: 'COPILOTO',
+      pilotRequestStatus: 'NONE',
+      pilotLostReason: 'PILOTO_SIN_ACTIVIDAD',
+      ...audit,
+    });
+    batch.set(db.collection('audit_logs').doc(), {
+      action: 'TOMAR_MANDO_PILOTO_INACTIVO',
+      module: 'OPERACIONES',
+      empresaId,
+      actorId: uid,
+      actorName: panel.operatorName,
+      device,
+      writeOrigin,
+      reason: 'piloto sin actividad',
+      previousPilotId: pilotSession.operatorId,
+      previousPilotName: pilotSession.operatorName,
+      pilotInactiveMinutes: inactiveMin,
+      pilotInactiveThresholdMinutes: PILOT_INACTIVE_MS / 60000,
+      timestamp: FieldValue.serverTimestamp(),
+      details: `${panel.operatorName} tomó el mando desde ${device}: ${pilotSession.operatorName || 'el piloto'} sin actividad hace ${inactiveMin} min.`,
+    });
+    await batch.commit();
+    return { success: true, action };
+  }
+
   if (action === 'requestPilot') {
     if (isPilot) return { success: true, action };
     await db.collection('sesiones_operador').doc(mySession.id).update({
       pilotRequestStatus: 'PENDING',
       pilotRequestedAt: FieldValue.serverTimestamp(),
+      lastActivityAt: FieldValue.serverTimestamp(),
       ...audit,
     });
     return { success: true, action };
@@ -232,6 +302,7 @@ export async function handleSesionOperador(
     batch.update(db.collection('sesiones_operador').doc(mySession.id), {
       role: 'COPILOTO',
       pilotRequestStatus: 'NONE',
+      lastActivityAt: FieldValue.serverTimestamp(),
       ...audit,
     });
     await batch.commit();

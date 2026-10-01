@@ -501,6 +501,89 @@ const cerradoHtml = render(ServiciosMovilScreens, {
 });
 check('cerrado: aviso y botón Reabrir', cerradoHtml.includes('Contrato cerrado (manual)') && cerradoHtml.includes('Reabrir contrato') && !cerradoHtml.includes('>Cerrar contrato<'));
 
+// ── Respaldo celular: acciones por estado en la hoja de la tarjeta (mismas callables del escritorio) ──
+const { accionesParaTurno } = await importFront('lib/movil/guardAcciones.ts');
+const { GuardAccionesSheetBody, SalaSheetBody, GuardCard } = await importFront('components/movil/OperacionScreens.tsx');
+const { isPilotInactive, pilotInactiveMinutes, PILOT_INACTIVE_MS } = await importFront('lib/operaciones/pilotInactivity.ts');
+const NOW_A = ar('15:20').getTime();
+const ids = (shift, now = NOW_A) => accionesParaTurno(shift, now).map((a) => a.id).join(',');
+const turnoBase = { id: 'a1', employeeName: 'Baez, Juan', phone: '351', code: 'T', positionName: 'Puesto 1', objectiveName: 'Peaje', shiftDateObj: ar('15:00'), endDateObj: ar('23:00') };
+check('plan antes de T−60: sin acciones (ni ingreso ni ausente)', ids({ ...turnoBase, shiftDateObj: ar('17:00'), endDateObj: ar('01:00', '2026-10-02'), isFuture: true }) === '');
+check('plan en ventana (T−30): marcar ingreso, todavía no ausente', ids({ ...turnoBase, shiftDateObj: ar('15:45'), endDateObj: ar('23:45'), isFuture: true, isImminent: true }) === 'INGRESO');
+check('tarde sin aviso (T+20): ingreso + ausente', ids({ ...turnoBase, isLateUnnotified: true }) === 'INGRESO,AUSENTE');
+check('tarde avisada: ingreso + ausente', ids({ ...turnoBase, isLateNotified: true, lateArrivalEtaMinutes: 30 }) === 'INGRESO,AUSENTE');
+check('activo: salida/relevo', ids({ ...turnoBase, isPresent: true, realStartTime: ar('15:01') }) === 'SALIDA');
+check('retenido: liberar (CHECKOUT) + extender retención, sin salida simple', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 }) === 'LIBERAR,RETENCION');
+check('esperando relevo (fin vencido, P9): liberar + retención', ids({ ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isPendingClose: true }) === 'LIBERAR,RETENCION');
+check('ausente dentro de T+60: llegó/revertir + cubrir hueco', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }) === 'LLEGO,PROTOCOLO');
+check('ausente pasado T+60: solo cubrir hueco (canRevertAbsenceNow)', ids({ ...turnoBase, isAbsent: true, status: 'ABSENT' }, ar('16:05').getTime()) === 'PROTOCOLO');
+check('ausente ya cubierto: revertir sigue hasta T+60 (P5f) + ver protocolo', ids({ ...turnoBase, isAbsent: true, operacionallyCovered: true }) === 'LLEGO,PROTOCOLO');
+check('vacante: solo cubrir hueco', ids({ ...turnoBase, employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'T' }) === 'PROTOCOLO');
+check('franco: sin acciones', ids({ ...turnoBase, code: 'F', isFranco: true }) === '');
+check('completado: sin acciones', ids({ ...turnoBase, isPresent: false, isCompleted: true, realEndTime: ar('15:10') }) === '');
+const conf = (shift, id) => accionesParaTurno(shift, NOW_A).find((a) => a.id === id)?.confirm;
+check('las escrituras piden confirmación, abrir el protocolo no', !!conf({ ...turnoBase, isLateUnnotified: true }, 'INGRESO') && !!conf({ ...turnoBase, isLateUnnotified: true }, 'AUSENTE') && !!conf({ ...turnoBase, isPresent: true }, 'SALIDA') && conf({ ...turnoBase, isAbsent: true }, 'PROTOCOLO') === null);
+
+const hojaNoops = { onEjecutar: () => {}, onCerrar: () => {} };
+const hojaTarde = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isLateUnnotified: true }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390 tarde: detalle, Marcar ingreso, Marcar ausente y LLAMAR', hojaTarde.includes('data-movil-sheet="acciones"') && hojaTarde.includes('data-movil-accion="INGRESO"') && hojaTarde.includes('data-movil-accion="AUSENTE"') && !hojaTarde.includes('data-movil-accion="SALIDA"') && hojaTarde.includes('registrarPresencia') && hojaTarde.includes('marcarAusenciaOperaciones') && hojaTarde.includes('data-movil-llamar="1"') && hojaTarde.includes('data-movil-detalle="a1"'));
+const hojaAus = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isAbsent: true }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390 ausente: Llegó/revertir y Cubrir hueco', hojaAus.includes('data-movil-accion="LLEGO"') && hojaAus.includes('data-movil-accion="PROTOCOLO"') && hojaAus.includes('Cubrir hueco') && !hojaAus.includes('data-movil-accion="INGRESO"'));
+const hojaRet = render(GuardAccionesSheetBody, { shift: { ...turnoBase, shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, isRetention: true, retentionMinutes: 20 }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390 retenido: Liberar retenido + Extender retención', hojaRet.includes('data-movil-accion="LIBERAR"') && hojaRet.includes('data-movil-accion="RETENCION"') && hojaRet.includes('Retenido desde 15:00'));
+const hojaVac = render(GuardAccionesSheetBody, { shift: { ...turnoBase, employeeId: 'VACANTE', employeeName: 'VACANTE', isUnassigned: true, vacancyBand: 'T' }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390 vacante: solo Cubrir hueco, sin LLAMAR', hojaVac.includes('data-movil-accion="PROTOCOLO"') && !hojaVac.includes('data-movil-llamar') && (hojaVac.match(/data-movil-accion=/g) || []).length === 1);
+const hojaConfirm = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isLateUnnotified: true }, siblings: [], now: NOW_A, confirmandoInicial: 'AUSENTE', ...hojaNoops });
+check('hoja 390 confirmación en la hoja: pregunta + Confirmar/Volver, sin lista', hojaConfirm.includes('data-movil-confirmar="AUSENTE"') && hojaConfirm.includes('¿Declarar ausente a Baez, Juan?') && hojaConfirm.includes('data-movil-confirmar-ok="1"') && hojaConfirm.includes('>Volver<') && !hojaConfirm.includes('data-movil-accion='));
+const hojaSin = render(GuardAccionesSheetBody, { shift: { ...turnoBase, isCompleted: true }, siblings: [], now: NOW_A, ...hojaNoops });
+check('hoja 390 sin acciones: aviso', hojaSin.includes('data-movil-acciones-vacio="1"'));
+const tarjetaTarde = render(GuardCard, { shift: { ...turnoBase, isLateUnnotified: true }, now: NOW_A, onLlego: () => {}, onRevertir: () => {}, onSalida: () => {}, onProtocolo: () => {}, onRetencion: () => {}, onAcciones: () => {} });
+check('tarjeta 390 tarde: botón Ingreso y ⋯ abren la hoja', tarjetaTarde.includes('>Ingreso<') && tarjetaTarde.includes('data-movil-mas-acciones="a1"'));
+
+// ── Sala del celular: tomar mando con piloto inactivo, pedir mando, pasar a Auto con confirmación ──
+const sesionPiloto = (minAgo) => ({ startTime: new Date(NOW_A - 3 * 3600000), lastActivityAt: new Date(NOW_A - minAgo * 60000) });
+check('piloto con heartbeat reciente está activo', !isPilotInactive(sesionPiloto(2), NOW_A) && pilotInactiveMinutes(sesionPiloto(2), NOW_A) === 2);
+check('piloto sin heartbeat hace 5 min está inactivo (umbral 5)', isPilotInactive(sesionPiloto(5), NOW_A) && PILOT_INACTIVE_MS === 300000 && isPilotInactive({ startTime: new Date(NOW_A - 10 * 60000), lastActivityAt: null }, NOW_A));
+check('sesión sin heartbeat usa startTime', !isPilotInactive({ startTime: new Date(NOW_A - 60000), lastActivityAt: null }, NOW_A));
+const salaNoops = { onTomarMando: () => {}, onTakeOver: () => {}, onRequestPilot: () => {}, onAcceptPilot: () => {}, onRejectPilot: () => {}, onPasarAuto: () => {}, onSalir: () => {} };
+const salaBase = { modeLabel: 'Manual', steps: ['RET', 'REF', 'ESC', 'Ext+Adel', 'Eventuales', 'FT'], ...salaNoops };
+const salaInactivo = render(SalaSheetBody, { ...salaBase, isPilot: false, inRoom: false, pilotName: 'Lopez, Ana', pilotInactive: true, pilotInactiveMin: 7 });
+check('sala 390: piloto sin actividad 7 min → Tomar el mando ahora (sin pedir)', salaInactivo.includes('data-movil-piloto-inactivo="1"') && salaInactivo.includes('Sin actividad hace 7 min') && salaInactivo.includes('data-movil-sala-accion="TOMAR_INACTIVO"') && !salaInactivo.includes('data-movil-sala-accion="PEDIR"') && !salaInactivo.includes('data-movil-sala-accion="AUTO"'));
+const salaActivo = render(SalaSheetBody, { ...salaBase, isPilot: false, inRoom: true, pilotName: 'Lopez, Ana', pilotInactive: false, pilotInactiveMin: 1 });
+check('sala 390: piloto activo → Pedir mando y Salir de la sala, sin tomar', salaActivo.includes('data-movil-sala-accion="PEDIR"') && salaActivo.includes('>Pedir mando<') && salaActivo.includes('data-movil-sala-accion="SALIR"') && !salaActivo.includes('TOMAR_INACTIVO') && !salaActivo.includes('data-movil-piloto-inactivo'));
+const salaFuera = render(SalaSheetBody, { ...salaBase, isPilot: false, inRoom: false, pilotName: 'Lopez, Ana', pilotInactive: false });
+check('sala 390: fuera de la sala con piloto activo → entrar como apoyo y pedir', salaFuera.includes('Entrar como apoyo y pedir mando'));
+const salaPiloto = render(SalaSheetBody, { ...salaBase, isPilot: true, inRoom: true, pilotName: 'Yo', pendingPilotName: 'Perez, Hugo' });
+check('sala 390: piloto → Pasar a Auto + pedido de mando pendiente', salaPiloto.includes('data-movil-sala-accion="AUTO"') && salaPiloto.includes('data-movil-pedido-mando="1"') && salaPiloto.includes('Perez, Hugo pide el mando') && !salaPiloto.includes('PEDIR'));
+const salaAuto = render(SalaSheetBody, { ...salaBase, modeLabel: 'Auto', isPilot: false, inRoom: false });
+check('sala 390: sin sala → Tomar mando · pasar a Manual', salaAuto.includes('data-movil-sala-accion="TOMAR"') && salaAuto.includes('pasar a Manual'));
+const salaConfAuto = render(SalaSheetBody, { ...salaBase, isPilot: true, inRoom: true, pilotName: 'Yo', confirmandoInicial: 'AUTO' });
+check('sala 390: Pasar a Auto pide confirmación', salaConfAuto.includes('data-movil-confirmar="AUTO"') && salaConfAuto.includes('Sí, pasar a Auto') && !salaConfAuto.includes('data-movil-sala-accion='));
+const salaConfTomar = render(SalaSheetBody, { ...salaBase, isPilot: false, inRoom: true, pilotName: 'Lopez, Ana', pilotInactive: true, pilotInactiveMin: 9, confirmandoInicial: 'TOMAR' });
+check('sala 390: tomar mando pide confirmación y avisa la bitácora', salaConfTomar.includes('data-movil-confirmar="TOMAR"') && salaConfTomar.includes('no da señales hace 9 min') && salaConfTomar.includes('bitácora') && salaConfTomar.includes('Sí, tomar el mando'));
+
+// ── Deep-link del push: /admin/operaciones/?shiftId=… ──
+const opsAlertLink = (() => {
+  try {
+    return createRequire(join(repo, 'apps/functions/package.json'))('./lib/notifications/onNovedadCreated.js').opsAlertLink;
+  } catch {
+    return null;
+  }
+})();
+if (opsAlertLink) {
+  check('push: link con shiftId abre la tarjeta; sin turno va al CC', opsAlertLink({ shiftId: 'abc 1' }) === '/admin/operaciones/?shiftId=abc%201' && opsAlertLink({ virtualVacancyId: 'gap_x' }) === '/admin/operaciones/?shiftId=gap_x' && opsAlertLink({}) === '/admin/operaciones/');
+} else {
+  console.log('SKIP push link (compilar apps/functions)');
+}
+const swSrc = readFileSync(join(web2, 'public/firebase-messaging-sw.js'), 'utf8');
+check('service worker: click navega al link del aviso (deep-link) con requireInteraction y vibrate para el operador', swSrc.includes('notificationclick') && swSrc.includes('client.navigate(target)') && swSrc.includes('requireInteraction: esOperador') && swSrc.includes('vibrate: esOperador'));
+const fcmSrc = readFileSync(join(web2, 'src/hooks/useAdminFcm.ts'), 'utf8');
+check('primer plano: notificación persistente con requireInteraction, vibrate y data.link', fcmSrc.includes('registration.showNotification') && fcmSrc.includes('requireInteraction: true') && fcmSrc.includes('vibrate: [300, 120, 300]') && fcmSrc.includes('data: { link }'));
+const novSrc = readFileSync(join(repo, 'apps/functions/src/notifications/onNovedadCreated.ts'), 'utf8');
+check('onNovedadCreated: ausencia, retención larga, tope 12:59, convocatoria rechazada y sin candidato con deep-link', ['AUSENCIA_AUTO', 'RETENCION_LARGA', 'TOPE_JORNADA', 'CONVOCATORIA_RECHAZADA', 'VACANTE_SIN_COBERTURA', 'SIN_COBERTURA'].every((t) => novSrc.includes(`'${t}'`)) && novSrc.includes('vibrate: [300, 120, 300]') && novSrc.includes('fcmOptions: { link }'));
+const movilSrc = readFileSync(join(web2, 'src/components/movil/OperacionMovil.tsx'), 'utf8');
+check('OperacionMovil: ?shiftId abre el objetivo y la hoja de acciones del turno', movilSrc.includes('router.query.shiftId') && movilSrc.includes('setAccionesShiftId(shift.id)') && movilSrc.includes('setSelectedId(esTurnoEvento(shift)'));
+
 rmSync(outdir, { recursive: true, force: true });
 
 if (failed) {
