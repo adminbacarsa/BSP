@@ -3737,11 +3737,14 @@ export default function OperacionesPage() {
 
     if (movil) {
         const apoyo = session.copilotoSessions.map((item) => item.operatorName).filter(Boolean).join(', ');
+        // Supervisión: el mismo Centro de Control del celular, solo lectura.
+        const supervisionReadOnly = String(router.query.modo || '') === 'supervision';
         return (
             <>
-                <Head><title>COSP V1.0 | Operaciones</title></Head>
+                <Head><title>{supervisionReadOnly ? 'COSP V1.0 | Supervisión' : 'COSP V1.0 | Operaciones'}</title></Head>
                 <OperacionMovil
                     empresa={empresa?.name || empresaId || 'Empresa'}
+                    readOnly={supervisionReadOnly}
                     logic={{
                         stats: logic.stats,
                         setViewTab: (tab: string) => logic.setViewTab(tab as never),

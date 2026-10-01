@@ -92,6 +92,7 @@ function BigButton({
 
 export function GuardCard({
   shift,
+  readOnly = false,
   onLlego,
   onRevertir,
   onSalida,
@@ -99,6 +100,7 @@ export function GuardCard({
   onRetencion,
 }: {
   shift: GuardShift;
+  readOnly?: boolean;
   onLlego: (shift: GuardShift) => void;
   onRevertir: (shift: GuardShift) => void;
   onSalida: (shift: GuardShift) => void;
@@ -118,14 +120,16 @@ export function GuardCard({
         <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${TONE_PILL[tone]}`}>
           {guardStatusLabel(shift)}
         </span>
-        <div className="mt-2 flex gap-1.5">
-          {tone === 'aus' && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
-          {tone === 'aus' && <BigButton label="Revertir" onClick={() => onRevertir(shift)} />}
-          {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
-          {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
-          {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
-          <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" onClick={() => onProtocolo(shift)}>⋯</button>
-        </div>
+        {!readOnly && (
+          <div className="mt-2 flex gap-1.5">
+            {tone === 'aus' && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
+            {tone === 'aus' && <BigButton label="Revertir" onClick={() => onRevertir(shift)} />}
+            {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
+            {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
+            {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
+            <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" onClick={() => onProtocolo(shift)}>⋯</button>
+          </div>
+        )}
       </div>
     </article>
   );
@@ -138,6 +142,7 @@ export function OperacionScreens({
   pendingLabel,
   stats,
   notices = [],
+  readOnly = false,
   objectives,
   objective,
   alerts,
@@ -158,6 +163,8 @@ export function OperacionScreens({
   pendingLabel: string | null;
   stats: MovilStats;
   notices?: string[];
+  /** Supervisión: mismas pantallas sin botones de acción ni sala. */
+  readOnly?: boolean;
   objectives: MovilObjective[];
   objective: MovilObjective | null;
   alerts: GuardShift[];
@@ -180,7 +187,7 @@ export function OperacionScreens({
     { id: 'PLAN', label: 'Plan', value: stats.plan, cls: 'text-indigo-600' },
   ];
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-slate-100 pb-24" data-movil-screen={panel}>
+    <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-slate-100 pb-24" data-movil-screen={panel} data-movil-readonly={readOnly ? '1' : undefined}>
       <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-2">
         <div className="flex items-center gap-2">
           {panel === 'objetivo' && (
@@ -189,12 +196,16 @@ export function OperacionScreens({
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-black">{panel === 'objetivo' ? objective?.name : empresa}</p>
             <p className="text-[11px] font-semibold text-slate-500">
-              {online ? modeLabel : 'Sin señal · se muestra lo último'}
+              {online ? (readOnly ? `Supervisión · ${modeLabel}` : modeLabel) : 'Sin señal · se muestra lo último'}
             </p>
           </div>
-          <button type="button" onClick={onSala} className="min-h-11 rounded-xl bg-emerald-600 px-2 text-[10px] font-black uppercase text-white">
-            {modeLabel}
-          </button>
+          {readOnly ? (
+            <span className="min-h-11 rounded-xl bg-slate-200 px-2 py-3 text-[10px] font-black uppercase text-slate-700">Solo lectura</span>
+          ) : (
+            <button type="button" onClick={onSala} aria-label={`Sala · ${modeLabel}`} className="min-h-11 rounded-xl bg-emerald-600 px-2 text-[10px] font-black uppercase text-white">
+              {modeLabel}
+            </button>
+          )}
         </div>
         {pendingLabel && (
           <p className="mt-1 rounded-xl bg-amber-50 px-2 py-1 text-[11px] font-bold text-amber-800">Pendiente de enviar: {pendingLabel}</p>
@@ -242,6 +253,7 @@ export function OperacionScreens({
             <GuardCard
               key={shift.id}
               shift={shift}
+              readOnly={readOnly}
               onLlego={onLlego}
               onRevertir={onRevertir}
               onSalida={onSalida}
@@ -252,10 +264,12 @@ export function OperacionScreens({
         )}
         {panel === 'alertas' && (
           <>
-            <p className="mb-2 text-[11px] font-bold text-slate-500">Prioridad primero. La acción grande queda bajo el pulgar.</p>
+            <p className="mb-2 text-[11px] font-bold text-slate-500">
+              {readOnly ? 'Prioridad primero. Las acciones las toma el Centro de Control.' : 'Prioridad primero. La acción grande queda bajo el pulgar.'}
+            </p>
             {alerts.map((shift, index) => (
               <article key={shift.id} className="mb-2 flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                {index === 0 && (
+                {index === 0 && !readOnly && (
                   <button type="button" onClick={() => (guardTone(shift) === 'vac' ? onProtocolo(shift) : onLlego(shift))} className="flex w-[92px] flex-col items-center justify-center bg-emerald-600 text-[11px] font-black text-white">
                     {guardTone(shift) === 'vac' ? 'Cubrir' : 'Llegó'}
                   </button>
@@ -264,10 +278,12 @@ export function OperacionScreens({
                   <p className="text-[10px] font-black uppercase text-rose-600">{guardStatusLabel(shift)}</p>
                   <h3 className="text-sm font-black">{shift.employeeName || 'Vacante'}</h3>
                   <p className="text-[11px] font-semibold text-slate-500">{shift.objectiveName} · {shift.code} · {horario(shift)}</p>
-                  <div className="mt-2 flex gap-1.5">
-                    <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />
-                    <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />
-                  </div>
+                  {!readOnly && (
+                    <div className="mt-2 flex gap-1.5">
+                      <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />
+                      <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />
+                    </div>
+                  )}
                 </div>
               </article>
             ))}

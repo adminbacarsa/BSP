@@ -14,6 +14,7 @@ import { useAdminFcm } from '@/hooks/useAdminFcm';
 import { useTrainingEvidence } from '@/hooks/useTrainingEvidence';
 import { useTrainingCleanup } from '@/hooks/useTrainingCleanup';
 import { useEmpresa } from '@/context/EmpresaContext';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 
 function AdminFcmRegistrar() {
   useAdminFcm();
@@ -28,6 +29,14 @@ function TrainingEvidenceWatcher() {
 
 function AssistantWrapper() {
   const { empresa } = useEmpresa();
+  const router = useRouter();
+  const movil = useMovilMode();
+  // En el celular el globo no se muestra: el asistente se abre desde Más (evento cosp-assistant-open).
+  if (movil) {
+    return <AssistantFloatingBubble />;
+  }
+  // En el escritorio del Centro de Control el globo tapaba los controles.
+  if (router.pathname === '/admin/operaciones') return null;
   if (empresa?.isTrainingEmpresa) {
     return <AssistantFloatingBubble />;
   }
@@ -61,7 +70,6 @@ export default function App({ Component, pageProps }: AppProps) {
     && !router.pathname.startsWith('/cliente')
     && !router.pathname.startsWith('/objetivo')
     && !router.pathname.includes('crono-popout')
-    && router.pathname !== '/admin/operaciones'
     && !router.pathname.startsWith('/privacidad');
   useEffect(() => {
     initTheme();

@@ -26,7 +26,9 @@ import {
 } from '@/hooks/usePendingGuardDeviceCount';
 import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { MovilDesktopOnly } from '@/components/movil/MovilDesktopOnly';
 import { useMovilMode } from '@/lib/movil/useMovilMode';
+import { movilModuleForPath, movilRouteHasMobileVersion } from '@/lib/movil/navItems';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -559,6 +561,17 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const _sbT = !sidebarOpen ? '-translate-x-full lg:translate-x-0' : 'translate-x-0';
   const _sbZ = sidebarOpen ? 'z-[1001]' : 'z-[999]';
   const _sbCls = 'fixed top-0 left-0 ' + _sbZ + ' h-screen transition-all duration-300 ease-in-out border-r flex flex-col overflow-hidden ' + _sbW + ' ' + _sbT;
+
+  // Modo celular: las páginas sin versión móvil no muestran el escritorio.
+  if (movil && !isSupervisionApp && !movilRouteHasMobileVersion(router.pathname)) {
+    const current = movilModuleForPath(router.pathname);
+    return (
+      <>
+        <MovilDesktopOnly moduleLabel={current?.label || getTitleByPath(router.pathname) || 'Panel'} />
+        <MovilBottomNav />
+      </>
+    );
+  }
 
   return (
     <>

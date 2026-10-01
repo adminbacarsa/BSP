@@ -4,8 +4,7 @@ import DashboardLayout from '@/components/layout/DashboardLayout';
 import { PageShell, PageHeader, ModuleShell } from '@/components/ui';
 import { slaService, ServiceSLA, ServicePosition, ShiftVariant, HorarioVersion, PositionAssignment, ServiceRule, RuleAction, RuleActionType, ServiceRotation, RotationPeriod, RotationEntry, appendSlaChangeLog } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
-import { db, getDocsOnce, functions as cloudFunctions } from '@/lib/firebase';
-import { httpsCallable } from 'firebase/functions';
+import { db, getDocsOnce } from '@/lib/firebase';
 import { getAuth, onAuthStateChanged } from 'firebase/auth';
 import { FirebaseError } from 'firebase/app'; 
 import { collection, addDoc, serverTimestamp, query, orderBy, where, getDocs, getDoc, writeBatch, doc, Timestamp, limit, updateDoc } from 'firebase/firestore';
@@ -41,11 +40,13 @@ import {
   defaultNewSlaDates,
   localTodayYmd,
   newSlaBornClosed,
-  normalizeReopenMotivo,
   REOPEN_MOTIVO_MSG,
   reopenMotivoError,
   stripSlaLifecycle,
 } from '@/lib/servicios/newSlaDraft';
+import { cerrarContratoSla, reabrirContratoSla } from '@/lib/servicios/contratoCierreClient';
+import { ServiciosMovil } from '@/components/movil/ServiciosMovil';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 import {
   applyEncargadoEmployeeChoice,
   buildEncargadoDefaultShift,
@@ -155,6 +156,7 @@ export default function ServiciosSLAPage() {
   const canUpdateService = isSuperAdmin || (rolePermissions['SERVICES'] || []).includes('update');
   const migracionCompleta = (empresa as any)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
+  const movil = useMovilMode();
   
   // ESTADOS
   const [currentUserName, setCurrentUserName] = useState("Cargando...");
@@ -1332,8 +1334,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
     if (!form.id || reopenError) return;
     setReopenBusy(true);
     try {
-      const motivo = normalizeReopenMotivo(reopenMotivo);
-      await httpsCallable(cloudFunctions, 'reabrirContratoSla')({ slaId: form.id, motivo });
+      const motivo = await reabrirContratoSla(form.id, reopenMotivo);
       setForm((prev: any) => ({ ...prev, closed: false, reopenedManually: true, reopenReason: motivo }));
       setReopenOpen(false);
       setReopenMotivo('');
@@ -1349,7 +1350,7 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   const handleCloseContract = async () => {
     if (!form.id || !window.confirm('¿Cerrar este contrato? Queda sin edición y su planificación bloqueada.')) return;
     try {
-      await httpsCallable(cloudFunctions, 'cerrarContratoSla')({ slaId: form.id });
+      await cerrarContratoSla(form.id);
       setForm((prev: any) => ({ ...prev, closed: true, reopenedManually: false }));
       addToast('Contrato cerrado', 'success');
     } catch (e: any) {
@@ -2014,6 +2015,23 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
   );
 
   const clientGroups = catalogClientGroups;
+
+  if (movil) {
+    return (
+      <ServiciosMovil
+        empresa={empresa?.name || empresaId || 'Empresa'}
+        loading={loading}
+        services={services}
+        clients={clients}
+        publishStatusMap={publishStatusMap}
+        isSuperAdmin={isSuperAdmin}
+        onSlaPatched={(slaId, patch) => {
+          setServices(prev => prev.map(s => (s.id === slaId ? { ...s, ...patch } : s)));
+          if (form.id === slaId) setForm((prev: any) => ({ ...prev, ...patch }));
+        }}
+      />
+    );
+  }
 
   return (
     <DashboardLayout>
