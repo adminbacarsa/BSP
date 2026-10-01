@@ -114,6 +114,8 @@ export function useCheckIn() {
         employeeIds?: string[];
         /** Preview SuperAdmin: el turno se ficha a nombre de este legajo. */
         previewAsEmployeeId?: string | null;
+        /** Legajo con fichadaRemota: sin radio de 80 m. */
+        fichadaRemota?: boolean;
       },
     ): Promise<{ ok: true; message: string } | { ok: false; message: string }> => {
       setBusyShiftId(shift.id);
@@ -141,7 +143,7 @@ export function useCheckIn() {
           shift.objectiveId,
           shift.objectiveName,
         );
-        const remoteAllowed = objective?.allowRemoteCheckIn === true;
+        const remoteAllowed = objective?.allowRemoteCheckIn === true || owner?.fichadaRemota === true;
         const hasCoords =
           !!objective &&
           objective.lat != null &&
@@ -158,7 +160,9 @@ export function useCheckIn() {
             coords = null;
           }
         }
-        const validation = validateCheckInDistance(objective, coords);
+        const validation = validateCheckInDistance(objective, coords, {
+          fichadaRemota: owner?.fichadaRemota === true,
+        });
         if (!validation.ok) {
           return { ok: false, message: validation.message };
         }

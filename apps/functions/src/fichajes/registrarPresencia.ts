@@ -37,6 +37,8 @@ export type RegistrarPresenciaInput = {
    */
   overrideRelieveShiftId?: string | null;
   skipAutoRelevo?: boolean;
+  /** Legajo con `fichadaRemota` (revisión Play). Si no viene, se lee el legajo. */
+  fichadaRemota?: boolean;
 };
 
 export type RegistrarPresenciaResult = {
@@ -121,8 +123,14 @@ export async function registrarPresencia(
   const nowMs = recordedMs;
   const now = FieldValue.serverTimestamp();
 
+  let fichadaRemota = input.fichadaRemota === true;
+  if (input.fichadaRemota == null && (source === 'PORTAL_GPS' || source === 'PORTAL') && empId) {
+    const empSnap = await db.collection('empleados').doc(empId).get();
+    fichadaRemota = empSnap.data()?.fichadaRemota === true;
+  }
   const windowEval = evaluateServerCheckInWindow(shiftData as Record<string, unknown>, nowMs, {
     source,
+    fichadaRemota,
   });
   if (!windowEval.allowed) {
     throw new Error(windowEval.rejectCode || 'CHECKIN_WINDOW');

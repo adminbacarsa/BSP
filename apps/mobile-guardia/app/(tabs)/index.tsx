@@ -293,8 +293,9 @@ function HoyScreenContent() {
     mainShift && lateEtaByShiftId[mainShift.id] != null ? lateEtaByShiftId[mainShift.id] : null;
   const timing = mainShift
     ? getCheckInTiming(mainShift, now, {
-        relaxWindow: labRelaxedCheckIn,
+        relaxWindow: labRelaxedCheckIn && employee?.fichadaRemota !== true,
         etaMinutesOverride: etaOverride,
+        fichadaRemota: employee?.fichadaRemota === true,
       })
     : null;
   const heroInProgress = !!mainShift && isShiftInProgress(mainShift, now);
@@ -386,6 +387,7 @@ function HoyScreenContent() {
       authUid: user?.uid ?? null,
       employeeIds: eventualLegajos.map((l) => l.employeeId),
       previewAsEmployeeId: isPreviewMode ? String(mainShift.employeeId || '') : null,
+      fichadaRemota: employee?.fichadaRemota === true,
     });
     appAlert(result.ok ? 'Presente' : 'Fichada', result.message);
   }

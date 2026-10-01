@@ -92,10 +92,20 @@ function finishAllowed(
  * convocado (no EXT): desde la aceptación hasta el fin del hueco, sin tarde;
  * isEarlyStart = adelanto OR turno propio.
  */
+/** Día calendario en Argentina (YYYY-MM-DD). */
+export function arCalendarDay(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
+
 export function evaluateServerCheckInWindow(
   shift: Record<string, unknown>,
   nowMs: number,
-  opts?: { source?: string },
+  opts?: { source?: string; fichadaRemota?: boolean },
 ): CheckInWindowResult {
   // Bloqueo legal, antes que cualquier ventana ni bypass del CC: sin alta AT confirmada no se ficha.
   if (!isAltaArcaConfirmada(shift)) {
@@ -121,6 +131,18 @@ export function evaluateServerCheckInWindow(
   }
   if (isOpsCoverageHoursOnSourceDoc(shift) && ctEarly !== 'ADVANCE') {
     return { allowed: false, rejectCode: 'TRACE_REGISTRATION' };
+  }
+
+  const plannedForReview = startMs(shift);
+  if (opts?.fichadaRemota === true && plannedForReview > 0) {
+    const sameDay = arCalendarDay(nowMs) === arCalendarDay(plannedForReview);
+    if (!sameDay) {
+      return {
+        allowed: false,
+        rejectCode: nowMs < plannedForReview ? 'TOO_EARLY' : 'SHIFT_ENDED',
+      };
+    }
+    return { allowed: true, usePlannedStart: true, lateMinutes: 0 };
   }
 
   const source = String(opts?.source || '').toUpperCase();

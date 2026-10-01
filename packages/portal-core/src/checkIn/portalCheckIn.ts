@@ -62,7 +62,22 @@ export type CheckInTimingOptions = {
   relaxWindow?: boolean;
   /** ETA local optimista si el backend aún no persistió lateArrivalEtaAt. */
   etaMinutesOverride?: number | null;
+  /**
+   * Legajo de revisión Play (`empleados.fichadaRemota`). El día del turno (AR)
+   * puede fichar desde cualquier hora. No abre la ventana a otros legajos.
+   */
+  fichadaRemota?: boolean;
 };
+
+/** Día calendario en Argentina (YYYY-MM-DD). */
+export function arCalendarDay(ms: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Argentina/Buenos_Aires',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(ms));
+}
 
 /** Campos extra de turno usados en ventanas CC (no todos están tipados en portal-types). */
 type ShiftTimingFields = Shift & {
@@ -293,6 +308,22 @@ export function getCheckInTiming(
     return empty;
   }
 
+  if (options?.fichadaRemota === true && start) {
+    const sameDay = arCalendarDay(nowMs) === arCalendarDay(start.getTime());
+    const rejectCode = sameDay ? undefined : nowMs < start.getTime() ? ('TOO_EARLY' as const) : ('SHIFT_ENDED' as const);
+    return {
+      diffMinutes,
+      canCheckIn: sameDay,
+      canNotifyLate: false,
+      lateWindow: false,
+      tooEarly: rejectCode === 'TOO_EARLY',
+      checkInDeadline: null,
+      rejectCode,
+      rejectMessage: rejectCode ? checkInRejectMessage(rejectCode) : undefined,
+      lateMinutes: 0,
+    };
+  }
+
   const relax = options?.relaxWindow === true && !s.isFranco;
   if (relax && diffMinutes !== null && start) {
     const end = toDate(s.endTime);
@@ -365,7 +396,11 @@ export function getCheckInTiming(
 export function validateCheckInDistance(
   objective: ObjectiveLocation | null,
   coords: { latitude: number; longitude: number } | null,
+  opts?: { fichadaRemota?: boolean },
 ): { ok: true } | { ok: false; message: string } {
+  if (opts?.fichadaRemota === true) {
+    return { ok: true };
+  }
   if (!objective) {
     return { ok: false, message: 'Objetivo sin ubicación configurada' };
   }

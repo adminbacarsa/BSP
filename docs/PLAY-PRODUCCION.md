@@ -51,25 +51,55 @@ https://comtroldata.web.app/privacidad/
 
 `firebase.json` reescribe `/privacidad` antes del catch-all del panel. En la app: Más → Privacidad. **Hay que desplegar hosting** para que Play pueda abrir la URL. No se desplegó en esta tarea.
 
-## Checklist Play Console
+La app nativa es solo para guardias y eventuales. No incluye el trabajo de `cursor/multirol-fase1`.
 
-1. Crear la app con package `com.cosp.guardia` si todavía no está, o abrir la existente.
-2. Subir el AAB al track que corresponda (closed testing primero si la cuenta es personal).
-3. **Política de privacidad:** `https://comtroldata.web.app/privacidad/`
-4. **Acceso a la app:** restringida. Instrucciones y usuario de abajo.
-5. **Anuncios:** No.
-6. **Público objetivo:** 18 años o más. No es para niños. No es “hecha para niños”.
-7. **Clasificación de contenido (IARC):** responder No a violencia, sexo, lenguaje vulgar, sustancias, apuestas, compras. Categoría de tienda: Productividad o Negocios.
-8. **Gobierno / finanzas / salud:** No. Los certificados médicos son adjuntos laborales, no una app médica.
-9. **Seguridad de los datos:** copiar el bloque de abajo.
-10. **Ubicación:** declarar ubicación precisa, solo en primer plano, no en background. El formulario de permisos debe coincidir: no marcar background location.
-11. **Ficha:** textos y capturas de abajo. Ícono 512×512. Gráfico de funciones 1024×500.
-12. **Firma:** copiar el SHA-256 de Play App Signing a `assetlinks.json` cuando se quiera el App Link de activación (no bloquea la revisión).
-13. Países, ficha en español (Argentina), mail de contacto `admin@bacarsa.com.ar`.
+La app `COSP Guardia` (`com.cosp.guardia`) ya está en Borrador, con Prueba interna. La cuenta de Play es **personal**: hace falta una **prueba cerrada** con 12 testers opted-in durante 14 días seguidos. La prueba interna no cuenta para ese plazo.
 
-### Cuenta personal: 12 testers × 14 días
+## Orden en Play Console
 
-Si la cuenta de Play Console es **personal** (creada después de noviembre 2023), Google exige un closed test con **al menos 12 testers que hayan aceptado y permanezcan opted-in 14 días seguidos** antes de habilitar producción. Una cuenta de organización puede no tener ese requisito. El internal testing que ya existe no reemplaza ese closed test.
+### 1. Panel (cada tarea pendiente)
+
+Respondé en este orden. Guardá cada una antes de pasar a la siguiente.
+
+| Tarea del panel | Qué responder |
+|-----------------|---------------|
+| Política de privacidad | `https://comtroldata.web.app/privacidad/` (hay que tener el hosting desplegado) |
+| Acceso a la app | El acceso está restringido. Instrucciones y usuario: sección de abajo. Pegá la clave que imprimió el script. |
+| Anuncios | No, la app no tiene anuncios |
+| Público objetivo | 18 años o más. No es para niños. No está hecha para niños |
+| Clasificación de contenido | Cuestionario IARC: No a violencia, sexo, lenguaje vulgar, sustancias, apuestas y compras dentro de la app. Categoría: Productividad o Negocios |
+| Apps de gobierno, finanzas o salud | No. Un certificado laboral no convierte a la app en una app médica |
+| Seguridad de los datos | Copiar la tabla de más abajo. Ubicación precisa, solo con la app en uso, no en segundo plano |
+| ID de publicidad | No se usa |
+| Ficha de Play Store | Textos de abajo. Ícono `docs/play/icono-512.png`. Destacada `docs/play/destacada-1024x500.png`. Capturas `docs/play/01` a `06` |
+| Categoría y datos de contacto | Productividad o Negocios. Mail `admin@bacarsa.com.ar`. Ficha en español (Argentina) |
+
+### 2. Build del AAB (lo corre Mauro)
+
+Desde `apps/mobile-guardia`:
+
+```text
+npx eas-cli build --platform android --profile production
+```
+
+Cuando termina, en el sitio de EAS: descargar el `.aab`. No uses `eas submit`.
+
+### 3. Prueba cerrada
+
+1. Play Console → **Probar y publicar** → **Pruebas** → **Prueba cerrada** → **Crear pista**. Nombre: `cerrada-produccion`.
+2. Países: Argentina (o los que correspondan).
+3. **Testers** → crear una lista de correos (Gmail) con **al menos 12** personas. Guardar.
+4. **Crear versión** → subir el AAB a mano (arrastrar el archivo, o **Subir**). Notas de la versión: “Primera prueba cerrada de COSP Guardia”.
+5. Revisar y **Enviar a revisión**.
+6. Cuando Google apruebe la pista, en Testers copiá el **link de inscripción** y pasáselo a los 12. Cada uno tiene que abrirlo, aceptar ser tester e instalar desde Play. El contador de 14 días empieza cuando hay 12 opted-in al mismo tiempo. Si uno se baja, el plazo se reinicia.
+
+### 4. A los 14 días: producción
+
+1. Panel → la tarea **Solicitar acceso a producción** (o Probar y publicar → Producción). Google la habilita solo si los 14 días se cumplieron.
+2. Producción → **Crear versión** → subir el mismo AAB (o uno nuevo generado con el mismo comando) → **Enviar a revisión**.
+3. Al aprobar, **Publicar**.
+
+Subir el AAB a mano, en la pista que corresponda: **Crear versión** → **App bundles** → **Subir** → elegir el `.aab` descargado de EAS. No hace falta `eas submit`.
 
 ## Seguridad de los datos (copiar)
 
@@ -87,22 +117,25 @@ Si la cuenta de Play Console es **personal** (creada después de noviembre 2023)
 
 Declaración de ubicación para el formulario de permisos: la app accede a la ubicación **solo con la app en uso**, para validar la fichada dentro del radio del objetivo y, si el vigilador lo permite, estimar la llegada al aceptar una convocatoria. No se accede en segundo plano.
 
-## Acceso a la app — usuario de prueba (diseño, no creado)
+## Acceso a la app — usuario de revisión
 
-No se escribió nada en producción. Crear esto en el proyecto `comtroldata`, empresa **`pruebas_sa`** (no en Bacar productiva):
+El script no escribe nada si no le pasás los dos flags. La clave sale por consola solo con `--apply` y no se guarda en el repo.
 
-1. Usuario de Auth `play.review@bacarsa.com.ar`. Contraseña larga, solo en Play Console → Acceso a la app. No guardarla en el repo. Sin claim de SuperAdmin.
-2. Legajo `empleados/{id}`: `empresaId: pruebas_sa`, `email` igual al de Auth, `uid` del usuario, `status: ACTIVE`, `firstName: Review`, `lastName: Play`, `fileNumber: PLAY-01`, `deviceId` vacío. No crear `device_tokens` antes: el primer teléfono del revisor se ata solo. Si Google entra desde otro aparato, hay que limpiar ese token.
-3. Un objetivo de `pruebas_sa` con `allowRemoteCheckIn: true` (el revisor no está en el puesto; si no, la geocerca de ~80 m rechaza la fichada).
-4. Dos turnos `turnos` de ese legajo, código `M`, uno para el día de la revisión y otro para el día siguiente, `draft: false`, `isFranco: false`, con `objectiveId` de ese objetivo. Publicar `planificacion_estados` con id `{objectiveId}_{año}_{mes}` y `publishedAt`; si no, el planificado no aparece en Hoy.
-5. Cliente de ese objetivo activo.
+```text
+node scripts/crear-usuario-review-play.mjs
+node scripts/crear-usuario-review-play.mjs --apply --allow-prod
+```
+
+Crea, en `pruebas_sa` (no en Bacar): Auth `play.review@bacarsa.com.ar` con claim `employee` (sin SuperAdmin), legajo `empleados/play_review_01` (`PLAY-01`) con `bypassDeviceCheck` y `fichadaRemota` (el gate de dispositivo y la geocerca los respetan solo en ese legajo), objetivo de prueba con coordenadas reales y **sin** `allowRemoteCheckIn`, y turnos `M` 07:00–15:00 publicados los próximos 30 días. Volver a correr `--apply` rota la clave.
+
+El revisor puede fichar ese día desde cualquier lugar, a cualquier hora, porque el legajo tiene `fichadaRemota`. Otro legajo sigue con el radio de 80 m y la ventana normal.
 
 Instrucciones para Play:
 
 ```text
 Abrí COSP Guardia. Ingresá con play.review@bacarsa.com.ar y la contraseña indicada.
 Aceptá notificaciones y, si la pide, la ubicación (solo se usa al fichar).
-En Hoy ves el turno del día. En Agenda, el mes. En Más → Credencial y Política de privacidad.
+En Hoy ves el turno del día y podés fichar. En Agenda, el mes. En Más → Credencial y Política de privacidad.
 ```
 
 ## Ficha de Play Store
@@ -129,14 +162,19 @@ COSP Guardia es la app del vigilador de Grupo Bacar. Muestra tus turnos, te avis
 No tiene anuncios. Hace falta una cuenta activada por RRHH. Cada vigilador ve solo su legajo.
 ```
 
-## Capturas a sacar (teléfono, 1080×1920 o relación similar)
+## Material de la ficha (`docs/play/`)
 
-1. Hoy, con el turno de prueba y el botón de fichar.
-2. El aviso de fichada (presente, o el mensaje si está fuera del puesto).
-3. Agenda del mes con el turno marcado.
-4. Alertas (una convocatoria o la lista vacía con el título de la pantalla).
-5. Credencial digital con el QR.
-6. Más, con la tarjeta de Privacidad visible.
-7. Opcional: pantalla de ingreso.
+Datos ficticios (Review Play, DNI 00.000.000, Cliente Revisión Play). No hay datos personales reales.
 
-Gráfico de funciones 1024×500: wordmark COSP Guardia sobre fondo `#8B1A1A`, una línea “Turnos, fichada y alertas”.
+| Archivo | Uso |
+|---------|-----|
+| `icono-512.png` | Ícono 512×512, recorte del ícono de la app |
+| `destacada-1024x500.png` | Imagen destacada |
+| `01-hoy.png` … `06-contratos.png` | Capturas 1080×1920: Hoy, Fichada, Alertas, Credencial, Agenda, Mis contratos |
+
+Para regenerar las capturas, contra el export web local:
+
+```text
+cd apps/mobile-guardia && npm run build:web
+node ../../scripts/capturar-play-ficha.mjs
+```

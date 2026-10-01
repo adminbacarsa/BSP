@@ -100,6 +100,8 @@ export type EmpleadoPortal = {
   photoUrl?: string;
   empresaId?: string;
   deviceId?: string | null;
+  /** Revisión Play: fichada sin geocerca, solo ese legajo. */
+  fichadaRemota?: boolean;
   deviceInfo?: Record<string, string>;
   platform?: PortalPlatform;
 };

@@ -186,6 +186,7 @@ function mapEmpleadoPortal(id: string, data: Record<string, unknown>, uid: strin
     fileNumber: (data.fileNumber || data.legajo) as string | undefined,
     empresaId: data.empresaId as string | undefined,
     deviceId: (data.deviceId as string | null | undefined) ?? null,
+    fichadaRemota: data.fichadaRemota === true,
   };
 }
 
