@@ -1430,6 +1430,16 @@ export const avisarGuardiaOperaciones = functions.https.onCall(async (data, cont
   if (kind !== 'ENTRANTE' && kind !== 'RETENIDO') {
     throw new functions.https.HttpsError('invalid-argument', 'kind debe ser ENTRANTE o RETENIDO.');
   }
+  const turnoSnap = await admin.firestore().collection('turnos').doc(shiftId).get();
+  if (!turnoSnap.exists) throw new functions.https.HttpsError('not-found', 'Turno no encontrado.');
+  const { assertOperationsUpdatePermission } = await import('./ops/staffPermissions');
+  await assertOperationsUpdatePermission(
+    admin.firestore(),
+    context.auth.uid,
+    String(turnoSnap.get('empresaId') || ''),
+    context.auth.token.role,
+    context.auth.token.name || context.auth.token.email,
+  );
   const { avisarGuardiaOperaciones: run } = await import('./ops/avisarGuardiaOperaciones');
   const r = await run(admin.firestore(), {
     shiftId,
