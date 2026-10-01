@@ -3224,6 +3224,19 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">Inicio</label><input type="date" disabled={isClosedContract || appendingMonths} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={appendingMonths ? (services.find(s => s.id === form.id)?.startDate || form.startDate) : form.startDate} onChange={e => setForm({...form, startDate: e.target.value})}/></div>
                      <div><label className="text-[10px] font-black uppercase text-slate-400 ml-1">{appendingMonths ? 'Hasta' : 'Fin'}</label><input type="date" disabled={isClosedContract} min={appendingMonths ? (slaMonthsMode === 'individuales' ? firstOfMonthAfter(services.find(s => s.id === form.id)?.endDate || form.endDate) : dayAfterYmd(services.find(s => s.id === form.id)?.endDate || form.endDate)) : undefined} className="w-full p-4 bg-slate-50 dark:bg-slate-900 border dark:border-slate-600 rounded-xl font-bold text-xs dark:text-white disabled:opacity-60" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})}/></div>
                  </div>
+                 <label className={`flex items-start gap-2 rounded-2xl border px-3 py-2 ${form.autoRenewMonthly ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-900/40'}`}>
+                   <input
+                     type="checkbox"
+                     className="mt-0.5"
+                     disabled={isClosedContract}
+                     checked={form.autoRenewMonthly === true}
+                     onChange={(e) => setForm({ ...form, autoRenewMonthly: e.target.checked })}
+                   />
+                   <span>
+                     <span className="block text-[10px] font-black uppercase text-slate-700 dark:text-slate-200">Renovar mes a mes automáticamente</span>
+                     <span className="block text-[10px] font-bold text-slate-500">Al publicar el cronograma del último mes se crea el mes siguiente. No entra en operación hasta que se publique ese cronograma.</span>
+                   </span>
+                 </label>
                  {!isEditing && (
                    <p className="text-[10px] font-bold text-slate-500 -mt-3">El mes de arriba solo propone el desde. Podés elegir meses posteriores.</p>
                  )}

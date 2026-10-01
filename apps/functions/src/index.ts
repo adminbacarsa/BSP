@@ -1388,6 +1388,7 @@ export const requestCheckIn = functions.https.onCall(async (data, context) => {
 export const sesionOperador = sesionOperadorCallable;
 export const resolveStaffProfile = resolveStaffProfileCallable;
 export { scheduledCerrarContratosVencidos, reabrirContratoSla, cerrarContratoSla } from './servicios/contratoCierre';
+export { onPlanificacionPublicadaRenovarSla } from './servicios/renovarSlaMes';
 
 export const marcarAusenciaOperaciones = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
