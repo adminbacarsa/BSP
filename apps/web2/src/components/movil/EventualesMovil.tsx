@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import { collection, onSnapshot, query, where } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
@@ -43,6 +44,7 @@ function formatoCuil(raw: string): string {
 }
 
 export function EventualesMovil() {
+  const router = useRouter();
   const { isSuperAdmin, canReadModule } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
@@ -190,7 +192,8 @@ export function EventualesMovil() {
         onBuscar={setBuscar}
         personas={personas}
         onElegir={setElegidaId}
-        altaAbierta={altaAbierta}
+        vista={String(router.query.panel || 'bolsa')}
+        altaAbierta={altaAbierta || String(router.query.panel || '') === 'alta'}
         onAbrirAlta={() => setAltaAbierta(true)}
         onCerrarAlta={() => setAltaAbierta(false)}
         cuil={cuil}

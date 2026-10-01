@@ -67,6 +67,7 @@ const render = (component, props) => renderToStaticMarkup(createElement(componen
 const { createWriteQueue } = await importFront('lib/movil/writeQueue.ts');
 const { createCallableGate } = await importFront('lib/movil/callableOnline.ts');
 const { movilNavForPermissions, movilModulesForPermissions, movilModuleForPath, movilRouteHasMobileVersion } = await importFront('lib/movil/navItems.ts');
+const { alertaDelModulo, movilDestinosVisibles } = await importFront('lib/movil/destinos.ts');
 const { coveragePct, guardStatusLabel, guardTone } = await importFront('lib/movil/guardTone.ts');
 
 // ── Cola offline y callables ──
@@ -93,14 +94,21 @@ online.value = true;
 check('callable se reintenta', (await gate.retry()) === 1 && calls === 1);
 
 // ── Shell: barra corta y menú por permisos ──
+const barras = (canRead, path, query) => movilNavForPermissions(canRead, path, query).map((item) => item.label).join(',');
+check('barra de Operación', barras((key) => key === 'OPERATIONS', '/admin/operaciones') === 'Objetivos,Alertas de operación,Sala,Menú');
+check('Operación no mezcla otros módulos', !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Novedades') && !barras((key) => key === 'OPERATIONS', '/admin/operaciones').includes('Eventuales'));
+check('barra de Supervisión', barras((key) => key === 'SUPERVISION', '/admin/operaciones', { modo: 'supervision' }) === 'Objetivos,Alertas,Menú');
+check('barra de Planificación', barras((key) => key === 'PLANNING', '/admin/planificacion') === 'Próximos días,Huecos,Menú');
+check('barra de RRHH', barras((key) => key === 'RRHH', '/admin/rrhh/movil') === 'Hoy,Cargar,Novedades,Menú');
+check('barra de Eventuales', barras((key) => key === 'EVENTUALES' || key === 'RRHH', '/admin/rrhh/eventuales') === 'Bolsa,ARCA pendientes,Alta,Menú');
+check('barra de Servicios', barras((key) => key === 'SERVICES', '/admin/servicios') === 'Lista,Menú');
 const opsNav = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones');
-check('barra del operador: Inicio, Alertas, Más', opsNav.map((item) => item.label).join(',') === 'Inicio,Alertas,Más');
-check('Inicio del operador es Operación', opsNav[0].href === '/admin/operaciones/');
-const servNav = movilNavForPermissions((key) => key === 'SERVICES', '/admin/servicios');
-check('sin OPERATIONS no hay Alertas', servNav.map((item) => item.label).join(',') === 'Inicio,Más' && servNav[0].href === '/admin/servicios/');
-check('Más no navega: abre el menú', opsNav[2].href === '');
-const planNav = movilNavForPermissions((key) => key === 'PLANNING' || key === 'OPERATIONS', '/admin/planificacion');
-check('Inicio sigue al módulo actual', planNav[0].href === '/admin/planificacion/');
+check('Sala y Menú no navegan', opsNav.find((item) => item.label === 'Sala').href === '' && opsNav.find((item) => item.label === 'Menú').href === '');
+check('un operador sin RRHH no lo ve', !movilDestinosVisibles((key) => key === 'OPERATIONS').some((item) => item.id === 'rrhh' || item.id === 'eventuales'));
+check('ALTA_ARCA_PENDIENTE es de Operación', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && !alertaDelModulo('eventuales', 'ALTA_ARCA_PENDIENTE'));
+check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'BAJA_ARCA') && !alertaDelModulo('operacion', 'BAJA_ARCA') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
+check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'RRHH_NOVEDAD') && alertaDelModulo('rrhh', 'RRHH_NOVEDAD'));
+check('hueco de planificación no entra en Operación', !alertaDelModulo('operacion', 'VACANTE_A_PLANIFICACION') && alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR'));
 const saModules = movilModulesForPermissions(() => true);
 check('SuperAdmin ve los 6 módulos', saModules.map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 check('solo SUPERVISION ve Supervisión y nada más', movilModulesForPermissions((key) => key === 'SUPERVISION').map((item) => item.id).join(',') === 'supervision');

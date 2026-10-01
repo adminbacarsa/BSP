@@ -1,35 +1,43 @@
+import { useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { signOut } from 'firebase/auth';
 import { auth } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
-import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilMenuGrid } from '@/components/movil/MovilMenuGrid';
-import { movilModuleForPath, movilModulesForPermissions } from '@/lib/movil/navItems';
+import { movilModulesForPermissions } from '@/lib/movil/navItems';
 import { writeMovilChoice } from '@/lib/movil/useMovilMode';
 
-/** Hoja «Más»: módulos por permiso, empresa activa, asistente y salida. */
-export function MovilMenu({ open, onClose, compact = false }: { open: boolean; onClose: () => void; compact?: boolean }) {
+/** Selector de módulos. Con un solo permiso entra directo y esta pantalla no se muestra. */
+export function MovilSelector() {
   const router = useRouter();
   const { canReadModule, isSuperAdmin, allEmpresas } = useAuth();
   const { empresa, empresas, empresaId, switchEmpresa } = useEmpresa();
   const modules = movilModulesForPermissions((key) => isSuperAdmin || canReadModule(key));
-  const current = movilModuleForPath(router.pathname, router.query as Record<string, string | string[] | undefined>);
+
+  useEffect(() => {
+    if (modules.length === 1) void router.replace(modules[0].href);
+  }, [modules, router]);
+
+  if (modules.length <= 1) return null;
 
   return (
-    <BottomSheet open={open} title="Más" onClose={onClose}>
+    <div className="mx-auto min-h-screen w-full max-w-[480px] bg-slate-100 px-3 pb-8 pt-4" data-movil-screen="selector">
+      <header className="mb-3">
+        <p className="text-[10px] font-black uppercase tracking-widest text-indigo-600">COSP</p>
+        <h1 className="text-lg font-black text-slate-900">Módulos</h1>
+      </header>
       <MovilMenuGrid
         empresaId={empresaId}
         empresaName={empresa?.name || empresaId || 'Empresa'}
         empresas={empresas.filter((item) => item.active !== false).map((item) => ({ id: item.id, name: item.name || item.id }))}
         canSwitchEmpresa={isSuperAdmin || allEmpresas}
-        modules={compact ? [] : modules}
-        sinGrilla={compact}
-        currentModuleId={current?.id || null}
-        onModule={(module) => { onClose(); void router.push(module.href); }}
-        onSwitchEmpresa={(id) => { switchEmpresa(id); onClose(); }}
-        onAsistente={() => { onClose(); window.dispatchEvent(new Event('cosp-assistant-open')); }}
-        onEscritorio={() => { onClose(); writeMovilChoice('0'); }}
+        modules={modules}
+        currentModuleId={null}
+        onModule={(module) => { void router.push(module.href); }}
+        onSwitchEmpresa={(id) => switchEmpresa(id)}
+        onAsistente={() => window.dispatchEvent(new Event('cosp-assistant-open'))}
+        onEscritorio={() => writeMovilChoice('0')}
         onAvisos={() => {
           if (typeof Notification === 'undefined') return;
           void Notification.requestPermission().then((perm) => {
@@ -40,6 +48,6 @@ export function MovilMenu({ open, onClose, compact = false }: { open: boolean; o
           void signOut(auth).then(() => { window.location.href = '/login'; }).catch((error) => console.error(error));
         }}
       />
-    </BottomSheet>
+    </div>
   );
 }

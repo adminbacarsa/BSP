@@ -58,6 +58,19 @@ export function OperacionMovil(props: Props) {
     setPending(labels[0] || null);
   }), []);
 
+  useEffect(() => {
+    if (readOnly) return;
+    const abrir = () => setSalaOpen(true);
+    window.addEventListener('cosp-sala-open', abrir);
+    return () => window.removeEventListener('cosp-sala-open', abrir);
+  }, [readOnly]);
+
+  useEffect(() => {
+    const alInicio = () => setSelectedId(null);
+    window.addEventListener('cosp-modulo-inicio', alInicio);
+    return () => window.removeEventListener('cosp-modulo-inicio', alInicio);
+  }, []);
+
   const panelQuery = String(router.query.panel || '');
   const objective = props.objectives.find((item) => item.objectiveId === selectedId) || null;
   const panel = panelQuery === 'alertas' ? 'alertas' : objective ? 'objetivo' : 'home';

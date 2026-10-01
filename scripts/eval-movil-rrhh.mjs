@@ -11,7 +11,17 @@ const root = join(here, '../apps/web2/src');
 const { createWriteQueue } = await import(pathToFileURL(join(root, 'lib/movil/writeQueue.ts')).href);
 const { resumenDiaRrhh } = await import(pathToFileURL(join(root, 'lib/movil/rrhhDia.ts')).href);
 const { movilDestinosVisibles } = await import(pathToFileURL(join(root, 'lib/movil/destinos.ts')).href);
-const { movilNavForPermissions } = await import(pathToFileURL(join(root, 'lib/movil/navItems.ts')).href);
+const navOut = join(here, '../apps/web2/.movil-eval-rrhh');
+mkdirSync(navOut, { recursive: true });
+const navJs = ts.transpileModule(
+  readFileSync(join(root, 'lib/movil/navItems.ts'), 'utf8').replace(
+    "from '@/lib/movil/destinos'",
+    `from ${JSON.stringify(pathToFileURL(join(root, 'lib/movil/destinos.ts')).href)}`,
+  ),
+  { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 }, fileName: 'navItems.ts' },
+).outputText;
+writeFileSync(join(navOut, 'navItems.mjs'), navJs);
+const { movilNavForPermissions } = await import(pathToFileURL(join(navOut, 'navItems.mjs')).href);
 
 let failed = 0;
 function check(name, ok) {
@@ -40,8 +50,12 @@ check('tarjetas del día', dia.ausenciasHoy.length === 2 && dia.licencias.length
 
 const destinos = movilDestinosVisibles(() => false, true).map((item) => item.label).join(',');
 check('superadmin ve el menú', destinos === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
-const ops = movilNavForPermissions((key) => key === 'OPERATIONS').map((item) => item.label).join(',');
-check('barra de operaciones intacta', ops === 'Operaciones,Alertas,Novedades,Más');
+const ops = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones').map((item) => item.label).join(',');
+check('barra de Operación solo con sus secciones', ops === 'Objetivos,Alertas de operación,Sala,Menú');
+const rrhhBar = movilNavForPermissions((key) => key === 'RRHH', '/admin/rrhh/movil').map((item) => item.label).join(',');
+check('barra de RRHH', rrhhBar === 'Hoy,Cargar,Novedades,Menú');
+const evBar = movilNavForPermissions((key) => key === 'EVENTUALES', '/admin/rrhh/eventuales').map((item) => item.label).join(',');
+check('barra de Eventuales', evBar === 'Bolsa,ARCA pendientes,Alta,Menú');
 
 const outdir = join(here, '../apps/web2/.movil-eval');
 rmSync(outdir, { recursive: true, force: true });
@@ -166,6 +180,7 @@ const ev = renderToStaticMarkup(createElement(EventualesScreens, {
 }));
 check('eventuales 390 muestra bolsa, marco y arca', ev.includes('data-viewport="390x844"') && ev.includes('Sosa, Carla') && ev.includes('Marco vigente') && ev.includes('Alta rápida') && ev.includes('ARCA requiere conexión') && ev.includes('20-11111111-2 válido'));
 
+rmSync(navOut, { recursive: true, force: true });
 if (failed) {
   console.error(failed, 'fallos');
   process.exit(1);

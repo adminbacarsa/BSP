@@ -1,25 +1,30 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/router';
-import { Bell, Home, Menu } from 'lucide-react';
+import { Bell, Home, LayoutGrid, Radio } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 import { MovilMenu } from '@/components/movil/MovilMenu';
-import { movilNavForPermissions, type MovilNavId } from '@/lib/movil/navItems';
-
-const ICONS: Record<MovilNavId, typeof Home> = {
-  inicio: Home,
-  alertas: Bell,
-  mas: Menu,
-};
+import { movilDestinosVisibles } from '@/lib/movil/destinos';
+import { movilNavForPermissions, type MovilNavItem } from '@/lib/movil/navItems';
 
 const ITEM_CLS = 'relative flex min-h-[56px] flex-1 flex-col items-center justify-center gap-0.5 text-[9px] font-black';
+
+function Icono({ item }: { item: MovilNavItem }) {
+  const props = { size: 18, strokeWidth: 2.2 };
+  if (item.menu) return <LayoutGrid {...props} />;
+  if (item.sala) return <Radio {...props} />;
+  if (item.alertas) return <Bell {...props} />;
+  return <Home {...props} />;
+}
 
 export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
   const router = useRouter();
   const { canReadModule, isSuperAdmin } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const canRead = (key: string) => isSuperAdmin || canReadModule(key);
   const query = router.query as Record<string, string | string[] | undefined>;
-  const items = movilNavForPermissions((key) => isSuperAdmin || canReadModule(key), router.pathname, query);
+  const items = movilNavForPermissions(canRead, router.pathname, query);
+  const unSoloModulo = movilDestinosVisibles(canRead).length <= 1;
   const panel = String(query.panel || '');
 
   return (
@@ -30,29 +35,49 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         {items.map((item) => {
-          const Icon = ICONS[item.id];
-          if (item.id === 'mas') {
+          if (item.menu) {
             return (
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setMenuOpen(true)}
-                className={`${ITEM_CLS} ${menuOpen ? 'text-indigo-600' : 'text-slate-400'}`}
-                aria-haspopup="dialog"
-                aria-expanded={menuOpen}
+                onClick={() => {
+                  if (unSoloModulo) setMenuOpen(true);
+                  else void router.push('/admin/movil/');
+                }}
+                className={`${ITEM_CLS} text-slate-400`}
+                aria-haspopup={unSoloModulo ? 'dialog' : undefined}
               >
-                <Icon size={18} strokeWidth={2.2} />
+                <Icono item={item} />
                 {item.label}
               </button>
             );
           }
-          const active = item.id === 'alertas'
-            ? panel === 'alertas'
-            : panel !== 'alertas';
+          if (item.sala) {
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => window.dispatchEvent(new Event('cosp-sala-open'))}
+                className={`${ITEM_CLS} text-slate-400`}
+              >
+                <Icono item={item} />
+                {item.label}
+              </button>
+            );
+          }
+          const seccion = item.href.includes('panel=') ? new URL(item.href, 'http://local').searchParams.get('panel') : '';
+          const active = panel === (seccion || '');
           return (
-            <Link key={item.id} href={item.href} className={`${ITEM_CLS} ${active && !menuOpen ? 'text-indigo-600' : 'text-slate-400'}`}>
-              <Icon size={18} strokeWidth={2.2} />
-              {item.id === 'alertas' && alertCount > 0 && (
+            <Link
+              key={item.id}
+              href={item.href}
+              onClick={() => {
+                if (!seccion) window.dispatchEvent(new Event('cosp-modulo-inicio'));
+              }}
+              className={`${ITEM_CLS} ${active ? 'text-indigo-600' : 'text-slate-400'}`}
+            >
+              <Icono item={item} />
+              {item.alertas && alertCount > 0 && (
                 <span className="absolute right-[calc(50%-18px)] top-1 min-w-[14px] rounded-full bg-rose-600 px-1 text-[8px] text-white">
                   {alertCount > 9 ? '9+' : alertCount}
                 </span>
@@ -62,7 +87,7 @@ export function MovilBottomNav({ alertCount = 0 }: { alertCount?: number }) {
           );
         })}
       </nav>
-      <MovilMenu open={menuOpen} onClose={() => setMenuOpen(false)} />
+      {unSoloModulo && <MovilMenu open={menuOpen} compact onClose={() => setMenuOpen(false)} />}
     </>
   );
 }

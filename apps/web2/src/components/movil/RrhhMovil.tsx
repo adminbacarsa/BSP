@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useRouter } from 'next/router';
 import { format, startOfWeek, endOfWeek } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
@@ -29,6 +30,7 @@ function ymd(date: Date): string {
 }
 
 export function RrhhMovil() {
+  const router = useRouter();
   const { isSuperAdmin, canReadModule } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
@@ -48,6 +50,14 @@ export function RrhhMovil() {
   const [turnos, setTurnos] = useState<{ id: string; dia: string; codigo: string }[]>([]);
   const hoy = ymd(new Date());
   const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
+
+  useEffect(() => {
+    const seccion = String(router.query.panel || '');
+    if (seccion === 'cargar' || seccion === 'ausencia') setPanel('ausencia');
+    else if (seccion === 'novedad' || seccion === 'novedades') setPanel('novedad');
+    else if (seccion === 'ficha') setPanel('ficha');
+    else setPanel('dia');
+  }, [router.query.panel]);
 
   useEffect(() => {
     const sync = () => {
@@ -297,7 +307,11 @@ export function RrhhMovil() {
         ficha={elegida ? { nombre: elegida.nombre, telefono: elegida.telefono, turnos } : null}
         onElegir={setElegidaId}
         onFicha={abrirFicha}
-        onPanel={setPanel}
+        onPanel={(next) => {
+          setPanel(next);
+          const seccion = next === 'ausencia' ? 'cargar' : next === 'novedad' ? 'novedades' : next === 'ficha' ? 'ficha' : '';
+          void router.replace(seccion ? `/admin/rrhh/movil/?panel=${seccion}` : '/admin/rrhh/movil/', undefined, { shallow: true });
+        }}
       />
       <MovilBottomNav />
     </>

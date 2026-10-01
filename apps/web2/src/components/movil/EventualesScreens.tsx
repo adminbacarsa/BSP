@@ -44,7 +44,12 @@ export function EventualesScreens(props: {
   onArca: (id: string) => void;
   onConfirmarArca: () => void;
   elegido: EventualMovil | null;
+  /** Sección de la barra. Sin valor se muestra todo (la bolsa y ARCA juntos). */
+  vista?: string;
 }) {
+  const vista = props.vista;
+  const verBolsa = !vista || vista === 'bolsa' || vista === 'alta';
+  const verArca = !vista || vista === 'arca';
   return (
     <div data-movil-screen data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-slate-100 pb-24">
       <header className="bg-indigo-700 px-4 pb-4 pt-5 text-white shadow-lg">
@@ -60,9 +65,9 @@ export function EventualesScreens(props: {
         )}
       </header>
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
-        <input value={props.buscar} onChange={(event) => props.onBuscar(event.target.value)} placeholder="Buscar en la bolsa" className="min-h-12 rounded-2xl border border-slate-200 px-3 text-sm font-semibold shadow-sm" />
-        <button type="button" onClick={props.onAbrirAlta} className="min-h-12 rounded-2xl bg-indigo-600 text-sm font-black text-white shadow-sm">Alta rápida</button>
-        <ul className="space-y-2">
+        {verBolsa && <input value={props.buscar} onChange={(event) => props.onBuscar(event.target.value)} placeholder="Buscar en la bolsa" className="min-h-12 rounded-2xl border border-slate-200 px-3 text-sm font-semibold shadow-sm" />}
+        {verBolsa && <button type="button" onClick={props.onAbrirAlta} className="min-h-12 rounded-2xl bg-indigo-600 text-sm font-black text-white shadow-sm">Alta rápida</button>}
+        {verBolsa && <ul className="space-y-2">
           {props.personas.map((persona) => (
             <li key={persona.id}>
               <button type="button" onClick={() => props.onElegir(persona.id)} className="flex min-h-12 w-full items-center justify-between rounded-2xl bg-white px-3 text-left shadow-sm">
@@ -71,8 +76,8 @@ export function EventualesScreens(props: {
               </button>
             </li>
           ))}
-        </ul>
-        {props.elegido && (
+        </ul>}
+        {verBolsa && props.elegido && (
           <section className="rounded-3xl bg-white p-4 shadow-sm">
             <h2 className="text-base font-black text-slate-900">{props.elegido.nombre}</h2>
             <p className="mt-1 text-sm font-bold text-slate-600">{props.elegido.marco}</p>
@@ -81,7 +86,7 @@ export function EventualesScreens(props: {
             </button>
           </section>
         )}
-        <section className="rounded-3xl bg-white p-4 shadow-sm">
+        {verArca && <section className="rounded-3xl bg-white p-4 shadow-sm">
           <h2 className="text-sm font-black text-slate-900">ARCA pendiente</h2>
           <ul className="mt-2 space-y-2">
             {props.arca.map((envio) => (
@@ -98,7 +103,7 @@ export function EventualesScreens(props: {
           <button type="button" onClick={props.onConfirmarArca} className="mt-2 min-h-12 w-full rounded-2xl bg-emerald-600 text-sm font-black text-white">
             {props.online ? 'Cargar transacción' : 'ARCA requiere conexión'}
           </button>
-        </section>
+        </section>}
       </div>
       <BottomSheet open={props.altaAbierta} title="Alta rápida" onClose={props.onCerrarAlta}>
         <label className="block text-xs font-black uppercase text-slate-500">CUIL

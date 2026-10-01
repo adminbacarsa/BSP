@@ -42,6 +42,12 @@ export function ServiciosMovil(props: Props) {
   const [busy, setBusy] = useState(false);
   const [clientHasOpenContract, setClientHasOpenContract] = useState<boolean | undefined>(undefined);
 
+  useEffect(() => {
+    const alInicio = () => setSelectedId(null);
+    window.addEventListener('cosp-modulo-inicio', alInicio);
+    return () => window.removeEventListener('cosp-modulo-inicio', alInicio);
+  }, []);
+
   useEffect(() => movilWriteQueue.subscribe(() => {
     const labels = [...movilWriteQueue.pending(), ...movilCallableGate.pending()];
     setPending(labels[0] || null);

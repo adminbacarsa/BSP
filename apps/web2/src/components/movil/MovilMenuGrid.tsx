@@ -21,6 +21,7 @@ export function MovilMenuGrid({
   empresas,
   canSwitchEmpresa,
   modules,
+  sinGrilla = false,
   currentModuleId,
   onModule,
   onSwitchEmpresa,
@@ -34,6 +35,8 @@ export function MovilMenuGrid({
   empresas: MovilMenuEmpresa[];
   canSwitchEmpresa: boolean;
   modules: MovilModule[];
+  /** Un solo módulo: la hoja no ofrece otros. */
+  sinGrilla?: boolean;
   currentModuleId: MovilModuleId | null;
   onModule: (module: MovilModule) => void;
   onSwitchEmpresa: (id: string) => void;
@@ -66,7 +69,7 @@ export function MovilMenuGrid({
           ))}
         </div>
       )}
-      <div className="mb-3 grid grid-cols-2 gap-2">
+      {!sinGrilla && <div className="mb-3 grid grid-cols-2 gap-2">
         {modules.map((module) => {
           const Icon = MODULE_ICON[module.id];
           const active = module.id === currentModuleId;
@@ -90,8 +93,8 @@ export function MovilMenuGrid({
             </button>
           );
         })}
-      </div>
-      {modules.length === 0 && (
+      </div>}
+      {!sinGrilla && modules.length === 0 && (
         <p className="mb-3 rounded-2xl bg-white p-4 text-sm font-semibold text-slate-500">Tu rol no tiene módulos para el celular.</p>
       )}
       <button type="button" onClick={onAsistente} className="mb-2 flex min-h-12 w-full items-center justify-center gap-2 rounded-2xl bg-indigo-50 text-sm font-black text-indigo-800 active:scale-95">
