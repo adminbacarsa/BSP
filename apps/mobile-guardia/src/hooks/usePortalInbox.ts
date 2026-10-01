@@ -135,6 +135,7 @@ export function usePortalInbox(user: User | null, previewEmpDocId?: string | nul
             return {
               id: d.id,
               status: typeof data.status === 'string' ? data.status : undefined,
+              type: typeof data.type === 'string' ? data.type : undefined,
               timeoutAt: data.timeoutAt,
               endTime: data.endTime,
               cancelReason: typeof data.cancelReason === 'string' ? data.cancelReason : undefined,

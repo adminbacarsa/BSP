@@ -4,6 +4,8 @@ import { haversineKm, isWithinCheckInRadius } from '../geo/haversine';
 import { isAbsentLikeShift } from '../shifts/isAbsentLikeShift';
 import {
   checkInRejectMessage,
+  convocadoPunchAnchorMs,
+  convocadoPunchCapMs,
   evaluateCheckInWindow,
   isAltaArcaConfirmada,
   isConvocadoCoverageShift,
@@ -176,28 +178,18 @@ function shiftToRecord(
   return rec;
 }
 
-function acceptanceMs(shift: ShiftTimingFields): number {
-  return (
-    timestampLikeToMillis(shift.respondedAt) ||
-    timestampLikeToMillis(shift.acceptedAt) ||
-    timestampLikeToMillis(shift.coverageAcceptedAt) ||
-    timestampLikeToMillis(shift.createdAt) ||
-    timestampLikeToMillis(shift.coverageCreatedAt) ||
-    0
-  );
-}
-
 function deadlineFromWindow(shift: Record<string, unknown>, nowMs: number): Date | null {
   const origin = String(shift.origin || '').toUpperCase();
   const ct = String(shift.coverageType || '').toUpperCase();
   const plannedStart = timestampLikeToMillis(shift.startTime);
-  if (!plannedStart) return null;
+  if (!plannedStart && origin !== 'OPERATIONS_COVERAGE') return null;
 
   if (origin === 'OPERATIONS_COVERAGE' && ct === 'EXTEND') return null;
   if (origin === 'OPERATIONS_COVERAGE') {
-    const end = timestampLikeToMillis(shift.endTime);
-    return end > 0 ? new Date(end) : null;
+    const cap = convocadoPunchCapMs(shift);
+    return cap > 0 ? new Date(cap) : null;
   }
+  if (!plannedStart) return null;
 
   const by = String(shift.absenceDetectedBy || '').toUpperCase();
   const provisional =
@@ -270,7 +262,17 @@ export function getCheckInTiming(
     };
   }
 
-  if (isCoverageHoursOnSourceShift(s)) {
+  const originEarly = String(s.origin || '').toUpperCase();
+  const coverageType = String((s as { coverageType?: unknown }).coverageType || '').toUpperCase();
+  if (originEarly === 'OPERATIONS_COVERAGE' && coverageType === 'EXTEND') {
+    return {
+      ...empty,
+      rejectCode: 'EXT_NO_CHECKIN',
+      rejectMessage: checkInRejectMessage('EXT_NO_CHECKIN'),
+    };
+  }
+
+  if (isCoverageHoursOnSourceShift(s) && coverageType !== 'ADVANCE') {
     return {
       ...empty,
       rejectCode: 'TRACE_REGISTRATION',
@@ -279,9 +281,10 @@ export function getCheckInTiming(
   }
 
   if (isConvocadoCoverageShift(s as unknown as Record<string, unknown>)) {
-    const end = toDate(s.endTime);
-    const accepted = acceptanceMs(s);
-    const ended = !!end && nowMs > end.getTime();
+    const recEarly = s as unknown as Record<string, unknown>;
+    const capMs = convocadoPunchCapMs(recEarly);
+    const accepted = convocadoPunchAnchorMs(recEarly);
+    const ended = capMs > 0 && nowMs > capMs;
     const beforeAccept = accepted > 0 && nowMs < accepted;
     const canCheckIn = !ended && !beforeAccept;
     const rejectCode = ended ? ('SHIFT_ENDED' as const) : beforeAccept ? ('TOO_EARLY' as const) : undefined;
@@ -291,7 +294,7 @@ export function getCheckInTiming(
       canNotifyLate: false,
       lateWindow: false,
       tooEarly: beforeAccept,
-      checkInDeadline: end,
+      checkInDeadline: capMs > 0 ? new Date(capMs) : null,
       rejectCode,
       rejectMessage: rejectCode
         ? beforeAccept

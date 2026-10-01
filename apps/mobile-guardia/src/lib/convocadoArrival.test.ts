@@ -40,6 +40,15 @@ describe('getCheckInTiming convocado', () => {
     assert.equal(t.checkInDeadline?.getTime(), end.getTime());
   });
 
+  it('EXT no ficha', () => {
+    const ext = getCheckInTiming(
+      { ...shift, id: 'ext-1', coverageType: 'EXTEND' } as never,
+      new Date('2026-09-14T18:00:00-03:00'),
+    );
+    assert.equal(ext.canCheckIn, false);
+    assert.equal(ext.rejectCode, 'EXT_NO_CHECKIN');
+  });
+
   it('antes de aceptar no ficha; después del fin tampoco', () => {
     const early = getCheckInTiming(shift as never, new Date('2026-09-14T17:00:00-03:00'));
     assert.equal(early.canCheckIn, false);

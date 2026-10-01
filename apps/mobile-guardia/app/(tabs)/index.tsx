@@ -43,6 +43,8 @@ import { CommandCard } from '../../src/components/ui/CommandCard';
 import { ConvocatoriasBanner } from '../../src/components/ConvocatoriasBanner';
 import { CoberturaConvocatoriasBanner } from '../../src/components/CoberturaConvocatoriasBanner';
 import { LlegadaTardeVenisBanner } from '../../src/components/LlegadaTardeVenisBanner';
+import { RetencionAvisoCard } from '../../src/components/RetencionAvisoCard';
+import { isRetencionAviso } from '../../src/lib/avisosCc';
 import { ConvocadoRecordatorioBanner } from '../../src/components/ConvocadoRecordatorioBanner';
 import { RetentionBanner } from '../../src/components/RetentionBanner';
 import { EvShiftDetails } from '../../src/components/EvShiftDetails';
@@ -135,7 +137,21 @@ function HoyScreenContent() {
     responder: responderCobertura,
   } = useConvocatoriasCobertura(empDocId, user?.uid ?? null);
   const { eventosMap } = useEventosMap(employee?.empresaId);
-  const { unreadCount } = usePortalInbox(user, previewEmpDocId);
+  const { items: inboxItems, unreadCount } = usePortalInbox(user, previewEmpDocId);
+  const retencionAvisos = useMemo(
+    () => inboxItems.filter((n) => isRetencionAviso(n.type)),
+    [inboxItems],
+  );
+  const avisoBodyById = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const n of inboxItems) {
+      if (String(n.type || '').toUpperCase() !== 'CONVOCATORIA_COBERTURA') continue;
+      const id = String(n.convocatoriaId || '').trim();
+      const body = String(n.body || '').trim();
+      if (id && body) map[id] = body;
+    }
+    return map;
+  }, [inboxItems]);
   const { db } = getPortalFirebase();
   const {
     items: pendingAaItems,
@@ -251,9 +267,12 @@ function HoyScreenContent() {
 
   async function onNoVoyLlegadaTarde(c: ConvocatoriaCobertura) {
     const result = await responderCobertura(c.id, 'REJECTED', {
-      rejectionReason: 'No voy',
+      rejectionReason: 'Tengo un problema',
     });
-    appAlert(result.ok ? 'Listo' : 'Error', result.ok ? 'Marcado como no voy' : result.message);
+    appAlert(
+      result.ok ? 'Listo' : 'Error',
+      result.ok ? 'Avisamos a operaciones que tenés un problema' : result.message,
+    );
   }
 
   const profileMissing = employeeProfileReady && !employee && !empDocId && !!user;
@@ -524,12 +543,15 @@ function HoyScreenContent() {
             />
           ) : null}
 
+          {retencionAvisos.length > 0 ? <RetencionAvisoCard avisos={retencionAvisos} /> : null}
+
           {llegadaTardePendientes.length > 0 ? (
             <LlegadaTardeVenisBanner
               convocatorias={llegadaTardePendientes}
               shifts={allShifts ?? shifts}
               objectivesMap={objectivesMap}
               busyId={coberturaBusyId}
+              bodyByConvocatoriaId={avisoBodyById}
               onSiVoy={(c, eta) => void onSiVoyLlegadaTarde(c, eta)}
               onNoVoy={(c) => void onNoVoyLlegadaTarde(c)}
             />

@@ -34,8 +34,20 @@ describe('resolveAlertaCard — cobertura', () => {
       conv: { status: 'PENDING', timeoutAt: timeout, endTime: end },
     });
     assert.equal(s.showCoverageButtons, true);
+    assert.equal(s.showVenisButton, false);
     assert.equal(s.closed, false);
     assert.equal(s.label, null);
+  });
+
+  it('LLEGADA_TARDE no muestra Aceptar/Rechazar: abre ¿Venís?', () => {
+    const early = new Date('2026-09-29T00:14:00-03:00').getTime();
+    const s = cobertura({
+      nowMs: early,
+      title: '¿Venís?',
+      conv: { status: 'PENDING', type: 'LLEGADA_TARDE', timeoutAt: timeout, endTime: end },
+    });
+    assert.equal(s.showCoverageButtons, false);
+    assert.equal(s.showVenisButton, true);
   });
 
   it('19 h después el hueco terminó: Vencida, sin botones', () => {
