@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boceto — RRHH en el celular</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --indigo-50: #eef2ff;
+    --emerald: #059669;
+    --emerald-500: #10b981;
+    --orange: #ea580c;
+    --amber: #d97706;
+    --rose: #e11d48;
+    --slate: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --bg: #f1f5f9;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "DM Sans", "Segoe UI", sans-serif;
+    background: #e8eef6;
+    color: var(--slate);
+  }
+  header.page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 28px 8px;
+  }
+  header.page h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.03em; }
+  header.page p { margin: 0; color: #334155; font-size: 14.5px; line-height: 1.45; max-width: 920px; }
+  .kicker {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--indigo-50);
+    color: var(--indigo);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .stage {
+    display: flex;
+    gap: 28px;
+    overflow-x: auto;
+    padding: 22px 28px 8px;
+    align-items: flex-start;
+  }
+  .col { flex: 0 0 auto; width: 410px; }
+  .cap {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #475569;
+    margin: 0 0 8px 8px;
+  }
+  .phone {
+    width: 410px;
+    padding: 10px;
+    background: #0f172a;
+    border-radius: 42px;
+    box-shadow: 0 22px 50px rgba(15, 23, 42, .28);
+  }
+  .screen {
+    width: 390px;
+    height: 844px;
+    background: var(--bg);
+    border-radius: 32px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .status {
+    height: 28px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 22px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    background: #fff;
+  }
+  .status.off { color: #be123c; }
+  .top {
+    background: #fff;
+    padding: 6px 14px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .top .who { min-width: 0; flex: 1; }
+  .top .emp { font-size: 13px; font-weight: 800; letter-spacing: -.02em; }
+  .top .sub { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 10px;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill.net { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+  .pill.off { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
+  .pill.wait { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+  .back {
+    width: 34px; height: 34px; border-radius: 12px; border: 1px solid var(--line);
+    background: #fff; display: grid; place-items: center; flex-shrink: 0; color: #334155;
+  }
+  .scroll { flex: 1; overflow: hidden; padding: 10px 12px 78px; }
+  .banner {
+    display: flex; align-items: center; gap: 8px;
+    background: #fff7ed; border: 1px solid #fed7aa; color: #9a3412;
+    border-radius: 14px; padding: 8px 10px; margin-bottom: 8px;
+    font-size: 11px; font-weight: 750;
+  }
+  .banner.ok { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+  .card {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 12px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.05);
+  }
+  .card h3 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
+  .card .meta { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+  .card .rowtop { display: flex; align-items: flex-start; gap: 8px; }
+  .n {
+    margin-left: auto;
+    min-width: 36px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 800;
+    border-radius: 12px;
+    padding: 6px 8px;
+    background: #eef2ff;
+    color: var(--indigo);
+  }
+  .n.warn { background: #fffbeb; color: var(--amber); }
+  .n.bad { background: #fff1f2; color: var(--rose); }
+  .n.ok { background: #ecfdf5; color: var(--emerald); }
+  .chips { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 10px; font-weight: 800; border-radius: 999px; padding: 3px 7px;
+    background: #f8fafc; color: #334155; border: 1px solid var(--line);
+  }
+  .chip.on { color: #fff; background: var(--indigo); border-color: #4338ca; }
+  .chip.ok { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+  .chip.warn { color: #b45309; background: #fffbeb; border-color: #fde68a; }
+  .chip.bad { color: #be123c; background: #fff1f2; border-color: #fecdd3; }
+  .search {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    padding: 12px 12px; font-size: 14px; font-weight: 650; color: #334155; margin-bottom: 8px;
+  }
+  .search b { color: var(--indigo); }
+  .lbl { font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin: 4px 0 6px; }
+  .field {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px;
+    padding: 11px 12px; font-size: 14px; font-weight: 700; margin-bottom: 6px;
+  }
+  .field span { display: block; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin-bottom: 2px; }
+  .field em { font-style: normal; color: #047857; font-size: 11px; font-weight: 800; }
+  .tipos { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+  .tipo {
+    min-width: 44px; min-height: 40px; padding: 6px 8px;
+    border-radius: 12px; border: 1px solid var(--line); background: #fff;
+    font-size: 12px; font-weight: 800; text-align: center; color: #334155;
+  }
+  .tipo.on { background: var(--indigo); color: #fff; border-color: #4338ca; }
+  .cam {
+    display: flex; align-items: center; gap: 10px;
+    background: #fff; border: 1px dashed #a5b4fc; border-radius: 16px; padding: 10px;
+    margin-bottom: 8px;
+  }
+  .cam .shot {
+    width: 52px; height: 52px; border-radius: 12px; background: #e0e7ff;
+    display: grid; place-items: center; color: var(--indigo); flex-shrink: 0; font-size: 11px; font-weight: 800;
+  }
+  .cam strong { display: block; font-size: 13px; }
+  .cam small { color: var(--muted); font-weight: 650; font-size: 11px; }
+  .note { font-size: 11px; color: #9a3412; font-weight: 650; margin-top: 3px; }
+  .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .act {
+    flex: 1;
+    min-height: 46px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; font-size: 11px; font-weight: 800; letter-spacing: .02em; color: #334155;
+  }
+  .act.pri { background: var(--indigo); color: #fff; border-color: #4338ca; }
+  .act.go { background: #059669; color: #fff; border-color: #047857; }
+  .act.warn { background: #fff7ed; color: #c2410c; border-color: #fdba74; }
+  .call {
+    width: 100%; min-height: 52px; border: 0; border-radius: 16px;
+    background: #059669; color: #fff; font-weight: 800; font-size: 15px; margin-top: 4px;
+  }
+  .nav {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 68px;
+    background: #fff;
+    border-top: 1px solid var(--line);
+    display: flex;
+    padding: 6px 4px 10px;
+  }
+  .nav a {
+    flex: 1; text-decoration: none; color: #94a3b8;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; font-size: 9px; font-weight: 800;
+  }
+  .nav a.on { color: var(--indigo); }
+  .dot { position: relative; }
+  .dot i {
+    position: absolute; top: -2px; right: -8px;
+    background: #e11d48; color: #fff; border-radius: 99px;
+    font-style: normal; font-size: 8px; font-weight: 800;
+    min-width: 14px; height: 14px; display: grid; place-items: center;
+  }
+  .sheet-dim { position: absolute; inset: 0; background: rgba(15,23,42,.45); }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    border-radius: 24px 24px 32px 32px;
+    padding: 8px 12px 16px;
+    box-shadow: 0 -12px 40px rgba(15,23,42,.2);
+    max-height: 560px;
+  }
+  .grab { width: 42px; height: 4px; border-radius: 99px; background: #cbd5e1; margin: 4px auto 8px; }
+  .sheet h2 { margin: 0; font-size: 16px; }
+  .sheet .hueco { font-size: 12px; color: var(--muted); font-weight: 650; margin-top: 2px; }
+  .hint { font-size: 11px; color: #475569; font-weight: 650; margin: 0 0 8px; }
+  .guard {
+    background: #fff; border: 1px solid var(--line); border-radius: 18px;
+    margin-bottom: 8px; overflow: hidden; display: flex;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .bar { width: 6px; flex-shrink: 0; }
+  .bar.ok { background: var(--emerald-500); }
+  .bar.warn { background: #f59e0b; }
+  .bar.bad { background: var(--rose); }
+  .bar.aus { background: #334155; }
+  .gbody { padding: 8px 10px; flex: 1; min-width: 0; }
+  .grow { display: flex; align-items: center; gap: 6px; }
+  .grow strong { font-size: 14px; letter-spacing: -.02em; }
+  .code {
+    margin-left: auto; font-size: 11px; font-weight: 800;
+    background: #0f172a; color: #fff; border-radius: 8px; padding: 2px 6px;
+  }
+  .when { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .legend {
+    max-width: 1280px; margin: 8px auto 0; padding: 8px 28px 36px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .box {
+    background: #fff; border-radius: 24px; padding: 16px 18px 18px;
+    box-shadow: 0 8px 24px rgba(15,23,42,.06); border: 1px solid #e2e8f0;
+  }
+  .box h2 { margin: 0 0 8px; font-size: 15px; }
+  .box p, .box li { font-size: 13px; line-height: 1.45; color: #334155; }
+  .box ul { margin: 0; padding-left: 18px; }
+  .box li { margin-bottom: 6px; }
+  @media (max-width: 980px) {
+    .legend { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="kicker">Boceto para aprobar · 01/10/2026 · no es código del panel</div>
+  <h1>RRHH en el celular</h1>
+  <p>Sábado o domingo, sin oficina. Quien tiene RRHH carga una ausencia, anota una novedad o da de alta un eventual desde el celular, con datos móviles. La app nativa y <b>/app</b> siguen solo para guardias y eventuales. Misma plataforma web y las mismas callables del escritorio. Datos de ejemplo de <b>pruebas_sa</b>, sábado 04/10, 11:18.</p>
+</header>
+
+<div class="stage">
+
+  <div class="col">
+    <p class="cap">1 · Inicio del día</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>11:18</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Pruebas S.A.</div>
+          <div class="sub">RRHH · sábado 04/10</div>
+        </div>
+        <span class="pill net">En línea</span>
+      </div>
+      <div class="scroll">
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Ausencias de hoy</h3>
+              <div class="meta">Turnos ya marcados · Operación las ve</div>
+            </div>
+            <div class="n bad">2</div>
+          </div>
+          <div class="chips">
+            <span class="chip bad">Baez · V</span>
+            <span class="chip">Farías · E</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Licencias</h3>
+              <div class="meta">Empiezan o terminan este fin de semana</div>
+            </div>
+            <div class="n warn">2</div>
+          </div>
+          <div class="chips">
+            <span class="chip warn">Guerrero · L empieza lun 06</span>
+            <span class="chip ok">Fantini · L termina hoy</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Certificados pendientes</h3>
+              <div class="meta">Enfermedad sin foto</div>
+            </div>
+            <div class="n warn">1</div>
+          </div>
+          <div class="chips"><span class="chip warn">Medina · E · falta foto</span></div>
+        </article>
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>ARCA de eventuales</h3>
+              <div class="meta">Alta o baja sin número de transacción</div>
+            </div>
+            <div class="n bad">2</div>
+          </div>
+          <div class="chips">
+            <span class="chip bad">Díaz · alta dom 17:00</span>
+            <span class="chip">Quiroga · baja vie 03</span>
+          </div>
+        </article>
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Marcos por vencer</h3>
+              <div class="meta">Aviso a 30 días · se imprime en escritorio</div>
+            </div>
+            <div class="n">1</div>
+          </div>
+          <div class="chips"><span class="chip">Sosa · vence 18/10</span></div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#ini"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Inicio</a>
+        <a href="#aus"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Ausencias</a>
+        <a href="#nov"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedad</a>
+        <a href="#ev"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><i>2</i></span>Eventuales</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">2 · Ausencia o licencia</p>
+    <div class="phone"><div class="screen">
+      <div class="status off"><span>11:18</span><span>sin señal</span></div>
+      <div class="top">
+        <div class="back" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Cargar ausencia</div>
+          <div class="sub">Catálogo tipos_novedad</div>
+        </div>
+        <span class="pill off">Sin señal</span>
+      </div>
+      <div class="scroll">
+        <div class="banner">Sin señal. Se guarda en el teléfono y queda pendiente de enviar.</div>
+        <div class="search">Buscar guardia · <b>Gue</b></div>
+        <article class="guard">
+          <div class="bar aus"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Guerrero, Martín</strong><span class="code">leg. 1408</span></div>
+            <div class="when">Peaje 9 Norte · planta</div>
+          </div>
+        </article>
+        <div class="lbl">Tipo</div>
+        <div class="tipos">
+          <div class="tipo">V</div>
+          <div class="tipo">L</div>
+          <div class="tipo on">E</div>
+          <div class="tipo">A</div>
+          <div class="tipo">AA</div>
+          <div class="tipo">PG</div>
+          <div class="tipo">MAVIC</div>
+        </div>
+        <div class="field"><span>Días</span>Sáb 04/10 y dom 05/10 · 2 días</div>
+        <div class="cam">
+          <div class="shot">FOTO</div>
+          <div>
+            <strong>Certificado</strong>
+            <small>Sacado con la cámara · queda en el teléfono · se sube al volver la señal</small>
+          </div>
+        </div>
+        <article class="card">
+          <h3>Turnos de esos días</h3>
+          <div class="meta">Sáb M y dom M en Peaje 9 Norte, Puesto 1, quedan marcados E.</div>
+          <div class="note">Operación los ve como licencia: no abre vacante. Planificación recibe el aviso para el cronograma.</div>
+        </article>
+        <div class="acts">
+          <div class="act pri">Guardar · pendiente de enviar</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="#ini"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Inicio</a>
+        <a class="on" href="#aus"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Ausencias</a>
+        <a href="#nov"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedad</a>
+        <a href="#ev"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><i>2</i></span>Eventuales</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">3 · Novedad rápida</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>11:18</span><span>5G</span></div>
+      <div class="top">
+        <div class="back" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Nueva novedad</div>
+          <div class="sub">Texto corto · no es el legajo</div>
+        </div>
+        <span class="pill net">En línea</span>
+      </div>
+      <div class="scroll">
+        <div class="lbl">Tipo</div>
+        <div class="tipos">
+          <div class="tipo on">Observación</div>
+          <div class="tipo">Incidente</div>
+          <div class="tipo">Uniforme</div>
+          <div class="tipo">Otro</div>
+        </div>
+        <div class="field"><span>Objetivo</span>Peaje 9 Norte</div>
+        <div class="field" style="min-height:88px"><span>Qué pasó</span>El puesto 2 amaneció sin linterna. Quedó asentado para el lunes.</div>
+        <div class="cam">
+          <div class="shot">+</div>
+          <div>
+            <strong>Foto opcional</strong>
+            <small>Cámara · se puede guardar sin foto</small>
+          </div>
+        </div>
+        <div class="acts">
+          <div class="act pri">Publicar novedad</div>
+        </div>
+        <p class="hint" style="margin-top:10px">Si no hay señal, el texto queda pendiente de enviar. La foto, si la hay, espera en el teléfono.</p>
+      </div>
+      <nav class="nav">
+        <a href="#ini"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Inicio</a>
+        <a href="#aus"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Ausencias</a>
+        <a class="on" href="#nov"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedad</a>
+        <a href="#ev"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><i>2</i></span>Eventuales</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">4 · Eventual y ARCA</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>11:21</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Eventuales</div>
+          <div class="sub">Altas y bajas ARCA · link manual</div>
+        </div>
+        <span class="pill net">En línea</span>
+      </div>
+      <div class="scroll">
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Díaz, evento domingo</h3>
+              <div class="meta">Obrador Malagueño · 17:00 · alta sin transacción</div>
+            </div>
+            <div class="n bad">AT</div>
+          </div>
+          <div class="field" style="margin-top:8px;margin-bottom:0"><span>N.º de transacción ARCA</span>pegar el número y confirmar</div>
+        </article>
+        <article class="card">
+          <div class="rowtop">
+            <div>
+              <h3>Quiroga · baja viernes</h3>
+              <div class="meta">No fichó · baja pendiente · movimiento BT</div>
+            </div>
+            <div class="n warn">BT</div>
+          </div>
+        </article>
+        <p class="hint">La hoja de abajo es el alta. Crear el acceso a la app pide conexión: si se corta, se reintenta.</p>
+      </div>
+      <div class="sheet-dim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <h2>Alta rápida</h2>
+        <div class="hueco">Bolsa de eventuales · Pruebas S.A.</div>
+        <div class="field"><span>CUIL</span>20-30123456-7 <em>· válido</em></div>
+        <div class="field"><span>Apellido y nombre</span>Sosa, Carla</div>
+        <div class="field"><span>Mail</span>carla.sosa@pruebas.test</div>
+        <div class="field"><span>Teléfono</span>351 555 0101</div>
+        <div class="chips">
+          <span class="chip on">Pruebas S.A. habilitada</span>
+          <span class="chip warn">Sin marco vigente</span>
+        </div>
+        <p class="hint" style="margin-top:8px">El marco se imprime en el escritorio. Desde acá se puede crear el acceso cuando hay señal.</p>
+        <div class="acts">
+          <div class="act">Guardar en la bolsa</div>
+          <div class="act go">Crear acceso</div>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">5 · Ficha corta</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>11:24</span><span>5G</span></div>
+      <div class="top">
+        <div class="back" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Guerrero, Martín</div>
+          <div class="sub">Legajo 1408 · planta · Peaje 9 Norte</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <button class="call" type="button">Llamar · 351 555 0142</button>
+        <div class="field" style="margin-top:8px"><span>Mail</span>martin.guerrero@pruebas.test</div>
+        <div class="lbl">Turnos de la semana</div>
+        <article class="guard">
+          <div class="bar ok"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Sábado 04</strong><span class="code">M</span></div>
+            <div class="when">07:00–15:00 · Puesto 1 · se marca E si confirmás la ausencia</div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar warn"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Domingo 05</strong><span class="code">M</span></div>
+            <div class="when">07:00–15:00 · Puesto 1</div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar aus"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Lunes 06</strong><span class="code">L</span></div>
+            <div class="when">Empieza licencia · sin turno de puesto</div>
+          </div>
+        </article>
+        <div class="lbl">Ausencias de octubre</div>
+        <article class="card">
+          <h3>Ninguna cerrada</h3>
+          <div class="meta">La E de este finde todavía no se envió · pendiente de enviar</div>
+          <div class="chips"><span class="chip warn">1 pendiente de enviar</span></div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a href="#ini"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M3 10.5 12 3l9 7.5V21a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Inicio</a>
+        <a class="on" href="#aus"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Ausencias</a>
+        <a href="#nov"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedad</a>
+        <a href="#ev"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg><i>2</i></span>Eventuales</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+</div>
+
+<section class="legend">
+  <article class="box">
+    <h2>Qué queda solo en el escritorio</h2>
+    <ul>
+      <li><b>Legajo completo:</b> apto, credencial, domicilio geocodificado, historial largo y documentos que no hacen falta para el sábado.</li>
+      <li><b>Liquidación</b> y el ciclo 26→25. En el celular no se liquida.</li>
+      <li><b>Nómina en Excel:</b> importar o exportar la planilla sigue en la compu.</li>
+      <li><b>Impresión de marcos</b> en lote, el QR de firmas y el escaneo. El celular solo avisa cuáles vencen y si el alta tiene marco vigente.</li>
+      <li>La barra de este boceto es la de RRHH: Inicio, Ausencias, Novedad, Eventuales, Más. Operación y Planificación tienen la suya, según el permiso.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Permisos</h2>
+    <ul>
+      <li><b>RRHH · read:</b> ver el día, la ficha corta, turnos de la semana y ausencias del mes.</li>
+      <li><b>RRHH · create:</b> cargar ausencia, licencia y novedad.</li>
+      <li><b>RRHH · update:</b> corregir una carga del día y adjuntar el certificado.</li>
+      <li><b>RRHH · adjust:</b> tocar una ausencia ya tomada. Sin adjust, el sábado solo crea.</li>
+      <li><b>EVENTUALES:</b> alta en la bolsa, empresa habilitada y ver el marco. <b>Crear acceso</b> es la callable de siempre y pide create. El número de transacción ARCA es el link manual que ya usa el escritorio.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Sin señal</h2>
+    <ul>
+      <li><b>Se ve igual,</b> con lo último en caché: tarjetas del día, catálogo de tipos (V, L, E, A, AA, PG, MAVIC), búsqueda de guardias ya abierta y la ficha con teléfono.</li>
+      <li><b>Pendiente de enviar:</b> la ausencia, la novedad y el alta del eventual se encolan. El botón lo dice. Al volver la señal se sincronizan solas.</li>
+      <li><b>La foto del certificado</b> se guarda en el teléfono y se sube cuando hay red. No se pierde si se cierra la pantalla.</li>
+      <li><b>Crear acceso</b> y confirmar el número de ARCA necesitan servidor. Avisan que requieren conexión y se reintentan; no quedan como hechas.</li>
+      <li>El indicador de arriba es En línea, Sin señal o Pendiente de enviar. Push web de RRHH sigue en Configuración → Empresas → Avisos.</li>
+    </ul>
+  </article>
+</section>
+</body>
+</html>
