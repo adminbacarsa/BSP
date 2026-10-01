@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boceto — Planificación en el celular</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --indigo-50: #eef2ff;
+    --emerald: #059669;
+    --emerald-500: #10b981;
+    --orange: #ea580c;
+    --amber: #d97706;
+    --rose: #e11d48;
+    --slate: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --bg: #f1f5f9;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "DM Sans", "Segoe UI", sans-serif;
+    background: #e8eef6;
+    color: var(--slate);
+  }
+  header.page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 28px 8px;
+  }
+  header.page h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.03em; }
+  header.page p { margin: 0; color: #334155; font-size: 14.5px; line-height: 1.45; max-width: 920px; }
+  .kicker {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--indigo-50);
+    color: var(--indigo);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .stage {
+    display: flex;
+    gap: 28px;
+    overflow-x: auto;
+    padding: 22px 28px 8px;
+    align-items: flex-start;
+  }
+  .col { flex: 0 0 auto; width: 410px; }
+  .cap {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #475569;
+    margin: 0 0 8px 8px;
+  }
+  .phone {
+    width: 410px;
+    padding: 10px;
+    background: #0f172a;
+    border-radius: 42px;
+    box-shadow: 0 22px 50px rgba(15, 23, 42, .28);
+  }
+  .screen {
+    width: 390px;
+    height: 844px;
+    background: var(--bg);
+    border-radius: 32px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .status {
+    height: 28px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 22px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    background: #fff;
+  }
+  .status .sig { display: inline-flex; align-items: center; gap: 6px; }
+  .status .off { color: #be123c; font-size: 10px; letter-spacing: .04em; }
+  .top {
+    background: #fff;
+    padding: 6px 14px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .top .who { min-width: 0; flex: 1; }
+  .top .emp { font-size: 13px; font-weight: 800; letter-spacing: -.02em; }
+  .top .sub { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 10px;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill.pub { background: #059669; color: #fff; }
+  .pill.fix { background: #4f46e5; color: #fff; }
+  .back {
+    width: 34px; height: 34px; border-radius: 12px; border: 1px solid var(--line);
+    background: #fff; display: grid; place-items: center; flex-shrink: 0; color: #334155;
+  }
+  .scroll { flex: 1; overflow: hidden; padding: 10px 12px 78px; }
+  .days { display: flex; gap: 6px; margin-bottom: 8px; }
+  .day {
+    flex: 1; text-align: center; background: #fff; border: 1px solid var(--line);
+    border-radius: 14px; padding: 6px 2px 5px;
+  }
+  .day.on { outline: 2px solid var(--indigo); background: var(--indigo-50); }
+  .day b { display: block; font-size: 13px; line-height: 1; }
+  .day small { display: block; margin-top: 2px; font-size: 9px; font-weight: 800; color: var(--muted); letter-spacing: .03em; }
+  .day .gapdot { display: inline-block; width: 6px; height: 6px; border-radius: 99px; background: var(--rose); margin-top: 3px; }
+  .banner {
+    background: #fff1f2; border: 1px solid #fecdd3; color: #9f1239;
+    border-radius: 14px; padding: 8px 10px; font-size: 11px; font-weight: 750; margin-bottom: 8px;
+  }
+  .banner.cache { background: #fffbeb; border-color: #fde68a; color: #92400e; }
+  .banner.pend { background: #eef2ff; border-color: #c7d2fe; color: #3730a3; }
+  .obj {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 10px 12px 8px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.05);
+  }
+  .obj h3 { margin: 0; font-size: 14px; letter-spacing: -.02em; }
+  .obj .meta { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .band {
+    display: flex; align-items: center; gap: 8px;
+    border-top: 1px solid #f1f5f9; padding: 7px 0;
+  }
+  .band:first-of-type { margin-top: 6px; }
+  .code {
+    font-size: 11px; font-weight: 800;
+    background: #0f172a; color: #fff; border-radius: 8px; padding: 3px 6px; flex-shrink: 0;
+  }
+  .code.bad { background: var(--rose); }
+  .code.lic { background: #7c3aed; }
+  .bn { min-width: 0; flex: 1; }
+  .bn strong { display: block; font-size: 13px; letter-spacing: -.02em; }
+  .bn span { display: block; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .tagh {
+    font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+    border-radius: 999px; padding: 3px 6px; flex-shrink: 0;
+  }
+  .tagh.ok { background: #ecfdf5; color: #047857; }
+  .tagh.vac { background: #fff1f2; color: #be123c; }
+  .tagh.lic { background: #f5f3ff; color: #6d28d9; }
+  .nav {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 68px;
+    background: #fff;
+    border-top: 1px solid var(--line);
+    display: flex;
+    padding: 6px 4px 10px;
+  }
+  .nav a {
+    flex: 1; text-decoration: none; color: #94a3b8;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; font-size: 9px; font-weight: 800;
+  }
+  .nav a.on { color: var(--indigo); }
+  .dot { position: relative; }
+  .dot i {
+    position: absolute; top: -2px; right: -8px;
+    background: #e11d48; color: #fff; border-radius: 99px;
+    font-style: normal; font-size: 8px; font-weight: 800;
+    min-width: 14px; height: 14px; display: grid; place-items: center;
+  }
+  .hint { font-size: 11px; color: #475569; font-weight: 650; margin: 0 0 8px; }
+  .sheet-dim { position: absolute; inset: 0; background: rgba(15,23,42,.45); }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    border-radius: 24px 24px 32px 32px;
+    padding: 8px 12px 16px;
+    box-shadow: 0 -12px 40px rgba(15,23,42,.2);
+    max-height: 640px;
+  }
+  .grab { width: 42px; height: 4px; border-radius: 99px; background: #cbd5e1; margin: 4px auto 8px; }
+  .sheet h2 { margin: 0; font-size: 16px; }
+  .sheet .hueco { font-size: 12px; color: var(--muted); font-weight: 650; margin-top: 2px; }
+  .tabs { display: flex; gap: 4px; margin: 10px 0 8px; }
+  .tab {
+    flex: 1; text-align: center; font-size: 9px; font-weight: 800;
+    border-radius: 999px; padding: 6px 2px; border: 1px solid var(--line);
+    background: #fff; color: #64748b;
+  }
+  .tab.on { background: #4f46e5; color: #fff; border-color: #4338ca; }
+  .cand {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); border-radius: 16px; padding: 8px;
+    margin-bottom: 6px; background: #fff;
+  }
+  .cand.sel { border-color: #a5b4fc; background: #eef2ff; }
+  .cand.no { opacity: .72; background: #f8fafc; }
+  .av {
+    width: 36px; height: 36px; border-radius: 999px; background: var(--indigo-50); color: var(--indigo);
+    display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0;
+  }
+  .cand .nm { font-size: 13px; font-weight: 800; }
+  .cand .ds { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .cand .why { font-size: 10px; font-weight: 750; color: #be123c; margin-top: 2px; }
+  .btn {
+    margin-left: auto; border: 0; background: var(--indigo); color: #fff;
+    font-weight: 800; font-size: 12px; border-radius: 12px; padding: 10px 12px; flex-shrink: 0;
+  }
+  .btn.no { background: #f1f5f9; color: #94a3b8; }
+  .opt {
+    width: 100%; text-align: left; background: #fff; border: 1px solid var(--line);
+    border-radius: 16px; padding: 10px 12px; margin-bottom: 6px;
+  }
+  .opt b { display: block; font-size: 13px; }
+  .opt span { display: block; font-size: 11px; color: var(--muted); font-weight: 650; margin-top: 2px; }
+  .opt.on { border-color: #a5b4fc; background: #eef2ff; }
+  .warns { margin-top: 4px; }
+  .warn {
+    font-size: 11px; font-weight: 700; border-radius: 12px; padding: 7px 8px; margin-bottom: 5px;
+  }
+  .warn.bad { background: #fff1f2; color: #9f1239; }
+  .warn.mid { background: #fffbeb; color: #92400e; }
+  .warn.ok { background: #ecfdf5; color: #047857; }
+  .wide {
+    width: 100%; margin: 8px 0 0; min-height: 46px; border-radius: 14px; border: 0;
+    font-weight: 800; font-size: 13px; background: var(--indigo); color: #fff;
+  }
+  .wide.ghost { background: #fff; color: #334155; border: 1px solid var(--line); }
+  .push {
+    background: #0f172a; color: #fff; border-radius: 18px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .push .app { font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: #a5b4fc; }
+  .push b { display: block; font-size: 13px; margin-top: 2px; }
+  .push p { margin: 3px 0 0; font-size: 12px; font-weight: 600; color: #e2e8f0; line-height: 1.35; }
+  .sum {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; margin-bottom: 8px;
+  }
+  .sum b { font-size: 13px; }
+  .sum p { margin: 3px 0 0; font-size: 12px; color: #334155; font-weight: 650; }
+  .meter { height: 8px; border-radius: 99px; background: #e2e8f0; overflow: hidden; margin: 6px 0 2px; }
+  .meter i { display: block; height: 100%; background: #4f46e5; border-radius: 99px; }
+  .meter i.warn { background: #d97706; }
+  .kpi { display: flex; justify-content: space-between; font-size: 11px; font-weight: 750; color: #475569; }
+  .rowcard {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 8px 10px; margin-bottom: 6px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .rowcard strong { display: block; font-size: 13px; }
+  .rowcard span { display: block; font-size: 11px; color: var(--muted); font-weight: 650; }
+  .legend {
+    max-width: 1280px; margin: 8px auto 0; padding: 8px 28px 36px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .box {
+    background: #fff; border-radius: 24px; padding: 16px 18px 18px;
+    box-shadow: 0 8px 24px rgba(15,23,42,.06); border: 1px solid #e2e8f0;
+  }
+  .box h2 { margin: 0 0 8px; font-size: 15px; }
+  .box p, .box li { font-size: 13px; line-height: 1.45; color: #334155; }
+  .box ul { margin: 0; padding-left: 18px; }
+  .box li { margin-bottom: 6px; }
+  @media (max-width: 980px) {
+    .legend { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="kicker">Boceto para aprobar · 01/10/2026 · no es código del panel</div>
+  <h1>Planificación en el celular</h1>
+  <p>Sábado, sin oficina. Hay que dejar cubierto el fin de semana desde el celular, con datos móviles. Misma plataforma web que el escritorio (PWA), mismas reglas y las mismas callables: no hay una planificación “chica” aparte. Datos de ejemplo de <b>pruebas_sa</b>, sábado 03/10/2026, 09:18. Octubre ya está publicado.</p>
+</header>
+
+<div class="stage">
+
+  <div class="col">
+    <p class="cap">1 · Próximos días</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>09:18</span><span class="sig"><span class="off">sin señal</span></span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Próximos días</div>
+          <div class="sub">Pruebas S.A. · hoy + 3 · octubre publicado</div>
+        </div>
+        <span class="pill pub">Publicado</span>
+      </div>
+      <div class="scroll">
+        <div class="banner cache">Visto a las 18:40 del viernes · sin señal. Es el último cronograma que bajó el teléfono.</div>
+        <div class="days">
+          <div class="day on"><b>3</b><small>SÁB</small><i class="gapdot"></i></div>
+          <div class="day"><b>4</b><small>DOM</small><i class="gapdot"></i></div>
+          <div class="day"><b>5</b><small>LUN</small></div>
+          <div class="day"><b>6</b><small>MAR</small></div>
+        </div>
+        <div class="banner">2 huecos en estos 4 días. El del sábado es el que se puede cubrir ahora.</div>
+        <article class="obj">
+          <h3>Peaje 9 Norte</h3>
+          <div class="meta">Puesto 1 · sábado 03/10</div>
+          <div class="band">
+            <span class="code">M</span>
+            <div class="bn"><strong>Baez, Juan</strong><span>07:00–15:00</span></div>
+            <span class="tagh ok">Ok</span>
+          </div>
+          <div class="band">
+            <span class="code">T</span>
+            <div class="bn"><strong>Guerrero, Martín</strong><span>15:00–23:00</span></div>
+            <span class="tagh ok">Ok</span>
+          </div>
+          <div class="band">
+            <span class="code bad">N</span>
+            <div class="bn"><strong>Vacante</strong><span>23:00–07:00 · sin asignar</span></div>
+            <span class="tagh vac">Hueco</span>
+          </div>
+        </article>
+        <article class="obj">
+          <h3>Obrador Malagueño</h3>
+          <div class="meta">Puesto 2 · domingo 04/10</div>
+          <div class="band">
+            <span class="code lic">V</span>
+            <div class="bn"><strong>Giupponi, Laura</strong><span>Mañana · licencia sin cubrir</span></div>
+            <span class="tagh lic">Licencia</span>
+          </div>
+          <div class="band">
+            <span class="code">T</span>
+            <div class="bn"><strong>Chavero, Pablo</strong><span>15:00–23:00</span></div>
+            <span class="tagh ok">Ok</span>
+          </div>
+        </article>
+        <article class="obj">
+          <h3>CET Río Ceballos</h3>
+          <div class="meta">Puesto 1 · lunes 05/10 · completo</div>
+          <div class="band">
+            <span class="code">M</span>
+            <div class="bn"><strong>Farías, Diego</strong><span>07:00–15:00</span></div>
+            <span class="tagh ok">Ok</span>
+          </div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#plan"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Plan</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg><i>2</i></span>Alertas</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">2 · Cubrir un hueco</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>09:19</span><span>5G</span></div>
+      <div class="top">
+        <div class="back" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Peaje 9 Norte</div>
+          <div class="sub">Puesto 1 · sábado · N vacante</div>
+        </div>
+      </div>
+      <div class="scroll" style="filter:brightness(.92)">
+        <article class="obj">
+          <h3>Hueco</h3>
+          <div class="meta">N 23:00–07:00 · 8 h · toca el domingo a la mañana</div>
+        </article>
+      </div>
+      <div class="sheet-dim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <h2>¿Quién cubre?</h2>
+        <div class="hueco">Un toque elige. El segundo confirma. Misma lista que el escritorio.</div>
+        <div class="tabs">
+          <div class="tab on">Plantel</div>
+          <div class="tab">Otros</div>
+          <div class="tab">Eventuales</div>
+          <div class="tab">FT</div>
+        </div>
+        <div class="cand sel">
+          <div class="av">FR</div>
+          <div>
+            <div class="nm">Fantini, Rosa</div>
+            <div class="ds">Franco hoy · 168/200 h · descanso 16 h · 4,2 km</div>
+          </div>
+          <button class="btn" type="button">Elegida</button>
+        </div>
+        <div class="cand">
+          <div class="av">LF</div>
+          <div>
+            <div class="nm">Fontana, Luis</div>
+            <div class="ds">RET · mismo objetivo · 152/200 h · 11 km</div>
+          </div>
+          <button class="btn" type="button">Elegir</button>
+        </div>
+        <div class="cand no">
+          <div class="av">PC</div>
+          <div>
+            <div class="nm">Chavero, Pablo</div>
+            <div class="ds">T 15:00–23:00 en Obrador · 9 km</div>
+            <div class="why">Descanso 8 h (art. 197). No se puede.</div>
+          </div>
+          <button class="btn no" type="button">No</button>
+        </div>
+        <p class="hint">Eventuales pide EVENTUALES.convocar y señal (es una callable). FT pide assign_ft. Quien pasa de 200 h queda al final, marcado.</p>
+        <button class="wide" type="button">Asignar a Fantini</button>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">3 · Mover un turno</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>09:24</span><span class="sig"><span class="off">sin señal</span></span></div>
+      <div class="top">
+        <div class="back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Guerrero, Martín</div>
+          <div class="sub">Domingo 04/10 · T · Peaje 9 Norte</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <div class="banner pend">El franco queda en el teléfono · pendiente de enviar. Se sincroniza al volver la señal.</div>
+        <article class="obj">
+          <h3>Turno de hoy en la grilla</h3>
+          <div class="meta">T 15:00–23:00 · Puesto 1 · 8 h · mes publicado</div>
+        </article>
+        <button class="opt" type="button"><b>Cambiar horario</b><span>Misma persona, otra franja del puesto</span></button>
+        <button class="opt" type="button"><b>Permuta</b><span>Cambia el día con un compañero</span></button>
+        <button class="opt on" type="button"><b>Franco</b><span>Pasa a F y el T queda como hueco para cubrir</span></button>
+        <div class="warns">
+          <div class="warn bad">Permuta con el M del lunes 07:00: desde el T del sábado (fin 23:00) hay 8 h. Art. 197, mínimo 12 h.</div>
+          <div class="warn bad">Pasar el M de Baez a 07:00–23:00 para tapar el hueco: 16 h. Pasa el tope 12:59.</div>
+          <div class="warn mid">Horario 12:00–20:00 se superpone con el M de Baez (hasta 15:00) en el mismo puesto.</div>
+          <div class="warn ok">Franco el domingo no choca. El T queda hueco: se cubre en la pantalla 2.</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#plan"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Plan</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>2</i></span>Alertas</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">4 · Publicar el cambio</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>09:26</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Publicar corrección</div>
+          <div class="sub">Octubre ya publicado · no rearma el mes</div>
+        </div>
+        <span class="pill fix">Correct</span>
+      </div>
+      <div class="scroll">
+        <p class="hint">Un cambio puntual. El resto del cronograma no se toca. Hace falta PLANNING.correct.</p>
+        <article class="sum">
+          <b>Peaje 9 Norte · Puesto 1</b>
+          <p>Sábado 03/10 · N 23:00–07:00</p>
+          <p>Vacante → Fantini, Rosa</p>
+          <p>Domingo 04/10 · Guerrero pasa a franco. El T queda hueco.</p>
+        </article>
+        <p class="hint">Al confirmar, el turno sale publicado (no queda en borrador) y el guardia recibe el push en su app, no en esta PWA.</p>
+        <div class="push">
+          <div class="app">App del guardia · alertas_turno</div>
+          <b>Rosa, turno nuevo</b>
+          <p>El sábado 03/10 cubrís N 23:00–07:00 en Peaje 9 Norte, Puesto 1.</p>
+        </div>
+        <div class="push">
+          <div class="app">App del guardia · alertas_turno</div>
+          <b>Martín, tu domingo cambió</b>
+          <p>El domingo 04/10 tu T en Peaje 9 Norte pasa a franco.</p>
+        </div>
+        <button class="wide" type="button">Publicar estos 2 cambios</button>
+        <button class="wide ghost" type="button">Dejar en borrador del teléfono</button>
+        <p class="hint" style="margin-top:8px">Sin señal el botón de publicar no sale: avisa que hace falta conexión y reintenta. El borrador local sigue en cola.</p>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#plan"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Plan</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>2</i></span>Alertas</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">5 · Horas del mes</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>09:27</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Horas · octubre</div>
+          <div class="sub">Plan publicado contra el SLA del objetivo</div>
+        </div>
+      </div>
+      <div class="scroll">
+        <article class="obj">
+          <h3>Peaje 9 Norte · Puesto 1</h3>
+          <div class="meta">M+T+N · 31 días · mes calendario</div>
+          <div class="kpi"><span>Plan publicado 736 h</span><span>SLA 744 h</span></div>
+          <div class="meter"><i style="width:98.9%"></i></div>
+          <div class="kpi"><span>Faltan 8 h</span><span>la N del sábado</span></div>
+        </article>
+        <article class="obj">
+          <h3>Obrador Malagueño · Puesto 2</h3>
+          <div class="meta">Con la V de Giupponi todavía sin cubrir</div>
+          <div class="kpi"><span>Plan 712 h</span><span>SLA 744 h</span></div>
+          <div class="meter"><i class="warn" style="width:95.7%"></i></div>
+          <div class="kpi"><span>Faltan 32 h</span><span>4 mañanas</span></div>
+        </article>
+        <p class="hint">Descanso menor a 12 h. Aviso, no bloquea el que ya está cargado. Sí bloquea una asignación nueva.</p>
+        <article class="rowcard">
+          <div>
+            <strong>Chavero · 8 h</strong>
+            <span>Vie 02/10 T cierra 23:00 en Obrador → sáb 03/10 M 07:00 en Peaje. Art. 197.</span>
+          </div>
+        </article>
+        <article class="rowcard">
+          <div>
+            <strong>Díaz, eventual · 196/200</strong>
+            <span>Un FT más lo pasa del tope. La solapa FT lo muestra y no lo ofrece primero.</span>
+          </div>
+        </article>
+        <article class="rowcard">
+          <div>
+            <strong>Fantini · 168/200</strong>
+            <span>Si toma la N del sábado queda en 176. Entra.</span>
+          </div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#plan"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M8 2v4M16 2v4M3 10h18"/></svg>Plan</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>2</i></span>Alertas</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+</div>
+
+<section class="legend">
+  <article class="box">
+    <h2>Qué hace el celular</h2>
+    <ul>
+      <li><b>Próximos 4 días</b> por objetivo y puesto: quién está en cada franja, vacante y licencia sin cubrir marcadas. No es la grilla del mes.</li>
+      <li><b>Cubrir</b> abre una hoja inferior. Solapas: plantel del objetivo, otros objetivos, Eventuales de la bolsa, FT. Cada uno muestra horas del mes / tope 200, descanso de 12 h y distancia. Dos toques: elegir y confirmar.</li>
+      <li><b>Mover</b> un turno ya cargado: otro horario, permuta o franco. Antes de guardar muestra superposición, tope 12:59 y descanso menor a 12 h.</li>
+      <li><b>Publicar</b> solo esos cambios de un mes ya publicado (permiso <b>correct</b>). No vuelve a publicar el mes. El guardia recibe el push en la app nativa, canal <b>alertas_turno</b>, con su primer nombre.</li>
+      <li><b>Horas:</b> plan publicado contra el SLA del objetivo en el mes calendario, más los descansos cortos. Sirve para decidir, no para liquidar.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Escritorio y permisos</h2>
+    <ul>
+      <li>Sigue en el escritorio: armar el mes completo, copiar días, ciclos, equilibrar y <b>Auto Lab</b>.</li>
+      <li><b>PLANNING.read</b> mira próximos días y horas. Sin este permiso la barra no muestra Plan.</li>
+      <li><b>create / update</b> cubren un hueco y mueven un turno.</li>
+      <li><b>publish</b> es la primera publicación del mes, en el escritorio. En el celular, con el mes ya publicado, alcanza <b>correct</b>.</li>
+      <li><b>assign_ft</b> habilita la solapa FT. <b>EVENTUALES.convocar</b> habilita la solapa de la bolsa. Sin el permiso la solapa se ve y explica por qué no asigna.</li>
+      <li>La barra de este rol es Plan, Alertas, Novedades y Más. Operación y RRHH tienen la suya. El guardia no entra: sigue en la app y en /app.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Sin señal</h2>
+    <ul>
+      <li>Firestore con caché persistente: se ven los objetivos, los turnos del mes y la bolsa de la última vez que hubo señal. Arriba dice a qué hora se vio.</li>
+      <li>Un franco, una permuta o una cobertura de plantel se escriben en Firestore: quedan <b>pendiente de enviar</b> y salen solas al volver la señal.</li>
+      <li>Elegir un eventual, publicar la corrección y mandar el push necesitan servidor. El botón avisa que hace falta conexión y se reintenta; no se pierde el borrador local.</li>
+      <li>La lista de candidatos eventuales no se inventa sin red: si no hubo una consulta previa, la solapa dice que hay que esperar señal.</li>
+      <li>El indicador de conexión está en la barra del teléfono (5G o “sin señal”), el mismo criterio para Operación, Planificación y RRHH.</li>
+    </ul>
+  </article>
+</section>
+</body>
+</html>
