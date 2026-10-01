@@ -92,11 +92,10 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(after.rejectCode).toBe('TOO_LATE');
   });
 
-  it('convocado: desde que aceptó hasta min(accepted+60, fin), nunca tarde', () => {
+  it('convocado: desde que aceptó hasta el fin del hueco, nunca tarde', () => {
     const start = new Date('2026-09-14T20:00:00-03:00');
     const end = new Date('2026-09-15T04:00:00-03:00');
     const created = new Date('2026-09-14T17:30:00-03:00');
-    const cap = new Date(created.getTime() + 60 * 60_000);
     const s = shift({
       id: 'ops1',
       origin: 'OPERATIONS_COVERAGE',
@@ -110,7 +109,7 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(afterAccept.canNotifyLate).toBe(false);
     expect(afterAccept.lateNoNotice).toBe(false);
     expect(afterAccept.lateMinutes).toBe(0);
-    expect(afterAccept.checkInDeadline?.getTime()).toBe(cap.getTime());
+    expect(afterAccept.checkInDeadline?.getTime()).toBe(end.getTime());
 
     const beforeAccept = getCheckInTiming(
       shift({ ...s, id: 'ops1b', createdAt: new Date('2026-09-14T19:00:00-03:00') }),
@@ -119,16 +118,16 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     expect(beforeAccept.canCheckIn).toBe(false);
     expect(beforeAccept.tooEarly).toBe(true);
 
-    const pastCap = getCheckInTiming(s, new Date('2026-09-14T18:31:00-03:00'));
-    expect(pastCap.canCheckIn).toBe(false);
-    expect(pastCap.rejectCode).toBe('SHIFT_ENDED');
+    const pastStart = getCheckInTiming(s, new Date('2026-09-14T21:01:00-03:00'));
+    expect(pastStart.canCheckIn).toBe(true);
+    expect(pastStart.canNotifyLate).toBe(false);
 
     const afterEnd = getCheckInTiming(s, new Date('2026-09-15T04:01:00-03:00'));
     expect(afterEnd.canCheckIn).toBe(false);
     expect(afterEnd.rejectCode).toBe('SHIFT_ENDED');
   });
 
-  it('convocado: coverageCreatedAt abre la fichada; el tope es min(+60, fin)', () => {
+  it('convocado: coverageCreatedAt abre la fichada; el tope es el fin del hueco', () => {
     const end = new Date('2026-09-15T01:00:00-03:00');
     const created = new Date('2026-09-14T17:30:00-03:00');
     const s = shift({
@@ -140,7 +139,7 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
     });
     const t = getCheckInTiming(s, now);
     expect(t.canCheckIn).toBe(true);
-    expect(t.checkInDeadline?.getTime()).toBe(created.getTime() + 60 * 60_000);
+    expect(t.checkInDeadline?.getTime()).toBe(end.getTime());
     expect(t.canNotifyLate).toBe(false);
   });
 

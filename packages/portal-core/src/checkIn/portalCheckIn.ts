@@ -298,7 +298,7 @@ export function getCheckInTiming(
       rejectCode,
       rejectMessage: rejectCode
         ? beforeAccept
-          ? 'Podés fichar desde que aceptaste, hasta 60 min o el fin del hueco.'
+          ? 'Podés fichar desde que aceptaste la convocatoria, hasta que termine el hueco.'
           : checkInRejectMessage(rejectCode)
         : undefined,
       lateNoNotice: false,

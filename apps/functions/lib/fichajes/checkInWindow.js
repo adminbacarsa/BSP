@@ -24,14 +24,8 @@ function convocadoPunchAnchorMs(shift) {
     return createdMs(shift);
 }
 function convocadoPunchCapMs(shift) {
-    const anchor = convocadoPunchAnchorMs(shift);
     const end = endMs(shift);
-    const plus = anchor > 0 ? anchor + 60 * 60 * 1000 : 0;
-    if (end > 0 && plus > 0)
-        return Math.min(end, plus);
-    if (plus > 0)
-        return plus;
-    return end > 0 ? end : 0;
+    return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
 }
 function adjustedStartMs(shift) {
     const adj = shift.adjustedStartTime?.toMillis?.() ?? 0;
