@@ -4,6 +4,8 @@ import {
   initializeFirestore,
   getFirestore,
   memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
   connectFirestoreEmulator,
   onSnapshot as _onSnapshot,
   type Firestore,
@@ -177,7 +179,28 @@ function createFirestoreInstance(): Firestore {
       return getFirestore(app);
     }
   }
+  if (wantsMovilPersistentCache()) {
+    try {
+      return initializeFirestore(app, {
+        localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+      });
+    } catch {
+      return getFirestore(app);
+    }
+  }
   return getFirestore(app);
+}
+
+/** Caché en disco solo en el celular. El escritorio ancho sigue con la caché de memoria. */
+function wantsMovilPersistentCache(): boolean {
+  try {
+    const choice = window.localStorage.getItem('cosp-movil');
+    if (choice === '0') return false;
+    if (choice === '1') return true;
+    return window.innerWidth < 768;
+  } catch {
+    return false;
+  }
 }
 
 /**

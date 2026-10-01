@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boceto — Centro de Control en el celular</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,600;0,9..40,700;0,9..40,800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --indigo: #4f46e5;
+    --indigo-50: #eef2ff;
+    --emerald: #059669;
+    --emerald-500: #10b981;
+    --orange: #ea580c;
+    --amber: #d97706;
+    --rose: #e11d48;
+    --slate: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+    --bg: #f1f5f9;
+    --card: #ffffff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "DM Sans", "Segoe UI", sans-serif;
+    background: #e8eef6;
+    color: var(--slate);
+  }
+  header.page {
+    max-width: 1280px;
+    margin: 0 auto;
+    padding: 28px 28px 8px;
+  }
+  header.page h1 { margin: 0 0 6px; font-size: 26px; letter-spacing: -0.03em; }
+  header.page p { margin: 0; color: #334155; font-size: 14.5px; line-height: 1.45; max-width: 920px; }
+  .kicker {
+    display: inline-block;
+    margin-bottom: 8px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--indigo-50);
+    color: var(--indigo);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+  }
+  .stage {
+    display: flex;
+    gap: 28px;
+    overflow-x: auto;
+    padding: 22px 28px 8px;
+    align-items: flex-start;
+  }
+  .col { flex: 0 0 auto; width: 410px; }
+  .cap {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #475569;
+    margin: 0 0 8px 8px;
+  }
+  .phone {
+    width: 410px;
+    padding: 10px;
+    background: #0f172a;
+    border-radius: 42px;
+    box-shadow: 0 22px 50px rgba(15, 23, 42, .28);
+  }
+  .screen {
+    width: 390px;
+    height: 844px;
+    background: var(--bg);
+    border-radius: 32px;
+    overflow: hidden;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+  }
+  .status {
+    height: 28px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding: 0 22px 2px;
+    font-size: 12px;
+    font-weight: 700;
+    color: #0f172a;
+    background: #fff;
+  }
+  .top {
+    background: #fff;
+    padding: 6px 14px 10px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .top .who { min-width: 0; flex: 1; }
+  .top .emp { font-size: 13px; font-weight: 800; letter-spacing: -.02em; }
+  .top .sub { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border-radius: 10px;
+    padding: 5px 8px;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .03em;
+    text-transform: uppercase;
+    border: 1px solid transparent;
+    white-space: nowrap;
+  }
+  .pill.manual { background: #059669; color: #fff; }
+  .pill.auto { background: #0891b2; color: #fff; }
+  .bell {
+    width: 36px; height: 36px; border-radius: 12px;
+    background: #e11d48; color: #fff; border: 0;
+    display: grid; place-items: center; position: relative; flex-shrink: 0;
+  }
+  .bell span {
+    position: absolute; top: -4px; right: -4px;
+    background: #fff; color: #e11d48; border: 1.5px solid #e11d48;
+    font-size: 9px; font-weight: 800; border-radius: 99px; min-width: 16px; height: 16px;
+    display: grid; place-items: center; padding: 0 3px;
+  }
+  .back {
+    width: 34px; height: 34px; border-radius: 12px; border: 1px solid var(--line);
+    background: #fff; display: grid; place-items: center; flex-shrink: 0; color: #334155;
+  }
+  .scroll { flex: 1; overflow: hidden; padding: 10px 12px 78px; }
+  .counters {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+  .cnt {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 8px 2px 7px;
+    text-align: center;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .cnt.on { outline: 2px solid var(--indigo); background: var(--indigo-50); }
+  .cnt b { display: block; font-size: 18px; line-height: 1; letter-spacing: -.03em; }
+  .cnt small { display: block; margin-top: 3px; font-size: 9px; font-weight: 800; letter-spacing: .04em; color: var(--muted); }
+  .c-act b { color: var(--emerald); }
+  .c-ret b { color: var(--orange); }
+  .c-aus b { color: #334155; }
+  .c-vac b { color: var(--rose); }
+  .c-plan b { color: var(--indigo); }
+  .obj {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    padding: 12px 12px 10px;
+    margin-bottom: 8px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.05);
+  }
+  .obj.head { display: flex; align-items: flex-start; gap: 8px; }
+  .obj h3 { margin: 0; font-size: 15px; letter-spacing: -.02em; }
+  .obj .meta { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 2px; }
+  .pct {
+    margin-left: auto;
+    font-size: 13px;
+    font-weight: 800;
+    color: var(--emerald);
+    background: #ecfdf5;
+    border-radius: 12px;
+    padding: 6px 8px;
+  }
+  .pct.warn { color: var(--amber); background: #fffbeb; }
+  .pct.bad { color: var(--rose); background: #fff1f2; }
+  .chips { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .chip {
+    font-size: 10px; font-weight: 800; border-radius: 999px; padding: 3px 7px;
+    background: #f8fafc; color: #334155; border: 1px solid var(--line);
+  }
+  .chip.act { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
+  .chip.ret { color: #c2410c; background: #fff7ed; border-color: #fed7aa; }
+  .chip.aus { color: #1e293b; background: #f1f5f9; border-color: #cbd5e1; }
+  .chip.vac { color: #be123c; background: #fff1f2; border-color: #fecdd3; }
+  .guard {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 18px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    display: flex;
+  }
+  .bar { width: 6px; flex-shrink: 0; }
+  .bar.ok { background: var(--emerald-500); }
+  .bar.ret { background: #f97316; }
+  .bar.aus { background: #334155; }
+  .bar.late { background: #f59e0b; }
+  .bar.vac { background: var(--rose); }
+  .bar.way { background: var(--indigo); }
+  .gbody { padding: 8px 10px 8px 8px; flex: 1; min-width: 0; }
+  .grow { display: flex; align-items: center; gap: 6px; }
+  .grow strong { font-size: 14px; letter-spacing: -.02em; }
+  .code {
+    margin-left: auto;
+    font-size: 11px; font-weight: 800;
+    background: #0f172a; color: #fff; border-radius: 8px; padding: 2px 6px;
+  }
+  .when { font-size: 11px; color: var(--muted); font-weight: 600; margin-top: 1px; }
+  .st {
+    display: inline-flex; align-items: center; gap: 4px;
+    margin-top: 4px; font-size: 10px; font-weight: 800;
+    letter-spacing: .03em; text-transform: uppercase; border-radius: 999px; padding: 2px 7px;
+  }
+  .st.ok { background: #ecfdf5; color: #047857; }
+  .st.ret { background: #fff7ed; color: #c2410c; }
+  .st.aus { background: #f1f5f9; color: #1e293b; }
+  .st.late { background: #fffbeb; color: #b45309; }
+  .st.vac { background: #fff1f2; color: #be123c; }
+  .st.way { background: #eef2ff; color: #4338ca; }
+  .acts { display: flex; gap: 6px; margin-top: 8px; }
+  .act {
+    flex: 1;
+    min-height: 46px;
+    border-radius: 14px;
+    border: 1px solid var(--line);
+    background: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1px; font-size: 9px; font-weight: 800; letter-spacing: .02em; color: #334155;
+  }
+  .act.pri { background: var(--indigo); color: #fff; border-color: #4338ca; }
+  .act.go { background: #059669; color: #fff; border-color: #047857; }
+  .act.warn { background: #fff7ed; color: #c2410c; border-color: #fdba74; }
+  .act.ghost { flex: 0 0 46px; }
+  .note { font-size: 11px; color: #9a3412; font-weight: 650; margin-top: 3px; }
+  .nav {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 68px;
+    background: #fff;
+    border-top: 1px solid var(--line);
+    display: flex;
+    padding: 6px 4px 10px;
+  }
+  .nav a {
+    flex: 1; text-decoration: none; color: #94a3b8;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 2px; font-size: 9px; font-weight: 800;
+  }
+  .nav a.on { color: var(--indigo); }
+  .dot {
+    position: relative;
+  }
+  .dot i {
+    position: absolute; top: -2px; right: -8px;
+    background: #e11d48; color: #fff; border-radius: 99px;
+    font-style: normal; font-size: 8px; font-weight: 800;
+    min-width: 14px; height: 14px; display: grid; place-items: center;
+  }
+  .alert {
+    background: #fff; border: 1px solid var(--line); border-radius: 16px;
+    margin-bottom: 8px; display: flex; overflow: hidden; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+  }
+  .alert .swipe {
+    width: 92px; background: #059669; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 800; gap: 2px; flex-shrink: 0;
+  }
+  .alert .swipe.cub { background: var(--indigo); }
+  .alert .abody { padding: 10px 10px 10px 8px; min-width: 0; }
+  .alert .tag {
+    font-size: 9px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase;
+    color: #be123c;
+  }
+  .alert h3 { margin: 2px 0 0; font-size: 14px; }
+  .alert p { margin: 2px 0 0; font-size: 11px; color: var(--muted); font-weight: 600; }
+  .hint { font-size: 11px; color: #475569; font-weight: 650; margin: 0 0 8px; }
+  .sheet-dim {
+    position: absolute; inset: 0; background: rgba(15,23,42,.45);
+  }
+  .sheet {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    background: #fff;
+    border-radius: 24px 24px 32px 32px;
+    padding: 8px 12px 16px;
+    box-shadow: 0 -12px 40px rgba(15,23,42,.2);
+    max-height: 620px;
+  }
+  .grab { width: 42px; height: 4px; border-radius: 99px; background: #cbd5e1; margin: 4px auto 8px; }
+  .sheet h2 { margin: 0; font-size: 16px; }
+  .sheet .hueco { font-size: 12px; color: var(--muted); font-weight: 650; margin-top: 2px; }
+  .steps { display: flex; gap: 4px; overflow: hidden; margin: 10px 0; }
+  .step {
+    font-size: 9px; font-weight: 800; border-radius: 999px; padding: 4px 6px;
+    background: #fff; color: #94a3b8; border: 1px solid var(--line); white-space: nowrap;
+  }
+  .step.done { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+  .step.now { background: #e11d48; color: #fff; border-color: #be123c; }
+  .cand {
+    display: flex; align-items: center; gap: 8px;
+    border: 1px solid var(--line); border-radius: 16px; padding: 8px;
+    margin-bottom: 6px;
+  }
+  .av {
+    width: 36px; height: 36px; border-radius: 999px; background: var(--indigo-50); color: var(--indigo);
+    display: grid; place-items: center; font-size: 11px; font-weight: 800; flex-shrink: 0;
+  }
+  .cand .nm { font-size: 13px; font-weight: 800; }
+  .cand .ds { font-size: 11px; color: var(--muted); font-weight: 600; }
+  .btn {
+    margin-left: auto; border: 0; background: var(--indigo); color: #fff;
+    font-weight: 800; font-size: 12px; border-radius: 12px; padding: 10px 12px;
+  }
+  .btn.no { background: #f1f5f9; color: #334155; }
+  .sala {
+    background: #ecfdf5; border: 1px solid #a7f3d0; border-radius: 18px; padding: 12px; margin-bottom: 8px;
+  }
+  .sala b { font-size: 12px; letter-spacing: .04em; text-transform: uppercase; color: #047857; }
+  .sala p { margin: 4px 0 0; font-size: 13px; font-weight: 700; }
+  .ask {
+    background: #fff; border: 1px solid #c7d2fe; border-radius: 18px; padding: 12px; margin-bottom: 8px;
+  }
+  .ask h3 { margin: 0; font-size: 14px; }
+  .ask p { margin: 3px 0 8px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .row { display: flex; gap: 6px; }
+  .row .btn { margin-left: 0; flex: 1; }
+  .wide {
+    width: 100%; margin: 6px 0 0; min-height: 44px; border-radius: 14px;
+    font-weight: 800; font-size: 13px; border: 1px solid #a7f3d0; background: #fff; color: #047857;
+  }
+  .wide.rose { border-color: #fecdd3; color: #be123c; background: #fff1f2; }
+  .roles { font-size: 11px; }
+  .role {
+    background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 8px 10px; margin-bottom: 6px;
+  }
+  .role b { font-size: 11px; }
+  .role span { display: block; color: var(--muted); font-weight: 650; margin-top: 2px; }
+  .legend {
+    max-width: 1280px; margin: 8px auto 0; padding: 8px 28px 36px;
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  }
+  .box {
+    background: #fff; border-radius: 24px; padding: 16px 18px 18px;
+    box-shadow: 0 8px 24px rgba(15,23,42,.06); border: 1px solid #e2e8f0;
+  }
+  .box h2 { margin: 0 0 8px; font-size: 15px; }
+  .box p, .box li { font-size: 13px; line-height: 1.45; color: #334155; }
+  .box ul { margin: 0; padding-left: 18px; }
+  .box li { margin-bottom: 6px; }
+  @media (max-width: 980px) {
+    .legend { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header class="page">
+  <div class="kicker">Boceto para aprobar · 01/10/2026 · no es código del panel</div>
+  <h1>Centro de Control en el celular</h1>
+  <p>La app nativa y <b>/app</b> siguen solo para guardias y eventuales. El personal entra a la plataforma web, en un modo compacto para el pulgar (PWA). Datos de ejemplo de <b>pruebas_sa</b>, hoy 15:42. La sala (piloto / apoyo / pasar a Auto) es la que ya existe en la web.</p>
+</header>
+
+<div class="stage">
+
+  <div class="col">
+    <p class="cap">1 · Inicio</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>15:42</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Pruebas S.A.</div>
+          <div class="sub">Manual · piloto Mauro</div>
+        </div>
+        <span class="pill manual">Manual</span>
+        <div class="bell" aria-hidden="true">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+          <span>4</span>
+        </div>
+      </div>
+      <div class="scroll">
+        <div class="counters">
+          <div class="cnt c-act on"><b>12</b><small>ACTIVOS</small></div>
+          <div class="cnt c-ret"><b>1</b><small>RET</small></div>
+          <div class="cnt c-aus"><b>2</b><small>AUS</small></div>
+          <div class="cnt c-vac"><b>3</b><small>VAC</small></div>
+          <div class="cnt c-plan"><b>1</b><small>PLAN</small></div>
+        </div>
+        <article class="obj">
+          <div class="head">
+            <div>
+              <h3>Peaje 9 Norte</h3>
+              <div class="meta">Ruta 9 · 4 puestos · tocando abre el objetivo</div>
+            </div>
+            <div class="pct warn">75%</div>
+          </div>
+          <div class="chips">
+            <span class="chip act">ACT 3</span>
+            <span class="chip ret">RET 1</span>
+            <span class="chip aus">AUS 1</span>
+            <span class="chip vac">VAC 1</span>
+          </div>
+        </article>
+        <article class="obj">
+          <div class="head">
+            <div>
+              <h3>Obrador Malagueño</h3>
+              <div class="meta">Malagueño · 6 puestos</div>
+            </div>
+            <div class="pct">100%</div>
+          </div>
+          <div class="chips"><span class="chip act">ACT 6</span></div>
+        </article>
+        <article class="obj">
+          <div class="head">
+            <div>
+              <h3>CET Río Ceballos</h3>
+              <div class="meta">Río Ceballos · 3 puestos</div>
+            </div>
+            <div class="pct bad">67%</div>
+          </div>
+          <div class="chips">
+            <span class="chip act">ACT 2</span>
+            <span class="chip aus">AUS 1</span>
+            <span class="chip vac">VAC 1</span>
+          </div>
+        </article>
+        <article class="obj">
+          <div class="head">
+            <div>
+              <h3>Río Primero</h3>
+              <div class="meta">Planta · 2 puestos · 1 a Planificación</div>
+            </div>
+            <div class="pct bad">50%</div>
+          </div>
+          <div class="chips">
+            <span class="chip act">ACT 1</span>
+            <span class="chip vac">VAC 1</span>
+          </div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#op"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Operaciones</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg><i>4</i></span>Alertas</a>
+        <a href="#ev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>Eventuales</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">2 · Objetivo abierto</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>15:42</span><span>5G</span></div>
+      <div class="top">
+        <div class="back" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Peaje 9 Norte</div>
+          <div class="sub">75% · Puesto 1 y 2</div>
+        </div>
+        <span class="pill manual">Piloto</span>
+      </div>
+      <div class="scroll">
+        <article class="guard">
+          <div class="bar ret"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Baez, Juan</strong><span class="code">M</span></div>
+            <div class="when">07:00–15:00 · Puesto 1</div>
+            <span class="st ret">Retenido · 42 min</span>
+            <div class="note">Espera relevo de las 15:00 (Guerrero). Tope 19:59.</div>
+            <div class="acts">
+              <div class="act warn">Salida</div>
+              <div class="act">Protocolo</div>
+              <div class="act ghost">⋯</div>
+            </div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar aus"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Guerrero, Martín</strong><span class="code">T</span></div>
+            <div class="when">15:00–23:00 · Puesto 1</div>
+            <span class="st aus">Ausente · no llegó</span>
+            <div class="acts">
+              <div class="act go">Llegó?</div>
+              <div class="act">Revertir</div>
+              <div class="act pri">Convocar</div>
+              <div class="act ghost">⋯</div>
+            </div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar late"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Farías, Diego</strong><span class="code">M3</span></div>
+            <div class="when">07:00–15:00 · Puesto 2 · fichó 07:18</div>
+            <span class="st late">Tarde sin aviso · 18 min</span>
+            <div class="acts">
+              <div class="act warn">Salida</div>
+              <div class="act ghost">⋯</div>
+            </div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar ok"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Fantini, Rosa</strong><span class="code">M2</span></div>
+            <div class="when">07:00–15:00 · Puesto 2 · presente</div>
+            <span class="st ok">Activo</span>
+            <div class="acts">
+              <div class="act warn">Salida</div>
+              <div class="act ghost">⋯</div>
+            </div>
+          </div>
+        </article>
+        <article class="guard">
+          <div class="bar vac"></div>
+          <div class="gbody">
+            <div class="grow"><strong>Vacante · Puesto 2</strong><span class="code">N</span></div>
+            <div class="when">23:00–07:00 · sin asignar</div>
+            <span class="st vac">Vacante</span>
+            <div class="acts">
+              <div class="act pri">Protocolo</div>
+              <div class="act">A plan</div>
+              <div class="act ghost">⋯</div>
+            </div>
+          </div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#op"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Operaciones</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>4</i></span>Alertas</a>
+        <a href="#ev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Eventuales</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">3 · Alertas</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>15:42</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Alertas</div>
+          <div class="sub">Prioridad primero · deslizar a la derecha</div>
+        </div>
+        <span class="pill manual">Manual</span>
+      </div>
+      <div class="scroll">
+        <p class="hint">La de arriba está deslizada: la acción queda bajo el pulgar.</p>
+        <article class="alert">
+          <div class="swipe">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>
+            Llegó
+          </div>
+          <div class="abody">
+            <div class="tag">Prioridad · ausencia</div>
+            <h3>Guerrero no llegó</h3>
+            <p>Peaje 9 Norte · T 15:00 · Puesto 1</p>
+          </div>
+        </article>
+        <article class="alert">
+          <div class="swipe cub">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.8 19.8 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.12.9.33 1.77.62 2.61a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.47-1.19a2 2 0 0 1 2.11-.45c.84.29 1.71.5 2.61.62A2 2 0 0 1 22 16.92z"/></svg>
+            Cubrir
+          </div>
+          <div class="abody">
+            <div class="tag">Vacante</div>
+            <h3>Noche sin cubrir</h3>
+            <p>CET Río Ceballos · N 23:00 · Puesto 1</p>
+          </div>
+        </article>
+        <article class="alert">
+          <div class="abody">
+            <div class="tag">Alta ARCA</div>
+            <h3>Díaz, evento 17:00</h3>
+            <p>Obrador Malagueño · sin nro de transacción · desde T−2 h</p>
+          </div>
+        </article>
+        <article class="alert">
+          <div class="abody">
+            <div class="tag" style="color:#c2410c">Retención</div>
+            <h3>Baez · 42 min</h3>
+            <p>Peaje 9 Norte · espera a Guerrero · tope 19:59</p>
+          </div>
+        </article>
+        <article class="alert">
+          <div class="abody">
+            <div class="tag" style="color:#4338ca">A planificación</div>
+            <h3>Vacante N a plan</h3>
+            <p>Río Primero · Puesto 2 · Fontana cubre el T2</p>
+          </div>
+        </article>
+      </div>
+      <nav class="nav">
+        <a href="#op"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Operaciones</a>
+        <a class="on" href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>4</i></span>Alertas</a>
+        <a href="#ev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="9" cy="7" r="4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/></svg>Eventuales</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">4 · Protocolo</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>15:42</span><span>5G</span></div>
+      <div class="top">
+        <div class="back"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M15 18l-6-6 6-6"/></svg></div>
+        <div class="who">
+          <div class="emp">Peaje 9 Norte</div>
+          <div class="sub">Guerrero ausente · T</div>
+        </div>
+      </div>
+      <div class="scroll" style="filter:brightness(.92)">
+        <article class="guard"><div class="bar aus"></div><div class="gbody"><div class="grow"><strong>Guerrero, Martín</strong><span class="code">T</span></div><div class="when">15:00–23:00 · hueco abierto</div></div></article>
+        <article class="guard"><div class="bar ret"></div><div class="gbody"><div class="grow"><strong>Baez, Juan</strong><span class="code">M</span></div><div class="when">Retenido 42 min</div></div></article>
+      </div>
+      <div class="sheet-dim"></div>
+      <div class="sheet">
+        <div class="grab"></div>
+        <h2>Cobertura</h2>
+        <div class="hueco">Peaje 9 Norte · Puesto 1 · T 15:00–23:00</div>
+        <div class="steps">
+          <span class="step done">RET</span>
+          <span class="step now">REF</span>
+          <span class="step">ESC</span>
+          <span class="step">Ext+Adel</span>
+          <span class="step">Eventuales</span>
+          <span class="step">FT</span>
+        </div>
+        <p class="hint" style="margin-top:0">RET agotado (Díaz no contestó). Ahora refuerzo, más cerca primero.</p>
+        <div class="cand">
+          <div class="av">CS</div>
+          <div><div class="nm">Sosa, Carla</div><div class="ds">REF · Obrador · 6,4 km</div></div>
+          <button class="btn" type="button">Convocar</button>
+        </div>
+        <div class="cand">
+          <div class="av">PM</div>
+          <div><div class="nm">Medina, Pablo</div><div class="ds">REF · CET Río Ceballos · 11 km</div></div>
+          <button class="btn" type="button">Convocar</button>
+        </div>
+        <div class="cand">
+          <div class="av">LQ</div>
+          <div><div class="nm">Quiroga, Lara</div><div class="ds">REF · Río Primero · 28 km</div></div>
+          <button class="btn" type="button">Convocar</button>
+        </div>
+      </div>
+    </div></div>
+  </div>
+
+  <div class="col">
+    <p class="cap">5 · Sala y barra por rol</p>
+    <div class="phone"><div class="screen">
+      <div class="status"><span>15:42</span><span>5G</span></div>
+      <div class="top">
+        <div class="who">
+          <div class="emp">Sala</div>
+          <div class="sub">La misma de la web · origen celular</div>
+        </div>
+        <span class="pill manual">Manual</span>
+      </div>
+      <div class="scroll">
+        <div class="sala">
+          <b>Operador manual</b>
+          <p>A mando: Mauro (vos)</p>
+          <p style="font-weight:650;color:#475569">Apoyo: Ana Gómez</p>
+        </div>
+        <div class="ask">
+          <h3>Ana Gómez pide el mando</h3>
+          <p>Si aceptás, ella queda piloto y vos pasás a apoyo.</p>
+          <div class="row">
+            <button class="btn" type="button">Aceptar</button>
+            <button class="btn no" type="button">No</button>
+          </div>
+        </div>
+        <button class="wide" type="button">Pasar mando</button>
+        <button class="wide rose" type="button">Pasar a Auto</button>
+        <p class="hint" style="margin-top:12px">Barra inferior según el permiso del rol. Etapa 1 usa la del operador.</p>
+        <div class="roles">
+          <div class="role"><b>Operador</b><span>Operaciones · Alertas · Eventuales · Novedades · Más</span></div>
+          <div class="role"><b>Supervisión</b><span>Operaciones (solo ver) · Alertas · Más</span></div>
+          <div class="role"><b>Planificación</b><span>Plan · Alertas · Novedades · Más</span></div>
+          <div class="role"><b>RRHH</b><span>Novedades · Alertas · Más</span></div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a class="on" href="#op"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Operaciones</a>
+        <a href="#al"><span class="dot"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/></svg><i>4</i></span>Alertas</a>
+        <a href="#ev"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="9" cy="7" r="4"/><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/></svg>Eventuales</a>
+        <a href="#nv"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>Novedades</a>
+        <a href="#mas"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>Más</a>
+      </nav>
+    </div></div>
+  </div>
+
+</div>
+
+<section class="legend">
+  <article class="box">
+    <h2>Primera etapa</h2>
+    <ul>
+      <li><b>Operaciones</b> (este boceto) y <b>Alertas</b>, para quien tiene <b>OPERATIONS · read</b>. Convocar, Llegó?, salida y protocolo piden además create/update, igual que el panel.</li>
+      <li><b>Sala</b>: tomar mando, apoyo, pedir mando, pasar a Auto. Ya está en la web; en el celular es la misma sesión.</li>
+      <li><b>Eventuales</b> y <b>Novedades</b>: lista corta desde la barra (convocar / anotar), no el módulo de escritorio.</li>
+      <li><b>Planificación, RRHH y Supervisión</b> siguen en el escritorio. Supervisión, después, mira este mismo CC sin botones.</li>
+      <li>Guardia y eventual no entran acá: siguen en la app nativa y en /app.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Cómo se instala</h2>
+    <ul>
+      <li>Es la plataforma web, no una app de Play. En el celular se agrega al inicio y abre a pantalla completa.</li>
+      <li><b>Android (Chrome):</b> menú del navegador → Instalar app, o Agregar a pantalla principal.</li>
+      <li><b>iPhone (Safari):</b> Compartir → Agregar a inicio. El push web pide iOS 16.4 o posterior y que el ícono esté en el inicio.</li>
+      <li>Más, en la barra, guarda el acceso a la sala, la empresa y Cerrar sesión.</li>
+    </ul>
+  </article>
+  <article class="box">
+    <h2>Push web por rol</h2>
+    <ul>
+      <li><b>Operador:</b> ausencia, vacante, retención que se alarga, protocolo sin candidato, alta ARCA si la empresa lo tiene en Avisos.</li>
+      <li><b>Planificación:</b> vacante derivada al plan y marco por vencer.</li>
+      <li><b>RRHH:</b> novedad que pide ajuste (licencia, ausencia).</li>
+      <li><b>Supervisión:</b> las de operaciones, solo para mirar.</li>
+      <li>A quién le llega cada aviso de empresa se elige en Configuración → Empresas → Avisos. El canal <b>alertas_turno</b> del guardia no se mezcla con este.</li>
+    </ul>
+  </article>
+</section>
+</body>
+</html>

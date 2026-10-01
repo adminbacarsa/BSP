@@ -25,6 +25,8 @@ import {
   usePendingGuardDeviceCount,
 } from '@/hooks/usePendingGuardDeviceCount';
 import { TrainingProgressPanel } from '@/components/training/TrainingProgressPanel';
+import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 
 /** Título del header según el módulo (ruta) actual */
 function getTitleByPath(pathname: string): string | null {
@@ -345,6 +347,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
   const [isHovered, setIsHovered]     = useState(false);
   const [topbarVisible, setTopbarVisible] = useState(false);
   const router = useRouter();
+  const movil = useMovilMode();
   const isSupervisionApp = router.pathname.startsWith('/admin/supervision');
   const { canReadModule, user, isSuperAdmin, rolePermissions } = useAuth();
   const showAutoLabNav = canReadModule('PLANNING') && canAccessAutoLab(isSuperAdmin, rolePermissions);
@@ -910,7 +913,7 @@ function LayoutInner({ children }: { children: React.ReactNode }) {
       )}
 
       {/* ── BOTTOM NAVIGATION (mobile) ────────────────────────────────── */}
-      {!isSupervisionApp && <BottomNav />}
+      {!isSupervisionApp && (movil ? <MovilBottomNav /> : <BottomNav />)}
       <HoursLedgerJobBar />
     </>
   );

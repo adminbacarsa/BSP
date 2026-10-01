@@ -5,11 +5,11 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 
 export function useAdminFcm() {
-  const { user, isAdmin } = useAuth();
+  const { user, isAdmin, canReadModule } = useAuth();
   const { empresa, empresaId } = useEmpresa();
 
   useEffect(() => {
-    if (!user || !isAdmin) return;
+    if (!user || (!isAdmin && !canReadModule('OPERATIONS'))) return;
     if (empresa?.isTrainingEmpresa) return;
     if (typeof window === 'undefined' || !('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
@@ -37,6 +37,7 @@ export function useAdminFcm() {
           token,
           empresaId: empresaId || null,
           role: 'admin',
+          webRole: canReadModule('OPERATIONS') ? 'OPERADOR' : 'admin',
           platform: 'web',
           updatedAt: serverTimestamp(),
         }, { merge: true });
@@ -64,5 +65,5 @@ export function useAdminFcm() {
     })();
 
     return () => { cancelled = true; };
-  }, [user?.uid, isAdmin, empresa?.isTrainingEmpresa, empresaId]);
+  }, [user?.uid, isAdmin, canReadModule, empresa?.isTrainingEmpresa, empresaId]);
 }

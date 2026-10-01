@@ -4,6 +4,8 @@ import { useRouter } from 'next/router';
 import Head from 'next/head';
 import dynamic from 'next/dynamic';
 import DashboardLayout from '@/components/layout/DashboardLayout';
+import { OperacionMovil } from '@/components/movil/OperacionMovil';
+import { useMovilMode } from '@/lib/movil/useMovilMode';
 import { 
     Radio, Search, Layers, Maximize2, Minimize2, MonitorUp, Building2, Shield,
     Clock, Siren, CheckCircle, LogOut, AlertTriangle, ClipboardList, Printer,
@@ -1734,6 +1736,7 @@ export default function OperacionesPage() {
     const migracionCompleta = !!(empresa as any)?.migracionCompleta;
     const centroControlEnabled = empresa?.centroControlEnabled !== false;
     const logic = useOperacionesMonitor(assignedClientId);
+    const movil = useMovilMode();
     const session = useOperatorSession();
     const elapsed = useElapsedTime(session.mySession?.startTime || null);
 
@@ -3737,6 +3740,51 @@ export default function OperacionesPage() {
         }),
         [coverageByObjective],
     );
+
+    if (movil) {
+        const apoyo = session.copilotoSessions.map((item) => item.operatorName).filter(Boolean).join(', ');
+        return (
+            <>
+                <Head><title>COSP V1.0 | Operaciones</title></Head>
+                <OperacionMovil
+                    empresa={empresa?.name || empresaId || 'Empresa'}
+                    logic={{
+                        stats: logic.stats,
+                        setViewTab: (tab: string) => logic.setViewTab(tab as never),
+                        handleAction: (action: string, shiftId: string, payload?: unknown) => logic.handleAction(action, shiftId, payload),
+                    }}
+                    objectives={objectivesWithAlerts}
+                    modeLabel={ccManualOn ? 'Manual' : ccAutoOn ? 'Auto' : 'Demo'}
+                    isPilot={session.isPilot}
+                    pilotName={session.pilotSession?.operatorName}
+                    apoyo={apoyo}
+                    pendingPilotName={session.pendingPilotRequest?.operatorName}
+                    onTomarMando={handleStartManualGuardia}
+                    onPasarAuto={handleEndManualGuardia}
+                    onRequestPilot={() => session.requestPilot()}
+                    onAcceptPilot={() => session.acceptPilotRequest()}
+                    onRejectPilot={() => session.rejectPilotRequest()}
+                    onLlego={handleRevertAbsence}
+                    onProtocolo={openCoverageProtocol}
+                    onRetencion={(shift) => setManualRetentionData({ isOpen: true, shift })}
+                />
+                <CoverageSessionManager
+                    dock="sheet"
+                    sessions={coverageSessions}
+                    activeId={activeCoverageId}
+                    logic={logic}
+                    onActivate={setActiveCoverageId}
+                    onClose={closeCoverageSession}
+                    onUpdate={updateCoverageSession}
+                />
+                <ManualRetentionModal
+                    isOpen={manualRetentionData.isOpen}
+                    onClose={() => setManualRetentionData({ isOpen: false, shift: null })}
+                    shift={manualRetentionData.shift}
+                />
+            </>
+        );
+    }
 
     if (!(logic.isStable ?? logic.isReady)) return (
         <DashboardLayout>

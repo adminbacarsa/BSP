@@ -34,5 +34,13 @@
   "categories": [
     "business",
     "productivity"
+  ],
+  "shortcuts": [
+    {
+      "name": "Operaciones",
+      "short_name": "CC",
+      "url": "/admin/operaciones/",
+      "description": "Centro de Control"
+    }
   ]
 }
