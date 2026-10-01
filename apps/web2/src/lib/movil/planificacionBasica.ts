@@ -342,13 +342,28 @@ export type CambioLocal =
   | { kind: 'asignar'; franjaId: string; employeeId: string; employeeName: string; ft: boolean; bolsaCuil?: string }
   | { kind: 'horario'; franjaId: string; code: string; start: string; end: string; hours: number }
   | { kind: 'franco'; franjaId: string }
-  | { kind: 'permuta'; franjaId: string; otroId: string };
+  | { kind: 'permuta'; franjaId: string; otroId: string }
+  /** Hueco del SLA sin doc (`slot:*`): el turno nace con el guardia. */
+  | { kind: 'nuevo'; franja: TurnoMovil; employeeId: string; employeeName: string; ft: boolean; bolsaCuil?: string }
+  | { kind: 'borrar'; franjaId: string };
 
 export function aplicarCambios(turnos: TurnoMovil[], cambios: CambioLocal[]): TurnoMovil[] {
-  const next = turnos.map((t) => ({ ...t }));
+  let next = turnos.map((t) => ({ ...t }));
   const byId = (id: string) => next.find((t) => t.id === id);
   for (const cambio of cambios) {
-    if (cambio.kind === 'asignar') {
+    if (cambio.kind === 'nuevo') {
+      next.push({
+        ...cambio.franja,
+        employeeId: cambio.employeeId,
+        employeeName: cambio.employeeName,
+        vacante: false,
+        licencia: false,
+        franco: false,
+        coveredBy: '',
+      });
+    } else if (cambio.kind === 'borrar') {
+      next = next.filter((t) => t.id !== cambio.franjaId);
+    } else if (cambio.kind === 'asignar') {
       const franja = byId(cambio.franjaId);
       if (!franja) continue;
       const banda = bandaParaCubrir({ ...franja, kind: franja.vacante ? 'vacante' : franja.licencia ? 'licencia' : 'ok' });

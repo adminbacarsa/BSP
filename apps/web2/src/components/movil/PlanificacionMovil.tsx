@@ -1,22 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import Head from 'next/head';
 import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { httpsCallable } from 'firebase/functions';
-import { Timestamp, addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc, updateDoc, type QueryDocumentSnapshot } from 'firebase/firestore';
+import { onSnapshot, type QueryDocumentSnapshot } from 'firebase/firestore';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { CambioPuntual, CandidatosHueco, PlanificacionMovilView, type EventualMovil } from '@/components/movil/PlanificacionMovilView';
+import {
+  BarraPublicar, CeldaSheetBody, SelectorObjetivoSheetBody, SemanaEncabezado, SemanaGrilla, type PanelPlanificacion,
+} from '@/components/movil/PlanificacionSemanaView';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { useCronogramaSinPublicar } from '@/hooks/useCronogramaSinPublicar';
-import { db, functions } from '@/lib/firebase';
+import { functions } from '@/lib/firebase';
 import { getDateKeyInTimezone } from '@/lib/crm/crmDateUtils';
 import { runCallableOnline, movilCallableGate } from '@/lib/movil/callableOnline';
-import { linkPublicar } from '@/lib/movil/cronogramaAlertas';
-import { writeMovilChoice } from '@/lib/movil/useMovilMode';
 import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
 import {
   aplicarCambios,
@@ -28,26 +29,65 @@ import {
   franjasDe,
   horasMesEmpleado,
   hoyArgentina,
-  instantesJornada,
   proximosDias,
   turnoMovilDesdeDoc,
   type CambioLocal,
   type EmpleadoMovil,
+  type FranjaMovil,
   type TabCandidato,
   type TurnoMovil,
 } from '@/lib/movil/planificacionBasica';
+import { escribirLote, publicarMes } from '@/lib/movil/planificacionEscritura';
+import {
+  celdasSemana,
+  clientesParaSelector,
+  estructuraSlaDelMes,
+  esSlotSintetico,
+  filasSemana,
+  guardarSeleccion,
+  huecoDeCelda,
+  huecosSemana,
+  leerSeleccion,
+  licenciasSemana,
+  lunesDe,
+  mesDeSemana,
+  mesesDeSemana,
+  semanaAnterior,
+  semanaDe,
+  semanaSiguiente,
+  type CeldaSemana,
+  type ClienteCatalogo,
+  type SeleccionPlan,
+} from '@/lib/movil/planificacionSemana';
 import { canAssignFrancoTrabajado } from '@/lib/planificacion/francoTrabajadoAccess';
 import { buildPlanningMonthTurnosQuery } from '@/lib/planificacion/loadPlanningMonthShifts';
 import { ingestPlanningTurnosSnapshot } from '@/lib/planificacion/planningTurnosIngest';
-import { belongsToEmpresaView, empresaCollectionQuery, fetchPlanificacionPublishStatus, stampEmpresaId } from '@/lib/multiempresa';
+import { belongsToEmpresaView, empresaCollectionQuery, fetchPlanificacionPublishStatus } from '@/lib/multiempresa';
+import type { SlaPlanningRow } from '@/lib/slaPlanningMatch';
 import { shouldScopeQueriesToEmpresa } from '@/lib/tenantScope';
 import { asignarEventualPlanificacion, canConvocarEventuales, eventualErrorMessage } from '@/services/eventualesPlanificacionService';
 
 type ObjGeo = { id: string; name: string; clientId: string; clientName: string; lat: number | null; lng: number | null };
+type Sheet =
+  | { tipo: 'selector' }
+  | { tipo: 'celda'; filaId: string; fecha: string }
+  | { tipo: 'cubrir'; franja: FranjaMovil; reemplazo: boolean }
+  | { tipo: 'cambiar'; franjaId: string };
+
+const MESES_LARGO = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
 
 function num(value: unknown): number | null {
   const n = Number(value);
   return Number.isFinite(n) && n !== 0 ? n : null;
+}
+
+function primero(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] || '' : value || '';
+}
+
+function mesLabelDe(ym: string): string {
+  const [, m] = ym.split('-').map(Number);
+  return MESES_LARGO[m - 1] || ym;
 }
 
 export function PlanificacionMovil() {
@@ -60,24 +100,31 @@ export function PlanificacionMovil() {
   const [turnos, setTurnos] = useState<TurnoMovil[]>([]);
   const [empleados, setEmpleados] = useState<EmpleadoMovil[]>([]);
   const [objetivos, setObjetivos] = useState<ObjGeo[]>([]);
-  const [publicado, setPublicado] = useState<Record<string, boolean>>({});
+  const [clientesCat, setClientesCat] = useState<ClienteCatalogo[]>([]);
+  const [slas, setSlas] = useState<SlaPlanningRow[]>([]);
+  const [publicado, setPublicado] = useState<Record<string, { publishedAt: boolean; publishedBy: string | null }>>({});
   const [cambios, setCambios] = useState<CambioLocal[]>([]);
   const [pending, setPending] = useState<string | null>(null);
   const [dia, setDia] = useState(() => hoyArgentina());
-  const [sheet, setSheet] = useState<{ tipo: 'cubrir' | 'cambiar'; franjaId: string } | null>(null);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
   const [tab, setTab] = useState<TabCandidato | 'eventuales'>('plantel');
   const [elegido, setElegido] = useState<string | null>(null);
   const [codigo, setCodigo] = useState<string | null>(null);
   const [companeroId, setCompaneroId] = useState<string | null>(null);
   const [eventuales, setEventuales] = useState<EventualMovil[]>([]);
   const [hoy] = useState(() => hoyArgentina());
+  const [lunes, setLunes] = useState(() => lunesDe(hoyArgentina()));
+  const [seleccion, setSeleccion] = useState<SeleccionPlan>(null);
+  const [seleccionLista, setSeleccionLista] = useState(false);
   const dias = useMemo(() => proximosDias(hoy, 4), [hoy]);
 
+  const panel: PanelPlanificacion = primero(router.query.panel as string | string[] | undefined) === 'dias' ? 'dias' : 'semana';
   const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
   const scopeEmpresa = shouldScopeQueriesToEmpresa(empresaId, migracionCompleta);
   const puedeLeer = isSuperAdmin || canReadModule('PLANNING');
   const puedeEditar = isSuperAdmin || (rolePermissions.PLANNING || []).some((a) => a === 'create' || a === 'update');
   const puedeCorregir = isSuperAdmin || (rolePermissions.PLANNING || []).includes('correct');
+  const puedePublicarMes = isSuperAdmin || (rolePermissions.PLANNING || []).includes('publish');
   const puedeFt = canAssignFrancoTrabajado(isSuperAdmin, rolePermissions);
   const puedeEventuales = canConvocarEventuales(isSuperAdmin, rolePermissions);
   const actorName = user?.displayName || user?.email || 'Planificación celular';
@@ -88,11 +135,28 @@ export function PlanificacionMovil() {
     setPending(labels[0] || null);
   }), []);
 
+  // Deep link (`?objectiveId=&clientId=&year=&month=`, el mismo de la alerta de cronograma) o el último objetivo elegido.
+  useEffect(() => {
+    if (!empresaId || !router.isReady) return;
+    const objectiveId = primero(router.query.objectiveId as string | string[] | undefined);
+    const clientId = primero(router.query.clientId as string | string[] | undefined);
+    const year = Number(primero(router.query.year as string | string[] | undefined));
+    const month = Number(primero(router.query.month as string | string[] | undefined));
+    if (objectiveId) {
+      setSeleccion({ clientId, objectiveId });
+      if (year > 2000 && month >= 1 && month <= 12) setLunes(lunesDe(`${year}-${String(month).padStart(2, '0')}-01`));
+    } else {
+      setSeleccion(leerSeleccion(empresaId));
+    }
+    setSeleccionLista(true);
+  }, [empresaId, router.isReady, router.query.objectiveId, router.query.clientId, router.query.year, router.query.month]);
+
+  const mesesCarga = useMemo(() => [...new Set([...dias.map((f) => f.slice(0, 7)), ...mesesDeSemana(lunes)])].sort(), [dias, lunes]);
+
   useEffect(() => {
     if (!empresaId || !puedeLeer) return;
-    const months = [...new Set(dias.map((fecha) => fecha.slice(0, 7)))];
     const bags = new Map<string, TurnoMovil[]>();
-    const unsubs = months.map((ym) => {
+    const unsubs = mesesCarga.map((ym) => {
       const [year, month] = ym.split('-').map(Number);
       const q = buildPlanningMonthTurnosQuery({ empresaId, scopeEmpresa, year, month });
       return onSnapshot(q, (snap) => {
@@ -115,7 +179,7 @@ export function PlanificacionMovil() {
       });
     });
     return () => unsubs.forEach((unsub) => unsub());
-  }, [empresaId, scopeEmpresa, migracionCompleta, puedeLeer, dias]);
+  }, [empresaId, scopeEmpresa, migracionCompleta, puedeLeer, mesesCarga]);
 
   useEffect(() => {
     if (!empresaId || !puedeLeer) return;
@@ -145,75 +209,121 @@ export function PlanificacionMovil() {
     const q = empresaCollectionQuery('clients', empresaId, scopeEmpresa);
     return onSnapshot(q, (snap) => {
       const list: ObjGeo[] = [];
+      const cat: ClienteCatalogo[] = [];
       snap.forEach((item) => {
         const data = item.data() as Record<string, unknown>;
         if (!belongsToEmpresaView(data, empresaId, migracionCompleta)) return;
         if (String(data.status || 'ACTIVE').toUpperCase() === 'INACTIVE') return;
         const objetivosCliente = Array.isArray(data.objetivos) ? data.objetivos as Record<string, unknown>[] : [];
+        const clientName = String(data.name || data.razonSocial || '');
+        const objs: ClienteCatalogo['objetivos'] = [];
         for (const obj of objetivosCliente) {
           const id = String(obj.id || '');
           if (!id) continue;
-          list.push({
-            id,
-            name: String(obj.name || obj.nombre || id),
-            clientId: item.id,
-            clientName: String(data.name || data.razonSocial || ''),
-            lat: num(obj.lat ?? obj.latitude),
-            lng: num(obj.lng ?? obj.longitude),
-          });
+          if (String(obj.status || 'ACTIVE').toUpperCase() === 'INACTIVE') continue;
+          const name = String(obj.name || obj.nombre || id);
+          objs.push({ id, name, objectiveId: typeof obj.objectiveId === 'string' ? obj.objectiveId : undefined });
+          list.push({ id, name, clientId: item.id, clientName, lat: num(obj.lat ?? obj.latitude), lng: num(obj.lng ?? obj.longitude) });
         }
+        cat.push({ id: item.id, name: clientName, objetivos: objs });
       });
       setObjetivos(list);
+      setClientesCat(cat);
     });
   }, [empresaId, scopeEmpresa, migracionCompleta, puedeLeer]);
 
+  useEffect(() => {
+    if (!empresaId || !puedeLeer) return;
+    const q = empresaCollectionQuery('servicios_sla', empresaId, scopeEmpresa);
+    return onSnapshot(q, (snap) => {
+      setSlas(snap.docs.map((d) => ({ id: d.id, ...(d.data() as Record<string, unknown>) }) as SlaPlanningRow));
+    });
+  }, [empresaId, scopeEmpresa, puedeLeer]);
+
   const visibles = useMemo(() => aplicarCambios(turnos, cambios), [turnos, cambios]);
   const franjas = useMemo(() => franjasDe(visibles, dias), [visibles, dias]);
-  const franjaAbierta = sheet ? franjas.find((f) => f.id === sheet.franjaId) || null : null;
-  const objetivo = objetivos.find((o) => o.id === franjaAbierta?.objectiveId);
-  const mesesPublicados = useMemo(() => {
-    const keys = new Set(franjas.map((f) => `${f.objectiveId}|${f.date.slice(0, 7)}`));
-    if (keys.size === 0) return false;
-    return [...keys].every((key) => publicado[key] === true);
-  }, [franjas, publicado]);
+
+  const diasSemana = useMemo(() => semanaDe(lunes), [lunes]);
+  const ymSemana = mesDeSemana(lunes);
+  const objetivoSel = objetivos.find((o) => o.id === seleccion?.objectiveId) || null;
+  const clienteSel = clientesCat.find((c) => c.id === (seleccion?.clientId || objetivoSel?.clientId)) || null;
+  const estructura = useMemo(() => {
+    if (!objetivoSel) return null;
+    return estructuraSlaDelMes({
+      slas, empresaId, scopeEmpresa, clientes: clientesCat, clientId: clienteSel?.id || objetivoSel.clientId, objectiveId: objetivoSel.id, ym: ymSemana,
+    });
+  }, [slas, empresaId, scopeEmpresa, clientesCat, clienteSel, objetivoSel, ymSemana]);
+  const filas = useMemo(() => (estructura ? filasSemana(estructura.estructura) : []), [estructura]);
+  const celdas = useMemo(() => (objetivoSel ? celdasSemana(filas, diasSemana, visibles, objetivoSel.id) : []), [filas, diasSemana, visibles, objetivoSel]);
+  const licencias = useMemo(() => (objetivoSel ? licenciasSemana(diasSemana, visibles, objetivoSel.id) : []), [diasSemana, visibles, objetivoSel]);
+  const huecos = useMemo(() => huecosSemana(celdas, licencias), [celdas, licencias]);
+  const keyMes = objetivoSel ? `${objetivoSel.id}|${ymSemana}` : null;
+  const estadoMes = keyMes ? publicado[keyMes] ?? null : null;
 
   useEffect(() => {
-    const keys = [...new Set(turnos.map((t) => `${t.objectiveId}|${t.date.slice(0, 7)}`))].filter((key) => key.split('|')[0]);
-    if (!empresaId || keys.length === 0) return;
+    const keys = new Set(turnos.map((t) => `${t.objectiveId}|${t.date.slice(0, 7)}`).filter((key) => key.split('|')[0]));
+    if (keyMes) keys.add(keyMes);
+    if (!empresaId || keys.size === 0) return;
     let alive = true;
-    void Promise.all(keys.map(async (key) => {
+    void Promise.all([...keys].map(async (key) => {
       const [objectiveId, ym] = key.split('|');
       const [year, month] = ym.split('-').map(Number);
       const status = await fetchPlanificacionPublishStatus(empresaId, objectiveId, year, month);
-      return [key, Boolean(status?.publishedAt)] as const;
+      return [key, { publishedAt: Boolean(status?.publishedAt), publishedBy: status?.publishedBy || null }] as const;
     })).then((rows) => {
       if (!alive) return;
       setPublicado(Object.fromEntries(rows));
     }).catch(() => {});
     return () => { alive = false; };
-  }, [empresaId, turnos]);
+  }, [empresaId, turnos, keyMes]);
+
+  const mesesPublicados = useMemo(() => {
+    const keys = new Set(franjas.map((f) => `${f.objectiveId}|${f.date.slice(0, 7)}`));
+    if (keys.size === 0) return false;
+    return [...keys].every((key) => publicado[key]?.publishedAt === true);
+  }, [franjas, publicado]);
+
+  const celdaAbierta: CeldaSemana | null = sheet?.tipo === 'celda'
+    ? celdas.flat().find((c) => c.fila.id === sheet.filaId && c.fecha === sheet.fecha) || null
+    : null;
+  const franjaAbierta: FranjaMovil | null = useMemo(() => {
+    if (sheet?.tipo === 'cubrir') {
+      const vivo = visibles.find((t) => t.id === sheet.franja.id);
+      return vivo ? { ...vivo, kind: sheet.reemplazo ? 'vacante' : vivo.vacante ? 'vacante' : vivo.licencia ? 'licencia' : 'ok' } : sheet.franja;
+    }
+    if (sheet?.tipo === 'cambiar') {
+      const vivo = visibles.find((t) => t.id === sheet.franjaId);
+      return vivo ? { ...vivo, kind: vivo.vacante ? 'vacante' : vivo.licencia ? 'licencia' : 'ok' } : null;
+    }
+    return null;
+  }, [sheet, visibles]);
+  const objetivo = objetivos.find((o) => o.id === franjaAbierta?.objectiveId);
 
   const candidatos = useMemo(() => {
     if (!franjaAbierta || franjaAbierta.kind === 'ok') return [];
     const ym = franjaAbierta.date.slice(0, 7);
+    // Al reemplazar, el titular actual no compite consigo mismo.
+    const base = sheet?.tipo === 'cubrir' && sheet.reemplazo ? visibles.filter((t) => t.id !== franjaAbierta.id) : visibles;
     return candidatosParaHueco({
       hueco: franjaAbierta,
-      turnos: visibles,
+      turnos: base,
       objLat: objetivo?.lat,
       objLng: objetivo?.lng,
-      empleados: empleados.map((emp) => ({ ...emp, monthHours: horasMesEmpleado(emp.id, ym, visibles) })),
-    });
-  }, [franjaAbierta, visibles, empleados, objetivo]);
+      empleados: empleados.map((emp) => ({ ...emp, monthHours: horasMesEmpleado(emp.id, ym, base) })),
+    }).filter((c) => !(sheet?.tipo === 'cubrir' && sheet.reemplazo && c.employeeId === franjaAbierta.employeeId));
+  }, [franjaAbierta, visibles, empleados, objetivo, sheet]);
 
   const companeros = franjaAbierta
-    ? franjas.filter((f) => f.date === franjaAbierta.date && f.kind === 'ok' && f.id !== franjaAbierta.id && !f.franco)
+    ? visibles.filter((f) => f.date === franjaAbierta.date && f.objectiveId === franjaAbierta.objectiveId && !f.vacante && !f.licencia && !f.franco && f.id !== franjaAbierta.id)
     : [];
   const bandaElegida = codigo ? bandaDe(codigo) : null;
   const avisoHorario = franjaAbierta && bandaElegida
     ? conflictosDeHorario(franjaAbierta, codigo!, bandaElegida.start, bandaElegida.end, bandaElegida.hours, visibles).reason
     : null;
   const companero = companeros.find((c) => c.id === companeroId) || null;
-  const avisoPermuta = franjaAbierta && companero ? conflictosDePermuta(franjaAbierta, companero, visibles).reason : null;
+  const avisoPermuta = franjaAbierta && companero
+    ? conflictosDePermuta(franjaAbierta, companero, visibles).reason
+    : null;
   const aviso = avisoHorario || avisoPermuta;
 
   const cerrar = () => {
@@ -234,11 +344,24 @@ export function PlanificacionMovil() {
   const stage = (cambio: CambioLocal) => {
     setCambios((prev) => [...prev, cambio]);
     cerrar();
-    toast.message('Quedó para publicar');
+    toast.message(estadoMes?.publishedAt ? 'Quedó para publicar la corrección' : 'Quedó en el borrador');
   };
+
+  const elegirObjetivo = useCallback((clientId: string, objectiveId: string) => {
+    const sel = { clientId, objectiveId };
+    setSeleccion(sel);
+    guardarSeleccion(empresaId, sel);
+    setSheet(null);
+    if (router.query.objectiveId) void router.replace({ pathname: router.pathname, query: {} }, undefined, { shallow: true });
+  }, [empresaId, router]);
 
   const confirmarCandidato = async () => {
     if (!franjaAbierta || !elegido || !exigirEdicion()) return;
+    const sintetico = esSlotSintetico(franjaAbierta.id);
+    const emitir = (employeeId: string, employeeName: string, ft: boolean, bolsaCuil?: string) => {
+      if (sintetico) stage({ kind: 'nuevo', franja: franjaAbierta, employeeId, employeeName, ft, bolsaCuil });
+      else stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId, employeeName, ft, bolsaCuil });
+    };
     if (tab === 'eventuales') {
       const ev = eventuales.find((row) => row.cuil === elegido);
       const banda = bandaParaCubrir(franjaAbierta);
@@ -255,7 +378,7 @@ export function PlanificacionMovil() {
           objetivoGeo: objetivo?.lat != null && objetivo.lng != null ? { lat: objetivo.lat, lng: objetivo.lng } : null,
           turnos: [{ fecha: franjaAbierta.date, horaInicio: banda.start, horaFin: banda.end, horas: banda.hours, code: banda.code, positionName: franjaAbierta.positionName }],
         }));
-        stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId: res.employeeId, employeeName: res.nombre || ev?.nombre || 'Eventual', ft: false, bolsaCuil: elegido });
+        emitir(res.employeeId, res.nombre || ev?.nombre || 'Eventual', false, elegido);
       } catch (error) {
         toast.error(eventualErrorMessage(error, 'La bolsa requiere conexión.'));
       }
@@ -267,7 +390,7 @@ export function PlanificacionMovil() {
       toast.error('Falta el permiso de franco trabajado.');
       return;
     }
-    stage({ kind: 'asignar', franjaId: franjaAbierta.id, employeeId: cand.employeeId, employeeName: cand.name, ft: cand.tab === 'ft' });
+    emitir(cand.employeeId, cand.name, cand.tab === 'ft');
   };
 
   useEffect(() => {
@@ -290,44 +413,75 @@ export function PlanificacionMovil() {
     return () => { alive = false; };
   }, [tab, franjaAbierta, puedeEventuales, empresaId, objetivo]);
 
-  const publicar = async () => {
-    if (!puedeCorregir) {
-      toast.error('Falta el permiso para publicar la corrección.');
-      return;
-    }
+  /** Guarda el lote: borrador si el mes no está publicado; corrección (`draft:false`, con aviso al guardia) si lo está. */
+  const guardarCambios = async () => {
+    if (cambios.length === 0) return;
     const afectados = new Set<string>();
     for (const cambio of cambios) {
-      const id = cambio.kind === 'permuta' ? cambio.franjaId : cambio.franjaId;
-      const base = turnos.find((t) => t.id === id);
-      if (base?.objectiveId) afectados.add(`${base.objectiveId}|${base.date.slice(0, 7)}`);
+      const franja = cambio.kind === 'nuevo' ? cambio.franja : turnos.find((t) => t.id === cambio.franjaId) || visibles.find((t) => t.id === cambio.franjaId);
+      if (franja?.objectiveId) afectados.add(`${franja.objectiveId}|${franja.date.slice(0, 7)}`);
     }
+    let algunoPublicado = false;
+    let algunoBorrador = false;
     for (const key of afectados) {
       const [objectiveId, ym] = key.split('|');
       const [year, month] = ym.split('-').map(Number);
       const status = await fetchPlanificacionPublishStatus(empresaId, objectiveId, year, month);
-      if (!status?.publishedAt) {
-        toast.error('Ese mes no está publicado. La primera publicación se hace en el escritorio.');
-        return;
-      }
+      if (status?.publishedAt) algunoPublicado = true;
+      else algunoBorrador = true;
+    }
+    if (algunoPublicado && !puedeCorregir) {
+      toast.error('Falta el permiso para publicar la corrección.');
+      return;
+    }
+    if (algunoBorrador && !puedeEditar) {
+      toast.error('No tenés permiso para modificar la planificación.');
+      return;
     }
     const lote = cambios;
     const base = turnos;
-    const result = await enqueueFirestoreWrite(`Corrección de ${lote.length} cambio${lote.length === 1 ? '' : 's'}`, async () => {
-      let actuales = base.map((t) => ({ ...t }));
-      const creados = new Map<string, string>();
-      for (const cambio of lote) {
-        actuales = aplicarCambios(actuales, [cambio]);
-        await escribirCambio(cambio, base, actuales, empresaId, actorName, creados);
-      }
-    });
+    const borrador = !algunoPublicado;
+    const label = borrador ? `Borrador · ${lote.length} cambio${lote.length === 1 ? '' : 's'}` : `Corrección de ${lote.length} cambio${lote.length === 1 ? '' : 's'}`;
+    const result = await enqueueFirestoreWrite(label, () => escribirLote(lote, base, { empresaId, actorName, borrador }));
     setCambios([]);
     if (result === 'queued') toast.message('Pendiente de enviar');
+    else if (borrador) toast.success('Borrador guardado. Publicá el mes para avisar a los guardias.');
     else toast.success('Corrección publicada. El guardia recibe el aviso.');
   };
 
+  const publicarElMes = async () => {
+    if (!objetivoSel || !puedePublicarMes) {
+      toast.error('Falta el permiso para publicar el cronograma.');
+      return;
+    }
+    if (cambios.length > 0) {
+      toast.error('Guardá primero los cambios pendientes.');
+      return;
+    }
+    const ym = ymSemana;
+    const result = await enqueueFirestoreWrite(`Publicar ${mesLabelDe(ym)} · ${objetivoSel.name}`, async () => {
+      await publicarMes({ empresaId, objectiveId: objetivoSel.id, objectiveName: objetivoSel.name, clientId: objetivoSel.clientId, ym, migracionCompleta });
+    });
+    if (result === 'queued') {
+      toast.message('Pendiente de enviar');
+      return;
+    }
+    setPublicado((prev) => ({ ...prev, [`${objetivoSel.id}|${ym}`]: { publishedAt: true, publishedBy: actorName } }));
+    toast.success(`Cronograma de ${mesLabelDe(ym)} publicado. Los guardias reciben el aviso.`);
+  };
+
+  const irAPanel = (p: PanelPlanificacion) => {
+    const query = p === 'dias' ? { panel: 'dias' } : {};
+    void router.replace({ pathname: router.pathname, query }, undefined, { shallow: true });
+  };
+
   if (!puedeLeer) {
-    return <p className="p-6 text-sm font-bold text-slate-600">No tenés permiso de planificación.</p>;
+    return <p className="p-6 text-sm font-medium text-slate-600">No tenés permiso de planificación.</p>;
   }
+
+  const sinEstructura = objetivoSel && estructura && !estructura.conSla
+    ? 'Sin contrato vigente en este mes: se muestra la estructura por defecto (M/T/N).'
+    : null;
 
   return (
     <>
@@ -337,11 +491,50 @@ export function PlanificacionMovil() {
         onEmpresa={empresaSheet.onEmpresa}
         online={online}
         pendingLabel={pending}
+        panel={panel}
+        onPanel={irAPanel}
+        semana={(
+          <>
+            <SemanaEncabezado
+              clienteNombre={clienteSel?.name || objetivoSel?.clientName || null}
+              objetivoNombre={objetivoSel?.name || (seleccionLista && seleccion && !objetivoSel ? 'Objetivo no disponible' : null)}
+              onSelector={() => setSheet({ tipo: 'selector' })}
+              publicado={estadoMes ? estadoMes.publishedAt : null}
+              publicadoPor={estadoMes?.publishedBy}
+              huecos={huecos}
+              cambios={cambios.length}
+              mesLabel={mesLabelDe(ymSemana)}
+            />
+            {objetivoSel ? (
+              <div className="mt-3">
+                <SemanaGrilla
+                  lunes={lunes}
+                  dias={diasSemana}
+                  hoy={hoy}
+                  filas={filas}
+                  celdas={celdas}
+                  licencias={licencias}
+                  sinEstructura={sinEstructura}
+                  onAnterior={() => setLunes((l) => semanaAnterior(l))}
+                  onSiguiente={() => setLunes((l) => semanaSiguiente(l))}
+                  onCelda={(celda) => setSheet({ tipo: 'celda', filaId: celda.fila.id, fecha: celda.fecha })}
+                  onLicencia={(turno) => {
+                    if (!exigirEdicion()) return;
+                    if (turno.coveredBy) return;
+                    setSheet({ tipo: 'cubrir', franja: { ...turno, kind: 'licencia' }, reemplazo: false });
+                  }}
+                />
+              </div>
+            ) : (
+              <p className="px-3 pt-6 text-center text-[13px] font-medium text-slate-400">{seleccionLista ? 'Elegí un objetivo para ver la semana.' : 'Cargando…'}</p>
+            )}
+          </>
+        )}
         dias={dias}
         dia={dias.includes(dia) ? dia : dias[0]}
         franjas={franjas}
-        porPublicar={cambios.length}
-        puedePublicar={puedeCorregir && mesesPublicados}
+        porPublicar={panel === 'dias' ? cambios.length : 0}
+        puedePublicar={mesesPublicados ? puedeCorregir : puedeEditar}
         mesPublicado={mesesPublicados || !readyTurnos}
         cronograma={cronograma.gruposPlanificacion}
         onCronogramaVista={(ids) => {
@@ -350,16 +543,42 @@ export function PlanificacionMovil() {
             .catch(() => toast.error('No se pudo marcar como vista'));
         }}
         onCronogramaPublicar={(item) => {
-          // La primera publicación del mes se hace en el planificador completo (escritorio).
-          writeMovilChoice('0');
-          void router.push(linkPublicar(item));
+          // Abre ese objetivo y mes en la semana; desde ahí se publica con el permiso `publish`.
+          const obj = objetivos.find((o) => o.id === item.objectiveId);
+          elegirObjetivo(item.clientId || obj?.clientId || '', item.objectiveId);
+          setLunes(lunesDe(`${item.year}-${String(item.month).padStart(2, '0')}-01`));
+          if (panel !== 'semana') irAPanel('semana');
         }}
         onDia={setDia}
-        onHueco={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franjaId: franja.id }); }}
+        onHueco={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja, reemplazo: false }); }}
         onAsignado={(franja) => { if (exigirEdicion()) setSheet({ tipo: 'cambiar', franjaId: franja.id }); }}
-        onPublicar={() => { void publicar(); }}
+        onPublicar={() => { void guardarCambios(); }}
       />
-      <BottomSheet open={sheet?.tipo === 'cubrir'} title={franjaAbierta ? `Cubrir ${franjaAbierta.code} ${franjaAbierta.start}` : 'Cubrir'} onClose={cerrar}>
+      {panel === 'semana' && objetivoSel && (
+        <BarraPublicar
+          cambios={cambios.length}
+          publicado={estadoMes ? estadoMes.publishedAt : null}
+          puedeEditar={puedeEditar}
+          puedeCorregir={puedeCorregir}
+          puedePublicar={puedePublicarMes}
+          mesLabel={mesLabelDe(ymSemana)}
+          onGuardar={() => { void guardarCambios(); }}
+          onPublicarMes={() => { void publicarElMes(); }}
+        />
+      )}
+      <BottomSheet open={sheet?.tipo === 'selector'} title="Cliente y objetivo" onClose={cerrar}>
+        <SelectorObjetivoSheetBody clientes={clientesParaSelector(clientesCat)} seleccion={seleccion} onElegir={elegirObjetivo} />
+      </BottomSheet>
+      <BottomSheet open={sheet?.tipo === 'celda'} title={celdaAbierta ? `${celdaAbierta.fila.code} · ${celdaAbierta.fecha.slice(8, 10)}/${celdaAbierta.fecha.slice(5, 7)}` : 'Celda'} onClose={cerrar}>
+        {celdaAbierta && objetivoSel && (
+          <CeldaSheetBody
+            celda={celdaAbierta}
+            onGuardia={(turno) => { if (exigirEdicion()) setSheet({ tipo: 'cambiar', franjaId: turno.id }); }}
+            onCubrir={() => { if (exigirEdicion()) setSheet({ tipo: 'cubrir', franja: huecoDeCelda(celdaAbierta, objetivoSel), reemplazo: false }); }}
+          />
+        )}
+      </BottomSheet>
+      <BottomSheet open={sheet?.tipo === 'cubrir'} title={franjaAbierta ? `${sheet?.tipo === 'cubrir' && sheet.reemplazo ? 'Cambiar guardia' : 'Cubrir'} ${franjaAbierta.code} ${franjaAbierta.start}` : 'Cubrir'} onClose={cerrar}>
         {franjaAbierta && (
           <CandidatosHueco
             tab={tab}
@@ -383,6 +602,10 @@ export function PlanificacionMovil() {
           onCompanero={setCompaneroId}
           aviso={aviso}
           bloqueado={Boolean(aviso)}
+          onCambiarGuardia={() => {
+            if (!franjaAbierta || !exigirEdicion()) return;
+            setSheet({ tipo: 'cubrir', franja: { ...franjaAbierta, kind: 'vacante' }, reemplazo: true });
+          }}
           onHorario={() => {
             if (!franjaAbierta || !bandaElegida || !codigo || avisoHorario || !exigirEdicion()) return;
             stage({ kind: 'horario', franjaId: franjaAbierta.id, code: codigo, start: bandaElegida.start, end: bandaElegida.end, hours: bandaElegida.hours });
@@ -395,140 +618,14 @@ export function PlanificacionMovil() {
             if (!franjaAbierta || !exigirEdicion()) return;
             stage({ kind: 'franco', franjaId: franjaAbierta.id });
           }}
+          onBorrar={() => {
+            if (!franjaAbierta || !exigirEdicion()) return;
+            stage({ kind: 'borrar', franjaId: franjaAbierta.id });
+          }}
         />
       </BottomSheet>
       {empresaSheet.sheet}
       <MovilBottomNav />
     </>
   );
-}
-
-async function escribirCambio(cambio: CambioLocal, originales: TurnoMovil[], aplicados: TurnoMovil[], empresaId: string, actorName: string, creados: Map<string, string>) {
-  const origen = originales.find((t) => t.id === cambio.franjaId) || aplicados.find((t) => t.id === cambio.franjaId);
-  if (!origen) return;
-  const idReal = creados.get(cambio.franjaId);
-  if (cambio.kind === 'asignar') {
-    const banda = bandaParaCubrir({ ...origen, kind: origen.vacante ? 'vacante' : origen.licencia ? 'licencia' : 'ok' });
-    if (origen.licencia) {
-      await updateDoc(doc(db, 'turnos', origen.id), stampEmpresaId({ coveredBy: cambio.employeeName, draft: false, actorName }, empresaId));
-      await addDoc(collection(db, 'turnos'), stampEmpresaId(payloadTurno({
-        ...origen,
-        employeeId: cambio.employeeId,
-        employeeName: cambio.employeeName,
-        code: banda.code,
-        start: banda.start,
-        end: banda.end,
-        hours: banda.hours,
-        franco: false,
-        ft: cambio.ft,
-        bolsaCuil: cambio.bolsaCuil,
-        actorName,
-        comments: 'Cobertura de licencia desde el celular',
-      }), empresaId));
-      return;
-    }
-    const inst = instantesJornada(origen.date, banda.start, banda.end, false);
-    const destino = idReal || origen.id;
-    if (idReal || originales.some((t) => t.id === origen.id)) {
-    await updateDoc(doc(db, 'turnos', destino), stampEmpresaId({
-      employeeId: cambio.employeeId,
-      employeeName: cambio.employeeName,
-      code: banda.code,
-      type: banda.code,
-      startTime: Timestamp.fromDate(inst.start),
-      endTime: Timestamp.fromDate(inst.end),
-      isUnassigned: false,
-      isFrancoTrabajado: cambio.ft,
-      draft: false,
-      esEventual: Boolean(cambio.bolsaCuil),
-      bolsaCuil: cambio.bolsaCuil || null,
-      actorName,
-      comments: 'Asignación desde el celular',
-      updatedAt: serverTimestamp(),
-    }, empresaId));
-    return;
-    }
-    return;
-  }
-  if (cambio.kind === 'horario') {
-    const inst = instantesJornada(origen.date, cambio.start, cambio.end, false);
-    await updateDoc(doc(db, 'turnos', origen.id), stampEmpresaId({
-      code: cambio.code,
-      type: cambio.code,
-      startTime: Timestamp.fromDate(inst.start),
-      endTime: Timestamp.fromDate(inst.end),
-      hours: cambio.hours,
-      isFranco: false,
-      draft: false,
-      actorName,
-      comments: 'Cambio de horario desde el celular',
-      updatedAt: serverTimestamp(),
-    }, empresaId));
-    return;
-  }
-  if (cambio.kind === 'franco') {
-    const inst = instantesJornada(origen.date, origen.start, origen.end, true);
-    await updateDoc(doc(db, 'turnos', origen.id), stampEmpresaId({
-      code: 'F',
-      type: 'F',
-      isFranco: true,
-      startTime: Timestamp.fromDate(inst.start),
-      endTime: Timestamp.fromDate(inst.end),
-      hours: 0,
-      draft: false,
-      actorName,
-      comments: 'Franco desde el celular',
-      updatedAt: serverTimestamp(),
-    }, empresaId));
-    const vacanteRef = doc(collection(db, 'turnos'));
-    await setDoc(vacanteRef, stampEmpresaId(payloadTurno({
-      ...origen,
-      employeeId: 'VACANTE',
-      employeeName: 'Vacante',
-      franco: false,
-      ft: false,
-      actorName,
-      comments: 'Hueco por franco desde el celular',
-    }), empresaId));
-    creados.set(`vacante:${origen.id}`, vacanteRef.id);
-    return;
-  }
-  const otro = originales.find((t) => t.id === cambio.otroId);
-  const a = aplicados.find((t) => t.id === cambio.franjaId);
-  const b = aplicados.find((t) => t.id === cambio.otroId);
-  if (!otro || !a || !b) return;
-  await updateDoc(doc(db, 'turnos', origen.id), stampEmpresaId({
-    employeeId: a.employeeId, employeeName: a.employeeName, draft: false, actorName, comments: 'Permuta desde el celular', updatedAt: serverTimestamp(),
-  }, empresaId));
-  await updateDoc(doc(db, 'turnos', otro.id), stampEmpresaId({
-    employeeId: b.employeeId, employeeName: b.employeeName, draft: false, actorName, comments: 'Permuta desde el celular', updatedAt: serverTimestamp(),
-  }, empresaId));
-}
-
-function payloadTurno(input: TurnoMovil & { ft: boolean; actorName: string; comments: string; bolsaCuil?: string }) {
-  const inst = instantesJornada(input.date, input.start, input.end, input.franco);
-  return {
-    employeeId: input.employeeId,
-    employeeName: input.employeeName,
-    clientId: input.clientId,
-    clientName: input.clientName,
-    objectiveId: input.objectiveId,
-    objectiveName: input.objectiveName,
-    code: input.code,
-    type: input.code,
-    startTime: Timestamp.fromDate(inst.start),
-    endTime: Timestamp.fromDate(inst.end),
-    scheduleDate: input.date,
-    isFranco: input.franco,
-    isFrancoTrabajado: input.ft,
-    isUnassigned: input.employeeId === 'VACANTE',
-    positionName: input.positionName,
-    hours: input.hours,
-    draft: false,
-    esEventual: Boolean(input.bolsaCuil),
-    bolsaCuil: input.bolsaCuil || null,
-    comments: input.comments,
-    actorName: input.actorName,
-    createdAt: serverTimestamp(),
-  };
 }
