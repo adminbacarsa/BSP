@@ -1,8 +1,9 @@
 import { registrarModuloMovil, tipoAlerta, type MovilAlerta } from './modulos';
+import { esAlertaDeSupervision } from './supervisionMovil';
 
 const ARCA_EN_OPERACION = new Set(['ALTA_ARCA_PENDIENTE']);
 // CRONOGRAMA_* es de Planificación: Operación solo muestra una línea agrupada (`cronogramaAlertas.ts`).
-const FUERA_DE_OPERACION = /^(IA_ALERTA_|INTEGRIDAD_DATOS|CERTIFICADO_|MARCO_|CONTRATO_|EVENTUAL_|CRONOGRAMA_)/;
+const FUERA_DE_OPERACION = /^(IA_ALERTA_|INTEGRIDAD_DATOS|CERTIFICADO_|MARCO_|CONTRATO_|EVENTUAL_|CRONOGRAMA_|SUPERVISION_)/;
 
 /** Alertas operativas: lo que afecta una fichada o un puesto hoy. ARCA solo si frena la fichada. */
 export function esAlertaDeOperacion(alerta: MovilAlerta): boolean {
@@ -34,19 +35,20 @@ registrarModuloMovil({
   esAlertaDelModulo: esAlertaDeOperacion,
 });
 
+// Supervisión es un módulo propio del supervisor que recorre: visitas, novedades con foto y
+// alertas de objetivos sin visita. No actúa sobre turnos (eso es Operación).
 registrarModuloMovil({
   id: 'supervision',
   label: 'Supervisión',
-  desc: 'Solo lectura',
-  href: '/admin/operaciones/?modo=supervision',
-  path: '/admin/operaciones',
-  query: { modo: 'supervision' },
+  desc: 'Recorrida y visitas',
+  href: '/admin/movil/supervision/',
+  path: '/admin/movil/supervision',
   moduleKeys: ['SUPERVISION'],
   secciones: [
-    { id: 'objetivos', label: 'Objetivos', href: '/admin/operaciones/?modo=supervision', icono: 'objetivos', panel: '' },
-    { id: 'alertas', label: 'Alertas', href: '/admin/operaciones/?modo=supervision&panel=alertas', icono: 'alertas', panel: 'alertas' },
+    { id: 'objetivos', label: 'Objetivos', href: '/admin/movil/supervision/', icono: 'objetivos', panel: '' },
+    { id: 'alertas', label: 'Alertas', href: '/admin/movil/supervision/?panel=alertas', icono: 'alertas', panel: 'alertas' },
   ],
-  esAlertaDelModulo: esAlertaDeOperacion,
+  esAlertaDelModulo: esAlertaDeSupervision,
 });
 
 registrarModuloMovil({

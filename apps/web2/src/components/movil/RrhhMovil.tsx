@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/router';
-import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
+import { collection, getDocs, query, Timestamp, where } from 'firebase/firestore';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { toast } from 'sonner';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
@@ -11,9 +11,10 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db, storage } from '@/lib/firebase';
 import { movilCallableGate } from '@/lib/movil/callableOnline';
-import { resumenDiaRrhh, type AusenciaDia } from '@/lib/movil/rrhhDia';
+import { crearNovedadRapida } from '@/lib/movil/novedadRapida';
+import { esAusenciaInjustificada, patchJustificarAusencia, resumenDiaRrhh, TIPOS_JUSTIFICAR_DEFAULT, tiposParaJustificar, type AusenciaDia } from '@/lib/movil/rrhhDia';
 import { enqueueFirestoreWrite, movilWriteQueue } from '@/lib/movil/writeQueue';
-import { stampEmpresaId, shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
+import { shouldScopeQueriesToEmpresa } from '@/lib/multiempresa';
 import { absenceNeedsMedicalVerification, absenceReplicatesToPlanning } from '@/lib/planificacion/absenceCodes';
 import { endDateFromDefaultDays } from '@/lib/rrhh/novedadTypes';
 import { avisarNovedadDeAusencia, replicarAusenciaPlanificador } from '@/lib/rrhh/replicarAusenciaPlanificador';
@@ -37,7 +38,7 @@ function ymd(date: Date): string {
 }
 
 export function RrhhMovil() {
-  const { isSuperAdmin, canReadModule } = useAuth();
+  const { isSuperAdmin, canReadModule, user } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
   const empresaSheet = useEmpresaSheet();
@@ -63,8 +64,12 @@ export function RrhhMovil() {
   const [novedadTipo, setNovedadTipo] = useState('Observación');
   const [novedadTexto, setNovedadTexto] = useState('');
   const [turnos, setTurnos] = useState<{ id: string; dia: string; codigo: string }[]>([]);
+  const [justificarId, setJustificarId] = useState<string | null>(null);
+  const [justificarTipoId, setJustificarTipoId] = useState('');
+  const [justificarFoto, setJustificarFoto] = useState<File | null>(null);
   const hoy = ymd(new Date());
   const migracionCompleta = (empresa as { migracionCompleta?: boolean } | null)?.migracionCompleta === true;
+  const nombreReal = user?.displayName || user?.email || 'RRHH celular';
 
   useEffect(() => {
     const sync = () => {
@@ -99,6 +104,8 @@ export function RrhhMovil() {
           status: row.status || '',
           hasCertificate: row.hasCertificate,
           certificateUrl: row.certificateUrl,
+          absenceType: String((row as { absenceType?: unknown }).absenceType || ''),
+          shiftId: row.shiftId || null,
         }));
         const gente: Guardia[] = empSnap.docs
           .map((docSnap): Guardia | null => {
@@ -253,21 +260,109 @@ export function RrhhMovil() {
     const texto = novedadTexto.trim();
     const label = `Novedad ${elegida?.nombre || novedadTipo}`;
     void enqueueFirestoreWrite(label, async () => {
-      await addDoc(collection(db, 'novedades'), stampEmpresaId({
-        type: novedadTipo.toUpperCase(),
+      await crearNovedadRapida({
+        empresaId,
+        type: novedadTipo,
         title: novedadTipo,
-        status: 'pending',
+        description: texto,
         employeeId: elegida?.id || null,
         employeeName: elegida?.nombre || '',
-        description: texto,
         reportedBy: 'RRHH celular',
-        createdAt: Timestamp.now(),
-      }, empresaId));
+      });
     }).then((result) => {
       if (result === 'sent') setNovedadTexto('');
       toast[result === 'queued' ? 'message' : 'success'](result === 'queued' ? 'Pendiente de enviar' : 'Novedad cargada');
     }).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'No se pudo cargar la novedad.');
+    });
+  };
+
+  const tiposJustificar = useMemo(() => {
+    const delCatalogo = tiposParaJustificar(tipos);
+    return delCatalogo.length ? delCatalogo : TIPOS_JUSTIFICAR_DEFAULT;
+  }, [tipos]);
+  const ausenciaAJustificar = justificarId ? ausencias.find((row) => row.id === justificarId) || null : null;
+
+  const abrirJustificar = (ausenciaId: string) => {
+    setJustificarId(ausenciaId);
+    setJustificarTipoId(tiposJustificar[0]?.id || '');
+    setJustificarFoto(null);
+  };
+  const cerrarJustificar = () => {
+    setJustificarId(null);
+    setJustificarFoto(null);
+  };
+
+  /** Misma edición que el escritorio: `absenceService.update` + réplica en planificación + aviso. */
+  const justificarAusencia = () => {
+    const tipo = tiposJustificar.find((row) => row.id === justificarTipoId) || tiposJustificar[0];
+    const ausencia = ausenciaAJustificar;
+    if (!ausencia || !tipo || !empresaId) {
+      toast.error('Elegí el tipo.');
+      return;
+    }
+    const archivo = justificarFoto;
+    const label = `Justificar ${ausencia.employeeName}`;
+    void enqueueFirestoreWrite(label, async () => {
+      let certificateUrl: string | null = null;
+      let certificateStoragePath: string | null = null;
+      if (archivo) {
+        certificateStoragePath = `absences/${empresaId}/${Date.now()}_${archivo.name.replace(/\s+/g, '_')}`;
+        const fileRef = ref(storage, certificateStoragePath);
+        await uploadBytes(fileRef, archivo);
+        certificateUrl = await getDownloadURL(fileRef);
+      }
+      const patch = patchJustificarAusencia({
+        tipo,
+        tieneCertificado: !!certificateUrl || !!ausencia.certificateUrl,
+        requiereVerificacionMedica: absenceNeedsMedicalVerification({ type: tipo.label }),
+        nombreReal,
+      });
+      const certificado = certificateUrl ? { certificateUrl, certificateName: archivo?.name || null, certificateStoragePath } : {};
+      const cambios: Partial<Absence> & { absenceType: string } = { ...patch, ...certificado };
+      const dataToSave: Absence & { absenceType: string } = {
+        employeeId: ausencia.employeeId || '',
+        employeeName: ausencia.employeeName,
+        startDate: ausencia.startDate,
+        endDate: ausencia.endDate,
+        reason: '',
+        ...(ausencia.shiftId ? { shiftId: ausencia.shiftId } : {}),
+        type: patch.type,
+        absenceType: patch.absenceType,
+        status: patch.status,
+        hasCertificate: patch.hasCertificate,
+        comments: patch.comments,
+        ...certificado,
+      };
+      await absenceService.update(ausencia.id, cambios, { empresaId, migracionCompleta });
+      if (absenceReplicatesToPlanning(dataToSave)) {
+        const guardia = guardias.find((row) => row.id === ausencia.employeeId);
+        await replicarAusenciaPlanificador({
+          empresaId,
+          migracionCompleta,
+          absenceId: ausencia.id,
+          data: { ...dataToSave, id: ausencia.id },
+          employees: [{ id: ausencia.employeeId || '', preferredObjectiveId: guardia?.preferredObjectiveId }],
+          objectives: [],
+          notify: (message) => toast.error(message),
+        });
+        if (dataToSave.status === 'Justificada') {
+          await avisarNovedadDeAusencia({
+            empresaId,
+            ausenciaId: ausencia.id,
+            reportedBy: nombreReal,
+            data: { type: tipo.label, employeeId: ausencia.employeeId || '', employeeName: ausencia.employeeName, startDate: ausencia.startDate, endDate: ausencia.endDate },
+          });
+        }
+      }
+      setAusencias((prev) => prev.map((row) => (row.id === ausencia.id
+        ? { ...row, type: patch.type, absenceType: patch.absenceType, status: patch.status, hasCertificate: patch.hasCertificate, certificateUrl: certificateUrl || row.certificateUrl }
+        : row)));
+    }).then((result) => {
+      toast[result === 'queued' ? 'message' : 'success'](result === 'queued' ? 'Pendiente de enviar' : `Ausencia justificada como ${tipo.label}.`);
+      cerrarJustificar();
+    }).catch((error: unknown) => {
+      toast.error(error instanceof Error ? error.message : 'No se pudo justificar.');
     });
   };
 
@@ -289,6 +384,7 @@ export function RrhhMovil() {
           employeeId: row.employeeId || '',
           nombre: row.employeeName,
           tipo: row.type,
+          justificable: esAusenciaInjustificada(row),
         }))}
         licencias={dia.licencias.map((row) => ({
           id: row.id,
@@ -321,6 +417,18 @@ export function RrhhMovil() {
         onElegir={setElegidaId}
         onFicha={abrirFicha}
         onPanel={setPanel}
+        onJustificar={abrirJustificar}
+        justificar={ausenciaAJustificar ? {
+          id: ausenciaAJustificar.id,
+          nombre: `${ausenciaAJustificar.employeeName} · ${ausenciaAJustificar.type}`,
+          tipos: tiposJustificar,
+          tipoId: justificarTipoId,
+          fotoNombre: justificarFoto?.name || null,
+        } : null}
+        onJustificarTipo={setJustificarTipoId}
+        onJustificarFoto={setJustificarFoto}
+        onJustificarGuardar={justificarAusencia}
+        onJustificarCerrar={cerrarJustificar}
       />
       {empresaSheet.sheet}
       <MovilBottomNav />

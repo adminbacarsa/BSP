@@ -107,7 +107,7 @@ check('barra de Servicios', barras((key) => key === 'SERVICES', '/admin/servicio
 const opsNav = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones');
 check('Sala abre con ?panel=sala y Menú va al selector', opsNav.find((item) => item.label === 'Sala').href === '/admin/operaciones/?panel=sala' && opsNav.find((item) => item.label === 'Menú').href === '/admin/movil/');
 check('un operador sin RRHH no lo ve', !movilModulesForPermissions((key) => key === 'OPERATIONS').some((item) => item.id === 'rrhh' || item.id === 'eventuales'));
-check('ALTA_ARCA_PENDIENTE es de Operación', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE'));
+check('ALTA_ARCA_PENDIENTE es de Operación (Supervisión ya no mira turnos)', alertaDelModulo('operacion', 'ALTA_ARCA_PENDIENTE') && !alertaDelModulo('supervision', 'ALTA_ARCA_PENDIENTE') && alertaDelModulo('supervision', 'SUPERVISION_NOVEDAD') && !alertaDelModulo('operacion', 'SUPERVISION_NOVEDAD'));
 check('el resto de ARCA es de Eventuales', alertaDelModulo('eventuales', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_BAJA_PENDIENTE') && !alertaDelModulo('operacion', 'ARCA_PENDIENTE'));
 check('novedad de RRHH no entra en Operación', !alertaDelModulo('operacion', 'CERTIFICADO_VENCIDO') && alertaDelModulo('rrhh', 'CERTIFICADO_VENCIDO'));
 check('cronograma sin publicar es solo de Planificación (Operación no la lista)', alertaDelModulo('planificacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('operacion', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('supervision', 'CRONOGRAMA_SIN_PUBLICAR') && !alertaDelModulo('eventuales', 'CRONOGRAMA_SIN_PUBLICAR'));
@@ -115,7 +115,7 @@ const saModules = movilModulesForPermissions(() => true);
 check('SuperAdmin ve los 6 módulos', saModules.map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 check('solo SUPERVISION ve Supervisión y nada más', movilModulesForPermissions((key) => key === 'SUPERVISION').map((item) => item.id).join(',') === 'supervision');
 check('RRHH ve Eventuales y RRHH', movilModulesForPermissions((key) => key === 'RRHH').map((item) => item.id).join(',') === 'eventuales,rrhh');
-check('Supervisión se reconoce por ?modo', movilModuleForPath('/admin/operaciones', { modo: 'supervision' })?.id === 'supervision');
+check('Supervisión es módulo propio en /admin/movil/supervision', movilModuleForPath('/admin/movil/supervision')?.id === 'supervision' && movilModuleForPath('/admin/operaciones', { modo: 'supervision' })?.id === 'operacion');
 check('eventuales gana sobre rrhh en la ruta', movilModuleForPath('/admin/rrhh/eventuales')?.id === 'eventuales');
 check('planificación apunta a /admin/movil/planificacion', moduloMovilDe('/admin/planificacion')?.href === '/admin/movil/planificacion/' && movilRouteHasMobileVersion('/admin/movil/planificacion') && movilRouteHasMobileVersion('/admin/planificacion'));
 check('configuración y reportes sin versión celular', movilRouteHasMobileVersion('/admin/configuracion') === false && movilRouteHasMobileVersion('/admin/reportes') === false);

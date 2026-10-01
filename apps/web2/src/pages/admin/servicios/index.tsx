@@ -2204,9 +2204,13 @@ const toggleCoverageShiftCode = (positionName: string, code: string) => {
         clients={clients}
         publishStatusMap={publishStatusMap}
         isSuperAdmin={isSuperAdmin}
+        canUpdate={canUpdateService}
         onSlaPatched={(slaId, patch) => {
           setServices(prev => prev.map(s => (s.id === slaId ? { ...s, ...patch } : s)));
           if (form.id === slaId) setForm((prev: any) => ({ ...prev, ...patch }));
+        }}
+        onSlaCreated={(rows) => {
+          setServices(prev => [...prev, ...rows]);
         }}
       />
     );

@@ -1,16 +1,15 @@
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(join(here, '../apps/web2/package.json'));
-const ts = require('typescript');
 const root = join(here, '../apps/web2/src');
 
 const { createWriteQueue } = await import(pathToFileURL(join(root, 'lib/movil/writeQueue.ts')).href);
-const { resumenDiaRrhh } = await import(pathToFileURL(join(root, 'lib/movil/rrhhDia.ts')).href);
-const { compileMovilLib } = await import('./movil-eval-lib.mjs');
+const { resumenDiaRrhh, esAusenciaInjustificada } = await import(pathToFileURL(join(root, 'lib/movil/rrhhDia.ts')).href);
+const { compileMovilLib, compileMovilScreens } = await import('./movil-eval-lib.mjs');
 const outdir = join(here, '../apps/web2/.movil-eval');
 rmSync(outdir, { recursive: true, force: true });
 const lib = compileMovilLib(outdir);
@@ -40,39 +39,20 @@ const dia = resumenDiaRrhh('2026-10-04', [
   { id: '2', employeeId: 'b', employeeName: 'Baez, Juan', type: 'Vacaciones', startDate: '2026-10-01', endDate: '2026-10-04', status: 'Autorizada', hasCertificate: true },
 ]);
 check('tarjetas del día', dia.ausenciasHoy.length === 2 && dia.licencias.length === 2 && dia.certificados.length === 1 && dia.certificados[0].employeeName.includes('Guerrero'));
+check('la AA automática del día es justificable', esAusenciaInjustificada({ type: 'No Presentación', absenceType: 'AA', status: 'Confirmada' }) && !esAusenciaInjustificada(dia.ausenciasHoy[0]));
 
 const { modulosMovil } = await import(lib.movilModulos);
 check('superadmin ve el menú', modulosMovil(() => false, true).map((item) => item.label).join(',') === 'Operación,Supervisión,Planificación,Eventuales,RRHH,Servicios');
 const ops = movilNavForPermissions((key) => key === 'OPERATIONS', '/admin/operaciones').map((item) => item.label).join(',');
 check('barra de Operación sin RRHH', ops === 'Objetivos,Alertas,Sala,Menú');
 
-function compile(file, name, transform = (src) => src) {
-  const js = ts.transpileModule(transform(readFileSync(file, 'utf8')), {
-    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-    fileName: name,
-  }).outputText;
-  const out = join(outdir, name.replace(/\.tsx?$/, '.mjs'));
-  writeFileSync(out, js);
-  return out;
-}
-// BottomSheet toma los tokens de estilo de components/movil/ui/tones.
-mkdirSync(join(outdir, 'ui'), { recursive: true });
-compile(join(root, 'components/movil/ui/tones.ts'), 'ui/tones.ts');
-compile(join(root, 'components/movil/ui/MovilTopBar.tsx'), 'ui/MovilTopBar.tsx', (src) => src.replace("from './tones'", "from './tones.mjs'"));
-const conTopBar = (src) => src.replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
-compile(join(root, 'components/movil/BottomSheet.tsx'), 'BottomSheet.tsx', (src) => src.replace("from './ui/tones'", "from './ui/tones.mjs'"));
-const eventualesSrc = conTopBar(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8'))
-  .replace("from './BottomSheet'", `from ${JSON.stringify(pathToFileURL(join(outdir, 'BottomSheet.mjs')).href)}`);
-writeFileSync(join(outdir, 'EventualesScreens.mjs'), ts.transpileModule(eventualesSrc, {
-  compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
-  fileName: 'EventualesScreens.tsx',
-}).outputText);
-compile(join(root, 'components/movil/RrhhScreens.tsx'), 'RrhhScreens.tsx', conTopBar);
+// Pantallas + components/movil/ui + BottomSheet compilados con el helper compartido.
+const screens = compileMovilScreens(outdir, lib, ['RrhhScreens', 'EventualesScreens']);
 
 const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);
-const { RrhhScreens } = await import(pathToFileURL(join(outdir, 'RrhhScreens.mjs')).href);
-const { EventualesScreens } = await import(pathToFileURL(join(outdir, 'EventualesScreens.mjs')).href);
+const { RrhhScreens } = await import(screens.RrhhScreens);
+const { EventualesScreens } = await import(screens.EventualesScreens);
 
 const noop = () => {};
 const rrhh = renderToStaticMarkup(createElement(RrhhScreens, {

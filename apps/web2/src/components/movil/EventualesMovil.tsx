@@ -11,6 +11,7 @@ import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
 import { db, functions } from '@/lib/firebase';
 import { normalizeCuil } from '@/lib/eventuales/cuil.mjs';
+import { textoLegajo } from '@/lib/eventuales/fichaUx.mjs';
 import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 import { GRUPO_EVENTUALES_ID } from '@/lib/eventuales/grupo.mjs';
 import { movilCallableGate, runCallableOnline } from '@/lib/movil/callableOnline';
@@ -30,7 +31,25 @@ type Ficha = {
   telefono: string;
   empresasHabilitadas: string[];
   marcos: Record<string, { firmado?: boolean; fechaFirma?: string; vigenciaDias?: number }>;
+  legajoPlanilla: string;
+  primerIngreso: string;
+  disponibilidad: string;
 };
+
+/** YYYY-MM-DD → dd/mm/aaaa; otra cosa se muestra tal cual. */
+function fechaDmy(raw: string): string {
+  const m = String(raw || '').match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(raw || '');
+}
+
+/** «Legajo 1001 · 1º ingreso 15/02/2024»; sin datos, vacío. */
+export function lineaLegajoIngreso(ficha: Pick<Ficha, 'legajoPlanilla' | 'primerIngreso'>): string {
+  const partes: string[] = [];
+  const legajo = textoLegajo(ficha.legajoPlanilla) as string;
+  if (legajo) partes.push(legajo);
+  if (ficha.primerIngreso) partes.push(`1º ingreso ${fechaDmy(ficha.primerIngreso)}`);
+  return partes.join(' · ');
+}
 
 function hoy(): string {
   const date = new Date();
@@ -86,6 +105,9 @@ export function EventualesMovil() {
           telefono: String(data.telefono || ''),
           empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
           marcos: (data.marcos && typeof data.marcos === 'object' ? data.marcos : {}) as Ficha['marcos'],
+          legajoPlanilla: String(data.legajoPlanilla || ''),
+          primerIngreso: String(data.primerIngreso || ''),
+          disponibilidad: String(data.disponibilidad || ''),
         };
       });
       setFichas(rows);
@@ -121,7 +143,10 @@ export function EventualesMovil() {
           nombre: ficha.nombre,
           cuil: formatoCuil(ficha.id),
           marco: MARCO[marco.estado || ''] || 'Sin marco',
+          marcoVigente: marco.estado === 'MARCO_VIGENTE',
           telefono: ficha.telefono,
+          legajoIngreso: lineaLegajoIngreso(ficha),
+          disponible: ficha.disponibilidad !== 'NO_DISPONIBLE',
         };
       });
   }, [buscar, empresaId, fichas]);

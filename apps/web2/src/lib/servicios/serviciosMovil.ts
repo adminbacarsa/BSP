@@ -22,6 +22,33 @@ export interface ServicioMovilRow {
   /** Contrato que se muestra: el que cubre el mes (abierto primero); si no, el más reciente. */
   sla: ServiceSLA | null;
   contratos: number;
+  /** «Sin cronograma de octubre» / «Sin cronograma de noviembre»: meses con contrato abierto y sin publicar. */
+  cronogramaAviso: string | null;
+}
+
+const MESES_ES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+/**
+ * Aviso de mes sin cronograma: el mes en curso y el siguiente que tengan un contrato abierto
+ * vigente y sin `planificacion_estados` publicado. Sin contrato abierto en ese mes no hay aviso
+ * (no entra en operación por falta de contrato, no de cronograma).
+ */
+export function avisoCronogramaObjetivo(input: {
+  slas: readonly ServiceSLA[];
+  year: number;
+  monthIndex0: number;
+  hasPublishedPlan: (year: number, month1to12: number) => boolean;
+}): string | null {
+  const meses: string[] = [];
+  for (let paso = 0; paso < 2; paso += 1) {
+    const total = input.monthIndex0 + paso;
+    const year = input.year + Math.floor(total / 12);
+    const monthIndex0 = total % 12;
+    const abiertoDelMes = input.slas.some((s) => s.closed !== true && slaCoversCalendarMonth(s.startDate, s.endDate, year, monthIndex0));
+    if (abiertoDelMes && !input.hasPublishedPlan(year, monthIndex0 + 1)) meses.push(MESES_ES[monthIndex0]);
+  }
+  if (!meses.length) return null;
+  return `Sin cronograma de ${meses.join(' y ')}`;
 }
 
 export interface ServicioMovilClient {
@@ -96,6 +123,9 @@ export function buildServiciosMovilRows(input: {
       estado,
       sla,
       contratos: slas.length,
+      cronogramaAviso: String(client?.status || 'ACTIVE').toUpperCase() === 'INACTIVE'
+        ? null
+        : avisoCronogramaObjetivo({ slas, year, monthIndex0, hasPublishedPlan: (y, m) => input.hasPublishedPlan(objectiveId, y, m) }),
     });
   }
   for (const client of input.clients) {
@@ -110,6 +140,7 @@ export function buildServiciosMovilRows(input: {
         estado: 'none',
         sla: null,
         contratos: 0,
+        cronogramaAviso: null,
       });
     }
   }
