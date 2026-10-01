@@ -4,9 +4,14 @@
  *
  *   node --experimental-strip-types scripts/eval-s8-servicios-meses.mjs
  */
+import { defaultNewSlaDates } from '../apps/web2/src/lib/servicios/newSlaDraft.ts';
 import {
+  accionesAltaVisiblesConFiltroAnterior,
   buildSlaDraftsForSegments,
+  lastForwardOfObjective,
+  lastOfChain,
   overlappingSegments,
+  planAppendMonthsForward,
   slaSegmentsForMode,
   splitRangeByCalendarMonth,
   summarizeSlaSplit,
@@ -74,6 +79,33 @@ check('otro objetivo no cuenta', overlappingSegments(individual, existing.filter
 check('octubre contiguo no solapa', overlappingSegments(individual, existing.filter((e) => e.id === 'c'), { clientId: 'c1', objectiveId: 'o1' }).length === 0);
 check('el propio doc no cuenta al editar', overlappingSegments(individual, existing, { clientId: 'c1', objectiveId: 'o1' }, 'a').length === 0);
 check('agrupado también detecta el solape', overlappingSegments(grouped, existing, { clientId: 'c1', objectiveId: 'o1' }).length === 1);
+
+// Filtro en septiembre: solo propone septiembre; nov–mar se puede crear igual y el botón no se oculta.
+const filtroSep = { year: 2026, monthIndex0: 8 };
+const propuesto = defaultNewSlaDates(new Date(2026, 8, 15), filtroSep);
+check('filtro septiembre propone desde/hasta de septiembre', propuesto.startDate === '2026-09-01' && propuesto.endDate === '2026-09-30');
+const novMar = slaSegmentsForMode('individuales', '2026-11-01', '2027-03-31');
+check('con filtro en septiembre igual se crean nov–mar', novMar.length === 5 && novMar[0].monthKey === '2026-11' && novMar.every((s) => s.monthKey !== '2026-09'));
+const visibles = accionesAltaVisiblesConFiltroAnterior(true);
+check('filtro anterior no oculta Nuevo servicio ni Agregar meses', visibles.nuevoServicio && visibles.agregarMeses);
+
+// Agregar meses a cadena individual: último es dic; no rellena hacia atrás ni repite nov/dic.
+const cadena = [
+  { id: 'n', clientId: 'c1', objectiveId: 'o1', slaSeriesId: 'ser', startDate: '2026-11-01', endDate: '2026-11-30', status: 'active' },
+  { id: 'd', clientId: 'c1', objectiveId: 'o1', slaSeriesId: 'ser', startDate: '2026-12-01', endDate: '2026-12-31', status: 'active' },
+];
+check('último de la cadena es diciembre', lastOfChain(cadena, cadena[0])?.id === 'd');
+const addInd = planAppendMonthsForward({ mode: 'individuales', lastEndDate: '2026-12-31', newEndDate: '2027-03-31' });
+check('individuales agrega ene–mar', addInd.error === null && addInd.segments.map((s) => s.monthKey).join(',') === '2027-01,2027-02,2027-03', addInd.segments.map((s) => s.monthKey).join(','));
+check('no rellena hacia atrás', addInd.segments.every((s) => s.startDate > '2026-12-31'));
+check('hasta anterior al último se rechaza', planAppendMonthsForward({ mode: 'individuales', lastEndDate: '2026-12-31', newEndDate: '2026-10-31' }).error != null);
+
+// Agrupado: extiende el mismo doc, no crea meses sueltos.
+const agrupado = { id: 'g', clientId: 'c1', objectiveId: 'o1', startDate: '2026-11-01', endDate: '2026-12-31', status: 'active' };
+check('agrupado sin serie es él mismo', lastForwardOfObjective([agrupado, cadena[0]])?.id === 'd' || lastOfChain([agrupado], agrupado)?.id === 'g');
+const addGrp = planAppendMonthsForward({ mode: 'agrupados', lastEndDate: '2026-12-31', newEndDate: '2027-03-10' });
+check('agrupado extiende hasta el 10/03', addGrp.extendTo === '2027-03-10' && addGrp.segments.length === 1 && addGrp.segments[0].startDate === '2027-01-01', JSON.stringify(addGrp));
+check('el tramo nuevo no pisa el doc agrupado', overlappingSegments(addGrp.segments, [agrupado], { clientId: 'c1', objectiveId: 'o1' }, 'g').length === 0);
 
 if (failed) {
   console.error(`S8_SERVICIOS_MESES_FAIL ${failed}`);
