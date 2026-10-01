@@ -1,4 +1,6 @@
+import { ArrowLeft } from 'lucide-react';
 import { ESTADO_LABEL, type ServicioMovilDetalle, type ServicioMovilEstado, type ServicioMovilRow } from '@/lib/servicios/serviciosMovil';
+import { MovilTopBar } from './ui/MovilTopBar';
 
 const ESTADO_PILL: Record<ServicioMovilEstado, string> = {
   active: 'bg-white text-emerald-700',
@@ -16,6 +18,7 @@ const ESTADO_BAR: Record<ServicioMovilEstado, string> = {
 
 export function ServiciosMovilScreens({
   empresa,
+  onEmpresa,
   online,
   pendingLabel,
   loading,
@@ -31,6 +34,7 @@ export function ServiciosMovilScreens({
   onReabrir,
 }: {
   empresa: string;
+  onEmpresa?: () => void;
   online: boolean;
   pendingLabel: string | null;
   loading: boolean;
@@ -57,25 +61,19 @@ export function ServiciosMovilScreens({
 
   return (
     <div className="mx-auto flex min-h-screen w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-24" data-movil-screen={`servicios-${panel}`}>
-      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-2">
-        <div className="flex items-center gap-2">
-          {panel === 'detalle' && (
-            <button type="button" onClick={onBack} className="min-h-11 rounded-lg border border-slate-200 px-3 text-sm font-semibold">←</button>
-          )}
+      <MovilTopBar modulo="Servicios" empresa={empresa} onEmpresa={onEmpresa} online={online} pendingLabel={pendingLabel} />
+      {row && (
+        <div className="flex h-11 items-center gap-2 px-3 pt-1" data-movil-objetivo-header="fino">
+          <button type="button" onClick={onBack} aria-label="Volver" className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-700 active:bg-slate-50">
+            <ArrowLeft size={16} strokeWidth={1.75} aria-hidden="true" />
+          </button>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold">{row ? row.objectiveName : 'Servicios'}</p>
-            <p className="truncate text-[11px] font-semibold text-slate-500">
-              {online ? (row ? row.clientName || empresa : empresa) : 'Sin señal · se muestra lo último'}
-            </p>
+            <p className="truncate text-[13px] font-semibold text-slate-900">{row.objectiveName}</p>
+            <p className="truncate text-[11px] text-slate-500">{row.clientName || empresa}</p>
           </div>
-          {row && (
-            <span className={`rounded-full px-2 py-1 text-[10px] font-semibold uppercase ${ESTADO_PILL[row.estado]}`}>{ESTADO_LABEL[row.estado]}</span>
-          )}
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase ${ESTADO_PILL[row.estado]}`}>{ESTADO_LABEL[row.estado]}</span>
         </div>
-        {pendingLabel && (
-          <p className="mt-1 rounded-lg bg-white px-2 py-1 text-[11px] font-bold text-amber-800">Pendiente de enviar: {pendingLabel}</p>
-        )}
-      </header>
+      )}
       <div className="px-3 pt-3">
         {panel === 'lista' && (
           <>

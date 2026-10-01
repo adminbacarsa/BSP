@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { Timestamp, addDoc, collection, doc, onSnapshot, serverTimestamp, setDoc, updateDoc, type QueryDocumentSnapshot } from 'firebase/firestore';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { CambioPuntual, CandidatosHueco, PlanificacionMovilView, type EventualMovil } from '@/components/movil/PlanificacionMovilView';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
@@ -49,6 +50,7 @@ export function PlanificacionMovil() {
   const { empresaId, empresa } = useEmpresa();
   const { isSuperAdmin, rolePermissions, canReadModule, user } = useAuth();
   const online = useOnlineFlag();
+  const empresaSheet = useEmpresaSheet();
   const [readyTurnos, setReadyTurnos] = useState(false);
   const [turnos, setTurnos] = useState<TurnoMovil[]>([]);
   const [empleados, setEmpleados] = useState<EmpleadoMovil[]>([]);
@@ -326,6 +328,7 @@ export function PlanificacionMovil() {
       <Head><title>Planificación · COSP</title></Head>
       <PlanificacionMovilView
         empresa={empresa?.name || empresaId}
+        onEmpresa={empresaSheet.onEmpresa}
         online={online}
         pendingLabel={pending}
         dias={dias}
@@ -377,6 +380,7 @@ export function PlanificacionMovil() {
           }}
         />
       </BottomSheet>
+      {empresaSheet.sheet}
       <MovilBottomNav />
     </>
   );

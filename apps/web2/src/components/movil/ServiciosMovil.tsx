@@ -5,6 +5,7 @@ import { db } from '@/lib/firebase';
 import type { ServiceSLA } from '@/services/slaService';
 import { BottomSheet } from '@/components/movil/BottomSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { ServiciosMovilScreens } from '@/components/movil/ServiciosMovilScreens';
 import { clientHasOpenCommercialContract } from '@/lib/crm/slaBilling';
@@ -34,6 +35,7 @@ interface Props {
 /** Servicios en el celular: lista por objetivo, detalle simple y cerrar/reabrir con las callables del escritorio. */
 export function ServiciosMovil(props: Props) {
   const online = useOnlineFlag();
+  const empresaSheet = useEmpresaSheet();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState('');
   const [pending, setPending] = useState<string | null>(null);
@@ -125,6 +127,7 @@ export function ServiciosMovil(props: Props) {
     <>
       <ServiciosMovilScreens
         empresa={props.empresa}
+        onEmpresa={empresaSheet.onEmpresa}
         online={online}
         pendingLabel={pending}
         loading={props.loading}
@@ -158,6 +161,7 @@ export function ServiciosMovil(props: Props) {
           {busy ? 'Reabriendo…' : 'Reabrir'}
         </button>
       </BottomSheet>
+      {empresaSheet.sheet}
       <MovilBottomNav />
     </>
   );

@@ -1,5 +1,6 @@
 import React from 'react';
 import type { CandidatoMovil, FranjaMovil, TabCandidato } from '@/lib/movil/planificacionBasica';
+import { MovilTopBar } from './ui/MovilTopBar';
 
 const TABS: { id: TabCandidato | 'eventuales'; label: string }[] = [
   { id: 'plantel', label: 'Plantel' },
@@ -25,6 +26,7 @@ function diaCorto(fecha: string): { n: string; lab: string } {
 
 export function PlanificacionMovilView(props: {
   empresa: string;
+  onEmpresa?: () => void;
   online: boolean;
   pendingLabel: string | null;
   dias: string[];
@@ -48,24 +50,14 @@ export function PlanificacionMovilView(props: {
   }
   const huecos = props.franjas.filter((f) => f.kind !== 'ok').length;
   return (
-    <div data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-slate-100">
-      <header className="bg-white px-4 pb-3 pt-4">
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className="text-base font-semibold text-slate-900">Próximos días</p>
-            <p className="text-xs font-semibold text-slate-500">{props.empresa}</p>
-          </div>
-          <span className={`rounded-lg px-2 py-1 text-[10px] font-semibold uppercase ${props.online ? 'bg-white text-emerald-800' : 'bg-white text-rose-700'}`}>
-            {props.online ? 'En línea' : 'Sin señal'}
-          </span>
-        </div>
-        {props.pendingLabel && (
-          <p className="mt-2 rounded-lg bg-white px-3 py-2 text-[11px] font-bold text-[var(--movil-primary,#111827)]">Pendiente de enviar: {props.pendingLabel}</p>
-        )}
+    <div data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa]">
+      <MovilTopBar modulo="Planificación" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
+      <div className="px-3 pt-1">
+        <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">Próximos días</p>
         {!props.mesPublicado && (
-          <p className="mt-2 rounded-lg bg-white px-3 py-2 text-[11px] font-bold text-amber-900">Este mes sigue en borrador. La primera publicación se hace en el escritorio.</p>
+          <p className="mt-1 text-[11px] font-medium text-amber-700">Este mes sigue en borrador. La primera publicación se hace en el escritorio.</p>
         )}
-      </header>
+      </div>
       <div className="flex gap-2 px-3 py-3">
         {props.dias.map((fecha) => {
           const d = diaCorto(fecha);

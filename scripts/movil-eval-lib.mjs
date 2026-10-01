@@ -9,7 +9,7 @@ const require = createRequire(join(here, '../apps/web2/package.json'));
 const ts = require('typescript');
 const root = join(here, '../apps/web2/src');
 
-const LIB = ['modulos', 'modulosPlataforma', 'modulosRrhh', 'movilModulos', 'navItems'];
+const LIB = ['modulos', 'modulosPlataforma', 'modulosRrhh', 'movilModulos', 'navItems', 'empresaSelector', 'fechaCorta'];
 
 export function compileMovilLib(outdir) {
   mkdirSync(outdir, { recursive: true });

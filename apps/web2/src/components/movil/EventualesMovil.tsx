@@ -5,6 +5,7 @@ import { httpsCallable } from 'firebase/functions';
 import { toast } from 'sonner';
 import { EventualesScreens, type ArcaMovil, type EventualMovil, type EventualesPanel } from '@/components/movil/EventualesScreens';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
 import { useEmpresa } from '@/context/EmpresaContext';
@@ -47,6 +48,7 @@ export function EventualesMovil() {
   const { isSuperAdmin, canReadModule } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
+  const empresaSheet = useEmpresaSheet();
   const permitido = isSuperAdmin || canReadModule('EVENTUALES') || canReadModule('RRHH');
   const router = useRouter();
   const panelQuery = String(router.query.panel || '');
@@ -188,6 +190,7 @@ export function EventualesMovil() {
     <>
       <EventualesScreens
         empresa={empresa?.name || 'Empresa'}
+        onEmpresa={empresaSheet.onEmpresa}
         online={online}
         pendingLabel={pendingLabel}
         panel={panel}
@@ -215,6 +218,7 @@ export function EventualesMovil() {
         onConfirmarArca={confirmarArca}
         elegido={elegido}
       />
+      {empresaSheet.sheet}
       <MovilBottomNav />
     </>
   );

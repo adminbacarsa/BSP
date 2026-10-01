@@ -58,14 +58,16 @@ function compile(file, name, transform = (src) => src) {
 // BottomSheet toma los tokens de estilo de components/movil/ui/tones.
 mkdirSync(join(outdir, 'ui'), { recursive: true });
 compile(join(root, 'components/movil/ui/tones.ts'), 'ui/tones.ts');
+compile(join(root, 'components/movil/ui/MovilTopBar.tsx'), 'ui/MovilTopBar.tsx', (src) => src.replace("from './tones'", "from './tones.mjs'"));
+const conTopBar = (src) => src.replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
 compile(join(root, 'components/movil/BottomSheet.tsx'), 'BottomSheet.tsx', (src) => src.replace("from './ui/tones'", "from './ui/tones.mjs'"));
-const eventualesSrc = readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8')
+const eventualesSrc = conTopBar(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8'))
   .replace("from './BottomSheet'", `from ${JSON.stringify(pathToFileURL(join(outdir, 'BottomSheet.mjs')).href)}`);
 writeFileSync(join(outdir, 'EventualesScreens.mjs'), ts.transpileModule(eventualesSrc, {
   compilerOptions: { jsx: ts.JsxEmit.ReactJSX, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ES2022 },
   fileName: 'EventualesScreens.tsx',
 }).outputText);
-compile(join(root, 'components/movil/RrhhScreens.tsx'), 'RrhhScreens.tsx');
+compile(join(root, 'components/movil/RrhhScreens.tsx'), 'RrhhScreens.tsx', conTopBar);
 
 const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);

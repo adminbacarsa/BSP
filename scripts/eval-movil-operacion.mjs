@@ -123,15 +123,17 @@ check('operaciones, servicios, rrhh y supervisión con versión celular', movilR
 
 const { MovilMenuScreens } = await importFront('components/movil/MovilMenuScreens.tsx');
 const menuHtml = render(MovilMenuScreens, {
-  empresaId: 'pruebas_sa',
   empresaName: 'Pruebas S.A.',
-  empresas: [{ id: 'pruebas_sa', name: 'Pruebas S.A.' }, { id: 'bacarsa', name: 'Bacar S.A.' }],
-  canSwitchEmpresa: true,
   modulos: saModules,
   unico: null,
-  onModulo: () => {}, onSwitchEmpresa: () => {}, onAsistente: () => {}, onEscritorio: () => {}, onLogout: () => {},
+  now: Date.UTC(2026, 9, 1, 15, 0, 0),
+  onEmpresa: () => {},
+  onModulo: () => {}, onAsistente: () => {}, onEscritorio: () => {}, onLogout: () => {},
 });
-check('menú 390: 6 módulos, empresa activa y cerrar sesión', (menuHtml.match(/data-movil-module=/g) || []).length === 6 && menuHtml.includes('Empresa activa') && menuHtml.includes('Cambiar a Bacar S.A.') && menuHtml.includes('Cerrar sesión') && menuHtml.includes('Asistente'));
+check('menú 390: 6 módulos, píldora de empresa (hoja) y cerrar sesión', (menuHtml.match(/data-movil-module=/g) || []).length === 6 && !menuHtml.includes('Empresa activa') && !menuHtml.includes('Cambiar a ') && menuHtml.includes('aria-label="Empresa Pruebas S.A.. Cambiar"') && menuHtml.includes('Cerrar sesión') && menuHtml.includes('Asistente'));
+const { EmpresaSheetBody } = await importFront('components/movil/EmpresaSheetBody.tsx');
+const hojaEmpresas = render(EmpresaSheetBody, { empresas: [{ id: 'pruebas_sa', name: 'Pruebas S.A.', color: '#2563eb' }, { id: 'bacarsa', name: 'Bacar S.A.' }], activaId: 'pruebas_sa', onElegir: () => {} });
+check('hoja de empresas: activa con check y color como punto', hojaEmpresas.includes('aria-current="true"') && hojaEmpresas.includes('background-color:#2563eb') && hojaEmpresas.includes('data-movil-empresa-item="bacarsa"') && !hojaEmpresas.includes('data-movil-empresa-buscar'));
 
 const { MovilDesktopOnly } = await importFront('components/movil/MovilDesktopOnly.tsx');
 const gateHtml = render(MovilDesktopOnly, { moduleLabel: 'Planificación', onOpenFull: () => {} });
@@ -728,7 +730,7 @@ check('Operación: barra + fecha/modo en línea gris, sin encabezado «Centro de
 const objChrome = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: [baezM] }, onAcciones: () => {}, ...noops });
 check('primera tarjeta de guardia a menos de 170 px del borde', F.ALTO_HASTA_PRIMERA_TARJETA_PX < 170 && F.ALTO_HASTA_PRIMERA_TARJETA_PX === 112 && objChrome.includes(`data-movil-hasta-tarjeta="${F.ALTO_HASTA_PRIMERA_TARJETA_PX}"`) && objChrome.includes('data-movil-card="compacta"') && objChrome.indexOf('data-movil-fecha') < objChrome.indexOf('data-movil-card="compacta"'));
 check('Supervisión: barra con «Supervisión» y Solo lectura en píldora', supervisionHtml.includes('data-movil-topbar="Supervisión"') && supervisionHtml.includes('Solo lectura'));
-check('Selector de módulos con barra oscura, encabezado y tarjetas con ícono', menuHtml.includes('data-movil-topbar="Menú"') && menuHtml.includes('>Módulos<') && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
+check('Selector de módulos con barra oscura, fecha en línea gris y tiles compactos con ícono', menuHtml.includes('data-movil-topbar="Menú"') && !menuHtml.includes('>Módulos<') && menuHtml.includes('data-movil-fecha="1"') && (menuHtml.match(/data-movil-tile="64"/g) || []).length === 6 && (menuHtml.match(/<svg/g) || []).length >= 8 && menuHtml.includes('Ver como escritorio'));
 check('ningún módulo del celular redefine tarjetas/píldoras sueltas en Operación', !readFileSync(join(web2, 'src/components/movil/OperacionScreens.tsx'), 'utf8').includes('TONE_PILL'));
 
 rmSync(outdir, { recursive: true, force: true });

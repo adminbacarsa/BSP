@@ -1,3 +1,5 @@
+import { MovilTopBar } from './ui/MovilTopBar';
+
 export type RrhhPanel = 'dia' | 'ausencia' | 'novedad' | 'ficha';
 
 export type GuardiaMovil = { id: string; nombre: string; telefono: string };
@@ -8,6 +10,7 @@ const NOVEDAD_TIPOS = ['Observación', 'Incidente', 'Uniforme', 'Otro'] as const
 
 export function RrhhScreens(props: {
   empresa: string;
+  onEmpresa?: () => void;
   online: boolean;
   pendingLabel: string | null;
   panel: RrhhPanel;
@@ -39,20 +42,9 @@ export function RrhhScreens(props: {
   const guardar = props.online ? 'Guardar' : 'Guardar · pendiente de enviar';
   return (
     <div data-movil-screen data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa] pb-24">
-      <header className="bg-[var(--movil-topbar,#111827)] px-4 pb-4 pt-5 text-white">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/75">{props.empresa}</p>
-        <div className="mt-1 flex items-center justify-between gap-2">
-          <h1 className="text-xl font-semibold">RRHH</h1>
-          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${props.online ? 'bg-emerald-400 text-emerald-950' : 'bg-amber-300 text-amber-950'}`}>
-            {props.online ? 'En línea' : 'Sin señal'}
-          </span>
-        </div>
-        <p className="mt-1 text-xs font-semibold text-white/75">{props.hoyLabel}</p>
-        {props.pendingLabel && (
-          <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-900">Pendiente de enviar: {props.pendingLabel}</p>
-        )}
-      </header>
-      <div className="flex flex-1 flex-col gap-3 px-3 pt-3">
+      <MovilTopBar modulo="RRHH" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
+      <div className="flex flex-1 flex-col gap-3 px-3 pt-1">
+        <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">{props.hoyLabel}</p>
         {props.panel === 'dia' && (
           <>
             <Tarjeta titulo="Ausencias de hoy" vacio="Nadie ausente hoy." items={props.ausenciasHoy.map((row) => ({ key: row.id, id: row.employeeId, titulo: row.nombre, detalle: row.tipo }))} onOpen={props.onFicha} />

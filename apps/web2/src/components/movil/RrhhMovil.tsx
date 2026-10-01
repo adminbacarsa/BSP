@@ -4,6 +4,7 @@ import { addDoc, collection, getDocs, query, Timestamp, where } from 'firebase/f
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { toast } from 'sonner';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
+import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { RrhhScreens, type RrhhPanel } from '@/components/movil/RrhhScreens';
 import { useOnlineFlag } from '@/components/movil/OperacionScreens';
 import { useAuth } from '@/context/AuthContext';
@@ -39,6 +40,7 @@ export function RrhhMovil() {
   const { isSuperAdmin, canReadModule } = useAuth();
   const { empresaId, empresa } = useEmpresa();
   const online = useOnlineFlag();
+  const empresaSheet = useEmpresaSheet();
   const permitido = isSuperAdmin || canReadModule('RRHH');
   const router = useRouter();
   const [fichaAbierta, setFichaAbierta] = useState(false);
@@ -277,6 +279,7 @@ export function RrhhMovil() {
     <>
       <RrhhScreens
         empresa={empresa?.name || 'Empresa'}
+        onEmpresa={empresaSheet.onEmpresa}
         online={online}
         pendingLabel={pendingLabel}
         panel={panel}
@@ -319,6 +322,7 @@ export function RrhhMovil() {
         onFicha={abrirFicha}
         onPanel={setPanel}
       />
+      {empresaSheet.sheet}
       <MovilBottomNav />
     </>
   );

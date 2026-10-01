@@ -1,4 +1,5 @@
 import { BottomSheet } from './BottomSheet';
+import { MovilTopBar } from './ui/MovilTopBar';
 
 export type EventualesPanel = 'bolsa' | 'arca' | 'alta';
 
@@ -19,6 +20,7 @@ export type ArcaMovil = {
 
 export function EventualesScreens(props: {
   empresa: string;
+  onEmpresa?: () => void;
   online: boolean;
   pendingLabel: string | null;
   panel: EventualesPanel;
@@ -48,18 +50,7 @@ export function EventualesScreens(props: {
 }) {
   return (
     <div data-movil-screen={props.panel} data-viewport="390x844" className="mx-auto flex min-h-[844px] w-full max-w-[390px] flex-col bg-[#f7f8fa] pb-24">
-      <header className="bg-[var(--movil-topbar,#111827)] px-4 pb-4 pt-5 text-white">
-        <p className="text-[10px] font-semibold uppercase tracking-widest text-white/75">{props.empresa}</p>
-        <div className="mt-1 flex items-center justify-between">
-          <h1 className="text-xl font-semibold">Eventuales</h1>
-          <span className={`rounded-full px-2 py-1 text-[10px] font-semibold ${props.online ? 'bg-emerald-400 text-emerald-950' : 'bg-amber-300 text-amber-950'}`}>
-            {props.online ? 'En línea' : 'Sin señal'}
-          </span>
-        </div>
-        {props.pendingLabel && (
-          <p className="mt-2 rounded-lg bg-amber-100 px-2 py-1 text-[11px] font-bold text-amber-900">Pendiente de enviar: {props.pendingLabel}</p>
-        )}
-      </header>
+      <MovilTopBar modulo="Eventuales" empresa={props.empresa} onEmpresa={props.onEmpresa} online={props.online} pendingLabel={props.pendingLabel} />
       <div className="flex flex-1 flex-col gap-3 px-3 py-3">
         {props.panel !== 'arca' && (
           <>

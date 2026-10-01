@@ -76,34 +76,77 @@ for (const name of readdirSync(uiDir)) {
   const out = compile(src, `ui/${name}`);
   if (name === 'index.ts') uiIndex = out;
 }
+const withLibs = (src) => src
+  .replace("from '@/lib/movil/empresaSelector'", `from ${JSON.stringify(lib.empresaSelector)}`)
+  .replace("from '@/lib/movil/fechaCorta'", `from ${JSON.stringify(lib.fechaCorta)}`)
+  .replace("from './ui/tones'", "from './ui/tones.mjs'")
+  .replace("from './ui/MovilTopBar'", "from './ui/MovilTopBar.mjs'");
 const menuFile = compile(
-  readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8')
+  withLibs(readFileSync(join(root, 'components/movil/MovilMenuScreens.tsx'), 'utf8'))
     .replace(/import type .*\n/, '')
     .replace("from './ui'", `from ${JSON.stringify(pathToFileURL(uiIndex).href)}`),
   'MovilMenuScreens.tsx',
 );
-const rrhhFile = compile(readFileSync(join(root, 'components/movil/RrhhScreens.tsx'), 'utf8'), 'RrhhScreens.tsx');
-const evFile = compile(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8').replace("from './BottomSheet'", JSON.stringify(pathToFileURL(sheet).href).replace(/^/, 'from ')), 'EventualesScreens.tsx');
+const empresaSheetFile = compile(withLibs(readFileSync(join(root, 'components/movil/EmpresaSheetBody.tsx'), 'utf8')), 'EmpresaSheetBody.tsx');
+const rrhhFile = compile(withLibs(readFileSync(join(root, 'components/movil/RrhhScreens.tsx'), 'utf8')), 'RrhhScreens.tsx');
+const evFile = compile(withLibs(readFileSync(join(root, 'components/movil/EventualesScreens.tsx'), 'utf8')).replace("from './BottomSheet'", JSON.stringify(pathToFileURL(sheet).href).replace(/^/, 'from ')), 'EventualesScreens.tsx');
 
 const { createElement } = await import(pathToFileURL(require.resolve('react')).href);
 const { renderToStaticMarkup } = await import(pathToFileURL(require.resolve('react-dom/server')).href);
 const { MovilMenuScreens } = await import(pathToFileURL(menuFile).href);
+const { EmpresaSheetBody } = await import(pathToFileURL(empresaSheetFile).href);
 const { RrhhScreens } = await import(pathToFileURL(rrhhFile).href);
 const { EventualesScreens } = await import(pathToFileURL(evFile).href);
+const sel = await import(lib.empresaSelector);
 const noop = () => {};
 
+const NOW = Date.UTC(2026, 9, 1, 15, 0, 0);
 const menuBase = {
-  empresaId: 'pruebas_sa',
   empresaName: 'Pruebas S.A.',
-  empresas: [{ id: 'pruebas_sa', name: 'Pruebas S.A.' }, { id: 'otra', name: 'Otra S.A.' }],
-  canSwitchEmpresa: true,
-  onModulo: noop, onSwitchEmpresa: noop, onAsistente: noop, onEscritorio: noop, onLogout: noop,
+  now: NOW,
+  onEmpresa: noop,
+  onModulo: noop, onAsistente: noop, onEscritorio: noop, onLogout: noop,
 };
 const todos = m.modulosMovil(() => false, true);
-const menuSa = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, modulos: todos, unico: null }));
-check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && menuSa.includes('Cambiar a Otra S.A.'));
-const menuOp = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, canSwitchEmpresa: false, modulos: operador, unico: operador[0] }));
-check('menú de un solo módulo: empresa, asistente y salir', !menuOp.includes('data-movil-module="rrhh"') && menuOp.includes('Volver a Operación') && menuOp.includes('Asistente') && menuOp.includes('Cerrar sesión') && !menuOp.includes('Cambiar a'));
+const menuSa = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, modulos: todos, unico: null, alertas: { operacion: 3, rrhh: 1 } }));
+const tilesSa = (menuSa.match(/data-movil-tile="64"/g) || []).length;
+check('menú superadmin 390 con seis módulos', menuSa.includes('data-viewport="390x844"') && ['Operación', 'Supervisión', 'Planificación', 'Eventuales', 'RRHH', 'Servicios'].every((l) => menuSa.includes(l)) && tilesSa === 6);
+check('menú sin encabezado grande ni bloque de empresa', !menuSa.includes('>Módulos<') && !menuSa.includes('Empresa activa') && !menuSa.includes('Cambiar a ') && !menuSa.includes('empresas<') && menuSa.includes('data-movil-fecha="1"'));
+check('menú: píldora de empresa es botón que abre la hoja', menuSa.includes('aria-label="Empresa Pruebas S.A.. Cambiar"') && menuSa.includes('data-movil-topbar="Menú"'));
+check('menú: tiles compactos 2 columnas con alertas a la derecha', menuSa.includes('grid-cols-2') && menuSa.includes('data-movil-tiles="6"') && menuSa.includes('data-movil-alertas="3"') && menuSa.includes('data-movil-alertas="1"') && (menuSa.match(/data-movil-alertas=/g) || []).length === 2 && !menuSa.includes('MovilIconBox') && !/bg-(emerald|indigo|violet|amber|blue)-(50|100)/.test(menuSa));
+check('menú: seis módulos + asistente entran en 844 sin scroll', sel.menuCabeEnPantalla(6) && sel.altoMenuPx(6) < 844 && menuSa.includes(`data-movil-alto="${sel.altoMenuPx(6)}"`) && menuSa.includes('>Asistente<') && menuSa.includes('Ver como escritorio'));
+const menuOp = renderToStaticMarkup(createElement(MovilMenuScreens, { ...menuBase, onEmpresa: undefined, modulos: operador, unico: operador[0] }));
+check('menú de un solo módulo: empresa, asistente y salir', !menuOp.includes('data-movil-module="rrhh"') && menuOp.includes('Volver a Operación') && menuOp.includes('Asistente') && menuOp.includes('Cerrar sesión') && menuOp.includes('data-movil-empresa="Pruebas S.A."') && !menuOp.includes('aria-label="Empresa'));
+
+const empresas = [
+  { id: 'pruebas_sa', name: 'Pruebas S.A.', color: '#2563eb' },
+  { id: 'bacarsa', name: 'Bacar SA', color: '#0f766e' },
+  { id: 'sin_color', name: 'Sin color' },
+  { id: 'inactiva', name: 'Inactiva', active: false },
+];
+const hoja = renderToStaticMarkup(createElement(EmpresaSheetBody, { empresas, activaId: 'pruebas_sa', onElegir: noop }));
+check('hoja de empresas: lista, activa con check, color como punto, inactiva afuera', hoja.includes('data-movil-empresa-item="bacarsa"') && hoja.includes('aria-current="true"') && hoja.includes('aria-label="Empresa activa"') && hoja.includes('background-color:#2563eb') && hoja.includes('data-movil-empresa-color="none"') && !hoja.includes('Inactiva') && !hoja.includes('data-movil-empresa-buscar'));
+const muchas = Array.from({ length: 8 }, (_, i) => ({ id: `e${i}`, name: `Empresa ${i}` }));
+const hojaMuchas = renderToStaticMarkup(createElement(EmpresaSheetBody, { empresas: muchas, activaId: 'e2', onElegir: noop }));
+check('hoja de empresas: buscador solo con más de 6', hojaMuchas.includes('data-movil-empresa-buscar="1"') && sel.necesitaBuscador(7) && !sel.necesitaBuscador(6));
+check('empresasVisibles: filtra, ordena y deja la activa', sel.empresasVisibles(empresas, 'inactiva', '').map((e) => e.id).join(',') === 'bacarsa,inactiva,pruebas_sa,sin_color' && sel.empresasVisibles(muchas, 'e2', 'empresa 7').map((e) => e.id).join(',') === 'e7' && sel.empresaColor('#ABCDEF') === '#ABCDEF' && sel.empresaColor('rojo') === null);
+// Cambio de empresa: sin DOM, se llama al componente como función (useState estático) y se
+// dispara el onClick del botón de la fila elegida recorriendo el árbol de elementos.
+const estaticoFile = compile(
+  withLibs(readFileSync(join(root, 'components/movil/EmpresaSheetBody.tsx'), 'utf8')).replace("import { useState } from 'react';", 'const useState = (v) => [v, () => {}];'),
+  'EmpresaSheetBody.static.tsx',
+);
+const { EmpresaSheetBody: HojaEstatica } = await import(pathToFileURL(estaticoFile).href);
+const buscarBoton = (node, id) => {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) { for (const n of node) { const hit = buscarBoton(n, id); if (hit) return hit; } return null; }
+  if (node.props?.['data-movil-empresa-item'] === id) return node;
+  return buscarBoton(node.props?.children, id);
+};
+let elegida = null;
+const arbol = HojaEstatica({ empresas, activaId: 'pruebas_sa', onElegir: (id) => { elegida = id; } });
+buscarBoton(arbol, 'bacarsa')?.props.onClick();
+check('cambio de empresa: tocar la fila llama onElegir con su id', elegida === 'bacarsa');
 
 const rrhhBase = {
   empresa: 'Pruebas S.A.', online: true, pendingLabel: null, hoyLabel: 'sábado 4 de octubre',

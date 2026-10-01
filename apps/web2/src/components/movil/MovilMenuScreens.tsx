@@ -1,124 +1,106 @@
 import {
-  ArrowLeftRight, Bot, Briefcase, Building2, CalendarDays, ChevronRight, Eye, LayoutGrid, LogOut, Monitor, Radio, UserPlus, Users,
+  Bot, Briefcase, CalendarDays, ChevronRight, Eye, LayoutGrid, LogOut, Monitor, Radio, UserPlus, Users,
   type LucideIcon,
 } from 'lucide-react';
 import type { MovilModulo } from '@/lib/movil/modulos';
-import { MOVIL_CARD, MOVIL_FONT, MOVIL_PRIMARY_BORDER, MOVIL_PRIMARY_TEXT, MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilTopBar, type MovilTone } from './ui';
+import { MENU_FILA_PX, MENU_TILE_PX, altoMenuPx } from '@/lib/movil/empresaSelector';
+import { movilFechaCorta } from '@/lib/movil/fechaCorta';
+import { MOVIL_BORDER, MOVIL_CARD, MOVIL_FONT, MOVIL_PRIMARY_TEXT, MovilTopBar } from './ui';
 
-export interface MovilMenuEmpresa {
-  id: string;
-  name: string;
-}
-
-/** Ícono y tono de cada módulo en el selector (mismos íconos que el menú del escritorio). */
-const MODULO_UI: Record<string, { icon: LucideIcon; tone: MovilTone }> = {
-  operacion: { icon: Radio, tone: 'emerald' },
-  supervision: { icon: Eye, tone: 'blue' },
-  planificacion: { icon: CalendarDays, tone: 'indigo' },
-  eventuales: { icon: UserPlus, tone: 'violet' },
-  rrhh: { icon: Users, tone: 'amber' },
-  servicios: { icon: Briefcase, tone: 'slate' },
+/** Ícono de cada módulo (trazo fino, gris oscuro, sin cuadro). */
+const MODULO_ICON: Record<string, LucideIcon> = {
+  operacion: Radio,
+  supervision: Eye,
+  planificacion: CalendarDays,
+  eventuales: UserPlus,
+  rrhh: Users,
+  servicios: Briefcase,
 };
 
-function moduloUi(id: string): { icon: LucideIcon; tone: MovilTone } {
-  return MODULO_UI[id] || { icon: LayoutGrid, tone: 'slate' };
+function moduloIcon(id: string): LucideIcon {
+  return MODULO_ICON[id] || LayoutGrid;
 }
 
-/** Fila de acción del menú: ícono pastel, texto y chevron. */
-function MenuRow({ icon, tone, label, hint, onClick, attrs }: { icon: LucideIcon; tone: MovilTone; label: string; hint?: string; onClick: () => void; attrs?: Record<string, string | undefined> }) {
+/** Fila de acción del menú (44 px): ícono, texto y chevron. */
+function MenuRow({ icon: Icon, label, onClick, attrs }: { icon: LucideIcon; label: string; onClick: () => void; attrs?: Record<string, string | undefined> }) {
   return (
-    <button type="button" onClick={onClick} {...attrs} className="flex min-h-14 w-full items-center gap-3 px-3 text-left active:bg-slate-50">
-      <MovilIconBox icon={icon} tone={tone} size="md" />
-      <span className="min-w-0 flex-1">
-        <span className="block text-sm font-semibold text-slate-900">{label}</span>
-        {hint && <span className="block truncate text-[11px] font-medium text-slate-500">{hint}</span>}
-      </span>
+    <button type="button" onClick={onClick} {...attrs} className="flex h-11 w-full items-center gap-3 px-3 text-left active:bg-slate-50" data-movil-fila={MENU_FILA_PX}>
+      <Icon size={18} strokeWidth={1.75} className="shrink-0 text-slate-700" aria-hidden="true" />
+      <span className="min-w-0 flex-1 truncate text-[13px] font-medium text-slate-900">{label}</span>
       <ChevronRight size={16} strokeWidth={1.75} className="shrink-0 text-slate-400" aria-hidden="true" />
     </button>
   );
 }
 
-/** Selector de módulos. Con un solo módulo permitido no hay grilla: empresa, asistente y salir. */
+/** Tile compacto (64 px): ícono, nombre, subtítulo en una línea y alertas a la derecha. */
+function ModuloTile({ modulo, alertas, onClick }: { modulo: MovilModulo; alertas: number; onClick: () => void }) {
+  const Icon = moduloIcon(modulo.id);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      data-movil-module={modulo.id}
+      data-movil-tile={MENU_TILE_PX}
+      className={`flex h-16 items-center gap-2.5 ${MOVIL_CARD} px-3 text-left active:bg-slate-50`}
+    >
+      <Icon size={20} strokeWidth={1.75} className="shrink-0 text-slate-700" aria-hidden="true" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-semibold leading-tight text-slate-900">{modulo.label}</span>
+        <span className="block truncate text-[11px] leading-tight text-slate-500">{modulo.mobile === false ? 'En la computadora' : modulo.desc}</span>
+      </span>
+      {alertas > 0 && (
+        <span data-movil-alertas={alertas} className={`shrink-0 text-[13px] font-semibold tabular-nums ${MOVIL_PRIMARY_TEXT}`}>{alertas}</span>
+      )}
+    </button>
+  );
+}
+
+/**
+ * Selector de módulos (`/admin/movil/`), estilo minimalista: barra oscura con la píldora de
+ * empresa (abre la hoja de cambio), fecha en una línea gris, tiles compactos en 2 columnas y
+ * las filas asistente / escritorio / salir. Seis módulos + asistente entran en 390x844 sin scroll.
+ * Con un solo módulo permitido no hay grilla: «Volver a X», asistente y salir.
+ */
 export function MovilMenuScreens(props: {
-  empresaId: string;
   empresaName: string;
-  empresas: MovilMenuEmpresa[];
-  canSwitchEmpresa: boolean;
   modulos: MovilModulo[];
   unico: MovilModulo | null;
+  /** Alertas pendientes por módulo (`modulo.id` → cantidad). */
+  alertas?: Partial<Record<string, number>>;
+  /** Instante de referencia (tests). Default `Date.now()`. */
+  now?: number;
+  onEmpresa?: () => void;
   onModulo: (modulo: MovilModulo) => void;
-  onSwitchEmpresa: (id: string) => void;
   onAsistente: () => void;
   onEscritorio: () => void;
   onLogout: () => void;
 }) {
-  const otras = props.canSwitchEmpresa ? props.empresas.filter((e) => e.id !== props.empresaId) : [];
+  const nowMs = props.now ?? Date.now();
+  const alertasDe = (id: string): number => props.alertas?.[id] ?? 0;
   return (
-    <div data-movil-screen="menu" data-viewport="390x844" className={`mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-8 ${MOVIL_FONT}`}>
-      <MovilTopBar modulo="Menú" empresa={props.empresaName} />
-      <div className="flex flex-col gap-3 px-3 pt-3">
-        <MovilHeader icon={LayoutGrid} title="Módulos" />
-
-        <MovilCard
-          icon={Building2}
-          tone="indigo"
-          title={props.empresaName}
-          subtitle="Empresa activa"
-          badge={otras.length > 0 ? <MovilBadge tone="indigo">{otras.length + 1} empresas</MovilBadge> : undefined}
-        >
-          {otras.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {otras.map((e) => (
-                <button key={e.id} type="button" onClick={() => props.onSwitchEmpresa(e.id)} data-movil-empresa-switch={e.id} className={`flex min-h-10 items-center gap-1.5 rounded-lg border bg-white px-3 text-[11px] font-semibold active:bg-slate-50 ${MOVIL_PRIMARY_BORDER} ${MOVIL_PRIMARY_TEXT}`}>
-                  <ArrowLeftRight size={13} strokeWidth={1.75} aria-hidden="true" />
-                  Cambiar a {e.name}
-                </button>
-              ))}
-            </div>
-          )}
-        </MovilCard>
+    <div data-movil-screen="menu" data-viewport="390x844" data-movil-alto={altoMenuPx(props.modulos.length)} className={`mx-auto flex min-h-[844px] w-full max-w-[480px] flex-col bg-[#f7f8fa] pb-8 ${MOVIL_FONT}`}>
+      <MovilTopBar modulo="Menú" empresa={props.empresaName} onEmpresa={props.onEmpresa} />
+      <div className="flex flex-col gap-3 px-3 pt-1">
+        <p className="h-5 text-[11px] font-medium leading-5 text-slate-400" data-movil-fecha="1">{movilFechaCorta(nowMs)}</p>
 
         {props.unico ? (
-          <MovilCard
-            icon={moduloUi(props.unico.id).icon}
-            tone={moduloUi(props.unico.id).tone}
-            title={`Volver a ${props.unico.label}`}
-            subtitle={props.unico.desc}
-            badge={<ChevronRight size={18} className="text-slate-300" aria-hidden="true" />}
-            onClick={() => props.onModulo(props.unico as MovilModulo)}
-            attrs={{ 'data-movil-module': props.unico.id }}
-          />
+          <ModuloTile modulo={{ ...props.unico, label: `Volver a ${props.unico.label}` }} alertas={alertasDe(props.unico.id)} onClick={() => props.onModulo(props.unico as MovilModulo)} />
         ) : (
-          <section className="grid grid-cols-2 gap-2">
-            {props.modulos.map((modulo) => {
-              const ui = moduloUi(modulo.id);
-              return (
-                <MovilCard
-                  key={modulo.id}
-                  className="min-h-[108px]"
-                  onClick={() => props.onModulo(modulo)}
-                  attrs={{ 'data-movil-module': modulo.id }}
-                >
-                  <div className="flex items-start justify-between">
-                    <MovilIconBox icon={ui.icon} tone={ui.tone} size="md" />
-                    {modulo.mobile === false && <MovilBadge tone="slate">PC</MovilBadge>}
-                  </div>
-                  <b className="mt-3 block text-[15px] font-semibold leading-tight text-slate-900">{modulo.label}</b>
-                  <small className="mt-0.5 block text-[11px] font-medium text-slate-500">{modulo.desc}</small>
-                </MovilCard>
-              );
-            })}
+          <section className="grid grid-cols-2 gap-2" data-movil-tiles={props.modulos.length}>
+            {props.modulos.map((modulo) => (
+              <ModuloTile key={modulo.id} modulo={modulo} alertas={alertasDe(modulo.id)} onClick={() => props.onModulo(modulo)} />
+            ))}
             {props.modulos.length === 0 && (
               <p className={`col-span-2 ${MOVIL_CARD} p-4 text-sm font-medium text-slate-500`}>Tu rol no tiene módulos para el celular.</p>
             )}
           </section>
         )}
 
-        <MovilCard className="!p-0 divide-y divide-slate-100 overflow-hidden">
-          <MenuRow icon={Bot} tone="indigo" label="Asistente" hint="Preguntale a COSP" onClick={props.onAsistente} />
-          <MenuRow icon={Monitor} tone="slate" label="Ver como escritorio" hint="Panel completo en esta pestaña" onClick={props.onEscritorio} />
-          <MenuRow icon={LogOut} tone="rose" label="Cerrar sesión" onClick={props.onLogout} />
-        </MovilCard>
+        <div className={`divide-y divide-slate-100 overflow-hidden rounded-lg border ${MOVIL_BORDER} bg-white`}>
+          <MenuRow icon={Bot} label="Asistente" onClick={props.onAsistente} />
+          <MenuRow icon={Monitor} label="Ver como escritorio" onClick={props.onEscritorio} />
+          <MenuRow icon={LogOut} label="Cerrar sesión" onClick={props.onLogout} />
+        </div>
       </div>
     </div>
   );

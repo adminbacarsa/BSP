@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/router';
 import { toast } from 'sonner';
 import { BottomSheet } from '@/components/movil/BottomSheet';
+import { useEmpresaSheet } from '@/components/movil/useEmpresaSheet';
 import { MovilBottomNav } from '@/components/movil/MovilBottomNav';
 import { AmbitoSheetBody, GuardAccionesSheetBody, OperacionScreens, ProximasSheetBody, SalaSheetBody, useOnlineFlag, type GuardShift, type MovilObjective } from '@/components/movil/OperacionScreens';
 import { COVERAGE_CASCADE_ORDER } from '@cosp/ops-core';
@@ -257,6 +258,7 @@ export function OperacionMovil(props: Props) {
   };
 
   // Deep-link del push: /admin/operaciones/?shiftId=… abre la tarjeta (su objetivo + hoja de acciones).
+  const empresaSheet = useEmpresaSheet();
   const deepShiftId = String(router.query.shiftId || '');
   const deepAbiertoRef = useRef<string | null>(null);
   useEffect(() => {
@@ -273,6 +275,7 @@ export function OperacionMovil(props: Props) {
     <>
       <OperacionScreens
         empresa={props.empresa}
+        onEmpresa={empresaSheet.onEmpresa}
         modeLabel={props.modeLabel}
         online={online}
         pendingLabel={pending}
@@ -368,6 +371,7 @@ export function OperacionMovil(props: Props) {
           )}
         </BottomSheet>
       )}
+      {empresaSheet.sheet}
       <MovilBottomNav alertCount={alerts.length} />
     </>
   );

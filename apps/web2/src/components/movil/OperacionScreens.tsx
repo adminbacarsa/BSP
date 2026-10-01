@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import {
   MOVIL_BORDER, MOVIL_BTN_PRIMARY, MOVIL_BTN_SECONDARY, MOVIL_CARD, MOVIL_FILETE, MOVIL_FONT, MOVIL_PRIMARY_BG, MOVIL_TEXT,
-  MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct,
+  MovilBadge, MovilCard, MovilHeader, MovilIconBox, MovilIconButton, MovilProgress, MovilTopBar, toneForGuard, toneForPct, type MovilTone,
 } from './ui';
 import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
 import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
@@ -14,6 +14,7 @@ import { ALTO_HASTA_PRIMERA_TARJETA_PX, MOVIL_CONTADORES, buscarClientes, etique
 import { accionesParaTurno, avisoManualRestanteSeg, type GuardAccion, type GuardAccionId } from '@/lib/movil/guardAcciones';
 import { etiquetaProximas, resumenProximas, type ProximaFranja } from '@/lib/movil/proximasFranjas';
 import { OPS_NOTA_MAX } from '@/lib/operaciones/opsNota';
+import { movilFechaCorta } from '@/lib/movil/fechaCorta';
 
 /**
  * Botones de la hoja de acciones: primario = color de la empresa (negro por defecto),
@@ -439,10 +440,6 @@ const TONE_TEXT: Record<string, string> = {
 };
 
 /** «jueves 1 de octubre» en la línea gris bajo la barra. */
-function movilFechaCorta(ms: number): string {
-  return new Date(ms).toLocaleDateString('es-AR', { weekday: 'long', day: 'numeric', month: 'long' });
-}
-
 function BigButton({ label, tone, onClick }: { label: string; tone?: 'go' | 'pri' | 'warn'; onClick: () => void }) {
   const cls = tone === 'pri' ? MOVIL_BTN_PRIMARY : tone === 'go' ? `${MOVIL_BTN_SECONDARY} !text-emerald-700` : tone === 'warn' ? `${MOVIL_BTN_SECONDARY} !text-orange-700` : MOVIL_BTN_SECONDARY;
   return (
@@ -640,8 +637,11 @@ export function OperacionScreens({
   proximas,
   onProximas,
   pieLabel = null,
+  onEmpresa,
 }: {
   empresa: string;
+  /** Píldora de empresa → hoja de cambio de empresa (solo si puede cambiar). */
+  onEmpresa?: () => void;
   modeLabel: string;
   online: boolean;
   pendingLabel: string | null;
@@ -713,6 +713,7 @@ export function OperacionScreens({
       <MovilTopBar
         modulo={moduloLabel}
         empresa={empresa}
+        onEmpresa={onEmpresa}
         online={online}
         pendingLabel={pendingLabel}
         right={readOnly ? (
