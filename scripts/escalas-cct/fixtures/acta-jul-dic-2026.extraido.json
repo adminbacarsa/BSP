@@ -1,0 +1,376 @@
+{
+  "ok": true,
+  "cct": "CCT_507_07",
+  "distintoDe422": true,
+  "vigenciaDesde": "2026-07-01",
+  "vigenciaHasta": "2026-12-31",
+  "partes": [
+    "UPSRA",
+    "CAESI"
+  ],
+  "documento": "RE-2026-66453610-APN-CGDTEYS#MCH",
+  "tramos": [
+    {
+      "vigenciaDesde": "2026-07-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1001300
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1065500
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1128000
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1065500
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1065500
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1128000
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1001300
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1095000
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1095000
+        }
+      ],
+      "noRemunerativoMensual": 20000,
+      "viaticoPorDia": 20220
+    },
+    {
+      "vigenciaDesde": "2026-08-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1020300
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1086200
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1150500
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1086200
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1086200
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1150500
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1020300
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1116600
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1116600
+        }
+      ],
+      "noRemunerativoMensual": 30000,
+      "viaticoPorDia": 20580
+    },
+    {
+      "vigenciaDesde": "2026-09-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1037600
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1105700
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1172100
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1105700
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1105700
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1172100
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1037600
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1137100
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1137100
+        }
+      ],
+      "noRemunerativoMensual": 50000,
+      "viaticoPorDia": 20960
+    },
+    {
+      "vigenciaDesde": "2026-10-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1053200
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1123000
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1191000
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1123000
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1123000
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1191000
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1053200
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1155100
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1155100
+        }
+      ],
+      "noRemunerativoMensual": 60000,
+      "viaticoPorDia": 21360
+    },
+    {
+      "vigenciaDesde": "2026-11-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1069000
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1140500
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1210200
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1140500
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1140500
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1210200
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1069000
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1173400
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1173400
+        }
+      ],
+      "noRemunerativoMensual": 70000,
+      "viaticoPorDia": 21800
+    },
+    {
+      "vigenciaDesde": "2026-12-01",
+      "categorias": [
+        {
+          "codigo": "VIGILADOR_GENERAL",
+          "label": "Vigilador General",
+          "basicoMensual": 1085000
+        },
+        {
+          "codigo": "VIGILADOR_BOMBERO",
+          "label": "Vigilador Bombero",
+          "basicoMensual": 1159500
+        },
+        {
+          "codigo": "VIGILADOR_PRINCIPAL",
+          "label": "Vigilador Principal",
+          "basicoMensual": 1232300
+        },
+        {
+          "codigo": "VERIFICACION_EVENTOS",
+          "label": "Verificacion de Eventos",
+          "basicoMensual": 1159500
+        },
+        {
+          "codigo": "OPERADOR_MONITOREO",
+          "label": "Operador de Monitoreo",
+          "basicoMensual": 1159500
+        },
+        {
+          "codigo": "INSTALADOR_SISTEMAS",
+          "label": "Instalador de Sistemas Electronicos",
+          "basicoMensual": 1232300
+        },
+        {
+          "codigo": "CONTROLADOR_ADMISION",
+          "label": "Controlador de Admision y Permanencia General",
+          "basicoMensual": 1085000
+        },
+        {
+          "codigo": "GUIA_TECNICO",
+          "label": "Guia Tecnico",
+          "basicoMensual": 1193900
+        },
+        {
+          "codigo": "ADMINISTRATIVO",
+          "label": "Administrativo",
+          "basicoMensual": 1194000
+        }
+      ],
+      "noRemunerativoMensual": 120000,
+      "viaticoPorDia": 21800
+    }
+  ],
+  "presentismo": [
+    {
+      "codigo": "VIGILADOR_GENERAL",
+      "label": "Vigilador General",
+      "montoMensual": 180000
+    },
+    {
+      "codigo": "VIGILADOR_BOMBERO",
+      "label": "Vigilador Bombero",
+      "montoMensual": 195100
+    },
+    {
+      "codigo": "VIGILADOR_PRINCIPAL",
+      "label": "Vigilador Principal",
+      "montoMensual": 210700
+    },
+    {
+      "codigo": "VERIFICACION_EVENTOS",
+      "label": "Verificacion de Eventos",
+      "montoMensual": 195100
+    },
+    {
+      "codigo": "OPERADOR_MONITOREO",
+      "label": "Operador de Monitoreo",
+      "montoMensual": 195100
+    },
+    {
+      "codigo": "INSTALADOR_SISTEMAS",
+      "label": "Instalador de Sistemas Electronicos",
+      "montoMensual": 210700
+    },
+    {
+      "codigo": "CONTROLADOR_ADMISION",
+      "label": "Controlador de Admision y Permanencia General",
+      "montoMensual": 180000
+    },
+    {
+      "codigo": "GUIA_TECNICO",
+      "label": "Guia Tecnico",
+      "montoMensual": 203000
+    },
+    {
+      "codigo": "ADMINISTRATIVO",
+      "label": "Administrativo",
+      "montoMensual": 203000
+    }
+  ],
+  "noRemunerativoSeIncorporaAlBasicoDesde": "2027-01-01",
+  "documentoHash": "c0c7498346fa20f5621fe8832d48ba49b7098952ccdcfa0e24e9c6abcfd83656",
+  "fuenteUrl": "https://upsra.org.ar/sitio/wp-content/uploads/2026/07/ACTA-SALARIAL-JUL-DIC-2026-CAESI-UPSRA-RE-2026-66453610.pdf"
+}
