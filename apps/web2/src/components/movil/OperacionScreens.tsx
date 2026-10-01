@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { coveragePct, guardStatusLabel, guardTone, type GuardFlags } from '@/lib/movil/guardTone';
+import { coveragePct, guardStatusLabel, guardTone } from '@/lib/movil/guardTone';
+import { guardDetalle, proximoRelevo, type GuardDetalleShift } from '@/lib/movil/guardDetalle';
 
 export interface MovilObjective {
   objectiveId: string;
@@ -13,15 +14,7 @@ export interface MovilObjective {
   shifts: GuardShift[];
 }
 
-export interface GuardShift extends GuardFlags {
-  id: string;
-  employeeName?: string;
-  code?: string;
-  positionName?: string;
-  objectiveName?: string;
-  shiftDateObj?: Date | string | null;
-  endDateObj?: Date | string | null;
-}
+export type GuardShift = GuardDetalleShift;
 
 export interface MovilStats {
   activos: number;
@@ -31,23 +24,14 @@ export interface MovilStats {
   plan: number;
 }
 
-function hhmm(value: Date | string | null | undefined): string {
-  const date = value instanceof Date ? value : value ? new Date(value) : null;
-  if (!date || Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString('es-AR', {
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-    timeZone: 'America/Argentina/Cordoba',
-  });
-}
-
-function horario(shift: GuardShift): string {
-  const start = hhmm(shift.shiftDateObj);
-  const end = hhmm(shift.endDateObj);
-  if (start && end) return `${start}–${end}`;
-  return start || '—';
-}
+const TONE_TEXT: Record<string, string> = {
+  ok: 'text-emerald-700',
+  ret: 'text-orange-700',
+  aus: 'text-slate-800',
+  late: 'text-amber-800',
+  vac: 'text-rose-700',
+  plan: 'text-indigo-700',
+};
 
 const TONE_BAR: Record<string, string> = {
   ok: 'bg-emerald-500',
@@ -90,8 +74,56 @@ function BigButton({
   );
 }
 
+/** Botón LLAMAR con el teléfono del legajo. Sin teléfono queda deshabilitado. */
+export function LlamarButton({ telefono, compact = false }: { telefono: string | null; compact?: boolean }) {
+  const cls = telefono
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-slate-200 bg-slate-50 text-slate-400';
+  return (
+    <a
+      href={telefono ? `tel:${telefono.replace(/[^\d+]/g, '')}` : undefined}
+      aria-disabled={telefono ? undefined : 'true'}
+      aria-label={telefono ? `Llamar a ${telefono}` : 'Sin teléfono en el legajo'}
+      data-movil-llamar={telefono ? '1' : '0'}
+      className={`flex min-h-12 items-center justify-center rounded-2xl border text-[11px] font-black ${compact ? 'w-12' : 'px-3'} ${cls}`}
+      onClick={telefono ? undefined : (event) => event.preventDefault()}
+    >
+      {compact ? '☎' : telefono ? 'Llamar' : 'Sin tel.'}
+    </a>
+  );
+}
+
+/**
+ * Detalle compacto del guardia: horario planificado + código, puesto y objetivo,
+ * ingreso real o estado con minutos, relevo, convocatoria/cobertura.
+ */
+export function GuardDetalleLines({ shift, siblings = [], now, showObjective = true }: { shift: GuardShift; siblings?: readonly GuardShift[]; now?: number; showObjective?: boolean }) {
+  const tone = guardTone(shift);
+  const d = guardDetalle(shift, siblings, now ?? Date.now());
+  return (
+    <div data-movil-detalle={shift.id} className="min-w-0">
+      <p className="truncate text-[11px] font-semibold text-slate-500">
+        <span className="font-black uppercase text-indigo-700">{d.puesto}</span>
+        {showObjective && d.objetivo ? ` · ${d.objetivo}` : ''}
+      </p>
+      <p className="text-[12px] font-black tabular-nums text-slate-800">
+        {d.horario}
+        <span className="ml-1 text-[10px] font-bold text-slate-500">· {d.code}</span>
+      </p>
+      {d.ingreso && <p className="truncate text-[11px] font-bold text-emerald-700">{d.ingreso}</p>}
+      {d.estado && <p className={`truncate text-[11px] font-bold ${TONE_TEXT[tone]}`}>{d.estado}</p>}
+      {d.relevaA && <p className="truncate text-[11px] font-semibold text-slate-600">{d.relevaA}</p>}
+      {d.loReleva && <p className="truncate text-[11px] font-semibold text-slate-600">{d.loReleva}</p>}
+      {d.convocatoria && <p className="truncate text-[11px] font-bold text-indigo-700">{d.convocatoria}</p>}
+      {d.cobertura && <p className="truncate text-[11px] font-bold text-violet-700">{d.cobertura}</p>}
+    </div>
+  );
+}
+
 export function GuardCard({
   shift,
+  siblings = [],
+  now,
   readOnly = false,
   onLlego,
   onRevertir,
@@ -100,6 +132,9 @@ export function GuardCard({
   onRetencion,
 }: {
   shift: GuardShift;
+  /** Turnos del mismo objetivo: de acá sale a quién releva / quién lo releva. */
+  siblings?: readonly GuardShift[];
+  now?: number;
   readOnly?: boolean;
   onLlego: (shift: GuardShift) => void;
   onRevertir: (shift: GuardShift) => void;
@@ -108,28 +143,31 @@ export function GuardCard({
   onRetencion: (shift: GuardShift) => void;
 }) {
   const tone = guardTone(shift);
+  const telefono = String(shift.phone || '').trim() || null;
+  const nombre = shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Sin nombre';
   return (
-    <article className="mb-2 flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+    <article className="mb-2 flex overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-movil-tone={tone}>
       <div className={`w-1.5 ${TONE_BAR[tone]}`} />
       <div className="min-w-0 flex-1 p-2.5">
         <div className="flex items-center gap-2">
-          <strong className="truncate text-sm">{shift.employeeName || 'Sin nombre'}</strong>
-          <span className="ml-auto rounded-lg bg-slate-900 px-1.5 py-0.5 text-[11px] font-black text-white">{shift.code || '—'}</span>
+          <strong className={`truncate text-sm ${shift.isUnassigned ? 'text-rose-700' : ''}`}>{nombre}</strong>
+          <span className={`ml-auto shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${TONE_PILL[tone]}`}>{guardStatusLabel(shift)}</span>
+          <span className="shrink-0 rounded-lg bg-slate-900 px-1.5 py-0.5 text-[11px] font-black text-white">{shift.code || '—'}</span>
         </div>
-        <p className="text-[11px] font-semibold text-slate-500">{horario(shift)} · {shift.positionName || 'Puesto'}</p>
-        <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${TONE_PILL[tone]}`}>
-          {guardStatusLabel(shift)}
-        </span>
-        {!readOnly && (
-          <div className="mt-2 flex gap-1.5">
-            {tone === 'aus' && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
-            {tone === 'aus' && <BigButton label="Revertir" onClick={() => onRevertir(shift)} />}
-            {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
-            {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
-            {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
-            <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" onClick={() => onProtocolo(shift)}>⋯</button>
-          </div>
-        )}
+        <GuardDetalleLines shift={shift} siblings={siblings} now={now} showObjective={false} />
+        <div className="mt-2 flex gap-1.5">
+          {!shift.isUnassigned && <LlamarButton telefono={telefono} compact={!readOnly} />}
+          {!readOnly && (
+            <>
+              {tone === 'aus' && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
+              {tone === 'aus' && <BigButton label="Revertir" onClick={() => onRevertir(shift)} />}
+              {(tone === 'ok' || tone === 'ret' || tone === 'late') && <BigButton label="Salida" tone="warn" onClick={() => onSalida(shift)} />}
+              {tone === 'ret' && <BigButton label="Retención" onClick={() => onRetencion(shift)} />}
+              {(tone === 'aus' || tone === 'vac') && <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />}
+              <button type="button" className="min-h-12 w-12 rounded-2xl border border-slate-200 text-lg font-black" aria-label="Más acciones" onClick={() => onProtocolo(shift)}>⋯</button>
+            </>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -156,6 +194,7 @@ export function OperacionScreens({
   onProtocolo,
   onRetencion,
   onSala,
+  now,
 }: {
   empresa: string;
   modeLabel: string;
@@ -165,6 +204,8 @@ export function OperacionScreens({
   notices?: string[];
   /** Supervisión: mismas pantallas sin botones de acción ni sala. */
   readOnly?: boolean;
+  /** Instante de referencia (tests). Default `Date.now()`. */
+  now?: number;
   objectives: MovilObjective[];
   objective: MovilObjective | null;
   alerts: GuardShift[];
@@ -179,6 +220,9 @@ export function OperacionScreens({
   onRetencion: (shift: GuardShift) => void;
   onSala: () => void;
 }) {
+  const nowMs = now ?? Date.now();
+  const siblingsOf = (shift: GuardShift): readonly GuardShift[] =>
+    objective?.shifts ?? objectives.find((item) => item.objectiveId === shift.objectiveId)?.shifts ?? [];
   const counters = [
     { id: 'ACTIVOS', label: 'Activos', value: stats.activos, cls: 'text-emerald-600' },
     { id: 'RETENIDOS', label: 'Ret', value: stats.retenidos, cls: 'text-orange-600' },
@@ -227,6 +271,7 @@ export function OperacionScreens({
             </div>
             {objectives.map((item) => {
               const pct = coveragePct(item);
+              const relevo = proximoRelevo(item.shifts, nowMs);
               return (
                 <button key={item.objectiveId} type="button" onClick={() => onOpen(item.objectiveId)} className="mb-2 w-full rounded-2xl border border-slate-200 bg-white p-3 text-left shadow-sm">
                   <div className="flex items-start gap-2">
@@ -242,6 +287,7 @@ export function OperacionScreens({
                     {item.absent > 0 && <span className="rounded-full bg-slate-100 px-2 py-0.5">AUS {item.absent}</span>}
                     {item.vacant > 0 && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-rose-700">VAC {item.vacant}</span>}
                   </div>
+                  {relevo && <p className="mt-1.5 text-[11px] font-bold text-indigo-700">{relevo}</p>}
                 </button>
               );
             })}
@@ -253,6 +299,8 @@ export function OperacionScreens({
             <GuardCard
               key={shift.id}
               shift={shift}
+              siblings={objective.shifts}
+              now={nowMs}
               readOnly={readOnly}
               onLlego={onLlego}
               onRevertir={onRevertir}
@@ -276,14 +324,17 @@ export function OperacionScreens({
                 )}
                 <div className="min-w-0 flex-1 p-3">
                   <p className="text-[10px] font-black uppercase text-rose-600">{guardStatusLabel(shift)}</p>
-                  <h3 className="text-sm font-black">{shift.employeeName || 'Vacante'}</h3>
-                  <p className="text-[11px] font-semibold text-slate-500">{shift.objectiveName} · {shift.code} · {horario(shift)}</p>
-                  {!readOnly && (
-                    <div className="mt-2 flex gap-1.5">
-                      <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />
-                      <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />
-                    </div>
-                  )}
+                  <h3 className="text-sm font-black">{shift.isUnassigned ? `VACANTE${shift.vacancyBand ? ` · ${shift.vacancyBand}` : ''}` : shift.employeeName || 'Vacante'}</h3>
+                  <GuardDetalleLines shift={shift} siblings={siblingsOf(shift)} now={nowMs} />
+                  <div className="mt-2 flex gap-1.5">
+                    {!shift.isUnassigned && <LlamarButton telefono={String(shift.phone || '').trim() || null} compact={!readOnly} />}
+                    {!readOnly && (
+                      <>
+                        {!shift.isUnassigned && <BigButton label="Llegó?" tone="go" onClick={() => onLlego(shift)} />}
+                        <BigButton label="Protocolo" tone="pri" onClick={() => onProtocolo(shift)} />
+                      </>
+                    )}
+                  </div>
                 </div>
               </article>
             ))}

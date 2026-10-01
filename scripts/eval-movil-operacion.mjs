@@ -29,6 +29,7 @@ const compiled = new Map();
 function resolveSource(spec, fromDir) {
   let base;
   if (spec.startsWith('@/')) base = join(web2, 'src', spec.slice(2));
+  else if (spec === '@cosp/ops-core') base = join(web2, '..', '..', 'packages', 'ops-core', 'src', 'index.ts');
   else if (spec.startsWith('.')) base = resolvePath(fromDir, spec);
   else return null;
   for (const candidate of [base, `${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
@@ -219,6 +220,109 @@ const supervisionAlertas = render(OperacionScreens, {
   ...noops,
 });
 check('alertas en supervisión sin Cubrir/Llegó', supervisionAlertas.includes('Guerrero, Martín') && !supervisionAlertas.includes('Llegó') && !supervisionAlertas.includes('Cubrir'));
+
+// ── Tarjetas del guardia: horario planificado, ingreso real o estado, relevo, convocatoria, cobertura, LLAMAR ──
+const { guardDetalle, proximoRelevo } = await importFront('lib/movil/guardDetalle.ts');
+const ar = (hhmm, day = '2026-10-01') => new Date(`${day}T${hhmm}:00-03:00`);
+const AHORA = ar('15:20').getTime();
+const base = (over) => ({ objectiveId: 'peaje', objectiveName: 'Peaje 9 Norte', positionName: 'Puesto 1', phone: '351 555-0101', ...over });
+const baezM = base({ id: 'm', employeeId: 'e1', employeeName: 'Baez, Juan', code: 'M', shiftDateObj: ar('07:00'), endDateObj: ar('15:00'), isPresent: true, realStartTime: ar('07:00'), checkInAt: ar('06:52') });
+const guerreroT = base({ id: 't', employeeId: 'e2', employeeName: 'Guerrero, Martín', code: 'T', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), isPresent: true, realStartTime: ar('15:12'), checkInAt: ar('15:12') });
+const fariasN = base({ id: 'n', employeeId: 'e3', employeeName: 'Farias, Lucas', code: 'N', shiftDateObj: ar('23:00'), endDateObj: ar('07:00', '2026-10-02') });
+const peaje = [baezM, guerreroT, fariasN];
+
+const dBaez = guardDetalle(baezM, peaje, AHORA);
+check('horario planificado con código y puesto', dBaez.horario === '07:00–15:00' && dBaez.code === 'M' && dBaez.puesto === 'Puesto 1' && dBaez.objetivo === 'Peaje 9 Norte');
+check('ingreso real a horario con marca anticipada (formatIngresoLine)', dBaez.ingreso === 'Ingresó 07:00 · marcó 06:52' && dBaez.estado === null);
+check('quién lo releva sale de la serie M→T', dBaez.loReleva === 'Lo releva Guerrero, Martín · T 15:00');
+const dGuerrero = guardDetalle(guerreroT, peaje, AHORA);
+check('ingreso tarde con minutos', dGuerrero.ingreso === 'Ingresó 15:12 (12 min tarde)');
+check('a quién releva y quién lo releva', dGuerrero.relevaA === 'Releva a Baez, Juan · M 15:00' && dGuerrero.loReleva === 'Lo releva Farias, Lucas · N 23:00');
+check('teléfono del legajo', dGuerrero.telefono === '351 555-0101');
+
+const retenido = base({ ...baezM, id: 'r', isRetention: true, retentionMinutes: 20, retentionWait: { sinceMs: ar('15:00').getTime(), elapsedMinutes: 20, capAtMs: ar('19:59').getTime(), capRemainingMinutes: 279, reliever: { id: 't', employeeName: 'Guerrero, Martín', code: 'T', startMs: ar('15:00').getTime(), status: 'NO_FICHO' }, waitLabel: 'Guerrero, Martín no se presentó' } });
+const dRet = guardDetalle(retenido, [retenido, { ...guerreroT, isPresent: false, isAbsent: true }], AHORA);
+check('retenido desde · minutos · tope y a quién espera', dRet.estado === 'Retenido desde 15:00 · 20 min · tope 19:59' && dRet.loReleva === 'Espera a Guerrero, Martín · T 15:00');
+
+const ausente = base({ ...guerreroT, id: 'a', isPresent: false, realStartTime: null, checkInAt: null, isAbsent: true });
+check('ausente: no llegó desde la hora planificada', guardDetalle(ausente, [], AHORA).estado === 'No llegó desde 15:00 · ausente' && guardDetalle(ausente, [], AHORA).ingreso === null);
+const ausenteCubierto = { ...ausente, operacionallyCovered: true, coveredByEmployeeName: 'Sosa, Carla (REF)' };
+check('ausente cubierto muestra quién lo cubre', guardDetalle(ausenteCubierto, [], AHORA).cobertura === 'Cubierto por Sosa, Carla');
+const provisoria = { ...ausente, isAbsent: false, isPotentialAbsence: true, isProvisionalLateAbsence: true };
+check('posible ausencia con aviso', guardDetalle(provisoria, [], AHORA).estado === 'No llegó desde 15:00 · posible ausencia');
+
+const tardeAvisada = base({ ...ausente, isAbsent: false, isLateNotified: true, lateArrivalEtaLabel: '15:30' });
+check('tarde avisada con minutos y ETA', guardDetalle(tardeAvisada, [], AHORA).estado === 'Tarde 20 min · avisó · llega ~15:30');
+const tardeSinAviso = base({ ...ausente, isAbsent: false, isLateUnnotified: true });
+check('tarde sin aviso con minutos', guardDetalle(tardeSinAviso, [], AHORA).estado === 'Tarde 20 min · sin aviso');
+
+const vacante = base({ id: 'v', employeeId: 'VACANTE', isUnassigned: true, vacancyBand: 'T', code: 'T', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), phone: '' });
+const dVac = guardDetalle(vacante, peaje, AHORA);
+check('vacante con banda y desde cuándo, sin teléfono', dVac.nombre === 'VACANTE · T' && dVac.estado === 'Vacante T · desde 15:00' && dVac.telefono === null && dVac.relevaA === null);
+
+const convocado = base({ id: 'c', employeeId: 'e9', employeeName: 'Sosa, Carla', code: 'REF', shiftDateObj: ar('15:00'), endDateObj: ar('23:00'), expectedArrivalAt: ar('15:40'), originSource: 'DEVICE', convocadoReminderSentAt: ar('15:25'), convocadoDemorado: false });
+check('convocatoria en curso', guardDetalle(convocado, [], AHORA).convocatoria === 'EN CAMINO · llega ~15:40 · celular · recordatorio enviado');
+check('convocado demorado', guardDetalle({ ...convocado, convocadoDemorado: true }, [], AHORA).convocatoria.endsWith('DEMORADO'));
+
+const ext = base({ id: 'x', employeeId: 'e1', employeeName: 'Baez, Juan', code: 'T', origin: 'OPERATIONS_COVERAGE', coverageSegmentRole: 'EXTENSION', coverageHoursOnSource: true, coversEmployeeName: 'Guerrero, Martín', shiftDateObj: ar('15:00'), endDateObj: ar('19:00'), isPresent: true, realStartTime: ar('15:00') });
+check('cobertura EXT hasta HH:MM y a quién cubre', guardDetalle(ext, [], AHORA).cobertura === 'EXT hasta 19:00 · cubre a Guerrero, Martín');
+const adv = { ...ext, id: 'y', coverageSegmentRole: 'EARLY_START', shiftDateObj: ar('19:00'), endDateObj: ar('23:00') };
+check('cobertura ADV desde HH:MM', guardDetalle(adv, [], AHORA).cobertura === 'ADV desde 19:00 · cubre a Guerrero, Martín');
+const ft = { ...ext, id: 'z', coverageSegmentRole: null, coverageType: 'FT' };
+check('cobertura FT', guardDetalle(ft, [], AHORA).cobertura === 'FT · cubre a Guerrero, Martín');
+
+const plan = base({ ...fariasN, isFuture: true });
+check('planificado: entra a HH:MM', guardDetalle(plan, peaje, AHORA).estado === 'Entra 23:00' && guardDetalle(plan, peaje, AHORA).relevaA === 'Releva a Guerrero, Martín · T 23:00');
+check('próximo relevo del objetivo', proximoRelevo(peaje, AHORA) === 'Próximo relevo 23:00 · N' && proximoRelevo([baezM, guerreroT], AHORA) === null);
+check('próximo relevo vacante', proximoRelevo([baezM, { ...vacante, shiftDateObj: ar('23:00'), vacancyBand: 'N' }], AHORA) === 'Próximo relevo 23:00 · N · VACANTE');
+
+const objetivoDetalle = { objectiveId: 'peaje', name: 'Peaje 9 Norte', client: 'Ruta 9', active: 2, retention: 0, absent: 0, vacant: 0, plan: 1, shifts: peaje };
+const tarjetasHtml = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA,
+  stats: { activos: 2, retenidos: 0, ausentes: 0, vacantes: 0, plan: 1 },
+  panel: 'objetivo', alerts: [], objectives: [objetivoDetalle], objective: objetivoDetalle, ...noops,
+});
+check('tarjeta 390: horario planificado y código en cada guardia', tarjetasHtml.includes('07:00–15:00') && tarjetasHtml.includes('15:00–23:00') && tarjetasHtml.includes('23:00–07:00') && (tarjetasHtml.match(/data-movil-detalle=/g) || []).length === 3);
+check('tarjeta 390: ingreso real debajo del horario', tarjetasHtml.includes('Ingresó 07:00 · marcó 06:52') && tarjetasHtml.includes('Ingresó 15:12 (12 min tarde)'));
+check('tarjeta 390: relevo y plan', tarjetasHtml.includes('Lo releva Guerrero, Martín · T 15:00') && tarjetasHtml.includes('Entra 23:00'));
+check('tarjeta 390: LLAMAR con tel: del legajo junto a las acciones', tarjetasHtml.includes('href="tel:3515550101"') && (tarjetasHtml.match(/data-movil-llamar="1"/g) || []).length === 3 && tarjetasHtml.includes('Salida'));
+const homeRelevo = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA,
+  stats: { activos: 2, retenidos: 0, ausentes: 0, vacantes: 0, plan: 1 },
+  panel: 'home', alerts: [], objectives: [objetivoDetalle], objective: null, ...noops,
+});
+check('tarjeta del objetivo: próximo relevo', homeRelevo.includes('Próximo relevo 23:00 · N'));
+const estadosTarjeta = [retenido, ausente, ausenteCubierto, tardeAvisada, tardeSinAviso, vacante, convocado, ext];
+const objetivoEstados = { objectiveId: 'peaje', name: 'Peaje 9 Norte', client: 'Ruta 9', active: 2, retention: 1, absent: 2, vacant: 1, plan: 1, shifts: estadosTarjeta };
+const estadosHtml = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA,
+  stats: { activos: 2, retenidos: 1, ausentes: 2, vacantes: 1, plan: 1 },
+  panel: 'objetivo', alerts: [], objectives: [objetivoEstados], objective: objetivoEstados, ...noops,
+});
+for (const [nombre, texto] of [
+  ['retenido', 'Retenido desde 15:00 · 20 min · tope 19:59'],
+  ['ausente', 'No llegó desde 15:00 · ausente'],
+  ['ausente cubierto', 'Cubierto por Sosa, Carla'],
+  ['tarde avisada', 'Tarde 20 min · avisó · llega ~15:30'],
+  ['tarde sin aviso', 'Tarde 20 min · sin aviso'],
+  ['vacante', 'Vacante T · desde 15:00'],
+  ['convocado', 'EN CAMINO · llega ~15:40'],
+  ['EXT', 'EXT hasta 19:00 · cubre a Guerrero, Martín'],
+]) check(`render estado ${nombre}`, estadosHtml.includes(texto));
+const sinTelHtml = render(OperacionScreens, { empresa: 'P', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA, stats: { activos: 1, retenidos: 0, ausentes: 0, vacantes: 0, plan: 0 }, panel: 'objetivo', alerts: [], objectives: [], objective: { ...objetivoDetalle, shifts: [{ ...baezM, phone: '' }] }, ...noops });
+check('vacante sin LLAMAR; sin teléfono deshabilitado', !estadosHtml.includes('data-movil-llamar="0"') && (estadosHtml.match(/data-movil-llamar="1"/g) || []).length === estadosTarjeta.length - 1 && sinTelHtml.includes('data-movil-llamar="0"'));
+const alertasDetalle = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Manual', online: true, pendingLabel: null, now: AHORA,
+  stats: { activos: 0, retenidos: 0, ausentes: 1, vacantes: 1, plan: 0 },
+  panel: 'alertas', alerts: [ausente, vacante], objectives: [objetivoEstados], objective: null, ...noops,
+});
+check('alertas con horario, estado, objetivo y LLAMAR', alertasDetalle.includes('15:00–23:00') && alertasDetalle.includes('No llegó desde 15:00 · ausente') && alertasDetalle.includes('Peaje 9 Norte') && alertasDetalle.includes('href="tel:3515550101"') && alertasDetalle.includes('VACANTE · T'));
+const supervisionDetalle = render(OperacionScreens, {
+  empresa: 'Pruebas S.A.', modeLabel: 'Auto', online: true, pendingLabel: null, readOnly: true, now: AHORA,
+  stats: { activos: 2, retenidos: 1, ausentes: 2, vacantes: 1, plan: 1 },
+  panel: 'objetivo', alerts: [], objectives: [objetivoEstados], objective: objetivoEstados, ...noops,
+});
+check('supervisión: mismo detalle y LLAMAR, sin acciones', supervisionDetalle.includes('Retenido desde 15:00') && supervisionDetalle.includes('>Llamar<') && !supervisionDetalle.includes('Llegó?') && !supervisionDetalle.includes('Protocolo'));
 
 // ── Contadores igual que escritorio ──
 const { shiftCountsInOpsHeader, isFinServicioSinCronograma } = await importFront('lib/operaciones/opsHeaderCounts.ts');
