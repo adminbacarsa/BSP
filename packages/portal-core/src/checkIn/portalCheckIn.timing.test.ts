@@ -214,7 +214,18 @@ describe('getCheckInTiming — ventanas CC (paridad server)', () => {
       endTime: new Date('2026-09-15T02:00:00-03:00'),
     });
     expect(isCoverageHoursOnSourceShift(byType)).toBe(true);
-    expect(getCheckInTiming(byType, now).rejectCode).toBe('TRACE_REGISTRATION');
+    expect(getCheckInTiming(byType, now).canCheckIn).toBe(true);
+
+    const ext = shift({
+      id: 'reg3',
+      origin: 'OPERATIONS_COVERAGE',
+      coverageType: 'EXTEND',
+      startTime: new Date('2026-09-14T18:00:00-03:00'),
+      endTime: new Date('2026-09-15T02:00:00-03:00'),
+      createdAt: new Date('2026-09-14T17:00:00-03:00'),
+    });
+    expect(getCheckInTiming(ext, now).canCheckIn).toBe(false);
+    expect(getCheckInTiming(ext, now).rejectCode).toBe('EXT_NO_CHECKIN');
   });
 
   it('SHIFT_ENDED: mensaje claro; retenido no ficha', () => {

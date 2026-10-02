@@ -6,6 +6,7 @@ import { radius, spacing } from '../theme/tokens';
 import { useTheme } from '../theme/ThemeContext';
 import type { ConvocatoriaCobertura } from '../lib/convocatoriasCobertura';
 import { llegadaTardePlaceLabel } from '../lib/llegadaTardePlace';
+import { avisoEntranteTexto } from '../lib/avisosCc';
 
 export const LLEGADA_TARDE_ETA_OPTIONS = [10, 15, 30] as const;
 export type LlegadaTardeEtaMinutes = (typeof LLEGADA_TARDE_ETA_OPTIONS)[number];
@@ -15,19 +16,21 @@ type Props = {
   shifts?: Shift[];
   objectivesMap?: Record<string, ObjectiveLocation>;
   busyId?: string | null;
+  bodyByConvocatoriaId?: Record<string, string>;
   onSiVoy: (c: ConvocatoriaCobertura, etaMinutes: LlegadaTardeEtaMinutes) => void;
   onNoVoy: (c: ConvocatoriaCobertura) => void;
 };
 
 /**
- * Tarjeta «¿Venís?» para convocatoria LLEGADA_TARDE.
- * Sí voy → elegir demora 15/30/60; No voy → ausente.
+ * Tarjeta «¿Venís?» para convocatoria LLEGADA_TARDE (aviso ENTRANTE del CC).
+ * 10 / 15 / 30 min → ACCEPTED. Tengo un problema → REJECTED (el CC lo ve).
  */
 export function LlegadaTardeVenisBanner({
   convocatorias,
   shifts = [],
   objectivesMap = {},
   busyId,
+  bodyByConvocatoriaId = {},
   onSiVoy,
   onNoVoy,
 }: Props) {
@@ -47,8 +50,7 @@ export function LlegadaTardeVenisBanner({
       <Text style={[styles.kicker, { color: '#b45309' }]}>Llegada tarde</Text>
       <Text style={[styles.headline, { color: palette.onSurface }]}>¿Venís?</Text>
       <Text style={[styles.hint, { color: palette.onSurfaceMuted }]}>
-        Operaciones pregunta si estás en camino. Si no respondés, la ventana de fichada llega hasta
-        T+30.
+        Respondé en 10, 15 o 30 min, o avisá si tenés un problema. Operaciones lo ve en el momento.
       </Text>
 
       {convocatorias.map((c) => {
@@ -61,8 +63,11 @@ export function LlegadaTardeVenisBanner({
             key={c.id}
             style={[styles.item, { borderColor: '#fcd34d', backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}
           >
-            <Text style={[styles.title, { color: palette.onSurface }]} numberOfLines={2}>
-              {obj}
+            <Text style={[styles.title, { color: palette.onSurface }]} numberOfLines={4}>
+              {avisoEntranteTexto({
+                body: bodyByConvocatoriaId[c.id],
+                objectiveName: obj,
+              })}
             </Text>
             {start ? (
               <Text style={[styles.sub, { color: palette.onSurfaceMuted }]}>Inicio {start}</Text>
@@ -83,7 +88,7 @@ export function LlegadaTardeVenisBanner({
               ))}
             </View>
             <CommandButton
-              label="No voy"
+              label="Tengo un problema"
               variant="secondary"
               onPress={() => onNoVoy(c)}
               disabled={busy}

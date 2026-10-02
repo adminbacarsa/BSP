@@ -31,7 +31,7 @@ check('seis módulos registrados', m.modulosRegistrados().map((x) => x.id).join(
 check('Operación: Objetivos · Alertas · Sala · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/operaciones/'))) === 'Objetivos · Alertas · Sala · Menú');
 check('Supervisión es módulo propio: Objetivos · Alertas · Menú en /admin/movil/supervision/', m.moduloMovilDe('/admin/movil/supervision/').id === 'supervision' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/movil/supervision/'))) === 'Objetivos · Alertas · Menú' && m.moduloMovilDe('/admin/movil/supervision/').href === '/admin/movil/supervision/' && m.rutaTieneVersionMovil('/admin/movil/supervision'));
 check('Supervisión ya no es Operación en solo lectura', m.moduloMovilDe('/admin/operaciones/', { modo: 'supervision' }).id === 'operacion' && !m.modulosRegistrados().find((x) => x.id === 'supervision').query);
-check('Planificación: Próximos días · Huecos · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/movil/planificacion/'))) === 'Próximos días · Huecos · Menú' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/planificacion/'))) === 'Próximos días · Huecos · Menú');
+check('Planificación: Semana · Próximos días · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/movil/planificacion/'))) === 'Semana · Próximos días · Menú' && labels(m.barraDelModulo(m.moduloMovilDe('/admin/planificacion/'))) === 'Semana · Próximos días · Menú');
 check('Planificación apunta a la pantalla celular', m.moduloMovilDe('/admin/planificacion/').href === '/admin/movil/planificacion/' && m.rutaTieneVersionMovil('/admin/movil/planificacion') && !m.rutaTieneVersionMovil('/admin/reportes'));
 check('Servicios también con CLIENTS; Supervisión solo con SUPERVISION', m.modulosMovil(solo('CLIENTS')).map((x) => x.id).join(',') === 'servicios' && m.modulosMovil(solo('SUPERVISION')).map((x) => x.id).join(',') === 'supervision');
 check('RRHH: Hoy · Cargar · Novedades · Menú', labels(m.barraDelModulo(m.moduloMovilDe('/admin/rrhh/movil/'))) === 'Hoy · Cargar · Novedades · Menú');
@@ -209,20 +209,21 @@ check('RRHH Novedades', novedad.includes('Novedad rápida') && novedad.includes(
 check('RRHH estilo guía', estiloOk(hoy) && estiloOk(cargar) && estiloOk(novedad) && !hoy.includes('border-emerald-600'));
 
 const evBase = {
-  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, buscar: '', onBuscar: noop,
+  empresa: 'Pruebas S.A.', online: true, pendingLabel: null, buscar: '', onBuscar: noop, totalEmpresa: 2,
   personas: [
-    { id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoVigente: true, telefono: '351', legajoIngreso: 'Legajo 1001 · 1º ingreso 15/02/2024' },
-    { id: '20222222223', nombre: 'Ruiz, Pedro', cuil: '20-22222222-3', marco: 'Sin marco', telefono: '', legajoIngreso: '' },
+    { id: '20111111112', nombre: 'Sosa, Carla', cuil: '20-11111111-2', marco: 'Marco vigente', marcoEstado: 'MARCO_VIGENTE', telefono: '351', legajo: '148', primerIngreso: '15/02/2024' },
+    { id: '20222222223', nombre: 'Ruiz, Pedro', cuil: '20-22222222-3', marco: 'Sin marco', marcoEstado: 'SIN_MARCO', telefono: '', legajo: '', primerIngreso: '' },
   ],
   onElegir: noop, onCerrarAlta: noop,
   cuil: '', onCuil: noop, cuilEstado: '', nombre: '', onNombre: noop, mail: '', onMail: noop, telefono: '', onTelefono: noop, onGuardarAlta: noop, onCrearAcceso: noop,
-  arca: [{ id: 'a', nombre: 'Sosa, Carla', tipo: 'AT', estado: 'PENDIENTE' }], nro: '', onNro: noop, arcaId: '', onArca: noop, onConfirmarArca: noop, elegido: null,
+  arca: [{ id: 'a', nombre: 'Sosa, Carla', cuil: '20-11111111-2', tipo: 'AT', estado: 'PENDIENTE', fecha: '01/10/2026', nroTransaccion: '' }],
+  nro: '', onNro: noop, arcaId: '', onArca: noop, onConfirmarArca: noop, elegido: null,
 };
 const bolsa = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'bolsa' }));
 const arca = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'arca' }));
 const alta = renderToStaticMarkup(createElement(EventualesScreens, { ...evBase, panel: 'alta' }));
-check('Eventuales Bolsa con legajo y 1º ingreso', bolsa.includes('Sosa, Carla') && bolsa.includes('Marco vigente') && bolsa.includes('Legajo 1001 · 1º ingreso 15/02/2024') && bolsa.includes('data-eventual-legajo="1"') && bolsa.includes('data-eventual-legajo="0"') && bolsa.includes('20-22222222-3') && !bolsa.includes('ARCA pendiente') && !bolsa.includes('Alta rápida'));
-check('Eventuales ARCA', arca.includes('ARCA pendiente') && arca.includes('AT PENDIENTE') && !arca.includes('Buscar en la bolsa'));
+check('Eventuales Bolsa con legajo, 1º ingreso y CUIL', bolsa.includes('Sosa, Carla') && bolsa.includes('Marco vigente') && bolsa.includes('data-legajo="148"') && bolsa.includes('data-primer-ingreso="15/02/2024"') && bolsa.includes('data-legajo="sin"') && bolsa.includes('20-22222222-3') && bolsa.includes('2 habilitados') && !bolsa.includes('ARCA pendiente') && !bolsa.includes('Alta rápida'));
+check('Eventuales ARCA', arca.includes('ARCA pendiente') && arca.includes('Alta AT') && arca.includes('PENDIENTE') && arca.includes('Elegí un envío de la lista') && !arca.includes('Buscar por nombre'));
 check('Eventuales Alta', alta.includes('Alta rápida') && alta.includes('Guardar en la bolsa'));
 check('Eventuales estilo guía', estiloOk(bolsa) && estiloOk(arca) && !bolsa.includes('border-emerald-600'));
 

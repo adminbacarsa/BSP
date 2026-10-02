@@ -52,7 +52,7 @@ export function isCoverageHoursOnSourceDoc(
 
 /**
  * Cobertura aceptada (convocado): no es el registro EXT/ADV.
- * La fichada va desde que aceptó hasta el fin del hueco, sin ventana T−15/T+30.
+ * La fichada va desde acceptedAt hasta el fin del hueco, sin tope de 60 min.
  */
 export function isConvocadoCoverageShift(
   data: Record<string, unknown> | null | undefined,
@@ -113,13 +113,14 @@ function createdMs(shift: Record<string, unknown>): number {
   return startMs(shift);
 }
 
-function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
+export function convocadoPunchAnchorMs(shift: Record<string, unknown>): number {
   const acc = timestampLikeToMillis(shift.acceptedAt);
   if (acc > 0) return acc;
   return createdMs(shift);
 }
 
-function convocadoPunchCapMs(shift: Record<string, unknown>): number {
+/** Tope del convocado: el fin del hueco. Sin fin, ancla + 12 h. */
+export function convocadoPunchCapMs(shift: Record<string, unknown>): number {
   const end = endMs(shift);
   return end > 0 ? end : convocadoPunchAnchorMs(shift) + 12 * 60 * 60 * 1000;
 }

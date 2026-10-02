@@ -169,6 +169,7 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
     assert.equal(on.allowed, true);
     assert.equal(on.lateMinutes, 0);
     assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T15:50:00-03:00`).getTime()).rejectCode, 'TOO_EARLY');
+    assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T17:01:00-03:00`).getTime()).allowed, true);
     assert.equal(evaluateCheckInWindow(shift, new Date(`${day}T23:01:00-03:00`).getTime()).rejectCode, 'SHIFT_ENDED');
     const ext = evaluateCheckInWindow({ ...shift, coverageType: 'EXTEND' }, new Date(`${day}T16:40:00-03:00`).getTime());
     assert.equal(ext.rejectCode, 'EXT_NO_CHECKIN');
@@ -256,7 +257,7 @@ describe('paridad evaluateCheckInWindow ↔ evaluateServerCheckInWindow', () => 
 
 describe('casos reales — CAPS Angelelli 26/09 y Nuevo Edificio 28/09', () => {
   it('Barrionuevo FT ops_cov (CAPS Angelelli 26/09): ventana ops + no es TRACE', () => {
-    // Hero FT ops_cov 15–23; sin acceptedAt el ancla es createdAt 14:45 → tope 15:45.
+    // Hero FT ops_cov 15–23; sin acceptedAt el ancla es createdAt 14:45 y el tope es el fin (23:00).
     const opsCov = {
       id: 'ops_cov_lXLFk2F33HRiAsQpmoqS_hzHO3PUA0Bo5DwZwHlG2',
       origin: 'OPERATIONS_COVERAGE',
