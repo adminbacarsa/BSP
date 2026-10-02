@@ -2484,6 +2484,7 @@ export const autoCompletarTurnos = functions
     const now = admin.firestore.Timestamp.now();
     const pass = await runAutoCompletarTurnosPass(db, {
       isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
+      isDemo: (eid) => cc.isDemo(eid == null ? undefined : String(eid)),
       shiftEmpresaId,
       sameTenantShift,
       getEmployeeTokens,
@@ -3503,10 +3504,20 @@ export const scheduledArrivalNotices = onScheduleV2(
   async () => {
     const db = admin.firestore();
     const cc = await loadCentroControlState(db);
-    if (!cc.anyEnabled) return;
-    const { runShiftArrivalNotices } = await import('./attendance/arrivalNotices');
-    const sent = await runShiftArrivalNotices(db, admin.firestore.Timestamp.now(), cc);
-    if (sent > 0) console.log(`[scheduledArrivalNotices] avisos=${sent}`);
+    const now = admin.firestore.Timestamp.now();
+    if (cc.anyEnabled) {
+      const { runShiftArrivalNotices } = await import('./attendance/arrivalNotices');
+      const sent = await runShiftArrivalNotices(db, now, cc);
+      if (sent > 0) console.log(`[scheduledArrivalNotices] avisos=${sent}`);
+    }
+    const cierre = await runAutoCompletarTurnosPass(db, {
+      isEnabled: (eid) => cc.isEnabled(String(eid ?? '')),
+      isDemo: (eid) => cc.isDemo(eid == null ? undefined : String(eid)),
+      shiftEmpresaId,
+      sameTenantShift,
+      getEmployeeTokens,
+    }, now, { recentEndMs: 2 * 60 * 1000 });
+    if (cierre.completed > 0) console.log(`[scheduledArrivalNotices] cierres puntuales=${cierre.completed}`);
   },
 );
 

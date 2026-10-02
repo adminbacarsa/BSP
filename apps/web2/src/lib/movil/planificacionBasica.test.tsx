@@ -12,6 +12,8 @@ import {
   conflictosDeAsignacion,
   conflictosDeHorario,
   franjasDe,
+  eventoEtiqueta,
+  turnoMovilDesdeDoc,
   type EmpleadoMovil,
   type TurnoMovil,
 } from '@/lib/movil/planificacionBasica';
@@ -21,6 +23,7 @@ import {
   direccionSwipe,
   estructuraSlaDelMes,
   etiquetaSemana,
+  eventosSemana,
   filasSemana,
   guardarSeleccion,
   huecoDeCelda,
@@ -28,6 +31,7 @@ import {
   leerSeleccion,
   lunesDe,
   mesDeSemana,
+  plantelDe,
   semanaAnterior,
   semanaDe,
   semanaSiguiente,
@@ -412,4 +416,86 @@ test('puntaje desempata dentro de la misma distancia y no salta un bloqueado', (
   const candidatos = candidatosParaHueco({ hueco, empleados, turnos, objLat: -31.4, objLng: -64.18 });
   assert.equal(candidatos[0]?.employeeId, 'zoe');
   assert.equal(candidatos[1]?.employeeId, 'ana');
+});
+
+test('evento en la semana: el EV del servidor se ve en el objetivo de base del guardia, solo lectura', () => {
+  // EV tal como lo escribe `camposTurnoEvento`: origin EVENTO, objectiveId del evento, sábado 3/10 20:00–02:00 AR.
+  const ts = (iso: string) => ({ toDate: () => new Date(iso), seconds: Math.floor(Date.parse(iso) / 1000) });
+  const evDoc = turnoMovilDesdeDoc('ev1', {
+    code: 'EV', origin: 'EVENTO', eventoId: 'evt_recital', eventoNombre: 'Recital Plaza', servicioId: 'srv', servicioNombre: 'Acceso general',
+    positionName: 'Acceso general', objectiveId: 'obj_evento', objectiveName: 'Plaza', employeeId: 'baez', employeeName: 'Baez',
+    startTime: ts('2026-10-03T23:00:00.000Z'), endTime: ts('2026-10-04T05:00:00.000Z'), scheduleDate: '2026-10-03', hours: 6,
+  });
+  if (!evDoc) throw new Error('el EV no se convirtió');
+  assert.deepEqual(evDoc.evento, { nombre: 'Recital Plaza', servicio: 'Acceso general' });
+  assert.equal(evDoc.start, '20:00');
+  assert.equal(eventoEtiqueta(evDoc), 'Recital Plaza · Acceso general · 20:00–02:00');
+  const francoDoc = turnoMovilDesdeDoc('f1', { code: 'F', isFranco: true, objectiveId: 'obj-peaje', employeeId: 'baez', employeeName: 'Baez', scheduleDate: '2026-10-03', startTime: '00:00', endTime: '23:59', coverageUsed: true });
+  assert.equal(francoDoc?.francoUsado, true);
+
+  const { estructura } = estructuraPeaje();
+  const filas = filasSemana(estructura);
+  const diasSem = semanaDe('2026-09-28');
+  const turnos = [
+    evDoc,
+    turno({ id: 'f1', employeeId: 'baez', employeeName: 'Baez', code: 'F', date: '2026-10-03', start: '00:00', end: '23:59', hours: 0 }),
+    turno({ id: 'm1', employeeId: 'baez', employeeName: 'Baez', code: 'M', date: '2026-10-01' }),
+    turno({ id: 'g1', employeeId: 'guerrero', employeeName: 'Guerrero', code: 'T', date: '2026-10-01', start: '15:00', end: '23:00' }),
+  ];
+  // El EV no entra en las celdas del SLA (objetivo del evento ≠ Peaje) …
+  const celdas = celdasSemana(filas, diasSem, turnos, 'obj-peaje');
+  assert.equal(celdas.flat().some((c) => c.guardias.some((g) => g.id === 'ev1')), false);
+  // … pero el plantel de Peaje lo ve en la fila Eventos, con el franco usado.
+  const plantel = plantelDe(turnos, 'obj-peaje', [{ id: 'fontana', preferredObjectiveId: 'obj-peaje' }]);
+  assert.deepEqual([...plantel].sort(), ['baez', 'fontana', 'guerrero']);
+  const eventos = eventosSemana(diasSem, turnos, plantel);
+  assert.equal(eventos.length, 1);
+  assert.equal(eventos[0].francoUsado, true);
+  assert.deepEqual(eventosSemana(diasSem, turnos, new Set(['otro'])), [], 'un guardia que no es del plantel no aparece');
+  const html = renderToStaticMarkup(
+    <SemanaGrilla lunes="2026-09-28" dias={diasSem} hoy="2026-10-01" filas={filas} celdas={celdas} licencias={[]} eventos={eventos} onAnterior={() => {}} onSiguiente={() => {}} onCelda={() => {}} onLicencia={() => {}} />,
+  );
+  assert.match(html, /data-plan-fila="eventos"/);
+  assert.match(html, /data-plan-evento="ev1"[^>]*data-plan-evento-franco="1"[^>]*title="Recital Plaza · Acceso general · 20:00–02:00"/);
+  assert.match(html, />BAEZ</);
+  assert.match(html, />EV · F usado</);
+  assert.equal(/data-plan-evento="ev1"[^>]*<button/.test(html), false, 'solo lectura: no es botón');
+  const sinEventos = renderToStaticMarkup(
+    <SemanaGrilla lunes="2026-09-28" dias={diasSem} hoy="2026-10-01" filas={filas} celdas={celdas} licencias={[]} onAnterior={() => {}} onSiguiente={() => {}} onCelda={() => {}} onLicencia={() => {}} />,
+  );
+  assert.equal(sinEventos.includes('data-plan-fila="eventos"'), false);
+});
+
+test('conflicto con el evento: el EV cuenta como turno para solape, descanso 12 h y candidatos', () => {
+  const ts = (iso: string) => ({ toDate: () => new Date(iso), seconds: Math.floor(Date.parse(iso) / 1000) });
+  const evDoc = turnoMovilDesdeDoc('ev1', {
+    code: 'EV', origin: 'EVENTO', eventoNombre: 'Recital Plaza', servicioNombre: 'Acceso general', objectiveId: 'obj_evento', objectiveName: 'Plaza',
+    employeeId: 'baez', employeeName: 'Baez', startTime: ts('2026-10-03T23:00:00.000Z'), endTime: ts('2026-10-04T05:00:00.000Z'), scheduleDate: '2026-10-03', hours: 6,
+  });
+  if (!evDoc) throw new Error('el EV no se convirtió');
+  const base = { employeeId: 'baez', employeeName: 'Baez', fecha: '2026-10-03', code: 'T', objectiveId: 'obj-peaje', objectiveName: 'Peaje 9 Norte', monthHours: 40, otrosTurnos: [evDoc] };
+  const solape = conflictosDeAsignacion({ ...base, start: '15:00', end: '23:00', hours: 8 });
+  assert.equal(solape.blocked, true);
+  assert.match(solape.reason || '', /Se superpone con el evento Recital Plaza · Acceso general · 20:00–02:00/);
+  const descanso = conflictosDeAsignacion({ ...base, code: 'M', start: '07:00', end: '15:00', hours: 8 });
+  assert.equal(descanso.blocked, true);
+  assert.match(descanso.reason || '', /12 h|descanso/i);
+  const lejos = conflictosDeAsignacion({ ...base, fecha: '2026-10-05', code: 'M', start: '07:00', end: '15:00', hours: 8 });
+  assert.equal(lejos.blocked, false);
+  // Candidatos para un hueco T de Peaje ese día: Baez (en el evento) no aparece; Guerrero sí.
+  const hueco = franjasDe([turno({ id: 'v1', employeeId: 'VACANTE', code: 'T', date: '2026-10-03', start: '15:00', end: '23:00' })], dias).find((f) => f.id === 'v1');
+  if (!hueco) throw new Error('falta el hueco');
+  const empleados: EmpleadoMovil[] = [
+    { id: 'baez', name: 'Baez', preferredObjectiveId: 'obj-peaje', lat: -31.4, lng: -64.18, monthHours: 40 },
+    { id: 'guerrero', name: 'Guerrero', preferredObjectiveId: 'obj-peaje', lat: -31.4, lng: -64.18, monthHours: 40 },
+  ];
+  const turnos = [evDoc, turno({ id: 'v1', employeeId: 'VACANTE', code: 'T', date: '2026-10-03', start: '15:00', end: '23:00' })];
+  const candidatos = candidatosParaHueco({ hueco, empleados, turnos, objLat: -31.4, objLng: -64.18 });
+  assert.deepEqual(candidatos.map((c) => c.employeeId), ['guerrero']);
+  // Hueco M del mismo día: Baez aparece bloqueado por descanso con el evento.
+  const huecoM = franjasDe([turno({ id: 'v2', employeeId: 'VACANTE', code: 'M', date: '2026-10-03' })], dias).find((f) => f.id === 'v2');
+  if (!huecoM) throw new Error('falta el hueco M');
+  const candM = candidatosParaHueco({ hueco: huecoM, empleados, turnos: [evDoc, turno({ id: 'v2', employeeId: 'VACANTE', code: 'M', date: '2026-10-03' })], objLat: -31.4, objLng: -64.18 });
+  const baezM = candM.find((c) => c.employeeId === 'baez');
+  assert.equal(baezM?.blocked, true);
 });
