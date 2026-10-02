@@ -136,6 +136,9 @@ export function EventualesScreens(props: {
   onMail: (value: string) => void;
   telefono: string;
   onTelefono: (value: string) => void;
+  /** 'M' | 'F' | '' (sin especificar). Cupo por género en eventos. */
+  genero?: string;
+  onGenero?: (value: string) => void;
   onGuardarAlta: () => void;
   onCrearAcceso: () => void;
   arca: ArcaMovil[];
@@ -367,6 +370,13 @@ export function EventualesScreens(props: {
         <input value={props.nombre} onChange={(event) => props.onNombre(event.target.value)} placeholder="Apellido, Nombre" className={`${INPUT} text-base mt-2`} />
         <input value={props.mail} onChange={(event) => props.onMail(event.target.value)} placeholder="Mail" inputMode="email" className={`${INPUT} text-base mt-2`} />
         <input value={props.telefono} onChange={(event) => props.onTelefono(event.target.value)} placeholder="Teléfono" inputMode="tel" className={`${INPUT} text-base mt-2`} />
+        <label className="mt-2 block text-xs font-semibold uppercase text-slate-500">Género
+          <select data-alta-genero value={props.genero || ''} onChange={(event) => props.onGenero?.(event.target.value)} className={`${INPUT} text-base mt-1 bg-white`}>
+            <option value="">Sin especificar</option>
+            <option value="M">Masculino</option>
+            <option value="F">Femenino</option>
+          </select>
+        </label>
         <p className="mt-2 text-xs font-semibold text-slate-500">Empresa habilitada: {props.empresa}</p>
         <button type="button" onClick={props.onGuardarAlta} className={`${BTN} ${MOVIL_BTN_PRIMARY} mt-3`}>
           {props.online ? 'Guardar en la bolsa' : 'El alta requiere conexión'}

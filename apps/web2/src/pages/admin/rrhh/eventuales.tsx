@@ -27,7 +27,7 @@ import { marcoDeBolsa } from '@/lib/eventuales/marcoTexto.mjs';
 type Ficha = FichaEventualData;
 
 type Form = {
-  nombre: string; cuil: string; dni: string; fechaNacimiento: string; domicilio: string;
+  nombre: string; cuil: string; dni: string; genero: string; fechaNacimiento: string; domicilio: string;
   telefono: string; mail: string; obraSocialRnos: string; empresasHabilitadas: string[];
   habilitacionNumero: string; habilitacionVencimiento: string; credencialVencimiento: string;
   aptoEstado: string; aptoVencimiento: string; observaciones: string;
@@ -35,14 +35,14 @@ type Form = {
 };
 
 const vacio = (): Form => ({
-  nombre: '', cuil: '', dni: '', fechaNacimiento: '', domicilio: '', telefono: '', mail: '',
+  nombre: '', cuil: '', dni: '', genero: '', fechaNacimiento: '', domicilio: '', telefono: '', mail: '',
   obraSocialRnos: RNOS_DEFAULT_FICHA, empresasHabilitadas: [], habilitacionNumero: '', habilitacionVencimiento: '',
   credencialVencimiento: '', aptoEstado: '', aptoVencimiento: '', observaciones: '', domicilioGeo: null,
 });
 
 const formDe = (f: Ficha): Form => ({
   ...vacio(),
-  nombre: f.nombre, cuil: f.id, dni: f.dni, fechaNacimiento: f.fechaNacimiento, domicilio: f.domicilio, telefono: f.telefono, mail: f.mail,
+  nombre: f.nombre, cuil: f.id, dni: f.dni, genero: f.genero || '', fechaNacimiento: f.fechaNacimiento, domicilio: f.domicilio, telefono: f.telefono, mail: f.mail,
   obraSocialRnos: f.obraSocialRnos || RNOS_DEFAULT_FICHA, empresasHabilitadas: f.empresasHabilitadas,
   habilitacionNumero: f.habilitacionNumero, habilitacionVencimiento: f.habilitacionVencimiento, credencialVencimiento: f.credencialVencimiento,
   aptoEstado: f.aptoEstado, aptoVencimiento: f.aptoVencimiento, observaciones: f.observaciones,
@@ -136,6 +136,7 @@ export default function EventualesPage() {
           mail: String(data.mail || ''),
           telefono: String(data.telefono || ''),
           dni: String(data.dni || ''),
+          genero: String(data.genero || ''),
           domicilio: String(data.domicilio || ''),
           empresasHabilitadas: Array.isArray(data.empresasHabilitadas) ? data.empresasHabilitadas.map(String) : [],
           habilitacionNumero: String(hab.numero || ''),
@@ -562,6 +563,14 @@ export default function EventualesPage() {
                     <input type={key.toLowerCase().includes('vencimiento') || key === 'fechaNacimiento' ? 'date' : 'text'} value={String(form[key] || '')} onChange={(e) => setForm({ ...form, [key]: e.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 px-2 py-1.5 text-sm font-normal normal-case text-slate-800" />
                   </label>
                 ))}
+                <label className="text-[10px] font-black uppercase tracking-wider text-slate-400">Género
+                  <select data-ficha-genero value={form.genero} onChange={(e) => setForm({ ...form, genero: e.target.value })} className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm font-normal normal-case text-slate-800">
+                    <option value="">Sin especificar</option>
+                    <option value="M">Masculino</option>
+                    <option value="F">Femenino</option>
+                  </select>
+                  <span className="mt-1 block text-[10px] font-normal normal-case tracking-normal text-slate-400">Lo usa el cupo por género de los eventos.</span>
+                </label>
               </div>
               <label className="mt-2 block text-[10px] font-black uppercase tracking-wider text-slate-400">Domicilio
                 <div className="mt-1 flex gap-2">

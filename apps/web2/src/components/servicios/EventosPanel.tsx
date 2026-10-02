@@ -20,6 +20,7 @@ import { aptitudTypeService } from '@/services/aptitudTypeService';
 import { type AptitudType } from '@/lib/rrhh/aptitudTypes';
 import { slaService } from '@/services/slaService';
 import { useToast } from '@/context/ToastContext';
+import { normalizarCupoServicio, validarCupoServicio } from '@/lib/eventuales/cupoGenero.mjs';
 import { EventoDetailModal } from './EventoDetailModal';
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -78,6 +79,8 @@ function emptySrv(defaultFecha?: string): Partial<ServicioEvento> {
         horaFin: '20:00',
         ubicacion: { tipo: 'nueva', direccion: '' },
         cupo: 1,
+        cupoModo: 'INDISTINTO',
+        cupoPorGenero: null,
         aptitudesRequeridas: [],
         requisitos: '',
         instrucciones: '',
@@ -330,11 +333,19 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
     }
 
     function saveSrv() {
-        const { nombre, fecha, tipoTurno, cupo } = srvForm;
-        if (!nombre?.trim() || !fecha || !tipoTurno || !cupo) {
+        const { nombre, fecha, tipoTurno } = srvForm;
+        // Cupo: «Indistinto» (N pax) o «Por género» (hombres + mujeres, total = suma).
+        const cupoCfg = normalizarCupoServicio(srvForm) as { cupoModo: 'INDISTINTO' | 'POR_GENERO'; cupo: number; cupoPorGenero: { M: number; F: number } | null };
+        const erroresCupo = validarCupoServicio(srvForm) as string[];
+        if (!nombre?.trim() || !fecha || !tipoTurno) {
             addToast('Completá los campos requeridos del servicio', 'error');
             return;
         }
+        if (erroresCupo.length) {
+            addToast(erroresCupo[0], 'error');
+            return;
+        }
+        const cupo = cupoCfg.cupo;
         const horasTotal = calcHorasServicio(srvForm as ServicioEvento);
         const vendidasN = Number(srvForm.horasVendidas);
         const horasVendidas = srvForm.horasVendidas == null || !Number.isFinite(vendidasN)
@@ -350,6 +361,8 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
             horasTotal,
             ubicacion: srvForm.ubicacion || { tipo: 'nueva', direccion: '' },
             cupo: Number(cupo),
+            cupoModo: cupoCfg.cupoModo,
+            cupoPorGenero: cupoCfg.cupoPorGenero,
             ...(horasVendidas != null ? { horasVendidas } : {}),
             aptitudesRequeridas: srvForm.aptitudesRequeridas || [],
             requisitos: srvForm.requisitos || '',
@@ -676,16 +689,64 @@ export function EventosPanel({ empresaId, canCreate, canUpdate, canDelete }: Pro
                                         </div>
                                     </>
                                 )}
-                                {/* Cupo */}
-                                <div>
+                                {/* Cupo: Indistinto (N pax) o Por género (hombres + mujeres) */}
+                                <div data-cupo-modo={srvForm.cupoModo || 'INDISTINTO'}>
                                     <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">Cupo (guardias) *</label>
-                                    <input
-                                        type="number"
-                                        min={1}
-                                        value={srvForm.cupo || 1}
-                                        onChange={e => setSrvForm(f => ({ ...f, cupo: Number(e.target.value) }))}
-                                        className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-yellow-400"
-                                    />
+                                    <div className="flex gap-1 mb-2">
+                                        {([['INDISTINTO', 'Indistinto'], ['POR_GENERO', 'Por género']] as const).map(([modo, label]) => {
+                                            const on = (srvForm.cupoModo || 'INDISTINTO') === modo;
+                                            return (
+                                                <button
+                                                    key={modo}
+                                                    type="button"
+                                                    data-cupo-modo-btn={modo}
+                                                    onClick={() => setSrvForm(f => ({
+                                                        ...f,
+                                                        cupoModo: modo,
+                                                        cupoPorGenero: modo === 'POR_GENERO' ? (f.cupoPorGenero || { M: Number(f.cupo) || 0, F: 0 }) : null,
+                                                    }))}
+                                                    className={`px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-colors ${on ? 'bg-yellow-400 border-yellow-400 text-slate-900' : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-50'}`}
+                                                >
+                                                    {label}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    {(srvForm.cupoModo || 'INDISTINTO') === 'POR_GENERO' ? (
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400">Hombres
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    data-cupo-genero="M"
+                                                    value={srvForm.cupoPorGenero?.M ?? 0}
+                                                    onChange={e => setSrvForm(f => ({ ...f, cupoPorGenero: { M: Math.max(0, Number(e.target.value) || 0), F: f.cupoPorGenero?.F ?? 0 } }))}
+                                                    className="mt-1 w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-yellow-400"
+                                                />
+                                            </label>
+                                            <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400">Mujeres
+                                                <input
+                                                    type="number"
+                                                    min={0}
+                                                    data-cupo-genero="F"
+                                                    value={srvForm.cupoPorGenero?.F ?? 0}
+                                                    onChange={e => setSrvForm(f => ({ ...f, cupoPorGenero: { M: f.cupoPorGenero?.M ?? 0, F: Math.max(0, Number(e.target.value) || 0) } }))}
+                                                    className="mt-1 w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-yellow-400"
+                                                />
+                                            </label>
+                                            <p className="col-span-2 text-[10px] text-slate-400" data-cupo-total>
+                                                Total: {(srvForm.cupoPorGenero?.M ?? 0) + (srvForm.cupoPorGenero?.F ?? 0)} guardias. El cupo de cada grupo se llena por orden de aceptación.
+                                            </p>
+                                        </div>
+                                    ) : (
+                                        <input
+                                            type="number"
+                                            min={1}
+                                            value={srvForm.cupo || 1}
+                                            onChange={e => setSrvForm(f => ({ ...f, cupo: Number(e.target.value) }))}
+                                            className="w-full px-3 py-2 bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 rounded-xl text-xs font-bold text-slate-800 dark:text-white outline-none focus:border-yellow-400"
+                                        />
+                                    )}
                                 </div>
                                 <div>
                                     <label className="block text-[10px] font-bold text-slate-500 dark:text-slate-400 mb-1">Horas vendidas</label>

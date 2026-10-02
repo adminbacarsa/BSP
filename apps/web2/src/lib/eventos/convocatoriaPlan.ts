@@ -110,7 +110,7 @@ export function explicacionAccion(accion: AccionConvocatoria | null): string {
   return 'Con turno productivo o licencia: no se puede convocar al evento.';
 }
 
-export type PersonaPlan = { id: string; nombre: string; situacion: SituacionDia };
+export type PersonaPlan = { id: string; nombre: string; situacion: SituacionDia; grupo?: string | null };
 
 export type PlanConvocatoria = {
   notificar: PersonaPlan[];
@@ -119,22 +119,41 @@ export type PlanConvocatoria = {
   omitidosPorCupo: PersonaPlan[];
 };
 
+/** Cupo que queda: un número (indistinto) o por grupo (`{ M: 3, F: 0 }`). Infinity = sin tope. */
+export type CupoDisponible = number | Record<string, number>;
+
 /**
- * Divide la selección en los dos grupos y respeta el cupo que queda (misma regla que antes:
- * los primeros N en orden de selección entran; `cupoDisponible` Infinity = sin tope).
+ * Divide la selección en los dos grupos. El cupo se llena POR ORDEN DE ACEPTACIÓN: se puede
+ * convocar a más gente que el cupo (quedan los primeros que aceptan). Lo que sí cuenta al momento
+ * es la asignación directa (libre / RET): entran los primeros N en orden de selección por grupo;
+ * el resto se omite. Con cupo por género, cada persona lleva su `grupo` ('M' / 'F'); sin grupo en
+ * un servicio por género queda omitida (hay que completar el legajo).
  */
 export function armarPlanConvocatoria(
-  seleccion: { id: string; nombre: string; code: string; horario?: string }[],
-  cupoDisponible: number,
+  seleccion: { id: string; nombre: string; code: string; horario?: string; grupo?: string | null }[],
+  cupoDisponible: CupoDisponible,
 ): PlanConvocatoria {
-  const personas = seleccion.map((s) => ({ id: s.id, nombre: s.nombre, situacion: situacionDelDia(s.code, s.horario || '') }));
-  const dentro = Number.isFinite(cupoDisponible) ? personas.slice(0, Math.max(0, cupoDisponible)) : personas;
-  const fuera = personas.slice(dentro.length);
-  return {
-    notificar: dentro.filter((p) => p.situacion.accion === 'NOTIFICAR'),
-    convocar: dentro.filter((p) => p.situacion.accion === 'CONVOCAR'),
-    omitidosPorCupo: fuera,
-  };
+  const personas: PersonaPlan[] = seleccion.map((s) => ({ id: s.id, nombre: s.nombre, situacion: situacionDelDia(s.code, s.horario || ''), grupo: s.grupo ?? null }));
+  const porGrupo = typeof cupoDisponible === 'object' && cupoDisponible !== null;
+  const restante: Record<string, number> = porGrupo
+    ? Object.fromEntries(Object.entries(cupoDisponible).map(([g, n]) => [g, Number.isFinite(n) ? Math.max(0, n) : Number.POSITIVE_INFINITY]))
+    : { TODOS: Number.isFinite(cupoDisponible as number) ? Math.max(0, cupoDisponible as number) : Number.POSITIVE_INFINITY };
+  const notificar: PersonaPlan[] = [];
+  const convocar: PersonaPlan[] = [];
+  const omitidosPorCupo: PersonaPlan[] = [];
+  for (const p of personas) {
+    const grupo = porGrupo ? String(p.grupo || '') : 'TODOS';
+    if (porGrupo && !(grupo in restante)) { omitidosPorCupo.push(p); continue; }
+    if (p.situacion.accion === 'CONVOCAR') { convocar.push(p); continue; }
+    if (p.situacion.accion !== 'NOTIFICAR') continue;
+    if (restante[grupo] > 0) {
+      restante[grupo] -= 1;
+      notificar.push(p);
+    } else {
+      omitidosPorCupo.push(p);
+    }
+  }
+  return { notificar, convocar, omitidosPorCupo };
 }
 
 export function textoBotonPlan(plan: Pick<PlanConvocatoria, 'notificar' | 'convocar'>): string {
@@ -182,7 +201,7 @@ export function textoAvisoGuardia(
 }
 
 export type EstadoConvocatoriaUi = {
-  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'VENCIO' | 'NO_VA' | 'OTRO';
+  key: 'ASIGNADO' | 'ACEPTO' | 'PENDIENTE' | 'RECHAZO' | 'VENCIO' | 'NO_VA' | 'CUPO_COMPLETO' | 'OTRO';
   label: string;
   detalle: string;
 };
@@ -200,6 +219,7 @@ export function estadoSolicitudUi(sol: { status?: string; tipo?: string; esEvent
   if (status === 'rechazada') return { key: 'RECHAZO', label: 'Rechazó', detalle: 'Rechazó la convocatoria' };
   if (status === 'vencida') return { key: 'VENCIO', label: 'Venció', detalle: 'No respondió en el plazo: no se generó nada y el lugar quedó libre' };
   if (status === 'cancelada') return { key: 'NO_VA', label: 'No puede asistir', detalle: 'Avisó antes del inicio: se canceló su aceptación y se reconvocó' };
+  if (status === 'cupo_completo') return { key: 'CUPO_COMPLETO', label: 'Cupo completo', detalle: 'El cupo de su grupo se llenó antes de que respondiera: se le avisó y no se generó nada' };
   if (status === 'convocado' || status === 'pendiente') return { key: 'PENDIENTE', label: 'Pendiente', detalle: tipo === 'admin_convoca' ? (sol.esEventual ? 'Eventual convocado, tiene que aceptar desde la app' : 'Convocado, todavía no respondió') : 'Solicitó participar' };
   return { key: 'OTRO', label: status || '—', detalle: '' };
 }

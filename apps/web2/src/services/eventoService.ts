@@ -20,6 +20,8 @@ export type TipoTurnoEvento = '3x8' | '2x12' | 'libre';
 
 export type EstadoServicio = 'pendiente' | 'confirmado' | 'ejecutado' | 'cancelado';
 
+export type CupoModoServicio = 'INDISTINTO' | 'POR_GENERO';
+
 export interface UbicacionServicio {
     tipo: 'objetivo_existente' | 'nueva';
     objectiveId?: string;
@@ -41,8 +43,14 @@ export interface ServicioEvento {
     /** Total horas del servicio (24 para 3x8 y 2x12, exacto para libre) */
     horasTotal: number;
     ubicacion: UbicacionServicio;
-    /** Cupo de guardias para este servicio */
+    /** Cupo de guardias para este servicio (total; por género = M + F) */
     cupo: number;
+    /**
+     * «Indistinto» (default, N pax) o «Por género»: cantidades separadas en `cupoPorGenero`
+     * y `cupo` = suma. Lógica en `lib/eventuales/cupoGenero.mjs`.
+     */
+    cupoModo?: CupoModoServicio;
+    cupoPorGenero?: { M: number; F: number } | null;
     /**
      * Horas contratadas con el cliente para este día de servicio.
      * La prefactura factura este número. No son las fichadas ni el plan del guardia.

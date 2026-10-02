@@ -50,6 +50,8 @@ export type EvaluarEventualesServerOpts = {
    * de las jornadas). Sin ventana se cargan todos los turnos del CUIL (CC, como siempre).
    */
   ventana?: { desde: string; hasta: string } | null;
+  /** Hueco de un servicio con cupo por género: solo ese grupo (cascada / CC). */
+  generoRequerido?: 'M' | 'F' | null;
 };
 
 async function bolsaDisponible(db: admin.firestore.Firestore): Promise<EventualBolsaRow[]> {
@@ -128,6 +130,7 @@ export async function evaluarEventualesServer(
       lat: opts.lat != null && Number.isFinite(lat) ? lat : null,
       lng: opts.lng != null && Number.isFinite(lng) ? lng : null,
       hoyYmd: opts.hoyYmd || arYmd(Date.now()),
+      generoRequerido: opts.generoRequerido === 'M' || opts.generoRequerido === 'F' ? opts.generoRequerido : null,
     },
     otrasJornadas: otras,
     incluirNoElegibles: opts.incluirNoElegibles === true,
@@ -145,6 +148,9 @@ export async function loadEventualesParaHueco(
     lng?: unknown;
     latitude?: unknown;
     longitude?: unknown;
+    /** Turno EV de un servicio con cupo por género: el hueco es de ese grupo. */
+    cupoGrupo?: unknown;
+    generoRequerido?: unknown;
   },
 ): Promise<EventualCandidato[]> {
   const empresaId = String(shift.empresaId || '').trim();
@@ -153,11 +159,13 @@ export async function loadEventualesParaHueco(
   if (!empresaId || !startMs || !endMs) return [];
   const lat = Number(shift.lat ?? shift.latitude);
   const lng = Number(shift.lng ?? shift.longitude);
+  const grupo = String(shift.generoRequerido ?? shift.cupoGrupo ?? '').toUpperCase();
   const pool = await evaluarEventualesServer(db, {
     empresaId,
     tramos: [{ startMs, endMs }],
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
+    generoRequerido: grupo === 'M' || grupo === 'F' ? grupo : null,
   });
   return pool.filter((row) => row.elegible !== false);
 }

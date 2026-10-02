@@ -46,6 +46,8 @@ export interface ConvocatoriaCoberturaDoc {
   startTime: Timestamp;
   endTime?: Timestamp;
   aptitudesRequeridas?: string[];
+  /** Hueco de un servicio de evento con cupo por género: solo candidatos de ese grupo. */
+  generoRequerido?: 'M' | 'F' | null;
 
   type: ConvocatoriaType;
   urgency: 'URGENTE' | 'INTERMEDIO' | 'NORMAL';
@@ -170,6 +172,8 @@ export async function convocarEventual(
     endTime: base.endTime,
     lat: titularGeo.lat ?? titularGeo.latitude,
     lng: titularGeo.lng ?? titularGeo.longitude,
+    // Cupo por género: si faltó una mujer, se reconvocan mujeres (el turno EV lleva `cupoGrupo`).
+    generoRequerido: base.generoRequerido ?? titularGeo.cupoGrupo ?? null,
   });
   const excluir = new Set(
     (Array.isArray(titularGeo.excluirBolsaCuils) ? titularGeo.excluirBolsaCuils : [])
@@ -1074,6 +1078,7 @@ export const crearConvocatoriaCobertura = functions
         endTime: shift.endTime,
         lat: shift.lat,
         lng: shift.lng,
+        cupoGrupo: shift.cupoGrupo,
       });
       const hit = pool.find((p) => p.cuil === cuil || p.employeeId === candidateEmployeeId);
       if (!hit) {
@@ -1498,6 +1503,9 @@ export async function iniciarCascadaCobertura(
 
   const eventGap = isEventoShift(titularData);
   const order = (eventGap ? EVENT_COVERAGE_CASCADE_ORDER : OBJECTIVE_COVERAGE_WITH_EVENTUAL) as readonly CandidateType[];
+  // Cupo por género del servicio: la cascada respeta el grupo del ausente (eventuales y nómina).
+  const cupoGrupo = String(titularData.cupoGrupo || '').toUpperCase();
+  if (eventGap && (cupoGrupo === 'M' || cupoGrupo === 'F')) baseConvData.generoRequerido = cupoGrupo;
 
   // Iterar la cascada desde el primer paso hasta encontrar candidato
   for (const type of order) {

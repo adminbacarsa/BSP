@@ -22,7 +22,20 @@ export type EventualMotivoCodigo =
   | 'NO_APTO'
   | 'HABILITACION_VENCIDA'
   | 'SUPERPOSICION'
-  | 'DESCANSO_12H';
+  | 'DESCANSO_12H'
+  | 'GENERO_SIN_ESPECIFICAR'
+  | 'GENERO_NO_COINCIDE';
+
+/** Género de la ficha / legajo: 'M' | 'F' | '' (sin especificar). Mismos valores que `cupoGenero.mjs`. */
+export type GeneroEventual = 'M' | 'F' | '';
+
+export function normalizarGeneroEventual(valor: unknown): GeneroEventual {
+  const v = String(valor ?? '').trim().toUpperCase();
+  if (!v) return '';
+  if (v === 'M' || v === 'H' || v.startsWith('MASC') || v.startsWith('HOM') || v === 'VARON' || v === 'VARÓN' || v === 'MALE') return 'M';
+  if (v === 'F' || v.startsWith('FEM') || v.startsWith('MUJ') || v === 'FEMALE') return 'F';
+  return '';
+}
 
 export type EventualVencimientoTipo = 'credencial' | 'apto' | 'habilitacion';
 
@@ -62,12 +75,16 @@ export type EventualCandidato = {
   legajos: { employeeId?: string; empresaId?: string }[];
   /** Ficha con «Exigir contrato marco y habilitación» en OFF: convocable sin marco ni empresa habilitada. */
   pruebasSinMarco?: boolean;
+  /** Género de la ficha ('' = sin especificar). Cupo por género en eventos. */
+  genero: GeneroEventual;
 };
 
 export type EventualBolsaRow = {
   cuil: string;
   nombre?: string;
   telefono?: string;
+  /** 'M' | 'F' | '' (sin especificar). */
+  genero?: string;
   disponibilidad?: string;
   empresasHabilitadas?: string[];
   credencialVencimiento?: string;
@@ -102,6 +119,11 @@ export type EventualHueco = {
   lng?: number | null;
   /** Día AR YYYY-MM-DD para vigencia de credencial y apto. */
   hoyYmd: string;
+  /**
+   * Hueco de un servicio con cupo por género: solo candidatos de ese grupo (la cascada reconvoca
+   * al mismo género que faltó). Sin dato en la ficha bloquea. `null`/ausente = indistinto.
+   */
+  generoRequerido?: 'M' | 'F' | null;
 };
 
 export type EventualJornadaOcupada = {
@@ -141,6 +163,8 @@ export const EVENTUAL_MOTIVOS: Record<EventualMotivoCodigo, string> = {
   HABILITACION_VENCIDA: 'Habilitación 9236 vencida.',
   SUPERPOSICION: 'Ya está asignado en ese horario. No se puede superponer.',
   DESCANSO_12H: 'Faltan horas de descanso (mínimo 12 h, art. 197).',
+  GENERO_SIN_ESPECIFICAR: 'Sin género en la ficha: no cuenta para el cupo por género.',
+  GENERO_NO_COINCIDE: 'El hueco es de otro grupo (género).',
 };
 
 export function isEventoShift(shift: object | null | undefined): boolean {
@@ -324,6 +348,7 @@ export function evaluarEventualParaHueco(
   const distanceKm = distanciaEventualKm(row.domicilioGeo, hueco.lat != null && hueco.lng != null ? { lat: hueco.lat, lng: hueco.lng } : null);
   const alertas = vencimientos.filter((v) => v.estado === 'PRONTO').map((v) => `${v.tipo} vence ${v.fecha}`);
   if (!exigeMarco) alertas.push(EVENTUAL_ETIQUETA_PRUEBAS_SIN_MARCO);
+  const genero = normalizarGeneroEventual(row.genero);
   const base: EventualCandidato = {
     employeeId: String(legajo?.employeeId || cuil),
     employeeName: String(row.nombre || cuil),
@@ -343,11 +368,17 @@ export function evaluarEventualParaHueco(
     alertas,
     legajos: row.legajos || [],
     ...(exigeMarco ? {} : { pruebasSinMarco: true }),
+    genero,
   };
   const bloquear = (codigo: EventualMotivoCodigo, mensaje?: string): EventualCandidato => ({
     ...base, elegible: false, motivoCodigo: codigo, motivo: mensaje || EVENTUAL_MOTIVOS[codigo],
   });
   if (String(row.disponibilidad || 'DISPONIBLE').toUpperCase() !== 'DISPONIBLE') return bloquear('NO_DISPONIBLE');
+  const generoRequerido = hueco.generoRequerido === 'M' || hueco.generoRequerido === 'F' ? hueco.generoRequerido : null;
+  if (generoRequerido) {
+    if (!genero) return bloquear('GENERO_SIN_ESPECIFICAR');
+    if (genero !== generoRequerido) return bloquear('GENERO_NO_COINCIDE');
+  }
   if (exigeMarco && !(row.empresasHabilitadas || []).includes(hueco.empresaId)) return bloquear('EMPRESA_NO_HABILITADA');
   if (exigeMarco) {
     const marco = marcoEventual((row.marcos || {})[hueco.empresaId], hoy);

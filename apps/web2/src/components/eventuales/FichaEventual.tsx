@@ -6,6 +6,7 @@ import {
 import { toast } from 'sonner';
 import { TabBar } from '@/components/ui';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
+import { GENERO_LABEL } from '@/lib/eventuales/cupoGenero.mjs';
 import { etiquetasPruebas, SWITCHES_PRUEBAS } from '@/lib/eventuales/pruebasSwitch.mjs';
 import {
   fmtFechaAr, humanizar, iniciales, opcionesVigenciaMarco, textoDisponibilidad, textoEstadoMarco, textoLegajo, textoObraSocial, VIGENCIA_MARCO_DEFAULT,
@@ -20,6 +21,8 @@ export type FichaEventualData = {
   mail: string;
   telefono: string;
   dni: string;
+  /** 'M' | 'F' | '' (sin especificar). Cupo por género en eventos. */
+  genero: string;
   domicilio: string;
   empresasHabilitadas: string[];
   habilitacionNumero: string;
@@ -303,6 +306,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             <Dato icon={Phone} label="Teléfono" valor={ficha.telefono} falta={!ficha.telefono} />
             <Dato icon={Home} label="Domicilio" valor={[ficha.domicilio, ficha.localidad].filter(Boolean).join(' · ')} falta={!ficha.domicilio} />
             <Dato label="Nacimiento" valor={fmtFechaAr(ficha.fechaNacimiento)} />
+            <Dato label="Género" valor={GENERO_LABEL[(ficha.genero || '') as keyof typeof GENERO_LABEL] || 'Sin especificar'} falta={!ficha.genero} />
             <Dato label="Obra social" valor={textoObraSocial(ficha.obraSocialRnos, RNOS_DEFAULT_FICHA)} falta={!!rnos?.pendiente} />
             <Dato label="Habilitación 9236" valor={[ficha.habilitacionNumero, ficha.habilitacionVencimiento ? `vence ${fmtFechaAr(ficha.habilitacionVencimiento)}` : ''].filter(Boolean).join(' · ')} />
             <Dato label="Credencial" valor={ficha.credencialVencimiento ? `vence ${fmtFechaAr(ficha.credencialVencimiento)}` : ''} falta={!!ficha.credencialVencimiento && ficha.credencialVencimiento < hoy()} />

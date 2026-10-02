@@ -30,7 +30,17 @@ export type CascadeConvLike = {
   endTime?: Timestamp;
   aptitudesRequeridas?: string[];
   candidateEmployeeId?: string;
+  /** Hueco de evento con cupo por género: solo legajos de ese grupo. */
+  generoRequerido?: 'M' | 'F' | null;
 };
+
+function generoLegajo(valor: unknown): 'M' | 'F' | '' {
+  const v = String(valor ?? '').trim().toUpperCase();
+  if (!v) return '';
+  if (v === 'M' || v === 'H' || v.startsWith('MASC') || v.startsWith('HOM') || v === 'VARON' || v === 'VARÓN' || v === 'MALE') return 'M';
+  if (v === 'F' || v.startsWith('FEM') || v.startsWith('MUJ') || v === 'FEMALE') return 'F';
+  return '';
+}
 
 const msOf = (v: unknown): number => {
   const ts = v as { toMillis?: () => number; seconds?: number } | undefined;
@@ -203,7 +213,11 @@ export async function loadCoverageCandidateInput(
     };
   });
 
-  const employees: CoverageEmployeeView[] = empDocs.map((d) => {
+  const generoRequerido = conv.generoRequerido === 'M' || conv.generoRequerido === 'F' ? conv.generoRequerido : null;
+  const empFiltrados = generoRequerido
+    ? empDocs.filter((d) => generoLegajo(d.data().genero) === generoRequerido)
+    : empDocs;
+  const employees: CoverageEmployeeView[] = empFiltrados.map((d) => {
     const e = d.data();
     const name = `${e.lastName || ''} ${e.firstName || ''}`.trim() || String(e.name || d.id);
     return {

@@ -106,6 +106,7 @@ export function EventualesMovil() {
   const [nombre, setNombre] = useState('');
   const [mail, setMail] = useState('');
   const [telefono, setTelefono] = useState('');
+  const [genero, setGenero] = useState('');
   const [arca, setArca] = useState<ArcaMovil[]>([]);
   const [arcaCargando, setArcaCargando] = useState(false);
   const [arcaEnviando, setArcaEnviando] = useState(false);
@@ -241,6 +242,7 @@ export function EventualesMovil() {
       nombre: nombre.trim(),
       mail: mail.trim(),
       telefono: telefono.trim(),
+      genero,
       empresasHabilitadas: [empresaId],
     }).then(() => {
       toast.success('Alta en la bolsa.');
@@ -249,6 +251,7 @@ export function EventualesMovil() {
       setNombre('');
       setMail('');
       setTelefono('');
+      setGenero('');
     }).catch((error: unknown) => {
       toast.error(error instanceof Error ? error.message : 'No se pudo dar de alta.');
     });
@@ -339,6 +342,8 @@ export function EventualesMovil() {
         onMail={setMail}
         telefono={telefono}
         onTelefono={setTelefono}
+        genero={genero}
+        onGenero={setGenero}
         onGuardarAlta={guardarAlta}
         onCrearAcceso={crearAcceso}
         arca={arca}

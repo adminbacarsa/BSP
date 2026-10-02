@@ -12,7 +12,8 @@ import { AlertTriangle, Loader2, MapPin, Phone, RotateCcw, Search, ShieldCheck, 
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { functions } from '@/lib/firebase';
 import { mensajeErrorCallable } from '@/lib/eventos/convocatoriaPlan';
-import { PruebasBadge } from '@/components/servicios/EventoConvocarResumen';
+import { GrupoCandidatosHeader, PruebasBadge, SinEspecificarAviso, type GrupoCupoUi } from '@/components/servicios/EventoConvocarResumen';
+import { grupoDeGenero } from '@/lib/eventuales/cupoGenero.mjs';
 
 export type JornadaEventual = { fecha: string; horaInicio: string; horaFin: string; horas: number };
 
@@ -30,6 +31,14 @@ export type CandidatoEventual = {
     employeeId: string | null;
     /** Ficha con «Exigir contrato marco y habilitación» en OFF: elegible sin marco ni empresa habilitada. */
     pruebasSinMarco?: boolean;
+    /** 'M' | 'F' | '' (sin especificar) — cupo por género de los eventos. */
+    genero?: string;
+};
+
+/** Cupo por género del servicio de evento: la lista se muestra en grupos (Hombres n/X · Mujeres n/Y). */
+export type CupoPanelEventuales = {
+    servicio: { cupoModo?: string; cupo?: number; cupoPorGenero?: { M: number; F: number } | null };
+    grupos: GrupoCupoUi[];
 };
 
 type Props = {
@@ -46,6 +55,8 @@ type Props = {
     busy?: boolean;
     onSelect: (candidato: CandidatoEventual) => void;
     compact?: boolean;
+    /** Si el servicio tiene cupo por género: agrupa la lista y deja aparte a los «Sin especificar». */
+    cupo?: CupoPanelEventuales | null;
 };
 
 export function jornadasKey(jornadas: JornadaEventual[]): string {
@@ -55,7 +66,7 @@ export function jornadasKey(jornadas: JornadaEventual[]): string {
 const TIPO_LABEL: Record<string, string> = { credencial: 'Credencial', apto: 'Apto', habilitacion: 'Hab. 9236' };
 
 export default function EventualesCandidatosPanel({
-    empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact,
+    empresaId, objectiveId, clientId, objetivoGeo, jornadas, excluirTurnoIds, excluirCuil, canConvocar, busy, onSelect, compact, cupo,
 }: Props) {
     const [rows, setRows] = useState<CandidatoEventual[]>([]);
     const [loading, setLoading] = useState(false);
@@ -130,18 +141,22 @@ export default function EventualesCandidatosPanel({
                         {rows.length === 0 ? 'No hay eventuales disponibles habilitados para esta empresa.' : 'Sin coincidencias.'}
                     </p>
                 )}
-                {!loading && filtered.map(c => {
+                {!loading && (() => {
+                    const renderCandidato = (c: CandidatoEventual, sinGrupo = false) => {
                     const vencidos = c.vencimientos.filter(v => v.estado === 'VENCIDO');
                     const prontos = c.vencimientos.filter(v => v.estado === 'PRONTO');
+                    // Sin género en la ficha con cupo por género: no cuenta para ningún cupo hasta cargarlo.
+                    const elegible = c.elegible && !sinGrupo;
                     return (
                         <button
                             key={c.cuil}
                             type="button"
-                            disabled={!c.elegible || !!busy}
-                            onClick={() => c.elegible && onSelect(c)}
-                            title={c.elegible ? `Asignar a ${c.nombre}` : c.motivo || 'No elegible'}
+                            data-eventual-grupo={sinGrupo ? 'SIN_ESPECIFICAR' : (cupo ? (grupoDeGenero(cupo.servicio, c.genero) as string | null) || 'TODOS' : 'TODOS')}
+                            disabled={!elegible || !!busy}
+                            onClick={() => elegible && onSelect(c)}
+                            title={sinGrupo ? 'Sin género en la ficha: completala para convocarlo (cupo por género).' : c.elegible ? `Asignar a ${c.nombre}` : c.motivo || 'No elegible'}
                             className={`w-full text-left rounded-xl border px-3 py-2 transition-colors ${
-                                c.elegible
+                                elegible
                                     ? 'bg-white border-indigo-100 hover:border-indigo-300 hover:bg-indigo-50/60'
                                     : 'bg-slate-50 border-slate-200 opacity-80 cursor-not-allowed'
                             }`}
@@ -192,7 +207,36 @@ export default function EventualesCandidatosPanel({
                             )}
                         </button>
                     );
-                })}
+                    };
+                    if (!cupo) return filtered.map((c) => renderCandidato(c));
+                    // Cupo por género: Hombres / Mujeres con su ocupación, y «Sin especificar» aparte (mismo orden del motor).
+                    const porGrupo = new Map<string, CandidatoEventual[]>(cupo.grupos.map((g) => [g.grupo, []]));
+                    const sinEspecificar: CandidatoEventual[] = [];
+                    for (const c of filtered) {
+                        const g = grupoDeGenero(cupo.servicio, c.genero) as string | null;
+                        const lista = g ? porGrupo.get(g) : null;
+                        if (lista) lista.push(c); else sinEspecificar.push(c);
+                    }
+                    return (
+                        <>
+                            {cupo.grupos.map((g) => (
+                                <div key={g.grupo} className="space-y-1 -mx-1" data-eventuales-grupo={g.grupo}>
+                                    <GrupoCandidatosHeader grupo={g} cantidad={(porGrupo.get(g.grupo) || []).length} />
+                                    <div className="px-1 space-y-1">
+                                        {(porGrupo.get(g.grupo) || []).length === 0 && <p className="text-[10px] text-slate-400 py-1">Sin candidatos en este grupo.</p>}
+                                        {(porGrupo.get(g.grupo) || []).map((c) => renderCandidato(c))}
+                                    </div>
+                                </div>
+                            ))}
+                            {sinEspecificar.length > 0 && (
+                                <div className="space-y-1 -mx-1" data-eventuales-grupo="SIN_ESPECIFICAR">
+                                    <SinEspecificarAviso cantidad={sinEspecificar.length} />
+                                    <div className="px-1 space-y-1">{sinEspecificar.map((c) => renderCandidato(c, true))}</div>
+                                </div>
+                            )}
+                        </>
+                    );
+                })()}
             </div>
             <div className="px-1 pt-2 text-[9px] font-bold text-slate-400 shrink-0">
                 {loading ? 'Consultando bolsa…' : `${elegibles} de ${rows.length} elegibles · sin superposición ni descanso < 12 h en el grupo`}

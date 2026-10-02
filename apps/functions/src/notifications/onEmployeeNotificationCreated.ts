@@ -16,6 +16,7 @@ import { logConvocatoriaEvento } from '../coverage/convocatoriaEventos';
 const INBOX_NEEDS_FCM = new Set([
   'CONVOCATORIA_EVENTO',
   'EVENTO_CONFIRMADO',
+  'EVENTO_CUPO_COMPLETO',       // «Ya se cubrió el cupo, gracias»: la convocatoria se cerró sola
   'SWAP_REQUEST',
   'TURNO_FINALIZADO',
   // Operaciones CC real
@@ -109,7 +110,7 @@ export const onEmployeeNotificationCreated = functions
     }
 
     const link =
-      type === 'CONVOCATORIA_EVENTO' || type === 'EVENTO_CONFIRMADO'
+      type === 'CONVOCATORIA_EVENTO' || type === 'EVENTO_CONFIRMADO' || type === 'EVENTO_CUPO_COMPLETO'
         ? '/eventos'
         : type === 'SWAP_REQUEST'
           ? '/permutas'

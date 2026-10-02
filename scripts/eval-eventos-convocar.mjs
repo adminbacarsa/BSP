@@ -58,21 +58,33 @@ check('M 07–15', m.label === 'M 07–15' && m.accion === null && !m.selecciona
 check('Libre sin horario', P.situacionDelDia('libre', '').label === 'Libre' && P.situacionDelDia('libre', '').seleccionable);
 check('RET y F no muestran horario', P.situacionDelDia('RET', '08–16').label === 'RET' && P.situacionDelDia('F', '00–23').label === 'F');
 
-// ── Plan en dos grupos + cupo ──
-const plan = P.armarPlanConvocatoria([
+// ── Plan en dos grupos + cupo (el cupo se llena por orden de aceptación: convocar no tiene tope,
+//    la asignación directa libre/RET sí cuenta al momento) ──
+const seleccion = [
   { id: 'a', nombre: 'Baez, Juan', code: 'libre' },
   { id: 'b', nombre: 'Guerrero, Martín', code: 'F' },
   { id: 'c', nombre: 'Fontana, Ana', code: 'RET', horario: '08–16' },
   { id: 'd', nombre: 'Lopez, Luis', code: 'ESC', horario: '07–15' },
   { id: 'e', nombre: 'Sosa, Carla', code: 'FF' },
-], 4);
-check('grupos y cupo', plan.notificar.map((p) => p.id).join(',') === 'a,c' && plan.convocar.map((p) => p.id).join(',') === 'b,d' && plan.omitidosPorCupo.map((p) => p.id).join(',') === 'e');
+];
+const plan = P.armarPlanConvocatoria(seleccion, 1);
+check('grupos y cupo: directo limitado, convocar sin tope', plan.notificar.map((p) => p.id).join(',') === 'a' && plan.convocar.map((p) => p.id).join(',') === 'b,d,e' && plan.omitidosPorCupo.map((p) => p.id).join(',') === 'c');
+const plan4 = P.armarPlanConvocatoria(seleccion, 4);
+check('cupo 4: entran los dos directos y los tres convocados', plan4.notificar.map((p) => p.id).join(',') === 'a,c' && plan4.convocar.map((p) => p.id).join(',') === 'b,d,e' && plan4.omitidosPorCupo.length === 0);
 check('sin cupo (Infinity) entran todos', P.armarPlanConvocatoria([{ id: 'x', nombre: 'X', code: 'F' }], Infinity).convocar.length === 1);
+const planG = P.armarPlanConvocatoria([
+  { id: 'h1', nombre: 'H1', code: 'libre', grupo: 'M' },
+  { id: 'h2', nombre: 'H2', code: 'RET', grupo: 'M' },
+  { id: 'm1', nombre: 'M1', code: 'libre', grupo: 'F' },
+  { id: 'm2', nombre: 'M2', code: 'F', grupo: 'F' },
+  { id: 's1', nombre: 'S1', code: 'libre', grupo: null },
+], { M: 1, F: 0 });
+check('cupo por género: directo por grupo, sin especificar se omite', planG.notificar.map((p) => p.id).join(',') === 'h1' && planG.convocar.map((p) => p.id).join(',') === 'm2' && planG.omitidosPorCupo.map((p) => p.id).join(',') === 'h2,m1,s1');
 check('botón: Notificar y convocar', P.textoBotonPlan(plan) === 'Notificar y convocar');
-check('botón: solo Notificar', P.textoBotonPlan({ notificar: plan.notificar, convocar: [] }) === 'Notificar (2)' && P.textoBotonPlan({ notificar: [plan.notificar[0]], convocar: [] }) === 'Notificar');
-check('botón: solo Convocar', P.textoBotonPlan({ notificar: [], convocar: plan.convocar }) === 'Convocar (2)');
+check('botón: solo Notificar', P.textoBotonPlan({ notificar: plan4.notificar, convocar: [] }) === 'Notificar (2)' && P.textoBotonPlan({ notificar: [plan.notificar[0]], convocar: [] }) === 'Notificar');
+check('botón: solo Convocar', P.textoBotonPlan({ notificar: [], convocar: plan.convocar }) === 'Convocar (3)');
 check('títulos de grupo', P.tituloGrupoNotificar(2) === 'Se asignan y se notifican (2)' && P.tituloGrupoConvocar(3) === 'Se convocan, tienen que aceptar (3)');
-check('resumen del envío', P.resumenEnvio(plan) === '2 asignados y notificados · 2 convocados (tienen que aceptar) · 1 omitido por cupo');
+check('resumen del envío', P.resumenEnvio(plan) === '1 asignado y notificado · 3 convocados (tienen que aceptar) · 1 omitido por cupo');
 
 // ── Aviso al guardia ──
 const ctx = { evento: 'Recital Plaza', servicio: 'Acceso', fecha: '04/10/26', horario: '18:00–02:00' };
@@ -96,9 +108,9 @@ check('deadline', P.mensajeErrorCallable(Object.assign(new Error('deadline-excee
 // ── Render ──
 const noop = () => {};
 const resumen = renderToStaticMarkup(createElement(UI.ConvocatoriaResumen, { plan, servicio: { nombre: 'Acceso', fecha: '04/10/26', horario: '18:00–02:00' }, sending: false, onCancelar: noop, onConfirmar: noop }));
-check('resumen: dos grupos con títulos y personas', resumen.includes('Se asignan y se notifican (2)') && resumen.includes('Se convocan, tienen que aceptar (2)') && resumen.includes('Baez, Juan') && resumen.includes('Fontana, Ana') && resumen.includes('Guerrero, Martín') && resumen.includes('Lopez, Luis') && resumen.includes('data-grupo="notificar"') && resumen.includes('data-grupo="convocar"'));
-check('resumen: omitidos por cupo y botón combinado', resumen.includes('Sosa, Carla') && resumen.includes('data-grupo="omitidos"') && resumen.includes('data-boton-plan="Notificar y convocar"') && resumen.includes('>Volver<'));
-const soloN = renderToStaticMarkup(createElement(UI.ConvocatoriaResumen, { plan: { notificar: plan.notificar, convocar: [], omitidosPorCupo: [] }, servicio: { nombre: 'Acceso', fecha: '04/10/26', horario: '18–02' }, sending: false, onCancelar: noop, onConfirmar: noop }));
+check('resumen: dos grupos con títulos y personas', resumen.includes('Se asignan y se notifican (1)') && resumen.includes('Se convocan, tienen que aceptar (3)') && resumen.includes('Baez, Juan') && resumen.includes('Sosa, Carla') && resumen.includes('Guerrero, Martín') && resumen.includes('Lopez, Luis') && resumen.includes('data-grupo="notificar"') && resumen.includes('data-grupo="convocar"'));
+check('resumen: omitidos por cupo y botón combinado', resumen.includes('Fontana, Ana') && resumen.includes('data-grupo="omitidos"') && resumen.includes('data-boton-plan="Notificar y convocar"') && resumen.includes('>Volver<'));
+const soloN = renderToStaticMarkup(createElement(UI.ConvocatoriaResumen, { plan: { notificar: plan4.notificar, convocar: [], omitidosPorCupo: [] }, servicio: { nombre: 'Acceso', fecha: '04/10/26', horario: '18–02' }, sending: false, onCancelar: noop, onConfirmar: noop }));
 check('resumen: solo Notificar sin grupo convocar', soloN.includes('data-boton-plan="Notificar (2)"') && !soloN.includes('data-grupo="convocar"'));
 const soloC = renderToStaticMarkup(createElement(UI.ConvocatoriaResumen, { plan: { notificar: [], convocar: [plan.convocar[0]], omitidosPorCupo: [] }, servicio: { nombre: 'Acceso', fecha: '04/10/26', horario: '18–02' }, sending: true, onCancelar: noop, onConfirmar: noop }));
 check('resumen: solo Convocar y enviando', soloC.includes('Enviando…') && !soloC.includes('data-grupo="notificar"') && soloC.includes('data-boton-plan="Convocar"'));
@@ -147,6 +159,29 @@ const csm = readFileSync(join(root, 'components/operaciones/CoverageSessionManag
 check('CC: la fila del eventual marca Pruebas: sin exigir marco', csm.includes('row.pruebasSinMarco') && csm.includes('Pruebas: sin exigir marco'));
 const ficha = readFileSync(join(root, 'components/eventuales/FichaEventual.tsx'), 'utf8');
 check('ficha escritorio: dos switches por gestionarEventual switchesPruebas, solo con update', ficha.includes("accion: 'switchesPruebas'") && ficha.includes('Exigir contrato marco y habilitación') && ficha.includes('Exigir alta ARCA para fichar') && ficha.includes("puede('update')") && ficha.includes('data-switches-pruebas'));
+
+// ── Cupo por género: estado «Cupo completo», barras por grupo, encabezados y sin especificar ──
+check('estado: cupo_completo → Cupo completo', P.estadoSolicitudUi({ status: 'cupo_completo', tipo: 'admin_convoca' }).key === 'CUPO_COMPLETO' && chip({ status: 'cupo_completo' }).includes('data-estado="CUPO_COMPLETO"') && chip({ status: 'cupo_completo' }).includes('Cupo completo'));
+const gruposUi = [
+  { grupo: 'M', label: 'Hombres', cupo: 20, ocupados: 12, completo: false },
+  { grupo: 'F', label: 'Mujeres', cupo: 15, ocupados: 15, completo: true },
+];
+const barra = renderToStaticMarkup(createElement(UI.CupoGruposBarra, { grupos: gruposUi }));
+check('barra por grupo: Hombres 12/20 · Mujeres 15/15 completo', barra.includes('data-cupo-grupos="2"') && barra.includes('data-cupo-grupo="M"') && barra.includes('>Hombres<') && barra.includes('12/20') && barra.includes('data-cupo-grupo="F"') && barra.includes('15/15 · completo') && barra.includes('data-cupo-completo="1"') && barra.includes('width:60%') && barra.includes('width:100%'));
+const barraUna = renderToStaticMarkup(createElement(UI.CupoGruposBarra, { grupos: [{ grupo: 'TODOS', label: 'Cupo', cupo: 5, ocupados: 2, completo: false }] }));
+check('barra indistinta: un solo grupo «Cupo 2/5»', barraUna.includes('data-cupo-grupos="1"') && barraUna.includes('>Cupo<') && barraUna.includes('2/5') && !barraUna.includes('· completo') && barraUna.includes('data-cupo-completo="0"'));
+const header = renderToStaticMarkup(createElement(UI.GrupoCandidatosHeader, { grupo: gruposUi[1], cantidad: 7 }));
+check('encabezado de grupo: Mujeres (7) 15/15 · completo', header.includes('data-grupo-candidatos="F"') && header.includes('Mujeres') && header.includes('(7)') && header.includes('15/15 · completo'));
+const sinEsp = renderToStaticMarkup(createElement(UI.SinEspecificarAviso, { cantidad: 3 }));
+check('aviso sin especificar: no cuentan hasta cargar el legajo', sinEsp.includes('data-grupo-candidatos="SIN_ESPECIFICAR"') && sinEsp.includes('Sin especificar (3)') && sinEsp.includes('no cuentan para ningún cupo'));
+check('aviso sin especificar: vacío no se pinta', renderToStaticMarkup(createElement(UI.SinEspecificarAviso, { cantidad: 0 })) === '');
+check('modal: nómina en grupos + sin especificar aparte', modal.includes('agruparCandidatos(selectedSrv, filteredEmps, confirmadosItems)') && modal.includes('<GrupoCandidatosHeader') && modal.includes('<SinEspecificarAviso') && modal.includes('data-nomina-grupo="SIN_ESPECIFICAR"') && modal.includes('renderEmp(emp, true)'));
+check('modal: contadores y barras por grupo en cabecera, Estado y Cronograma', modal.includes('data-cabecera-cupo-grupos') && modal.includes('data-estado-cupo') && modal.includes('data-crono-cupo') && (modal.match(/<CupoGruposBarra/g) || []).length >= 3 && modal.includes('textoResumenCupo(cupoEstado)'));
+check('modal: solicitudes llevan genero y cupoGrupo; cupo_completo en Estado', modal.includes("genero: emp.genero || ''") && modal.includes('cupoGrupo: grupoEmp') && modal.includes("s.status === 'cupo_completo'") && modal.includes('Cupo completo antes de responder') && modal.includes('textoCupoServicio(selectedSrv)'));
+check('modal: si el servidor rechaza la asignación directa (cupo) se borra la solicitud', modal.includes('await deleteDoc(solicitudRef)'));
+check('panel eventuales: grupos por cupo + sin especificar', panel.includes('cupo?: CupoPanelEventuales | null') && panel.includes('<GrupoCandidatosHeader') && panel.includes('<SinEspecificarAviso') && panel.includes('renderCandidato(c, true)') && panel.includes('data-eventuales-grupo="SIN_ESPECIFICAR"'));
+const eventosPanel = readFileSync(join(root, 'components/servicios/EventosPanel.tsx'), 'utf8');
+check('servicio: Indistinto / Por género con cantidades y total', eventosPanel.includes('data-cupo-modo-btn={modo}') && eventosPanel.includes("'INDISTINTO'") && eventosPanel.includes("'POR_GENERO'") && eventosPanel.includes('data-cupo-total') && eventosPanel.includes('data-cupo-genero="M"') && eventosPanel.includes('data-cupo-genero="F"') && eventosPanel.includes('validarCupoServicio(') && eventosPanel.includes('cupoPorGenero: cupoCfg.cupoPorGenero'));
 
 rmSync(outdir, { recursive: true, force: true });
 if (failed) {

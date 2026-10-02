@@ -261,14 +261,18 @@ export async function asignarGuardiaAEvento(db, params) {
     clientId: params.clienteId || params.clientId,
     clientName: params.clienteNombre || params.clientName,
     sourceShiftId: source ? source.id : null,
+    extra: params.extraTurno || {},
   });
 
   const batch = db.batch();
   if (params.solicitudId) {
+    const cupo = params.extraTurno || {};
     batch.update(db.collection('solicitudes_evento').doc(params.solicitudId), {
       status: 'aprobada',
       respondidoAt: FieldValue.serverTimestamp(),
       turnoId: escrito.turnoId,
+      ...(cupo.cupoGrupo ? { cupoGrupo: cupo.cupoGrupo } : {}),
+      ...(cupo.genero ? { genero: cupo.genero } : {}),
       ...(params.respondidoPor ? { respondidoPor: params.respondidoPor } : {}),
     });
   }

@@ -4,7 +4,7 @@
  * Sin Firestore ni contextos: se renderizan en `scripts/eval-eventos-convocar.mjs`.
  */
 import React from 'react';
-import { AlertTriangle, Bell, CheckCircle, Clock, FlaskConical, RotateCcw, Send, TimerOff, UserCheck, XCircle } from 'lucide-react';
+import { AlertTriangle, Bell, CheckCircle, Clock, FlaskConical, RotateCcw, Send, TimerOff, UserCheck, Users, XCircle } from 'lucide-react';
 import {
   detalleEventualUi,
   estadoSolicitudUi,
@@ -180,8 +180,10 @@ export function EstadoSolicitudChip({ sol }: { sol: { status?: string; tipo?: st
         ? 'text-rose-500'
         : ui.key === 'VENCIO' || ui.key === 'NO_VA'
           ? 'text-amber-600 dark:text-amber-400'
-          : 'text-slate-400 dark:text-slate-500';
-  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : ui.key === 'VENCIO' || ui.key === 'NO_VA' ? TimerOff : Clock;
+          : ui.key === 'CUPO_COMPLETO'
+            ? 'text-slate-500 dark:text-slate-400'
+            : 'text-slate-400 dark:text-slate-500';
+  const Icon = ui.key === 'ASIGNADO' ? UserCheck : ui.key === 'ACEPTO' ? CheckCircle : ui.key === 'RECHAZO' ? XCircle : ui.key === 'VENCIO' || ui.key === 'NO_VA' ? TimerOff : ui.key === 'CUPO_COMPLETO' ? Users : Clock;
   return (
     <span data-estado={ui.key} title={ui.detalle} className={`inline-flex items-center gap-1 text-[10px] shrink-0 ${cls}`}>
       <Icon size={11} />
@@ -219,6 +221,65 @@ export function EventualEstadoLinea({ sol, turno }: { sol: SolicitudEventualLike
       {d.pruebas && <PruebasBadge compact texto={d.pruebas} />}
       {d.anexo && <span data-anexo={d.anexo.tono} className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${DETALLE_TONO[d.anexo.tono]}`}>{d.anexo.label}</span>}
       {d.arca && <span data-arca={d.arca.tono} className={`rounded-full border px-1.5 py-0.5 text-[8px] font-bold ${DETALLE_TONO[d.arca.tono]}`}>{d.arca.label}</span>}
+    </div>
+  );
+}
+
+export type GrupoCupoUi = { grupo: string; label: string; cupo: number; ocupados: number; completo: boolean };
+
+/**
+ * Cupo por grupo (Estado convocatoria / Cronograma / encabezado): «Hombres 12/20 · Mujeres 15/15 completo»
+ * con una barra por grupo. Indistinto = un solo grupo.
+ */
+export function CupoGruposBarra({ grupos, compact }: { grupos: GrupoCupoUi[]; compact?: boolean }) {
+  if (!grupos.length) return null;
+  return (
+    <div className={`grid gap-1.5 ${grupos.length > 1 ? 'sm:grid-cols-2' : ''}`} data-cupo-grupos={grupos.length}>
+      {grupos.map((g) => {
+        const pct = g.cupo > 0 ? Math.min(100, Math.round((g.ocupados / g.cupo) * 100)) : 0;
+        const label = grupos.length > 1 ? g.label : 'Cupo';
+        return (
+          <div key={g.grupo} data-cupo-grupo={g.grupo} data-cupo-completo={g.completo ? '1' : '0'} className="min-w-0">
+            <div className={`flex items-center justify-between gap-2 ${compact ? 'text-[9px]' : 'text-[10px]'}`}>
+              <span className="font-bold text-slate-600 dark:text-slate-300 truncate">{label}</span>
+              <span className={`shrink-0 tabular-nums ${g.completo ? 'font-black text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+                {g.ocupados}/{g.cupo}{g.completo ? ' · completo' : ''}
+              </span>
+            </div>
+            <div className={`mt-0.5 w-full ${compact ? 'h-1' : 'h-1.5'} rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden`}>
+              <div className={`h-full rounded-full transition-all ${g.completo ? 'bg-emerald-500' : 'bg-yellow-400'}`} style={{ width: `${pct}%` }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Encabezado de un grupo de candidatos («Hombres 12/20») en Convocar guardias. */
+export function GrupoCandidatosHeader({ grupo, cantidad }: { grupo: GrupoCupoUi; cantidad: number }) {
+  return (
+    <div data-grupo-candidatos={grupo.grupo} className="flex items-center justify-between gap-2 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-y border-slate-200 dark:border-slate-700">
+      <span className="text-[10px] font-black uppercase tracking-wide text-slate-600 dark:text-slate-300 flex items-center gap-1">
+        <Users size={10} />
+        {grupo.label} <span className="font-medium normal-case text-slate-400">({cantidad})</span>
+      </span>
+      <span className={`text-[10px] tabular-nums ${grupo.completo ? 'font-black text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400'}`}>
+        {grupo.ocupados}/{grupo.cupo}{grupo.completo ? ' · completo' : ''}
+      </span>
+    </div>
+  );
+}
+
+/** Aviso para los candidatos sin género cargado cuando el servicio tiene cupo por género. */
+export function SinEspecificarAviso({ cantidad }: { cantidad: number }) {
+  if (cantidad <= 0) return null;
+  return (
+    <div data-grupo-candidatos="SIN_ESPECIFICAR" className="flex items-start gap-2 px-3 py-1.5 bg-amber-50 dark:bg-amber-900/20 border-y border-amber-200 dark:border-amber-800">
+      <AlertTriangle size={11} className="shrink-0 mt-0.5 text-amber-600" />
+      <p className="text-[10px] text-amber-800 dark:text-amber-300">
+        <span className="font-black">Sin especificar ({cantidad})</span> · Sin género en el legajo: no cuentan para ningún cupo hasta que se cargue. Completá el legajo para convocarlos.
+      </p>
     </div>
   );
 }

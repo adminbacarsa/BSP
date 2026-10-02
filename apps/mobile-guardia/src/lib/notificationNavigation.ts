@@ -9,6 +9,7 @@ import { isAvisoEntrante, isRetencionAviso } from './avisosCc';
 export const EMPLOYEE_ALERT_TYPES = new Set([
   'CONVOCATORIA_EVENTO',
   'EVENTO_CONFIRMADO',
+  'EVENTO_CUPO_COMPLETO',
   'CRONOGRAMA_PUBLICADO',
   'TURNO_NUEVO',
   'TURNO_MODIFICADO',
@@ -79,7 +80,7 @@ const HOY_TYPES = new Set([
 
 const COBERTURA_TYPES = new Set(['CONVOCATORIA_COBERTURA', 'RETENCION', 'ADELANTO']);
 
-const EVENTOS_TYPES = new Set(['CONVOCATORIA_EVENTO', 'EVENTO_CONFIRMADO']);
+const EVENTOS_TYPES = new Set(['CONVOCATORIA_EVENTO', 'EVENTO_CONFIRMADO', 'EVENTO_CUPO_COMPLETO']);
 
 export function isEmployeeFacingAlert(raw: {
   type?: string;

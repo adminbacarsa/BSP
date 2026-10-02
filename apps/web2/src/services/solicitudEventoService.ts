@@ -13,7 +13,8 @@ import {
 import { stampEmpresaId } from '@/lib/multiempresa';
 
 /** `vencida` = convocatoria de eventual sin respuesta en el plazo (`venceAt`): no generó nada, el lugar quedó libre. */
-export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva' | 'vencida' | 'cancelada';
+/** `cupo_completo` = el cupo de su grupo se llenó antes de que respondiera (se le avisó; no se generó nada). */
+export type EstadoSolicitudEvento = 'pendiente' | 'convocado' | 'aprobada' | 'rechazada' | 'cerrada' | 'reserva' | 'vencida' | 'cancelada' | 'cupo_completo';
 /** `admin_asigna` = asignación directa desde Eventos (libre/RET): nace `aprobada`, no es una aceptación. */
 export type TipoSolicitudEvento = 'guardia_solicita' | 'admin_convoca' | 'admin_asigna';
 
@@ -51,6 +52,12 @@ export interface SolicitudEvento {
     turnoIds?: string[];
     venceAt?: any;
     vencidaAt?: any;
+    /** Cupo por género: género de la persona ('M' | 'F' | '') y grupo al que aporta ('M' | 'F' | 'TODOS'). */
+    genero?: string;
+    cupoGrupo?: string;
+    /** El servidor reservó el lugar en la transacción de aceptación. */
+    cupoReservado?: boolean;
+    cupoCerradoAt?: any;
 }
 
 export const solicitudEventoService = {
@@ -80,6 +87,8 @@ export const solicitudEventoService = {
         empleadoId: string;
         empleadoNombre: string;
         convocadoPor?: string;
+        genero?: string;
+        cupoGrupo?: string;
     }): Promise<string> => {
         const payload = stampEmpresaId(
             {

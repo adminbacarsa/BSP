@@ -1,5 +1,6 @@
 import { RNOS_SUVICO } from './arcaConst.mjs';
 import { normalizeCuil } from './cuil.mjs';
+import { normalizarGenero } from './cupoGenero.mjs';
 import { GRUPO_EVENTUALES_EMPRESA_IDS, GRUPO_EVENTUALES_ID } from './grupo.mjs';
 import { sumarDias } from './jornadas.mjs';
 
@@ -61,6 +62,8 @@ export function validarFicha(input, ctx = {}) {
       cuil,
       nombre,
       dni: texto(input?.dni),
+      // 'M' | 'F' | '' (sin especificar). Lo usa el cupo por género de los eventos.
+      genero: normalizarGenero(input?.genero),
       fechaNacimiento: texto(input?.fechaNacimiento),
       domicilio: texto(input?.domicilio),
       domicilioGeo: input?.domicilioGeo || null,

@@ -20,11 +20,24 @@ import { canConvocarEventuales, convocarEventualEvento } from '@/services/eventu
 import {
     AccionChip,
     ConvocatoriaResumen,
+    CupoGruposBarra,
     ErrorCallableBox,
     EstadoSolicitudChip,
     EventualEstadoLinea,
+    GrupoCandidatosHeader,
+    SinEspecificarAviso,
     SituacionAccionBadges,
+    type GrupoCupoUi,
 } from '@/components/servicios/EventoConvocarResumen';
+import {
+    agruparCandidatos,
+    esPorGenero,
+    estadoCupo,
+    grupoDeGenero,
+    normalizarGenero,
+    textoCupoServicio,
+    textoResumenCupo,
+} from '@/lib/eventuales/cupoGenero.mjs';
 import {
     armarPlanConvocatoria,
     CON_TURNO_CODES,
@@ -83,6 +96,8 @@ interface EmpRow {
     preferredObjectiveName?: string;
     objectiveId?: string;
     objectiveName?: string;
+    /** 'M' | 'F' | '' (sin especificar). Cupo por género. */
+    genero: string;
 }
 
 interface Props {
@@ -152,6 +167,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                         preferredObjectiveName: dat.preferredObjectiveName || '',
                         objectiveId: dat.objectiveId || '',
                         objectiveName: dat.objectiveName || '',
+                        genero: normalizarGenero(dat.genero) as string,
                     };
                 })
                 .sort((a, b) => a.name.localeCompare(b.name, 'es'));
@@ -361,10 +377,19 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     function planActual(): PlanConvocatoria {
         const empMap = Object.fromEntries(empleados.map(e => [e.id, e]));
         const pendingIds = Array.from(selected).filter((empId) => !yaEnviadosIds.has(empId) && empMap[empId]);
-        const availableSlots = cupo > 0 ? Math.max(0, cupo - totalConfirmados) : Number.POSITIVE_INFINITY;
+        // Cupo por grupo: la asignación directa cuenta al momento; convocar no tiene tope (orden de aceptación).
+        const cupoDisponible = cupoEstado && cupoEstado.cupo > 0
+            ? Object.fromEntries(cupoEstado.grupos.map((g: GrupoCupoUi) => [g.grupo, Math.max(0, g.cupo - g.ocupados)]))
+            : (porGenero ? { M: Number.POSITIVE_INFINITY, F: Number.POSITIVE_INFINITY } : Number.POSITIVE_INFINITY);
         return armarPlanConvocatoria(
-            pendingIds.map((empId) => ({ id: empId, nombre: empMap[empId].name, code: availMap[empId] || 'libre', horario: horarioMap[empId] || '' })),
-            availableSlots,
+            pendingIds.map((empId) => ({
+                id: empId,
+                nombre: empMap[empId].name,
+                code: availMap[empId] || 'libre',
+                horario: horarioMap[empId] || '',
+                grupo: selectedSrv ? (grupoDeGenero(selectedSrv, empMap[empId].genero) as string | null) : 'TODOS',
+            })),
+            cupoDisponible,
         );
     }
 
@@ -387,6 +412,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     : selectedSrv.tipoTurno === '2x12'
                         ? 12
                         : calcHorasServicio(selectedSrv.horaInicio, selectedSrv.horaFin);
+                const grupoEmp = grupoDeGenero(selectedSrv, emp.genero) as string | null;
                 const solicitudRef = await addDoc(collection(db, 'solicitudes_evento'), {
                     empresaId,
                     eventoId: evento.id,
@@ -400,28 +426,37 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     tipo: 'admin_asigna',
                     convocadoPor,
                     respondidoPor: convocadoPor,
+                    genero: emp.genero || '',
+                    cupoGrupo: grupoEmp || 'TODOS',
                     respondidoAt: serverTimestamp(),
                     creadoAt: serverTimestamp(),
                 });
-                await assignGuardToEvent({
-                    empresaId,
-                    empleadoId: empId,
-                    empleadoNombre: emp.name,
-                    empleadoObjectiveId: emp.preferredObjectiveId || emp.objectiveId || undefined,
-                    empleadoObjectiveName: emp.preferredObjectiveName || emp.objectiveName || undefined,
-                    eventoId: evento.id!,
-                    eventoNombre: evento.nombre,
-                    clienteId: evento.clienteId,
-                    clienteNombre: evento.clienteNombre,
-                    servicioId: selectedSrv.id,
-                    servicioNombre: selectedSrv.nombre,
-                    servicioFecha: selectedSrv.fecha,
-                    horaInicio: selectedSrv.horaInicio,
-                    horaFin: selectedSrv.horaFin,
-                    horas: guardHours,
-                    solicitudId: solicitudRef.id,
-                    respondidoPor: convocadoPor,
-                });
+                try {
+                    // El servidor cuenta el cupo del grupo al momento (transacción) y escribe el turno EV.
+                    await assignGuardToEvent({
+                        empresaId,
+                        empleadoId: empId,
+                        empleadoNombre: emp.name,
+                        empleadoObjectiveId: emp.preferredObjectiveId || emp.objectiveId || undefined,
+                        empleadoObjectiveName: emp.preferredObjectiveName || emp.objectiveName || undefined,
+                        eventoId: evento.id!,
+                        eventoNombre: evento.nombre,
+                        clienteId: evento.clienteId,
+                        clienteNombre: evento.clienteNombre,
+                        servicioId: selectedSrv.id,
+                        servicioNombre: selectedSrv.nombre,
+                        servicioFecha: selectedSrv.fecha,
+                        horaInicio: selectedSrv.horaInicio,
+                        horaFin: selectedSrv.horaFin,
+                        horas: guardHours,
+                        solicitudId: solicitudRef.id,
+                        respondidoPor: convocadoPor,
+                    });
+                } catch (e) {
+                    // Cupo completo u otro rechazo del servidor: la solicitud directa no queda como confirmada.
+                    await deleteDoc(solicitudRef).catch(() => {});
+                    throw e;
+                }
                 const avisoAsignado = textoAvisoGuardia('NOTIFICAR', avisoCtx);
                 await addDoc(collection(db, 'user_notifications'), {
                     empresaId,
@@ -454,6 +489,8 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                     empleadoId: empId,
                     empleadoNombre: emp.name,
                     convocadoPor,
+                    genero: emp.genero || '',
+                    cupoGrupo: (grupoDeGenero(selectedSrv, emp.genero) as string | null) || 'TODOS',
                 });
                 const avisoConvocado = textoAvisoGuardia('CONVOCAR', avisoCtx);
                 await addDoc(collection(db, 'user_notifications'), {
@@ -496,7 +533,9 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     /** Eventuales que no respondieron en el plazo: no generaron nada, el lugar quedó libre. */
     const vencieron = srvSols.filter(s => s.status === 'vencida');
     const noVan = srvSols.filter(s => s.status === 'cancelada');
-    const yaEnviadosIds = new Set(srvSols.map(s => s.empleadoId));
+    /** El cupo de su grupo se llenó antes de que respondieran: se les avisó, no se generó nada. */
+    const cupoCompletos = srvSols.filter(s => s.status === 'cupo_completo');
+    const yaEnviadosIds = new Set(srvSols.filter(s => s.status !== 'cupo_completo').map(s => s.empleadoId));
     /** Turno EV del eventual que aceptó (anexo/ARCA en «Estado convocatoria»). */
     const turnoEvDe = (sol: SolicitudEvento) => evTurnos.find(t => t.servicioId === sol.servicioId && (t.employeeId === sol.empleadoId || (sol.bolsaCuil && t.bolsaCuil === sol.bolsaCuil))) || null;
 
@@ -507,7 +546,17 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
     const totalConfirmados = aprobadas.length + turnosDirectos.length;
 
     const cupo = selectedSrv?.cupo || 0;
-    const cupoLleno = cupo > 0 && totalConfirmados >= cupo;
+    /** Cupo por género (o indistinto) del servicio elegido: ocupación por grupo. */
+    const porGenero = !!selectedSrv && (esPorGenero(selectedSrv) as boolean);
+    const generoDeEmpleado = (empleadoId: string) => empleados.find(e => e.id === empleadoId)?.genero || '';
+    const confirmadosItems = [
+        ...aprobadas.map(s => ({ genero: s.genero || generoDeEmpleado(s.empleadoId), cupoGrupo: s.cupoGrupo || '' })),
+        ...turnosDirectos.map(t => ({ genero: t.genero || generoDeEmpleado(String(t.employeeId || '')), cupoGrupo: t.cupoGrupo || '' })),
+    ];
+    const cupoEstado = selectedSrv ? (estadoCupo(selectedSrv, confirmadosItems) as { grupos: GrupoCupoUi[]; cupo: number; ocupados: number; completo: boolean }) : null;
+    const cupoLleno = cupo > 0 && (cupoEstado ? cupoEstado.completo : totalConfirmados >= cupo);
+    /** Grupo (M/F) de cada guardia de nómina según el servicio; `null` = sin especificar en un servicio por género. */
+    const grupoDeEmp = (emp: EmpRow) => (selectedSrv ? (grupoDeGenero(selectedSrv, emp.genero) as string | null) : 'TODOS');
 
     const aptitudesRequeridas = selectedSrv?.aptitudesRequeridas || [];
 
@@ -607,7 +656,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         <div className="flex items-center gap-2 mt-1">
                                             {pend > 0 && <span className="text-[9px] text-amber-600 dark:text-amber-400">{pend} pend.</span>}
                                             {srvTotalAsig > 0 && <span className="text-[9px] text-emerald-600 dark:text-emerald-400">{srvTotalAsig} asignados</span>}
-                                            <span className="text-[9px] text-slate-400 ml-auto">{srv.cupo} pax</span>
+                                            <span className="text-[9px] text-slate-400 ml-auto" data-srv-cupo={srv.id}>{textoCupoServicio(srv)}</span>
                                         </div>
                                     </button>
                                 );
@@ -626,7 +675,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                     <span className="font-semibold text-slate-800 dark:text-white text-sm">{selectedSrv.nombre}</span>
                                     <span className="text-[10px] bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 px-2 py-0.5 rounded font-medium">{horarioBadge(selectedSrv)}</span>
                                     <span className="text-[10px] text-slate-400 flex items-center gap-1"><Calendar size={9}/>{fmtFecha(selectedSrv.fecha)}</span>
-                                    <span className="text-[10px] text-slate-400 flex items-center gap-1"><Users size={9}/>{cupo} pax</span>
+                                    <span className="text-[10px] text-slate-400 flex items-center gap-1" data-cabecera-cupo><Users size={9}/>{textoCupoServicio(selectedSrv)}</span>
                                     {selectedSrv.ubicacion?.direccion && (
                                         <span className="text-[10px] text-slate-400 flex items-center gap-1 truncate max-w-[200px]"><MapPin size={9}/>{selectedSrv.ubicacion.direccion}</span>
                                     )}
@@ -644,7 +693,12 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         })}
                                     </div>
                                 )}
-                                {/* Barra progreso confirmados */}
+                                {/* Barra progreso confirmados (por grupo si el cupo es por género) */}
+                                {porGenero && cupoEstado ? (
+                                    <div className="mt-2" data-cabecera-cupo-grupos>
+                                        <CupoGruposBarra grupos={cupoEstado.grupos} compact />
+                                    </div>
+                                ) : (
                                 <div className="mt-2 flex items-center gap-2">
                                     <div className="flex-1 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full overflow-hidden">
                                         <div
@@ -654,6 +708,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                     </div>
                                     <span className="text-[9px] text-slate-400 shrink-0">{totalConfirmados}/{cupo} confirmados</span>
                                 </div>
+                                )}
                             </div>
                             ) : (
                             <div className="px-5 py-3 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-800/50 shrink-0">
@@ -704,6 +759,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                             <CheckCircle size={28} className="text-emerald-500"/>
                                             <p className="text-sm font-semibold text-emerald-700 dark:text-emerald-300">Cupo completo</p>
                                             <p className="text-xs text-emerald-600 dark:text-emerald-400">{totalConfirmados}/{cupo} guardias confirmados ({asignadosDirecto.length} asignados y notificados, {aceptaron.length} aceptaron).</p>
+                                            {porGenero && cupoEstado && <p className="text-[10px] text-emerald-700 dark:text-emerald-300" data-cupo-completo-grupos>{textoResumenCupo(cupoEstado)}</p>}
                                             <p className="text-[10px] text-slate-400 mt-1">Para agregar más, editá el cupo del servicio.</p>
                                         </div>
                                     ) : (
@@ -771,6 +827,7 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             canConvocar={canConvocarEventual}
                                                             busy={eventualBusy}
                                                             onSelect={(candidato) => { void asignarEventual(candidato); }}
+                                                            cupo={porGenero && cupoEstado ? { servicio: selectedSrv, grupos: cupoEstado.grupos } : null}
                                                         />
                                                     </div>
                                                 );
@@ -860,24 +917,28 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                 {loadingAvail && (
                                                     <p className="text-[11px] text-slate-400 text-center py-4">Cargando disponibilidad…</p>
                                                 )}
-                                                {!loadingAvail && filteredEmps.map(emp => {
+                                                {!loadingAvail && (() => {
+                                                    const renderEmp = (emp: EmpRow, sinGrupo = false) => {
                                                     const code = availMap[emp.id] || 'libre';
                                                     const situacion = situacionDelDia(code, horarioMap[emp.id] || '');
-                                                    const solPrevia = srvSols.find((s) => s.empleadoId === emp.id);
+                                                    const solPrevia = srvSols.find((s) => s.empleadoId === emp.id && s.status !== 'cupo_completo');
                                                     const yaEnviado = yaEnviadosIds.has(emp.id);
                                                     const isChecked = selected.has(emp.id);
                                                     const disponible = DISPONIBLE_CODES.has(code);
-                                                    const clickable = !yaEnviado && disponible;
+                                                    // Sin género en un servicio por género: no se puede convocar hasta completar el legajo.
+                                                    const clickable = !yaEnviado && disponible && !sinGrupo;
                                                     return (
                                                         <div
                                                             key={emp.id}
+                                                            data-emp-grupo={sinGrupo ? 'SIN_ESPECIFICAR' : (grupoDeEmp(emp) || 'TODOS')}
+                                                            title={sinGrupo ? 'Sin género en el legajo: completalo para convocarlo (cupo por género).' : undefined}
                                                             onClick={() => clickable && toggleEmp(emp.id)}
                                                             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border transition-colors
                                                                 ${isChecked
                                                                     ? 'bg-slate-100 dark:bg-slate-700 border-slate-300 dark:border-slate-600'
                                                                     : yaEnviado
                                                                         ? 'bg-slate-50 dark:bg-slate-800/40 border-slate-100 dark:border-slate-800 opacity-60'
-                                                                        : disponible
+                                                                        : disponible && !sinGrupo
                                                                             ? 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 cursor-pointer'
                                                                             : 'bg-slate-50 dark:bg-slate-800/30 border-slate-100 dark:border-slate-800 opacity-40 cursor-not-allowed'
                                                                 }`}
@@ -919,7 +980,33 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             />
                                                         </div>
                                                     );
-                                                })}
+                                                    };
+                                                    if (!porGenero || !selectedSrv) return filteredEmps.map((emp) => renderEmp(emp));
+                                                    // Cupo por género: dos grupos (Hombres n/X · Mujeres n/Y) + «Sin especificar» aparte.
+                                                    const agrupado = agruparCandidatos(selectedSrv, filteredEmps, confirmadosItems) as {
+                                                        grupos: (GrupoCupoUi & { candidatos: EmpRow[] })[];
+                                                        sinEspecificar: EmpRow[];
+                                                    };
+                                                    return (
+                                                        <>
+                                                            {agrupado.grupos.map((g) => (
+                                                                <div key={g.grupo} className="space-y-1.5 -mx-4" data-nomina-grupo={g.grupo}>
+                                                                    <GrupoCandidatosHeader grupo={g} cantidad={g.candidatos.length} />
+                                                                    <div className="px-4 space-y-1.5">
+                                                                        {g.candidatos.length === 0 && <p className="text-[10px] text-slate-400 py-1">Sin candidatos en este grupo.</p>}
+                                                                        {g.candidatos.map((emp) => renderEmp(emp))}
+                                                                    </div>
+                                                                </div>
+                                                            ))}
+                                                            {agrupado.sinEspecificar.length > 0 && (
+                                                                <div className="space-y-1.5 -mx-4" data-nomina-grupo="SIN_ESPECIFICAR">
+                                                                    <SinEspecificarAviso cantidad={agrupado.sinEspecificar.length} />
+                                                                    <div className="px-4 space-y-1.5">{agrupado.sinEspecificar.map((emp) => renderEmp(emp, true))}</div>
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    );
+                                                })()}
                                                 {!loadingAvail && filteredEmps.length === 0 && (
                                                     <p className="text-[11px] text-slate-400 text-center py-8">Sin resultados</p>
                                                 )}
@@ -970,6 +1057,14 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                             Desasignar selección ({selectedSrvTurnos.length})
                                                         </button>
                                                     </div>
+                                                    {(srv.cupo || 0) > 0 && (
+                                                        <div className="mb-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2" data-crono-cupo={srv.id}>
+                                                            <CupoGruposBarra
+                                                                compact
+                                                                grupos={(estadoCupo(srv, srvT.map(t => ({ genero: t.genero || generoDeEmpleado(String(t.employeeId || '')), cupoGrupo: t.cupoGrupo || '' }))) as { grupos: GrupoCupoUi[] }).grupos}
+                                                            />
+                                                        </div>
+                                                    )}
                                                     <div className="space-y-1.5">
                                                         {srvT.map(turno => (
                                                             <div key={turno.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl">
@@ -1094,6 +1189,14 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                         })
                                     ) : (
                                         <>
+                                            {cupo > 0 && cupoEstado && (
+                                                <section className="rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 px-3 py-2" data-estado-cupo>
+                                                    <p className="text-[9px] font-black uppercase text-slate-400 tracking-wide mb-1.5">
+                                                        Cupo · {textoResumenCupo(cupoEstado)}{porGenero ? ' · se llena por orden de aceptación' : ''}
+                                                    </p>
+                                                    <CupoGruposBarra grupos={cupoEstado.grupos} />
+                                                </section>
+                                            )}
                                             {asignadosDirecto.length > 0 && (
                                                 <section>
                                                     <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Asignados (notificados) — {asignadosDirecto.length}</p>
@@ -1185,6 +1288,23 @@ export function EventoDetailModal({ evento, empresaId, onClose }: Props) {
                                                                     <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
                                                                     <p className="text-[9px] text-slate-400">Canceló antes del inicio. El anexo quedó sin efecto y se reconvocó el lugar.</p>
                                                                     <EventualEstadoLinea sol={sol} turno={turnoEvDe(sol)} />
+                                                                </div>
+                                                                <EstadoSolicitudChip sol={sol} />
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                </section>
+                                            )}
+                                            {cupoCompletos.length > 0 && (
+                                                <section data-estado-cupo-completos={cupoCompletos.length}>
+                                                    <p className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">Cupo completo antes de responder — {cupoCompletos.length}</p>
+                                                    <div className="space-y-1">
+                                                        {cupoCompletos.map(sol => (
+                                                            <div key={sol.id} className="flex items-center gap-3 px-3 py-2.5 bg-white dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 rounded-lg">
+                                                                <div className="flex-1 min-w-0">
+                                                                    <p className="text-xs font-medium text-slate-700 dark:text-slate-200">{sol.empleadoNombre}</p>
+                                                                    <p className="text-[9px] text-slate-400">El cupo{sol.cupoGrupo === 'M' ? ' de hombres' : sol.cupoGrupo === 'F' ? ' de mujeres' : ''} se llenó antes de que respondiera. Se le avisó «Ya se cubrió el cupo, gracias»; no se generó turno, contrato, anexo ni alta.</p>
+                                                                    <EventualEstadoLinea sol={sol} />
                                                                 </div>
                                                                 <EstadoSolicitudChip sol={sol} />
                                                             </div>

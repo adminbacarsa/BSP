@@ -153,6 +153,7 @@ function candidatoParaPanel(c: EventualCandidato, empresaId: string) {
     motivo: c.motivo,
     ...(typeof c.puntaje === 'number' ? { puntaje: c.puntaje } : {}),
     ...(c.pruebasSinMarco ? { pruebasSinMarco: true } : {}),
+    genero: c.genero || '',
     employeeId: legajo?.employeeId || null,
   };
 }
@@ -193,6 +194,8 @@ async function asegurarLegajo(bolsa: Record<string, unknown> & { cuil: string },
       if (String(doc.data()?.status || '').toLowerCase() === 'inactivo') Object.assign(patch, { status: 'activo', reactivadoAt: admin.firestore.FieldValue.serverTimestamp() });
       // El push de la convocatoria sale por `empleados.uid`: si el acceso a la app se creó después del legajo, se completa acá.
       if (bolsa.uid && !doc.data()?.uid) patch.uid = bolsa.uid;
+      // Género de la ficha → legajo (cupo por género en eventos).
+      if (bolsa.genero && !doc.data()?.genero) patch.genero = String(bolsa.genero);
       if (Object.keys(patch).length) await doc.ref.update(patch);
       return previo.employeeId;
     }
@@ -210,6 +213,7 @@ async function asegurarLegajo(bolsa: Record<string, unknown> & { cuil: string },
       ...nombrePartes(String(bolsa.nombre || '')),
       cuil: bolsa.cuil,
       dni: bolsa.dni || '',
+      genero: String(bolsa.genero || ''),
       phone: bolsa.telefono || '',
       email: bolsa.mail || '',
       address: bolsa.domicilio || '',
@@ -480,6 +484,14 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
   }
 
   const evento = data?.evento as EventoRef | null;
+  // Asignación directa a un servicio de evento: cuenta contra el cupo (por género) al momento.
+  let extraTurno: Record<string, unknown> | undefined;
+  if (evento?.eventoId && evento.servicioId) {
+    const { reservarCupo, camposCupoTurno } = await import('../eventos/cupoEvento');
+    const reserva = await reservarCupo(db(), { eventoId: String(evento.eventoId), servicioId: String(evento.servicioId), empleadoId: employeeId, bolsaCuil: cuil, esEventual: true });
+    if (!reserva.ok) throw new functions.https.HttpsError('failed-precondition', reserva.mensaje, { codigo: reserva.motivo, grupo: reserva.grupo });
+    extraTurno = camposCupoTurno(reserva);
+  }
   const { turnoIds, contratos } = await escribirTurnosEventual({
     bolsa, empresaId, employeeId, turnosIn, evento, objectiveId,
     objectiveName: data?.objectiveName ? String(data.objectiveName) : null,
@@ -489,7 +501,12 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
     cubreA: (data?.cubreA as CubreA | null) || null,
     actorUid: auth.uid,
     actorName: String(auth.token.email || auth.uid),
+    ...(extraTurno ? { extraTurno } : {}),
   });
+  if (evento?.eventoId && evento.servicioId) {
+    const { cerrarPendientesPorCupo } = await import('../eventos/cupoEvento');
+    await cerrarPendientesPorCupo(db(), { eventoId: String(evento.eventoId), servicioId: String(evento.servicioId), actor: auth.uid });
+  }
   await auditar('EVENTUAL_ASIGNADO_PLANIFICACION', auth.uid, empresaId, cuil, `${bolsa.nombre} asignado a ${data?.objectiveName || objectiveId || evento?.eventoNombre || '—'}: ${turnosIn.length} turno/s (${turnosIn.map((t) => `${t.fecha} ${t.code || 'EV'}`).join(', ')}).`, { employeeId, objectiveId, turnoIds });
   return { ok: true, employeeId, turnoIds, contratos };
 });
@@ -651,6 +668,21 @@ export const convocarEventualEvento = functions.https.onCall(async (data, contex
   const viva = abiertas.docs.find((d) => ['convocado', 'aprobada', 'pendiente'].includes(String(d.data().status || '')));
   if (viva) throw new functions.https.HttpsError('already-exists', `${bolsa.nombre} ya tiene una convocatoria ${String(viva.data().status)} en este servicio.`);
 
+  // Cupo por género: la ficha sin género no entra a un servicio por género; un grupo ya lleno no recibe más convocatorias.
+  const { libCupo, servicioDeEvento, ocupadosDeServicio } = await import('../eventos/cupoEvento');
+  const cupoLib = await libCupo();
+  const genero = cupoLib.normalizarGenero(bolsa.genero);
+  const { servicio: servicioCupo } = await servicioDeEvento(db(), String(evento.eventoId), String(evento.servicioId));
+  let cupoGrupo: string = 'TODOS';
+  if (servicioCupo && cupoLib.estadoCupo(servicioCupo, []).cupo > 0) {
+    const { ocupados } = await ocupadosDeServicio(db(), { eventoId: String(evento.eventoId), servicioId: String(evento.servicioId), excluirEmpleadoId: employeeId });
+    const chequeo = cupoLib.puedeConfirmar(servicioCupo, ocupados, genero);
+    if (!chequeo.ok) throw new functions.https.HttpsError('failed-precondition', chequeo.mensaje || chequeo.motivo || 'CUPO', { codigo: chequeo.motivo, grupo: chequeo.grupo });
+    cupoGrupo = chequeo.grupo || 'TODOS';
+  } else {
+    cupoGrupo = cupoLib.grupoDeGenero(servicioCupo || {}, genero) || 'TODOS';
+  }
+
   const venceAt = admin.firestore.Timestamp.fromMillis(Date.now() + EVENTO_EVENTUAL_TIMEOUT_MIN * 60000);
   const ref = db().collection('solicitudes_evento').doc();
   await ref.set({
@@ -667,6 +699,8 @@ export const convocarEventualEvento = functions.https.onCall(async (data, contex
     convocadoPor: auth.uid,
     esEventual: true,
     bolsaCuil: cuil,
+    genero,
+    cupoGrupo,
     jornada,
     clientId: data?.clientId ? String(data.clientId) : null,
     clientName: data?.clientName ? String(data.clientName) : null,
@@ -708,6 +742,8 @@ export async function aceptarConvocatoriaEventualEvento(
   solicitudId: string,
   sol: Record<string, unknown>,
   actor: { uid: string; email?: string | null },
+  /** `cupoGrupo` / `genero` reservados por `reservarCupo` (se estampan en el turno EV). */
+  camposCupo: Record<string, unknown> = {},
 ): Promise<AceptacionEventual> {
   const { exigeMarco } = await import('../eventuales-shared/pruebasSwitch.mjs') as LibPruebas;
   const cuil = String(sol.bolsaCuil || '').replace(/\D/g, '');
@@ -744,7 +780,7 @@ export async function aceptarConvocatoriaEventualEvento(
     cubreA: null,
     actorUid: actor.uid,
     actorName: String(actor.email || actor.uid),
-    extraTurno: { solicitudEventoId: solicitudId, convocadoAceptoAt: admin.firestore.FieldValue.serverTimestamp() },
+    extraTurno: { solicitudEventoId: solicitudId, convocadoAceptoAt: admin.firestore.FieldValue.serverTimestamp(), ...camposCupo },
   });
   const contratoId = contratos[0]?.contratoId || null;
 

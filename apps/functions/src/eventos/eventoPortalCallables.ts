@@ -3,6 +3,7 @@ import * as functions from 'firebase-functions/v1';
 import { FieldValue } from 'firebase-admin/firestore';
 import { guardFirstName } from '../common/pushGreeting';
 import { assignGuardToEventAdmin } from './eventoAssignAdmin';
+import { camposCupoTurno, cerrarPendientesPorCupo, liberarReservaCupo, reservarCupo } from './cupoEvento';
 
 async function resolveEmployeeIdForUid(
   db: admin.firestore.Firestore,
@@ -140,13 +141,35 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
     return { success: true, status: 'rechazada' };
   }
 
+  // Cupo por orden de aceptación (transacción): si el grupo ya se llenó, la solicitud queda «Cupo completo»
+  // y no se genera turno, contrato, anexo ni alta ARCA.
+  const reserva = await reservarCupo(db, {
+    eventoId: String(sol.eventoId || ''),
+    servicioId: String(sol.servicioId || ''),
+    solicitudId,
+    empleadoId: String(sol.empleadoId || empId),
+    bolsaCuil: String(sol.bolsaCuil || ''),
+    esEventual,
+  });
+  if (!reserva.ok) {
+    throw new functions.https.HttpsError('failed-precondition', reserva.mensaje, { codigo: reserva.motivo, grupo: reserva.grupo });
+  }
+  const camposCupo = camposCupoTurno(reserva);
+
   if (esEventual) {
     // Recién al aceptar: turno EV + contrato + AT + código del anexo. Rechazo o vencimiento no generan nada.
     const { aceptarConvocatoriaEventualEvento } = await import('../eventuales/planificacionEventuales');
-    const out = await aceptarConvocatoriaEventualEvento(solicitudId, sol, {
-      uid: context.auth!.uid,
-      email: typeof context.auth!.token.email === 'string' ? context.auth!.token.email : null,
-    });
+    let out: Awaited<ReturnType<typeof aceptarConvocatoriaEventualEvento>>;
+    try {
+      out = await aceptarConvocatoriaEventualEvento(solicitudId, sol, {
+        uid: context.auth!.uid,
+        email: typeof context.auth!.token.email === 'string' ? context.auth!.token.email : null,
+      }, camposCupo);
+    } catch (err) {
+      await liberarReservaCupo(db, solicitudId);
+      throw err;
+    }
+    await cerrarPendientesPorCupo(db, { eventoId: String(sol.eventoId || ''), servicioId: String(sol.servicioId || ''), actor: context.auth!.uid });
     const bolsa = (await db.collection('eventuales_bolsa').doc(String(sol.bolsaCuil || '')).get()).data() || {};
     const guardUid = typeof bolsa.uid === 'string' && bolsa.uid ? bolsa.uid : context.auth!.uid;
     const nombre = guardFirstName({ employeeName: String(sol.empleadoNombre || '') });
@@ -187,22 +210,30 @@ export const respondEventoConvocatoria = functions.https.onCall(async (data, con
   const horas = calcHorasServicio(tipoTurno, horaInicio, horaFin);
   const empNombre = employeeDisplayName(empData);
 
-  await assignGuardToEventAdmin(db, {
-    empresaId: String(sol.empresaId || empData.empresaId || ''),
-    empleadoId: empId,
-    empleadoNombre: empNombre,
-    eventoId: String(sol.eventoId),
-    eventoNombre: String(sol.eventoNombre || evento.nombre || ''),
-    clienteId: evento.clienteId ? String(evento.clienteId) : undefined,
-    clienteNombre: evento.clienteNombre ? String(evento.clienteNombre) : undefined,
-    servicioId: String(sol.servicioId),
-    servicioNombre: String(sol.servicioNombre || ''),
-    servicioFecha: String(sol.servicioFecha),
-    horaInicio,
-    horaFin,
-    horas,
-    solicitudId,
-  });
+  try {
+    await assignGuardToEventAdmin(db, {
+      empresaId: String(sol.empresaId || empData.empresaId || ''),
+      empleadoId: empId,
+      empleadoNombre: empNombre,
+      eventoId: String(sol.eventoId),
+      eventoNombre: String(sol.eventoNombre || evento.nombre || ''),
+      clienteId: evento.clienteId ? String(evento.clienteId) : undefined,
+      clienteNombre: evento.clienteNombre ? String(evento.clienteNombre) : undefined,
+      servicioId: String(sol.servicioId),
+      servicioNombre: String(sol.servicioNombre || ''),
+      servicioFecha: String(sol.servicioFecha),
+      horaInicio,
+      horaFin,
+      horas,
+      solicitudId,
+      cupoReservado: true,
+      extraTurno: camposCupo,
+    });
+  } catch (err) {
+    await liberarReservaCupo(db, solicitudId);
+    throw err;
+  }
+  await cerrarPendientesPorCupo(db, { eventoId: String(sol.eventoId || ''), servicioId: String(sol.servicioId || ''), actor: context.auth!.uid });
 
   const guardUid = typeof empData.uid === 'string' && empData.uid ? empData.uid : context.auth!.uid;
 
