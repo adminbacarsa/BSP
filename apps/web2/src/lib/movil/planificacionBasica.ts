@@ -38,6 +38,10 @@ export type TurnoMovil = {
   licencia: boolean;
   coveredBy: string;
   franco: boolean;
+  /** Turno de EVENTO (EV del servidor): solo lectura en el celular. */
+  evento?: { nombre: string; servicio: string } | null;
+  /** Franco que ya se usó para cubrir (evento o cobertura). */
+  francoUsado?: boolean;
 };
 
 export type FranjaMovil = TurnoMovil & { kind: 'ok' | 'vacante' | 'licencia' };
@@ -150,6 +154,8 @@ export function turnoMovilDesdeDoc(id: string, data: Record<string, unknown>): T
   const hours = Number(data.hours) > 0 ? Number(data.hours) : (hoursBetweenClockTimes(start, end) ?? banda?.hours ?? 0);
   const employeeId = String(data.employeeId || '');
   const vacante = data.isUnassigned === true || employeeId === 'VACANTE' || employeeId === '';
+  const esEvento = code === 'EV' || String(data.origin || '').toUpperCase() === 'EVENTO';
+  const franco = FRANCO.has(code) || data.isFranco === true;
   return {
     id,
     employeeId,
@@ -167,8 +173,18 @@ export function turnoMovilDesdeDoc(id: string, data: Record<string, unknown>): T
     vacante,
     licencia: LICENCIA.has(code),
     coveredBy: String(data.coveredBy || ''),
-    franco: FRANCO.has(code) || data.isFranco === true,
+    franco,
+    evento: esEvento
+      ? { nombre: String(data.eventoNombre || 'Evento'), servicio: String(data.servicioNombre || data.positionName || '') }
+      : null,
+    francoUsado: franco && data.coverageUsed === true,
   };
+}
+
+/** «{evento} · {servicio} · HH:MM–HH:MM» del turno EV. */
+export function eventoEtiqueta(t: Pick<TurnoMovil, 'evento' | 'start' | 'end'>): string {
+  if (!t.evento) return '';
+  return [t.evento.nombre, t.evento.servicio, t.start && t.end ? `${t.start}–${t.end}` : ''].filter(Boolean).join(' · ');
 }
 
 export function franjasDe(turnos: TurnoMovil[], dias: string[]): FranjaMovil[] {
@@ -221,6 +237,7 @@ export function conflictosDeAsignacion(input: {
     if (otro.employeeId !== input.employeeId || otro.franco || otro.licencia || otro.vacante) continue;
     const o = intervalo(otro.date, otro.start, otro.end);
     if (propio.desde < o.hasta && o.desde < propio.hasta) {
+      if (otro.evento) return { blocked: true, reason: `Se superpone con el evento ${eventoEtiqueta(otro)}.` };
       return { blocked: true, reason: `Se superpone con ${otro.code} ${otro.start}–${otro.end}${otro.objectiveName ? ` en ${otro.objectiveName}` : ''}.` };
     }
   }

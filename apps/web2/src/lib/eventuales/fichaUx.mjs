@@ -439,6 +439,32 @@ function venceProntoFicha(f, hoy) {
   return vencimientosDe(f, hoy).some((v) => v.estado === 'PRONTO');
 }
 
+/** Marco vigente que vence en menos de 30 días (en la empresa, o en alguna habilitada si no hay empresa). */
+export function marcoPorVencer(f, hoy, empresaId = '') {
+  const habilitadas = (Array.isArray(f?.empresasHabilitadas) ? f.empresasHabilitadas : []).map(String);
+  const ids = empresaId ? [empresaId] : habilitadas;
+  return ids.some((id) => marcoDeBolsa(f, id, hoy).avisar === true);
+}
+
+/**
+ * Filtros de la pantalla de escritorio (tarjetas-resumen y pasos de la guía). Todos sobre disponibles.
+ * `empresaId` vacío = toda la bolsa (mira todas las habilitadas).
+ */
+export const FILTROS_PASOS = ['LISTOS', 'FALTA', 'MARCO_VENCE', 'FALTA_CONTACTO', 'FALTA_MARCO', 'FALTA_EMPRESA', 'SIN_ACCESO'];
+
+function cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaActiva) {
+  if (f.disponibilidad === 'NO_DISPONIBLE') return false;
+  const faltan = faltantesConvocable(f, hoy, empresaFiltro).map((c) => c.id);
+  if (filtro === 'LISTOS') return faltan.length === 0;
+  if (filtro === 'FALTA') return faltan.length > 0;
+  if (filtro === 'MARCO_VENCE') return marcoPorVencer(f, hoy, empresaFiltro);
+  if (filtro === 'FALTA_CONTACTO') return faltan.some((id) => id === 'MAIL' || id === 'TEL' || id === 'DOM');
+  if (filtro === 'FALTA_MARCO') return faltan.includes('MARCO');
+  if (filtro === 'FALTA_EMPRESA') return faltan.includes('EMPRESA') || (!!empresaActiva && !(f.empresasHabilitadas || []).map(String).includes(empresaActiva));
+  if (filtro === 'SIN_ACCESO') return !String(f.uid || '').trim();
+  return true;
+}
+
 /**
  * Alcance + filtro + búsqueda de la lista.
  * `todaLaBolsa=false` → solo habilitados en `empresaId`. Incompletos mira lo que falta para esa empresa.
@@ -446,11 +472,13 @@ function venceProntoFicha(f, hoy) {
 export function filtrarFichas({ fichas, empresaId = '', todaLaBolsa = false, filtro = 'DISPONIBLE', buscar = '', hoy }) {
   const q = String(buscar || '').trim().toLowerCase();
   const alcance = (fichas || []).filter((f) => todaLaBolsa || !empresaId || (f.empresasHabilitadas || []).includes(empresaId));
+  const empresaFiltro = todaLaBolsa ? '' : empresaId;
   const porFiltro = alcance.filter((f) => {
     if (filtro === 'DISPONIBLE') return f.disponibilidad !== 'NO_DISPONIBLE';
     if (filtro === 'NO_DISPONIBLE') return f.disponibilidad === 'NO_DISPONIBLE';
     if (filtro === 'VENCE') return venceProntoFicha(f, hoy);
-    if (filtro === 'INCOMPLETOS') return esIncompleto(f, hoy, todaLaBolsa ? '' : empresaId);
+    if (filtro === 'INCOMPLETOS') return esIncompleto(f, hoy, empresaFiltro);
+    if (FILTROS_PASOS.includes(filtro)) return cumpleFiltroPaso(f, filtro, hoy, empresaFiltro, empresaId);
     return true;
   });
   if (!q) return porFiltro;

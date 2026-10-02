@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { TabBar } from '@/components/ui';
+import { ChecklistEventual, type PasoChecklist } from '@/components/eventuales/EventualesUx';
 import { RNOS_DEFAULT_FICHA } from '@/lib/eventuales/ficha.mjs';
 import { GENERO_LABEL } from '@/lib/eventuales/cupoGenero.mjs';
 import { etiquetasPruebas, SWITCHES_PRUEBAS } from '@/lib/eventuales/pruebasSwitch.mjs';
@@ -70,6 +71,8 @@ type Props = {
   horasMes?: { texto: string; aviso: boolean; usadas: number; tope: number; excepcion?: boolean; motivo?: string | null; topeEmpresa?: number; chip?: string | null; alcanzado?: boolean; cerca?: boolean } | null;
   /** Guarda o quita (horas null) la excepción de tope de esta persona. */
   onGuardarTope?: (horas: number | null, motivo: string) => Promise<void>;
+  /** Lista de verificación (`checklistFicha`). Sin ella la ficha se ve como siempre. */
+  checklist?: PasoChecklist[];
 };
 
 type Solapa = 'DATOS' | 'EMPRESAS' | 'DOCUMENTOS' | 'CONTRATOS' | 'ARCA' | 'HISTORIAL';
@@ -122,16 +125,17 @@ function SwitchPrueba({ campo, label, ayuda, on, disabled, busy, onChange }: { c
   );
 }
 
-function IconBtn({ title, onClick, children, tono = 'neutro', disabled }: { title: string; onClick: () => void; children: React.ReactNode; tono?: 'neutro' | 'primario' | 'peligro' | 'ok'; disabled?: boolean }) {
+/** Botón con ícono y rótulo (cabecera de la ficha): nada queda solo con dibujo. */
+function TextBtn({ title, label, onClick, children, tono = 'neutro', disabled }: { title?: string; label: string; onClick: () => void; children: React.ReactNode; tono?: 'neutro' | 'primario' | 'peligro' | 'ok'; disabled?: boolean }) {
   const clases = {
-    neutro: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50',
+    neutro: 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
     primario: 'bg-indigo-600 text-white hover:bg-indigo-700',
-    peligro: 'border border-rose-200 bg-white text-rose-600 hover:bg-rose-50',
+    peligro: 'border border-rose-200 bg-white text-rose-700 hover:bg-rose-50',
     ok: 'bg-emerald-600 text-white hover:bg-emerald-700',
   }[tono];
   return (
-    <button type="button" title={title} aria-label={title} onClick={onClick} disabled={disabled} className={`inline-flex h-9 w-9 items-center justify-center rounded-xl shadow-sm transition active:scale-95 disabled:opacity-50 ${clases}`}>
-      {children}
+    <button type="button" title={title || label} onClick={onClick} disabled={disabled} className={`inline-flex h-9 items-center gap-1.5 rounded-xl px-3 text-xs font-bold shadow-sm transition active:scale-95 disabled:opacity-50 ${clases}`}>
+      {children} {label}
     </button>
   );
 }
@@ -152,7 +156,7 @@ async function base64De(file: File) {
   return btoa(bin);
 }
 
-export default function FichaEventual({ ficha, detalle, marcos, documentos, empresas, empresaActivaId, puede, llamar, recargar, onEditar, onAcceso, onBaja, onReactivar, onVolver, horasMes, onGuardarTope }: Props) {
+export default function FichaEventual({ ficha, detalle, marcos, documentos, empresas, empresaActivaId, puede, llamar, recargar, onEditar, onAcceso, onBaja, onReactivar, onVolver, horasMes, onGuardarTope, checklist }: Props) {
   const [solapa, setSolapa] = useState<Solapa>('DATOS');
   const [bajaAbierta, setBajaAbierta] = useState(false);
   const [baja, setBaja] = useState({ motivo: '', fecha: hoy() });
@@ -198,6 +202,21 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
       toast.error(e instanceof Error ? e.message : 'No se pudo guardar.');
     } finally {
       setGuardandoEmpresa('');
+    }
+  };
+
+  /** Botón de cada paso de la lista de verificación: resuelve ahí mismo, con las mismas acciones de siempre. */
+  const resolverPaso = (accion: string) => {
+    if (accion === 'EDITAR') { onEditar(); return; }
+    if (accion === 'ACCESO') { onAcceso(); return; }
+    if (accion === 'EMPRESA') {
+      if (empresaActivaId && !habilitadas.includes(empresaActivaId)) { void toggleEmpresa(empresaActivaId, true); return; }
+      setSolapa('EMPRESAS');
+      return;
+    }
+    if (accion === 'MARCO') {
+      setSolapa('EMPRESAS');
+      if (empresaActivaId && habilitadas.includes(empresaActivaId)) setEmpresaMarco(empresaActivaId);
     }
   };
 
@@ -275,15 +294,16 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
               </span>
             )}
             {etiquetasPrueba.map((t) => (
-              <span key={t} data-pruebas="sin-marco" className="inline-flex items-center gap-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-[10px] font-black text-fuchsia-800"><FlaskConical size={10} /> {t}</span>
+              <span key={t} data-pruebas="sin-marco" title="Switch de pruebas: se lo puede convocar sin exigir ese requisito." className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-bold text-slate-600"><FlaskConical size={10} /> {t}</span>
             ))}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {puede('update') && <IconBtn title="Editar ficha" onClick={onEditar}><Pencil size={16} /></IconBtn>}
-          {puede('update') && !noDisponible && <IconBtn title={ficha.mail ? 'Crear acceso a la app (link de 48 h al mail)' : 'Falta el mail para crear el acceso'} onClick={onAcceso} tono="primario" disabled={!ficha.mail}><KeyRound size={16} /></IconBtn>}
-          {puede('update') && noDisponible && <IconBtn title="Reactivar en la bolsa" onClick={onReactivar} tono="ok"><RotateCcw size={16} /></IconBtn>}
-          {puede('delete') && !noDisponible && <IconBtn title="Dar de baja de la bolsa" onClick={() => setBajaAbierta((v) => !v)} tono="peligro"><UserX size={16} /></IconBtn>}
+          {puede('update') && <TextBtn label="Editar ficha" onClick={onEditar}><Pencil size={14} /></TextBtn>}
+          {puede('update') && !noDisponible && !ficha.uid && <TextBtn label="Crear acceso a la app" title={ficha.mail ? 'Le llega un link de 48 h al mail para crear su contraseña' : 'Falta el mail para crear el acceso'} onClick={onAcceso} tono="primario" disabled={!ficha.mail}><KeyRound size={14} /></TextBtn>}
+          {puede('update') && !noDisponible && !!ficha.uid && <TextBtn label="Reenviar acceso" title="Vuelve a mandar el link de 48 h al mail" onClick={onAcceso} disabled={!ficha.mail}><KeyRound size={14} /></TextBtn>}
+          {puede('update') && noDisponible && <TextBtn label="Reactivar en la bolsa" onClick={onReactivar} tono="ok"><RotateCcw size={14} /></TextBtn>}
+          {puede('delete') && !noDisponible && <TextBtn label="Dar de baja" title="Sale de la bolsa (queda como no disponible)" onClick={() => setBajaAbierta((v) => !v)} tono="peligro"><UserX size={14} /></TextBtn>}
         </div>
         {bajaAbierta && (
           <div className="flex w-full flex-wrap items-end gap-2 rounded-xl border border-rose-100 bg-rose-50/60 p-3">
@@ -324,6 +344,12 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
               Quitar excepción
             </button>
           )}
+        </div>
+      )}
+
+      {checklist && checklist.length > 0 && !noDisponible && (
+        <div className="px-4 pt-4">
+          <ChecklistEventual pasos={checklist} puedeEditar={puede('update')} ocupado={guardandoEmpresa ? 'EMPRESA' : ''} onAccion={resolverPaso} />
         </div>
       )}
 
@@ -418,7 +444,7 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
                       <span className="flex-1 font-bold text-slate-700">{nombreEmpresa(emp)}</span>
                       <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${TONO[vista.tono] || TONO.pendiente}`}>{vista.texto}</span>
                       {m?.avisar && <span className="text-[10px] font-bold text-amber-700">vence en menos de 30 días</span>}
-                      {puede('update') && <IconBtn title={`Generar PDF del marco de ${nombreEmpresa(emp)} para imprimir`} onClick={() => generarPdf(emp)}><Download size={14} /></IconBtn>}
+                      {puede('update') && <TextBtn label="PDF para imprimir" title={`Generar el PDF del contrato marco de ${nombreEmpresa(emp)} para firmar en papel`} onClick={() => generarPdf(emp)}><Download size={13} /></TextBtn>}
                     </li>
                   );
                 })}

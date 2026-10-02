@@ -19,6 +19,7 @@ const INBOX_NEEDS_FCM = new Set([
   'EVENTO_CUPO_COMPLETO',       // «Ya se cubrió el cupo, gracias»: la convocatoria se cerró sola
   'SWAP_REQUEST',
   'TURNO_FINALIZADO',
+  'TOPE_JORNADA',
   // Operaciones CC real
   'SOLICITUD_ESTADO_LLEGADA',   // ¿por qué no fichaste? ¿llegás tarde?
   'SOLICITUD_ESTADO_RELEVO',    // ¿llegás a relevar? hay un guardia esperando

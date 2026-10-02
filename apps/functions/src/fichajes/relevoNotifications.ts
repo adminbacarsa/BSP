@@ -26,7 +26,128 @@ async function employeePushIdentity(
   };
 }
 
-/** Push + bandeja: turno saliente cerrado con relevo ya en puesto (TURNO_FINALIZADO). */
+export type FinTurnoKind = 'RELIEVO' | 'FIN' | 'TOPE';
+
+export function finTurnoDocId(shiftId: string): string {
+  return `fin_turno_${String(shiftId).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 140)}`;
+}
+
+function conNombre(name: string, sentence: string): string {
+  const text = sentence.trim();
+  if (!name) return text;
+  const rest = text.charAt(0).toLocaleLowerCase('es-AR') + text.slice(1);
+  return `${name}, ${rest}`;
+}
+
+/** Texto del aviso de fin. El push sale por el trigger de la bandeja, canal alertas_turno. */
+export function finTurnoCopy(input: {
+  kind: FinTurnoKind;
+  name: string;
+  place: string;
+  incomingName?: string;
+  hm?: string;
+}): { title: string; body: string; type: string } {
+  const place = input.place.trim() || 'el puesto';
+  if (input.kind === 'TOPE') {
+    return {
+      title: 'Tope de jornada',
+      type: 'TOPE_JORNADA',
+      body: conNombre(input.name, 'Llegaste al máximo de horas de hoy. Podés retirarte, gracias por quedarte.'),
+    };
+  }
+  if (input.kind === 'RELIEVO') {
+    const who = (input.incomingName || 'tu relevo').trim() || 'tu relevo';
+    return {
+      title: 'Turno finalizado',
+      type: 'TURNO_FINALIZADO',
+      body: conNombre(input.name, `Terminaste tu turno en ${place}. Te relevó ${who}. Buen descanso.`),
+    };
+  }
+  const hm = input.hm || '--:--';
+  return {
+    title: 'Turno finalizado',
+    type: 'TURNO_FINALIZADO',
+    body: conNombre(input.name, `Terminó tu turno en ${place} a las ${hm}. Buen descanso.`),
+  };
+}
+
+/** CC apagado o Demo: no se avisa a guardias (misma regla que los avisos de turno P5b). */
+export async function avisosDeTurnoSilenciosos(
+  db: FirebaseFirestore.Firestore,
+  empresaId: string | null | undefined,
+): Promise<boolean> {
+  const id = String(empresaId || '').trim();
+  if (!id) return false;
+  const snap = await db.collection('empresas').doc(id).get();
+  if (!snap.exists) return false;
+  const data = snap.data() || {};
+  return data.centroControlEnabled === false || data.modoDemoEnabled === true;
+}
+
+/**
+ * Bandeja + flag `finTurnoAvisoAt`. Un doc por turno: el trigger manda el push una sola vez.
+ * Si el turno ya tiene el flag, no escribe de nuevo.
+ */
+export async function claimFinTurnoAviso(
+  db: FirebaseFirestore.Firestore,
+  params: {
+    kind: FinTurnoKind;
+    outEmpId: string;
+    outDocId: string;
+    employeeName?: string;
+    incomingName?: string;
+    place: string;
+    hm?: string;
+    empresaId: string | null;
+    at?: Timestamp;
+  },
+): Promise<boolean> {
+  const empId = String(params.outEmpId || '').trim();
+  if (!empId || empId === 'VACANTE' || !params.outDocId) return false;
+  const shiftRef = db.collection('turnos').doc(params.outDocId);
+  const notifRef = db.collection('user_notifications').doc(finTurnoDocId(params.outDocId));
+  try {
+    return await db.runTransaction(async (tx) => {
+      const snap = await tx.get(shiftRef);
+      if (!snap.exists || snap.data()?.finTurnoAvisoAt) return false;
+      const emp = await tx.get(db.collection('empleados').doc(empId));
+      const row = emp.data() || {};
+      const name = guardFirstName({
+        firstName: row.firstName,
+        employeeName: params.employeeName || row.nombre,
+      });
+      const msg = finTurnoCopy({
+        kind: params.kind,
+        name,
+        place: params.place,
+        incomingName: params.incomingName,
+        hm: params.hm,
+      });
+      tx.update(shiftRef, { finTurnoAvisoAt: params.at || Timestamp.now() });
+      tx.set(notifRef, {
+        uid: row.uid ? String(row.uid) : null,
+        employeeId: empId,
+        userId: empId,
+        title: msg.title,
+        body: msg.body,
+        type: msg.type,
+        target: 'employee',
+        turnoId: params.outDocId,
+        shiftId: params.outDocId,
+        empresaId: params.empresaId || null,
+        read: false,
+        readAt: null,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      return true;
+    });
+  } catch (e) {
+    console.warn('[relevoNotifications] fin de turno:', (e as Error)?.message);
+    return false;
+  }
+}
+
+/** Push + bandeja: turno saliente cerrado porque ya lo relevó alguien. */
 export async function notifyTurnoFinalizadoRelevo(
   db: FirebaseFirestore.Firestore,
   params: {
@@ -37,32 +158,15 @@ export async function notifyTurnoFinalizadoRelevo(
     empresaId: string | null;
   },
 ): Promise<void> {
-  const { outEmpId, outDocId, objectiveName, empresaId } = params;
-  const who = await employeePushIdentity(db, outEmpId);
-  const title = 'Turno finalizado';
-  const body = who.name
-    ? `¡Gracias, ${who.name}! Terminaste tu turno en ${objectiveName || 'el puesto'}. Buen descanso.`
-    : `¡Gracias! Terminaste tu turno en ${objectiveName || 'el puesto'}. Buen descanso.`;
-
-  try {
-    const outEmpUid = who.uid;
-    await db.collection('user_notifications').add({
-      uid: outEmpUid || null,
-      employeeId: outEmpId,
-      userId: outEmpId,
-      title,
-      body,
-      type: 'TURNO_FINALIZADO',
-      target: 'employee',
-      turnoId: outDocId,
-      empresaId: empresaId || null,
-      read: false,
-      readAt: null,
-      createdAt: FieldValue.serverTimestamp(),
-    });
-  } catch (e) {
-    console.warn('[relevoNotifications] TURNO_FINALIZADO doc:', (e as Error)?.message);
-  }
+  if (await avisosDeTurnoSilenciosos(db, params.empresaId)) return;
+  await claimFinTurnoAviso(db, {
+    kind: 'RELIEVO',
+    outEmpId: params.outEmpId,
+    outDocId: params.outDocId,
+    incomingName: params.incomingName,
+    place: params.objectiveName || 'el puesto',
+    empresaId: params.empresaId,
+  });
 }
 
 /** Aviso al saliente: relevo llega tarde; queda retenido hasta que llegue (RETENCION_AVISO). */

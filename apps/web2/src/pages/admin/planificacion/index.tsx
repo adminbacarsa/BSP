@@ -162,6 +162,7 @@ import {
 } from '@/lib/planificacion/planToast';
 import { checkRestBetweenShifts, getAgreementRestConfig } from '@/lib/planificacion/restBetweenShifts';
 import { findLctRestGaps, type LctShiftInput } from '@/lib/planificacion/lctRestGap';
+import { eventoAssignBlock, eventoCellOverlay, eventoTooltip, isEventoTurno, pickShiftForRest } from '@/lib/planificacion/planningEventoCell';
 import { applyServiceExcludedDays } from '@/lib/planificacion/absenceFrancoUtils';
 import { generateScheduleV4, effectiveShiftsForPositionDay, positionIsActiveOn } from '@/lib/planificacion/autoScheduleEngineV4';
 import { runPlanningGeneration, resolvePlanningGenerationRoute } from '@/lib/planificacion/planningGenerationRouter';
@@ -616,6 +617,9 @@ function isOpsCoverageShiftForObjective(data: any, objectiveId: string | undefin
 
 const OTHER_OBJECTIVE_CELL_STYLE =
     'bg-slate-700 text-slate-200 border-slate-600 ring-2 ring-slate-500 ring-offset-2 dark:ring-offset-slate-900 font-bold opacity-90';
+
+/** Códigos de franco que la celda conserva cuando el guardia fue a un evento desde ese franco. */
+const FRANCO_CELL_CODES = new Set(['F', 'FF', 'FP']);
 
 /** Estilo visual: turno asignado por Operaciones (cobertura), distinto del planificado. */
 const OPS_COVERAGE_CELL_RING =
@@ -2688,7 +2692,8 @@ function PlanificacionDesktop() {
             const k = `${empId}_${ds}`;
             const p = pendingChanges[k];
             if (p) return p.isDeleted ? null : p;
-            return shiftsMap[k] || null;
+            // Un EV del guardia ese día cuenta como turno aunque el doc principal sea un franco.
+            return pickShiftForRest(shiftsMap[k] || null, cellTurnosMap[k]);
         };
         const cfg = { minRestBetweenShiftsHours: 12, longRestAfterWorkedHours: 48, minLongRestHours: 35 };
         for (const emp of displayedEmployees as any[]) {
@@ -2707,7 +2712,7 @@ function PlanificacionDesktop() {
             }
         }
         return violated;
-    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap]);
+    }, [displayedEmployees, daysInMonth, pendingChanges, shiftsMap, cellTurnosMap]);
 
     // Art. 197 LCT: menos de 12 h entre el tope de cierre (inicio + 12:59) y el próximo turno, también de otro objetivo. Solo aviso.
     const lctRestByCell = useMemo(() => {
@@ -2734,7 +2739,13 @@ function PlanificacionDesktop() {
         Object.entries(cellTurnosMap).forEach(([key, turnos]) => {
             const pending = pendingChanges[key];
             if (pending?.isDeleted) { seen.add(key); return; }
-            if (pending && !pending.isDeleted) { push(key, pending); seen.add(key); return; }
+            if (pending && !pending.isDeleted) {
+                push(key, pending);
+                // El EV del servidor sigue existiendo aunque haya un cambio pendiente en la celda.
+                (turnos || []).filter(isEventoTurno).forEach((t) => push(key, t));
+                seen.add(key);
+                return;
+            }
             (turnos || []).forEach((t) => push(key, t));
             seen.add(key);
         });
@@ -4298,6 +4309,14 @@ function PlanificacionDesktop() {
         if (finalShift && (finalShift.code === 'F' || finalShift.isFranco)) {
             return `ALERTA CRÍTICA: El empleado ya tiene un FRANCO asignado este día.`;
         }
+        if (proposedShift) {
+            const evBlock = eventoAssignBlock({
+                cellTurnos: cellTurnosMap[key],
+                dateStr: dateKey,
+                proposed: { code: proposedShift.code, start: proposedShift.startTime, end: proposedShift.endTime },
+            });
+            if (evBlock) return evBlock;
+        }
         let monthlyTotal = 0;
         const daysInCurrentMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1, 0).getDate();
         for (let d = 1; d <= daysInCurrentMonth; d++) {
@@ -4335,7 +4354,7 @@ function PlanificacionDesktop() {
                 if (eid === empId && ds === dateKey) {
                     return { ...proposedForRest };
                 }
-                return fromPending || shiftsMap[k2] || null;
+                return fromPending || pickShiftForRest(shiftsMap[k2] || null, cellTurnosMap[k2]);
             };
             const restMsg = checkRestBetweenShifts({
                 empId,
@@ -7752,6 +7771,20 @@ function PlanificacionDesktop() {
             warnings.push(`🚫 Puesto "${posForGenero}" excluido por SLA (${planningPositionExclusionLabel(dateStr)}) — sin servicio ese día`);
             return { blocked: true, warnings };
         }
+        // Afectado a un evento ese día (turno EV del servidor): no se planifica encima.
+        if (shiftCode) {
+            const rango = SHIFT_RANGES[String(shiftCode).toUpperCase()] || '';
+            const [rIni, rFin] = rango.includes(' - ') ? rango.split(' - ') : ['', ''];
+            const evBlock = eventoAssignBlock({
+                cellTurnos: cellTurnosMap[`${emp.id}_${dateStr}`],
+                dateStr,
+                proposed: { code: shiftCode, start: rIni, end: rFin },
+            });
+            if (evBlock) {
+                warnings.push(`🚫 ${emp.name}: ${evBlock.replace('ALERTA CRÍTICA: ', '')}`);
+                return { blocked: true, warnings };
+            }
+        }
         const prefGenero = getPreferenciaGeneroFromPositionStructure(struct, posForGenero);
         const generoCheck = checkGeneroPuesto(emp.genero, prefGenero);
         if (generoCheck.blocked && generoCheck.message) {
@@ -8126,6 +8159,19 @@ function PlanificacionDesktop() {
         if (!correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F' && !isFT) { if(!confirm(`⚠️ ATENCIÓN: ESTÁ ELIMINANDO UN FRANCO\n\n¿Seguro que desea eliminar el Franco?`)) return; }
         if (correctionMode && existing && (existing.code === 'F' || existing.isFranco) && shiftConfig.code !== 'F') { if(!confirm(`⚠️ MODO CORRECCIÓN: Vas a reemplazar un Franco publicado.\n\n¿Confirmar corrección directa?`)) return; }
         const [y, m, d] = selectedCell.dateStr.split('-').map(Number); const targetDate = new Date(y, m-1, d); const hours = shiftConfig.hours != null ? shiftConfig.hours : 8;
+        // Afectado a un evento ese día: no se asigna dos veces (también en FT y corrección).
+        const evBlock = eventoAssignBlock({
+            cellTurnos: cellTurnosMap[key],
+            dateStr: selectedCell.dateStr,
+            proposed: {
+                code: isFT ? 'FT' : String(shiftConfig.code || ''),
+                start: shiftConfig.startTime,
+                end: shiftConfig.endTime,
+                eventoId: (shiftConfig as any).eventoId ?? null,
+                servicioId: (shiftConfig as any).servicioId ?? null,
+            },
+        });
+        if (evBlock) { toast.error(evBlock, { duration: 9000 }); return; }
         if (shiftConfig.code !== 'F' && !isFT && !correctionMode) {
             const warning = checkLaborRules(selectedCell.empId, targetDate, hours, {
                 code: shiftConfig.code,
@@ -10643,6 +10689,16 @@ function PlanificacionDesktop() {
                                         if (_cellIsRetAtOtherObj && content != null) {
                                             style = `${SHIFT_STYLES['RET']} ring-1 ring-amber-400/80`;
                                         }
+                                        // Evento (EV del servidor) en la fila del guardia: celda EV, franco usado o marca sobre otro turno.
+                                        const _evOverlay = (absence || isSnapshotView) ? null : eventoCellOverlay(cellTurnosMap[key], (p && !p.isDeleted) ? p : s);
+                                        if (_evOverlay?.mode === 'EV') {
+                                            content = 'EV';
+                                            style = `${SHIFT_STYLES['EV']} ring-1 ring-yellow-600/70`;
+                                        } else if (_evOverlay?.mode === 'FRANCO_USADO') {
+                                            const _fCode = String(_evOverlay.franco?.code || _evOverlay.franco?.type || 'F').toUpperCase();
+                                            content = FRANCO_CELL_CODES.has(String(content || '').toUpperCase()) ? content : _fCode;
+                                            style = `${SHIFT_STYLES[String(content)] || SHIFT_STYLES['F']} ring-1 ring-violet-500/90`;
+                                        }
                                         const isCoverageSplitCell = !!(
                                             !isFT
                                             && !isFF
@@ -10710,16 +10766,25 @@ function PlanificacionDesktop() {
                                                 + `${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`
                                                 : `\n🔗 Usado: cubrió a ${String(coverageSourceShift?.coverageUsedCoversEmployeeName || coverageSourceShift?.coversEmployeeName || 'titular').trim()}${coverageSourceShift?.coverageUsedObjectiveName ? ` en ${coverageSourceShift.coverageUsedObjectiveName}` : ''}`)
                                             : '';
-                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint;
+                                        const _evHint = _evOverlay
+                                            ? (_evOverlay.mode === 'FRANCO_USADO'
+                                                ? `\n🔗 Franco usado en evento: ${_evOverlay.tooltip}`
+                                                : _evOverlay.mode === 'BADGE'
+                                                    ? `\n⚠ También afectado al evento: ${_evOverlay.tooltip}`
+                                                    : '')
+                                            : '';
+                                        const _covHint = (covNote ? `\n📋 ${covNote}` : '') + _covSegHint + _usedHint + _evHint;
                                         const _billBr = activeShift && shiftCountsForEmployeeCronoHours(activeShift)
                                             ? planningShiftBillableBreakdown(activeShift, slaCodeHoursHint)
                                             : null;
                                         const _billHint = _billBr && _billBr.gross > 0
                                             ? `\n📊 ${_billBr.base}h base${_billBr.extra > 0 ? ` + ${_billBr.extra}h cobertura = ${_billBr.gross}h` : ` (${_billBr.gross}h)`}`
                                             : '';
-                                        return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell) && !absence) { const shiftLabel = (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
-                                                    ? [activeShift?.eventoNombre, activeShift?.servicioNombre].filter(Boolean).join(' · ')
-                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} title={isOpsCoverageCell ? undefined : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
+                                        return <td key={key} data-testid="grilla-celda" onMouseDown={() => !isSnapshotView && handleMouseDown(idx, dayIndex)} onMouseEnter={(e) => { if (!isSnapshotView && isDragging && allowPlanningMultiSelect) setSelection(pr => ({...pr, end:{r:idx, c:dayIndex}})); if (isLeaveCell) { const absType = absence?.type || activeShift?.name || LEGEND_DESCRIPTIONS[leaveCellCode] || leaveCellCode; const reason = absence?.reason || activeShift?.comments || p?.comments || ''; const covered = resolveTitularCoverageName(emp.id, emp.name || '', cellDateStr, shiftsMap, pendingChanges, (id) => employees.find((x: any) => x.id === id)?.name, coveredByCell, cellTurnosMap); setShiftTooltip({ label: buildLeaveCellTooltipLabel({ absenceType: absType, reason, coveredBy: covered }), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else if ((s || p || rfzOnCell || _evOverlay) && !absence) { const shiftLabel = _evOverlay?.mode === 'EV'
+                                                    ? _evOverlay.tooltip
+                                                    : (cellCode === 'EV' && (activeShift?.eventoNombre || activeShift?.servicioNombre))
+                                                    ? eventoTooltip(activeShift)
+                                                    : cellCode ? (LEGEND_DESCRIPTIONS[cellCode] || cellCode) : (rfzOnCell ? 'Refuerzo cliente (RFZ)' : null); const _isFrancoTip = cellCode ? ['F','FF','FP','FT'].includes(String(cellCode).toUpperCase()) : false; const _restHrs = _isFrancoTip ? calcFrancoRestHours(emp.id, dayIndex) : null; const _isRet = String(cellCode || '').toUpperCase() === 'RET'; const _exclHint = cellPosExcluded ? `\n⚠ Puesto excluido por SLA este día` : ''; const _otherObjHint = isOtherObjectiveShift && activeShift?.objectiveId ? `\n📍 Otro objetivo: ${getObjectiveName(activeShift.objectiveId)}` : ''; const _rfzHint = rfzOnCell ? `\n🔴 RFZ ${formatTime(rfzOnCell.startTime)}–${formatTime(rfzOnCell.endTime)}${rfzOnCell.positionName ? ` · ${rfzOnCell.positionName}` : ''}` : ''; const _linkedTura = activeShift?.id ? turaMap[activeShift.id] : null; const _turaHint = _linkedTura ? `\n🟣 TURA ${isTuraContiguousToParent(activeShift, _linkedTura) ? 'seguido' : 'cortado'} ${formatShiftClockRange(_linkedTura)}${_linkedTura.positionName ? ` → ${_linkedTura.positionName}` : ''}` : ''; const _tipLabel = isOpsCoverageCell ? buildOpsCoverageCellTooltip(opsTooltipShift, opsCoverageTooltipCtxFor(opsTooltipShift, emp.name || '')) : (shiftLabel ? `${shiftLabel}${_exclHint}${_otherObjHint}${_rfzHint}${_turaHint}${_covHint}${_billHint}${_lctRest ? `\n⚠ ${_lctRest}` : ''}` : (_exclHint || _otherObjHint || _rfzHint || _turaHint || _covHint || _billHint || _lctRest || null)); setShiftTooltip({ label: _tipLabel, readOnlyOps: isOpsCoverageCell, pos: _isRet ? null : (cellPosName || rfzOnCell?.positionName || null), range: _isRet ? null : (cellRange || (rfzOnCell ? `${formatTime(rfzOnCell.startTime)} - ${formatTime(rfzOnCell.endTime)}` : null)), x: e.clientX, y: e.clientY, restHours: _restHrs }); } else if (isExclusionCol) { setShiftTooltip({ label: excludedPositionsTooltip(excludedOnDay, cellDateStr), pos: null, range: null, x: e.clientX, y: e.clientY, restHours: null }); } else setShiftTooltip(null); }} onMouseLeave={() => setShiftTooltip(null)} className={`border-b border-r p-0.5 ${!isSnapshotView && !isLockedDate && !isServiceLocked && !isOpsCoverageCell ? 'cursor-pointer' : 'cursor-default'} text-center relative ${selected ? 'bg-indigo-200 dark:bg-indigo-800/50' : isExclusionCol ? 'bg-rose-50/50 dark:bg-rose-950/15 sla-excluded-day-col' : isCellWeekend ? 'bg-rose-50/60 dark:bg-rose-950/20' : ''}`} data-evento={_evOverlay ? _evOverlay.mode : undefined} title={isOpsCoverageCell ? undefined : _evOverlay ? (_evOverlay.mode === 'EV' ? _evOverlay.tooltip : `${_evOverlay.mode === 'FRANCO_USADO' ? 'Franco usado en evento' : 'También afectado al evento'}: ${_evOverlay.tooltip}`) : isExclusionCol && !s && !p ? excludedPositionsTooltip(excludedOnDay, cellDateStr) : isOtherObjectiveShift && activeShift?.objectiveId ? `Turno en ${getObjectiveName(activeShift.objectiveId)}` : undefined}><div className={`w-full h-6 rounded flex items-center justify-center text-[9px] font-black relative ${style} ${_lctRest ? 'ring-2 ring-amber-400' : cellPosExcluded ? 'ring-1 ring-rose-400/70' : ''}`}>{_evOverlay && _evOverlay.mode !== 'EV' && (<div className="absolute -bottom-0.5 right-0 text-[6.5px] font-black bg-yellow-400 text-yellow-900 px-0.5 rounded z-10" title={_evOverlay.tooltip}>EV</div>)}{_lctRest ? (<span className="absolute top-0 left-0 w-1.5 h-1.5 rounded-full bg-amber-500 border border-white" title={_lctRest}/>) : null}{content}{isExclusionCol && !content && (<span className="absolute bottom-0 left-0 w-1.5 h-1.5 rounded-full bg-rose-400/80" title="Día con puesto(s) excluido(s)"/>)}{isSwap && (<div className={`absolute bottom-0.5 right-0.5 text-[8px] font-black px-1 rounded ${swapPending ? 'bg-amber-600 text-white' : 'bg-cyan-600 text-white'}`}>{swapPending ? 'S!' : 'S'}</div>)}{(isExtended || isEarly || isCoverageSplitCell) && <div className="absolute -top-1 -right-1 text-[8px] bg-red-900 text-white px-1 rounded-full border border-white/40">+</div>}{covRole === 'LIBERATED' && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-emerald-600 text-white px-0.5 rounded">RET</div>}{isCoverageSourceUsed && <div className="absolute -top-1 -left-1 text-[7px] font-black bg-violet-600 text-white px-0.5 rounded z-10" title="Turno usado en cobertura operativa">U</div>}{(covRole === 'TARGET' || isLeaveCell) && coveredByCell && <div className="absolute -bottom-0.5 left-0 text-[7px] font-black bg-orange-500 text-white px-0.5 rounded" title={coveredByCell ? `Cubierto por ${coveredByCell}` : 'Cubierto'}>✓</div>}{statusIndicator && <div className={`absolute top-0 right-0 w-2 h-2 rounded-full border border-white ${statusIndicator}`}></div>}{hasConflict && ( <div className="absolute inset-0 bg-red-500/30 flex items-center justify-center animate-pulse border-2 border-red-500 z-20"><Siren size={14} className="text-white drop-shadow-md"/></div> )}{isGuest && (s || p) && !absence && !isOtherObjectiveShift && (<div className="absolute bottom-0 left-0"><Briefcase size={8} className="text-amber-600 drop-shadow-sm"/></div>)}{isOtherObjectiveShift && content && (<div className="absolute bottom-0 left-0"><MapPin size={7} className="text-slate-300 drop-shadow-sm"/></div>)}{selectedGrupo && grupoUnifiedMode && content && !isOtherObjectiveShift && activeShift?.objectiveId && selectedGrupo.objectiveIds.includes(activeShift.objectiveId) && (() => {
                                                     const _oi = selectedGrupo.objectiveIds.indexOf(activeShift.objectiveId!);
                                                     const _clr = GRUPO_COLOR_HEX[_oi % GRUPO_COLOR_HEX.length];
                                                     const _nm = (selectedGrupo.objectiveNames[_oi] || '').trim().split(/\s+/).filter((w: string) => w.length > 1).pop()?.slice(0, 6).toUpperCase() || (selectedGrupo.objectiveNames[_oi] || '').slice(0, 5).toUpperCase();
