@@ -23,7 +23,12 @@ import { rosterIfSameSecond } from '../fichajes/relevoOutgoingMatch';
 import { escalarVacanteSinCobertura } from '../coverage/escalarVacanteSinCobertura';
 import { retentionPendingReason } from './retentionPendingReason';
 import { guardFirstName } from '../common/pushGreeting';
-import { notifyTurnoFinalizadoRelevo } from '../fichajes/relevoNotifications';
+import { isEventoShift } from '../eventos/eventoCoverage';
+import {
+  finTurnoCopy,
+  finTurnoDocId,
+  type FinTurnoKind,
+} from '../fichajes/relevoNotifications';
 import {
   buildAutoClosePatch,
   clearRetentionOnReliefClose,
@@ -47,6 +52,8 @@ export type AutoCompleteContext = {
     b: FirebaseFirestore.DocumentData,
   ) => boolean;
   getEmployeeTokens: (db: Firestore, employeeId: string) => Promise<string[]>;
+  /** Demo: no avisar a guardias reales. Igual que los avisos de llegada (P5b). */
+  isDemo?: (empresaId: unknown) => boolean;
 };
 
 export type AutoCompleteActionKind = 'CLOSE' | 'RETAIN' | 'RETAIN_QUIET' | 'LINK_RELIEF' | 'WAIT';
@@ -198,6 +205,11 @@ export type AutoCompletarTurnosPassOpts = {
   dryRun?: boolean;
   /** Limita la pasada a las empresas que devuelvan true (dryRun por empresa). */
   empresaFilter?: (empresaId: string) => boolean;
+  /**
+   * Pasada puntual (scheduler de 1 min): solo turnos cuyo fin cayó en esta ventana
+   * y no tienen continuidad (sin franja, fin de servicio o evento). El resto lo cierra el cron de 5 min.
+   */
+  recentEndMs?: number;
 };
 
 type CapEscalation = {
@@ -218,6 +230,9 @@ export async function runAutoCompletarTurnosPass(
   const cutoff = Timestamp.fromMillis(nowMs);
   const onlyOutId = String(passOpts?.onlyOutgoingShiftId || '').trim();
   const dryRun = passOpts?.dryRun === true;
+  const recentEndMs = !onlyOutId && passOpts?.recentEndMs && passOpts.recentEndMs > 0
+    ? passOpts.recentEndMs
+    : 0;
 
   let snap: FirebaseFirestore.QuerySnapshot;
   if (onlyOutId) {
@@ -226,17 +241,21 @@ export async function runAutoCompletarTurnosPass(
       ? ({ empty: false, docs: [direct] } as FirebaseFirestore.QuerySnapshot)
       : ({ empty: true, docs: [] } as FirebaseFirestore.QuerySnapshot);
   } else {
-    snap = await db
+    let q = db
       .collection('turnos')
       .where('status', '==', 'PRESENT')
-      .where('endTime', '<=', cutoff)
-      .get();
+      .where('endTime', '<=', cutoff);
+    if (recentEndMs) {
+      q = q.where('endTime', '>=', Timestamp.fromMillis(nowMs - recentEndMs));
+    }
+    snap = await q.get();
   }
 
   const actions: AutoCompleteAction[] = [];
   if (snap.empty) return { completed: 0, alertedNoRelief: 0, actions };
 
   const completeBatch = db.batch();
+  let batchOps = 0;
   let completed = 0;
   let alertedNoRelief = 0;
 
@@ -246,12 +265,25 @@ export async function runAutoCompletarTurnosPass(
   const reliefIncomingClaimed = new Set<string>();
   const reliefPendingClaimed = new Set<string>();
   const capEscalations: CapEscalation[] = [];
-  const relevoFinishNotifs: {
-    outEmpId: string;
-    outDocId: string;
-    incomingName: string;
-    objectiveName: string;
-    empresaId: string | null;
+  const FIN_SIN_RELEVO = new Set([
+    'SIN_CONTINUIDAD_SLA',
+    'FIN_SERVICIO_SIN_CRONOGRAMA',
+    'FIN_TURNO_EXTRA',
+    'FIN_HUECO_SIN_CONTINUIDAD',
+    'SIN_LUGAR_FRANJA',
+  ]);
+  const pendingCloses: {
+    ref: FirebaseFirestore.DocumentReference;
+    patch: Record<string, unknown>;
+    aviso: {
+      kind: FinTurnoKind;
+      employeeId: string;
+      employeeName: string;
+      incomingName?: string;
+      place: string;
+      hm?: string;
+      empresaId: string | null;
+    } | null;
   }[] = [];
 
   const describe = (
@@ -278,7 +310,10 @@ export async function runAutoCompletarTurnosPass(
   });
 
   const update = (ref: FirebaseFirestore.DocumentReference, patch: Record<string, unknown>) => {
-    if (!dryRun) completeBatch.update(ref, patch);
+    if (!dryRun) {
+      completeBatch.update(ref, patch);
+      batchOps += 1;
+    }
   };
 
   const close = (
@@ -288,12 +323,33 @@ export async function runAutoCompletarTurnosPass(
     reason: string,
     extra?: Record<string, unknown>,
     gapShiftId?: string | null,
+    incomingName?: string,
   ) => {
     const patch = buildAutoClosePatch(shift as Record<string, unknown>, { realEndMs, reason, now, extra });
     if (reason === 'RELEVO_PRESENTE' || reason === 'RELEVO_PROGRAMADO') {
       clearRetentionOnReliefClose(patch);
     }
-    update(docSnap.ref, patch);
+    const silent = !ctx.isEnabled(shift.empresaId) || ctx.isDemo?.(shift.empresaId) === true;
+    const empId = String(shift.employeeId || '').trim();
+    const endMs = (patch.realEndTime as Timestamp).toMillis();
+    let kind: FinTurnoKind | null = null;
+    if (reason === 'TOPE_JORNADA') kind = 'TOPE';
+    else if (reason === 'RELEVO_PRESENTE' || reason === 'RELEVO_PROGRAMADO') kind = 'RELIEVO';
+    else if (FIN_SIN_RELEVO.has(reason)) kind = 'FIN';
+    const aviso = !dryRun && !silent && !shift.finTurnoAvisoAt && empId && empId !== 'VACANTE' && kind
+      ? {
+          kind,
+          employeeId: empId,
+          employeeName: String(shift.employeeName || ''),
+          incomingName: kind === 'RELIEVO' ? (incomingName || 'tu relevo') : undefined,
+          place: isEventoShift(shift) 
+            ? (String(shift.eventoNombre || shift.objectiveName || '').trim() || 'el evento')
+            : (String(shift.objectiveName || '').trim() || 'el puesto'),
+          hm: kind === 'FIN' ? fmtArHm(endMs) : undefined,
+          empresaId: ctx.shiftEmpresaId(shift) || null,
+        }
+      : null;
+    if (!dryRun) pendingCloses.push({ ref: docSnap.ref, patch, aviso });
     actions.push(describe(docSnap.id, shift, 'CLOSE', reason, {
       realEndMs: (patch.realEndTime as Timestamp).toMillis(),
       requiereRevision: patch.requiereRevision === true,
@@ -444,6 +500,19 @@ export async function runAutoCompletarTurnosPass(
 
     const endTimeMs = shiftEndMs(shift);
     if (!endTimeMs) continue;
+
+    if (recentEndMs) {
+      const event = isEventoShift(shift as Record<string, unknown>);
+      const handoffEarly = await handoffAtEnd(
+        db,
+        shift as Record<string, unknown>,
+        new Date(endTimeMs),
+        await slasFor(String(shift.objectiveId || '')),
+        opCache,
+      );
+      const inScope = event || handoffEarly === 'FIN_SERVICIO' || !(await hasContinuity(shift));
+      if (!inScope) continue;
+    }
     const capAtMs = shiftHardCapAtMs(shift as Record<string, unknown>);
     const capReached = capAtMs > 0 && nowMs >= capAtMs;
 
@@ -533,17 +602,7 @@ export async function runAutoCompletarTurnosPass(
     }
     if (programmedIncoming && relieveSchedMs > 0 && nowMs >= relieveSchedMs) {
       const incomingName = String(shift.relievedByName || programmedIncoming.data().employeeName || 'relevo').trim();
-      close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO');
-      const outEmpId = String(shift.employeeId || '').trim();
-      if (outEmpId && !ccOff) {
-        relevoFinishNotifs.push({
-          outEmpId,
-          outDocId: docSnap.id,
-          incomingName,
-          objectiveName: String(shift.objectiveName || ''),
-          empresaId: ctx.shiftEmpresaId(shift) || null,
-        });
-      }
+      close(docSnap, shift, relieveSchedMs, 'RELEVO_PROGRAMADO', undefined, undefined, incomingName);
       continue;
     }
 
@@ -616,17 +675,8 @@ export async function runAutoCompletarTurnosPass(
       const relCheckMs = Math.max(handoffMs, Math.min(punchMs, nowMs));
       const closeMs = relCheckMs;
       const overCap = capAtMs > 0 && closeMs > capAtMs;
-      close(docSnap, shift, closeMs, overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE');
-      const outEmpId = String(shift.employeeId || '').trim();
-      if (outEmpId && !ccOff && relCheckMs <= endTimeMs) {
-        relevoFinishNotifs.push({
-          outEmpId,
-          outDocId: docSnap.id,
-          incomingName: String(relData.employeeName || 'tu relevo').trim(),
-          objectiveName: String(shift.objectiveName || ''),
-          empresaId: ctx.shiftEmpresaId(shift) || null,
-        });
-      }
+      const incomingName = String(relData.employeeName || 'tu relevo').trim();
+      close(docSnap, shift, closeMs, overCap ? 'TOPE_JORNADA' : 'RELEVO_PRESENTE', undefined, undefined, incomingName);
       continue;
     }
 
@@ -765,12 +815,47 @@ export async function runAutoCompletarTurnosPass(
 
   if (dryRun) return { completed, alertedNoRelief, actions };
 
-  await completeBatch.commit();
+  if (batchOps) await completeBatch.commit();
 
-  for (const n of relevoFinishNotifs) {
-    await notifyTurnoFinalizadoRelevo(db, n).catch((e) =>
-      console.warn('[autoCompletarTurnos] TURNO_FINALIZADO:', (e as Error)?.message),
-    );
+  for (const c of pendingCloses) {
+    await db.runTransaction(async (tx) => {
+      const snap = await tx.get(c.ref);
+      if (!snap.exists || snap.data()?.isCompleted === true) return;
+      const already = !!snap.data()?.finTurnoAvisoAt;
+      const aviso = !already ? c.aviso : null;
+      let uid: string | null = null;
+      let name = '';
+      if (aviso) {
+        const emp = await tx.get(db.collection('empleados').doc(aviso.employeeId));
+        const row = emp.data() || {};
+        uid = row.uid ? String(row.uid) : null;
+        name = guardFirstName({ firstName: row.firstName, employeeName: aviso.employeeName || row.nombre });
+      }
+      tx.update(c.ref, aviso ? { ...c.patch, finTurnoAvisoAt: now } : c.patch);
+      if (!aviso) return;
+      const msg = finTurnoCopy({
+        kind: aviso.kind,
+        name,
+        place: aviso.place,
+        incomingName: aviso.incomingName,
+        hm: aviso.hm,
+      });
+      tx.set(db.collection('user_notifications').doc(finTurnoDocId(c.ref.id)), {
+        uid,
+        employeeId: aviso.employeeId,
+        userId: aviso.employeeId,
+        title: msg.title,
+        body: msg.body,
+        type: msg.type,
+        target: 'employee',
+        turnoId: c.ref.id,
+        shiftId: c.ref.id,
+        empresaId: aviso.empresaId,
+        read: false,
+        readAt: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+    }).catch((e) => console.warn('[autoCompletarTurnos] cierre:', (e as Error)?.message));
   }
 
   for (const esc of capEscalations) {
@@ -834,24 +919,6 @@ async function escalateCapClose(
     });
   }
 
-  const outEmpId = String(shift.employeeId || '').trim();
-  if (outEmpId && outEmpId !== 'VACANTE') {
-    const tokens = await ctx.getEmployeeTokens(db, outEmpId).catch(() => [] as string[]);
-    if (tokens.length) {
-      const capName = guardFirstName({ employeeName: shift.employeeName });
-      await admin
-        .messaging()
-        .sendEachForMulticast({
-          tokens,
-          notification: {
-            title: 'Tope de jornada',
-            body: `${capName ? `${capName}, ` : ''}llegaste al máximo de horas de hoy. Podés retirarte, gracias por quedarte.`,
-          },
-          webpush: { fcmOptions: { link: '/app/' } },
-        })
-        .catch(() => undefined);
-    }
-  }
 }
 
 export { loadPositionHasContinuity };

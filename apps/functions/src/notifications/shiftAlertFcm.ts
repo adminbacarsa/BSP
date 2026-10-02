@@ -27,6 +27,8 @@ export const SHIFT_ALERT_FCM_TYPES = new Set([
   'SOLICITUD_ESTADO_RELEVO',
   'CONVOCADO_RECORDATORIO',
   'CODIGO_ANEXO',
+  'TURNO_FINALIZADO',
+  'TOPE_JORNADA',
 ]);
 
 export function isShiftAlertFcmType(type: string): boolean {
