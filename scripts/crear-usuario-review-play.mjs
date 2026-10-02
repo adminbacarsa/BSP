@@ -12,7 +12,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const REVIEW_EMAIL = 'play.review@bacarsa.com.ar';
+export const REVIEW_EMAIL = 'cosp@bacarsa.com.ar';
 export const REVIEW_EMPRESA = 'pruebas_sa';
 export const REVIEW_EMPLOYEE_ID = 'play_review_01';
 export const REVIEW_FILE_NUMBER = 'PLAY-01';
@@ -87,22 +87,45 @@ export function buildReviewEmployee(uid) {
   };
 }
 
+/** Objetivo de ejemplo: sin SLA y fuera del Centro de Control y de los crons. */
+export function buildReviewObjective() {
+  return {
+    id: REVIEW_OBJECTIVE_ID,
+    name: 'Objetivo Revisión Play',
+    empresaId: REVIEW_EMPRESA,
+    clientId: REVIEW_CLIENT_ID,
+    clientName: 'Cliente Revisión Play',
+    address: 'Objetivo de prueba para la revisión de Google Play',
+    lat: -31.4201,
+    lng: -64.1888,
+    active: true,
+    status: 'ACTIVE',
+    allowRemoteCheckIn: false,
+    excluirDeOperacion: true,
+    reviewPlay: true,
+  };
+}
+
 export function buildReviewClient() {
+  const objective = buildReviewObjective();
   return {
     name: 'Cliente Revisión Play',
     empresaId: REVIEW_EMPRESA,
     status: 'ACTIVE',
     active: true,
+    reviewPlay: true,
+    excluirDeOperacion: true,
     objetivos: [
       {
-        id: REVIEW_OBJECTIVE_ID,
-        name: 'Objetivo Revisión Play',
+        id: objective.id,
+        name: objective.name,
         active: true,
         status: 'ACTIVE',
-        address: 'Objetivo de prueba para la revisión de Google Play',
-        lat: -31.4201,
-        lng: -64.1888,
+        address: objective.address,
+        lat: objective.lat,
+        lng: objective.lng,
         allowRemoteCheckIn: false,
+        excluirDeOperacion: true,
       },
     ],
   };
@@ -129,7 +152,7 @@ async function main() {
   console.log(`  email:       ${REVIEW_EMAIL}`);
   console.log(`  legajo:      ${REVIEW_EMPLOYEE_ID} (${REVIEW_FILE_NUMBER})`);
   console.log(`  flags:       bypassDeviceCheck + fichadaRemota (solo este legajo)`);
-  console.log(`  objetivo:    ${REVIEW_OBJECTIVE_ID} (geocerca normal; la excepción es el flag del legajo)`);
+  console.log(`  objetivo:    ${REVIEW_OBJECTIVE_ID} (excluirDeOperacion, sin SLA; geocerca normal)`);
   console.log(`  turnos M:    ${days.length} días desde ${ymd(days[0])} hasta ${ymd(days[days.length - 1])}`);
   console.log(`  publicados:  ${months.map((x) => `${x.year}-${x.month}`).join(', ')}`);
   console.log('  clave:       se genera al aplicar y se imprime una vez; no se guarda en el repo');
@@ -181,22 +204,7 @@ async function main() {
     { merge: true },
   );
   await db.collection('clients').doc(REVIEW_CLIENT_ID).set(buildReviewClient(), { merge: true });
-  await db.collection('objetivos').doc(REVIEW_OBJECTIVE_ID).set(
-    {
-      id: REVIEW_OBJECTIVE_ID,
-      name: 'Objetivo Revisión Play',
-      empresaId: REVIEW_EMPRESA,
-      clientId: REVIEW_CLIENT_ID,
-      clientName: 'Cliente Revisión Play',
-      address: 'Objetivo de prueba para la revisión de Google Play',
-      lat: -31.4201,
-      lng: -64.1888,
-      active: true,
-      status: 'ACTIVE',
-      allowRemoteCheckIn: false,
-    },
-    { merge: true },
-  );
+  await db.collection('objetivos').doc(REVIEW_OBJECTIVE_ID).set(buildReviewObjective(), { merge: true });
 
   for (const day of days) {
     const bounds = morningShiftBounds(day.y, day.m, day.d);
@@ -217,6 +225,7 @@ async function main() {
         isCompleted: false,
         isAbsent: false,
         isFranco: false,
+        excluirDeOperacion: true,
         startTime: Timestamp.fromDate(bounds.start),
         endTime: Timestamp.fromDate(bounds.end),
         createdAt: FieldValue.serverTimestamp(),

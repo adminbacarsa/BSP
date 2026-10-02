@@ -1,3 +1,4 @@
+export { isExcluidoDeOperacion, turnoFueraDeCentroDeControl } from './excluirDeOperacion';
 export { isOperationalOriginShift } from './operationalOrigin';
 export { isPassiveRetStandbyShift } from './passiveRetShift';
 export {

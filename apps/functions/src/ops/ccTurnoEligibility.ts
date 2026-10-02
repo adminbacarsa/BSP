@@ -1,5 +1,6 @@
 import * as admin from 'firebase-admin';
 import { planificacionEstadoLookupDocIds, ymCordobaParts } from '../assistant/planificacionEstadoKeys';
+import { isExcluidoDeOperacion } from '../common/excluirDeOperacion';
 
 export function isOperationalTurnoForCc(t: Record<string, unknown>): boolean {
   const origin = String(t.origin ?? '').trim().toUpperCase();
@@ -70,12 +71,15 @@ function isSlaContractActive(status: unknown): boolean {
 export class CcObjectiveMonthGate {
   private publishCache = new Map<string, boolean>();
   private slaByEmpresa = new Map<string, admin.firestore.QueryDocumentSnapshot[]>();
+  private excludedObjective = new Map<string, boolean>();
 
   async isTurnoInCcScope(db: admin.firestore.Firestore, t: Record<string, unknown>): Promise<boolean> {
     if (t.draft === true || t.isVirtual === true) return false;
+    if (isExcluidoDeOperacion(t)) return false;
+    const objId = String(t.objectiveId ?? '').trim();
+    if (objId && (await this.isObjectiveExcluded(db, objId))) return false;
     if (isOperationalTurnoForCc(t)) return true;
 
-    const objId = String(t.objectiveId ?? '').trim();
     const empId = String(t.empresaId ?? '').trim();
     if (!objId || !empId) return false;
 
@@ -92,6 +96,15 @@ export class CcObjectiveMonthGate {
     if (!(await this.hasActiveSlaForMonth(db, empId, objId, year, monthIndex0))) return false;
     if (!(await this.isPlanPublished(db, empId, objId, year, month))) return false;
     return true;
+  }
+
+  private async isObjectiveExcluded(db: admin.firestore.Firestore, objectiveId: string): Promise<boolean> {
+    const hit = this.excludedObjective.get(objectiveId);
+    if (hit != null) return hit;
+    const doc = await db.collection('objetivos').doc(objectiveId).get();
+    const excluded = doc.exists && isExcluidoDeOperacion(doc.data());
+    this.excludedObjective.set(objectiveId, excluded);
+    return excluded;
   }
 
   private async isPlanPublished(

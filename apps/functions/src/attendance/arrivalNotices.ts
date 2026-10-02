@@ -1,5 +1,6 @@
 import { FieldValue, Timestamp, type Firestore } from 'firebase-admin/firestore';
 import { ObjectiveOperationCache } from '../common/simulableShift';
+import { loadObjectiveIdsExcluidos, turnoFueraDeCentroDeControl } from '../common/excluirDeOperacion';
 import { isExtraNonReliefShift } from '../common/reliefEligibility';
 import { skipAbsencePipelineForShift } from '../coverage/coverageTraceShift';
 import { crearConvocatoriaLlegadaTarde } from '../coverage/convocatoriasCobertura';
@@ -156,6 +157,7 @@ export async function runShiftArrivalNotices(
   if (!cc.anyEnabled) return 0;
   const nowMs = now.toMillis();
   const cache = new ObjectiveOperationCache();
+  const excludedObjectives = await loadObjectiveIdsExcluidos(db);
   let sent = 0;
 
   const headsUpSnap = await db.collection('turnos')
@@ -177,6 +179,7 @@ export async function runShiftArrivalNotices(
       const empresaId = String(shift.empresaId || '').trim();
       if (!cc.isEnabled(empresaId)) continue;
       if (cc.isDemo(empresaId)) continue;
+      if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!eligibleShift(shift)) continue;
       const startMs = (shift.startTime as Timestamp | undefined)?.toMillis?.() ?? 0;
       if (classifyArrivalNotice(startMs, nowMs) !== kind) continue;

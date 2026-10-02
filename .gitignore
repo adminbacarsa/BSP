@@ -19,6 +19,7 @@ apps/web2/public/app/
 apps/web2/public/version.json
 # Motor del libro: lo genera scripts/bundle-hours-ledger.mjs y se copia a functions/lib.
 apps/functions/src/hoursLedger/bundledEngine.js
+apps/functions/.e2e-play/
 
 # --- Credenciales (nunca commitear) ---
 service-account.json

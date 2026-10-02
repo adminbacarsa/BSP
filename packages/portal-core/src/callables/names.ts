@@ -2,6 +2,7 @@ export const PORTAL_CALLABLES = {
   activateDevice: 'activateDevice',
   activateAndSetPassword: 'activateAndSetPassword',
   requestCheckIn: 'requestCheckIn',
+  cerrarTurnoPortal: 'cerrarTurnoPortal',
   reportarAusencia: 'reportarAusencia',
   notificarLlegadaTarde: 'notificarLlegadaTarde',
   responderConvocatoriaCobertura: 'responderConvocatoriaCobertura',
