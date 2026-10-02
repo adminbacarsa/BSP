@@ -51,7 +51,7 @@ export function EscalaMovilPanel({ escalas: externas }: { escalas?: Escala[] }) 
         <div className="flex gap-1 overflow-x-auto px-1">
           {escalas.map((e) => (
             <button key={e.id} type="button" onClick={() => setElegidaId(e.id)} data-escala={e.id}
-              className={`shrink-0 rounded-full border px-3 py-1.5 text-[12px] font-semibold ${elegida?.id === e.id ? 'border-transparent bg-[var(--movil-primary,#111827)] text-[var(--movil-primary-text,#fff)]' : 'border-slate-200 bg-white text-slate-700'}`}>
+              className={`shrink-0 rounded-md border px-3 py-1.5 text-[12px] font-semibold ${elegida?.id === e.id ? 'border-transparent bg-[var(--movil-primary,#111827)] text-[var(--movil-primary-text,#fff)]' : 'border-[#eceef1] bg-white text-slate-700'}`}>
               {rotuloVigencia(e)}{e.version != null ? ` · v${e.version}` : ''}
             </button>
           ))}

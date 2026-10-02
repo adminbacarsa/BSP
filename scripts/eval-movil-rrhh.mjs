@@ -1,5 +1,5 @@
 import { createRequire } from 'node:module';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -185,6 +185,36 @@ const anulaHtml = renderToStaticMarkup(createElement(EventualesScreens, {
   }],
 }));
 check('anulación es tarea manual con datos, plazo y acuse', anulaHtml.includes('data-anulacion-manual="1"') && anulaHtml.includes('data-anula-cuil="1"') && anulaHtml.includes('20111111112') && anulaHtml.includes('20261005') && anulaHtml.includes('778899') && anulaHtml.includes('Anular Registro') && anulaHtml.includes('data-anula-plazo="abierto"') && anulaHtml.includes('Registrar acuse') && !anulaHtml.includes('Confirmar en ARCA'));
+
+const bolsaPalabras = renderToStaticMarkup(createElement(EventualesScreens, {
+  ...evProps,
+  panel: 'bolsa',
+  elegido: null,
+  personas: [
+    { ...evProps.personas[0], estadoTexto: 'Listo para convocar', estadoTono: 'ok' },
+    { id: '20999999996', nombre: 'Ruiz, Pedro', cuil: '20-99999999-6', marco: 'Sin marco', marcoEstado: 'SIN_MARCO', telefono: '', legajo: '', primerIngreso: '', estadoTexto: 'Falta: mail, contrato marco', estadoTono: 'falta' },
+  ],
+}));
+check('bolsa: estado en palabras con filete', bolsaPalabras.includes('data-estado-fila="Listo para convocar"') && bolsaPalabras.includes('Falta: mail, contrato marco') && bolsaPalabras.includes('w-[3px]') && bolsaPalabras.includes('text-emerald-600') && bolsaPalabras.includes('text-amber-600') && !/bg-emerald-50(?!\d)/.test(bolsaPalabras));
+check('la bolsa del celular usa estadoFila', readFileSync(join(root, 'components/movil/EventualesMovil.tsx'), 'utf8').includes('estadoFila'));
+
+const hoyAa = renderToStaticMarkup(createElement(RrhhScreens, {
+  ...{
+    empresa: 'Pruebas S.A.', online: true, pendingLabel: null, panel: 'dia', hoyLabel: 'viernes 2 de octubre',
+    ausenciasHoy: [{ id: '2', employeeId: 'b', nombre: 'Baez, Juan', tipo: 'No Presentación', justificable: true }],
+    licencias: [], certificados: [], busqueda: '', onBusqueda: noop, guardias: [], tipos: [], tipoId: '', onTipo: noop,
+    dias: '1', onDias: noop, fotoNombre: null, onFoto: noop, onGuardarAusencia: noop, novedadTipo: 'Observación', onNovedadTipo: noop,
+    novedadTexto: '', onNovedadTexto: noop, onGuardarNovedad: noop, ficha: null, onElegir: noop, onFicha: noop, onPanel: noop, onJustificar: noop,
+  },
+}));
+check('AA de hoy lleva filete rojo y Justificar', hoyAa.includes('data-rrhh-filete="rose"') && hoyAa.includes('w-[3px]') && hoyAa.includes('bg-rose-500') && hoyAa.includes('>Justificar<'));
+
+const marcar = (html, nombre) => html.replaceAll(nombre, 'EMPRESA');
+const rrhhA = renderToStaticMarkup(createElement(RrhhScreens, { empresa: 'Bacar S.A.', online: true, pendingLabel: null, panel: 'ausencia', hoyLabel: 'viernes 2 de octubre', ausenciasHoy: [], licencias: [], certificados: [], busqueda: '', onBusqueda: noop, guardias: [], tipos: [{ id: 'e', label: 'Enfermedad', code: 'E' }], tipoId: 'e', onTipo: noop, dias: '1', onDias: noop, fotoNombre: null, onFoto: noop, onGuardarAusencia: noop, novedadTipo: 'Observación', onNovedadTipo: noop, novedadTexto: '', onNovedadTexto: noop, onGuardarNovedad: noop, ficha: null, onElegir: noop, onFicha: noop, onPanel: noop }));
+const rrhhB = renderToStaticMarkup(createElement(RrhhScreens, { empresa: 'Grupo Norte', online: true, pendingLabel: null, panel: 'ausencia', hoyLabel: 'viernes 2 de octubre', ausenciasHoy: [], licencias: [], certificados: [], busqueda: '', onBusqueda: noop, guardias: [], tipos: [{ id: 'e', label: 'Enfermedad', code: 'E' }], tipoId: 'e', onTipo: noop, dias: '1', onDias: noop, fotoNombre: null, onFoto: noop, onGuardarAusencia: noop, novedadTipo: 'Observación', onNovedadTipo: noop, novedadTexto: '', onNovedadTexto: noop, onGuardarNovedad: noop, ficha: null, onElegir: noop, onFicha: noop, onPanel: noop }));
+const evA = renderToStaticMarkup(createElement(EventualesScreens, { ...evProps, panel: 'bolsa', empresa: 'Bacar S.A.' }));
+const evB = renderToStaticMarkup(createElement(EventualesScreens, { ...evProps, panel: 'bolsa', empresa: 'Grupo Norte' }));
+check('dos empresas: mismo markup, el color sale de las variables', marcar(rrhhA, 'Bacar S.A.') === marcar(rrhhB, 'Grupo Norte') && marcar(evA, 'Bacar S.A.') === marcar(evB, 'Grupo Norte') && rrhhA.includes('var(--movil-topbar') && rrhhA.includes('var(--movil-primary') && evA.includes('focus:border-[var(--movil-primary,#111827)]'));
 
 if (failed) {
   console.error(failed, 'fallos');

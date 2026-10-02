@@ -213,7 +213,8 @@ function Tarjeta(props: {
       <h2 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{props.titulo}</h2>
       <ul className="mt-1 divide-y divide-[#eceef1]">
         {props.items.map((item) => (
-          <li key={item.key} className="flex min-h-12 items-center gap-2 py-1">
+          <li key={item.key} data-rrhh-filete={item.tono || undefined} className="relative flex min-h-12 items-center gap-2 py-1 pl-2">
+            {item.tono && <span aria-hidden="true" className={`absolute inset-y-1 left-0 w-[3px] rounded ${item.tono === 'rose' ? 'bg-rose-500' : 'bg-amber-500'}`} />}
             <button type="button" onClick={() => props.onOpen(item.id)} className="flex min-w-0 flex-1 flex-col items-start text-left">
               <span className="truncate text-sm font-semibold text-slate-900">{item.titulo}</span>
               <span className={`text-[11px] font-medium ${item.tono === 'rose' ? 'text-rose-600' : item.tono === 'amber' ? 'text-amber-600' : 'text-slate-500'}`}>{item.detalle}</span>
