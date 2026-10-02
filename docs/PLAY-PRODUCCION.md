@@ -170,11 +170,15 @@ Datos ficticios (Review Play, DNI 00.000.000, Cliente Revisión Play). No hay da
 |---------|-----|
 | `icono-512.png` | Ícono 512×512, recorte del ícono de la app |
 | `destacada-1024x500.png` | Imagen destacada |
-| `01-hoy.png` … `06-contratos.png` | Capturas 1080×1920: Hoy, Fichada, Alertas, Credencial, Agenda, Mis contratos |
+| `01-hoy.png` … `06-contratos.png` | Capturas viejas 1080×1920 (maqueta simplificada) |
+| `capturas-1.2.0/01` … `06` | **Capturas vigentes 1080×2400** con los componentes reales de la app: inicio con el turno del día, agenda, fichada con ubicación, bandeja de alertas, convocatoria Aceptar/Rechazar, aviso ¿Venís? 10/15/30. Más copia de `icono-512.png` y `destacada-1024x500.png` |
 
-Para regenerar las capturas, contra el export web local:
+Las pantallas salen de `apps/mobile-guardia/app/play-capturas/[frame].tsx` (datos ficticios PLAY-01, sin Firestore; no está en el menú). Para regenerar, contra el export web local:
 
 ```text
 cd apps/mobile-guardia && npm run build:web
-node ../../scripts/capturar-play-ficha.mjs
+cd ../..
+node scripts/capturar-play-ficha.mjs
 ```
+
+Escribe en `docs/play/capturas-{version}/` (versión de `apps/mobile-guardia/package.json`). `PLAY_CAPTURAS_COPY="C:\...\COSP Play Store\1.2.0"` deja una copia extra. Si Playwright no encuentra Chromium: `PLAYWRIGHT_BROWSERS_PATH=%LOCALAPPDATA%\ms-playwright`.
