@@ -140,7 +140,8 @@ export function modeloAnexo(input = {}) {
   ];
   const filas = jornadas.map((j) => [fechaCorta(j.fecha), horarioDe(j), horasDe(j), dato(j.observacion)]);
   const monto = input.bruto == null || input.bruto === '' ? '[monto calculado]' : String(input.bruto);
-  const remuneracion = `Remuneración bruta de esta convocatoria: según escala salarial CCT 422/05 vigente, con los adicionales que correspondan: ${monto}, más SAC y vacaciones proporcionales al cierre. Se abona por mes vencido.`;
+  const escala = String(input.escalaTexto || '').trim();
+  const remuneracion = `Remuneración bruta de esta convocatoria: según escala salarial CCT 422/05 vigente, con los adicionales que correspondan: ${monto}, más SAC y vacaciones proporcionales al cierre. Se abona por mes vencido.${escala ? ` ${escala}` : ''}`;
   const arca = `Registración ARCA: alta el ${alta} (antes de la primera jornada) y baja el ${baja} (día en que termina la última jornada). Modalidad 012 – Trabajo eventual.`;
   const cierre = 'Este anexo integra el contrato marco según su cláusula novena. El trabajador lo aceptó a través de la aplicación COSP mediante código de verificación personal, según la constancia adjunta.';
   const plano = [

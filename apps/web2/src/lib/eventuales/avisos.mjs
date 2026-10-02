@@ -3,7 +3,7 @@
  * El rol se resuelve contra los roles que ya existen (permiso de lectura del módulo).
  * Si el rol todavía no tiene nadie, la lista queda vacía y no rompe el envío.
  */
-export const TIPOS_AVISO = ['ARCA_ALTA_PENDIENTE', 'ARCA_BAJA_PENDIENTE', 'ARCA_ERROR', 'MARCO_POR_VENCER', 'CRONOGRAMA_SIN_PUBLICAR'];
+export const TIPOS_AVISO = ['ARCA_ALTA_PENDIENTE', 'ARCA_BAJA_PENDIENTE', 'ARCA_ERROR', 'MARCO_POR_VENCER', 'CRONOGRAMA_SIN_PUBLICAR', 'ESCALA_CCT_PROPUESTA'];
 
 /** Roles de destino futuros. Hoy se cruzan con el módulo que ya usa COSP. */
 export const ROL_DESTINO_MODULO = {
@@ -11,6 +11,7 @@ export const ROL_DESTINO_MODULO = {
   PLANIFICACION: 'PLANNING',
   RRHH: 'RRHH',
   SUPERVISION: 'SUPERVISION',
+  EVENTUALES: 'EVENTUALES',
 };
 
 export function usuariosDelRol(rolDestino, usuarios, roles) {

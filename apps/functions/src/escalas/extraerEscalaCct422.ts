@@ -6,9 +6,11 @@
  */
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
-import { CCT_422, parsearAnexoOficial422, esPropuesta, type PropuestaEscala422 } from './escalaCct422Core';
+import { parsearAnexoOficial422, esPropuesta, type PropuestaEscala422 } from './escalaCct422Core';
 import { leerEscala422ConGemini, validarPdfBase64 } from './escalaCct422Gemini';
-import { sha256Hex } from './escalaCct422Core';
+import { avisarEscalaCct, escalaCctDocId, guardarPropuestaEscala, NOVEDAD_ESCALA_PROPUESTA } from './escalaCctStore';
+
+export { escalaCctDocId };
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 const ACCIONES_RRHH = ['create', 'update', 'adjust'];
@@ -51,10 +53,6 @@ export interface ExtraerEscalaCct422Result {
   yaExistia: boolean;
 }
 
-export function escalaCctDocId(p: PropuestaEscala422): string {
-  return `${CCT_422}_${p.vigenciaDesde || 'sin-vigencia'}_${p.documentoHash.slice(0, 8)}`;
-}
-
 export async function extraerEscalaCct422Handler(
   data: ExtraerEscalaCct422Payload,
   context: functions.https.CallableContext,
@@ -86,34 +84,13 @@ export async function extraerEscalaCct422Handler(
 
   if (!data?.guardar) return { propuesta, modelo, docId: null, yaExistia: false };
 
-  const docId = escalaCctDocId(propuesta);
-  const ref = db().collection('escalas_cct').doc(docId);
-  const existente = await ref.get();
-  if (existente.exists) return { propuesta, modelo, docId, yaExistia: true };
   const empresaId = typeof data.empresaId === 'string' && data.empresaId.trim() ? data.empresaId.trim() : null;
-  await ref.set({
-    ...propuesta,
-    estado: 'PROPUESTA',
-    modelo,
-    empresaId,
-    creadoPor: quien.uid,
-    creadoPorEmail: quien.email,
-    creadoEn: admin.firestore.FieldValue.serverTimestamp(),
-    aprobadoPor: null,
-    aprobadoEn: null,
-    payloadHash: sha256Hex(JSON.stringify(propuesta.tramos)),
-  });
-  await db().collection('audit_logs').add({
-    action: 'ESCALA_CCT_PROPUESTA',
-    collection: 'escalas_cct',
-    docId,
-    empresaId,
-    userId: quien.uid,
-    userEmail: quien.email,
-    details: { cct: propuesta.cct, extraccion: propuesta.extraccion, vigenciaDesde: propuesta.vigenciaDesde, vigenciaHasta: propuesta.vigenciaHasta, confianzaGlobal: propuesta.confianzaGlobal, advertencias: propuesta.advertencias.length },
-    timestamp: admin.firestore.FieldValue.serverTimestamp(),
-  });
-  return { propuesta, modelo, docId, yaExistia: false };
+  const guardado = await guardarPropuestaEscala(db(), propuesta, { uid: quien.uid, email: quien.email, empresaId, modelo, origen: 'CALLABLE_EXTRAER' });
+  if (!guardado.yaExistia) {
+    await avisarEscalaCct(db(), NOVEDAD_ESCALA_PROPUESTA, guardado.docId, propuesta as unknown as Record<string, unknown>, { empresaId })
+      .catch((e) => console.warn('[extraerEscalaCct422] aviso:', (e as Error)?.message));
+  }
+  return { propuesta, modelo, docId: guardado.docId, yaExistia: guardado.yaExistia };
 }
 
 export const extraerEscalaCct422 =
