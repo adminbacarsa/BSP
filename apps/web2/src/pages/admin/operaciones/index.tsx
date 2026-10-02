@@ -760,7 +760,7 @@ const WorkedDayOffModal = ({ isOpen, onClose, shift }: any) => {
     );
 };
 
-// â"€â"€ Popup de detalle de novedad â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+// ── Popup de detalle de novedad ──────────────────────────────────────────────
 const TYPE_META: Record<string, { label: string; bg: string; text: string; border: string }> = {
     AUSENCIA_AUTO:                { label: 'AUSENCIA AUTO',   bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
     AUSENCIA_OPERATIVA:           { label: 'AUSENCIA',        bg: 'bg-rose-600',   text: 'text-white',     border: 'border-rose-500' },
@@ -1277,7 +1277,7 @@ const GuardCard = ({ shift, viewTab, onOpenCheckout, onOpenAttendance, onOpenHan
         </div>
     );
 
-    // â"€â"€ Vista expandida â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // ── Vista expandida ──────────────────────────────────────────────
     return (
         <div className={`relative rounded-xl border border-slate-200 mb-2 shadow-sm overflow-hidden transition-all ${rowBg}`}>
             <div className={`h-1 w-full ${accentColor}`}/>
@@ -2466,7 +2466,7 @@ export default function OperacionesPage() {
         prevPendingCountRef.current = pendingNovedades.length;
     }, [pendingNovedades.length, soundEnabled]);
 
-    // â"€â"€ Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
+    // ── Auto-cerrar novedades VACANTE_PROTOCOLO_COBERTURA cuando el slot ya venció sin cobertura
     const autoExpiredRef = useRef<Set<string>>(new Set());
     useEffect(() => {
         const nowMs = Date.now();
@@ -2653,7 +2653,7 @@ export default function OperacionesPage() {
         const fmt24 = (d: any) => { try { return toDate(d).toLocaleTimeString('es-AR', { hour:'2-digit', minute:'2-digit', hour12: false, timeZone: tz }); } catch { return '--:--'; } };
         const fmtDT = (d: Date) => d.toLocaleString('es-AR', { timeZone: tz, day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit', hour12: false });
         const fmtDateLong = (d: Date) => d.toLocaleDateString('es-AR', { timeZone: tz, weekday:'long', day:'2-digit', month:'long', year:'numeric' });
-        // Fix double-encoded UTF-8 (e.g. Ã³ → ó)
+        // Fix double-encoded UTF-8 (p. ej. "\u00C3\u00B3" → "ó")
         const fixEnc = (s: string) => { try { return decodeURIComponent(escape(s || '')); } catch { return s || ''; } };
         // Sanitize: keep printable latin-1, fix encoding first
         const sanitize = (s: string) => fixEnc(s).replace(/[^\x20-\xFF]/g, '').replace(/\s+/g, ' ').trim();
@@ -3359,7 +3359,7 @@ export default function OperacionesPage() {
         }
     };
     const handleNovedadAbsence = async (shift: any) => {
-        if (!confirm(`Â¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificará a RRHH y Planificación.`)) return;
+        if (!confirm(`¿Registrar aviso anticipado de ausencia para ${shift.employeeName}?\nSe notificará a RRHH y Planificación.`)) return;
         try {
             const batch = writeBatch(db);
             // Marca el turno con aviso → el planificador muestra barra ámbar
@@ -3493,7 +3493,7 @@ export default function OperacionesPage() {
         }
     }, [logic.viewTab, logic.selectedClientId, logic.filterText]);
 
-    // â"€â"€ COBERTURA POR OBJETIVO â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // ── COBERTURA POR OBJETIVO ─────────────────────────────────────────────────
     const coverageByObjective = useMemo(() => {
         const now = new Date();
         const map: Record<string, {name:string; client:string; total:number; active:number; absent:number; vacant:number; objectiveId:string}> = {};
@@ -3535,7 +3535,7 @@ export default function OperacionesPage() {
 
     const matchesViewTabForShift = (s: any) => shiftMatchesOpsViewTab(s, logic.viewTab);
 
-    // â"€â"€ VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad â"€â"€
+    // ── VISTA POR OBJETIVO: estado agregado por objetivo, ordenado por criticidad ──
     const objectivesWithAlerts = useMemo(() => {
         const now = new Date();
         const map = new Map<string, any>();
@@ -4217,7 +4217,7 @@ export default function OperacionesPage() {
                         </div>
                     </div>
 
-                    {/* â"€â"€ Panel ausencias autorizadas hoy â"€â"€ */}
+                    {/* ── Panel ausencias autorizadas hoy ── */}
                     {authorizedAbsences.length > 0 && (
                         <div className="px-3 py-1.5 border-b border-amber-100 bg-amber-50/60 shrink-0">
                             <button
@@ -4314,7 +4314,7 @@ export default function OperacionesPage() {
 
                     <div className="flex-1 min-h-0 overflow-y-auto bg-slate-50">
 
-                        {/* â•â• MODO OBJETIVOS (default) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                        {/* ══ MODO OBJETIVOS (default) ════════════════════════════════ */}
                         {logic.viewTab === ('TRABAJARON' as any) && (
                             <WorkedTodayPanel
                                 empresaId={empresaId || ''}
@@ -4567,7 +4567,7 @@ export default function OperacionesPage() {
                         </div>
                         )}
 
-                        {/* â•â• MODO LISTA (existente) â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
+                        {/* ══ MODO LISTA (existente) ══════════════════════════════════ */}
                         {viewMode === 'lista' && logic.viewTab !== ('TRABAJARON' as any) && (
                         <div className={`p-3 ${wideOpsPanel ? objectivesLayoutClass : 'space-y-2'}`}>
                         {logic.listData.length === 0 ? <div className="text-center py-10 text-slate-400 text-xs">Sin novedades en esta categoría</div> :
@@ -5014,7 +5014,7 @@ export default function OperacionesPage() {
                             </div>
                         </div>
 
-                        {/* â"€â"€ Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) â"€â"€ */}
+                        {/* ── Sección PRIORIDAD — usa priorityShiftsPanel ya calculado (mismo filtro que stats) ── */}
                         {priorityShiftsPanel.length > 0 && (() => {
                             const priorityShifts = priorityShiftsPanel;
                             return (

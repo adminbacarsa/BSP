@@ -40,7 +40,7 @@ export function dateKeyAR(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/** Horas nocturnas 21:00ÔÇô06:00 en reloj Argentina. */
+/** Horas nocturnas 21:00–06:00 en reloj Argentina. */
 export function getNightDuration(start: Date, end: Date): number {
   if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
   if (end.getTime() <= start.getTime()) return 0;
@@ -117,7 +117,7 @@ export function accumulatePayrollTurnoContribution(
   if (!start || !end) {
     return {
       ...empty,
-      warnings: [`Turno ${docId} sin startTime/endTime v├ílidos.`],
+      warnings: [`Turno ${docId} sin startTime/endTime válidos.`],
     };
   }
 

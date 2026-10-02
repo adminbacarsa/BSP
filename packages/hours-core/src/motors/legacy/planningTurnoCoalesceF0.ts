@@ -9,7 +9,7 @@ function turnoContributesCoverageMerge(t: any): boolean {
   return Number.isFinite(ex) && ex > 0;
 }
 
-/** Fusiona varios turnos del mismo emp/obj/d├¡a (p. ej. ext + base en docs distintos). */
+/** Fusiona varios turnos del mismo emp/obj/día (p. ej. ext + base en docs distintos). */
 export function coalescePlannedTurnosForCell(
   turnos: any[],
   slaCodeHoursHint?: Record<string, number>,

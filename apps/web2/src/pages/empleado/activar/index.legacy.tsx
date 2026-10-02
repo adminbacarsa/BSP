@@ -30,7 +30,7 @@ function getOrCreateDeviceId(): string {
   return id;
 }
 
-/** Intent Android: abre la app si est├í instalada; si no, no rompe la p├ígina. */
+/** Intent Android: abre la app si está instalada; si no, no rompe la página. */
 function buildAndroidIntentUrl(token: string): string {
   const schemePath = `empleado/activar?t=${encodeURIComponent(token)}`;
   return `intent://${schemePath}#Intent;scheme=cosp-guardia;package=com.cosp.guardia;end`;
@@ -58,7 +58,7 @@ export default function ActivarDispositivoPage() {
     if (!router.isReady) return;
     if (!token) {
       setState('error');
-      setErrorMsg('Enlace inv├ílido o incompleto.');
+      setErrorMsg('Enlace inválido o incompleto.');
       return;
     }
     setState('form');
@@ -87,7 +87,7 @@ export default function ActivarDispositivoPage() {
 
   async function handleActivate() {
     if (!password || password.length < 6) {
-      setErrorMsg('La contrase├▒a debe tener al menos 6 caracteres.');
+      setErrorMsg('La contraseña debe tener al menos 6 caracteres.');
       return;
     }
     setErrorMsg('');
@@ -107,7 +107,7 @@ export default function ActivarDispositivoPage() {
         deviceInfo: getDeviceInfo(),
       });
 
-      // Auto sign-in con las credenciales reci├®n creadas
+      // Auto sign-in con las credenciales recién creadas
       const auth = getAuth(app);
       await signInWithEmailAndPassword(auth, data.email, password);
 
@@ -116,11 +116,11 @@ export default function ActivarDispositivoPage() {
       setState('error');
       const code = err?.code?.replace('functions/', '') || '';
       if (code === 'already-exists') {
-        setErrorMsg('Este enlace ya fue utilizado. Tu dispositivo puede estar activo ÔÇö intent├í ingresar al portal.');
+        setErrorMsg('Este enlace ya fue utilizado. Tu dispositivo puede estar activo — intentá ingresar al portal.');
       } else if (code === 'deadline-exceeded') {
-        setErrorMsg('El enlace expir├│. Pedile al administrador que te reenv├¡e el mail de acceso.');
+        setErrorMsg('El enlace expiró. Pedile al administrador que te reenvíe el mail de acceso.');
       } else if (code === 'invalid-argument') {
-        setErrorMsg(err?.message || 'Datos inv├ílidos.');
+        setErrorMsg(err?.message || 'Datos inválidos.');
         setState('form');
       } else {
         setErrorMsg(err?.message || 'Error al activar el dispositivo.');
@@ -153,8 +153,8 @@ export default function ActivarDispositivoPage() {
           <div className="w-16 h-16 bg-teal-900/50 rounded-full flex items-center justify-center mx-auto mb-4">
             <ShieldCheck size={32} className="text-teal-400" />
           </div>
-          <h1 className="text-white font-black text-xl mb-2">┬íCuenta activada!</h1>
-          <p className="text-slate-400 text-sm mb-6">Tu contrase├▒a fue creada y este celular qued├│ vinculado a tu cuenta. Ahora pod├®s marcar presencia desde aqu├¡.</p>
+          <h1 className="text-white font-black text-xl mb-2">¡Cuenta activada!</h1>
+          <p className="text-slate-400 text-sm mb-6">Tu contraseña fue creada y este celular quedó vinculado a tu cuenta. Ahora podés marcar presencia desde aquí.</p>
           <button
             onClick={() => router.push('/empleado/dashboard')}
             className="w-full bg-teal-600 hover:bg-teal-500 text-white font-bold py-3 rounded-xl transition-colors"
@@ -195,14 +195,14 @@ export default function ActivarDispositivoPage() {
             <Smartphone size={32} className="text-teal-400" />
           </div>
           <h1 className="text-white font-black text-xl mb-1">Activar mi cuenta</h1>
-          <p className="text-slate-400 text-sm">Cre├í tu contrase├▒a para acceder al portal desde este celular.</p>
+          <p className="text-slate-400 text-sm">Creá tu contraseña para acceder al portal desde este celular.</p>
         </div>
 
         {isAndroid && (appDeepLink || androidIntentUrl) ? (
           <div className="mb-5 space-y-2">
             {openApp ? (
               <p className="text-center text-xs text-indigo-300/90">
-                Si ten├®s COSP Guardia instalada, deber├¡a abrirse sola. Si no, toc├í el bot├│n.
+                Si tenés COSP Guardia instalada, debería abrirse sola. Si no, tocá el botón.
               </p>
             ) : null}
             <a
@@ -216,14 +216,14 @@ export default function ActivarDispositivoPage() {
 
         <div className="space-y-4">
           <div>
-            <label className="block text-slate-300 text-sm font-medium mb-1">Nueva contrase├▒a</label>
+            <label className="block text-slate-300 text-sm font-medium mb-1">Nueva contraseña</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
                 value={password}
                 onChange={e => { setPassword(e.target.value); setErrorMsg(''); }}
                 onKeyDown={e => e.key === 'Enter' && handleActivate()}
-                placeholder="M├¡nimo 6 caracteres"
+                placeholder="Mínimo 6 caracteres"
                 className="w-full bg-slate-800 border border-slate-700 text-white rounded-xl px-4 py-3 pr-12 text-sm focus:outline-none focus:border-teal-500 placeholder-slate-500"
               />
               <button
