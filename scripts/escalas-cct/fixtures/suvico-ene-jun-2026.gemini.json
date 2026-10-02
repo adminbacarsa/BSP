@@ -1,0 +1,822 @@
+{
+  "tramos": [
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 867200,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 165000,
+          "total": 1516000,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 923700,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 178900,
+          "total": 1586400,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 949700,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 186100,
+          "total": 1619600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 946300,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 177800,
+          "total": 1680200,
+          "viatico": 546100
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 881000,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 162700,
+          "total": 1529100,
+          "viatico": 475400
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 932200,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 161500,
+          "total": 1615100,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 949700,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 186100,
+          "total": 1619600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 978800,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 192900,
+          "total": 1655500,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 932200,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 161500,
+          "total": 1615100,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 947400,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 176800,
+          "total": 1680400,
+          "viatico": 546200
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 966300,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 179900,
+          "total": 1729200,
+          "viatico": 573000
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 962300,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 176800,
+          "total": 1727600,
+          "viatico": 578500
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 988200,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 176900,
+          "total": 1747100,
+          "viatico": 572000
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1066600,
+          "confianza": null,
+          "noRemunerativo": 10000,
+          "presentismo": 216800,
+          "total": 1943400,
+          "viatico": 650000
+        }
+      ],
+      "adicionalVacacionesPorDia": 18952,
+      "aeroportuario": 117490,
+      "confianzaMes": 1,
+      "mes": "2026-01",
+      "mesLabel": "ENERO 2026"
+    },
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 876000,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 165000,
+          "total": 1539800,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 933600,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 178900,
+          "total": 1611300,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 960200,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1645100,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 957700,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 177800,
+          "total": 1706600,
+          "viatico": 546100
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 890000,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 162700,
+          "total": 1553100,
+          "viatico": 475400
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 942500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1640400,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 960200,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1645100,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 989800,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 192900,
+          "total": 1681500,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 942500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1640400,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 958800,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1706800,
+          "viatico": 546200
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 978400,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 179900,
+          "total": 1756300,
+          "viatico": 573000
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 974500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1754800,
+          "viatico": 578500
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 1000600,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176900,
+          "total": 1774500,
+          "viatico": 572000
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1082100,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 216800,
+          "total": 1973900,
+          "viatico": 650000
+        }
+      ],
+      "adicionalVacacionesPorDia": 18952,
+      "aeroportuario": 118685,
+      "confianzaMes": 1,
+      "mes": "2026-02",
+      "mesLabel": "FEBRERO 2026"
+    },
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 884800,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 165000,
+          "total": 1548600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 942900,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 178900,
+          "total": 1620600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 969700,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1654600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 967400,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 177800,
+          "total": 1716300,
+          "viatico": 546100
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 898900,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 162700,
+          "total": 1562000,
+          "viatico": 475400
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 951900,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1649800,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 969700,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1654600,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 999400,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 192900,
+          "total": 1691100,
+          "viatico": 473800
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 951900,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1648800,
+          "viatico": 511400
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 968500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1716500,
+          "viatico": 546200
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 988500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 179900,
+          "total": 1766400,
+          "viatico": 573000
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 984500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1764800,
+          "viatico": 578500
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 1010700,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176900,
+          "total": 1784600,
+          "viatico": 572000
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1093400,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 216800,
+          "total": 1985200,
+          "viatico": 650000
+        }
+      ],
+      "adicionalVacacionesPorDia": 18952,
+      "aeroportuario": 119880,
+      "confianzaMes": 1,
+      "mes": "2026-03",
+      "mesLabel": "MARZO 2026"
+    },
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 893650,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 165000,
+          "total": 1564150,
+          "viatico": 480500
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 952400,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 178900,
+          "total": 1636800,
+          "viatico": 480500
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 979500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1670100,
+          "viatico": 480500
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 977000,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 177800,
+          "total": 1733600,
+          "viatico": 553800
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 907900,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 162700,
+          "total": 1577700,
+          "viatico": 482100
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 961300,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1666400,
+          "viatico": 518600
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 979500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 186100,
+          "total": 1676100,
+          "viatico": 480500
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 1009700,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 192900,
+          "total": 1708100,
+          "viatico": 480500
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 961300,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 161500,
+          "total": 1666400,
+          "viatico": 518600
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 978100,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1733800,
+          "viatico": 553900
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 998100,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 179900,
+          "total": 1784100,
+          "viatico": 581100
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 994000,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176800,
+          "total": 1782500,
+          "viatico": 586700
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 1020500,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 176900,
+          "total": 1802500,
+          "viatico": 580100
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1104100,
+          "confianza": null,
+          "noRemunerativo": 25000,
+          "presentismo": 216800,
+          "total": 2005100,
+          "viatico": 659200
+        }
+      ],
+      "adicionalVacacionesPorDia": 19220,
+      "aeroportuario": 121080,
+      "confianzaMes": 1,
+      "mes": "2026-04",
+      "mesLabel": "ABRIL 2026"
+    },
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 902600,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 165000,
+          "total": 1584600,
+          "viatico": 487000
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 962300,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 178900,
+          "total": 1658200,
+          "viatico": 487000
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 989800,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 186100,
+          "total": 1692900,
+          "viatico": 487000
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 987100,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 177800,
+          "total": 1756200,
+          "viatico": 561300
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 917000,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 162700,
+          "total": 1598300,
+          "viatico": 488600
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 971100,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 161500,
+          "total": 1688200,
+          "viatico": 525600
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 989800,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 186100,
+          "total": 1692900,
+          "viatico": 487000
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 1020500,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 192900,
+          "total": 1730400,
+          "viatico": 487000
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 971100,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 161500,
+          "total": 1688200,
+          "viatico": 525600
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 988200,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 176800,
+          "total": 1756400,
+          "viatico": 561400
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 1008500,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 179900,
+          "total": 1807400,
+          "viatico": 589000
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 1004400,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 176800,
+          "total": 1805800,
+          "viatico": 594600
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 1031300,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 176900,
+          "total": 1826100,
+          "viatico": 587900
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1116400,
+          "confianza": null,
+          "noRemunerativo": 30000,
+          "presentismo": 216800,
+          "total": 2031300,
+          "viatico": 668100
+        }
+      ],
+      "adicionalVacacionesPorDia": 19480,
+      "aeroportuario": 122290,
+      "confianzaMes": 1,
+      "mes": "2026-05",
+      "mesLabel": "MAYO 2026"
+    },
+    {
+      "filas": [
+        {
+          "categoria": "Vigilador",
+          "basico": 911650,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 165000,
+          "total": 1644650,
+          "viatico": 498000
+        },
+        {
+          "categoria": "Vigilador Bombero",
+          "basico": 974100,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 178900,
+          "total": 1721000,
+          "viatico": 498000
+        },
+        {
+          "categoria": "Administrativo",
+          "basico": 1003000,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 186100,
+          "total": 1757100,
+          "viatico": 498000
+        },
+        {
+          "categoria": "Encargado de turno",
+          "basico": 1001000,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 177800,
+          "total": 1822800,
+          "viatico": 574000
+        },
+        {
+          "categoria": "Controlador de admision y permanencia gral",
+          "basico": 926500,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 162700,
+          "total": 1658900,
+          "viatico": 499700
+        },
+        {
+          "categoria": "Acude alarma",
+          "basico": 981300,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 161500,
+          "total": 1752100,
+          "viatico": 537500
+        },
+        {
+          "categoria": "Guia Tecnico",
+          "basico": 1003000,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 186100,
+          "total": 1757100,
+          "viatico": 498000
+        },
+        {
+          "categoria": "Inst. de elem. De Seg. Electron.",
+          "basico": 1035100,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 192900,
+          "total": 1796000,
+          "viatico": 498000
+        },
+        {
+          "categoria": "Personal de Monitoreo",
+          "basico": 981300,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 161500,
+          "total": 1752100,
+          "viatico": 537500
+        },
+        {
+          "categoria": "Supervision de Alarma",
+          "basico": 1002100,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 176800,
+          "total": 1823000,
+          "viatico": 574100
+        },
+        {
+          "categoria": "Investigador",
+          "basico": 1023700,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 179900,
+          "total": 1875900,
+          "viatico": 602300
+        },
+        {
+          "categoria": "Custodio de Primera",
+          "basico": 1019500,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 176800,
+          "total": 1874300,
+          "viatico": 608000
+        },
+        {
+          "categoria": "Custodio Brigada",
+          "basico": 1047200,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 176900,
+          "total": 1895300,
+          "viatico": 601200
+        },
+        {
+          "categoria": "Supervisor General",
+          "basico": 1138300,
+          "confianza": null,
+          "noRemunerativo": 70000,
+          "presentismo": 216800,
+          "total": 2108300,
+          "viatico": 683200
+        }
+      ],
+      "adicionalVacacionesPorDia": 19920,
+      "aeroportuario": 123515,
+      "confianzaMes": 1,
+      "mes": "2026-06",
+      "mesLabel": "JUNIO 2026"
+    }
+  ],
+  "convenio": "CCT 422/05",
+  "notas": [
+    "Los rubros con asterisco se computan para SAC, vacaciones, hora extra y feriados. Valor adicional por nocturnidad = Básico + Antiguedad.",
+    "Adicional por vacaciones: $18.952 (Ene-Mar 2026), $19.220 (Abr 2026), $19.480 (May 2026), $19.920 (Jun 2026) por día.",
+    "Adicional especial por nocturnidad para CCT 422/05 (21:00-6:00 hs). Jornada nocturna (sin antigüedad, 9 hs/17 días): Ene 2026: $132.681,60; Feb 2026: $134.028,00; Mar 2026: $135.374,40; Abr 2026: $136.728,45; May 2026: $138.097,80; Jun 2026: $139.482,45."
+  ],
+  "vigenciaDesde": "2026-01-01",
+  "vigenciaHasta": "2026-06-30"
+}
