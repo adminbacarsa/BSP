@@ -5,6 +5,7 @@
 import { Readable } from 'stream';
 import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions/v1';
+import { MailNotConfiguredError, sendSystemMail } from '../common/mailer';
 
 const CUENTA_DRIVE = 'comtroldata@appspot.gserviceaccount.com';
 const callable = functions.runWith({ serviceAccount: CUENTA_DRIVE }).https;
@@ -324,24 +325,18 @@ async function tieneTokenPush(uid: string): Promise<boolean> {
 }
 
 async function enviarMailCodigo(destino: string, codigo: string): Promise<void> {
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-  if (!gmailUser || !gmailPass) {
-    throw new functions.https.HttpsError('failed-precondition', 'El mail no está configurado. Contactá a RRHH.');
+  try {
+    await sendSystemMail({
+      to: destino,
+      subject: 'Código para aceptar el anexo',
+      text: `Tu código de 6 dígitos para aceptar el anexo es ${codigo}. Vence en 15 minutos. Si no lo pediste, avisá a RRHH.`,
+    });
+  } catch (err) {
+    if (err instanceof MailNotConfiguredError) {
+      throw new functions.https.HttpsError('failed-precondition', 'El mail no está configurado. Contactá a RRHH.');
+    }
+    throw new functions.https.HttpsError('internal', err instanceof Error ? err.message : 'No se pudo enviar el mail.');
   }
-  const nodemailer = await import('nodemailer');
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: { user: gmailUser, pass: gmailPass },
-  });
-  await transporter.sendMail({
-    from: `"COSP" <${gmailUser}>`,
-    to: destino,
-    subject: 'Código para aceptar el anexo',
-    text: `Tu código de 6 dígitos para aceptar el anexo es ${codigo}. Vence en 15 minutos. Si no lo pediste, avisá a RRHH.`,
-  });
 }
 
 async function refCodigo(contratoId: string, convocatoriaId: string) {

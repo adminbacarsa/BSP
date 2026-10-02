@@ -34,6 +34,7 @@ import { loadObjectiveIdsExcluidos, turnoFueraDeCentroDeControl } from './common
 import { isExtraNonReliefShift, isReliefEligibleShift } from './common/reliefEligibility';
 import { arPlanificacionEstadoKey } from './common/arClock';
 import { guardFirstName } from './common/pushGreeting';
+import { MailNotConfiguredError, replyToFromEmpresa, resolveSmtpAuth, sendSystemMail, verifySmtp } from './common/mailer';
 import { releaseTraceAbsencesRun } from './coverage/releaseTraceAbsences';
 import { markShiftAbsent } from './attendance/markShiftAbsent';
 import { clampLateEtaMinutes, isProvisionalLateAbsence, lateAbsenceDeadlineMs } from './attendance/lateAbsenceWindow';
@@ -585,31 +586,10 @@ export const platformHealthCheck = functions.https.onCall(async (_data, context)
     }
   }
 
-  // — Gmail SMTP —
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-  if (!gmailUser || !gmailPass) {
-    results.gmail = { ok: false, detail: 'GMAIL_USER / GMAIL_PASS no configurados' };
-  } else {
-    const tm = Date.now();
-    try {
-      const nodemailerMod = await import('nodemailer');
-      const transporter = nodemailerMod.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: { user: gmailUser, pass: gmailPass },
-      });
-      await transporter.verify();
-      results.gmail = { ok: true, latencyMs: Date.now() - tm, detail: `${gmailUser} · passLen=${gmailPass.length}` };
-    } catch (e: any) {
-      results.gmail = {
-        ok: false,
-        latencyMs: Date.now() - tm,
-        detail: `${gmailUser} · passLen=${gmailPass.length} · ${(e.message || '').slice(0, 100)}`,
-      };
-    }
-  }
+  // — SMTP (mailer único) —
+  const tm = Date.now();
+  const smtp = await verifySmtp();
+  results.gmail = { ok: smtp.ok, latencyMs: Date.now() - tm, detail: smtp.detail };
 
   // â"€â"€ Google Drive â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
   const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
@@ -1754,9 +1734,8 @@ export { respondEventoConvocatoria, noPuedoAsistirEventual } from './eventos/eve
 export { asignarGuardiaEvento } from './eventos/eventoAssignAdmin';
 
 // =========================================================
-// 13. ENVÃO DE ACCESO AL PORTAL DE EMPLEADOS
+// 13. ENVÍO DE ACCESO AL PORTAL DE EMPLEADOS
 // =========================================================
-import * as nodemailer from 'nodemailer';
 
 function buildPortalEmailHtml(
   activationLinkWeb: string,
@@ -1868,27 +1847,13 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('invalid-argument', 'Se requiere al menos un empleado.');
   }
 
-  // Credenciales SMTP — definir en apps/functions/.env (GMAIL_USER y GMAIL_PASS)
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-
-  if (!gmailUser || !gmailPass) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'Servicio de email no configurado. Definir GMAIL_USER y GMAIL_PASS en apps/functions/.env y redesplegar.'
-    );
+  if (!resolveSmtpAuth()) {
+    throw new functions.https.HttpsError('failed-precondition', new MailNotConfiguredError().message);
   }
-
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: { user: gmailUser, pass: gmailPass },
-  });
 
   const db = admin.firestore();
   const results: { empId: string; email: string; success: boolean; error?: string; alreadyExisted: boolean }[] = [];
-  const empresaNombreCache: Record<string, string> = {};
+  const empresaCache: Record<string, { nombre: string; replyTo: string | null }> = {};
 
   for (const empId of employeeIds) {
     try {
@@ -1904,17 +1869,21 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       // Resolver nombre de empresa (con cache para no repetir lecturas)
       const empresaId = (emp.empresaId || '').toString();
       let empresaNombre = 'Bacar sa. Seguridad Privada';
+      let replyTo: string | null = null;
       if (empresaId) {
-        if (empresaNombreCache[empresaId] !== undefined) {
-          empresaNombre = empresaNombreCache[empresaId];
+        if (empresaCache[empresaId]) {
+          empresaNombre = empresaCache[empresaId].nombre;
+          replyTo = empresaCache[empresaId].replyTo;
         } else {
           try {
             const empDoc2 = await db.collection('empresas').doc(empresaId).get();
             if (empDoc2.exists) {
-              empresaNombre = empDoc2.data()!.nombre || empDoc2.data()!.name || empresaNombre;
+              const data = empDoc2.data()!;
+              empresaNombre = data.nombre || data.name || empresaNombre;
+              replyTo = replyToFromEmpresa(data);
             }
           } catch (_) {}
-          empresaNombreCache[empresaId] = empresaNombre;
+          empresaCache[empresaId] = { nombre: empresaNombre, replyTo };
         }
       }
       if (!email) {
@@ -1968,13 +1937,12 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       // la página web intenta abrir la app y deja activar en navegador.
       const activationLinkApp = `https://comtroldata.web.app/app/activar?t=${activationToken}&open=app`;
 
-      // Enviar email — solo se marca como enviado si el envío fue exitoso
-      await transporter.sendMail({
-        from: `"${empresaNombre}" <${gmailUser}>`,
+      await sendSystemMail({
         to: email,
         subject: `Acceso al Portal de Empleados - ${empresaNombre}`,
         html: buildPortalEmailHtml(activationLinkWeb, activationLinkApp, empresaNombre),
         text: buildPortalEmailText(activationLinkWeb, activationLinkApp, empresaNombre),
+        replyTo,
       });
 
       // Limpiar uid de cualquier otro documento que ya lo tenga (evita duplicados)
@@ -2189,22 +2157,9 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     throw new functions.https.HttpsError('invalid-argument', 'Se requieren clientId, clientName, nombre y email.');
   }
 
-  const gmailUser = (process.env.GMAIL_USER || '').trim();
-  const gmailPass = (process.env.GMAIL_PASS || '').replace(/\s+/g, '');
-
-  if (!gmailUser || !gmailPass) {
-    throw new functions.https.HttpsError(
-      'failed-precondition',
-      'Servicio de email no configurado. Definir GMAIL_USER y GMAIL_PASS en apps/functions/.env y redesplegar.'
-    );
+  if (!resolveSmtpAuth()) {
+    throw new functions.https.HttpsError('failed-precondition', new MailNotConfiguredError().message);
   }
-
-  const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com',
-    port: 465,
-    secure: true,
-    auth: { user: gmailUser, pass: gmailPass },
-  });
 
   const db = admin.firestore();
   const normalizedEmail = email.trim().toLowerCase();
@@ -2254,13 +2209,19 @@ export const createClientPortalAccess = functions.https.onCall(async (data, cont
     url: 'https://comtroldata.web.app/cliente/dashboard',
   });
 
-  // Enviar email
-  await transporter.sendMail({
-    from: `"Bacar sa. Seguridad Privada" <${gmailUser}>`,
+  let clientReplyTo: string | null = null;
+  if (empresaId) {
+    try {
+      const empresaDoc = await db.collection('empresas').doc(empresaId).get();
+      if (empresaDoc.exists) clientReplyTo = replyToFromEmpresa(empresaDoc.data());
+    } catch { /* el mail sale igual, sin reply-to */ }
+  }
+  await sendSystemMail({
     to: normalizedEmail,
     subject: 'Acceso al Portal de Clientes - COSP',
     html: buildClientPortalEmailHtml(resetLink, clientName),
     text: buildClientPortalEmailText(resetLink, clientName),
+    replyTo: clientReplyTo,
   });
 
   // Intentar obtener empresaId del doc clients si no vino en el payload
