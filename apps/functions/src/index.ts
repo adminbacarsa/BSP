@@ -108,7 +108,7 @@ import {
   refreshMobileAppBuildStatusHandler,
 } from './mobileApp/mobileAppHandlers';
 
-// InicializaciÃ³n de Firebase Admin
+// Inicialización de Firebase Admin
 if (!admin.apps.length) {
   admin.initializeApp();
 }
@@ -136,7 +136,7 @@ const ALLOWED_ROLES: EmployeeRole[] = ['admin', 'employee'];
 // =========================================================
 export const createUser = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida.');
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida.');
   }
   const caller = await resolveBackupCaller(context.auth.uid, context.auth.token?.role);
   if (!caller.isPanelUser || !isAdminBackupRole(caller.sysRole || context.auth.token?.role)) {
@@ -148,11 +148,11 @@ export const createUser = functions.https.onCall(async (data, context) => {
     const { email, password, name, role: receivedRole, clientId, dni, fileNumber, address, empresaId: rawEmpresaId } = data;
     const targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim();
     if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-      throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
+      throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
     }
     
     if (!ALLOWED_ROLES.includes(receivedRole as EmployeeRole)) {
-       throw new functions.https.HttpsError('invalid-argument', 'Rol invÃ¡lido.');
+       throw new functions.https.HttpsError('invalid-argument', 'Rol inválido.');
     }
 
     const validRole = receivedRole as EmployeeRole;
@@ -234,10 +234,10 @@ export const manageShifts = functions.https.onCall(async (data, context) => {
         return { 
             success: true, 
             data: result, 
-            message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} dÃ­as)` 
+            message: `Replicado: ${result.created} turnos. (Omitidos: ${result.skipped} días)` 
         };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -248,10 +248,10 @@ export const manageShifts = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 4. AUDITORÃA (GEOFENCING & MANUAL OVERRIDE)
+// 4. AUDITORÍA (GEOFENCING & MANUAL OVERRIDE)
 // =========================================================
 export const auditShift = functions.https.onCall(async (data, context) => {
-  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
+  if (!context.auth) throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
 
   const { shiftId, action, coords, isManualOverride } = data;
 
@@ -277,7 +277,7 @@ export const auditShift = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 5. GESTIÓN DE DATOS BÃSICOS
+// 5. GESTIÓN DE DATOS BÁSICOS
 // =========================================================
 export const manageData = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -292,7 +292,7 @@ export const manageData = functions.https.onCall(async (data, context) => {
       case 'CREATE_OBJECTIVE': return { success: true, data: await dmService.createObjective(payload) };
       case 'GET_ALL_OBJECTIVES': return { success: true, data: await dmService.findAllObjectives(payload?.clientId) };
       case 'GET_CLIENT_BY_ID': return { success: true, data: await dmService.getClientById(payload.clientId) };
-      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -303,7 +303,7 @@ export const manageData = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 6. GESTIÓN DE JERARQUÃA COMERCIAL
+// 6. GESTIÓN DE JERARQUÍA COMERCIAL
 // =========================================================
 export const manageHierarchy = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
@@ -335,7 +335,7 @@ export const manageHierarchy = functions.https.onCall(async (data, context) => {
       case 'UPDATE_SHIFT_TYPE': await clientService.updateShiftType(payload.id, payload.data); return { success: true, message: 'Modalidad actualizada' };
       case 'DELETE_SHIFT_TYPE': await clientService.deleteShiftType(payload.id); return { success: true, message: 'Modalidad eliminada' };
       
-      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -364,7 +364,7 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
         
       case 'GET_WORKLOAD_REPORT':
         if (!payload.uid || !payload.month || !payload.year) {
-            throw new functions.https.HttpsError('invalid-argument', 'Faltan parÃ¡metros (uid, month, year) para el reporte.');
+            throw new functions.https.HttpsError('invalid-argument', 'Faltan parámetros (uid, month, year) para el reporte.');
         }
         const report = await employeeService.getEmployeeWorkload(payload.uid, payload.month, payload.year);
         return { success: true, data: report };
@@ -380,12 +380,12 @@ export const manageEmployees = functions.https.onCall(async (data, context) => {
       // ðŸ›' NUEVO: IMPORTACIÓN MASIVA
       case 'IMPORT_EMPLOYEES':
         if (!payload.rows || !Array.isArray(payload.rows)) {
-             throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo invÃ¡lido. Se espera un array "rows".');
+             throw new functions.https.HttpsError('invalid-argument', 'Formato de archivo inválido. Se espera un array "rows".');
         }
         const importResult = await employeeService.importEmployees(payload.rows, callerAuth.uid);
         return { success: true, data: importResult };
         
-      default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+      default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -423,7 +423,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
         await sysUserService.deleteSystemUser(payload.uid);
         return { success: true, message: 'Administrador eliminado.' };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -439,7 +439,7 @@ export const manageSystemUsers = functions.https.onCall(async (data, context) =>
 export const manageAbsences = functions.https.onCall(async (data, context) => {
   const callerAuth = context.auth;
   if (!callerAuth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
+    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
   }
 
   const { action, payload } = data as { action: string, payload: any };
@@ -458,7 +458,7 @@ export const manageAbsences = functions.https.onCall(async (data, context) => {
       case 'CREATE_ABSENCE':
         return { success: true, data: await absenceService.createAbsence(payload) };
       default:
-        throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+        throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
     }
   } catch (error: any) {
     const err = error as Error;
@@ -508,7 +508,7 @@ export const managePatterns = functions.https.onCall(async (data, context) => {
                 payload.month,
                 payload.year
             );
-        default: throw new functions.https.HttpsError('invalid-argument', 'AcciÃ³n invÃ¡lida');
+        default: throw new functions.https.HttpsError('invalid-argument', 'Acción inválida');
     }
   } catch (error: any) {
       console.error(`[PATTERN_ERROR] Action ${action} failed:`, error.message);
@@ -540,7 +540,7 @@ export const manageAgreements = functions.https.onCall(async (data, context) => 
                 const msg = await agreementService.initializeDefaults();
                 return { success: true, message: msg };
                 
-            default: throw new functions.https.HttpsError('invalid-argument', `AcciÃ³n desconocida: ${action}`);
+            default: throw new functions.https.HttpsError('invalid-argument', `Acción desconocida: ${action}`);
         }
     } catch (error: any) {
         console.error(`[AGREEMENT_ERROR] Action ${action} failed:`, error.message);
@@ -558,22 +558,22 @@ export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
   : functions.runWith({ secrets: ['GEMINI_API_KEY'] })
 ).https.onCall(async (_data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
+    throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
   }
 
   const db = admin.firestore();
   const results: Record<string, { ok: boolean; latencyMs?: number; detail?: string }> = {};
 
-  // â"€â"€ Firestore â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Firestore ────────────────────────────────────────────
   const t0 = Date.now();
   try {
     const snap = await db.collection('empresas').limit(1).get();
-    results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leÃ­da(s)` };
+    results.firestore = { ok: true, latencyMs: Date.now() - t0, detail: `${snap.size} empresa(s) leída(s)` };
   } catch (e: any) {
     results.firestore = { ok: false, latencyMs: Date.now() - t0, detail: e.message };
   }
 
-  // â"€â"€ Gemini API â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Gemini API ───────────────────────────────────────────
   const geminiKey = process.env.GEMINI_API_KEY || '';
   if (!geminiKey) {
     results.gemini = { ok: false, detail: 'GEMINI_API_KEY no configurada' };
@@ -595,7 +595,7 @@ export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
   const smtp = await verifySmtp();
   results.gmail = { ok: smtp.ok, latencyMs: Date.now() - tm, detail: smtp.detail };
 
-  // â"€â"€ Google Drive â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Google Drive ─────────────────────────────────────────
   const driveFolderId = process.env.DRIVE_BACKUP_FOLDER_ID || '';
   if (!driveFolderId) {
     results.drive = { ok: false, detail: 'DRIVE_BACKUP_FOLDER_ID no configurado' };
@@ -605,24 +605,24 @@ export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
       if (!snap.empty) {
         const last = snap.docs[0].data();
         const ts = last.createdAt?.toDate?.()?.toISOString?.() ?? 'desconocido';
-        results.drive = { ok: true, detail: `Ãšltimo backup: ${ts}` };
+        results.drive = { ok: true, detail: `Último backup: ${ts}` };
       } else {
-        results.drive = { ok: true, detail: 'Sin backups registrados aÃºn' };
+        results.drive = { ok: true, detail: 'Sin backups registrados aún' };
       }
     } catch (e: any) {
       results.drive = { ok: false, detail: e.message?.slice(0, 120) };
     }
   }
 
-  // â"€â"€ FCM (Push Notifications) â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── FCM (Push Notifications) ─────────────────────────────
   try {
     const tokSnap = await db.collection('device_tokens').limit(1).get();
-    results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? 'â‰¥1' : '0'}` };
+    results.fcm = { ok: true, detail: `Tokens registrados: ${tokSnap.size > 0 ? '≥1' : '0'}` };
   } catch (e: any) {
     results.fcm = { ok: false, detail: e.message };
   }
 
-  // â"€â"€ Scheduled jobs — Ãºltima ejecuciÃ³n â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Scheduled jobs — última ejecución ───────────────────
   const scheduledJobs = ['autoCompletarTurnos', 'detectarAusencias', 'gestionarVacantes', 'scheduledBackup'];
   const jobStatus: Record<string, string> = {};
   for (const job of scheduledJobs) {
@@ -641,7 +641,7 @@ export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
   }
   results.scheduledJobs = { ok: true, detail: JSON.stringify(jobStatus) };
 
-  // â"€â"€ Conteos de datos â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Conteos de datos ─────────────────────────────────────
   try {
     const [empSnap, sysSnap, empActivos] = await Promise.all([
       db.collection('empresas').get(),
@@ -650,21 +650,21 @@ export const platformHealthCheck = (process.env.FUNCTIONS_EMULATOR === 'true'
     ]);
     results.data = {
       ok: true,
-      detail: `Empresas: ${empSnap.size} Â· Admins: ${sysSnap.size} Â· Empleados activos: ${empActivos.size}`,
+      detail: `Empresas: ${empSnap.size} · Admins: ${sysSnap.size} · Empleados activos: ${empActivos.size}`,
     };
   } catch (e: any) {
     results.data = { ok: false, detail: e.message };
   }
 
-  // â"€â"€ Entorno â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Entorno ──────────────────────────────────────────────
   const isEmulator = process.env.FUNCTIONS_EMULATOR === 'true';
-  results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'ProducciÃ³n (Firebase)' };
+  results.env = { ok: true, detail: isEmulator ? 'Emulador local' : 'Producción (Firebase)' };
 
   return { ok: Object.values(results).every(r => r.ok), results, nodeVersion: process.version, checkedAt: new Date().toISOString() };
 });
 export const checkSystemHealth = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-      throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticaciÃ³n.');
+      throw new functions.https.HttpsError('unauthenticated', 'Requiere autenticación.');
   }
 
   const start = Date.now();
@@ -695,8 +695,8 @@ export const checkSystemHealth = functions.https.onCall(async (data, context) =>
 });
 
 // =========================================================
-// 12b. ASISTENTE VIRTUAL (Gemini vÃ­a Functions)
-// ProducciÃ³n: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
+// 12b. ASISTENTE VIRTUAL (Gemini vía Functions)
+// Producción: Secret Manager — `GEMINI_API_KEY`. Emulador: NO usar secrets (no se montan):
 // misma llamable sin runWith para que cargue GEMINI desde apps/functions/.env (bootstrap-env.ts).
 // =========================================================
 async function chatPlatformAssistantHandler(
@@ -704,7 +704,7 @@ async function chatPlatformAssistantHandler(
   context: functions.https.CallableContext,
 ): Promise<{ reply: string }> {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }
 
   const t0 = Date.now();
@@ -760,7 +760,7 @@ async function chatPlatformAssistantHandler(
 
 function truncateMsg(s: string, max: number): string {
   const t = String(s).trim();
-  return t.length <= max ? t : `${t.slice(0, max - 3)}â€¦`;
+  return t.length <= max ? t : `${t.slice(0, max - 3)}…`;
 }
 
 export const chatPlatformAssistant =
@@ -1079,12 +1079,12 @@ async function optimizePlanningGeminiHandler(
   context: functions.https.CallableContext,
 ): Promise<GeminiRespuesta> {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'DebÃ©s estar logueado.');
+    throw new functions.https.HttpsError('unauthenticated', 'Debés estar logueado.');
   }
   const role = String(context.auth.token.role || '').trim();
   const { isSuperAdminRole } = await import('./common/role.util');
   if (!isSuperAdminRole(role) && !ALLOWED_PLANNING_AI_ROLES.includes(role)) {
-    throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificaciÃ³n.');
+    throw new functions.https.HttpsError('permission-denied', 'Rol sin acceso a IA de planificación.');
   }
   const { resolveAssistantUser, empresaAllowed } = await import('./assistant/resolveAssistantUser');
   const tokenRole = String(context.auth.token?.role ?? '').trim() || undefined;
@@ -1105,7 +1105,7 @@ async function optimizePlanningGeminiHandler(
   } catch (e: any) {
     if (e instanceof functions.https.HttpsError) throw e;
     console.error('[optimizePlanningGemini]', e?.message, e?.stack);
-    const detail = e?.message || e?.toString?.() || 'Error Gemini planificaciÃ³n';
+    const detail = e?.message || e?.toString?.() || 'Error Gemini planificación';
     throw new functions.https.HttpsError('internal', detail);
   }
 }
@@ -1174,7 +1174,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
   } else {
     targetEmpresaId = String(rawEmpresaId ?? caller.profileEmpresa ?? 'bacarsa').trim() || 'bacarsa';
     if (!caller.isSuper && caller.profileEmpresa && targetEmpresaId !== caller.profileEmpresa) {
-      throw new functions.https.HttpsError('permission-denied', 'No podÃ©s crear usuarios para otra empresa.');
+      throw new functions.https.HttpsError('permission-denied', 'No podés crear usuarios para otra empresa.');
     }
   }
 
@@ -1209,7 +1209,7 @@ export const crearUsuarioSistema = functions.https.onCall(async (data, context) 
 /** Sincroniza custom claims de Auth con el rol en system_users (p. ej. tras editar rol en UI). */
 export const syncSystemUserClaims = functions.https.onCall(async (data, context) => {
   if (!context.auth?.uid) {
-    throw new functions.https.HttpsError('unauthenticated', 'AutenticaciÃ³n requerida');
+    throw new functions.https.HttpsError('unauthenticated', 'Autenticación requerida');
   }
   const targetUid = String((data as { uid?: string })?.uid ?? context.auth.uid).trim();
   const db = admin.firestore();
@@ -1269,7 +1269,7 @@ export const limpiarBaseDeDatos = functions.runWith({ timeoutSeconds: 540 }).htt
 
     if (target === 'AUDIT') path = 'historial_operaciones';
     else if (target === 'SHIFTS') path = 'turnos';
-    else throw new functions.https.HttpsError("invalid-argument", "Target invÃ¡lido");
+    else throw new functions.https.HttpsError("invalid-argument", "Target inválido");
 
     await db.recursiveDelete(db.collection(path));
     return { success: true };
@@ -1827,7 +1827,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
     throw new functions.https.HttpsError('permission-denied', 'Acceso denegado.');
   }
 
-  // Check 1: token claim (rÃ¡pido, sin Firestore)
+  // Check 1: token claim (rápido, sin Firestore)
   const tokenRole = (callerAuth.token.role as string) || '';
   let hasAccess = ADMIN_ROLES.some(r => r.toLowerCase() === tokenRole.toLowerCase());
 
@@ -1924,7 +1924,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
         }
       }
 
-      // Generar token de activaciÃ³n (UUID, expira 48h) — Ãºnico link para crear contraseÃ±a + activar dispositivo
+      // Generar token de activación (UUID, expira 48h) — único link para crear contraseña + activar dispositivo
       const crypto = await import('crypto');
       const activationToken = crypto.randomUUID();
       const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
@@ -1963,7 +1963,7 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
       });
       if (needsCleanup) await cleanupBatch.commit();
 
-      // Marcar invitaciÃ³n SOLO despuÃ©s del envÃ­o exitoso
+      // Marcar invitación SOLO después del envío exitoso
       await db.collection('empleados').doc(empId).update({
         uid,
         portalInvite: {
@@ -1984,12 +1984,12 @@ export const createPortalAccess = functions.https.onCall(async (data, context) =
 });
 
 // =========================================================
-// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vÃ­a email)
+// 14. ACTIVACIÓN DE DISPOSITIVO (device binding vía email)
 // =========================================================
 
 export const activateDevice = functions.https.onCall(async (data, context) => {
   if (!context.auth) {
-    throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesiÃ³n primero.');
+    throw new functions.https.HttpsError('unauthenticated', 'Debe iniciar sesión primero.');
   }
   const { token, deviceInfo, deviceId } = data as { token: string; deviceInfo?: Record<string, string>; deviceId?: string };
   if (!token) {
@@ -2005,7 +2005,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   const tokenDoc = await tokenRef.get();
 
   if (!tokenDoc.exists) {
-    throw new functions.https.HttpsError('not-found', 'Token de activaciÃ³n invÃ¡lido.');
+    throw new functions.https.HttpsError('not-found', 'Token de activación inválido.');
   }
 
   const td = tokenDoc.data()!;
@@ -2015,7 +2015,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
   }
 
   if (td.expiresAt.toDate() < new Date()) {
-    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activaciÃ³n expirÃ³. PedÃ­ uno nuevo al administrador.');
+    throw new functions.https.HttpsError('deadline-exceeded', 'El enlace de activación expiró. Pedí uno nuevo al administrador.');
   }
 
   if (td.uid !== context.auth.uid) {
@@ -2047,7 +2047,7 @@ export const activateDevice = functions.https.onCall(async (data, context) => {
 });
 
 // =========================================================
-// 15. ACTIVACIÓN COMPLETA: contraseÃ±a + dispositivo en un paso (sin auth previa)
+// 15. ACTIVACIÓN COMPLETA: contraseña + dispositivo en un paso (sin auth previa)
 // =========================================================
 
 export const activateAndSetPassword = functions.https.onCall(activateAndSetPasswordHandler);
@@ -2076,31 +2076,31 @@ function buildClientPortalEmailHtml(resetLink: string, clientName: string): stri
         <tr>
           <td style="background:#1e3a5f;padding:32px 40px;text-align:center;">
             <p style="color:#fff;font-size:20px;font-weight:bold;margin:0;letter-spacing:1px;">BACAR SA. SEGURIDAD PRIVADA</p>
-            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes Â· COSP</p>
+            <p style="color:#93c5fd;font-size:12px;margin:6px 0 0;letter-spacing:2px;text-transform:uppercase;">Portal de Clientes · COSP</p>
           </td>
         </tr>
         <tr>
           <td style="padding:40px 40px 32px;">
             <p style="color:#1e293b;font-size:16px;line-height:1.7;margin:0 0 16px;">Bacar sa. Seguridad Privada te ha otorgado acceso al <strong>Portal de Clientes de COSP</strong> para gestionar el personal autorizado de <strong>${clientName}</strong>.</p>
-            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">HacÃ© clic en el botÃ³n de abajo para crear tu contraseÃ±a y acceder al portal:</p>
+            <p style="color:#475569;font-size:15px;line-height:1.7;margin:0 0 28px;">Hacé clic en el botón de abajo para crear tu contraseña y acceder al portal:</p>
             <table cellpadding="0" cellspacing="0" style="margin:0 auto 32px;">
               <tr>
                 <td style="background:#4f46e5;border-radius:8px;">
-                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÃ'A</a>
+                  <a href="${resetLink}" target="_blank" style="display:inline-block;padding:14px 36px;color:#fff;font-size:15px;font-weight:bold;text-decoration:none;letter-spacing:0.5px;">CREAR CONTRASEÑA</a>
                 </td>
               </tr>
             </table>
-            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.</p>
+            <p style="color:#475569;font-size:14px;line-height:1.7;margin:0 0 8px;">Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.</p>
             <hr style="border:none;border-top:1px solid #e2e8f0;margin:28px 0;">
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.</p>
-            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botÃ³n no funciona, copiÃ¡ este enlace en tu navegador:<br>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:0;">Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.</p>
+            <p style="color:#94a3b8;font-size:12px;line-height:1.6;margin:10px 0 0;">Si el botón no funciona, copiá este enlace en tu navegador:<br>
               <a href="${resetLink}" style="color:#3b82f6;word-break:break-all;">${resetLink}</a>
             </p>
           </td>
         </tr>
         <tr>
           <td style="background:#f8fafc;padding:20px 40px;border-top:1px solid #e2e8f0;text-align:center;">
-            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo Â· Bacar sa. Seguridad Privada</strong></p>
+            <p style="color:#64748b;font-size:13px;margin:0;">Saludos,<br><strong>Equipo Operativo · Bacar sa. Seguridad Privada</strong></p>
           </td>
         </tr>
       </table>
@@ -2113,13 +2113,13 @@ function buildClientPortalEmailHtml(resetLink: string, clientName: string): stri
 function buildClientPortalEmailText(resetLink: string, clientName: string): string {
   return `Bacar sa. Seguridad Privada te ha otorgado acceso al Portal de Clientes de COSP para gestionar el personal autorizado de ${clientName}.
 
-HacÃ© clic en el siguiente enlace para crear tu contraseÃ±a y acceder al portal:
+Hacé clic en el siguiente enlace para crear tu contraseña y acceder al portal:
 
 ${resetLink}
 
-Una vez que crees tu contraseÃ±a, podrÃ¡s consultar los accesos del dÃ­a y gestionar el personal autorizado de tus objetivos.
+Una vez que crees tu contraseña, podrás consultar los accesos del día y gestionar el personal autorizado de tus objetivos.
 
-Si no esperabas este email, podÃ©s ignorarlo. El enlace caduca en 24 horas.
+Si no esperabas este email, podés ignorarlo. El enlace caduca en 24 horas.
 
 Saludos,
 Equipo Operativo - Bacar sa. Seguridad Privada`;
@@ -2470,9 +2470,9 @@ export const sendTestNotification = functions.https.onCall(async (data, context)
 // =========================================================
 // 15. AUTO-COMPLETAR TURNOS (SCHEDULED - cada 5 minutos)
 // =========================================================
-// LÃ³gica:
-//   A) Turno tiene relevo ya PRESENTE → cerrar (el handover no lo cerrÃ³, safety net)
-//   B) Turno tiene relevo pero NO llegÃ³ → NO cerrar, crear novedad de AUSENCIA_RELEVO
+// Lógica:
+//   A) Turno tiene relevo ya PRESENTE → cerrar (el handover no lo cerró, safety net)
+//   B) Turno tiene relevo pero NO llegó → NO cerrar, crear novedad de AUSENCIA_RELEVO
 //   C) Turno sin relevo programado → cerrar directamente al vencimiento
 export const autoCompletarTurnos = functions
   .region('us-central1')
@@ -2496,7 +2496,7 @@ export const autoCompletarTurnos = functions
 // 16. DETECTAR AUSENCIAS (SCHEDULED - cada 5 minutos)
 // =========================================================
 // Fases:
-//   ALERTA  (startTime + 15min): push al empleado "Â¿EstÃ¡s en tu puesto?"
+//   ALERTA  (startTime + 15min): push al empleado "¿Estás en tu puesto?"
 //   AUSENTE (startTime + 60min): marcar ABSENT + novedad operaciones
 const SKIP_STATUSES = new Set(['PRESENT', 'ABSENT', 'COMPLETED', 'INTERRUPTED', 'CANCELLED']);
 const SKIP_CODES    = new Set(['F', 'FF', 'V', 'L', 'A', 'E', 'AA', 'FP']);
@@ -2553,7 +2553,7 @@ export const detectarAusencias = functions
 
     // Aviso T−5 y ¿Venís? a T: scheduledArrivalNotices (cada 1 min). Este cron queda en T+30.
 
-    // â"€â"€ BLOQUE 2: ausencia automÃ¡tica AA a T+30 â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+    // ── BLOQUE 2: ausencia automática AA a T+30 ──────────────────────────────
     // Ventana: turnos que empezaron entre hace 8h y hace 30min
     const windowFrom = admin.firestore.Timestamp.fromMillis(nowMs - 8 * 60 * 60 * 1000);
     const windowTo   = admin.firestore.Timestamp.fromMillis(nowMs - 30 * 60 * 1000);
@@ -2575,7 +2575,7 @@ export const detectarAusencias = functions
       if (turnoFueraDeCentroDeControl(shift, excludedObjectives)) continue;
       if (!cc.isEnabled(shift.empresaId)) continue;
       if (cc.isDemo(shift.empresaId)) continue; // Demo genera presentes/ausentes/tardes
-      // Saltar si ya estÃ¡ resuelto o si es una vacante (vacantes tienen su propio flujo)
+      // Saltar si ya está resuelto o si es una vacante (vacantes tienen su propio flujo)
       if (shift.draft === true) continue;              // borrador no publicado
       if (skipAbsencePipelineForShift(shift as Record<string, unknown>)) continue;
       if (SKIP_STATUSES.has(shift.status || '')) continue;
@@ -2589,9 +2589,9 @@ export const detectarAusencias = functions
       const startMs: number = shift.startTime?.toMillis?.() ?? 0;
       if (!startMs) continue;
 
-      // Turnos de planificaciÃ³n (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
-      // si el cronograma del objetivo/mes estÃ¡ publicado; RETEN y OPERATIONS_COVERAGE son
-      // operativos explÃ­citos y siempre se procesan.
+      // Turnos de planificación (SLA_VIRTUAL, PLANIFICADOR o sin origin) solo se procesan
+      // si el cronograma del objetivo/mes está publicado; RETEN y OPERATIONS_COVERAGE son
+      // operativos explícitos y siempre se procesan.
       const planningOrigins = new Set(['', 'PLANIFICADOR', 'SLA_VIRTUAL', undefined]);
       if (planningOrigins.has(shift.origin) && shift.objectiveId) {
         const { year: chkYear, month: chkMonth } = ymCordobaParts(new Date(startMs));
@@ -2661,7 +2661,7 @@ export const detectarAusencias = functions
         continue;
       }
 
-      // â"€â"€ AUSENTE: T+30 sin marcar presente → ausencia automÃ¡tica AA â"€â"€
+      // ── AUSENTE: T+30 sin marcar presente → ausencia automática AA ──
       if (elapsedMin >= 30) {
         // Evitar procesar dos veces — pero antes corregir fecha si hay ausencia con fecha incorrecta
         if (shift.absenceDetectedAt) {

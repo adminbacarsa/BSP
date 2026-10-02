@@ -16,12 +16,12 @@ function planificacionPublishLookupKey(objectiveId: string, year: number, month:
 }
 
 // --- CONSTANTES Y HELPERS ---
-// Francos/licencias/retÃ©n: no computan horas de liquidaciÃ³n del empleado.
+// Francos/licencias/retén: no computan horas de liquidación del empleado.
 const NON_WORK_CODES = new Set(['F', 'FF', 'V', 'L', 'PG', 'A', 'E', 'AA', 'FP', 'RET']);
 export const PAID_LEAVE_CODES = new Set(['V', 'L', 'PG', 'E', 'A']);
-/** Vacaciones: marca el dÃ­a/perÃ­odo, no suma horas en reportes. */
+/** Vacaciones: marca el día/período, no suma horas en reportes. */
 export const PERIOD_ONLY_CODES = new Set(['V']);
-/** Licencias/enfermedad justificadas: computan jornada estÃ¡ndar (8h). */
+/** Licencias/enfermedad justificadas: computan jornada estándar (8h). */
 export const PAID_DAY_LEAVE_CODES = new Set(['L', 'PG', 'E', 'A']);
 const ZERO_HOUR_CODES = new Set(['F', 'FF', 'FP', 'AA']);
 // REF/ESC liquidan al empleado (8h) pero no son cobertura de puesto en reporte por objetivo.
@@ -84,7 +84,7 @@ const shiftHasRealCheckIn = (shift: any): boolean => {
     );
 };
 
-/** Franco planificado (dÃ­a libre), aÃºn sin marcar FT en Firestore. */
+/** Franco planificado (día libre), aún sin marcar FT en Firestore. */
 function isPlainFrancoDayOff(s: any): boolean {
     const code = String(s?.code || '').trim().toUpperCase();
     if (code === 'F' || code === 'FP') return true;
@@ -109,7 +109,7 @@ function isCoverageWorkShift(s: any): boolean {
     );
 }
 
-/** Convocado desde operaciones/planificaciÃ³n: franco que cubre vacante/ausencia â†’ pago al 100% (FT). */
+/** Convocado desde operaciones/planificación: franco que cubre vacante/ausencia → pago al 100% (FT). */
 export function isFrancoTrabajadoShift(shift: any): boolean {
     if (shift?.isFrancoTrabajado === true) return true;
     if (shift?._inferredFrancoTrabajado === true) return true;
@@ -122,8 +122,8 @@ export function isFrancoTrabajadoShift(shift: any): boolean {
 }
 
 /**
- * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo dÃ­a.
- * Si el flag no llegÃ³ a Firestore, infiere FT cuando hay F + turno con fichada el mismo dÃ­a.
+ * Operaciones marca isFrancoTrabajado en el doc F; la fichada puede quedar en el turno de cobertura del mismo día.
+ * Si el flag no llegó a Firestore, infiere FT cuando hay F + turno con fichada el mismo día.
  */
 export function propagateFrancoTrabajadoFlags(shifts: any[], opts?: { usePlannedHours?: boolean }): any[] {
     const usePlanned = opts?.usePlannedHours ?? false;
@@ -222,7 +222,7 @@ export function buildFrancoDocLiquidationSkipIds(shifts: any[], opts?: { usePlan
     return skip;
 }
 
-/** Total trabajado para liquidaciÃ³n: fichada real, o jornada FT/cobertura ya finalizada. */
+/** Total trabajado para liquidación: fichada real, o jornada FT/cobertura ya finalizada. */
 export function resolveLiquidationWorkedHours(
     shift: any,
     opts: {
@@ -251,7 +251,7 @@ export function liquidacion200FromWorkedHours(totalTrabajado: number) {
     };
 }
 
-/** Misma regla que operaciones: planificado sin publicar no entra a liquidaciÃ³n salvo fichada real u origen ops. */
+/** Misma regla que operaciones: planificado sin publicar no entra a liquidación salvo fichada real u origen ops. */
 export type ReportPublishFilter = 'published' | 'unpublished' | 'all';
 
 /** Alcance para acotar consulta Firestore (pestaña Planificado). */
@@ -286,7 +286,7 @@ export function isShiftEligibleForReports(
     const isOps = isOperationalOriginShift(shift);
     const isNovedad = shift?.type === 'NOVEDAD';
 
-    // Todos: incluye borradores (draft) = crono planificado aÃºn no publicado
+    // Todos: incluye borradores (draft) = crono planificado aún no publicado
     if (publishFilter === 'all') return true;
 
     if (publishFilter === 'unpublished') {
@@ -296,7 +296,7 @@ export function isShiftEligibleForReports(
         return !isPublished;
     }
 
-    // published â€” liquidaciÃ³n oficial (sin borradores)
+    // published — liquidación oficial (sin borradores)
     // Los turnos de operaciones son siempre reales, nunca se excluyen por draft
     if (isOps) return true;
     if (isNovedad) return true;
@@ -331,7 +331,7 @@ function leaveReportShiftScore(s: any): number {
     return score;
 }
 
-/** Si hay licencia/ausencia RRHH en el dÃ­a, ocultar turno M/T/N sin fichada duplicado. */
+/** Si hay licencia/ausencia RRHH en el día, ocultar turno M/T/N sin fichada duplicado. */
 export function dedupeShiftsByAbsencePriority(shifts: any[], opts?: { usePlannedHours?: boolean }): any[] {
     const usePlanned = opts?.usePlannedHours ?? false;
     const byEmpDate: Record<string, any[]> = {};
@@ -585,7 +585,7 @@ function registerSlaSlotCapacity(
     }
 }
 
-/** Quita placeholders virtuales y vacantes huÃ©rfanas cuando el slot ya estÃ¡ cubierto. */
+/** Quita placeholders virtuales y vacantes huérfanas cuando el slot ya está cubierto. */
 export function filterObjectiveReportShifts(
     shifts: any[],
     empMap: Record<string, string>,
@@ -624,7 +624,7 @@ export function filterObjectiveReportShifts(
     return withoutVirtual.filter(s => keepIds.has(s.id));
 }
 
-/** RET stand-by se omite si el mismo dÃ­a hay turno operativo (M/T/Nâ€¦) â€” liquida ese turno. */
+/** RET stand-by se omite si el mismo día hay turno operativo (M/T/N…) — liquida ese turno. */
 export function prepareShiftsForEmployeeLiquidation(shifts: any[]): any[] {
     const byDay = new Map<string, any[]>();
     for (const s of shifts) {
@@ -645,7 +645,7 @@ export function prepareShiftsForEmployeeLiquidation(shifts: any[]): any[] {
     });
 }
 
-/** Horas a mostrar/liquidar: V = perÃ­odo (0h); E/L/PG/A = jornada estÃ¡ndar; ignora rango 00:00â€“23:59 de RRHH. */
+/** Horas a mostrar/liquidar: V = período (0h); E/L/PG/A = jornada estándar; ignora rango 00:00–23:59 de RRHH. */
 export function resolveShiftDurationHours(
     shift: {
         code?: string;
@@ -733,7 +733,7 @@ const getArgentinaDate = (dateInput: any): string => {
     }
 };
 
-// CÃ¡lculo de horas nocturnas (21:00 a 06:00)
+// Cálculo de horas nocturnas (21:00 a 06:00)
 const getNightDuration = (start: Date, end: Date) => {
     let durationMins = 0;
     if (isNaN(start.getTime()) || isNaN(end.getTime())) return 0;
