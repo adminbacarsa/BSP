@@ -118,7 +118,7 @@ function contractActive(status: unknown): boolean {
 }
 
 /** Mismo criterio que el libro de horas: sin doc, se asume activo. */
-function clientIsActive(data: Record<string, unknown> | undefined): boolean {
+export function clientIsActive(data: Record<string, unknown> | undefined): boolean {
   if (!data) return true;
   if (data.active === false) return false;
   const u = String(data.status ?? 'ACTIVO').trim().toUpperCase();
@@ -136,6 +136,24 @@ function slaMonthRange(data: Record<string, unknown>): { start: string; end: str
   const endRaw = contractCalendarYmd(data.endDate);
   if (!startRaw && !endRaw) return null;
   return { start: startRaw || '1970-01-01', end: endRaw || '2099-12-31' };
+}
+
+export type SlaDayCoverage = 'IN' | 'OUT' | 'UNDATED';
+
+/**
+ * ?El contrato cubre ese d?a calendario (YYYY-MM-DD)? Mismo universo que el Banco de Horas / P1d:
+ * activo vigente o cerrado (`closed: true`) cuya vigencia incluye el d?a. Inactivo/cancelado = OUT.
+ * Sin fechas = UNDATED (el llamador decide si aplica la regla anterior).
+ * Un SLA cerrado del 25/09 no cubre el 02/10: no genera huecos ni avisos de octubre.
+ */
+export function slaDayCoverage(data: Record<string, unknown>, ymd: string): SlaDayCoverage {
+  if (!contractActive(data.status)) return 'OUT';
+  const startRaw = contractCalendarYmd(data.startDate);
+  const endRaw = contractCalendarYmd(data.endDate);
+  if (!startRaw && !endRaw) return 'UNDATED';
+  const range = slaMonthRange(data);
+  if (!range) return 'OUT';
+  return ymd >= range.start && ymd <= range.end ? 'IN' : 'OUT';
 }
 
 function overlapsMonth(start: string, end: string, year: number, month: number): boolean {
@@ -172,7 +190,9 @@ type MonthOp = {
   ranges: Array<{ start: string; end: string }>;
 };
 
-type SlaDoc = { data: () => Record<string, unknown> };
+type SlaDoc = { id: string; data: () => Record<string, unknown> };
+
+export type SlaVigenteDia = { id: string; objectiveId: string; data: Record<string, unknown> };
 
 /**
  * Universo Demo = SLA del mes del Banco de Horas: contrato activo vigente ese día,
@@ -222,6 +242,26 @@ export class ObjectiveOperationCache {
     await this.monthEntry(db, empresaId, objectiveId, year, month);
     if (!this.modeledKeys.has(`${empresaId}|${objectiveId}`)) return 'UNMODELED';
     return (await this.isShiftInOperation(db, shift)) ? 'IN' : 'OUT';
+  }
+
+  /**
+   * Contratos que cubren ese d?a (`slaDayCoverage === 'IN'`) con cliente activo, en el orden de
+   * Firestore. Universo de ?hay servicio vendido ese d?a?: lo usan el detector de huecos y el
+   * aviso de cronograma sin publicar. No mira el cronograma.
+   */
+  async slasVigentesEnDia(db: Firestore, empresaId: string, ymd: string): Promise<SlaVigenteDia[]> {
+    const [slas, clients] = await Promise.all([this.loadSlas(db, empresaId), this.loadClients(db, empresaId)]);
+    const out: SlaVigenteDia[] = [];
+    for (const doc of slas) {
+      const data = doc.data();
+      const objectiveId = String(data.objectiveId ?? '').trim();
+      if (!objectiveId) continue;
+      if (slaDayCoverage(data, ymd) !== 'IN') continue;
+      const clientId = String(data.clientId ?? '').trim();
+      if (clientId && clients.has(clientId) && !clientIsActive(clients.get(clientId))) continue;
+      out.push({ id: doc.id, objectiveId, data });
+    }
+    return out;
   }
 
   private async monthEntry(
@@ -287,7 +327,7 @@ export class ObjectiveOperationCache {
     const hit = this.slasByEmpresa.get(empresaId);
     if (hit) return hit;
     const snap = await db.collection('servicios_sla').where('empresaId', '==', empresaId).get();
-    const docs = snap.docs.map((d) => ({ data: () => d.data() as Record<string, unknown> }));
+    const docs = snap.docs.map((d) => ({ id: d.id, data: () => d.data() as Record<string, unknown> }));
     this.slasByEmpresa.set(empresaId, docs);
     return docs;
   }

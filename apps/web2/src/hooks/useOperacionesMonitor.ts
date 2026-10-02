@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, orderBy, limit, Timestamp, doc, serverTimestamp, addDoc, setDoc, getDocs, runTransaction, getDoc, writeBatch, deleteField } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useStaleBuild } from '@/hooks/useStaleBuild';
 import { toast } from 'sonner';
@@ -29,6 +29,7 @@ import {
   plannedShiftCoversSlaBand,
   buildRetentionWaitInfo,
   etiquetaCierreSinContinuidad,
+  computeShiftCloseTimes,
 } from '@cosp/ops-core';
 
 const registerPublishedState = (
@@ -1170,9 +1171,22 @@ export const useOperacionesMonitor = (forcedClientId?: string | null) => {
         try {
             if (action === 'CHECKOUT') {
                 const shift = processedData.find((s: any) => s.id === shiftId);
+                // Mismo c?lculo que el servidor (`shiftCloseCore`): salida acotada al tope 12:59 y, si
+                // estaba retenido, la retenci?n termina en esa misma salida con sus minutos (auditor?a 01/10).
+                const close = computeShiftCloseTimes((shift || {}) as Record<string, unknown>, Date.now());
+                const realEndTime = Timestamp.fromMillis(close.realEndMs);
+                const retentionPatch = shift?.isRetention === true
+                    ? {
+                        isRetention: false,
+                        retentionReason: deleteField(),
+                        retentionEndedAt: realEndTime,
+                        ...(close.retentionMinutes != null ? { retentionMinutes: close.retentionMinutes } : {}),
+                    }
+                    : {};
                 await updateDocForEmpresa('turnos', shiftId, {
                     status: 'COMPLETED', isCompleted: true, isPresent: false,
-                    realEndTime: serverTimestamp(), checkoutNote: payload || null,
+                    realEndTime, checkoutNote: payload || null,
+                    ...retentionPatch,
                 }, empresaId, migracionCompleta);
                 // Bitácora
                 const actor = getAuth().currentUser?.displayName || getAuth().currentUser?.email?.split('@')[0] || 'Operador';
