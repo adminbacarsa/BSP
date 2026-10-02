@@ -33,6 +33,7 @@ export type CandidatoEventual = {
     pruebasSinMarco?: boolean;
     /** 'M' | 'F' | '' (sin especificar) — cupo por género de los eventos. */
     genero?: string;
+    horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean } | null;
 };
 
 /** Cupo por género del servicio de evento: la lista se muestra en grupos (Hombres n/X · Mujeres n/Y). */
@@ -169,6 +170,9 @@ export default function EventualesCandidatosPanel({
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-1 text-[11px] font-black text-slate-800"><span className="truncate">{c.nombre}</span><PuntajeChip sujetoId={c.cuil} /></div>
                                         <div className="text-[9px] font-mono text-slate-400">{c.cuil}{c.employeeId ? ' · legajo en esta empresa' : ''}</div>
+                                        {c.horasMes && (
+                                          <div data-horas-mes className={`text-[9px] font-black ${c.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>{c.horasMes.texto}</div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-1.5 shrink-0">

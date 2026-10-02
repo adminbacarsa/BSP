@@ -17,6 +17,7 @@ import { CONVOCATORIA_TIMEOUT_MINUTES } from '../coverage/convocatoriaTimeout';
 import { escribirTurnoEvento } from '../eventos/turnoEvento';
 import type { EventualBolsaRow, EventualCandidato, EventualTramo } from '../eventos/eventoCoverage';
 import { evaluarEventualesServer } from '../eventos/eventualesParaHuecoServer';
+import { reservarTopeHoras } from './topeHorasEventual';
 
 const SUPER = ['SuperAdmin', 'SUPERADMIN', 'SUPER_ADMIN', 'SP'];
 const AR_OFFSET = '-03:00';
@@ -96,7 +97,7 @@ function tramoDe(j: Jornada): EventualTramo {
   const startMs = tsAr(j.fecha, j.horaInicio).toMillis();
   let endMs = tsAr(j.fecha, j.horaFin).toMillis();
   if (endMs <= startMs) endMs += 24 * 3600000;
-  return { startMs, endMs };
+  return { startMs, endMs, fecha: j.fecha, ...(Number(j.horas) > 0 ? { horas: Number(j.horas) } : {}) };
 }
 
 /** Ventana de turnos ocupados: ±2 días alrededor de las jornadas (la misma de siempre en Planificación). */
@@ -137,6 +138,21 @@ async function exigirElegible(bolsa: Record<string, unknown> & { cuil: string },
   return evaluacion;
 }
 
+/** Transacción del tope: no escribe el turno si estas jornadas pasan el cupo de horas de la empresa. */
+async function exigirTope(empresaId: string, cuil: string, jornadas: Jornada[], excluirTurnoIds?: Set<string>) {
+  const reserva = await reservarTopeHoras(db(), {
+    empresaId,
+    cuil,
+    jornadas: jornadas.map((j) => {
+      const [h, min] = String(j.horaInicio || '').split(':');
+      const horaInicio = `${String(h || '0').padStart(2, '0')}:${String(min || '00').padStart(2, '0')}`;
+      return { fecha: j.fecha, horaInicio, horaFin: j.horaFin, horas: Number(j.horas) || 0 };
+    }),
+    excluirTurnoIds,
+  });
+  if (reserva.ok === false) throw new functions.https.HttpsError('failed-precondition', reserva.mensaje);
+}
+
 /** Forma que consumen `EventualesCandidatosPanel` (escritorio) y `PlanificacionMovil` (celular). */
 function candidatoParaPanel(c: EventualCandidato, empresaId: string) {
   const legajo = (c.legajos || []).find((l) => String(l.empresaId || '') === empresaId && String(l.employeeId || '').trim());
@@ -153,6 +169,7 @@ function candidatoParaPanel(c: EventualCandidato, empresaId: string) {
     motivo: c.motivo,
     ...(typeof c.puntaje === 'number' ? { puntaje: c.puntaje } : {}),
     ...(c.pruebasSinMarco ? { pruebasSinMarco: true } : {}),
+    ...(c.horasMes ? { horasMes: c.horasMes } : {}),
     genero: c.genero || '',
     employeeId: legajo?.employeeId || null,
   };
@@ -476,6 +493,7 @@ export const asignarEventualPlanificacion = functions.https.onCall(async (data, 
   const objectiveId = data?.objectiveId ? String(data.objectiveId) : null;
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, objectiveId, data?.objetivoGeo);
   await exigirElegible(bolsa, empresaId, jornadas, objetivoGeo);
+  await exigirTope(empresaId, cuil, jornadas);
 
   const employeeId = await asegurarLegajo(bolsa, empresaId, auth.uid);
   if (modo === 'LEGAJO') {
@@ -760,6 +778,7 @@ export async function aceptarConvocatoriaEventualEvento(
   const jornada = jornadaDeSolicitud(sol);
   if (!jornada) throw new functions.https.HttpsError('failed-precondition', 'La convocatoria no tiene horario.');
   await exigirElegible(bolsa, empresaId, [jornada], null);
+  await exigirTope(empresaId, cuil, [jornada]);
 
   const employeeId = String(sol.empleadoId || '') || await asegurarLegajo(bolsa, empresaId, actor.uid);
   const evento: EventoRef = {
@@ -863,6 +882,7 @@ export const sustituirEventualPlanificacion = functions.https.onCall(async (data
   if (!jornadas.length) throw new functions.https.HttpsError('failed-precondition', 'El titular no tiene turnos por sustituir en ese rango.');
   const objetivoGeo = await objetivoGeoDe(empresaId, data?.clientId ? String(data.clientId) : null, objectiveId, data?.objetivoGeo);
   await exigirElegible(sustituto, empresaId, jornadas, objetivoGeo);
+  await exigirTope(empresaId, cuilSustituto, jornadas, new Set(turnos.map((t) => t.id)));
 
   const employeeId = await asegurarLegajo(sustituto, empresaId, auth.uid);
   const batch = db().batch();

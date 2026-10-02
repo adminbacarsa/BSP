@@ -22,6 +22,9 @@ export type EventualMovil = {
   /** Switches de pruebas de la ficha (default true). */
   exigirMarco?: boolean;
   exigirAltaArca?: boolean;
+  /** `32/50 h este mes`. aviso = ámbar desde el 80%. */
+  horasMes?: string;
+  horasAviso?: boolean;
 };
 
 export type ArcaMovil = {
@@ -207,6 +210,9 @@ export function EventualesScreens(props: {
                         <dd className="text-[13px] font-semibold tabular-nums text-slate-900">{persona.cuil}</dd>
                       </div>
                     </dl>
+                    {persona.horasMes && (
+                      <p data-horas-mes className={`mt-1.5 text-[12px] font-semibold tabular-nums ${persona.horasAviso ? 'text-amber-700' : 'text-slate-500'}`}>{persona.horasMes}</p>
+                    )}
                   </button>
                 </li>
               ))}
@@ -223,6 +229,9 @@ export function EventualesScreens(props: {
                   {props.elegido.legajo ? ` · Legajo ${props.elegido.legajo}` : ' · Sin legajo'}
                   {props.elegido.primerIngreso ? ` · 1º ingreso ${props.elegido.primerIngreso}` : ''}
                 </p>
+                {props.elegido.horasMes && (
+                  <p data-horas-mes className={`mt-2 text-sm font-semibold tabular-nums ${props.elegido.horasAviso ? 'text-amber-700' : 'text-slate-600'}`}>{props.elegido.horasMes}</p>
+                )}
                 {(props.elegido.exigirMarco === false || props.elegido.exigirAltaArca === false) && (
                   <div className="mt-2 flex flex-wrap gap-1" data-pruebas="sin-marco">
                     {props.elegido.exigirMarco === false && <MovilBadge tone="violet" outline>Pruebas: sin exigir marco</MovilBadge>}

@@ -74,6 +74,7 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     crear: 'create', editar: 'update', baja: 'delete', reactivar: 'update', detalle: 'read',
     asignarEmpresas: 'update', importarContacto: 'update', habilitarEmpresa: 'update',
     arcaPendientes: 'read', arcaConfirmar: 'update', arcaAcuseAnulacion: 'update', switchesPruebas: 'update',
+    horasMes: 'read', guardarTopeEmpresa: 'update', guardarTopeExcepcion: 'update',
   };
   const permiso = mapa[accion];
   if (!permiso) throw new functions.https.HttpsError('invalid-argument', 'Acción desconocida.');
@@ -252,6 +253,114 @@ export const gestionarEventual = functions.https.onCall(async (data, context) =>
     }
     await auditar('EVENTUAL_SWITCH_PRUEBAS', auth.uid, cuil, `${plan.detalle}${turnosActualizados ? ` · ${turnosActualizados} turno/s actualizados` : ''}`);
     return { ok: true, cambios: plan.cambios, turnosActualizados };
+  }
+
+  if (accion === 'horasMes' || accion === 'guardarTopeEmpresa' || accion === 'guardarTopeExcepcion') {
+    const { evaluarTopeCuils } = await import('./topeHorasEventual');
+    const reglas = await import('../eventuales-shared/topeHoras.mjs') as {
+      normalizarTope: (valor: unknown, fallback?: number | null) => number | null;
+      normalizarPeriodo: (valor: unknown) => string;
+      PERIODO_CICLO: string;
+      textoHorasMes: (usadas: number, tope: number) => string;
+    };
+    const empresaId = String(data?.empresaId || '');
+    if (!empresaId) throw new functions.https.HttpsError('invalid-argument', 'Falta la empresa.');
+    const empresaRef = db().collection('empresas').doc(empresaId);
+    const empresaSnap = await empresaRef.get();
+    if (!empresaSnap.exists) throw new functions.https.HttpsError('not-found', 'No está la empresa.');
+
+    if (accion === 'guardarTopeEmpresa') {
+      const horas = reglas.normalizarTope(data?.horas, null);
+      if (!horas) throw new functions.https.HttpsError('invalid-argument', 'El tope tiene que ser mayor a 0 y hasta 400 h.');
+      const periodo = reglas.normalizarPeriodo(data?.periodo);
+      await empresaRef.set({
+        eventualesTopeHoras: horas,
+        eventualesPeriodoHoras: periodo,
+        eventualesTopeAt: admin.firestore.FieldValue.serverTimestamp(),
+        eventualesTopePor: auth.uid,
+      }, { merge: true });
+      const periodoTxt = periodo === reglas.PERIODO_CICLO ? 'ciclo de liquidación 26→25' : 'mes calendario';
+      await db().collection('audit_logs').add({
+        action: 'EVENTUAL_TOPE_EMPRESA', module: 'EVENTUALES', actorUid: auth.uid, actorName: auth.uid,
+        empresaId, bolsaCuil: null, details: `Tope de horas por mes por eventual: ${horas} h · ${periodoTxt}.`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { ok: true, horas, periodo };
+    }
+
+    if (accion === 'guardarTopeExcepcion') {
+      const cuil = String(data?.cuil || '').replace(/\D/g, '');
+      if (cuil.length !== 11) throw new functions.https.HttpsError('invalid-argument', 'CUIL inválido.');
+      const ref = db().collection('eventuales_bolsa').doc(cuil);
+      const bolsa = await ref.get();
+      if (!bolsa.exists) throw new functions.https.HttpsError('not-found', 'No está en la bolsa.');
+      const quitar = data?.horas === null || data?.horas === '' || Number(data?.horas) === 0;
+      const motivo = String(data?.motivo || '').trim();
+      if (quitar) {
+        await ref.update({ [`topeHorasExcepcion.${empresaId}`]: admin.firestore.FieldValue.delete(), updatedAt: admin.firestore.FieldValue.serverTimestamp() });
+      } else {
+        const horas = reglas.normalizarTope(data?.horas, null);
+        if (!horas) throw new functions.https.HttpsError('invalid-argument', 'El tope de la excepción tiene que ser mayor a 0 y hasta 400 h.');
+        if (motivo.length < 3) throw new functions.https.HttpsError('invalid-argument', 'El motivo de la excepción es obligatorio.');
+        await ref.update({
+          [`topeHorasExcepcion.${empresaId}`]: { horas, motivo, por: auth.uid, at: new Date().toISOString() },
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+      await db().collection('audit_logs').add({
+        action: 'EVENTUAL_TOPE_EXCEPCION', module: 'EVENTUALES', actorUid: auth.uid, actorName: auth.uid,
+        empresaId, bolsaCuil: cuil,
+        details: quitar ? `Se quitó la excepción de tope en ${empresaId}. Vuelve el tope de la empresa.` : `Excepción de tope: ${reglas.normalizarTope(data?.horas)} h. Motivo: ${motivo}.`,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+      });
+      return { ok: true, quitada: quitar };
+    }
+
+    const hoy = new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+    const fecha = /^\d{4}-\d{2}-\d{2}$/.test(String(data?.fecha || '')) ? String(data.fecha) : hoy;
+    const cuilsPedidos = Array.isArray(data?.cuils) ? (data.cuils as unknown[]).map((c) => String(c).replace(/\D/g, '')).filter((c) => c.length === 11).slice(0, 400) : [];
+    const bolsas = new Map<string, { topeHorasExcepcion?: Record<string, { horas?: number; motivo?: string }>; topeHorasReservas?: unknown[] }>();
+    if (cuilsPedidos.length) {
+      const refs = cuilsPedidos.map((cuil) => db().collection('eventuales_bolsa').doc(cuil));
+      for (let i = 0; i < refs.length; i += 10) {
+        const got = await db().getAll(...refs.slice(i, i + 10));
+        for (const doc of got) {
+          if (!doc.exists) continue;
+          bolsas.set(doc.id, doc.data() as { topeHorasExcepcion?: Record<string, { horas?: number; motivo?: string }>; topeHorasReservas?: unknown[] });
+        }
+      }
+    } else {
+      const snap = await db().collection('eventuales_bolsa').where('empresasHabilitadas', 'array-contains', empresaId).get();
+      for (const doc of snap.docs) bolsas.set(doc.id, doc.data() as { topeHorasExcepcion?: Record<string, { horas?: number; motivo?: string }>; topeHorasReservas?: unknown[] });
+    }
+    const cuils = [...bolsas.keys()];
+    const evals = await evaluarTopeCuils(db(), {
+      empresaId,
+      cuils,
+      jornadas: [{ fecha, horaInicio: '00:00', horas: 0 }],
+      bolsas,
+      empresa: empresaSnap.data() || {},
+    });
+    const filas = cuils.map((cuil) => {
+      const ev = evals.get(cuil);
+      return {
+        cuil,
+        usadas: ev?.usadas || 0,
+        tope: ev?.tope || 50,
+        texto: ev?.texto || reglas.textoHorasMes(0, ev?.tope || 50),
+        aviso: ev?.aviso === true,
+        excepcion: ev?.excepcion === true,
+        motivo: ev?.motivoExcepcion || null,
+        topeEmpresa: ev?.topeEmpresa || 50,
+      };
+    });
+    const primero = evals.values().next().value as { periodo?: string; topeEmpresa?: number } | undefined;
+    return {
+      ok: true,
+      periodo: primero?.periodo || reglas.normalizarPeriodo(empresaSnap.data()?.eventualesPeriodoHoras),
+      tope: primero?.topeEmpresa ?? reglas.normalizarTope(empresaSnap.data()?.eventualesTopeHoras, 50),
+      filas,
+    };
   }
 
   if (accion === 'habilitarEmpresa') {

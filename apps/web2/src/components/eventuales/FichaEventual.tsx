@@ -66,6 +66,10 @@ type Props = {
   onBaja: (motivo: string, fecha: string) => Promise<void>;
   onReactivar: () => void;
   onVolver?: () => void;
+  /** Horas del período en la empresa activa (`32/50 h este mes`). */
+  horasMes?: { texto: string; aviso: boolean; usadas: number; tope: number; excepcion?: boolean; motivo?: string | null; topeEmpresa?: number } | null;
+  /** Guarda o quita (horas null) la excepción de tope de esta persona. */
+  onGuardarTope?: (horas: number | null, motivo: string) => Promise<void>;
 };
 
 type Solapa = 'DATOS' | 'EMPRESAS' | 'DOCUMENTOS' | 'CONTRATOS' | 'ARCA' | 'HISTORIAL';
@@ -148,7 +152,7 @@ async function base64De(file: File) {
   return btoa(bin);
 }
 
-export default function FichaEventual({ ficha, detalle, marcos, documentos, empresas, empresaActivaId, puede, llamar, recargar, onEditar, onAcceso, onBaja, onReactivar, onVolver }: Props) {
+export default function FichaEventual({ ficha, detalle, marcos, documentos, empresas, empresaActivaId, puede, llamar, recargar, onEditar, onAcceso, onBaja, onReactivar, onVolver, horasMes, onGuardarTope }: Props) {
   const [solapa, setSolapa] = useState<Solapa>('DATOS');
   const [bajaAbierta, setBajaAbierta] = useState(false);
   const [baja, setBaja] = useState({ motivo: '', fecha: hoy() });
@@ -158,6 +162,9 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
   const [archivoMarco, setArchivoMarco] = useState<File | null>(null);
   const [guardandoEmpresa, setGuardandoEmpresa] = useState('');
   const [guardandoSwitch, setGuardandoSwitch] = useState<SwitchCampo | ''>('');
+  const [topeEx, setTopeEx] = useState('');
+  const [motivoEx, setMotivoEx] = useState('');
+  const [guardandoTope, setGuardandoTope] = useState(false);
   const etiquetasPrueba = etiquetasPruebas(ficha) as string[];
 
   const cambiarSwitch = async (campo: SwitchCampo, valor: boolean) => {
@@ -257,6 +264,11 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
             <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${noDisponible ? TONO.malo : TONO.ok}`}>{textoDisponibilidad(ficha.disponibilidad)}</span>
             {ficha.uid && <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-black text-indigo-700">Con acceso a la app</span>}
             {ficha.riesgoEncadenamiento && <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-black text-amber-800">Encadenamiento: {ficha.riesgoEncadenamiento}</span>}
+            {horasMes && (
+              <span data-horas-mes title={horasMes.excepcion ? `Excepción: ${horasMes.motivo || ''}` : 'Tope de la empresa'} className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${horasMes.aviso ? 'border-amber-300 bg-amber-50 text-amber-800' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>
+                {horasMes.texto}{horasMes.excepcion ? ' · excepción' : ''}
+              </span>
+            )}
             {etiquetasPrueba.map((t) => (
               <span key={t} data-pruebas="sin-marco" className="inline-flex items-center gap-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2 py-0.5 text-[10px] font-black text-fuchsia-800"><FlaskConical size={10} /> {t}</span>
             ))}
@@ -281,6 +293,34 @@ export default function FichaEventual({ ficha, detalle, marcos, documentos, empr
           </div>
         )}
       </header>
+
+      {onGuardarTope && puede('update') && (
+        <div className="mx-4 mt-3 flex flex-wrap items-end gap-2 rounded-xl border border-slate-100 bg-slate-50/70 p-3" data-tope-excepcion>
+          <p className="w-full text-[10px] font-black uppercase tracking-wider text-slate-400">Excepción de tope en esta empresa{horasMes?.topeEmpresa ? ` (la empresa tiene ${horasMes.topeEmpresa} h)` : ''}</p>
+          <label className="text-[10px] font-black uppercase text-slate-500">Horas
+            <input value={topeEx} onChange={(e) => setTopeEx(e.target.value)} inputMode="decimal" placeholder={horasMes?.excepcion ? String(horasMes.tope) : '50'} className="mt-1 block w-24 rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold normal-case text-slate-800" />
+          </label>
+          <label className="min-w-[180px] flex-1 text-[10px] font-black uppercase text-slate-500">Motivo
+            <input value={motivoEx} onChange={(e) => setMotivoEx(e.target.value)} placeholder="Por qué esta persona tiene otro tope" className="mt-1 block w-full rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-sm font-semibold normal-case text-slate-800" />
+          </label>
+          <button
+            type="button"
+            disabled={guardandoTope}
+            onClick={() => {
+              const horas = Number(String(topeEx).replace(',', '.'));
+              if (!Number.isFinite(horas) || horas <= 0) { toast.error('Poné las horas de la excepción.'); return; }
+              setGuardandoTope(true);
+              void onGuardarTope(horas, motivoEx).finally(() => setGuardandoTope(false));
+            }}
+            className="rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+          >{guardandoTope ? 'Guardando…' : 'Guardar excepción'}</button>
+          {horasMes?.excepcion && (
+            <button type="button" disabled={guardandoTope} onClick={() => { setGuardandoTope(true); void onGuardarTope(null, '').finally(() => setGuardandoTope(false)); }} className="rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600">
+              Quitar excepción
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="px-4 pt-3">
         <TabBar

@@ -10,6 +10,7 @@ import {
   type EventualTramo,
 } from './eventoCoverage';
 import { puntajesPorClave } from '../desempeno/puntajeGuardiaJob';
+import { evaluarTopeCuils, jornadasDeTramos, reservarTopeHoras } from '../eventuales/topeHorasEventual';
 
 function msOf(value: unknown): number {
   if (value instanceof Timestamp) return value.toMillis();
@@ -116,6 +117,25 @@ export async function evaluarEventualesServer(
     if (typeof n === 'number') row.puntaje = n;
   }
 
+  const jornadasTope = jornadasDeTramos(tramos);
+  if (jornadasTope.length) {
+    const bolsas = new Map(bolsa.map((row) => {
+      const raw = row as EventualBolsaRow & { topeHorasExcepcion?: Record<string, { horas?: number; motivo?: string }>; topeHorasReservas?: unknown[] };
+      return [String(row.cuil || ''), { topeHorasExcepcion: raw.topeHorasExcepcion, topeHorasReservas: raw.topeHorasReservas }] as const;
+    }));
+    const topes = await evaluarTopeCuils(db, {
+      empresaId,
+      cuils,
+      jornadas: jornadasTope,
+      bolsas,
+      excluirTurnoIds: opts.excluirTurnoIds,
+    });
+    for (const row of bolsa) {
+      const ev = topes.get(String(row.cuil || ''));
+      if (ev) row.topeHoras = { usadas: ev.usadas, tope: ev.tope, horasTurno: ev.horasTurno };
+    }
+  }
+
   const lat = Number(opts.lat);
   const lng = Number(opts.lng);
   const startMs = Math.min(...tramos.map((t) => t.startMs));
@@ -151,6 +171,8 @@ export async function loadEventualesParaHueco(
     /** Turno EV de un servicio con cupo por género: el hueco es de ese grupo. */
     cupoGrupo?: unknown;
     generoRequerido?: unknown;
+    hours?: unknown;
+    scheduleDate?: unknown;
   },
 ): Promise<EventualCandidato[]> {
   const empresaId = String(shift.empresaId || '').trim();
@@ -160,9 +182,15 @@ export async function loadEventualesParaHueco(
   const lat = Number(shift.lat ?? shift.latitude);
   const lng = Number(shift.lng ?? shift.longitude);
   const grupo = String(shift.generoRequerido ?? shift.cupoGrupo ?? '').toUpperCase();
+  const horas = Number(shift.hours);
   const pool = await evaluarEventualesServer(db, {
     empresaId,
-    tramos: [{ startMs, endMs }],
+    tramos: [{
+      startMs,
+      endMs,
+      ...(horas > 0 ? { horas } : {}),
+      ...(/^\d{4}-\d{2}-\d{2}$/.test(String(shift.scheduleDate || '')) ? { fecha: String(shift.scheduleDate) } : {}),
+    }],
     lat: Number.isFinite(lat) ? lat : null,
     lng: Number.isFinite(lng) ? lng : null,
     generoRequerido: grupo === 'M' || grupo === 'F' ? grupo : null,
@@ -191,6 +219,13 @@ export async function registrarAsignacionEventualEnBatch(
   const cuil = String(opts.cuil || '').trim();
   const bolsaSnap = await db.collection('eventuales_bolsa').doc(cuil).get();
   if (!bolsaSnap.exists) throw new Error('EVENTUAL_SIN_BOLSA');
+  const horasTurno = Math.round(((opts.endMs - opts.startMs) / 3600000) * 100) / 100;
+  const reserva = await reservarTopeHoras(db, {
+    empresaId: opts.empresaId,
+    cuil,
+    jornadas: [{ fecha: arYmd(opts.startMs), horaInicio: hmAr(opts.startMs), horas: horasTurno }],
+  });
+  if (reserva.ok === false) throw new Error(reserva.mensaje);
   const pool = await loadEventualesParaHueco(db, {
     empresaId: opts.empresaId,
     startTime: Timestamp.fromMillis(opts.startMs),

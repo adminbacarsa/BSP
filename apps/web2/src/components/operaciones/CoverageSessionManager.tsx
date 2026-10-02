@@ -15,7 +15,8 @@ import {
   collection, doc, addDoc, writeBatch, serverTimestamp, Timestamp, onSnapshot, getDoc,
   getDocs, limit, query, where,
 } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import { httpsCallable } from 'firebase/functions';
+import { db, functions } from '@/lib/firebase';
 import { PuntajeChip } from '@/components/desempeno/PuntajeChip';
 import { useGuardiaPuntaje } from '@/context/guardiaPuntajeStore';
 import { setAppBusy } from '@/lib/appBusyState';
@@ -513,8 +514,27 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
         const end = toDate(absenceShift.endDateObj).getTime();
         const coords = resolveObjectiveCoords(absenceForGeo as Record<string, unknown>);
         const hoy = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const fechaHueco = new Date(start - 3 * 60 * 60 * 1000).toISOString().slice(0, 10);
+        const horasTurno = Math.round(((end - start) / 3600000) * 100) / 100;
+        const horasPorCuil = new Map<string, { usadas: number; tope: number }>();
+        try {
+          const fn = httpsCallable(functions, 'gestionarEventual');
+          const res = await fn({
+            accion: 'horasMes',
+            empresaId: String(tid),
+            cuils: bolsa.map((b) => String((b as { cuil?: string }).cuil || '')).filter((c) => c.length === 11),
+            fecha: fechaHueco,
+          });
+          const data = res.data as { filas?: { cuil: string; usadas: number; tope: number }[] };
+          for (const fila of data.filas || []) horasPorCuil.set(fila.cuil, { usadas: fila.usadas, tope: fila.tope });
+        } catch { /* sin tope cargado el motor no limita */ }
+        const bolsaConTope = bolsa.map((row) => {
+          const cuil = String((row as { cuil?: string }).cuil || '');
+          const horas = horasPorCuil.get(cuil);
+          return horas ? { ...row, topeHoras: { usadas: horas.usadas, tope: horas.tope, horasTurno } } : row;
+        });
         const rows = eventualesParaHueco({
-          bolsa,
+          bolsa: bolsaConTope,
           hueco: {
             empresaId: String(tid),
             startMs: start,
@@ -1663,6 +1683,7 @@ function CoveragePanel({ session: s, allSessions, logic, onUpd, onClose, onMinim
                               <span className="flex items-center gap-1"><span className="block truncate text-sm font-black text-slate-800">{row.employeeName}</span><PuntajeChip sujetoId={row.cuil || row.employeeId} /></span>
                               <span className="block text-[10px] text-slate-500">
                                 {row.distanceKm == null ? 'Sin geo' : `${row.distanceKm} km`} · confiabilidad {row.confiabilidad}
+                                {row.horasMes && <span data-horas-mes className={`ml-1 font-black ${row.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>{row.horasMes.texto}</span>}
                                 {row.pruebasSinMarco && <span data-pruebas="sin-marco" className="ml-1 rounded-full border border-fuchsia-200 bg-fuchsia-50 px-1.5 py-0.5 text-[8px] font-black uppercase text-fuchsia-800">Pruebas: sin exigir marco</span>}
                               </span>
                             </span>

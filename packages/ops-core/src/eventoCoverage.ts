@@ -24,7 +24,8 @@ export type EventualMotivoCodigo =
   | 'SUPERPOSICION'
   | 'DESCANSO_12H'
   | 'GENERO_SIN_ESPECIFICAR'
-  | 'GENERO_NO_COINCIDE';
+  | 'GENERO_NO_COINCIDE'
+  | 'TOPE_HORAS';
 
 /** Género de la ficha / legajo: 'M' | 'F' | '' (sin especificar). Mismos valores que `cupoGenero.mjs`. */
 export type GeneroEventual = 'M' | 'F' | '';
@@ -77,6 +78,8 @@ export type EventualCandidato = {
   pruebasSinMarco?: boolean;
   /** Género de la ficha ('' = sin especificar). Cupo por género en eventos. */
   genero: GeneroEventual;
+  /** Horas ya usadas en el período de la empresa contra el tope. `aviso` = ≥ 80% y todavía entra. */
+  horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean } | null;
 };
 
 export type EventualBolsaRow = {
@@ -105,9 +108,14 @@ export type EventualBolsaRow = {
   marcos?: Record<string, { firmado?: boolean; vencimiento?: string; estado?: string; fechaFirma?: string; vigenciaDias?: number }>;
   /** Switch de pruebas de la ficha. Ausente = true. */
   exigirMarco?: boolean;
+  /**
+   * Tope del período de esta empresa, ya resuelto (excepción o default) con las horas usadas
+   * y las del turno que se evalúa. Lo carga el servidor; sin esto el motor no limita.
+   */
+  topeHoras?: { usadas: number; tope: number; horasTurno: number } | null;
 };
 
-export type EventualTramo = { startMs: number; endMs: number };
+export type EventualTramo = { startMs: number; endMs: number; /** Horas del turno (bruto/anexo). */ horas?: number; /** YYYY-MM-DD del tramo. */ fecha?: string };
 
 export type EventualHueco = {
   empresaId: string;
@@ -165,7 +173,24 @@ export const EVENTUAL_MOTIVOS: Record<EventualMotivoCodigo, string> = {
   DESCANSO_12H: 'Faltan horas de descanso (mínimo 12 h, art. 197).',
   GENERO_SIN_ESPECIFICAR: 'Sin género en la ficha: no cuenta para el cupo por género.',
   GENERO_NO_COINCIDE: 'El hueco es de otro grupo (género).',
+  TOPE_HORAS: 'Supera el tope mensual.',
 };
+
+function fmtHorasTope(n: number): string {
+  const r = Math.round(Number(n) * 100) / 100;
+  return Number.isFinite(r) ? String(r) : '0';
+}
+
+/** Mismo texto que `motivoTopeHoras` (`topeHoras.mjs`). */
+export function textoTopeHoras(usadas: number, tope: number, horasTurno: number): string {
+  return `Supera el tope mensual (${fmtHorasTope(usadas)}/${fmtHorasTope(tope)} h, este turno ${fmtHorasTope(horasTurno)} h)`;
+}
+
+export function resumenHorasMes(usadas: number, tope: number): { texto: string; aviso: boolean } {
+  const u = Number(usadas) || 0;
+  const t = Number(tope) || 0;
+  return { texto: `${fmtHorasTope(u)}/${fmtHorasTope(t)} h este mes`, aviso: t > 0 && u / t >= 0.8 };
+}
 
 export function isEventoShift(shift: object | null | undefined): boolean {
   if (!shift) return false;
@@ -396,6 +421,17 @@ export function evaluarEventualParaHueco(
   const tramos = hueco.jornadas?.length ? hueco.jornadas : [{ startMs: hueco.startMs, endMs: hueco.endMs }];
   const cruce = bloqueoCruceEventual({ empresaId: hueco.empresaId, jornadas: tramos }, otrasDelCuil);
   if (!cruce.ok) return bloquear(cruce.codigo || 'SUPERPOSICION', cruce.mensaje);
+  const tope = row.topeHoras;
+  if (tope && Number(tope.tope) > 0) {
+    const usadas = Number(tope.usadas) || 0;
+    const topeN = Number(tope.tope);
+    const horasTurno = Number(tope.horasTurno) || 0;
+    const resumen = resumenHorasMes(usadas, topeN);
+    const supera = usadas + horasTurno > topeN + 1e-9;
+    base.horasMes = { usadas, tope: topeN, texto: resumen.texto, aviso: !supera && resumen.aviso };
+    if (supera) return bloquear('TOPE_HORAS', textoTopeHoras(usadas, topeN, horasTurno));
+    if (base.horasMes.aviso) base.alertas.push(resumen.texto);
+  }
   return base;
 }
 

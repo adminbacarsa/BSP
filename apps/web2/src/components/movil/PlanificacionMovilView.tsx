@@ -22,6 +22,7 @@ export type EventualMovil = {
   distanciaKm: number | null;
   motivo: string | null;
   elegible: boolean;
+  horasMes?: { usadas: number; tope: number; texto: string; aviso: boolean } | null;
 };
 
 function diaCorto(fecha: string): { n: string; lab: string } {
@@ -258,6 +259,7 @@ export function CandidatosHueco(props: {
         <>
           <span className="flex items-center gap-1 text-sm font-semibold text-slate-900">{ev.nombre}<PuntajeChip sujetoId={ev.cuil} /></span>
           <span className="block text-[11px] font-medium tabular-nums text-slate-500">{ev.distanciaKm != null ? `${ev.distanciaKm} km` : 'sin distancia'} · bolsa</span>
+          {ev.horasMes && <span data-horas-mes className={`block text-[11px] font-semibold tabular-nums ${ev.horasMes.aviso ? 'text-amber-700' : 'text-slate-500'}`}>{ev.horasMes.texto}</span>}
           {ev.motivo && <span className={`block text-[11px] font-semibold ${MOVIL_TEXT.rose}`}>{ev.motivo}</span>}
         </>
       ), { 'data-plan-candidato': ev.cuil }))}
