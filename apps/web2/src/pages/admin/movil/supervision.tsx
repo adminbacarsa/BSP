@@ -1,6 +1,14 @@
-import { SupervisionMovil } from '@/components/movil/SupervisionMovil';
+import { useEffect } from 'react';
+import { useRouter } from 'next/router';
 
-/** Supervisión del celular: módulo propio del supervisor que recorre (visitas, novedades, alertas). */
+/**
+ * La ronda de visitas quedó fuera del menú. Esta ruta abre el Centro de Control
+ * en solo lectura, que es la Supervisión del celular.
+ */
 export default function SupervisionMovilPage() {
-  return <SupervisionMovil />;
+  const router = useRouter();
+  useEffect(() => {
+    void router.replace('/admin/operaciones/?modo=supervision');
+  }, [router]);
+  return null;
 }
